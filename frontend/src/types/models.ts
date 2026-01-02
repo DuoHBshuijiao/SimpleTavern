@@ -9,6 +9,7 @@ export interface GenerationParams {
 
 export interface ChatOverrides {
   prompt?: string | null
+  presetId?: string | null
   params: GenerationParams
 }
 
@@ -21,6 +22,14 @@ export interface UserPersona {
   updatedAt: string
 }
 
+export interface ApiPreset {
+  id: string
+  name: string
+  baseUrl: string
+  apiKey: string
+  models: string[]
+}
+
 export interface Settings {
   version: number
   llm: {
@@ -30,6 +39,7 @@ export interface Settings {
     modelCandidates: string[]
     usedModels: string[]
   }
+  apiPresets: ApiPreset[]
   generationDefaults: GenerationParams
   prompts: {
     globalSystem: string
@@ -74,5 +84,3 @@ export interface Chat {
   createdAt: string
   updatedAt: string
 }
-
-

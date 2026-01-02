@@ -96,6 +96,22 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
     top_p = pick_param("top_p")
     max_tokens = pick_param("max_tokens")
 
+    # 确定 API 配置 (Preset > Global)
+    preset_id = None
+    if runtime and runtime.presetId:
+        preset_id = runtime.presetId
+    elif chat.overrides.presetId:
+        preset_id = chat.overrides.presetId
+    
+    base_url = settings.llm.baseUrl
+    api_key = settings.llm.apiKey
+
+    if preset_id:
+        found_preset = next((p for p in settings.apiPresets if p.id == preset_id), None)
+        if found_preset:
+            base_url = found_preset.baseUrl
+            api_key = found_preset.apiKey
+
     messages = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
@@ -106,8 +122,8 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
         full_text: list[str] = []
         try:
             async for delta in stream_chat_completions(
-                base_url=settings.llm.baseUrl,
-                api_key=settings.llm.apiKey,
+                base_url=base_url,
+                api_key=api_key,
                 model=model,
                 messages=messages,
                 temperature=temperature,
@@ -124,10 +140,11 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
                 chat.updatedAt = _now_iso()
                 save_chat(chat)
                 
-                # 保存使用过的模型到 usedModels 列表
+                # 保存使用过的模型到 usedModels 列表 (不再保存)
+                # 注意：如果使用了预设，这里的 usedModels 逻辑可能需要调整，
+                # 但为了兼容性，我们依然更新全局的 usedModels，或者后续前端自行管理
                 if model and model not in settings.llm.usedModels:
                     settings.llm.usedModels.insert(0, model)
-                    # 限制最多保存 20 个使用过的模型
                     settings.llm.usedModels = settings.llm.usedModels[:20]
                     settings.updatedAt = _now_iso()
                     save_settings(settings)
@@ -146,8 +163,8 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
         # 非流式模式：直接调用并返回完整结果
         try:
             result = await chat_completions(
-                base_url=settings.llm.baseUrl,
-                api_key=settings.llm.apiKey,
+                base_url=base_url,
+                api_key=api_key,
                 model=model,
                 messages=messages,
                 temperature=temperature,
@@ -162,7 +179,6 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
                 chat.updatedAt = _now_iso()
                 save_chat(chat)
                 
-                # 保存使用过的模型到 usedModels 列表
                 if model and model not in settings.llm.usedModels:
                     settings.llm.usedModels.insert(0, model)
                     settings.llm.usedModels = settings.llm.usedModels[:20]
@@ -188,5 +204,3 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
             "X-Accel-Buffering": "no",
         },
     )
-
-

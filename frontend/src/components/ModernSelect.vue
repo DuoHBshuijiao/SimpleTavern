@@ -7,9 +7,14 @@ interface Option {
   [key: string]: any
 }
 
+interface OptionGroup {
+  label: string
+  options: Option[]
+}
+
 const props = withDefaults(defineProps<{
   modelValue?: string | null
-  options: Option[] | string[]
+  options: (Option | OptionGroup | string)[]
   placeholder?: string
   searchable?: boolean
   loading?: boolean
@@ -30,6 +35,7 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   (e: 'update:modelValue', value: string): void
   (e: 'change', value: string): void
+  (e: 'select', option: Option): void // 新增，方便上层获取完整option对象(包含presetId等)
 }>()
 
 const isOpen = ref(false)
@@ -43,23 +49,59 @@ const normalizedOptions = computed(() => {
     if (typeof opt === 'string') {
       return { label: opt, value: opt }
     }
-    return opt
+    if ('options' in opt && Array.isArray(opt.options)) {
+      return {
+        label: opt.label,
+        options: opt.options.map((sub: string | Option) => {
+           if (typeof sub === 'string') return { label: sub, value: sub }
+           return sub
+        })
+      } as OptionGroup
+    }
+    return opt as Option
   })
 })
 
 const filteredOptions = computed(() => {
   if (!props.searchable || !searchQuery.value) return normalizedOptions.value
   const query = searchQuery.value.toLowerCase()
-  return normalizedOptions.value.filter(opt => 
-    opt.label.toLowerCase().includes(query) || 
-    opt.value.toLowerCase().includes(query)
-  )
+  
+  const result: (Option | OptionGroup)[] = []
+  
+  for (const opt of normalizedOptions.value) {
+    if ('options' in opt) {
+       // It's a group
+       const filteredSub = opt.options.filter(sub => 
+         sub.label.toLowerCase().includes(query) || 
+         sub.value.toLowerCase().includes(query)
+       )
+       if (filteredSub.length > 0) {
+         result.push({ ...opt, options: filteredSub })
+       }
+    } else {
+       // It's a single option
+       if (opt.label.toLowerCase().includes(query) || opt.value.toLowerCase().includes(query)) {
+         result.push(opt)
+       }
+    }
+  }
+  return result
 })
 
 const selectedLabel = computed(() => {
   if (!props.modelValue) return ''
-  const opt = normalizedOptions.value.find(o => o.value === props.modelValue)
-  return opt ? opt.label : props.modelValue
+  
+  // Flat search
+  for (const opt of normalizedOptions.value) {
+     if ('options' in opt) {
+        const found = opt.options.find(sub => sub.value === props.modelValue)
+        if (found) return found.label
+     } else {
+        if (opt.value === props.modelValue) return opt.label
+     }
+  }
+  
+  return props.modelValue
 })
 
 function toggle() {
@@ -83,24 +125,38 @@ function open() {
 
 function close() {
   isOpen.value = false
-  // 如果允许创建且有搜索内容，且没有选中项，则尝试使用搜索内容
-  if (props.allowCreate && searchQuery.value && searchQuery.value !== props.modelValue) {
-      // 这里的逻辑可以根据需求调整，比如是否要在 blur 时自动应用
-  }
 }
 
 function select(opt: Option) {
   emit('update:modelValue', opt.value)
   emit('change', opt.value)
+  emit('select', opt)
   close()
 }
 
 function handleInputEnter() {
+  // If there is exactly one match (or first match in list), select it?
+  // For safety, only select if we have filtered options.
+  
+  // Flatten filtered options to check first match
+  let firstMatch: Option | null = null
+  
   if (filteredOptions.value.length > 0) {
-    select(filteredOptions.value[0])
+     const first = filteredOptions.value[0]
+     if ('options' in first) {
+        if (first.options.length > 0) firstMatch = first.options[0]
+     } else {
+        firstMatch = first
+     }
+  }
+
+  if (firstMatch) {
+    select(firstMatch)
   } else if (props.allowCreate && searchQuery.value) {
+    const newOpt = { label: searchQuery.value, value: searchQuery.value }
     emit('update:modelValue', searchQuery.value)
     emit('change', searchQuery.value)
+    emit('select', newOpt)
     close()
   }
 }
@@ -161,16 +217,33 @@ onUnmounted(() => {
 
       <!-- Options List -->
       <div class="overflow-y-auto custom-scrollbar p-1">
-        <div 
-          v-for="opt in filteredOptions" 
-          :key="opt.value"
-          class="px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors flex items-center justify-between group/item"
-          :class="modelValue === opt.value ? 'bg-brand/10 text-brand' : 'text-gray-300 hover:bg-white/5'"
-          @click="select(opt)"
-        >
-          <span class="truncate">{{ opt.label }}</span>
-          <span v-if="modelValue === opt.value" class="text-brand text-xs">✓</span>
-        </div>
+        <template v-for="(item, idx) in filteredOptions" :key="idx">
+           <!-- Group Header -->
+           <div v-if="'options' in item" class="px-2 py-1">
+              <div class="text-[10px] font-bold text-gray-500 uppercase tracking-wider px-1 mb-1">{{ item.label }}</div>
+              <div 
+                v-for="opt in item.options" 
+                :key="opt.value"
+                class="px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors flex items-center justify-between group/item pl-4"
+                :class="modelValue === opt.value ? 'bg-brand/10 text-brand' : 'text-gray-300 hover:bg-white/5'"
+                @click="select(opt)"
+              >
+                <span class="truncate">{{ opt.label }}</span>
+                <span v-if="modelValue === opt.value" class="text-brand text-xs">✓</span>
+              </div>
+           </div>
+           
+           <!-- Single Option -->
+           <div 
+              v-else 
+              class="px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors flex items-center justify-between group/item"
+              :class="modelValue === (item as Option).value ? 'bg-brand/10 text-brand' : 'text-gray-300 hover:bg-white/5'"
+              @click="select(item as Option)"
+            >
+              <span class="truncate">{{ (item as Option).label }}</span>
+              <span v-if="modelValue === (item as Option).value" class="text-brand text-xs">✓</span>
+            </div>
+        </template>
 
         <div v-if="filteredOptions.length === 0" class="px-3 py-4 text-center text-xs text-gray-500">
            <span v-if="allowCreate && searchQuery">按回车使用 "{{ searchQuery }}"</span>
@@ -196,4 +269,3 @@ onUnmounted(() => {
   background: rgba(255, 255, 255, 0.2);
 }
 </style>
-

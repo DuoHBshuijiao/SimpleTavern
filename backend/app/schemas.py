@@ -36,6 +36,16 @@ class SettingsLLM(BaseModel):
     usedModels: list[str] = Field(default_factory=list)
 
 
+class ApiPreset(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: str = Field(default_factory=lambda: uuid4().hex)
+    name: str = "新预设"
+    baseUrl: str = "https://api.openai.com"
+    apiKey: str = ""
+    models: list[str] = Field(default_factory=list)
+
+
 class UserPersona(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -52,6 +62,7 @@ class Settings(BaseModel):
 
     version: int = 1
     llm: SettingsLLM = Field(default_factory=SettingsLLM)
+    apiPresets: list[ApiPreset] = Field(default_factory=list)  # API预设列表
     generationDefaults: GenerationParams = Field(default_factory=GenerationParams)
     prompts: SettingsPrompts = Field(default_factory=SettingsPrompts)
     streamEnabled: bool = True  # 是否启用流式传输
@@ -95,6 +106,7 @@ class ChatOverrides(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     prompt: str | None = None
+    presetId: str | None = None  # 关联的API预设ID
     params: GenerationParams = Field(default_factory=GenerationParams)
 
 
@@ -135,5 +147,3 @@ class GenerateStreamRequest(BaseModel):
     chatId: str
     userMessage: str
     runtimeOverrides: ChatOverrides | None = None
-
-

@@ -12,7 +12,6 @@ import { postAndConsumeSse } from '../api/sse'
 import { apiPost } from '../api/http'
 
 import {
-  NAlert,
   NButton,
   NDivider,
   NDropdown,
@@ -23,9 +22,7 @@ import {
   NPopconfirm,
   NSpace,
   NTag,
-  NText,
-  NTooltip,
-  useMessage
+  NTooltip
 } from 'naive-ui'
 
 const settings = useSettingsStore()
@@ -55,20 +52,58 @@ const editingPersona = ref<UserPersona | null>(null)
 const isNewPersona = ref(false)
 const showPersonaAvatarCropper = ref(false)
 
-// 快速模型切换
-const usedModelsOptions = computed(() => {
-  const usedModels = settings.settings?.llm.usedModels ?? []
-  return usedModels.map((m) => ({ label: m, key: m }))
+// 快速模型切换 (聚合所有预设)
+const chatModelOptions = computed(() => {
+  const options: any[] = []
+  if (!settings.settings) return []
+
+  // Presets
+  if (settings.settings.apiPresets) {
+      for (const preset of settings.settings.apiPresets) {
+          if (preset.models && preset.models.length > 0) {
+              options.push({
+                  label: preset.name,
+                  options: preset.models.map(m => ({ label: m, value: m, presetId: preset.id }))
+              })
+          }
+      }
+  }
+  
+  // Global (Legacy / Default)
+  if (settings.settings.llm.modelCandidates && settings.settings.llm.modelCandidates.length > 0) {
+      options.push({
+          label: '全局/默认',
+          options: settings.settings.llm.modelCandidates.map(m => ({ label: m, value: m, presetId: null }))
+      })
+  } else if (settings.settings.llm.usedModels && settings.settings.llm.usedModels.length > 0) {
+       options.push({
+          label: '最近使用',
+          options: settings.settings.llm.usedModels.map(m => ({ label: m, value: m, presetId: null }))
+      })
+  }
+
+  return options
 })
 
 const currentModel = computed(() => {
   return chats.activeChat?.overrides?.params?.model || settings.settings?.llm.defaultModel || '未设置'
 })
 
-async function selectModel(key: string) {
+// 处理模型选择
+async function handleModelSelect(option: any) {
   if (!chats.activeChat) return
   const overrides = { ...chats.activeChat.overrides }
-  overrides.params = { ...overrides.params, model: key }
+  overrides.params = { ...overrides.params, model: option.value }
+  
+  if (option.presetId) {
+      overrides.presetId = option.presetId
+  } else {
+      // 如果手动输入或选择了全局模型，尝试反查预设
+      const found = settings.settings?.apiPresets.find(p => p.models.includes(option.value))
+      if (found) overrides.presetId = found.id
+      else overrides.presetId = null
+  }
+  
   await chats.updateOverrides(chats.activeChat.id, overrides)
 }
 
@@ -701,12 +736,13 @@ const editingPersonaAvatarUrl = computed(() => {
                  <div class="flex items-center gap-3">
                    <ModernSelect
                       :model-value="currentModel"
-                      :options="usedModelsOptions"
+                      :options="chatModelOptions"
                       placement="top"
-                      placeholder="选择模型"
-                      class="!w-[160px] !text-xs"
-                      :disabled="usedModelsOptions.length === 0"
-                      @update:model-value="selectModel"
+                      placeholder="选择模型 (自动关联预设)..."
+                      class="!w-[200px] !text-xs"
+                      searchable
+                      allow-create
+                      @select="handleModelSelect"
                     />
                     <button 
                       class="bg-brand hover:bg-brand-hover text-white px-4 py-1.5 rounded-lg text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-brand/20"
