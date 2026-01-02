@@ -4,36 +4,273 @@
 后端：FastAPI（SSE 流式）  
 存储：本地 `data/` 下按文件拆分的 JSON（无数据库）
 
-## 目录
-- `frontend/`：Vue3 前端
-- `backend/`：FastAPI 后端
-- `data/`：本地 JSON 数据（settings/characters/chats）
+## 环境要求
 
-## 启动（Windows PowerShell）
+- **Python 3.7+** 和 pip
+- **Node.js 16+** 和 npm
+- **Git**（用于克隆仓库，或直接从 releases 下载）
 
-### 1) 后端
+## 快速开始
+
+### 方法一：从 GitHub Releases 下载（推荐）
+
+1. **访问 Releases 页面**
+   - 打开 [https://github.com/DuoHBshuijiao/SimpleTavern/releases](https://github.com/DuoHBshuijiao/SimpleTavern/releases)
+   - 下载最新版本的源码压缩包（Source code (zip) 或 Source code (tar.gz)）
+
+2. **解压并进入项目目录**
+
+   **Windows (PowerShell):**
+   ```powershell
+   # 假设下载到 D:\Downloads，解压后进入目录
+   cd D:\Downloads\SimpleTavern-0.15
+   # 或者解压到你想要的位置，例如：
+   # cd E:\SimpleTavern
+   ```
+
+   **Linux/macOS (Bash):**
+   ```bash
+   # 假设下载到 ~/Downloads，解压后进入目录
+   cd ~/Downloads/SimpleTavern-0.15
+   # 或者解压到你想要的位置，例如：
+   # cd ~/SimpleTavern
+   ```
+
+3. **运行一键部署脚本**
+
+   **Windows:**
+   ```cmd
+   python deploy.py
+   ```
+   或使用批处理脚本：
+   ```cmd
+   deploy.bat
+   ```
+
+   **Linux/macOS:**
+   ```bash
+   python3 deploy.py
+   ```
+   或使用 shell 脚本：
+   ```bash
+   chmod +x deploy.sh
+   ./deploy.sh
+   ```
+
+### 方法二：使用 Git 克隆仓库
+
+1. **克隆仓库**
+
+   **Windows (PowerShell):**
+   ```powershell
+   # 克隆到当前目录
+   git clone https://github.com/DuoHBshuijiao/SimpleTavern.git
+   cd SimpleTavern
+   ```
+
+   **Linux/macOS (Bash):**
+   ```bash
+   # 克隆到当前目录
+   git clone https://github.com/DuoHBshuijiao/SimpleTavern.git
+   cd SimpleTavern
+   ```
+
+2. **运行一键部署脚本**（同上）
+
+## 一键部署脚本说明
+
+项目提供了跨平台的一键部署脚本，支持 Windows 和 Linux/macOS。
+
+脚本会自动完成以下操作：
+1. 检查 Python 和 Node.js 环境
+2. 安装后端依赖（pip install）
+3. 安装前端依赖（npm install）
+4. 构建前端项目（npm run build）
+5. 启动后端服务（端口 8000）
+6. 启动前端服务（端口 4173）
+7. 自动打开浏览器访问应用
+
+按 `Ctrl+C` 可停止所有服务。
+
+## 手动部署（分步操作）
+
+如果一键部署脚本遇到问题，可以按照以下步骤手动部署：
+
+### Windows (PowerShell)
+
+#### 1) 安装后端依赖
 
 ```powershell
-cd E:\SimpleTavern\backend
+# 进入项目根目录
+cd E:\SimpleTavern
+
+# 进入后端目录
+cd backend
+
+# 安装依赖（推荐使用虚拟环境）
 python -m venv .venv
-.\.venv\Scripts\pip install -r requirements.txt
-.\.venv\Scripts\uvicorn app.main:app --reload --port 8000
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+#### 2) 安装前端依赖
+
+```powershell
+# 返回项目根目录
+cd ..
+
+# 进入前端目录
+cd frontend
+
+# 安装依赖
+npm install
+```
+
+#### 3) 构建前端
+
+```powershell
+# 仍在 frontend 目录
+npm run build
+```
+
+#### 4) 启动后端服务
+
+```powershell
+# 返回项目根目录
+cd ..
+
+# 进入后端目录
+cd backend
+
+# 激活虚拟环境（如果使用）
+.\.venv\Scripts\Activate.ps1
+
+# 启动后端（在新终端窗口）
+uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
 后端默认会在首次启动时创建/补齐 `data/settings.json`。
 
-### 2) 前端
+#### 5) 启动前端服务
 
 ```powershell
+# 打开新终端，进入前端目录
 cd E:\SimpleTavern\frontend
-npm install
-npm run dev
+
+# 启动预览服务器
+npm run preview -- --port 4173 --host
 ```
 
-打开 Vite 输出的本地地址（通常是 `http://localhost:5173`）。
+#### 6) 访问应用
+
+打开浏览器访问：`http://localhost:4173`
+
+### Linux/macOS (Bash)
+
+#### 1) 安装后端依赖
+
+```bash
+# 进入项目根目录
+cd ~/SimpleTavern
+
+# 进入后端目录
+cd backend
+
+# 安装依赖（推荐使用虚拟环境）
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+#### 2) 安装前端依赖
+
+```bash
+# 返回项目根目录
+cd ..
+
+# 进入前端目录
+cd frontend
+
+# 安装依赖
+npm install
+```
+
+#### 3) 构建前端
+
+```bash
+# 仍在 frontend 目录
+npm run build
+```
+
+#### 4) 启动后端服务
+
+```bash
+# 返回项目根目录
+cd ..
+
+# 进入后端目录
+cd backend
+
+# 激活虚拟环境（如果使用）
+source .venv/bin/activate
+
+# 启动后端（在后台运行或新终端）
+uvicorn app.main:app --host 0.0.0.0 --port 8000 &
+```
+
+后端默认会在首次启动时创建/补齐 `data/settings.json`。
+
+#### 5) 启动前端服务
+
+```bash
+# 进入前端目录（新终端或后台）
+cd ~/SimpleTavern/frontend
+
+# 启动预览服务器
+npm run preview -- --port 4173 --host &
+```
+
+#### 6) 访问应用
+
+打开浏览器访问：`http://localhost:4173`
+
+## 项目目录结构
+
+- `frontend/`：Vue3 前端
+- `backend/`：FastAPI 后端
+- `data/`：本地 JSON 数据（settings/characters/chats）
+- `deploy.py`：跨平台一键部署脚本（Python）
+- `deploy.sh`：Linux/macOS 一键部署脚本
+- `deploy.bat`：Windows 一键部署脚本
 
 ## 配置模型（OpenAI 兼容）
 
-在应用内“设置”里配置：\n- Base URL：例如 `https://api.openai.com` 或你的兼容网关地址\n- API Key：明文存储到 `data/settings.json`\n- Model：例如 `gpt-4o-mini`（取决于你的服务端支持）
+在应用内"设置"里配置：
+- **Base URL**：例如 `https://api.openai.com` 或你的兼容网关地址
+- **API Key**：明文存储到 `data/settings.json`
+- **Model**：例如 `gpt-4o-mini`（取决于你的服务端支持）
+
+## 常见问题
+
+### 端口被占用
+
+如果 8000 或 4173 端口被占用，可以：
+
+1. **修改后端端口**：在启动命令中修改 `--port` 参数
+2. **修改前端端口**：在 `npm run preview` 命令中修改 `--port` 参数
+3. **关闭占用端口的程序**
+
+### Python 命令不存在
+
+- Windows：尝试使用 `py` 或 `python3`
+- Linux/macOS：确保已安装 Python 3，使用 `python3` 命令
+
+### npm 命令不存在
+
+确保已安装 Node.js，可以从 [nodejs.org](https://nodejs.org/) 下载安装。
+
+## 许可证
+
+本项目采用 MIT 许可证。
 
 
