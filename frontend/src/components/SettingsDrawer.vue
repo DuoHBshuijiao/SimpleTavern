@@ -21,7 +21,7 @@ const tab = ref<'global' | 'presets' | 'chat'>('global')
 const globalDraft = ref<Settings | null>(null)
 const chatDraft = ref<ChatOverrides | null>(null)
 
-const modelsLoading = ref(false)
+const _modelsLoading = ref(false) // 保留备用
 const showApiKey = ref(false)
 const editingPresetId = ref<string | null>(null)
 const editingPresetShowApiKey = ref(false)
