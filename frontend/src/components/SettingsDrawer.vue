@@ -21,6 +21,7 @@ const globalDraft = ref<Settings | null>(null)
 const chatDraft = ref<ChatOverrides | null>(null)
 const modelOptions = ref<string[]>([])
 const modelsLoading = ref(false)
+const showApiKey = ref(false)
 
 function close() {
   emit('update:show', false)
@@ -167,11 +168,21 @@ async function saveChatOverrides() {
             <!-- API Key -->
             <div class="space-y-1.5">
               <label class="block text-sm font-medium text-gray-300">API Key</label>
-              <input 
-                v-model="globalDraft.llm.apiKey" 
-                type="password" 
-                class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-brand/50 focus:ring-1 focus:ring-brand/50 outline-none transition-colors"
-              />
+              <div class="relative">
+                <input 
+                  v-model="globalDraft.llm.apiKey" 
+                  :type="showApiKey ? 'text' : 'password'"
+                  class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 pr-10 text-sm text-gray-200 focus:border-brand/50 focus:ring-1 focus:ring-brand/50 outline-none transition-colors"
+                />
+                <button 
+                  class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 p-1"
+                  @click="showApiKey = !showApiKey"
+                  title="显示/隐藏 API Key"
+                >
+                  <span v-if="showApiKey">👁️</span>
+                  <span v-else>🔒</span>
+                </button>
+              </div>
             </div>
 
             <!-- Model Selection -->
