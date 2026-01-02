@@ -437,8 +437,9 @@ async function sendUserMessage() {
   const localAssistantId = `local_assistant_${Date.now()}`
 
   activeChat.value.messages.push({ version: 1, id: localUserId, role: 'user', content: text, ts: now })
-  const assistantMsg: ChatMessage = { version: 1, id: localAssistantId, role: 'assistant', content: '', ts: now }
-  activeChat.value.messages.push(assistantMsg)
+  activeChat.value.messages.push({ version: 1, id: localAssistantId, role: 'assistant', content: '', ts: now })
+  // 从响应式数组中获取引用，确保后续修改能触发视图更新
+  const assistantMsg = activeChat.value.messages[activeChat.value.messages.length - 1]
   
   scrollToBottom()
 
