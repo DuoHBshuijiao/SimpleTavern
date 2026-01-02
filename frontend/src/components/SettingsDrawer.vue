@@ -27,6 +27,12 @@ const editingPresetId = ref<string | null>(null)
 const editingPresetShowApiKey = ref(false)
 const presetModelsLoading = ref(false)
 
+// Model Selector Modal State
+const showModelSelector = ref(false)
+const candidateModels = ref<string[]>([])
+const selectedCandidateModels = ref<Set<string>>(new Set())
+const modelSelectorQuery = ref('')
+
 function close() {
   emit('update:show', false)
 }
@@ -60,14 +66,12 @@ watch(
     globalDraft.value = s
     chatDraft.value = props.chat ? clone(props.chat.overrides) : ensureOverrides()
     
-    // 如果有预设，默认选中第一个编辑
     if (s.apiPresets.length > 0 && !editingPresetId.value) {
         editingPresetId.value = s.apiPresets[0].id
     }
   },
 )
 
-// 全局模型列表 (旧版兼容)
 const globalModelOptions = computed(() => {
     return globalDraft.value?.llm.modelCandidates || []
 })
@@ -77,11 +81,7 @@ async function refreshGlobalModels() {
   try {
     const r = await fetch('/api/llm/models')
     if (!r.ok) throw new Error(await r.text())
-    const models = (await r.json()) as string[]
-    if (globalDraft.value) {
-        // 虽然接口返回的是当前配置的模型，但这里我们只更新列表展示，不强制覆盖
-        // 实际上 /api/llm/models 逻辑比较简单，我们这里主要用于测试连接
-    }
+    // 仅作连接测试，不更新列表
   } catch {
       // ignore
   } finally {
@@ -89,7 +89,6 @@ async function refreshGlobalModels() {
   }
 }
 
-// 预设相关
 const editingPreset = computed(() => {
   if (!globalDraft.value) return null
   return globalDraft.value.apiPresets.find(p => p.id === editingPresetId.value) || null
@@ -117,30 +116,50 @@ function deletePreset(id: string) {
   }
 }
 
-async function refreshPresetModels(preset: ApiPreset) {
-  presetModelsLoading.value = true
-  try {
-    const models = await apiPost<string[]>('/api/llm/test-models', {
-      baseUrl: preset.baseUrl,
-      apiKey: preset.apiKey
-    })
-    preset.models = models
-  } catch (e) {
-    alert('获取模型失败: ' + String(e))
-  } finally {
-    presetModelsLoading.value = false
-  }
+async function openModelSelector(preset: ApiPreset) {
+    if (presetModelsLoading.value) return
+    presetModelsLoading.value = true
+    try {
+        const models = await apiPost<string[]>('/api/llm/test-models', {
+            baseUrl: preset.baseUrl,
+            apiKey: preset.apiKey
+        })
+        candidateModels.value = models
+        selectedCandidateModels.value = new Set(preset.models)
+        modelSelectorQuery.value = ''
+        showModelSelector.value = true
+    } catch (e) {
+        alert('获取模型失败: ' + String(e))
+    } finally {
+        presetModelsLoading.value = false
+    }
 }
 
-// 聚合模型列表 (用于聊天设置)
+function toggleCandidate(m: string) {
+    if (selectedCandidateModels.value.has(m)) {
+        selectedCandidateModels.value.delete(m)
+    } else {
+        selectedCandidateModels.value.add(m)
+    }
+}
+
+function saveModelSelection() {
+    if (editingPreset.value) {
+        editingPreset.value.models = Array.from(selectedCandidateModels.value)
+    }
+    showModelSelector.value = false
+}
+
+const filteredCandidates = computed(() => {
+    if (!modelSelectorQuery.value) return candidateModels.value
+    const q = modelSelectorQuery.value.toLowerCase()
+    return candidateModels.value.filter(m => m.toLowerCase().includes(q))
+})
+
 const chatModelOptions = computed(() => {
   const options: any[] = []
   if (!globalDraft.value) return []
 
-  // Global Models (Legacy)
-  // 如果有配置全局模型，也加进去作为默认组
-  // 这里简化处理，如果配置了 API Presets，主要展示 Presets 的模型
-  
   for (const preset of globalDraft.value.apiPresets) {
       if (preset.models && preset.models.length > 0) {
           options.push({
@@ -149,9 +168,6 @@ const chatModelOptions = computed(() => {
           })
       }
   }
-  
-  // 如果没有 presets 或者想提供全局 fallback
-  // 可以添加一个 "Global Default" 组
   
   return options
 })
@@ -292,6 +308,40 @@ async function saveChatOverrides() {
               ></textarea>
             </div>
 
+            <!-- Parameters (Ensured Visibility) -->
+            <div class="grid grid-cols-2 gap-4 pt-2">
+              <div class="space-y-1.5">
+                <label class="block text-sm font-medium text-gray-300">Temperature</label>
+                <input 
+                  v-model.number="globalDraft.generationDefaults.temperature" 
+                  type="number" 
+                  step="0.1" min="0" max="2"
+                  placeholder="默认"
+                  class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-brand/50 outline-none"
+                />
+              </div>
+              <div class="space-y-1.5">
+                <label class="block text-sm font-medium text-gray-300">Top P</label>
+                <input 
+                  v-model.number="globalDraft.generationDefaults.top_p" 
+                  type="number" 
+                  step="0.1" min="0" max="1"
+                  placeholder="默认"
+                  class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-brand/50 outline-none"
+                />
+              </div>
+              <div class="space-y-1.5">
+                <label class="block text-sm font-medium text-gray-300">Max Tokens</label>
+                <input 
+                  v-model.number="globalDraft.generationDefaults.max_tokens" 
+                  type="number" 
+                  step="128" min="1"
+                  placeholder="默认"
+                  class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-brand/50 outline-none"
+                />
+              </div>
+            </div>
+
              <div class="pt-4 flex justify-end">
               <button 
                 class="px-6 py-2 bg-brand hover:bg-brand-hover text-white rounded-lg font-medium shadow-lg shadow-brand/20 transition-all"
@@ -373,10 +423,10 @@ async function saveChatOverrides() {
                                  <button 
                                     class="text-xs text-brand hover:text-brand-hover flex items-center gap-1" 
                                     :disabled="presetModelsLoading"
-                                    @click="refreshPresetModels(editingPreset!)"
+                                    @click="openModelSelector(editingPreset!)"
                                  >
                                     <span v-if="presetModelsLoading" class="animate-spin">⟳</span>
-                                    <span>从 API 获取</span>
+                                    <span>从 API 获取并筛选</span>
                                  </button>
                              </div>
                              <div class="bg-black/20 border border-white/10 rounded-lg p-2 min-h-[100px] max-h-[200px] overflow-y-auto custom-scrollbar">
@@ -508,6 +558,59 @@ async function saveChatOverrides() {
         </div>
 
       </div>
+    </div>
+
+    <!-- Model Selector Modal -->
+    <div v-if="showModelSelector" class="fixed inset-0 z-[60] flex items-center justify-center">
+        <!-- Backdrop -->
+        <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" @click="showModelSelector = false"></div>
+        
+        <!-- Modal -->
+        <div class="relative w-full max-w-lg bg-[#18181c] border border-white/10 rounded-xl shadow-2xl flex flex-col max-h-[85vh] m-4">
+            <div class="p-4 border-b border-white/10 flex justify-between items-center bg-[#141418] rounded-t-xl">
+                <h3 class="font-bold text-gray-200">选择模型</h3>
+                <button class="text-gray-400 hover:text-white" @click="showModelSelector = false">✕</button>
+            </div>
+            
+            <div class="p-3 border-b border-white/10 bg-[#18181c]">
+                <input 
+                    v-model="modelSelectorQuery" 
+                    placeholder="筛选模型..." 
+                    class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-brand/50 outline-none"
+                    autoFocus
+                />
+            </div>
+            
+            <div class="flex-1 overflow-y-auto p-2 bg-[#18181c]">
+                <div v-if="filteredCandidates.length === 0" class="text-center text-gray-500 py-8 text-sm">
+                    未找到模型
+                </div>
+                <div v-else class="space-y-1">
+                    <div 
+                        v-for="m in filteredCandidates" 
+                        :key="m"
+                        class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 cursor-pointer transition-colors"
+                        @click="toggleCandidate(m)"
+                    >
+                        <div 
+                            class="w-4 h-4 rounded border flex items-center justify-center transition-colors"
+                            :class="selectedCandidateModels.has(m) ? 'bg-brand border-brand' : 'border-gray-600'"
+                        >
+                            <span v-if="selectedCandidateModels.has(m)" class="text-white text-[10px]">✓</span>
+                        </div>
+                        <span class="text-sm text-gray-300" :class="selectedCandidateModels.has(m) ? 'text-white font-medium' : ''">{{ m }}</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="p-4 border-t border-white/10 flex justify-between items-center bg-[#141418] rounded-b-xl">
+                <div class="text-xs text-gray-500">已选 {{ selectedCandidateModels.size }} 个模型</div>
+                <div class="flex gap-2">
+                    <button class="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors" @click="showModelSelector = false">取消</button>
+                    <button class="px-4 py-2 text-sm bg-brand hover:bg-brand-hover text-white rounded-lg shadow-lg shadow-brand/20 transition-all" @click="saveModelSelection">确认</button>
+                </div>
+            </div>
+        </div>
     </div>
   </div>
 </template>

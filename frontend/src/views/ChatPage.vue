@@ -52,12 +52,32 @@ const editingPersona = ref<UserPersona | null>(null)
 const isNewPersona = ref(false)
 const showPersonaAvatarCropper = ref(false)
 
-// 快速模型切换 (聚合所有预设)
+// 快速模型切换 (聚合所有预设 + 最近使用置顶)
 const chatModelOptions = computed(() => {
   const options: any[] = []
   if (!settings.settings) return []
 
-  // Presets
+  // 1. 最近使用 (Top Priority)
+  const recentModels = settings.settings.llm.usedModels || []
+  if (recentModels.length > 0) {
+       options.push({
+          label: '最近使用',
+          options: recentModels.map(m => {
+              // 尝试找到它所属的 preset
+              let preset = null
+              if (settings.settings?.apiPresets) {
+                  preset = settings.settings.apiPresets.find(p => p.models.includes(m))
+              }
+              return { 
+                  label: m, 
+                  value: m, 
+                  presetId: preset ? preset.id : null
+              }
+          })
+      })
+  }
+
+  // 2. Presets
   if (settings.settings.apiPresets) {
       for (const preset of settings.settings.apiPresets) {
           if (preset.models && preset.models.length > 0) {
@@ -69,16 +89,13 @@ const chatModelOptions = computed(() => {
       }
   }
   
-  // Global (Legacy / Default)
-  if (settings.settings.llm.modelCandidates && settings.settings.llm.modelCandidates.length > 0) {
+  // 3. Global / Default
+  // 只有当没有 preset 且 global candidates 有值时才显示，作为 fallback
+  if ((!settings.settings.apiPresets || settings.settings.apiPresets.length === 0) && 
+      settings.settings.llm.modelCandidates && settings.settings.llm.modelCandidates.length > 0) {
       options.push({
-          label: '全局/默认',
+          label: '全局配置',
           options: settings.settings.llm.modelCandidates.map(m => ({ label: m, value: m, presetId: null }))
-      })
-  } else if (settings.settings.llm.usedModels && settings.settings.llm.usedModels.length > 0) {
-       options.push({
-          label: '最近使用',
-          options: settings.settings.llm.usedModels.map(m => ({ label: m, value: m, presetId: null }))
       })
   }
 
