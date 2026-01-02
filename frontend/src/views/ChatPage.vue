@@ -13,16 +13,12 @@ import { apiPost } from '../api/http'
 
 import {
   NButton,
-  NDivider,
-  NDropdown,
   NForm,
   NFormItem,
   NInput,
   NModal,
   NPopconfirm,
   NSpace,
-  NTag,
-  NTooltip
 } from 'naive-ui'
 
 const settings = useSettingsStore()
@@ -239,12 +235,6 @@ const userName = computed(() => {
   return selectedPersona.value?.name || '你'
 })
 
-function roleTagType(role: ChatMessage['role']) {
-  if (role === 'user') return 'info'
-  if (role === 'assistant') return 'success'
-  return 'warning'
-}
-
 function getMessageLabel(role: ChatMessage['role']) {
   if (role === 'user') return userName.value
   if (role === 'assistant') return selectedCharacter.value?.name || 'AI'
@@ -457,7 +447,7 @@ async function sendUserMessage() {
         (evt) => {
           if (evt.event === 'delta') {
             const t = evt.data?.text
-            if (typeof t === 'string') {
+            if (typeof t === 'string' && assistantMsg) {
               assistantMsg.content += t
               scrollToBottom()
             }
@@ -476,7 +466,7 @@ async function sendUserMessage() {
         error?: string
       }>('/api/generate/stream', { chatId, userMessage: text })
       
-      if (res.ok) {
+      if (res.ok && assistantMsg) {
         assistantMsg.content = res.content
         scrollToBottom()
       } else {

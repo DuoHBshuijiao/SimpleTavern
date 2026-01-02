@@ -67,27 +67,27 @@ watch(
     chatDraft.value = props.chat ? clone(props.chat.overrides) : ensureOverrides()
     
     if (s.apiPresets.length > 0 && !editingPresetId.value) {
-        editingPresetId.value = s.apiPresets[0].id
+        editingPresetId.value = s.apiPresets[0]?.id ?? null
     }
   },
 )
 
-const globalModelOptions = computed(() => {
-    return globalDraft.value?.llm.modelCandidates || []
-})
+// 保留备用，未来可能用于全局模型选项
+// const globalModelOptions = computed(() => {
+//     return globalDraft.value?.llm.modelCandidates || []
+// })
 
-async function refreshGlobalModels() {
-  modelsLoading.value = true
-  try {
-    const r = await fetch('/api/llm/models')
-    if (!r.ok) throw new Error(await r.text())
-    // 仅作连接测试，不更新列表
-  } catch {
-      // ignore
-  } finally {
-    modelsLoading.value = false
-  }
-}
+// 保留备用，未来可能用于刷新全局模型列表
+// async function refreshGlobalModels() {
+//   modelsLoading.value = true
+//   try {
+//     const r = await fetch('/api/llm/models')
+//     if (!r.ok) throw new Error(await r.text())
+//   } catch {
+//   } finally {
+//     modelsLoading.value = false
+//   }
+// }
 
 const editingPreset = computed(() => {
   if (!globalDraft.value) return null
@@ -501,9 +501,9 @@ async function saveChatOverrides() {
                 placeholder="选择模型 (自动关联预设)..."
                 @select="handleChatModelSelect"
               />
-              <div v-if="chatDraft.presetId" class="text-xs text-brand mt-1 flex items-center gap-1">
+              <div v-if="chatDraft?.presetId" class="text-xs text-brand mt-1 flex items-center gap-1">
                   <span>🔗 已关联 API 预设:</span>
-                  <span class="font-bold">{{ globalDraft.apiPresets.find(p => p.id === chatDraft.presetId)?.name || 'Unknown' }}</span>
+                  <span class="font-bold">{{ globalDraft?.apiPresets.find(p => p.id === chatDraft?.presetId)?.name || 'Unknown' }}</span>
               </div>
             </div>
 

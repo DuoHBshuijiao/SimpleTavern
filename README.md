@@ -24,16 +24,12 @@
    ```powershell
    # 假设下载到 D:\Downloads，解压后进入目录
    cd D:\Downloads\SimpleTavern-0.15
-   # 或者解压到你想要的位置，例如：
-   # cd E:\SimpleTavern
    ```
 
    **Linux/macOS (Bash):**
    ```bash
    # 假设下载到 ~/Downloads，解压后进入目录
    cd ~/Downloads/SimpleTavern-0.15
-   # 或者解压到你想要的位置，例如：
-   # cd ~/SimpleTavern
    ```
 
 3. **运行一键部署脚本**
@@ -41,10 +37,6 @@
    **Windows:**
    ```cmd
    python deploy.py
-   ```
-   或使用批处理脚本：
-   ```cmd
-   deploy.bat
    ```
 
    **Linux/macOS:**
@@ -61,16 +53,7 @@
 
 1. **克隆仓库**
 
-   **Windows (PowerShell):**
-   ```powershell
-   # 克隆到当前目录
-   git clone https://github.com/DuoHBshuijiao/SimpleTavern.git
-   cd SimpleTavern
-   ```
-
-   **Linux/macOS (Bash):**
    ```bash
-   # 克隆到当前目录
    git clone https://github.com/DuoHBshuijiao/SimpleTavern.git
    cd SimpleTavern
    ```
@@ -83,14 +66,20 @@
 
 脚本会自动完成以下操作：
 1. 检查 Python 和 Node.js 环境
-2. 安装后端依赖（pip install）
-3. 安装前端依赖（npm install）
-4. 构建前端项目（npm run build）
-5. 启动后端服务（端口 8000）
-6. 启动前端服务（端口 4173）
-7. 自动打开浏览器访问应用
+2. **创建 Python 虚拟环境**（`venv/` 目录）
+3. 在虚拟环境中安装后端依赖（pip install）
+4. 安装前端依赖（npm install）
+5. 构建前端项目（npm run build）
+6. 启动后端服务（端口 8000）
+7. 启动前端服务（端口 4173）
+8. 自动打开浏览器访问应用
 
 按 `Ctrl+C` 可停止所有服务。
+
+### 部署脚本文件
+
+- `deploy.py`：跨平台一键部署脚本（Python，**推荐使用**）
+- `deploy.sh`：Linux/macOS 一键部署脚本
 
 ## 手动部署（分步操作）
 
@@ -98,18 +87,20 @@
 
 ### Windows (PowerShell)
 
-#### 1) 安装后端依赖
+#### 1) 创建虚拟环境并安装后端依赖
 
 ```powershell
 # 进入项目根目录
 cd E:\SimpleTavern
 
-# 进入后端目录
-cd backend
+# 创建虚拟环境
+python -m venv venv
 
-# 安装依赖（推荐使用虚拟环境）
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+# 激活虚拟环境
+.\venv\Scripts\Activate.ps1
+
+# 进入后端目录并安装依赖
+cd backend
 pip install -r requirements.txt
 ```
 
@@ -119,10 +110,8 @@ pip install -r requirements.txt
 # 返回项目根目录
 cd ..
 
-# 进入前端目录
+# 进入前端目录并安装依赖
 cd frontend
-
-# 安装依赖
 npm install
 ```
 
@@ -142,14 +131,12 @@ cd ..
 # 进入后端目录
 cd backend
 
-# 激活虚拟环境（如果使用）
-.\.venv\Scripts\Activate.ps1
+# 确保激活虚拟环境
+..\venv\Scripts\Activate.ps1
 
 # 启动后端（在新终端窗口）
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
-
-后端默认会在首次启动时创建/补齐 `data/settings.json`。
 
 #### 5) 启动前端服务
 
@@ -167,18 +154,20 @@ npm run preview -- --port 4173 --host
 
 ### Linux/macOS (Bash)
 
-#### 1) 安装后端依赖
+#### 1) 创建虚拟环境并安装后端依赖
 
 ```bash
 # 进入项目根目录
 cd ~/SimpleTavern
 
-# 进入后端目录
-cd backend
+# 创建虚拟环境
+python3 -m venv venv
 
-# 安装依赖（推荐使用虚拟环境）
-python3 -m venv .venv
-source .venv/bin/activate
+# 激活虚拟环境
+source venv/bin/activate
+
+# 进入后端目录并安装依赖
+cd backend
 pip install -r requirements.txt
 ```
 
@@ -188,10 +177,8 @@ pip install -r requirements.txt
 # 返回项目根目录
 cd ..
 
-# 进入前端目录
+# 进入前端目录并安装依赖
 cd frontend
-
-# 安装依赖
 npm install
 ```
 
@@ -211,14 +198,12 @@ cd ..
 # 进入后端目录
 cd backend
 
-# 激活虚拟环境（如果使用）
-source .venv/bin/activate
+# 确保激活虚拟环境
+source ../venv/bin/activate
 
 # 启动后端（在后台运行或新终端）
-uvicorn app.main:app --host 0.0.0.0 --port 8000 &
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 &
 ```
-
-后端默认会在首次启动时创建/补齐 `data/settings.json`。
 
 #### 5) 启动前端服务
 
@@ -239,9 +224,9 @@ npm run preview -- --port 4173 --host &
 - `frontend/`：Vue3 前端
 - `backend/`：FastAPI 后端
 - `data/`：本地 JSON 数据（settings/characters/chats）
+- `venv/`：Python 虚拟环境（由部署脚本自动创建）
 - `deploy.py`：跨平台一键部署脚本（Python）
 - `deploy.sh`：Linux/macOS 一键部署脚本
-- `deploy.bat`：Windows 一键部署脚本
 
 ## 配置模型（OpenAI 兼容）
 
@@ -269,8 +254,14 @@ npm run preview -- --port 4173 --host &
 
 确保已安装 Node.js，可以从 [nodejs.org](https://nodejs.org/) 下载安装。
 
+### 虚拟环境激活问题
+
+- Windows PowerShell：如果提示脚本执行策略问题，以管理员身份运行：
+  ```powershell
+  Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+  ```
+- Windows CMD：使用 `venv\Scripts\activate.bat` 代替
+
 ## 许可证
 
 本项目采用 MIT 许可证。
-
-

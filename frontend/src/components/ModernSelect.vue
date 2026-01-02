@@ -71,7 +71,7 @@ const filteredOptions = computed(() => {
   for (const opt of normalizedOptions.value) {
     if ('options' in opt) {
        // It's a group
-       const filteredSub = opt.options.filter(sub => 
+       const filteredSub = opt.options.filter((sub: Option) => 
          sub.label.toLowerCase().includes(query) || 
          sub.value.toLowerCase().includes(query)
        )
@@ -94,7 +94,7 @@ const selectedLabel = computed(() => {
   // Flat search
   for (const opt of normalizedOptions.value) {
      if ('options' in opt) {
-        const found = opt.options.find(sub => sub.value === props.modelValue)
+        const found = opt.options.find((sub: Option) => sub.value === props.modelValue)
         if (found) return found.label
      } else {
         if (opt.value === props.modelValue) return opt.label
@@ -143,10 +143,10 @@ function handleInputEnter() {
   
   if (filteredOptions.value.length > 0) {
      const first = filteredOptions.value[0]
-     if ('options' in first) {
-        if (first.options.length > 0) firstMatch = first.options[0]
-     } else {
-        firstMatch = first
+     if (first && 'options' in first) {
+        if (first.options.length > 0) firstMatch = first.options[0] ?? null
+     } else if (first) {
+        firstMatch = first as Option
      }
   }
 

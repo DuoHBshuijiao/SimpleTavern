@@ -49,7 +49,8 @@ function handleLoad() {
 }
 
 const initials = computed(() => {
-  return (props.name || '?')[0].toUpperCase()
+  const name = props.name || '?'
+  return name.length > 0 ? name[0].toUpperCase() : '?'
 })
 
 const bgColor = computed(() => {
