@@ -1,11 +1,26 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand: #a230ed;
+  --color-brand-hover: #b558f0;
+  --color-brand-dark: #8e23d1;
+  --color-dark-bg: #101014;
+  --color-dark-surface: #18181c;
+  --color-dark-lighter: #2d2d33;
+  
+  --radius-xl: 1rem;
+  --radius-2xl: 1.5rem;
+  --radius-3xl: 2rem;
+}
+
 :root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: 'Inter', system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
 
   color-scheme: dark;
   color: rgba(255, 255, 255, 0.9);
-  background-color: #101014;
+  background-color: var(--color-dark-bg);
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -13,33 +28,28 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* 覆盖 Naive UI 默认滚动条 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
 body {
   margin: 0;
   padding: 0;
   min-height: 100vh;
-  background-color: #101014;
-}
-
-#app {
-  width: 100%;
-  height: 100vh;
-}
-
-a {
-  font-weight: 500;
-  color: #a230ed;
-  text-decoration: inherit;
-  transition: color 0.3s;
-}
-
-a:hover {
-  color: #b558f0;
-}
-
-div.n-space {
-  align-items: flex-start;
-  margin-left: 15px;
-  margin-right: 15px;
-  padding-left: 0px;
-  padding-right: 0px;
+  background-color: var(--color-dark-bg);
 }

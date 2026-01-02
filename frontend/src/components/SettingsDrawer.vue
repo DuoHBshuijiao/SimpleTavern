@@ -1,25 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-
-import {
-  NButton,
-  NDivider,
-  NDrawer,
-  NDrawerContent,
-  NForm,
-  NFormItem,
-  NInput,
-  NInputNumber,
-  NSelect,
-  NSpace,
-  NSwitch,
-  NTabPane,
-  NTabs,
-  NText,
-} from 'naive-ui'
-
-import type { Chat, ChatOverrides, Settings } from '../types/models'
 import { useChatsStore, useSettingsStore } from '../stores'
+import type { Chat, ChatOverrides, Settings } from '../types/models'
+import ModernSelect from './ModernSelect.vue'
 
 const props = defineProps<{
   show: boolean
@@ -34,12 +17,14 @@ const settingsStore = useSettingsStore()
 const chatsStore = useChatsStore()
 
 const tab = ref<'global' | 'chat'>('global')
-
 const globalDraft = ref<Settings | null>(null)
 const chatDraft = ref<ChatOverrides | null>(null)
-
-const modelOptions = ref<{ label: string; value: string }[]>([])
+const modelOptions = ref<string[]>([])
 const modelsLoading = ref(false)
+
+function close() {
+  emit('update:show', false)
+}
 
 function clone<T>(v: T): T {
   return JSON.parse(JSON.stringify(v)) as T
@@ -63,7 +48,6 @@ watch(
     if (!open) return
     if (!settingsStore.settings) await settingsStore.load()
     const s = clone(settingsStore.settings!)
-    // 确保 streamEnabled 存在
     if (s.streamEnabled === undefined) {
       s.streamEnabled = true
     }
@@ -79,7 +63,7 @@ async function refreshModels() {
     const r = await fetch('/api/llm/models')
     if (!r.ok) throw new Error(await r.text())
     const models = (await r.json()) as string[]
-    modelOptions.value = models.map((m) => ({ label: m, value: m }))
+    modelOptions.value = models
   } catch {
     modelOptions.value = []
   } finally {
@@ -87,155 +71,286 @@ async function refreshModels() {
   }
 }
 
-const showModelSelect = computed(() => modelOptions.value.length > 0)
-
 async function saveGlobal() {
   if (!globalDraft.value) return
   await settingsStore.save(globalDraft.value)
+  close()
 }
 
 async function saveChatOverrides() {
   if (!props.chat || !chatDraft.value) return
   await chatsStore.updateOverrides(props.chat.id, chatDraft.value)
+  close()
 }
 </script>
 
 <template>
-  <NDrawer :show="show" width="520" placement="right" @update:show="(v) => emit('update:show', v)">
-    <NDrawerContent title="高级设置" closable>
-      <NTabs v-model:value="tab" type="line" animated>
-        <NTabPane name="global" tab="全局">
-          <div v-if="!globalDraft" style="padding: 20px; text-align: center"><NText depth="3">加载中…</NText></div>
-          <NForm v-else label-placement="top">
-            <NSpace vertical size="large">
-              <NText depth="3">这些设置会写入本地 `data/settings.json`（API Key 明文）。</NText>
+  <div v-if="show" class="fixed inset-0 z-50 flex justify-end">
+    <!-- Backdrop -->
+    <div class="absolute inset-0 bg-black/50 backdrop-blur-sm transition-opacity" @click="close"></div>
 
-              <NFormItem label="流式传输">
-                <NSpace align="center">
-                  <NSwitch v-model:value="globalDraft.streamEnabled" />
-                  <NText depth="3" style="font-size: 12px">
-                    {{ globalDraft.streamEnabled ? '已开启：逐字显示回复' : '已关闭：等待完整回复后显示' }}
-                  </NText>
-                </NSpace>
-              </NFormItem>
+    <!-- Drawer Panel -->
+    <div class="relative w-full max-w-md bg-[#18181c] border-l border-white/10 shadow-2xl flex flex-col h-full transform transition-transform duration-300">
+      
+      <!-- Header -->
+      <div class="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-[#141418]">
+        <h2 class="text-lg font-bold text-gray-100">高级设置</h2>
+        <button class="text-gray-400 hover:text-white transition-colors" @click="close">
+          ✕
+        </button>
+      </div>
 
-              <NFormItem label="Base URL（OpenAI 兼容）">
-                <NInput v-model:value="globalDraft.llm.baseUrl" placeholder="https://api.openai.com" />
-              </NFormItem>
-              <NFormItem label="API Key（明文存储）">
-                <NInput v-model:value="globalDraft.llm.apiKey" type="password" show-password-on="click" />
-              </NFormItem>
-              <NFormItem label="默认模型">
-                <NSpace vertical style="width: 100%">
-                  <NSpace>
-                    <NInput v-model:value="globalDraft.llm.defaultModel" placeholder="留空，或手动输入模型名" style="width: 280px" />
-                    <NButton :loading="modelsLoading" @click="refreshModels">获取模型列表</NButton>
-                  </NSpace>
-                  <NSelect
-                    v-if="showModelSelect"
-                    v-model:value="globalDraft.llm.defaultModel"
-                    :options="modelOptions"
-                    :loading="modelsLoading"
-                    filterable
-                    clearable
-                    placeholder="从API获取的模型中选择..."
-                  />
-                </NSpace>
-              </NFormItem>
-              <NFormItem label="全局高级提示词（globalSystem）">
-                <NInput
-                  v-model:value="globalDraft.prompts.globalSystem"
-                  type="textarea"
-                  :autosize="{ minRows: 4, maxRows: 12 }"
-                />
-              </NFormItem>
-              <NDivider />
-              <NFormItem label="Temperature（默认，留空则不传）">
-                <NInputNumber
-                  v-model:value="globalDraft.generationDefaults.temperature"
-                  :min="0"
-                  :max="2"
-                  :step="0.1"
-                  placeholder="留空"
-                  clearable
-                  style="width: 200px"
-                />
-              </NFormItem>
-              <NFormItem label="Top_p（默认，留空则不传）">
-                <NInputNumber
-                  v-model:value="globalDraft.generationDefaults.top_p"
-                  :min="0"
-                  :max="1"
-                  :step="0.1"
-                  placeholder="留空"
-                  clearable
-                  style="width: 200px"
-                />
-              </NFormItem>
-              <NFormItem label="Max tokens（默认）">
-                <NInputNumber v-model:value="globalDraft.generationDefaults.max_tokens" :min="1" :step="64" clearable />
-              </NFormItem>
-              <NSpace justify="end">
-                <NButton type="primary" @click="saveGlobal">保存全局</NButton>
-              </NSpace>
-            </NSpace>
-          </NForm>
-        </NTabPane>
+      <!-- Tabs -->
+      <div class="flex border-b border-white/5 bg-[#141418]">
+        <button
+          class="flex-1 py-3 text-sm font-medium transition-colors relative"
+          :class="tab === 'global' ? 'text-brand' : 'text-gray-400 hover:text-gray-200'"
+          @click="tab = 'global'"
+        >
+          全局设置
+          <div v-if="tab === 'global'" class="absolute bottom-0 left-0 right-0 h-0.5 bg-brand"></div>
+        </button>
+        <button
+          class="flex-1 py-3 text-sm font-medium transition-colors relative"
+          :class="tab === 'chat' ? 'text-brand' : 'text-gray-400 hover:text-gray-200'"
+          @click="tab = 'chat'"
+        >
+          当前会话
+          <div v-if="tab === 'chat'" class="absolute bottom-0 left-0 right-0 h-0.5 bg-brand"></div>
+        </button>
+      </div>
 
-        <NTabPane name="chat" tab="当前会话">
-          <div v-if="!chat" style="padding: 20px; text-align: center"><NText depth="3">请先选择一个会话。</NText></div>
-          <NForm v-else-if="chatDraft && globalDraft" label-placement="top">
-            <NSpace vertical size="large">
-              <NText depth="3">这些覆盖会写入当前会话对应的 chat.json。</NText>
-              <NFormItem label="会话高级提示词（overrides.prompt）">
-                <NInput v-model:value="chatDraft.prompt" type="textarea" :autosize="{ minRows: 4, maxRows: 12 }" />
-              </NFormItem>
-              <NFormItem label="模型（覆盖）">
-                <NSpace vertical style="width: 100%">
-                  <NInput v-model:value="chatDraft.params.model" placeholder="留空则用全局默认" />
-                  <NSelect
-                    v-if="showModelSelect"
-                    v-model:value="chatDraft.params.model"
-                    :options="modelOptions"
-                    :loading="modelsLoading"
-                    clearable
-                    filterable
-                    placeholder="从API获取的模型中选择..."
-                  />
-                </NSpace>
-              </NFormItem>
-              <NFormItem label="Temperature（覆盖，留空则用全局）">
-                <NInputNumber
-                  v-model:value="chatDraft.params.temperature"
-                  :min="0"
-                  :max="2"
-                  :step="0.1"
-                  placeholder="留空"
-                  clearable
-                  style="width: 200px"
+      <!-- Content -->
+      <div class="flex-1 overflow-y-auto p-6 custom-scrollbar">
+        
+        <!-- Global Settings -->
+        <div v-if="tab === 'global'" class="space-y-6">
+          <div v-if="!globalDraft" class="text-center text-gray-500 py-8">加载中...</div>
+          <div v-else class="space-y-5">
+            <div class="text-xs text-gray-500 bg-white/5 p-3 rounded-lg border border-white/5">
+              这些设置将保存到本地配置文件中。API Key 以明文存储。
+            </div>
+
+            <!-- Stream Toggle -->
+            <div class="space-y-2">
+              <label class="block text-sm font-medium text-gray-300">流式传输 (Streaming)</label>
+              <button 
+                class="flex items-center gap-3 group cursor-pointer w-full text-left"
+                @click="globalDraft.streamEnabled = !globalDraft.streamEnabled"
+              >
+                <div 
+                  class="w-10 h-5 rounded-full relative transition-colors duration-200"
+                  :class="globalDraft.streamEnabled ? 'bg-brand' : 'bg-gray-700'"
+                >
+                  <div 
+                    class="absolute top-1 w-3 h-3 rounded-full bg-white transition-transform duration-200"
+                    :class="globalDraft.streamEnabled ? 'left-6' : 'left-1'"
+                  ></div>
+                </div>
+                <span class="text-xs text-gray-400">
+                  {{ globalDraft.streamEnabled ? '已开启：逐字显示回复' : '已关闭：等待完整回复后显示' }}
+                </span>
+              </button>
+            </div>
+
+            <!-- Base URL -->
+            <div class="space-y-1.5">
+              <label class="block text-sm font-medium text-gray-300">API Base URL</label>
+              <input 
+                v-model="globalDraft.llm.baseUrl" 
+                type="text" 
+                placeholder="https://api.openai.com"
+                class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-brand/50 focus:ring-1 focus:ring-brand/50 outline-none transition-colors"
+              />
+            </div>
+
+            <!-- API Key -->
+            <div class="space-y-1.5">
+              <label class="block text-sm font-medium text-gray-300">API Key</label>
+              <input 
+                v-model="globalDraft.llm.apiKey" 
+                type="password" 
+                class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-brand/50 focus:ring-1 focus:ring-brand/50 outline-none transition-colors"
+              />
+            </div>
+
+            <!-- Model Selection -->
+            <div class="space-y-1.5">
+              <label class="block text-sm font-medium text-gray-300">默认模型</label>
+              <div class="flex gap-2 items-start">
+                <ModernSelect
+                  v-model="globalDraft.llm.defaultModel"
+                  :options="modelOptions"
+                  :loading="modelsLoading"
+                  searchable
+                  allow-create
+                  placeholder="选择或输入模型..."
                 />
-              </NFormItem>
-              <NFormItem label="Top_p（覆盖，留空则用全局）">
-                <NInputNumber
-                  v-model:value="chatDraft.params.top_p"
-                  :min="0"
-                  :max="1"
-                  :step="0.1"
-                  placeholder="留空"
-                  clearable
-                  style="width: 200px"
+                <button 
+                  class="px-3 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-sm text-gray-300 transition-colors h-[38px] flex items-center justify-center min-w-[60px]"
+                  :disabled="modelsLoading"
+                  @click="refreshModels"
+                >
+                  <span v-if="modelsLoading" class="animate-spin text-brand">⟳</span>
+                  <span v-else>刷新</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Global System Prompt -->
+            <div class="space-y-1.5">
+              <label class="block text-sm font-medium text-gray-300">全局 System Prompt</label>
+              <textarea 
+                v-model="globalDraft.prompts.globalSystem" 
+                rows="4"
+                class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-brand/50 focus:ring-1 focus:ring-brand/50 outline-none transition-colors resize-none"
+              ></textarea>
+            </div>
+
+            <div class="h-px bg-white/5 my-4"></div>
+
+            <!-- Parameters -->
+            <div class="grid grid-cols-2 gap-4">
+              <div class="space-y-1.5">
+                <label class="block text-sm font-medium text-gray-300">Temperature</label>
+                <input 
+                  v-model.number="globalDraft.generationDefaults.temperature" 
+                  type="number" 
+                  step="0.1" min="0" max="2"
+                  placeholder="默认"
+                  class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-brand/50 outline-none"
                 />
-              </NFormItem>
-              <NFormItem label="Max tokens（覆盖）">
-                <NInputNumber v-model:value="chatDraft.params.max_tokens" :min="1" :step="64" clearable />
-              </NFormItem>
-              <NSpace justify="end">
-                <NButton type="primary" @click="saveChatOverrides(); saveGlobal()">保存</NButton>
-              </NSpace>
-            </NSpace>
-          </NForm>
-        </NTabPane>
-      </NTabs>
-    </NDrawerContent>
-  </NDrawer>
+              </div>
+              <div class="space-y-1.5">
+                <label class="block text-sm font-medium text-gray-300">Top P</label>
+                <input 
+                  v-model.number="globalDraft.generationDefaults.top_p" 
+                  type="number" 
+                  step="0.1" min="0" max="1"
+                  placeholder="默认"
+                  class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-brand/50 outline-none"
+                />
+              </div>
+              <div class="space-y-1.5">
+                <label class="block text-sm font-medium text-gray-300">Max Tokens</label>
+                <input 
+                  v-model.number="globalDraft.generationDefaults.max_tokens" 
+                  type="number" 
+                  step="128" min="1"
+                  placeholder="默认"
+                  class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-brand/50 outline-none"
+                />
+              </div>
+            </div>
+
+            <div class="pt-4 flex justify-end">
+              <button 
+                class="px-6 py-2 bg-brand hover:bg-brand-hover text-white rounded-lg font-medium shadow-lg shadow-brand/20 transition-all"
+                @click="saveGlobal"
+              >
+                保存全局设置
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Chat Specific Settings -->
+        <div v-else class="space-y-6">
+          <div v-if="!chat" class="text-center text-gray-500 py-8">请先选择一个会话</div>
+          <div v-else-if="chatDraft && globalDraft" class="space-y-5">
+             <div class="text-xs text-gray-500 bg-white/5 p-3 rounded-lg border border-white/5">
+              这些设置仅应用于当前会话，并会覆盖全局设置。
+            </div>
+
+            <div class="space-y-1.5">
+              <label class="block text-sm font-medium text-gray-300">会话 System Prompt (Override)</label>
+              <textarea 
+                v-model="chatDraft.prompt" 
+                rows="4"
+                placeholder="留空则使用角色默认Prompt"
+                class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-brand/50 focus:ring-1 focus:ring-brand/50 outline-none transition-colors resize-none"
+              ></textarea>
+            </div>
+
+             <div class="space-y-1.5">
+              <label class="block text-sm font-medium text-gray-300">模型覆盖</label>
+              <ModernSelect
+                v-model="chatDraft.params.model"
+                :options="modelOptions"
+                :loading="modelsLoading"
+                searchable
+                allow-create
+                placeholder="留空使用全局默认"
+              />
+            </div>
+
+             <div class="grid grid-cols-2 gap-4">
+              <div class="space-y-1.5">
+                <label class="block text-sm font-medium text-gray-300">Temperature</label>
+                <input 
+                  v-model.number="chatDraft.params.temperature" 
+                  type="number" 
+                  step="0.1" min="0" max="2"
+                  placeholder="使用全局"
+                  class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-brand/50 outline-none"
+                />
+              </div>
+              <div class="space-y-1.5">
+                <label class="block text-sm font-medium text-gray-300">Top P</label>
+                <input 
+                  v-model.number="chatDraft.params.top_p" 
+                  type="number" 
+                  step="0.1" min="0" max="1"
+                  placeholder="使用全局"
+                  class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-brand/50 outline-none"
+                />
+              </div>
+              <div class="space-y-1.5">
+                <label class="block text-sm font-medium text-gray-300">Max Tokens</label>
+                <input 
+                  v-model.number="chatDraft.params.max_tokens" 
+                  type="number" 
+                  step="128" min="1"
+                  placeholder="使用全局"
+                  class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-brand/50 outline-none"
+                />
+              </div>
+            </div>
+
+             <div class="pt-4 flex justify-end gap-3">
+              <button 
+                class="px-4 py-2 text-gray-400 hover:text-white transition-colors"
+                @click="close"
+              >
+                取消
+              </button>
+              <button 
+                class="px-6 py-2 bg-brand hover:bg-brand-hover text-white rounded-lg font-medium shadow-lg shadow-brand/20 transition-all"
+                @click="saveChatOverrides(); saveGlobal()"
+              >
+                保存设置
+              </button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
 </template>
+
+<style scoped>
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+}
+.custom-scrollbar:hover::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+}
+</style>

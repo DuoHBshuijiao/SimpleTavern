@@ -1,35 +1,31 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch, nextTick } from 'vue'
 import MarkdownIt from 'markdown-it'
 
 import { useCharactersStore, useChatsStore, useSettingsStore } from '../stores'
 import type { CharacterCard, ChatMessage, UserPersona } from '../types/models'
 import SettingsDrawer from '../components/SettingsDrawer.vue'
 import AvatarCropper from '../components/AvatarCropper.vue'
+import ModernAvatar from '../components/ModernAvatar.vue'
+import ModernSelect from '../components/ModernSelect.vue'
 import { postAndConsumeSse } from '../api/sse'
 import { apiPost } from '../api/http'
 
 import {
   NAlert,
-  NAvatar,
   NButton,
-  NCard,
   NDivider,
   NDropdown,
   NForm,
   NFormItem,
   NInput,
-  NLayout,
-  NLayoutContent,
-  NLayoutSider,
-  NList,
-  NListItem,
   NModal,
   NPopconfirm,
   NSpace,
   NTag,
   NText,
   NTooltip,
+  useMessage
 } from 'naive-ui'
 
 const settings = useSettingsStore()
@@ -44,6 +40,7 @@ const streamError = ref<string | null>(null)
 const sidebarCollapsed = ref(false)
 const editingChatId = ref<string | null>(null)
 const editingTitle = ref('')
+const messagesScrollRef = ref<HTMLElement | null>(null)
 let aborter: AbortController | null = null
 
 // 角色编辑相关
@@ -75,6 +72,14 @@ async function selectModel(key: string) {
   await chats.updateOverrides(chats.activeChat.id, overrides)
 }
 
+function scrollToBottom() {
+  nextTick(() => {
+    if (messagesScrollRef.value) {
+      messagesScrollRef.value.scrollTop = messagesScrollRef.value.scrollHeight
+    }
+  })
+}
+
 onMounted(async () => {
   if (!settings.settings) await settings.load()
   await characters.loadAll()
@@ -93,6 +98,7 @@ watch(
     const first = chats.list[0]
     if (first) {
       await chats.load(first.id)
+      scrollToBottom()
     } else {
       chats.activeChatId = null
       chats.activeChat = null
@@ -381,6 +387,8 @@ async function sendUserMessage() {
   activeChat.value.messages.push({ version: 1, id: localUserId, role: 'user', content: text, ts: now })
   const assistantMsg: ChatMessage = { version: 1, id: localAssistantId, role: 'assistant', content: '', ts: now }
   activeChat.value.messages.push(assistantMsg)
+  
+  scrollToBottom()
 
   isGenerating.value = true
   aborter?.abort()
@@ -396,7 +404,10 @@ async function sendUserMessage() {
         (evt) => {
           if (evt.event === 'delta') {
             const t = evt.data?.text
-            if (typeof t === 'string') assistantMsg.content += t
+            if (typeof t === 'string') {
+              assistantMsg.content += t
+              scrollToBottom()
+            }
           } else if (evt.event === 'error') {
             streamError.value = String(evt.data?.message ?? 'unknown error')
           }
@@ -414,6 +425,7 @@ async function sendUserMessage() {
       
       if (res.ok) {
         assistantMsg.content = res.content
+        scrollToBottom()
       } else {
         streamError.value = res.error || 'unknown error'
       }
@@ -439,347 +451,325 @@ const editingPersonaAvatarUrl = computed(() => {
 </script>
 
 <template>
-  <div class="main-container">
-    <NLayout has-sider class="centered-layout">
-      <!-- 收起按钮 -->
-      <div class="sidebar-toggle" @click="sidebarCollapsed = !sidebarCollapsed">
-        <NTooltip trigger="hover" :placement="sidebarCollapsed ? 'right' : 'left'">
-          <template #trigger>
-            <div class="toggle-btn">
-              {{ sidebarCollapsed ? '▶' : '◀' }}
-            </div>
-          </template>
-          {{ sidebarCollapsed ? '展开侧栏' : '收起侧栏' }}
-        </NTooltip>
-      </div>
+  <div class="flex h-screen w-full bg-dark-bg text-gray-200 overflow-hidden font-sans">
+    
+    <!-- 侧边栏开关 -->
+    <div 
+      class="absolute left-0 top-1/2 -translate-y-1/2 z-50 cursor-pointer p-2 bg-brand/30 hover:bg-brand/50 rounded-r-lg backdrop-blur-sm transition-colors border border-l-0 border-brand/40 shadow-lg"
+      @click="sidebarCollapsed = !sidebarCollapsed"
+      title="切换侧边栏"
+    >
+      <span class="text-xs text-white">{{ sidebarCollapsed ? '▶' : '◀' }}</span>
+    </div>
 
-      <NLayoutSider
-        v-show="!sidebarCollapsed"
-        bordered
-        width="320"
-        style="padding: 12px; overflow-y: auto"
-        class="sidebar-animated"
-      >
-        <NSpace vertical>
-          <!-- 用户 Persona 区域 -->
-          <NSpace justify="space-between" align="center">
-            <NText strong>我的身份</NText>
-            <NButton size="tiny" type="primary" @click="openCreatePersona">+新建</NButton>
-          </NSpace>
-          <NList bordered hoverable clickable size="small">
-            <NListItem
+    <!-- 左侧侧边栏 -->
+    <aside 
+      class="flex flex-col border-r border-white/5 bg-[#141418] transition-all duration-300 relative flex-shrink-0"
+      :class="sidebarCollapsed ? '-ml-80 w-80' : 'w-80'"
+    >
+      <div class="flex flex-col h-full overflow-hidden">
+        
+        <!-- 用户身份区域 (头部) -->
+        <div class="p-4 bg-black/10 border-b border-white/5 shrink-0">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-xs font-bold text-gray-400 uppercase tracking-wider">我的身份</span>
+            <button class="text-xs text-brand hover:text-brand-hover transition-colors px-2 py-0.5 rounded hover:bg-white/5" @click="openCreatePersona">+ 新建</button>
+          </div>
+          
+          <div class="space-y-2 max-h-[140px] overflow-y-auto pr-1 custom-scrollbar">
+            <div 
               v-for="p in (settings.settings?.userPersonas || [])"
               :key="p.id"
-              :style="{
-                cursor: 'pointer',
-                backgroundColor: settings.settings?.selectedPersonaId === p.id ? 'rgba(162, 48, 237, 0.15)' : 'transparent',
-                transition: 'background-color 0.3s'
-              }"
+              class="group flex items-center gap-3 p-2 rounded-xl cursor-pointer transition-all duration-200 border border-transparent"
+              :class="settings.settings?.selectedPersonaId === p.id ? 'bg-brand/10 border-brand/20' : 'hover:bg-white/5'"
               @click="selectPersona(p.id)"
             >
-              <NSpace align="center" justify="space-between" style="width: 100%">
-                <NSpace align="center">
-                  <NAvatar
-                    v-if="p.avatar"
-                    :src="`/api/avatars/${p.avatar}`"
-                    :size="28"
-                    round
-                  />
-                  <NAvatar v-else :size="28" round style="background: rgba(162, 48, 237, 0.3)">
-                    {{ p.name[0] || '?' }}
-                  </NAvatar>
-                  <NText :style="{ color: settings.settings?.selectedPersonaId === p.id ? '#a230ed' : 'inherit' }">{{ p.name }}</NText>
-                </NSpace>
-                <NSpace size="small">
-                  <NButton size="tiny" quaternary @click.stop="openEditPersona(p)">✏</NButton>
-                  <NPopconfirm @positive-click="deletePersona(p.id)">
-                    <template #trigger>
-                      <NButton size="tiny" quaternary type="error" @click.stop>🗑</NButton>
-                    </template>
-                    确定删除这个身份？
-                  </NPopconfirm>
-                </NSpace>
-              </NSpace>
-            </NListItem>
-            <NListItem v-if="!settings.settings?.userPersonas?.length" style="opacity: 0.6; font-size: 12px">
-              点击"新建"创建你的第一个身份
-            </NListItem>
-          </NList>
+              <ModernAvatar :src="p.avatar ? `/api/avatars/${p.avatar}` : null" :name="p.name" :size="36" aspect="1" />
+              <div class="flex-1 min-w-0">
+                <div class="font-medium text-sm truncate" :class="settings.settings?.selectedPersonaId === p.id ? 'text-brand' : 'text-gray-300'">{{ p.name }}</div>
+              </div>
+              <div class="opacity-0 group-hover:opacity-100 flex gap-1 transition-opacity">
+                <button class="p-1 hover:text-white text-gray-500" @click.stop="openEditPersona(p)">✏</button>
+                <NPopconfirm @positive-click="deletePersona(p.id)">
+                  <template #trigger>
+                    <button class="p-1 hover:text-red-400 text-gray-500" @click.stop>🗑</button>
+                  </template>
+                  确定删除这个身份？
+                </NPopconfirm>
+              </div>
+            </div>
+            
+            <div v-if="!settings.settings?.userPersonas?.length" class="text-xs text-gray-500 text-center py-2">
+              点击上方新建创建你的第一个身份
+            </div>
+          </div>
+        </div>
 
-          <NDivider style="margin: 8px 0" />
+        <!-- 角色列表区域 (中间，弹性伸缩) -->
+        <div class="flex-1 overflow-y-auto min-h-0 custom-scrollbar p-3">
+          <div class="flex items-center justify-between mb-2 px-1">
+            <span class="text-xs font-bold text-gray-400 uppercase tracking-wider">角色列表</span>
+            <button class="text-xs text-brand hover:text-brand-hover transition-colors px-2 py-0.5 rounded hover:bg-white/5" @click="openCreateCharacter">+ 新建</button>
+          </div>
 
-          <!-- 角色区域 -->
-          <NSpace justify="space-between" align="center">
-            <NText strong>角色</NText>
-            <NButton size="tiny" type="primary" @click="openCreateCharacter">+新建</NButton>
-          </NSpace>
-
-          <NList bordered hoverable clickable>
-            <NListItem
+          <div class="grid grid-cols-1 gap-2">
+            <div 
               v-for="c in characters.list"
               :key="c.id"
-              :style="{
-                cursor: 'pointer',
-                backgroundColor: selectedCharacterId === c.id ? 'rgba(162, 48, 237, 0.15)' : 'transparent',
-                transition: 'background-color 0.3s'
-              }"
+              class="group relative flex items-start gap-3 p-3 rounded-2xl cursor-pointer transition-all duration-200 border border-transparent"
+              :class="selectedCharacterId === c.id ? 'bg-white/5 border-brand/20 shadow-sm' : 'hover:bg-white/5'"
               @click="selectedCharacterId = c.id"
             >
-              <NSpace align="center" justify="space-between" style="width: 100%">
-                <NSpace align="center">
-                  <NAvatar
-                    v-if="c.avatar"
-                    :src="`/api/avatars/${c.avatar}`"
-                    :size="32"
-                    round
-                  />
-                  <NAvatar v-else :size="32" round style="background: rgba(162, 48, 237, 0.3)">
-                    {{ c.name[0] || '?' }}
-                  </NAvatar>
-                  <div style="flex: 1; min-width: 0">
-                    <div><NText strong :style="{ color: selectedCharacterId === c.id ? '#a230ed' : 'inherit' }">{{ c.name }}</NText></div>
-                    <div style="opacity: 0.65; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px">{{ c.description }}</div>
-                  </div>
-                </NSpace>
-                <NSpace size="small">
-                  <NButton size="tiny" quaternary @click.stop="openEditCharacter(c)">✏</NButton>
-                  <NPopconfirm @positive-click="deleteCharacter(c.id)">
-                    <template #trigger>
-                      <NButton size="tiny" quaternary type="error" @click.stop>🗑</NButton>
-                    </template>
-                    <div style="max-width: 200px">
-                      <p style="margin: 0 0 4px 0">确定删除此角色？</p>
-                      <p style="margin: 0; opacity: 0.7; font-size: 12px">将同时删除所有关联会话</p>
-                    </div>
-                  </NPopconfirm>
-                </NSpace>
-              </NSpace>
-            </NListItem>
-          </NList>
+              <!-- 角色头像 (3:4 比例) -->
+              <ModernAvatar 
+                :src="c.avatar ? `/api/avatars/${c.avatar}` : null" 
+                :name="c.name" 
+                :size="56" 
+                :aspect="0.75"
+                rounded="rounded-lg"
+                class="shadow-md"
+              />
+              
+              <div class="flex-1 min-w-0 flex flex-col h-[74px]"> <!-- 56/0.75 approx 74px height -->
+                <div class="flex justify-between items-start">
+                  <div class="font-bold text-sm truncate" :class="selectedCharacterId === c.id ? 'text-brand-300' : 'text-gray-200'">{{ c.name }}</div>
+                </div>
+                <div class="text-xs text-gray-500 line-clamp-3 mt-1 leading-relaxed">{{ c.description || '暂无简介' }}</div>
+              </div>
 
-          <NDivider style="margin: 8px 0" />
+              <!-- 悬浮操作 -->
+              <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-black/60 rounded-lg backdrop-blur-sm p-0.5 flex">
+                <button class="p-1.5 hover:text-white text-gray-400" @click.stop="openEditCharacter(c)">✏</button>
+                <NPopconfirm @positive-click="deleteCharacter(c.id)">
+                  <template #trigger>
+                    <button class="p-1.5 hover:text-red-400 text-gray-400" @click.stop>🗑</button>
+                  </template>
+                  确定删除？
+                </NPopconfirm>
+              </div>
+            </div>
+          </div>
+        </div>
 
-          <!-- 会话区域 -->
-          <NSpace justify="space-between" align="center">
-            <NText strong>会话</NText>
-            <NButton size="small" secondary type="primary" :disabled="!selectedCharacterId" @click="createChat">新建会话</NButton>
-          </NSpace>
-          <NList bordered hoverable clickable>
-            <NListItem
+        <!-- 会话列表区域 (底部) -->
+        <div class="h-1/3 min-h-[150px] border-t border-white/5 bg-black/10 flex flex-col">
+          <div class="p-3 pb-1 shrink-0 flex items-center justify-between">
+            <span class="text-xs font-bold text-gray-400 uppercase tracking-wider">历史会话</span>
+            <button 
+              class="text-xs bg-brand/20 hover:bg-brand/30 text-brand px-2 py-1 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed" 
+              :disabled="!selectedCharacterId" 
+              @click="createChat"
+            >
+              新建会话
+            </button>
+          </div>
+          <div class="flex-1 overflow-y-auto p-2 custom-scrollbar">
+            <div 
               v-for="c in chats.list"
               :key="c.id"
-              :style="{
-                cursor: 'pointer',
-                backgroundColor: chats.activeChatId === c.id ? 'rgba(162, 48, 237, 0.1)' : 'transparent',
-                transition: 'background-color 0.3s'
-              }"
+              class="group flex items-center justify-between p-2 rounded-lg cursor-pointer text-sm mb-1 transition-colors"
+              :class="chats.activeChatId === c.id ? 'bg-brand/10 text-brand' : 'text-gray-400 hover:bg-white/5 hover:text-gray-200'"
               @click="chats.load(c.id)"
             >
-              <NSpace justify="space-between" align="center" style="width: 100%">
-                <div style="flex: 1; min-width: 0">
-                  <div v-if="editingChatId === c.id" @click.stop>
-                    <NSpace>
-                      <NInput
-                        v-model:value="editingTitle"
-                        size="small"
-                        style="width: 120px"
-                        @keyup.enter="saveTitle"
-                        @keyup.escape="cancelEditTitle"
-                      />
-                      <NButton size="tiny" type="primary" @click="saveTitle">✓</NButton>
-                      <NButton size="tiny" @click="cancelEditTitle">✕</NButton>
-                    </NSpace>
-                  </div>
-                  <div v-else :style="{ color: chats.activeChatId === c.id ? '#a230ed' : 'inherit', fontSize: '13px' }">
-                    {{ c.title }}
-                  </div>
-                </div>
-                <NSpace v-if="editingChatId !== c.id" align="center" size="small">
-                  <NButton size="tiny" quaternary @click.stop="startEditTitle(c.id, c.title)">✏</NButton>
-                  <NPopconfirm @positive-click="deleteChat(c.id)">
-                    <template #trigger>
-                      <NButton size="tiny" quaternary type="error" @click.stop>🗑</NButton>
-                    </template>
-                    确定要删除这个会话吗？
-                  </NPopconfirm>
-                </NSpace>
-              </NSpace>
-            </NListItem>
-          </NList>
-        </NSpace>
-      </NLayoutSider>
-
-      <NLayoutContent style="padding: 24px">
-        <div style="max-width: 900px; margin: 0 auto">
-          <NCard v-if="selectedCharacter && activeChat" :title="`${selectedCharacter.name} / ${activeChat.title}`" bordered>
-            <template #header-extra>
-              <NButton size="small" @click="showSettings = true">高级设置</NButton>
-            </template>
-            <div style="height: calc(100vh - 320px); overflow: auto; padding-right: 8px">
-              <NSpace vertical size="large">
-                <div v-for="m in activeChat.messages" :key="m.id" class="msg-row">
-                  <!-- 头像：system 用固定图标，其余用 Persona/角色头像 -->
-                  <NAvatar
-                    v-if="m.role === 'system'"
-                    :size="28"
-                    round
-                    class="msg-avatar"
-                    style="background: rgba(245, 158, 11, 0.25); color: rgba(255,255,255,0.95)"
-                  >
-                    ⚙
-                  </NAvatar>
-                  <NAvatar
-                    v-else-if="getMessageAvatar(m.role)"
-                    :src="getMessageAvatar(m.role)!"
-                    :size="28"
-                    round
-                    class="msg-avatar"
-                  />
-                  <NAvatar
-                    v-else
-                    :size="28"
-                    round
-                    class="msg-avatar"
-                    :style="{ background: m.role === 'user' ? 'rgba(162, 48, 237, 0.3)' : 'rgba(124, 58, 237, 0.3)' }"
-                  >
-                    {{ getMessageLabel(m.role)[0] }}
-                  </NAvatar>
-
-                  <div class="msg-body">
-                    <div class="msg-meta">
-                      <NTag size="tiny" :type="roleTagType(m.role)" round :bordered="false">{{ getMessageLabel(m.role) }}</NTag>
-                    </div>
-                    <div class="msg-bubble" :class="m.role === 'user' ? 'is-user' : 'is-assistant'">
-                      <div class="md" v-html="renderMarkdown(m.content)"></div>
-                    </div>
-                    <div class="msg-actions">
-                      <NButton
-                        size="tiny"
-                        quaternary
-                        :disabled="isGenerating || m.id.startsWith('local_')"
-                        @click="openEditMessage(m)"
-                      >
-                        ✏
-                      </NButton>
-                      <NPopconfirm @positive-click="deleteMessage(m)">
-                        <template #trigger>
-                          <NButton
-                            size="tiny"
-                            quaternary
-                            type="error"
-                            :disabled="isGenerating || m.id.startsWith('local_')"
-                          >
-                            🗑
-                          </NButton>
-                        </template>
-                        确定删除这条消息？
-                      </NPopconfirm>
-                    </div>
-                  </div>
-                </div>
-              </NSpace>
+              <div class="flex-1 min-w-0 pr-2">
+                 <div v-if="editingChatId === c.id" @click.stop class="flex gap-1">
+                    <input 
+                      v-model="editingTitle" 
+                      class="bg-black/20 border border-brand/50 rounded px-1 py-0.5 text-xs w-full text-white outline-none focus:border-brand"
+                      @keyup.enter="saveTitle"
+                      @keyup.escape="cancelEditTitle"
+                      autoFocus
+                    />
+                    <button class="text-brand hover:text-white" @click="saveTitle">✓</button>
+                    <button class="text-gray-500 hover:text-white" @click="cancelEditTitle">✕</button>
+                 </div>
+                 <div v-else class="truncate">{{ c.title }}</div>
+              </div>
+              
+              <div v-if="editingChatId !== c.id" class="opacity-0 group-hover:opacity-100 flex gap-1 transition-opacity">
+                <button class="hover:text-white" @click.stop="startEditTitle(c.id, c.title)">✏</button>
+                <NPopconfirm @positive-click="deleteChat(c.id)">
+                  <template #trigger>
+                    <button class="hover:text-red-400" @click.stop>🗑</button>
+                  </template>
+                  删除会话？
+                </NPopconfirm>
+              </div>
             </div>
+            <div v-if="!chats.list.length" class="text-center text-xs text-gray-600 py-4">
+              无历史会话
+            </div>
+          </div>
+        </div>
+      </div>
+    </aside>
 
-            <NDivider />
+    <!-- 右侧主区域 -->
+    <main class="flex-1 flex flex-col relative min-w-0 bg-[#101014]">
+      
+      <!-- 聊天内容区 -->
+      <div v-if="selectedCharacter && activeChat" class="flex flex-col h-full relative">
+        <!-- 顶部标题栏 (悬浮) -->
+        <header class="absolute top-0 left-0 right-0 z-10 h-16 flex items-center justify-between px-6 bg-gradient-to-b from-[#101014] via-[#101014]/90 to-transparent pointer-events-none">
+          <div class="pointer-events-auto flex items-center gap-3">
+             <h2 class="text-lg font-bold text-gray-100 shadow-sm">{{ selectedCharacter.name }}</h2>
+             <span class="text-gray-600">/</span>
+             <span class="text-sm text-gray-400">{{ activeChat.title }}</span>
+          </div>
+          <div class="pointer-events-auto">
+            <NButton size="small" secondary type="primary" class="!bg-brand/10 !text-brand hover:!bg-brand/20" @click="showSettings = true">
+              设置
+            </NButton>
+          </div>
+        </header>
 
-            <div class="chat-input-area">
+        <!-- 消息列表 -->
+        <div ref="messagesScrollRef" class="flex-1 overflow-y-auto p-4 pt-20 pb-4 scroll-smooth custom-scrollbar">
+          <div class="max-w-4xl mx-auto space-y-8">
+            <div v-for="m in activeChat.messages" :key="m.id" class="flex gap-4 group" :class="m.role === 'user' ? 'flex-row-reverse' : 'flex-row'">
+              
+              <!-- 头像 -->
+              <div class="flex-shrink-0 mt-1">
+                 <div v-if="m.role === 'system'" class="w-10 h-10 rounded-full bg-yellow-500/20 flex items-center justify-center text-yellow-500">
+                   ⚙
+                 </div>
+                 <ModernAvatar 
+                   v-else
+                   :src="getMessageAvatar(m.role)"
+                   :name="getMessageLabel(m.role)"
+                   :size="40"
+                   aspect="1"
+                   rounded="rounded-xl"
+                   class="shadow-sm"
+                 />
+              </div>
+
+              <!-- 消息体 -->
+              <div class="flex flex-col max-w-[85%] min-w-0" :class="m.role === 'user' ? 'items-end' : 'items-start'">
+                <div class="flex items-center gap-2 mb-1 px-1">
+                  <span class="text-xs font-bold" :class="m.role === 'user' ? 'text-brand-300' : 'text-gray-400'">
+                    {{ getMessageLabel(m.role) }}
+                  </span>
+                  <!-- 角色标签 (仅 System 显示，其他靠颜色区分) -->
+                  <span v-if="m.role === 'system'" class="text-[10px] bg-yellow-500/10 text-yellow-500 px-1.5 py-0.5 rounded">SYSTEM</span>
+                </div>
+
+                <!-- 气泡 -->
+                <div 
+                  class="relative px-5 py-3.5 rounded-2xl text-[15px] leading-7 shadow-sm transition-all duration-200 border"
+                  :class="[
+                    m.role === 'user' 
+                      ? 'bg-brand/10 border-brand/20 text-gray-100 rounded-tr-sm hover:border-brand/30' 
+                      : m.role === 'assistant'
+                        ? 'bg-[#1e1e24] border-white/5 text-gray-200 rounded-tl-sm hover:bg-[#232329]'
+                        : 'bg-yellow-500/5 border-yellow-500/10 text-gray-300'
+                  ]"
+                >
+                  <div class="md prose prose-invert prose-sm max-w-none prose-p:my-1 prose-headings:my-2 prose-pre:bg-black/30 prose-pre:border prose-pre:border-white/5" v-html="renderMarkdown(m.content)"></div>
+                </div>
+
+                <!-- 底部操作栏 -->
+                <div class="flex items-center gap-2 mt-1 px-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                   <button class="text-xs text-gray-600 hover:text-brand transition-colors" @click="openEditMessage(m)" :disabled="isGenerating">编辑</button>
+                   <NPopconfirm @positive-click="deleteMessage(m)">
+                      <template #trigger>
+                        <button class="text-xs text-gray-600 hover:text-red-400 transition-colors" :disabled="isGenerating">删除</button>
+                      </template>
+                      确定删除？
+                   </NPopconfirm>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 输入区域 (底部悬浮) -->
+        <div class="shrink-0 p-4 pb-6 w-full max-w-4xl mx-auto z-20">
+           <div class="relative bg-[#18181c] border border-white/10 rounded-2xl shadow-xl p-3 flex flex-col gap-2 transition-colors focus-within:border-brand/40 focus-within:ring-1 focus-within:ring-brand/20">
               <NInput
                 v-model:value="draftMessage"
                 type="textarea"
-                placeholder="输入你的消息…"
-                :autosize="{ minRows: 3, maxRows: 8 }"
-                class="chat-input"
+                placeholder="发送消息..."
+                :autosize="{ minRows: 2, maxRows: 8 }"
+                class="!bg-transparent !border-0 text-base"
+                style="--n-border: none; --n-box-shadow-focus: none;"
+                @keydown.ctrl.enter="sendUserMessage"
               />
-              <div class="chat-actions">
-                <NText v-if="streamError" type="error" style="font-size: 12px; white-space: pre-wrap; flex: 1">{{ streamError }}</NText>
-                <div style="flex: 1" v-else></div>
-                <NSpace align="center">
-                  <NDropdown
-                    :options="usedModelsOptions"
-                    trigger="click"
-                    :disabled="usedModelsOptions.length === 0"
-                    @select="selectModel"
-                  >
-                    <NButton size="small" secondary :disabled="usedModelsOptions.length === 0">
-                      {{ currentModel }}
-                    </NButton>
-                  </NDropdown>
-                  <NButton type="primary" :disabled="!draftMessage.trim() || isGenerating" @click="sendUserMessage">
-                    {{ isGenerating ? '生成中…' : '发送' }}
-                  </NButton>
-                </NSpace>
+              
+              <div class="flex items-center justify-between pt-2 border-t border-white/5">
+                 <div class="text-xs text-red-400 truncate max-w-[300px]">{{ streamError }}</div>
+                 <div class="flex items-center gap-3">
+                   <ModernSelect
+                      :model-value="currentModel"
+                      :options="usedModelsOptions"
+                      placement="top"
+                      placeholder="选择模型"
+                      class="!w-[160px] !text-xs"
+                      :disabled="usedModelsOptions.length === 0"
+                      @update:model-value="selectModel"
+                    />
+                    <button 
+                      class="bg-brand hover:bg-brand-hover text-white px-4 py-1.5 rounded-lg text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-brand/20"
+                      :disabled="!draftMessage.trim() || isGenerating"
+                      @click="sendUserMessage"
+                    >
+                      {{ isGenerating ? '生成中...' : '发送' }}
+                    </button>
+                 </div>
               </div>
-            </div>
-          </NCard>
-
-          <NCard v-else bordered title="开始聊天">
-            <div v-if="!characters.list.length" style="text-align: center; padding: 40px 0">
-              <NText depth="3" style="display: block; margin-bottom: 16px">还没有角色。请先创建一个角色。</NText>
-              <NButton type="primary" @click="openCreateCharacter">创建角色</NButton>
-            </div>
-            <div v-else style="text-align: center; padding: 40px 0">
-              <NText depth="3">请从左侧选择角色并点击"新建会话"开始聊天。</NText>
-            </div>
-          </NCard>
+           </div>
+           <div class="text-center mt-2 text-xs text-gray-600">
+             Markdown 支持 · Ctrl + Enter 发送
+           </div>
         </div>
-      </NLayoutContent>
-    </NLayout>
+
+      </div>
+
+      <!-- 空状态 -->
+      <div v-else class="flex flex-col items-center justify-center h-full text-center p-8 opacity-60">
+         <div class="w-20 h-20 rounded-2xl bg-white/5 mb-6 flex items-center justify-center text-4xl">👋</div>
+         <h3 class="text-xl font-bold text-gray-200 mb-2">欢迎来到 SimpleTavern</h3>
+         <p class="text-gray-500 mb-8 max-w-md">请在左侧选择一个角色并开始会话，或者创建一个新的角色。</p>
+         <button class="bg-brand text-white px-6 py-2 rounded-xl hover:bg-brand-hover transition-colors" @click="openCreateCharacter">
+           创建新角色
+         </button>
+      </div>
+
+    </main>
   </div>
 
   <SettingsDrawer v-model:show="showSettings" :chat="activeChat" />
 
   <!-- 消息编辑弹窗 -->
-  <NModal v-model:show="showMessageEditor" preset="card" style="width: min(700px, 92vw)" title="编辑消息">
+  <NModal v-model:show="showMessageEditor" preset="card" style="width: min(700px, 92vw)" title="编辑消息" class="!bg-[#18181c] !border-white/10">
     <NForm label-placement="top">
       <NSpace vertical size="medium">
-        <NFormItem label="发送者 / 头像（选择会直接改变该条消息的角色）">
+        <NFormItem label="发送者 / 头像">
           <NSpace size="small" wrap>
-            <NButton
-              size="tiny"
-              :type="editingMessageRole === 'system' ? 'primary' : 'default'"
+            <div 
+              class="cursor-pointer border-2 rounded-xl p-1 px-3 flex items-center gap-2 transition-all"
+              :class="editingMessageRole === 'system' ? 'border-brand bg-brand/10' : 'border-transparent bg-white/5 hover:bg-white/10'"
               @click="editingMessageRole = 'system'"
             >
-              <NSpace align="center" size="small">
-                <NAvatar :size="20" round style="background: rgba(245, 158, 11, 0.25)">⚙</NAvatar>
-                <span>系统</span>
-              </NSpace>
-            </NButton>
-            <NButton
-              size="tiny"
-              :type="editingMessageRole === 'assistant' ? 'primary' : 'default'"
+               <span class="text-lg">⚙</span>
+               <span class="text-sm">系统</span>
+            </div>
+            <div 
+              class="cursor-pointer border-2 rounded-xl p-1 px-3 flex items-center gap-2 transition-all"
+              :class="editingMessageRole === 'assistant' ? 'border-brand bg-brand/10' : 'border-transparent bg-white/5 hover:bg-white/10'"
               @click="editingMessageRole = 'assistant'"
             >
-              <NSpace align="center" size="small">
-                <NAvatar
-                  v-if="characterAvatarUrl"
-                  :src="characterAvatarUrl"
-                  :size="20"
-                  round
-                />
-                <NAvatar v-else :size="20" round style="background: rgba(124, 58, 237, 0.3)">
-                  {{ (selectedCharacter?.name || 'A')[0] }}
-                </NAvatar>
-                <span>角色</span>
-              </NSpace>
-            </NButton>
-            <NButton
-              size="tiny"
-              :type="editingMessageRole === 'user' ? 'primary' : 'default'"
+               <ModernAvatar :src="characterAvatarUrl" :size="24" aspect="1" rounded="rounded" />
+               <span class="text-sm">角色</span>
+            </div>
+            <div 
+              class="cursor-pointer border-2 rounded-xl p-1 px-3 flex items-center gap-2 transition-all"
+              :class="editingMessageRole === 'user' ? 'border-brand bg-brand/10' : 'border-transparent bg-white/5 hover:bg-white/10'"
               @click="editingMessageRole = 'user'"
             >
-              <NSpace align="center" size="small">
-                <NAvatar
-                  v-if="userAvatarUrl"
-                  :src="userAvatarUrl"
-                  :size="20"
-                  round
-                />
-                <NAvatar v-else :size="20" round style="background: rgba(162, 48, 237, 0.3)">
-                  {{ (userName || '你')[0] }}
-                </NAvatar>
-                <span>用户</span>
-              </NSpace>
-            </NButton>
+               <ModernAvatar :src="userAvatarUrl" :size="24" aspect="1" rounded="rounded" />
+               <span class="text-sm">用户</span>
+            </div>
           </NSpace>
         </NFormItem>
 
@@ -789,7 +779,7 @@ const editingPersonaAvatarUrl = computed(() => {
             type="textarea"
             :autosize="{ minRows: 6, maxRows: 18 }"
             placeholder="输入消息内容（支持 Markdown）"
-            style="width: 100%"
+            class="!bg-black/20"
           />
         </NFormItem>
 
@@ -802,53 +792,48 @@ const editingPersonaAvatarUrl = computed(() => {
   </NModal>
 
   <!-- 角色编辑弹窗 -->
-  <NModal v-model:show="showCharacterEditor" preset="card" style="width: min(700px, 90vw)" :title="isNewCharacter ? '新建角色' : '编辑角色'">
+  <NModal v-model:show="showCharacterEditor" preset="card" style="width: min(700px, 90vw)" :title="isNewCharacter ? '新建角色' : '编辑角色'" class="!bg-[#18181c] !border-white/10">
     <NForm v-if="editingCharacter" label-placement="top">
       <NSpace vertical size="medium">
-        <NFormItem label="头像">
-          <NSpace align="center">
-            <NAvatar
-              v-if="editingCharacterAvatarUrl"
-              :src="editingCharacterAvatarUrl"
-              :size="56"
-              round
-              style="border: 2px solid rgba(162, 48, 237, 0.5)"
-            />
-            <NAvatar v-else :size="56" round style="background: rgba(162, 48, 237, 0.3)">
-              {{ editingCharacter.name?.[0] || '?' }}
-            </NAvatar>
-            <NButton size="small" @click="showCharacterAvatarCropper = true">
-              {{ editingCharacterAvatarUrl ? '更换' : '设置头像' }}
-            </NButton>
-          </NSpace>
-        </NFormItem>
-
-        <NFormItem label="名称">
-          <NInput v-model:value="editingCharacter.name" placeholder="角色名称" style="width: 100%" />
-        </NFormItem>
-
-        <NFormItem label="简介">
-          <NInput v-model:value="editingCharacter.description" type="textarea" :autosize="{ minRows: 2, maxRows: 3 }" placeholder="简短描述" style="width: 100%" />
-        </NFormItem>
+        <div class="flex gap-6">
+           <div class="flex flex-col items-center gap-3">
+              <ModernAvatar 
+                :src="editingCharacterAvatarUrl"
+                :size="120"
+                :aspect="0.75"
+                rounded="rounded-xl"
+                class="border-2 border-brand/40 shadow-lg bg-black/20"
+              />
+              <NButton size="small" secondary @click="showCharacterAvatarCropper = true">更换头像</NButton>
+           </div>
+           <div class="flex-1 space-y-4">
+              <NFormItem label="名称">
+                <NInput v-model:value="editingCharacter.name" placeholder="角色名称" />
+              </NFormItem>
+              <NFormItem label="简介">
+                <NInput v-model:value="editingCharacter.description" type="textarea" :autosize="{ minRows: 2, maxRows: 3 }" placeholder="简短描述" />
+              </NFormItem>
+           </div>
+        </div>
 
         <NFormItem label="Personality（性格/外貌）">
-          <NInput v-model:value="editingCharacter.personality" type="textarea" :autosize="{ minRows: 2, maxRows: 5 }" placeholder="角色的性格、外貌等" style="width: 100%" />
+          <NInput v-model:value="editingCharacter.personality" type="textarea" :autosize="{ minRows: 2, maxRows: 5 }" placeholder="详细设定..." />
         </NFormItem>
 
         <NFormItem label="Scenario（情景/世界观）">
-          <NInput v-model:value="editingCharacter.scenario" type="textarea" :autosize="{ minRows: 2, maxRows: 4 }" placeholder="世界背景或谈话环境" style="width: 100%" />
+          <NInput v-model:value="editingCharacter.scenario" type="textarea" :autosize="{ minRows: 2, maxRows: 4 }" placeholder="世界背景..." />
         </NFormItem>
 
         <NFormItem label="系统提示词">
-          <NInput v-model:value="editingCharacter.systemPrompt" type="textarea" :autosize="{ minRows: 2, maxRows: 6 }" placeholder="回复例句、格式要求等" style="width: 100%" />
+          <NInput v-model:value="editingCharacter.systemPrompt" type="textarea" :autosize="{ minRows: 2, maxRows: 6 }" placeholder="回复格式要求..." />
         </NFormItem>
 
         <NFormItem>
           <template #label>
             <span>首句</span>
-            <span style="opacity: 0.6; font-size: 11px; margin-left: 6px">支持 {<!-- -->{user}} 占位符</span>
+            <span class="opacity-60 text-xs ml-2">支持 {<!-- -->{user}} 占位符</span>
           </template>
-          <NInput v-model:value="editingCharacter.firstMessage" type="textarea" :autosize="{ minRows: 2, maxRows: 4 }" placeholder="新建会话时的第一条消息" style="width: 100%" />
+          <NInput v-model:value="editingCharacter.firstMessage" type="textarea" :autosize="{ minRows: 2, maxRows: 4 }" placeholder="开场白..." />
         </NFormItem>
 
         <NSpace justify="end">
@@ -860,33 +845,22 @@ const editingPersonaAvatarUrl = computed(() => {
   </NModal>
 
   <!-- Persona 编辑弹窗 -->
-  <NModal v-model:show="showPersonaEditor" preset="card" style="width: min(500px, 90vw)" :title="isNewPersona ? '新建身份' : '编辑身份'">
+  <NModal v-model:show="showPersonaEditor" preset="card" style="width: min(500px, 90vw)" :title="isNewPersona ? '新建身份' : '编辑身份'" class="!bg-[#18181c] !border-white/10">
     <NForm v-if="editingPersona" label-placement="top">
       <NSpace vertical size="medium">
-        <NAlert type="info" style="margin-bottom: 8px">
-          用户身份用于在对话中标识你。姓名将替换角色首句中的 <code style="background: rgba(255,255,255,0.1); padding: 1px 4px; border-radius: 3px">{<!-- -->{user}}</code>，并在系统提示词中介绍你的身份。
-        </NAlert>
-
-        <NFormItem label="头像">
-          <NSpace align="center">
-            <NAvatar
-              v-if="editingPersonaAvatarUrl"
+        <div class="flex items-center gap-4 mb-2">
+            <ModernAvatar 
               :src="editingPersonaAvatarUrl"
-              :size="56"
-              round
-              style="border: 2px solid rgba(162, 48, 237, 0.5)"
+              :size="80"
+              aspect="1"
+              rounded="rounded-xl"
+              class="border-2 border-brand/40"
             />
-            <NAvatar v-else :size="56" round style="background: rgba(162, 48, 237, 0.3)">
-              {{ editingPersona.name?.[0] || '?' }}
-            </NAvatar>
-            <NButton size="small" @click="showPersonaAvatarCropper = true">
-              {{ editingPersonaAvatarUrl ? '更换' : '设置头像' }}
-            </NButton>
-          </NSpace>
-        </NFormItem>
+            <NButton size="small" secondary @click="showPersonaAvatarCropper = true">更换头像</NButton>
+        </div>
 
         <NFormItem label="姓名（{{user}}）">
-          <NInput v-model:value="editingPersona.name" placeholder="你的角色名称" style="width: 100%" />
+          <NInput v-model:value="editingPersona.name" placeholder="你的角色名称" />
         </NFormItem>
 
         <NFormItem label="简介">
@@ -895,7 +869,6 @@ const editingPersonaAvatarUrl = computed(() => {
             type="textarea"
             :autosize="{ minRows: 3, maxRows: 6 }"
             placeholder="你的角色身份、背景等"
-            style="width: 100%"
           />
         </NFormItem>
 
@@ -919,173 +892,34 @@ const editingPersonaAvatarUrl = computed(() => {
 </template>
 
 <style scoped>
-.main-container {
-  display: flex;
-  justify-content: center;
-  width: 100%;
-  height: 100vh;
-  background-color: #101014;
+/* 自定义滚动条样式，比全局的更细一些 */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+}
+.custom-scrollbar:hover::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
 }
 
-.centered-layout {
-  max-width: 1400px;
-  width: 100%;
-  height: 100%;
-  border-left: 1px solid rgba(255, 255, 255, 0.1);
-  border-right: 1px solid rgba(255, 255, 255, 0.1);
-  position: relative;
-}
-
-.sidebar-toggle {
-  position: absolute;
-  left: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 100;
-  cursor: pointer;
-}
-
-.toggle-btn {
-  background: rgba(162, 48, 237, 0.3);
-  border: 1px solid rgba(162, 48, 237, 0.5);
-  border-left: none;
-  border-radius: 0 8px 8px 0;
-  padding: 12px 6px;
-  color: #fff;
-  font-size: 12px;
-  transition: all 0.3s;
-}
-
-.toggle-btn:hover {
-  background: rgba(162, 48, 237, 0.5);
-}
-
-.sidebar-animated {
-  transition: all 0.3s ease;
-}
-
-.chat-input-area {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  width: 100%;
-}
-
-.chat-input {
-  width: 100%;
-}
-
-.chat-input :deep(textarea) {
-  min-height: 80px !important;
-}
-
-.chat-actions {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.msg-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: flex-start;
-  gap: 10px;
-}
-
-.msg-avatar {
-  flex: 0 0 auto;
-  margin-top: 2px;
-}
-
-.msg-body {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-}
-
-.msg-meta {
-  margin-bottom: 4px;
-}
-
-.msg-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin-top: 6px;
-  opacity: 0;
-  transition: opacity 0.15s ease;
-}
-
-.msg-row:hover .msg-actions {
-  opacity: 1;
-}
-
-.msg-actions :deep(.n-button) {
-  padding: 0 6px;
-}
-
-.msg-bubble {
-  max-width: 80%;
-  padding: 10px 14px;
-  border-radius: 12px;
-  color: rgba(255, 255, 255, 0.9);
-  overflow: hidden;
-}
-
-.msg-bubble.is-user {
-  background-color: rgba(162, 48, 237, 0.2);
-  border: 1px solid rgba(162, 48, 237, 0.3);
-}
-
-.msg-bubble.is-assistant {
-  background-color: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.md :deep(*) {
-  margin: 0;
-}
-
+/* Markdown 内容样式微调 */
 .md :deep(p) {
-  margin: 0.2em 0;
-  line-height: 1.65;
-  word-break: break-word;
+  margin-bottom: 0.5em;
+  margin-top: 0.5em;
 }
-
-.md :deep(pre) {
-  margin: 0.4em 0;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  overflow: auto;
+.md :deep(p:first-child) {
+  margin-top: 0;
 }
-
-.md :deep(code) {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
-  font-size: 0.92em;
+.md :deep(p:last-child) {
+  margin-bottom: 0;
 }
-
-.md :deep(:not(pre) > code) {
-  padding: 1px 6px;
-  border-radius: 6px;
-  background: rgba(0, 0, 0, 0.25);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.md :deep(ul),
-.md :deep(ol) {
-  margin: 0.2em 0 0.2em 1.2em;
-  padding: 0;
-}
-
-.md :deep(blockquote) {
-  margin: 0.35em 0;
-  padding: 0.2em 0 0.2em 0.9em;
-  border-left: 3px solid rgba(162, 48, 237, 0.6);
-  color: rgba(255, 255, 255, 0.75);
+.md :deep(a) {
+  color: #a78bfa;
+  text-decoration: underline;
 }
 </style>
