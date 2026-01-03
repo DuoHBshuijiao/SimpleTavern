@@ -26,6 +26,20 @@ class Colors:
     CYAN = '\033[96m'
     RESET = '\033[0m'
 
+def _mark(ok: bool) -> str:
+    """
+    控制台状态标记：
+    - 若当前 stdout 编码能输出 '✓/✗'，则优先使用（更直观）
+    - 否则回退到 ASCII（避免某些 Windows 控制台编码报错）
+    """
+    try:
+        enc = sys.stdout.encoding or "utf-8"
+        "✓".encode(enc)
+        "✗".encode(enc)
+        return "✓" if ok else "✗"
+    except Exception:
+        return "OK" if ok else "NO"
+
 def print_info(msg):
     print(f"{Colors.BLUE}[INFO]{Colors.RESET} {msg}")
 
@@ -78,6 +92,9 @@ def find_npm():
             if result.returncode == 0:
                 version = result.stdout.strip()
                 print_success(f"找到 npm: {npm_path} (v{version})")
+                # Windows 下优先返回短命令名，避免路径带空格导致 cmd /k 启动命令的嵌套引号问题
+                if platform.system() == "Windows":
+                    return "npm"
                 return npm_path
         except Exception:
             pass
@@ -209,6 +226,7 @@ def start_services(venv_python, npm_cmd, backend_dir, frontend_dir):
         backend_process = subprocess.Popen(
             backend_cmd,
             cwd=backend_dir,
+            # 单独控制台窗口，便于用户查看日志/手动关闭
             creationflags=subprocess.CREATE_NEW_CONSOLE
         )
     else:
@@ -233,15 +251,20 @@ def start_services(venv_python, npm_cmd, backend_dir, frontend_dir):
     
     # 启动前端
     print_info("启动前端服务...")
-    frontend_cmd = [npm_cmd, "run", "preview", "--", "--port", str(frontend_port), "--host"]
     if platform.system() == 'Windows':
+        # Windows 下如果直接用 npm.cmd / shell=True，terminate() 往往只会杀掉“壳进程”，node/vite 子进程会残留。
+        # 这里显式启动一个可见的 cmd 窗口，并在退出时用 taskkill /T 杀掉整棵进程树（见下方 KeyboardInterrupt 处理）。
+        # 注意：cmd.exe /k 往往会给整段命令再包一层外部引号；因此此处避免在命令内部再嵌套引号（尤其是带空格的 npm 路径）。
+        # 这里依赖 npm 在 PATH 中可用（find_npm 已优先返回 "npm"）。
+        frontend_dir_str = str(frontend_dir)
+        frontend_cmd_str = f'title SimpleTavern Frontend & cd /d {frontend_dir_str} & {npm_cmd} run preview -- --port {frontend_port} --host'
         frontend_process = subprocess.Popen(
-            frontend_cmd,
+            ["cmd.exe", "/k", frontend_cmd_str],
             cwd=frontend_dir,
-            shell=True,
-            creationflags=subprocess.CREATE_NEW_CONSOLE
+            creationflags=subprocess.CREATE_NEW_CONSOLE,
         )
     else:
+        frontend_cmd = [npm_cmd, "run", "preview", "--", "--port", str(frontend_port), "--host"]
         frontend_process = subprocess.Popen(
             frontend_cmd,
             cwd=frontend_dir,
@@ -264,6 +287,21 @@ def start_services(venv_python, npm_cmd, backend_dir, frontend_dir):
         print_info(f"请手动访问: {frontend_url}")
     
     return backend_process, frontend_process, backend_url, frontend_url
+
+
+def _terminate_process_tree_windows(pid: int) -> None:
+    """Windows: 结束指定 PID 的进程树（包含子进程）。"""
+    try:
+        subprocess.run(
+            ["taskkill", "/PID", str(pid), "/T", "/F"],
+            capture_output=True,
+            text=True,
+            shell=False,
+            check=False,
+        )
+    except Exception:
+        # 终止过程不应影响主流程退出
+        pass
 
 def main():
     print_info("SimpleTavern 一键部署脚本")
@@ -300,10 +338,10 @@ def main():
     print_info("检查部署状态...")
     is_ready, status = check_deployment_status(venv_dir, frontend_dir)
     
-    print_info(f"  - 虚拟环境: {'✓' if status['venv_exists'] else '✗'}")
-    print_info(f"  - 后端依赖: {'✓' if status['backend_deps_ok'] else '✗'}")
-    print_info(f"  - 前端依赖 (node_modules): {'✓' if status['node_modules_exists'] else '✗'}")
-    print_info(f"  - 前端构建 (dist): {'✓' if status['dist_exists'] else '✗'}")
+    print_info(f"  - 虚拟环境: {_mark(status['venv_exists'])}")
+    print_info(f"  - 后端依赖: {_mark(status['backend_deps_ok'])}")
+    print_info(f"  - 前端依赖 (node_modules): {_mark(status['node_modules_exists'])}")
+    print_info(f"  - 前端构建 (dist): {_mark(status['dist_exists'])}")
     print()
     
     if is_ready:
@@ -392,6 +430,8 @@ def main():
     print_info(f"后端地址: {backend_url}")
     print_info(f"前端地址: {frontend_url}")
     print_info(f"虚拟环境: {venv_dir}")
+    if platform.system() == "Windows":
+        print_info("Windows 提示：已分别打开后端/前端控制台窗口；也可在本窗口按 Ctrl+C 一键停止两者")
     print()
     print_warning("按 Ctrl+C 停止服务")
     print()
@@ -403,13 +443,20 @@ def main():
     except KeyboardInterrupt:
         print()
         print_info("正在停止服务...")
-        backend_process.terminate()
-        frontend_process.terminate()
-        time.sleep(1)
-        if backend_process.poll() is None:
-            backend_process.kill()
-        if frontend_process.poll() is None:
-            frontend_process.kill()
+        if platform.system() == "Windows":
+            # 用 taskkill /T 确保 node/vite 等子进程不会残留
+            if backend_process and backend_process.poll() is None:
+                _terminate_process_tree_windows(backend_process.pid)
+            if frontend_process and frontend_process.poll() is None:
+                _terminate_process_tree_windows(frontend_process.pid)
+        else:
+            backend_process.terminate()
+            frontend_process.terminate()
+            time.sleep(1)
+            if backend_process.poll() is None:
+                backend_process.kill()
+            if frontend_process.poll() is None:
+                frontend_process.kill()
         print_success("服务已停止")
 
 if __name__ == "__main__":
