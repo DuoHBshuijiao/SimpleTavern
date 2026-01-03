@@ -135,7 +135,7 @@ cd backend
 ..\venv\Scripts\Activate.ps1
 
 # 启动后端（在新终端窗口）
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+.\.venv\Scripts\uvicorn app.main:app --reload --port 8000
 ```
 
 #### 5) 启动前端服务
