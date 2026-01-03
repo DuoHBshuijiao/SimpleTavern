@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch, nextTick } from 'vue'
 import MarkdownIt from 'markdown-it'
 
 import { useCharactersStore, useChatsStore, useSettingsStore } from '../stores'
-import type { CharacterCard, ChatMessage, UserPersona } from '../types/models'
+import type { CharacterCard, ChatMessage, UserPersona, GroupMemberSettings, Chat } from '../types/models'
 import SettingsDrawer from '../components/SettingsDrawer.vue'
 import AvatarCropper from '../components/AvatarCropper.vue'
 import ModernAvatar from '../components/ModernAvatar.vue'
@@ -16,6 +16,7 @@ import {
   NForm,
   NFormItem,
   NInput,
+  NInputNumber,
   NModal,
   NPopconfirm,
   NSpace,
@@ -47,6 +48,26 @@ const showPersonaEditor = ref(false)
 const editingPersona = ref<UserPersona | null>(null)
 const isNewPersona = ref(false)
 const showPersonaAvatarCropper = ref(false)
+
+// 群聊相关
+const showGroupCreator = ref(false)
+const selectedMemberIds = ref<string[]>([])
+const groupTitle = ref('')
+const showMemberManager = ref(false)
+
+// 成员设置编辑
+const editingMemberId = ref<string | null>(null)
+const editingMemberSettings = ref<GroupMemberSettings>({
+  model: null,
+  presetId: null,
+  temperature: null,
+  top_p: null,
+  probability: 1.0
+})
+
+// 插话相关
+const showInterjectPanel = ref(false)  // 是否显示插话面板
+const isInterjecting = ref(false)  // 是否正在插话
 
 // 快速模型切换 (聚合所有预设 + 最近使用置顶)
 const chatModelOptions = computed(() => {
@@ -131,6 +152,7 @@ function scrollToBottom() {
 onMounted(async () => {
   if (!settings.settings) await settings.load()
   await characters.loadAll()
+  await chats.loadGroupList()
 
   if (!selectedCharacterId.value) {
     const first = characters.list[0]
@@ -235,15 +257,29 @@ const userName = computed(() => {
   return selectedPersona.value?.name || '你'
 })
 
-function getMessageLabel(role: ChatMessage['role']) {
-  if (role === 'user') return userName.value
-  if (role === 'assistant') return selectedCharacter.value?.name || 'AI'
+function getMessageLabel(m: ChatMessage) {
+  if (m.role === 'user') return userName.value
+  if (m.role === 'assistant') {
+    // 群聊时根据 characterId 获取角色名称
+    if (m.characterId) {
+      const char = getCharacterById(m.characterId)
+      return char?.name || 'AI'
+    }
+    return selectedCharacter.value?.name || 'AI'
+  }
   return '系统'
 }
 
-function getMessageAvatar(role: ChatMessage['role']) {
-  if (role === 'user') return userAvatarUrl.value
-  if (role === 'assistant') return characterAvatarUrl.value
+function getMessageAvatar(m: ChatMessage) {
+  if (m.role === 'user') return userAvatarUrl.value
+  if (m.role === 'assistant') {
+    // 群聊时根据 characterId 获取角色头像
+    if (m.characterId) {
+      const char = getCharacterById(m.characterId)
+      return char?.avatar ? `/api/avatars/${char.avatar}` : null
+    }
+    return characterAvatarUrl.value
+  }
   return null
 }
 
@@ -413,42 +449,150 @@ async function handlePersonaAvatarSave(imageData: string) {
   }
 }
 
-async function sendUserMessage() {
-  const text = draftMessage.value.trim()
-  if (!text) return
-  if (!activeChat.value) return
-  if (isGenerating.value) return
-  draftMessage.value = ''
-  streamError.value = null
+// ========== 群聊相关 ==========
+function openGroupCreator() {
+  selectedMemberIds.value = []
+  groupTitle.value = ''
+  showGroupCreator.value = true
+}
 
-  const chatId = activeChat.value.id
-  const now = new Date().toISOString()
-  const localUserId = `local_user_${Date.now()}`
-  const localAssistantId = `local_assistant_${Date.now()}`
+function toggleMemberSelection(characterId: string) {
+  const idx = selectedMemberIds.value.indexOf(characterId)
+  if (idx >= 0) {
+    selectedMemberIds.value.splice(idx, 1)
+  } else {
+    selectedMemberIds.value.push(characterId)
+  }
+}
 
-  activeChat.value.messages.push({ version: 1, id: localUserId, role: 'user', content: text, ts: now })
-  activeChat.value.messages.push({ version: 1, id: localAssistantId, role: 'assistant', content: '', ts: now })
-  // 从响应式数组中获取引用，确保后续修改能触发视图更新
-  const assistantMsg = activeChat.value.messages[activeChat.value.messages.length - 1]
-  
+async function createGroupChat() {
+  if (selectedMemberIds.value.length < 2) {
+    return // 群聊至少需要2个角色
+  }
+  const firstMember = selectedMemberIds.value[0]
+  await chats.createGroup(firstMember, selectedMemberIds.value, groupTitle.value || '新群聊')
+  showGroupCreator.value = false
+  selectedMemberIds.value = []
+  groupTitle.value = ''
+}
+
+async function selectGroupChat(chat: Chat) {
+  await chats.load(chat.id)
+  // 群聊时不切换选中的角色
   scrollToBottom()
+}
 
-  isGenerating.value = true
+// 获取角色信息 by ID
+function getCharacterById(id: string) {
+  return characters.list.find(c => c.id === id) ?? null
+}
+
+// 群成员角色列表
+const groupMembers = computed(() => {
+  if (!activeChat.value?.isGroup) return []
+  return activeChat.value.memberIds
+    .map(id => getCharacterById(id))
+    .filter(c => c !== null)
+})
+
+// 打开成员管理
+function openMemberManager() {
+  showMemberManager.value = true
+}
+
+// 添加成员到群聊
+async function addMemberToGroup(characterId: string) {
+  if (!activeChat.value) return
+  await chats.addMember(activeChat.value.id, characterId)
+}
+
+// 从群聊移除成员
+async function removeMemberFromGroup(characterId: string) {
+  if (!activeChat.value) return
+  await chats.removeMember(activeChat.value.id, characterId)
+}
+
+// 非群成员的角色列表（可添加）
+const availableMembers = computed(() => {
+  if (!activeChat.value?.isGroup) return []
+  return characters.list.filter(c => !activeChat.value?.memberIds.includes(c.id))
+})
+
+// 更新群聊延迟时间
+async function updateGroupDelay(delay: number | null) {
+  if (!activeChat.value || delay === null) return
+  await chats.updateGroupDelay(activeChat.value.id, delay)
+}
+
+// ========== 成员设置管理 ==========
+function getMemberSettings(memberId: string): GroupMemberSettings {
+  return activeChat.value?.memberSettings?.[memberId] ?? {
+    model: null,
+    presetId: null,
+    temperature: null,
+    top_p: null,
+    probability: 1.0
+  }
+}
+
+function openMemberSettingsEditor(memberId: string) {
+  editingMemberId.value = memberId
+  const settings = getMemberSettings(memberId)
+  editingMemberSettings.value = { ...settings }
+}
+
+function closeMemberSettingsEditor() {
+  editingMemberId.value = null
+}
+
+async function saveMemberSettings() {
+  if (!activeChat.value || !editingMemberId.value) return
+  await chats.updateMemberSettings(
+    activeChat.value.id,
+    editingMemberId.value,
+    editingMemberSettings.value
+  )
+  closeMemberSettingsEditor()
+}
+
+// ========== 插话功能 ==========
+async function triggerInterject(characterId: string) {
+  if (!activeChat.value || isGenerating.value || isInterjecting.value) return
+  
+  const chatId = activeChat.value.id
+  isInterjecting.value = true
+  streamError.value = null
   aborter?.abort()
   aborter = new AbortController()
-
+  
   const useStream = settings.settings?.streamEnabled !== false
-
+  
+  // 创建本地临时消息
+  const localAssistantId = `local_interject_${Date.now()}`
+  const localMsg = { 
+    version: 1, 
+    id: localAssistantId, 
+    role: 'assistant' as const, 
+    content: '', 
+    characterId,
+    ts: new Date().toISOString() 
+  }
+  activeChat.value.messages.push(localMsg)
+  const msgIndex = activeChat.value.messages.length - 1
+  scrollToBottom()
+  
   try {
     if (useStream) {
       await postAndConsumeSse(
-        '/api/generate/stream',
-        { chatId, userMessage: text },
+        '/api/generate/interject',
+        { chatId, characterId },
         (evt) => {
           if (evt.event === 'delta') {
             const t = evt.data?.text
-            if (typeof t === 'string' && assistantMsg) {
-              assistantMsg.content += t
+            if (typeof t === 'string' && activeChat.value && activeChat.value.messages[msgIndex]) {
+              const updatedMsg = { ...activeChat.value.messages[msgIndex] }
+              updatedMsg.content += t
+              activeChat.value.messages.splice(msgIndex, 1, updatedMsg)
               scrollToBottom()
             }
           } else if (evt.event === 'error') {
@@ -462,12 +606,14 @@ async function sendUserMessage() {
         ok: boolean
         chatId: string
         assistantMessageId: string | null
+        characterId: string
         content: string
         error?: string
-      }>('/api/generate/stream', { chatId, userMessage: text })
+      }>('/api/generate/interject', { chatId, characterId })
       
-      if (res.ok && assistantMsg) {
-        assistantMsg.content = res.content
+      if (res.ok && activeChat.value && activeChat.value.messages[msgIndex]) {
+        const updatedMsg = { ...activeChat.value.messages[msgIndex], content: res.content }
+        activeChat.value.messages.splice(msgIndex, 1, updatedMsg)
         scrollToBottom()
       } else {
         streamError.value = res.error || 'unknown error'
@@ -476,7 +622,269 @@ async function sendUserMessage() {
   } catch (e: any) {
     streamError.value = e?.message ?? String(e)
   } finally {
+    isInterjecting.value = false
+    await chats.load(chatId)
+  }
+}
+
+// 群聊暂停/继续相关状态
+const isPaused = ref(false)
+const pendingMembers = ref<string[]>([])  // 暂停时剩余待发言的成员
+const showContinueButton = ref(false)  // 是否显示"继续轮次"按钮
+
+// 当前正在发言的角色索引（群聊用）
+const currentSpeakerIndex = ref<number>(-1)
+
+// 延迟函数
+function delay(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+// 暂停群聊
+function pauseGroupChat() {
+  isPaused.value = true
+}
+
+// 继续群聊轮次
+async function continueGroupChat() {
+  if (!activeChat.value || pendingMembers.value.length === 0) return
+  
+  showContinueButton.value = false
+  isPaused.value = false
+  isGenerating.value = true
+  
+  const chatId = activeChat.value.id
+  const useStream = settings.settings?.streamEnabled !== false
+  const groupDelay = activeChat.value.groupDelay || 1500
+  
+  try {
+    await runGroupGeneration(chatId, pendingMembers.value, useStream, groupDelay, 0)
+  } catch (e: any) {
+    streamError.value = e?.message ?? String(e)
+  } finally {
     isGenerating.value = false
+    currentSpeakerIndex.value = -1
+    pendingMembers.value = []
+    await chats.load(chatId)
+    await settings.load()
+  }
+}
+
+// 群聊生成核心逻辑（可被暂停）
+async function runGroupGeneration(
+  chatId: string, 
+  memberIds: string[], 
+  useStream: boolean, 
+  groupDelay: number,
+  startIndex: number
+) {
+  for (let i = startIndex; i < memberIds.length; i++) {
+    const characterId = memberIds[i]
+    currentSpeakerIndex.value = i
+    
+    // 添加角色间延迟（第一个角色不需要）
+    if (i > startIndex) {
+      await delay(groupDelay)
+    }
+    
+    // 检查是否暂停
+    if (isPaused.value) {
+      // 保存剩余待发言的成员
+      pendingMembers.value = memberIds.slice(i)
+      showContinueButton.value = true
+      isGenerating.value = false
+      currentSpeakerIndex.value = -1
+      return
+    }
+    
+    // 确保 activeChat 仍然有效
+    if (!activeChat.value) break
+    
+    // 创建本地临时消息
+    const localAssistantId = `local_assistant_${Date.now()}_${i}`
+    const localMsg = { 
+      version: 1, 
+      id: localAssistantId, 
+      role: 'assistant' as const, 
+      content: '', 
+      characterId,
+      ts: new Date().toISOString() 
+    }
+    activeChat.value.messages.push(localMsg)
+    // 保存消息索引，而不是对象引用（避免响应式引用丢失问题）
+    const msgIndex = activeChat.value.messages.length - 1
+    scrollToBottom()
+    
+    // 调用群聊生成接口
+    if (useStream) {
+      await postAndConsumeSse(
+        '/api/generate/group',
+        { chatId, characterId },
+        (evt) => {
+          if (evt.event === 'delta') {
+            const t = evt.data?.text
+            // 通过替换整个消息对象来确保响应式更新
+            if (typeof t === 'string' && activeChat.value && activeChat.value.messages[msgIndex]) {
+              const updatedMsg = { ...activeChat.value.messages[msgIndex] }
+              updatedMsg.content += t
+              activeChat.value.messages.splice(msgIndex, 1, updatedMsg)
+              scrollToBottom()
+            }
+          } else if (evt.event === 'error') {
+            streamError.value = String(evt.data?.message ?? 'unknown error')
+          }
+        },
+        aborter.signal,
+      )
+    } else {
+      const res = await apiPost<{
+        ok: boolean
+        chatId: string
+        assistantMessageId: string | null
+        characterId: string
+        content: string
+        error?: string
+      }>('/api/generate/group', { chatId, characterId })
+      
+      if (res.ok && activeChat.value && activeChat.value.messages[msgIndex]) {
+        const updatedMsg = { ...activeChat.value.messages[msgIndex], content: res.content }
+        activeChat.value.messages.splice(msgIndex, 1, updatedMsg)
+        scrollToBottom()
+      } else {
+        streamError.value = res.error || 'unknown error'
+      }
+    }
+    
+    // 每个角色完成后再次检查暂停状态
+    if (isPaused.value && i < memberIds.length - 1) {
+      pendingMembers.value = memberIds.slice(i + 1)
+      showContinueButton.value = true
+      isGenerating.value = false
+      currentSpeakerIndex.value = -1
+      return
+    }
+  }
+  
+  // 全部完成
+  pendingMembers.value = []
+  showContinueButton.value = false
+}
+
+async function sendUserMessage() {
+  const text = draftMessage.value.trim()
+  if (!text) return
+  if (!activeChat.value) return
+  if (isGenerating.value) return
+  draftMessage.value = ''
+  streamError.value = null
+  
+  // 用户发送新消息时，清除暂停状态和继续按钮
+  isPaused.value = false
+  showContinueButton.value = false
+  pendingMembers.value = []
+  showInterjectPanel.value = false  // 隐藏插话面板
+
+  const chatId = activeChat.value.id
+  const isGroup = activeChat.value.isGroup
+  const now = new Date().toISOString()
+
+  isGenerating.value = true
+  aborter?.abort()
+  aborter = new AbortController()
+
+  const useStream = settings.settings?.streamEnabled !== false
+
+  try {
+    if (isGroup) {
+      // ========== 群聊轮流发言逻辑 ==========
+      const allMemberIds = [...activeChat.value.memberIds]  // 复制一份，防止被覆盖
+      const groupDelay = activeChat.value.groupDelay || 1500
+      
+      // 根据概率筛选本轮参与的成员
+      const memberIds = allMemberIds.filter(memberId => {
+        const memberSettings = activeChat.value?.memberSettings?.[memberId]
+        const probability = memberSettings?.probability ?? 1.0
+        return Math.random() < probability
+      })
+      
+      // 如果所有成员都被跳过，至少保留一个（随机选择）
+      if (memberIds.length === 0 && allMemberIds.length > 0) {
+        const randomIdx = Math.floor(Math.random() * allMemberIds.length)
+        memberIds.push(allMemberIds[randomIdx])
+      }
+      
+      // 1. 添加用户消息到本地显示
+      const localUserId = `local_user_${Date.now()}`
+      activeChat.value.messages.push({ version: 1, id: localUserId, role: 'user', content: text, ts: now })
+      scrollToBottom()
+      
+      // 2. 先保存用户消息到后端（直接调用API，不更新store的activeChat）
+      await apiPost(`/api/chats/${chatId}/messages`, { role: 'user', content: text })
+      
+      // 3. 依次让每个角色回复（可被暂停）
+      await runGroupGeneration(chatId, memberIds, useStream, groupDelay, 0)
+      
+      // 如果被暂停了，不执行 finally 中的重新加载
+      if (isPaused.value) return
+      
+      currentSpeakerIndex.value = -1
+      
+      // 轮次结束后显示插话面板
+      showInterjectPanel.value = true
+      
+    } else {
+      // ========== 单聊逻辑 ==========
+      const localUserId = `local_user_${Date.now()}`
+      const localAssistantId = `local_assistant_${Date.now()}`
+
+      activeChat.value.messages.push({ version: 1, id: localUserId, role: 'user', content: text, ts: now })
+      activeChat.value.messages.push({ version: 1, id: localAssistantId, role: 'assistant', content: '', ts: now })
+      const assistantMsgIndex = activeChat.value.messages.length - 1
+      
+      scrollToBottom()
+
+      if (useStream) {
+        await postAndConsumeSse(
+          '/api/generate/stream',
+          { chatId, userMessage: text },
+          (evt) => {
+            if (evt.event === 'delta') {
+              const t = evt.data?.text
+              if (typeof t === 'string' && activeChat.value && activeChat.value.messages[assistantMsgIndex]) {
+                const updatedMsg = { ...activeChat.value.messages[assistantMsgIndex] }
+                updatedMsg.content += t
+                activeChat.value.messages.splice(assistantMsgIndex, 1, updatedMsg)
+                scrollToBottom()
+              }
+            } else if (evt.event === 'error') {
+              streamError.value = String(evt.data?.message ?? 'unknown error')
+            }
+          },
+          aborter.signal,
+        )
+      } else {
+        const res = await apiPost<{
+          ok: boolean
+          chatId: string
+          assistantMessageId: string | null
+          content: string
+          error?: string
+        }>('/api/generate/stream', { chatId, userMessage: text })
+        
+        if (res.ok && activeChat.value && activeChat.value.messages[assistantMsgIndex]) {
+          const updatedMsg = { ...activeChat.value.messages[assistantMsgIndex], content: res.content }
+          activeChat.value.messages.splice(assistantMsgIndex, 1, updatedMsg)
+          scrollToBottom()
+        } else {
+          streamError.value = res.error || 'unknown error'
+        }
+      }
+    }
+  } catch (e: any) {
+    streamError.value = e?.message ?? String(e)
+  } finally {
+    isGenerating.value = false
+    currentSpeakerIndex.value = -1
     await chats.load(chatId)
     await settings.load()
   }
@@ -598,48 +1006,105 @@ const editingPersonaAvatarUrl = computed(() => {
         <div class="h-1/3 min-h-[150px] border-t border-white/5 bg-black/10 flex flex-col">
           <div class="p-3 pb-1 shrink-0 flex items-center justify-between">
             <span class="text-xs font-bold text-gray-400 uppercase tracking-wider">历史会话</span>
-            <button 
-              class="text-xs bg-brand/20 hover:bg-brand/30 text-brand px-2 py-1 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed" 
-              :disabled="!selectedCharacterId" 
-              @click="createChat"
-            >
-              新建会话
-            </button>
+            <div class="flex gap-2">
+              <button 
+                class="text-xs bg-purple-500/20 hover:bg-purple-500/30 text-purple-400 px-2 py-1 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed" 
+                :disabled="characters.list.length < 2" 
+                @click="openGroupCreator"
+                title="创建群聊"
+              >
+                + 群聊
+              </button>
+              <button 
+                class="text-xs bg-brand/20 hover:bg-brand/30 text-brand px-2 py-1 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed" 
+                :disabled="!selectedCharacterId" 
+                @click="createChat"
+              >
+                新建会话
+              </button>
+            </div>
           </div>
           <div class="flex-1 overflow-y-auto p-2 custom-scrollbar">
-            <div 
-              v-for="c in chats.list"
-              :key="c.id"
-              class="group flex items-center justify-between p-2 rounded-lg cursor-pointer text-sm mb-1 transition-colors"
-              :class="chats.activeChatId === c.id ? 'bg-brand/10 text-brand' : 'text-gray-400 hover:bg-white/5 hover:text-gray-200'"
-              @click="chats.load(c.id)"
-            >
-              <div class="flex-1 min-w-0 pr-2">
-                 <div v-if="editingChatId === c.id" @click.stop class="flex gap-1">
+            <!-- 群聊列表 -->
+            <div v-if="chats.groupList.length > 0" class="mb-3">
+              <div class="text-[10px] text-purple-400 uppercase tracking-wider px-2 mb-1 flex items-center gap-1">
+                <span>👥</span> 群聊
+              </div>
+              <div 
+                v-for="c in chats.groupList"
+                :key="c.id"
+                class="group flex items-center justify-between p-2 rounded-lg cursor-pointer text-sm mb-1 transition-colors"
+                :class="chats.activeChatId === c.id ? 'bg-purple-500/10 text-purple-400' : 'text-gray-400 hover:bg-white/5 hover:text-gray-200'"
+                @click="selectGroupChat(c)"
+              >
+                <div class="flex items-center gap-2 flex-1 min-w-0 pr-2">
+                  <span class="text-purple-400">👥</span>
+                  <div v-if="editingChatId === c.id" @click.stop class="flex gap-1 flex-1">
                     <input 
                       v-model="editingTitle" 
-                      class="bg-black/20 border border-brand/50 rounded px-1 py-0.5 text-xs w-full text-white outline-none focus:border-brand"
+                      class="bg-black/20 border border-purple-500/50 rounded px-1 py-0.5 text-xs w-full text-white outline-none focus:border-purple-500"
                       @keyup.enter="saveTitle"
                       @keyup.escape="cancelEditTitle"
                       autoFocus
                     />
-                    <button class="text-brand hover:text-white" @click="saveTitle">✓</button>
+                    <button class="text-purple-400 hover:text-white" @click="saveTitle">✓</button>
                     <button class="text-gray-500 hover:text-white" @click="cancelEditTitle">✕</button>
-                 </div>
-                 <div v-else class="truncate">{{ c.title }}</div>
-              </div>
-              
-              <div v-if="editingChatId !== c.id" class="opacity-0 group-hover:opacity-100 flex gap-1 transition-opacity">
-                <button class="hover:text-white" @click.stop="startEditTitle(c.id, c.title)">✏</button>
-                <NPopconfirm @positive-click="deleteChat(c.id)">
-                  <template #trigger>
-                    <button class="hover:text-red-400" @click.stop>🗑</button>
-                  </template>
-                  删除会话？
-                </NPopconfirm>
+                  </div>
+                  <div v-else class="truncate">{{ c.title }}</div>
+                  <span class="text-[10px] text-gray-600">({{ c.memberIds.length }}人)</span>
+                </div>
+                
+                <div v-if="editingChatId !== c.id" class="opacity-0 group-hover:opacity-100 flex gap-1 transition-opacity">
+                  <button class="hover:text-white" @click.stop="startEditTitle(c.id, c.title)">✏</button>
+                  <NPopconfirm @positive-click="deleteChat(c.id)">
+                    <template #trigger>
+                      <button class="hover:text-red-400" @click.stop>🗑</button>
+                    </template>
+                    删除群聊？
+                  </NPopconfirm>
+                </div>
               </div>
             </div>
-            <div v-if="!chats.list.length" class="text-center text-xs text-gray-600 py-4">
+
+            <!-- 单聊列表 -->
+            <div v-if="chats.list.filter(c => !c.isGroup).length > 0">
+              <div v-if="chats.groupList.length > 0" class="text-[10px] text-gray-500 uppercase tracking-wider px-2 mb-1">
+                单聊
+              </div>
+              <div 
+                v-for="c in chats.list.filter(chat => !chat.isGroup)"
+                :key="c.id"
+                class="group flex items-center justify-between p-2 rounded-lg cursor-pointer text-sm mb-1 transition-colors"
+                :class="chats.activeChatId === c.id ? 'bg-brand/10 text-brand' : 'text-gray-400 hover:bg-white/5 hover:text-gray-200'"
+                @click="chats.load(c.id)"
+              >
+                <div class="flex-1 min-w-0 pr-2">
+                  <div v-if="editingChatId === c.id" @click.stop class="flex gap-1">
+                      <input 
+                        v-model="editingTitle" 
+                        class="bg-black/20 border border-brand/50 rounded px-1 py-0.5 text-xs w-full text-white outline-none focus:border-brand"
+                        @keyup.enter="saveTitle"
+                        @keyup.escape="cancelEditTitle"
+                        autoFocus
+                      />
+                      <button class="text-brand hover:text-white" @click="saveTitle">✓</button>
+                      <button class="text-gray-500 hover:text-white" @click="cancelEditTitle">✕</button>
+                  </div>
+                  <div v-else class="truncate">{{ c.title }}</div>
+                </div>
+                
+                <div v-if="editingChatId !== c.id" class="opacity-0 group-hover:opacity-100 flex gap-1 transition-opacity">
+                  <button class="hover:text-white" @click.stop="startEditTitle(c.id, c.title)">✏</button>
+                  <NPopconfirm @positive-click="deleteChat(c.id)">
+                    <template #trigger>
+                      <button class="hover:text-red-400" @click.stop>🗑</button>
+                    </template>
+                    删除会话？
+                  </NPopconfirm>
+                </div>
+              </div>
+            </div>
+            <div v-if="!chats.list.length && !chats.groupList.length" class="text-center text-xs text-gray-600 py-4">
               无历史会话
             </div>
           </div>
@@ -651,23 +1116,82 @@ const editingPersonaAvatarUrl = computed(() => {
     <main class="flex-1 flex flex-col relative min-w-0 bg-[#101014]">
       
       <!-- 聊天内容区 -->
-      <div v-if="selectedCharacter && activeChat" class="flex flex-col h-full relative">
+      <div v-if="(selectedCharacter || activeChat?.isGroup) && activeChat" class="flex flex-col h-full relative">
         <!-- 顶部标题栏 (悬浮) -->
-        <header class="absolute top-0 left-0 right-0 z-10 h-16 flex items-center justify-between px-6 bg-gradient-to-b from-[#101014] via-[#101014]/90 to-transparent pointer-events-none">
-          <div class="pointer-events-auto flex items-center gap-3">
-             <h2 class="text-lg font-bold text-gray-100 shadow-sm">{{ selectedCharacter.name }}</h2>
-             <span class="text-gray-600">/</span>
-             <span class="text-sm text-gray-400">{{ activeChat.title }}</span>
+        <header class="absolute top-0 left-0 right-0 z-10 flex flex-col bg-gradient-to-b from-[#101014] via-[#101014]/90 to-transparent pointer-events-none">
+          <!-- 主标题行 -->
+          <div class="h-14 flex items-center justify-between px-6">
+            <div class="pointer-events-auto flex items-center gap-3">
+              <template v-if="activeChat.isGroup">
+                <span class="text-purple-400">👥</span>
+                <h2 class="text-lg font-bold text-purple-300 shadow-sm">{{ activeChat.title }}</h2>
+                <span class="text-xs text-gray-500">({{ activeChat.memberIds.length }}个角色)</span>
+              </template>
+              <template v-else>
+                <h2 class="text-lg font-bold text-gray-100 shadow-sm">{{ selectedCharacter?.name }}</h2>
+                <span class="text-gray-600">/</span>
+                <span class="text-sm text-gray-400">{{ activeChat.title }}</span>
+              </template>
+            </div>
+            <div class="pointer-events-auto flex items-center gap-2">
+              <NButton v-if="activeChat.isGroup" size="small" secondary class="!bg-purple-500/10 !text-purple-400 hover:!bg-purple-500/20" @click="openMemberManager">
+                管理成员
+              </NButton>
+              <NButton size="small" secondary type="primary" class="!bg-brand/10 !text-brand hover:!bg-brand/20" @click="showSettings = true">
+                设置
+              </NButton>
+            </div>
           </div>
-          <div class="pointer-events-auto">
-            <NButton size="small" secondary type="primary" class="!bg-brand/10 !text-brand hover:!bg-brand/20" @click="showSettings = true">
-              设置
-            </NButton>
+          
+          <!-- 群成员头像行 (仅群聊时显示) -->
+          <div v-if="activeChat.isGroup && groupMembers.length > 0" class="px-6 pb-2 pointer-events-auto">
+            <div class="flex items-center gap-2 overflow-x-auto pb-1">
+              <div class="text-xs text-gray-500 shrink-0">成员:</div>
+              <div 
+                v-for="(member, idx) in groupMembers" 
+                :key="member.id"
+                class="flex items-center gap-1 shrink-0 bg-white/5 px-2 py-1 rounded-lg transition-colors group/member"
+                :class="showInterjectPanel && !isGenerating && !isInterjecting ? 'cursor-pointer hover:bg-purple-500/20 hover:border-purple-500/50' : ''"
+                :title="showInterjectPanel && !isGenerating && !isInterjecting ? `点击让 ${member.name} 插话` : member.name"
+                @click="showInterjectPanel && !isGenerating && !isInterjecting && triggerInterject(member.id)"
+              >
+                <span class="text-xs text-gray-500">{{ idx + 1 }}.</span>
+                <ModernAvatar 
+                  :src="member.avatar ? `/api/avatars/${member.avatar}` : null" 
+                  :name="member.name" 
+                  :size="20" 
+                  aspect="1"
+                  rounded="rounded"
+                  :class="showInterjectPanel && !isGenerating && !isInterjecting ? 'group-hover/member:ring-2 group-hover/member:ring-purple-500' : ''"
+                />
+                <span class="text-xs text-gray-300 max-w-[60px] truncate">{{ member.name }}</span>
+                <!-- 显示概率标记 -->
+                <span 
+                  v-if="getMemberSettings(member.id).probability < 1" 
+                  class="text-[10px] text-yellow-400 ml-0.5"
+                  :title="`${Math.round(getMemberSettings(member.id).probability * 100)}% 参与概率`"
+                >
+                  {{ Math.round(getMemberSettings(member.id).probability * 100) }}%
+                </span>
+              </div>
+              <!-- 用户也是成员 -->
+              <div class="flex items-center gap-1 shrink-0 bg-brand/10 px-2 py-1 rounded-lg border border-brand/20">
+                <ModernAvatar 
+                  :src="userAvatarUrl" 
+                  :name="userName" 
+                  :size="20" 
+                  aspect="1"
+                  rounded="rounded"
+                />
+                <span class="text-xs text-brand max-w-[60px] truncate">{{ userName }}</span>
+                <span class="text-[10px] text-brand/60">(你)</span>
+              </div>
+            </div>
           </div>
         </header>
 
         <!-- 消息列表 -->
-        <div ref="messagesScrollRef" class="flex-1 overflow-y-auto p-4 pt-20 pb-4 scroll-smooth custom-scrollbar">
+        <div ref="messagesScrollRef" class="flex-1 overflow-y-auto p-4 pb-4 scroll-smooth custom-scrollbar" :class="activeChat.isGroup ? 'pt-28' : 'pt-20'">
           <div class="max-w-4xl mx-auto space-y-8">
             <div v-for="m in activeChat.messages" :key="m.id" class="flex gap-4 group" :class="m.role === 'user' ? 'flex-row-reverse' : 'flex-row'">
               
@@ -678,8 +1202,8 @@ const editingPersonaAvatarUrl = computed(() => {
                  </div>
                  <ModernAvatar 
                    v-else
-                   :src="getMessageAvatar(m.role)"
-                   :name="getMessageLabel(m.role)"
+                   :src="getMessageAvatar(m)"
+                   :name="getMessageLabel(m)"
                    :size="40"
                    aspect="1"
                    rounded="rounded-xl"
@@ -691,7 +1215,7 @@ const editingPersonaAvatarUrl = computed(() => {
               <div class="flex flex-col max-w-[85%] min-w-0" :class="m.role === 'user' ? 'items-end' : 'items-start'">
                 <div class="flex items-center gap-2 mb-1 px-1">
                   <span class="text-xs font-bold" :class="m.role === 'user' ? 'text-brand-300' : 'text-gray-400'">
-                    {{ getMessageLabel(m.role) }}
+                    {{ getMessageLabel(m) }}
                   </span>
                   <!-- 角色标签 (仅 System 显示，其他靠颜色区分) -->
                   <span v-if="m.role === 'system'" class="text-[10px] bg-yellow-500/10 text-yellow-500 px-1.5 py-0.5 rounded">SYSTEM</span>
@@ -732,15 +1256,75 @@ const editingPersonaAvatarUrl = computed(() => {
               <NInput
                 v-model:value="draftMessage"
                 type="textarea"
-                placeholder="发送消息..."
+                :placeholder="isGenerating && activeChat?.isGroup && !isPaused ? '等待角色发言完成...' : (showContinueButton ? '输入消息插话，或点击继续轮次...' : '发送消息...')"
                 :autosize="{ minRows: 2, maxRows: 8 }"
+                :disabled="isGenerating && !isPaused && !showContinueButton"
                 class="!bg-transparent !border-0 text-base"
+                :class="isGenerating && !isPaused && !showContinueButton ? 'opacity-50' : ''"
                 style="--n-border: none; --n-box-shadow-focus: none;"
                 @keydown.ctrl.enter="sendUserMessage"
               />
               
               <div class="flex items-center justify-between pt-2 border-t border-white/5">
-                 <div class="text-xs text-red-400 truncate max-w-[300px]">{{ streamError }}</div>
+                 <div class="flex-1 min-w-0">
+                   <!-- 群聊发言状态指示器 -->
+                   <div v-if="activeChat?.isGroup && isGenerating && currentSpeakerIndex >= 0" class="flex items-center gap-2 text-xs text-purple-400">
+                     <span class="animate-pulse">●</span>
+                     <span>{{ groupMembers[currentSpeakerIndex]?.name || '角色' }} 正在发言...</span>
+                     <span class="text-gray-500">({{ currentSpeakerIndex + 1 }}/{{ groupMembers.length }})</span>
+                     <!-- 暂停按钮 -->
+                     <button 
+                       class="ml-2 px-2 py-0.5 text-xs bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-400 rounded transition-colors"
+                       @click="pauseGroupChat"
+                     >
+                       暂停
+                     </button>
+                   </div>
+                   <!-- 继续轮次按钮 -->
+                   <div v-else-if="showContinueButton && pendingMembers.length > 0" class="flex items-center gap-2 text-xs text-green-400">
+                     <span>轮次已暂停，还有 {{ pendingMembers.length }} 位角色待发言</span>
+                     <button 
+                       class="px-3 py-1 text-xs bg-green-500/20 hover:bg-green-500/30 text-green-400 rounded transition-colors font-medium"
+                       @click="continueGroupChat"
+                     >
+                       继续轮次
+                     </button>
+                   </div>
+                   <!-- 插话面板 -->
+                   <div v-else-if="showInterjectPanel && activeChat?.isGroup && !isInterjecting" class="flex items-center gap-2 text-xs">
+                     <span class="text-purple-400">💬 轮次结束，点击角色插话：</span>
+                     <div class="flex items-center gap-1">
+                       <div 
+                         v-for="member in groupMembers"
+                         :key="member.id"
+                         class="cursor-pointer hover:scale-110 transition-transform"
+                         :title="`让 ${member.name} 插话`"
+                         @click="triggerInterject(member.id)"
+                       >
+                         <ModernAvatar 
+                           :src="member.avatar ? `/api/avatars/${member.avatar}` : null" 
+                           :name="member.name" 
+                           :size="24" 
+                           aspect="1"
+                           rounded="rounded"
+                           class="ring-2 ring-purple-500/50 hover:ring-purple-500"
+                         />
+                       </div>
+                     </div>
+                     <button 
+                       class="ml-2 px-2 py-0.5 text-xs bg-gray-500/20 hover:bg-gray-500/30 text-gray-400 rounded transition-colors"
+                       @click="showInterjectPanel = false"
+                     >
+                       关闭
+                     </button>
+                   </div>
+                   <!-- 插话中状态 -->
+                   <div v-else-if="isInterjecting" class="flex items-center gap-2 text-xs text-purple-400">
+                     <span class="animate-pulse">●</span>
+                     <span>正在插话...</span>
+                   </div>
+                   <div v-else-if="streamError" class="text-xs text-red-400 truncate">{{ streamError }}</div>
+                 </div>
                  <div class="flex items-center gap-3">
                    <ModernSelect
                       :model-value="currentModel"
@@ -754,10 +1338,10 @@ const editingPersonaAvatarUrl = computed(() => {
                     />
                     <button 
                       class="bg-brand hover:bg-brand-hover text-white px-4 py-1.5 rounded-lg text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-brand/20"
-                      :disabled="!draftMessage.trim() || isGenerating"
+                      :disabled="!draftMessage.trim() || (isGenerating && !isPaused && !showContinueButton)"
                       @click="sendUserMessage"
                     >
-                      {{ isGenerating ? '生成中...' : '发送' }}
+                      {{ isGenerating && !isPaused && !showContinueButton ? '生成中...' : (showContinueButton ? '插话并重新开始' : '发送') }}
                     </button>
                  </div>
               </div>
@@ -933,6 +1517,282 @@ const editingPersonaAvatarUrl = computed(() => {
     v-model:show="showPersonaAvatarCropper"
     @save="handlePersonaAvatarSave"
   />
+
+  <!-- 群聊创建弹窗 -->
+  <NModal v-model:show="showGroupCreator" preset="card" style="width: min(600px, 90vw)" title="创建群聊" class="!bg-[#18181c] !border-white/10">
+    <NSpace vertical size="medium">
+      <NFormItem label="群聊名称">
+        <NInput v-model:value="groupTitle" placeholder="新群聊" />
+      </NFormItem>
+      
+      <div>
+        <div class="text-sm text-gray-400 mb-3">选择群成员 (至少选择2个角色):</div>
+        <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+          <div 
+            v-for="c in characters.list"
+            :key="c.id"
+            class="flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all border-2"
+            :class="selectedMemberIds.includes(c.id) ? 'bg-purple-500/10 border-purple-500/50' : 'bg-white/5 border-transparent hover:bg-white/10'"
+            @click="toggleMemberSelection(c.id)"
+          >
+            <div class="relative shrink-0">
+              <ModernAvatar 
+                :src="c.avatar ? `/api/avatars/${c.avatar}` : null" 
+                :name="c.name" 
+                :size="40" 
+                :aspect="0.75"
+                rounded="rounded-lg"
+              />
+              <div 
+                v-if="selectedMemberIds.includes(c.id)"
+                class="absolute -top-1 -right-1 w-5 h-5 bg-purple-500 rounded-full flex items-center justify-center text-white text-xs font-bold"
+              >
+                {{ selectedMemberIds.indexOf(c.id) + 1 }}
+              </div>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="font-medium text-sm truncate" :class="selectedMemberIds.includes(c.id) ? 'text-purple-300' : 'text-gray-300'">{{ c.name }}</div>
+              <div class="text-xs text-gray-500 truncate">{{ c.description || '暂无简介' }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-between pt-2 border-t border-white/10">
+        <div class="text-sm text-gray-500">
+          已选择 {{ selectedMemberIds.length }} 个角色
+          <span v-if="selectedMemberIds.length < 2" class="text-yellow-500">(至少需要2个)</span>
+        </div>
+        <NSpace>
+          <NButton @click="showGroupCreator = false">取消</NButton>
+          <NButton type="primary" :disabled="selectedMemberIds.length < 2" class="!bg-purple-500 !hover:bg-purple-600" @click="createGroupChat">
+            创建群聊
+          </NButton>
+        </NSpace>
+      </div>
+    </NSpace>
+  </NModal>
+
+  <!-- 群成员管理弹窗 -->
+  <NModal v-model:show="showMemberManager" preset="card" style="width: min(700px, 90vw)" title="管理群成员" class="!bg-[#18181c] !border-white/10">
+    <NSpace vertical size="medium">
+      <!-- 当前成员 -->
+      <div>
+        <div class="text-sm text-gray-400 mb-3">当前成员 (点击配置按钮设置独立参数):</div>
+        <div class="space-y-2 max-h-[280px] overflow-y-auto pr-2 custom-scrollbar">
+          <div 
+            v-for="(member, idx) in groupMembers"
+            :key="member.id"
+            class="flex items-center justify-between p-3 rounded-xl bg-white/5"
+          >
+            <div class="flex items-center gap-3 flex-1 min-w-0">
+              <span class="text-xs text-gray-500 w-5 shrink-0">{{ idx + 1 }}.</span>
+              <ModernAvatar 
+                :src="member.avatar ? `/api/avatars/${member.avatar}` : null" 
+                :name="member.name" 
+                :size="36" 
+                :aspect="0.75"
+                rounded="rounded-lg"
+              />
+              <div class="flex-1 min-w-0">
+                <div class="font-medium text-sm text-gray-200">{{ member.name }}</div>
+                <div class="text-xs text-gray-500 truncate">{{ member.description || '暂无简介' }}</div>
+                <!-- 显示成员自定义设置概览 -->
+                <div v-if="getMemberSettings(member.id).model || getMemberSettings(member.id).probability < 1" class="flex gap-2 mt-1 flex-wrap">
+                  <span v-if="getMemberSettings(member.id).model" class="text-[10px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded">
+                    {{ getMemberSettings(member.id).model }}
+                  </span>
+                  <span v-if="getMemberSettings(member.id).probability < 1" class="text-[10px] bg-yellow-500/20 text-yellow-400 px-1.5 py-0.5 rounded">
+                    {{ Math.round(getMemberSettings(member.id).probability * 100) }}% 概率
+                  </span>
+                  <span v-if="getMemberSettings(member.id).temperature != null" class="text-[10px] bg-orange-500/20 text-orange-400 px-1.5 py-0.5 rounded">
+                    T={{ getMemberSettings(member.id).temperature }}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+              <NButton size="small" secondary @click="openMemberSettingsEditor(member.id)">
+                ⚙ 设置
+              </NButton>
+              <NPopconfirm @positive-click="removeMemberFromGroup(member.id)">
+                <template #trigger>
+                  <NButton size="small" quaternary type="error">移除</NButton>
+                </template>
+                确定移除该成员？
+              </NPopconfirm>
+            </div>
+          </div>
+          
+          <!-- 用户（不可移除） -->
+          <div class="flex items-center justify-between p-3 rounded-xl bg-brand/5 border border-brand/20">
+            <div class="flex items-center gap-3">
+              <span class="text-xs text-brand/60 w-5">—</span>
+              <ModernAvatar 
+                :src="userAvatarUrl" 
+                :name="userName" 
+                :size="36" 
+                aspect="1"
+                rounded="rounded-lg"
+              />
+              <div>
+                <div class="font-medium text-sm text-brand">{{ userName }}</div>
+                <div class="text-xs text-brand/60">你是群成员之一</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 可添加的成员 -->
+      <div v-if="availableMembers.length > 0">
+        <div class="text-sm text-gray-400 mb-3">添加成员:</div>
+        <div class="grid grid-cols-2 gap-2 max-h-[200px] overflow-y-auto pr-2 custom-scrollbar">
+          <div 
+            v-for="c in availableMembers"
+            :key="c.id"
+            class="flex items-center gap-3 p-2 rounded-xl bg-white/5 hover:bg-white/10 cursor-pointer transition-colors"
+            @click="addMemberToGroup(c.id)"
+          >
+            <ModernAvatar 
+              :src="c.avatar ? `/api/avatars/${c.avatar}` : null" 
+              :name="c.name" 
+              :size="32" 
+              :aspect="0.75"
+              rounded="rounded-lg"
+            />
+            <div class="flex-1 min-w-0">
+              <div class="font-medium text-sm text-gray-300 truncate">{{ c.name }}</div>
+            </div>
+            <span class="text-green-500 text-lg">+</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 延迟时间设置 -->
+      <div class="pt-2 border-t border-white/10">
+        <div class="text-sm text-gray-400 mb-2">角色发言间隔:</div>
+        <div class="flex items-center gap-3">
+          <NInputNumber 
+            :value="activeChat?.groupDelay || 1500" 
+            :min="0" 
+            :max="30000" 
+            :step="500"
+            class="!w-32"
+            @update:value="updateGroupDelay"
+          >
+            <template #suffix>毫秒</template>
+          </NInputNumber>
+          <div class="flex gap-2">
+            <button 
+              class="px-2 py-1 text-xs rounded bg-white/5 hover:bg-white/10 text-gray-400"
+              @click="updateGroupDelay(0)"
+            >无延迟</button>
+            <button 
+              class="px-2 py-1 text-xs rounded bg-white/5 hover:bg-white/10 text-gray-400"
+              @click="updateGroupDelay(1500)"
+            >1.5秒</button>
+            <button 
+              class="px-2 py-1 text-xs rounded bg-white/5 hover:bg-white/10 text-gray-400"
+              @click="updateGroupDelay(3000)"
+            >3秒</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex justify-end pt-2 border-t border-white/10">
+        <NButton @click="showMemberManager = false">完成</NButton>
+      </div>
+    </NSpace>
+  </NModal>
+
+  <!-- 成员设置编辑弹窗 -->
+  <NModal v-model:show="editingMemberId" preset="card" style="width: min(500px, 90vw)" title="成员设置" class="!bg-[#18181c] !border-white/10" @update:show="(v: boolean) => !v && closeMemberSettingsEditor()">
+    <NSpace vertical size="medium">
+      <!-- 角色信息 -->
+      <div v-if="editingMemberId" class="flex items-center gap-3 pb-3 border-b border-white/10">
+        <ModernAvatar 
+          :src="getCharacterById(editingMemberId)?.avatar ? `/api/avatars/${getCharacterById(editingMemberId)?.avatar}` : null" 
+          :name="getCharacterById(editingMemberId)?.name || ''" 
+          :size="48" 
+          :aspect="0.75"
+          rounded="rounded-lg"
+        />
+        <div>
+          <div class="font-bold text-lg text-gray-200">{{ getCharacterById(editingMemberId)?.name }}</div>
+          <div class="text-xs text-gray-500">独立设置（覆盖全局）</div>
+        </div>
+      </div>
+
+      <!-- 模型绑定 -->
+      <NFormItem label="绑定模型">
+        <ModernSelect
+          v-model:model-value="editingMemberSettings.model"
+          :options="chatModelOptions"
+          placement="bottom"
+          placeholder="使用全局模型..."
+          class="!w-full"
+          searchable
+          allow-create
+          @select="(opt: any) => { editingMemberSettings.model = opt.value; editingMemberSettings.presetId = opt.presetId }"
+        />
+      </NFormItem>
+
+      <!-- Temperature -->
+      <NFormItem label="Temperature (覆写)">
+        <NInputNumber 
+          v-model:value="editingMemberSettings.temperature"
+          :min="0" 
+          :max="2" 
+          :step="0.1"
+          clearable
+          placeholder="使用全局设置"
+          class="!w-full"
+        />
+      </NFormItem>
+
+      <!-- Top P -->
+      <NFormItem label="Top P (覆写)">
+        <NInputNumber 
+          v-model:value="editingMemberSettings.top_p"
+          :min="0" 
+          :max="1" 
+          :step="0.05"
+          clearable
+          placeholder="使用全局设置"
+          class="!w-full"
+        />
+      </NFormItem>
+
+      <!-- 参与概率 -->
+      <NFormItem label="参与概率">
+        <div class="flex items-center gap-3 w-full">
+          <NInputNumber 
+            v-model:value="editingMemberSettings.probability"
+            :min="0" 
+            :max="1" 
+            :step="0.1"
+            class="!w-32"
+          />
+          <div class="flex-1">
+            <div class="h-2 bg-white/10 rounded-full overflow-hidden">
+              <div 
+                class="h-full bg-gradient-to-r from-yellow-500 to-green-500 transition-all"
+                :style="{ width: `${editingMemberSettings.probability * 100}%` }"
+              ></div>
+            </div>
+          </div>
+          <span class="text-sm text-gray-400 w-12 text-right">{{ Math.round(editingMemberSettings.probability * 100) }}%</span>
+        </div>
+        <div class="text-xs text-gray-500 mt-1">设置为 100% 表示每轮必定发言，低于 100% 则按概率随机参与</div>
+      </NFormItem>
+
+      <NSpace justify="end" class="pt-2 border-t border-white/10">
+        <NButton @click="closeMemberSettingsEditor">取消</NButton>
+        <NButton type="primary" @click="saveMemberSettings">保存</NButton>
+      </NSpace>
+    </NSpace>
+  </NModal>
 </template>
 
 <style scoped>

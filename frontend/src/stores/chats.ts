@@ -1,12 +1,13 @@
 import { defineStore } from 'pinia'
 
-import type { Chat, ChatOverrides } from '../types/models'
+import type { Chat, ChatOverrides, GroupMemberSettings } from '../types/models'
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/http'
 
 export const useChatsStore = defineStore('chats', {
   state: () => ({
     characterId: null as string | null,
     list: [] as Chat[],
+    groupList: [] as Chat[],  // 群聊列表
     activeChatId: null as string | null,
     activeChat: null as Chat | null,
     loading: false,
@@ -32,6 +33,30 @@ export const useChatsStore = defineStore('chats', {
       this.activeChatId = chat.id
       this.activeChat = chat
       return chat
+    },
+    async createGroup(characterId: string, memberIds: string[], title?: string) {
+      const chat = await apiPost<Chat>('/api/chats', { 
+        characterId, 
+        title: title || '新群聊',
+        isGroup: true,
+        memberIds
+      })
+      await this.loadGroupList()
+      this.activeChatId = chat.id
+      this.activeChat = chat
+      return chat
+    },
+    async loadGroupList() {
+      this.loading = true
+      this.error = null
+      try {
+        this.groupList = await apiGet<Chat[]>('/api/chats/groups')
+      } catch (e: any) {
+        this.error = e?.message ?? String(e)
+        throw e
+      } finally {
+        this.loading = false
+      }
     },
     async load(chatId: string) {
       this.loading = true
@@ -60,9 +85,16 @@ export const useChatsStore = defineStore('chats', {
       if (this.characterId) await this.loadList(this.characterId)
       return chat
     },
+    async updateGroupDelay(chatId: string, groupDelay: number) {
+      const chat = await apiPut<Chat>(`/api/chats/${chatId}`, { groupDelay })
+      this.activeChat = chat
+      await this.loadGroupList()
+      return chat
+    },
     async remove(chatId: string) {
       await apiDelete(`/api/chats/${chatId}`)
       if (this.characterId) await this.loadList(this.characterId)
+      await this.loadGroupList()  // 同时刷新群聊列表
       if (this.activeChatId === chatId) {
         this.activeChatId = null
         this.activeChat = null
@@ -87,6 +119,28 @@ export const useChatsStore = defineStore('chats', {
       // apiDelete 返回 void，这里重新拉取保证状态一致
       await this.load(chatId)
       if (this.characterId) await this.loadList(this.characterId)
+    },
+    
+    // ========== 群成员管理 ==========
+    async addMember(chatId: string, memberId: string) {
+      const chat = await apiPost<Chat>(`/api/chats/${chatId}/members/${memberId}`, {})
+      this.activeChat = chat
+      await this.loadGroupList()
+      return chat
+    },
+    async removeMember(chatId: string, memberId: string) {
+      await apiDelete(`/api/chats/${chatId}/members/${memberId}`)
+      // 重新加载聊天数据
+      await this.load(chatId)
+      await this.loadGroupList()
+    },
+    
+    // ========== 成员设置管理 ==========
+    async updateMemberSettings(chatId: string, memberId: string, settings: GroupMemberSettings) {
+      const memberSettings = { [memberId]: settings }
+      const chat = await apiPut<Chat>(`/api/chats/${chatId}`, { memberSettings })
+      this.activeChat = chat
+      return chat
     },
   },
 })

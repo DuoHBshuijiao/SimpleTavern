@@ -99,6 +99,7 @@ class ChatMessage(BaseModel):
     id: str = Field(default_factory=lambda: uuid4().hex)
     role: ChatRole
     content: str
+    characterId: str | None = None  # 群聊中标识发言角色ID
     ts: str = Field(default_factory=_now_iso)
 
 
@@ -110,6 +111,17 @@ class ChatOverrides(BaseModel):
     params: GenerationParams = Field(default_factory=GenerationParams)
 
 
+class GroupMemberSettings(BaseModel):
+    """群聊成员独立设置"""
+    model_config = ConfigDict(extra="allow")
+
+    model: str | None = None  # 绑定的模型
+    presetId: str | None = None  # 绑定的API预设
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+    top_p: float | None = Field(default=None, ge=0.0, le=1.0)
+    probability: float = Field(default=1.0, ge=0.0, le=1.0)  # 参与概率 0-1
+
+
 class Chat(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -119,6 +131,11 @@ class Chat(BaseModel):
     title: str = "新对话"
     messages: list[ChatMessage] = Field(default_factory=list)
     overrides: ChatOverrides = Field(default_factory=ChatOverrides)
+    # 群聊相关字段
+    isGroup: bool = False  # 是否为群聊
+    memberIds: list[str] = Field(default_factory=list)  # 群成员角色ID列表 (用户始终是成员)
+    memberSettings: dict[str, GroupMemberSettings] = Field(default_factory=dict)  # 成员独立设置 {characterId: settings}
+    groupDelay: int = 1500  # 群聊角色间延迟时间（毫秒）
     createdAt: str = Field(default_factory=_now_iso)
     updatedAt: str = Field(default_factory=_now_iso)
 
@@ -126,6 +143,9 @@ class Chat(BaseModel):
 class CreateChatRequest(BaseModel):
     characterId: str
     title: str | None = None
+    # 群聊创建参数
+    isGroup: bool = False
+    memberIds: list[str] | None = None  # 群成员角色ID列表
 
 
 class AppendMessageRequest(BaseModel):
@@ -141,9 +161,24 @@ class UpdateMessageRequest(BaseModel):
 class UpdateChatRequest(BaseModel):
     title: str | None = None
     overrides: ChatOverrides | None = None
+    groupDelay: int | None = None  # 群聊角色间延迟时间（毫秒）
+    memberSettings: dict[str, GroupMemberSettings] | None = None  # 成员独立设置
 
 
 class GenerateStreamRequest(BaseModel):
     chatId: str
     userMessage: str
     runtimeOverrides: ChatOverrides | None = None
+
+
+class GroupGenerateRequest(BaseModel):
+    """群聊生成请求 - 指定角色回复"""
+    chatId: str
+    characterId: str  # 指定回复的角色ID
+    runtimeOverrides: ChatOverrides | None = None
+
+
+class SingleInterjectRequest(BaseModel):
+    """单次插话请求 - 轮次结束后让某角色额外回复一次"""
+    chatId: str
+    characterId: str  # 指定插话的角色ID

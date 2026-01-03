@@ -225,6 +225,26 @@ def delete_chats_by_character(character_id: str) -> None:
         pass
 
 
+def list_group_chats() -> list[Chat]:
+    """列出所有群聊 (isGroup=True)"""
+    out: list[Chat] = []
+    base = _chats_dir()
+    if not base.exists():
+        return out
+    for character_dir in base.iterdir():
+        if not character_dir.is_dir():
+            continue
+        for p in list_json_files(character_dir):
+            try:
+                chat = Chat.model_validate(read_json(p))
+                if chat.isGroup:
+                    out.append(chat)
+            except Exception:
+                continue
+    out.sort(key=lambda c: c.updatedAt, reverse=True)
+    return out
+
+
 # ---------- Avatars ----------
 
 

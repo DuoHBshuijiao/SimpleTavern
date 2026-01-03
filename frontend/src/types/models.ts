@@ -71,7 +71,16 @@ export interface ChatMessage {
   id: string
   role: ChatRole
   content: string
+  characterId?: string | null  // 群聊中标识发言角色ID
   ts: string
+}
+
+export interface GroupMemberSettings {
+  model?: string | null
+  presetId?: string | null
+  temperature?: number | null
+  top_p?: number | null
+  probability: number  // 参与概率 0-1，默认1
 }
 
 export interface Chat {
@@ -81,6 +90,11 @@ export interface Chat {
   title: string
   messages: ChatMessage[]
   overrides: ChatOverrides
+  // 群聊相关字段
+  isGroup: boolean
+  memberIds: string[]
+  memberSettings: Record<string, GroupMemberSettings>  // {characterId: settings}
+  groupDelay: number  // 群聊角色间延迟时间（毫秒）
   createdAt: string
   updatedAt: string
 }

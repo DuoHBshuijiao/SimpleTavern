@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.llm.openai_compat import chat_completions, stream_chat_completions
-from app.schemas import ChatMessage, GenerateStreamRequest
+from app.schemas import ChatMessage, GenerateStreamRequest, GroupGenerateRequest, SingleInterjectRequest
 from app.storage import load_character, load_chat, load_settings, save_chat, save_settings
 
 
@@ -191,6 +191,445 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
                 "assistantMessageId": assistant_msg.id if assistant_msg else None,
                 "content": assistant_content,
                 "stream": False,
+            })
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+    return StreamingResponse(
+        event_iter(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post("/generate/group")
+async def generate_group_response(req: GroupGenerateRequest) -> StreamingResponse:
+    """群聊生成 - 指定角色回复，不添加新的用户消息"""
+    try:
+        chat = load_chat(req.chatId)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="chat not found")
+
+    if not chat.isGroup:
+        raise HTTPException(status_code=400, detail="this endpoint is for group chats only")
+    
+    if req.characterId not in chat.memberIds:
+        raise HTTPException(status_code=400, detail="character is not a member of this group")
+
+    settings = load_settings()
+    try:
+        character = load_character(req.characterId)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="character not found")
+
+    # 组装 prompt/参数
+    runtime = req.runtimeOverrides
+    prompt_parts: list[str] = []
+    if settings.prompts.globalSystem:
+        prompt_parts.append(settings.prompts.globalSystem)
+    
+    # 构建用户Persona相关提示词
+    selected_persona = None
+    if settings.selectedPersonaId and settings.userPersonas:
+        selected_persona = next((p for p in settings.userPersonas if p.id == settings.selectedPersonaId), None)
+    
+    if selected_persona:
+        user_persona_parts: list[str] = []
+        if selected_persona.name and selected_persona.name.strip():
+            user_persona_parts.append(f"user姓名：{selected_persona.name.strip()}")
+        if selected_persona.description and selected_persona.description.strip():
+            user_persona_parts.append(f"User简介：\n{selected_persona.description.strip()}")
+        if user_persona_parts:
+            prompt_parts.append("\n".join(user_persona_parts))
+
+    # 群聊场景：构建所有角色的信息
+    all_characters = []
+    for member_id in chat.memberIds:
+        try:
+            member_char = load_character(member_id)
+            all_characters.append(member_char)
+        except FileNotFoundError:
+            continue
+    
+    # 构建群聊上下文
+    group_context_parts = ["这是一个群聊场景，参与者包括："]
+    for i, char in enumerate(all_characters):
+        group_context_parts.append(f"{i+1}. {char.name}")
+    prompt_parts.append("\n".join(group_context_parts))
+    
+    # 构建当前回复角色的提示词
+    character_parts: list[str] = []
+    character_parts.append(f"你现在扮演的角色是：{character.name}")
+    if character.personality and character.personality.strip():
+        character_parts.append(f"Personality：\n{character.personality.strip()}")
+    if character.scenario and character.scenario.strip():
+        character_parts.append(f"Scenario：\n{character.scenario.strip()}")
+    if character.systemPrompt and character.systemPrompt.strip():
+        character_parts.append(character.systemPrompt.strip())
+    
+    if character_parts:
+        prompt_parts.append("\n\n".join(character_parts))
+    
+    if chat.overrides.prompt:
+        prompt_parts.append(chat.overrides.prompt)
+    if runtime and runtime.prompt:
+        prompt_parts.append(runtime.prompt)
+    system_prompt = "\n\n".join([p for p in prompt_parts if p.strip()])
+
+    # 获取该角色的独立设置
+    member_settings = chat.memberSettings.get(req.characterId)
+    
+    def pick_param(name: str):
+        val = None
+        # 优先级: runtime > memberSettings > chat.overrides > settings.generationDefaults
+        if runtime is not None:
+            val = getattr(runtime.params, name, None)
+        if val is None and member_settings is not None:
+            val = getattr(member_settings, name, None)
+        if val is None:
+            val = getattr(chat.overrides.params, name, None)
+        if val is None:
+            val = getattr(settings.generationDefaults, name, None)
+        return val
+
+    # 模型选择优先级: memberSettings.model > chat.overrides.params.model > settings.llm.defaultModel
+    model = None
+    if member_settings and member_settings.model:
+        model = member_settings.model
+    if not model:
+        model = pick_param("model") or settings.llm.defaultModel
+    
+    temperature = pick_param("temperature")
+    top_p = pick_param("top_p")
+    max_tokens = pick_param("max_tokens")
+
+    # 确定 API 配置 (memberSettings.presetId > runtime.presetId > chat.overrides.presetId > Global)
+    preset_id = None
+    if member_settings and member_settings.presetId:
+        preset_id = member_settings.presetId
+    elif runtime and runtime.presetId:
+        preset_id = runtime.presetId
+    elif chat.overrides.presetId:
+        preset_id = chat.overrides.presetId
+    
+    base_url = settings.llm.baseUrl
+    api_key = settings.llm.apiKey
+
+    if preset_id:
+        found_preset = next((p for p in settings.apiPresets if p.id == preset_id), None)
+        if found_preset:
+            base_url = found_preset.baseUrl
+            api_key = found_preset.apiKey
+
+    # 构建消息列表，为群聊格式化历史消息
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    
+    for m in chat.messages:
+        if m.role == "user":
+            # 用户消息
+            user_name = selected_persona.name if selected_persona else "用户"
+            messages.append({"role": "user", "content": f"[{user_name}]: {m.content}"})
+        elif m.role == "assistant":
+            # 角色消息 - 标注是哪个角色说的
+            if m.characterId:
+                try:
+                    msg_char = load_character(m.characterId)
+                    messages.append({"role": "assistant", "content": f"[{msg_char.name}]: {m.content}"})
+                except FileNotFoundError:
+                    messages.append({"role": "assistant", "content": m.content})
+            else:
+                messages.append({"role": "assistant", "content": m.content})
+        else:
+            messages.append({"role": m.role, "content": m.content})
+
+    async def event_iter():
+        full_text: list[str] = []
+        try:
+            async for delta in stream_chat_completions(
+                base_url=base_url,
+                api_key=api_key,
+                model=model,
+                messages=messages,
+                temperature=temperature,
+                top_p=top_p,
+                max_tokens=max_tokens,
+            ):
+                full_text.append(delta.text)
+                yield _sse("delta", {"text": delta.text})
+
+            assistant_content = "".join(full_text).strip()
+            if assistant_content:
+                # 保存消息，标记 characterId
+                assistant_msg = ChatMessage(
+                    role="assistant", 
+                    content=assistant_content,
+                    characterId=req.characterId
+                )
+                chat.messages.append(assistant_msg)
+                chat.updatedAt = _now_iso()
+                save_chat(chat)
+                
+                yield _sse(
+                    "done",
+                    {"ok": True, "chatId": chat.id, "assistantMessageId": assistant_msg.id, "characterId": req.characterId},
+                )
+            else:
+                yield _sse("done", {"ok": True, "chatId": chat.id, "characterId": req.characterId})
+        except Exception as e:
+            yield _sse("error", {"message": str(e)})
+
+    # 检查是否启用流式传输
+    if not settings.streamEnabled:
+        try:
+            result = await chat_completions(
+                base_url=base_url,
+                api_key=api_key,
+                model=model,
+                messages=messages,
+                temperature=temperature,
+                top_p=top_p,
+                max_tokens=max_tokens,
+            )
+            assistant_content = result.text.strip()
+            assistant_msg = None
+            if assistant_content:
+                assistant_msg = ChatMessage(
+                    role="assistant", 
+                    content=assistant_content,
+                    characterId=req.characterId
+                )
+                chat.messages.append(assistant_msg)
+                chat.updatedAt = _now_iso()
+                save_chat(chat)
+            
+            return JSONResponse({
+                "ok": True,
+                "chatId": chat.id,
+                "assistantMessageId": assistant_msg.id if assistant_msg else None,
+                "characterId": req.characterId,
+                "content": assistant_content,
+                "stream": False,
+            })
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+    return StreamingResponse(
+        event_iter(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post("/generate/interject")
+async def generate_single_interject(req: SingleInterjectRequest) -> StreamingResponse:
+    """单次插话 - 让指定角色额外回复一次（不添加用户消息）"""
+    try:
+        chat = load_chat(req.chatId)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="chat not found")
+
+    if not chat.isGroup:
+        raise HTTPException(status_code=400, detail="this endpoint is for group chats only")
+    
+    if req.characterId not in chat.memberIds:
+        raise HTTPException(status_code=400, detail="character is not a member of this group")
+
+    settings = load_settings()
+    try:
+        character = load_character(req.characterId)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="character not found")
+
+    # 组装 prompt/参数
+    prompt_parts: list[str] = []
+    if settings.prompts.globalSystem:
+        prompt_parts.append(settings.prompts.globalSystem)
+    
+    # 构建用户Persona相关提示词
+    selected_persona = None
+    if settings.selectedPersonaId and settings.userPersonas:
+        selected_persona = next((p for p in settings.userPersonas if p.id == settings.selectedPersonaId), None)
+    
+    if selected_persona:
+        user_persona_parts: list[str] = []
+        if selected_persona.name and selected_persona.name.strip():
+            user_persona_parts.append(f"user姓名：{selected_persona.name.strip()}")
+        if selected_persona.description and selected_persona.description.strip():
+            user_persona_parts.append(f"User简介：\n{selected_persona.description.strip()}")
+        if user_persona_parts:
+            prompt_parts.append("\n".join(user_persona_parts))
+
+    # 群聊场景：构建所有角色的信息
+    all_characters = []
+    for member_id in chat.memberIds:
+        try:
+            member_char = load_character(member_id)
+            all_characters.append(member_char)
+        except FileNotFoundError:
+            continue
+    
+    # 构建群聊上下文
+    group_context_parts = ["这是一个群聊场景，参与者包括："]
+    for i, char in enumerate(all_characters):
+        group_context_parts.append(f"{i+1}. {char.name}")
+    prompt_parts.append("\n".join(group_context_parts))
+    
+    # 构建当前回复角色的提示词
+    character_parts: list[str] = []
+    character_parts.append(f"你现在扮演的角色是：{character.name}")
+    character_parts.append("请根据当前对话内容进行回复（这是一次额外的插话机会）。")
+    if character.personality and character.personality.strip():
+        character_parts.append(f"Personality：\n{character.personality.strip()}")
+    if character.scenario and character.scenario.strip():
+        character_parts.append(f"Scenario：\n{character.scenario.strip()}")
+    if character.systemPrompt and character.systemPrompt.strip():
+        character_parts.append(character.systemPrompt.strip())
+    
+    if character_parts:
+        prompt_parts.append("\n\n".join(character_parts))
+    
+    if chat.overrides.prompt:
+        prompt_parts.append(chat.overrides.prompt)
+    system_prompt = "\n\n".join([p for p in prompt_parts if p.strip()])
+
+    # 获取该角色的独立设置
+    member_settings = chat.memberSettings.get(req.characterId)
+    
+    def pick_param(name: str):
+        val = None
+        if member_settings is not None:
+            val = getattr(member_settings, name, None)
+        if val is None:
+            val = getattr(chat.overrides.params, name, None)
+        if val is None:
+            val = getattr(settings.generationDefaults, name, None)
+        return val
+
+    # 模型选择优先级: memberSettings.model > chat.overrides.params.model > settings.llm.defaultModel
+    model = None
+    if member_settings and member_settings.model:
+        model = member_settings.model
+    if not model:
+        model = pick_param("model") or settings.llm.defaultModel
+    
+    temperature = pick_param("temperature")
+    top_p = pick_param("top_p")
+    max_tokens = pick_param("max_tokens")
+
+    # 确定 API 配置
+    preset_id = None
+    if member_settings and member_settings.presetId:
+        preset_id = member_settings.presetId
+    elif chat.overrides.presetId:
+        preset_id = chat.overrides.presetId
+    
+    base_url = settings.llm.baseUrl
+    api_key = settings.llm.apiKey
+
+    if preset_id:
+        found_preset = next((p for p in settings.apiPresets if p.id == preset_id), None)
+        if found_preset:
+            base_url = found_preset.baseUrl
+            api_key = found_preset.apiKey
+
+    # 构建消息列表
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    
+    for m in chat.messages:
+        if m.role == "user":
+            user_name = selected_persona.name if selected_persona else "用户"
+            messages.append({"role": "user", "content": f"[{user_name}]: {m.content}"})
+        elif m.role == "assistant":
+            if m.characterId:
+                try:
+                    msg_char = load_character(m.characterId)
+                    messages.append({"role": "assistant", "content": f"[{msg_char.name}]: {m.content}"})
+                except FileNotFoundError:
+                    messages.append({"role": "assistant", "content": m.content})
+            else:
+                messages.append({"role": "assistant", "content": m.content})
+        else:
+            messages.append({"role": m.role, "content": m.content})
+
+    async def event_iter():
+        full_text: list[str] = []
+        try:
+            async for delta in stream_chat_completions(
+                base_url=base_url,
+                api_key=api_key,
+                model=model,
+                messages=messages,
+                temperature=temperature,
+                top_p=top_p,
+                max_tokens=max_tokens,
+            ):
+                full_text.append(delta.text)
+                yield _sse("delta", {"text": delta.text})
+
+            assistant_content = "".join(full_text).strip()
+            if assistant_content:
+                assistant_msg = ChatMessage(
+                    role="assistant", 
+                    content=assistant_content,
+                    characterId=req.characterId
+                )
+                chat.messages.append(assistant_msg)
+                chat.updatedAt = _now_iso()
+                save_chat(chat)
+                
+                yield _sse(
+                    "done",
+                    {"ok": True, "chatId": chat.id, "assistantMessageId": assistant_msg.id, "characterId": req.characterId, "isInterject": True},
+                )
+            else:
+                yield _sse("done", {"ok": True, "chatId": chat.id, "characterId": req.characterId, "isInterject": True})
+        except Exception as e:
+            yield _sse("error", {"message": str(e)})
+
+    # 检查是否启用流式传输
+    if not settings.streamEnabled:
+        try:
+            result = await chat_completions(
+                base_url=base_url,
+                api_key=api_key,
+                model=model,
+                messages=messages,
+                temperature=temperature,
+                top_p=top_p,
+                max_tokens=max_tokens,
+            )
+            assistant_content = result.text.strip()
+            assistant_msg = None
+            if assistant_content:
+                assistant_msg = ChatMessage(
+                    role="assistant", 
+                    content=assistant_content,
+                    characterId=req.characterId
+                )
+                chat.messages.append(assistant_msg)
+                chat.updatedAt = _now_iso()
+                save_chat(chat)
+            
+            return JSONResponse({
+                "ok": True,
+                "chatId": chat.id,
+                "assistantMessageId": assistant_msg.id if assistant_msg else None,
+                "characterId": req.characterId,
+                "content": assistant_content,
+                "stream": False,
+                "isInterject": True,
             })
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
