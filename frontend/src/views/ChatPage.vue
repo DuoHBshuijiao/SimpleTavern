@@ -2018,7 +2018,7 @@ const editingPersonaAvatarUrl = computed(() => {
                       type="checkbox"
                       class="accent-purple-500"
                       :checked="(groupMemberInclusions[c.id]?.includePersonality ?? true)"
-                      @change="(e) => { groupMemberInclusions[c.id] = groupMemberInclusions[c.id] || { includePersonality: true, includeScenario: true }; groupMemberInclusions[c.id].includePersonality = (e.target as HTMLInputElement).checked }"
+                      @change="(e) => { const checked = (e.target as HTMLInputElement).checked; const inc = groupMemberInclusions[c.id] ?? { includePersonality: true, includeScenario: true }; groupMemberInclusions[c.id] = inc; inc.includePersonality = checked }"
                     />
                     Personality
                   </label>
@@ -2027,7 +2027,7 @@ const editingPersonaAvatarUrl = computed(() => {
                       type="checkbox"
                       class="accent-purple-500"
                       :checked="(groupMemberInclusions[c.id]?.includeScenario ?? true)"
-                      @change="(e) => { groupMemberInclusions[c.id] = groupMemberInclusions[c.id] || { includePersonality: true, includeScenario: true }; groupMemberInclusions[c.id].includeScenario = (e.target as HTMLInputElement).checked }"
+                      @change="(e) => { const checked = (e.target as HTMLInputElement).checked; const inc = groupMemberInclusions[c.id] ?? { includePersonality: true, includeScenario: true }; groupMemberInclusions[c.id] = inc; inc.includeScenario = checked }"
                     />
                     Scenario
                   </label>

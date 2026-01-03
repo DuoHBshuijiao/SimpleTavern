@@ -49,16 +49,39 @@
    ./deploy.sh
    ```
 
-### 方法二：使用 Git 克隆仓库
+### 方法二：安卓 Termux 命令行安装部署教程
 
-1. **克隆仓库**
+> 源码获取入口（最新版本）：[https://github.com/DuoHBshuijiao/SimpleTavern/releases](https://github.com/DuoHBshuijiao/SimpleTavern/releases)
 
-   ```bash
-   git clone https://github.com/DuoHBshuijiao/SimpleTavern.git
-   cd SimpleTavern
-   ```
+1. **安装依赖（Termux）**
 
-2. **运行一键部署脚本**（同上）
+```bash
+pkg update -y
+pkg install -y python nodejs git unzip wget
+```
+
+2. **下载并解压最新 Releases 源码包**
+
+- 推荐：先在手机上打开 Releases 页面，找到最新版本并复制 “Source code (zip)” 的下载链接：
+
+```bash
+termux-open-url https://github.com/DuoHBshuijiao/SimpleTavern/releases
+```
+
+- 或者（可选）：你也可以用“版本号”方式下载（把 `v0.xxx` 替换为 Releases 里的最新版本号）：
+
+```bash
+VERSION=v0.xxx
+wget -O SimpleTavern.zip "https://github.com/DuoHBshuijiao/SimpleTavern/archive/refs/tags/${VERSION}.zip"
+unzip SimpleTavern.zip
+cd SimpleTavern-*
+```
+
+3. **运行一键部署脚本**
+
+```bash
+python deploy.py
+```
 
 ## 一键部署脚本说明
 
