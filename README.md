@@ -51,7 +51,8 @@
 
 ### 方法二：安卓 Termux 命令行安装部署教程
 
-> 源码获取入口（最新版本）：[https://github.com/DuoHBshuijiao/SimpleTavern/releases](https://github.com/DuoHBshuijiao/SimpleTavern/releases)
+> 重要：**请不要把项目放在 `/sdcard`（共享存储）里运行**。Termux 在共享存储下经常会遇到权限/挂载限制，导致 `python -m venv` 创建虚拟环境失败。  
+> 推荐做法：用 `git clone` 把源码直接放到 Termux 的私有目录（`$HOME`）中。
 
 1. **安装依赖（Termux）**
 
@@ -60,22 +61,15 @@ pkg update -y
 pkg install -y python nodejs git unzip wget
 ```
 
-2. **下载并解压最新 Releases 源码包**
-
-- 推荐：先在手机上打开 Releases 页面，找到最新版本并复制 “Source code (zip)” 的下载链接：
+2. **在 Termux 私有目录中克隆源码（推荐）**
 
 ```bash
-termux-open-url https://github.com/DuoHBshuijiao/SimpleTavern/releases
+cd ~
+git clone https://github.com/DuoHBshuijiao/SimpleTavern.git
+cd SimpleTavern
 ```
 
-- 或者（可选）：你也可以用“版本号”方式下载（把 `v0.xxx` 替换为 Releases 里的最新版本号）：
-
-```bash
-VERSION=v0.xxx
-wget -O SimpleTavern.zip "https://github.com/DuoHBshuijiao/SimpleTavern/archive/refs/tags/${VERSION}.zip"
-unzip SimpleTavern.zip
-cd SimpleTavern-*
-```
+> 可选：如果你必须用 Releases 的 zip 包，也请**在 `$HOME` 下解压**（不要在 `/sdcard` 下解压/运行）。
 
 3. **运行一键部署脚本**
 
