@@ -54,6 +54,16 @@ const showGroupCreator = ref(false)
 const selectedMemberIds = ref<string[]>([])
 const groupTitle = ref('')
 const showMemberManager = ref(false)
+// 新建单聊弹窗（沿用群聊弹窗风格）
+const showChatCreator = ref(false)
+const chatTitle = ref('')
+const chatPureAiMode = ref(false)
+
+// 群聊创建附加选项
+const groupPureAiMode = ref(false)
+const groupFirstMessageEnabled = ref(true)
+const groupFirstMessageCharacterId = ref<string | null>(null)
+const groupMemberInclusions = ref<Record<string, { includePersonality: boolean; includeScenario: boolean }>>({})
 
 // 成员设置编辑
 const editingMemberId = ref<string | null>(null)
@@ -62,7 +72,9 @@ const editingMemberSettings = ref<GroupMemberSettings>({
   presetId: null,
   temperature: null,
   top_p: null,
-  probability: 1.0
+  probability: 1.0,
+  includePersonality: true,
+  includeScenario: true,
 })
 
 // 插话相关
@@ -190,8 +202,15 @@ const md = new MarkdownIt({
   breaks: true,
 })
 
+function normalizeMarkdownInput(text: string) {
+  // markdown-it 会把形如 "[xxx]: ..." 的行识别为“引用链接定义”，该行不会被渲染。
+  // 群聊里模型常输出 "[角色名]: 内容" 作为说话人前缀，这会导致气泡显示为空。
+  // 这里把 ":" 换成全角 "：" 来打断该语法，但保持可读性。
+  return (text ?? '').replace(/(^|\n)\[([^\]\n]+)\]:(\s*)/g, (_m, p1, name, sp) => `${p1}[${name}]：${sp}`)
+}
+
 function renderMarkdown(text: string) {
-  return md.render(text ?? '')
+  return md.render(normalizeMarkdownInput(text))
 }
 
 // 消息编辑相关
@@ -284,8 +303,11 @@ function getMessageAvatar(m: ChatMessage) {
 }
 
 async function createChat() {
+  // 改为弹出创建设置窗口
   if (!selectedCharacterId.value) return
-  await chats.create(selectedCharacterId.value)
+  chatTitle.value = ''
+  chatPureAiMode.value = false
+  showChatCreator.value = true
 }
 
 async function deleteChat(chatId: string) {
@@ -453,6 +475,10 @@ async function handlePersonaAvatarSave(imageData: string) {
 function openGroupCreator() {
   selectedMemberIds.value = []
   groupTitle.value = ''
+  groupPureAiMode.value = false
+  groupFirstMessageEnabled.value = true
+  groupFirstMessageCharacterId.value = null
+  groupMemberInclusions.value = {}
   showGroupCreator.value = true
 }
 
@@ -460,8 +486,18 @@ function toggleMemberSelection(characterId: string) {
   const idx = selectedMemberIds.value.indexOf(characterId)
   if (idx >= 0) {
     selectedMemberIds.value.splice(idx, 1)
+    delete groupMemberInclusions.value[characterId]
+    if (groupFirstMessageCharacterId.value === characterId) {
+      groupFirstMessageCharacterId.value = selectedMemberIds.value[0] ?? null
+    }
   } else {
     selectedMemberIds.value.push(characterId)
+    if (!groupMemberInclusions.value[characterId]) {
+      groupMemberInclusions.value[characterId] = { includePersonality: true, includeScenario: true }
+    }
+    if (!groupFirstMessageCharacterId.value) {
+      groupFirstMessageCharacterId.value = characterId
+    }
   }
 }
 
@@ -470,10 +506,42 @@ async function createGroupChat() {
     return // 群聊至少需要2个角色
   }
   const firstMember = selectedMemberIds.value[0]
-  await chats.createGroup(firstMember, selectedMemberIds.value, groupTitle.value || '新群聊')
+  if (!firstMember) return
+
+  // 组装创建时 memberSettings（包含 prompt 插入字段开关）
+  const memberSettings: Record<string, GroupMemberSettings> = {}
+  for (const id of selectedMemberIds.value) {
+    const inc = groupMemberInclusions.value[id] ?? { includePersonality: true, includeScenario: true }
+    memberSettings[id] = {
+      model: null,
+      presetId: null,
+      temperature: null,
+      top_p: null,
+      probability: 1.0,
+      includePersonality: inc.includePersonality,
+      includeScenario: inc.includeScenario,
+    }
+  }
+
+  const firstMsgId = groupFirstMessageEnabled.value ? groupFirstMessageCharacterId.value : null
+  await chats.createGroup(
+    firstMember,
+    selectedMemberIds.value,
+    groupTitle.value || '新群聊',
+    groupPureAiMode.value,
+    firstMsgId,
+    memberSettings,
+  )
   showGroupCreator.value = false
   selectedMemberIds.value = []
   groupTitle.value = ''
+}
+
+async function confirmCreateChat() {
+  if (!selectedCharacterId.value) return
+  await chats.create(selectedCharacterId.value, chatTitle.value.trim() || undefined, chatPureAiMode.value)
+  showChatCreator.value = false
+  chatTitle.value = ''
 }
 
 async function selectGroupChat(chat: Chat) {
@@ -531,7 +599,9 @@ function getMemberSettings(memberId: string): GroupMemberSettings {
     presetId: null,
     temperature: null,
     top_p: null,
-    probability: 1.0
+    probability: 1.0,
+    includePersonality: true,
+    includeScenario: true,
   }
 }
 
@@ -577,8 +647,9 @@ async function triggerInterject(characterId: string) {
     characterId,
     ts: new Date().toISOString() 
   }
-  activeChat.value.messages.push(localMsg)
-  const msgIndex = activeChat.value.messages.length - 1
+  // activeChat.value.messages.push(localMsg)
+  chats.addLocalMessage(localMsg)
+  // const msgIndex = activeChat.value.messages.length - 1
   scrollToBottom()
   
   try {
@@ -589,10 +660,8 @@ async function triggerInterject(characterId: string) {
         (evt) => {
           if (evt.event === 'delta') {
             const t = evt.data?.text
-            if (typeof t === 'string' && activeChat.value && activeChat.value.messages[msgIndex]) {
-              const updatedMsg = { ...activeChat.value.messages[msgIndex] }
-              updatedMsg.content += t
-              activeChat.value.messages.splice(msgIndex, 1, updatedMsg)
+            if (typeof t === 'string') {
+              chats.appendLocalMessageContent(localAssistantId, t)
               scrollToBottom()
             }
           } else if (evt.event === 'error') {
@@ -611,9 +680,9 @@ async function triggerInterject(characterId: string) {
         error?: string
       }>('/api/generate/interject', { chatId, characterId })
       
-      if (res.ok && activeChat.value && activeChat.value.messages[msgIndex]) {
-        const updatedMsg = { ...activeChat.value.messages[msgIndex], content: res.content }
-        activeChat.value.messages.splice(msgIndex, 1, updatedMsg)
+      if (res.ok) {
+        // 非流式：一次性填充本地临时消息
+        chats.appendLocalMessageContent(localAssistantId, res.content || '')
         scrollToBottom()
       } else {
         streamError.value = res.error || 'unknown error'
@@ -710,7 +779,9 @@ async function runGroupGeneration(
       characterId,
       ts: new Date().toISOString() 
     }
-    activeChat.value.messages.push(localMsg)
+    // activeChat.value.messages.push(localMsg)
+    chats.addLocalMessage(localMsg)
+    
     // 保存消息索引，而不是对象引用（避免响应式引用丢失问题）
     const msgIndex = activeChat.value.messages.length - 1
     scrollToBottom()
@@ -723,18 +794,15 @@ async function runGroupGeneration(
         (evt) => {
           if (evt.event === 'delta') {
             const t = evt.data?.text
-            // 通过替换整个消息对象来确保响应式更新
-            if (typeof t === 'string' && activeChat.value && activeChat.value.messages[msgIndex]) {
-              const updatedMsg = { ...activeChat.value.messages[msgIndex] }
-              updatedMsg.content += t
-              activeChat.value.messages.splice(msgIndex, 1, updatedMsg)
+            if (typeof t === 'string') {
+              chats.appendLocalMessageContent(localAssistantId, t)
               scrollToBottom()
             }
           } else if (evt.event === 'error') {
             streamError.value = String(evt.data?.message ?? 'unknown error')
           }
         },
-        aborter.signal,
+        aborter?.signal,
       )
     } else {
       const res = await apiPost<{
@@ -810,12 +878,13 @@ async function sendUserMessage() {
       // 如果所有成员都被跳过，至少保留一个（随机选择）
       if (memberIds.length === 0 && allMemberIds.length > 0) {
         const randomIdx = Math.floor(Math.random() * allMemberIds.length)
-        memberIds.push(allMemberIds[randomIdx])
+        memberIds.push(allMemberIds[randomIdx]!)
       }
       
       // 1. 添加用户消息到本地显示
       const localUserId = `local_user_${Date.now()}`
-      activeChat.value.messages.push({ version: 1, id: localUserId, role: 'user', content: text, ts: now })
+      // activeChat.value.messages.push({ version: 1, id: localUserId, role: 'user', content: text, ts: now })
+      chats.addLocalMessage({ version: 1, id: localUserId, role: 'user', content: text, ts: now })
       scrollToBottom()
       
       // 2. 先保存用户消息到后端（直接调用API，不更新store的activeChat）
@@ -837,9 +906,11 @@ async function sendUserMessage() {
       const localUserId = `local_user_${Date.now()}`
       const localAssistantId = `local_assistant_${Date.now()}`
 
-      activeChat.value.messages.push({ version: 1, id: localUserId, role: 'user', content: text, ts: now })
-      activeChat.value.messages.push({ version: 1, id: localAssistantId, role: 'assistant', content: '', ts: now })
-      const assistantMsgIndex = activeChat.value.messages.length - 1
+      // activeChat.value.messages.push({ version: 1, id: localUserId, role: 'user', content: text, ts: now })
+      // activeChat.value.messages.push({ version: 1, id: localAssistantId, role: 'assistant', content: '', ts: now })
+      chats.addLocalMessage({ version: 1, id: localUserId, role: 'user', content: text, ts: now })
+      chats.addLocalMessage({ version: 1, id: localAssistantId, role: 'assistant', content: '', ts: now })
+      // const assistantMsgIndex = activeChat.value.messages.length - 1
       
       scrollToBottom()
 
@@ -850,17 +921,15 @@ async function sendUserMessage() {
           (evt) => {
             if (evt.event === 'delta') {
               const t = evt.data?.text
-              if (typeof t === 'string' && activeChat.value && activeChat.value.messages[assistantMsgIndex]) {
-                const updatedMsg = { ...activeChat.value.messages[assistantMsgIndex] }
-                updatedMsg.content += t
-                activeChat.value.messages.splice(assistantMsgIndex, 1, updatedMsg)
+              if (typeof t === 'string') {
+                chats.appendLocalMessageContent(localAssistantId, t)
                 scrollToBottom()
               }
             } else if (evt.event === 'error') {
               streamError.value = String(evt.data?.message ?? 'unknown error')
             }
           },
-          aborter.signal,
+          aborter?.signal,
         )
       } else {
         const res = await apiPost<{
@@ -871,13 +940,12 @@ async function sendUserMessage() {
           error?: string
         }>('/api/generate/stream', { chatId, userMessage: text })
         
-        if (res.ok && activeChat.value && activeChat.value.messages[assistantMsgIndex]) {
-          const updatedMsg = { ...activeChat.value.messages[assistantMsgIndex], content: res.content }
-          activeChat.value.messages.splice(assistantMsgIndex, 1, updatedMsg)
-          scrollToBottom()
-        } else {
-          streamError.value = res.error || 'unknown error'
-        }
+      if (res.ok) {
+        chats.appendLocalMessageContent(localAssistantId, res.content || '')
+        scrollToBottom()
+      } else {
+        streamError.value = res.error || 'unknown error'
+      }
       }
     }
   } catch (e: any) {
@@ -887,6 +955,54 @@ async function sendUserMessage() {
     currentSpeakerIndex.value = -1
     await chats.load(chatId)
     await settings.load()
+  }
+}
+
+// 跳过用户轮次：群聊“开始下一轮”
+async function startNextRound() {
+  if (!activeChat.value) return
+  if (!activeChat.value.isGroup) return
+  if (isGenerating.value) return
+
+  streamError.value = null
+  showInterjectPanel.value = false
+  isPaused.value = false
+  showContinueButton.value = false
+  pendingMembers.value = []
+
+  const chatId = activeChat.value.id
+  const useStream = settings.settings?.streamEnabled !== false
+  const groupDelay = activeChat.value.groupDelay || 1500
+
+  isGenerating.value = true
+  aborter?.abort()
+  aborter = new AbortController()
+
+  try {
+    const allMemberIds = [...activeChat.value.memberIds]
+    const memberIds = allMemberIds.filter(memberId => {
+      const memberSettings = activeChat.value?.memberSettings?.[memberId]
+      const probability = memberSettings?.probability ?? 1.0
+      return Math.random() < probability
+    })
+    if (memberIds.length === 0 && allMemberIds.length > 0) {
+      const randomIdx = Math.floor(Math.random() * allMemberIds.length)
+      memberIds.push(allMemberIds[randomIdx]!)
+    }
+
+    await runGroupGeneration(chatId, memberIds, useStream, groupDelay, 0)
+    if (isPaused.value) return
+
+    showInterjectPanel.value = true
+  } catch (e: any) {
+    streamError.value = e?.message ?? String(e)
+  } finally {
+    isGenerating.value = false
+    currentSpeakerIndex.value = -1
+    if (!isPaused.value) {
+      await chats.load(chatId)
+      await settings.load()
+    }
   }
 }
 
@@ -1343,6 +1459,15 @@ const editingPersonaAvatarUrl = computed(() => {
                     >
                       {{ isGenerating && !isPaused && !showContinueButton ? '生成中...' : (showContinueButton ? '插话并重新开始' : '发送') }}
                     </button>
+                    <button
+                      v-if="activeChat?.isGroup"
+                      class="bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 px-4 py-1.5 rounded-lg text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                      :disabled="isGenerating"
+                      @click="startNextRound"
+                      title="不发送用户消息，直接让群聊进入下一轮"
+                    >
+                      开始下一轮
+                    </button>
                  </div>
               </div>
            </div>
@@ -1435,7 +1560,11 @@ const editingPersonaAvatarUrl = computed(() => {
               <NButton size="small" secondary @click="showCharacterAvatarCropper = true">更换头像</NButton>
            </div>
            <div class="flex-1 space-y-4">
-              <NFormItem label="名称">
+        <NFormItem>
+          <template #label>
+            <span>名称</span>
+            <span class="opacity-60 text-xs ml-2 text-brand">该项参与对话</span>
+          </template>
                 <NInput v-model:value="editingCharacter.name" placeholder="角色名称" />
               </NFormItem>
               <NFormItem label="简介">
@@ -1444,15 +1573,27 @@ const editingPersonaAvatarUrl = computed(() => {
            </div>
         </div>
 
-        <NFormItem label="Personality（性格/外貌）">
+        <NFormItem>
+          <template #label>
+            <span>Personality（性格/外貌）</span>
+            <span class="opacity-60 text-xs ml-2 text-brand">该项参与对话</span>
+          </template>
           <NInput v-model:value="editingCharacter.personality" type="textarea" :autosize="{ minRows: 2, maxRows: 5 }" placeholder="详细设定..." />
         </NFormItem>
 
-        <NFormItem label="Scenario（情景/世界观）">
+        <NFormItem>
+          <template #label>
+            <span>Scenario（情景/世界观）</span>
+            <span class="opacity-60 text-xs ml-2 text-brand">该项参与对话</span>
+          </template>
           <NInput v-model:value="editingCharacter.scenario" type="textarea" :autosize="{ minRows: 2, maxRows: 4 }" placeholder="世界背景..." />
         </NFormItem>
 
-        <NFormItem label="系统提示词">
+        <NFormItem>
+          <template #label>
+            <span>系统提示词</span>
+            <span class="opacity-60 text-xs ml-2 text-brand">该项参与对话</span>
+          </template>
           <NInput v-model:value="editingCharacter.systemPrompt" type="textarea" :autosize="{ minRows: 2, maxRows: 6 }" placeholder="回复格式要求..." />
         </NFormItem>
 
@@ -1460,6 +1601,7 @@ const editingPersonaAvatarUrl = computed(() => {
           <template #label>
             <span>首句</span>
             <span class="opacity-60 text-xs ml-2">支持 {<!-- -->{user}} 占位符</span>
+            <span class="opacity-60 text-xs ml-2 text-brand">该项参与对话</span>
           </template>
           <NInput v-model:value="editingCharacter.firstMessage" type="textarea" :autosize="{ minRows: 2, maxRows: 4 }" placeholder="开场白..." />
         </NFormItem>
@@ -1524,6 +1666,49 @@ const editingPersonaAvatarUrl = computed(() => {
       <NFormItem label="群聊名称">
         <NInput v-model:value="groupTitle" placeholder="新群聊" />
       </NFormItem>
+
+      <div class="bg-white/5 border border-white/10 rounded-xl p-3">
+        <div class="text-sm text-gray-300 font-medium mb-2">本次聊天设置</div>
+        <div class="flex items-center justify-between">
+          <div class="text-sm text-gray-400">纯 AI 模式（不注入 Persona，用户发言将以 system 影响世界）</div>
+          <button
+            class="flex items-center gap-2"
+            @click="groupPureAiMode = !groupPureAiMode"
+          >
+            <div class="w-10 h-5 rounded-full relative transition-colors duration-200" :class="groupPureAiMode ? 'bg-brand' : 'bg-gray-700'">
+              <div class="absolute top-1 w-3 h-3 rounded-full bg-white transition-transform duration-200" :class="groupPureAiMode ? 'left-6' : 'left-1'"></div>
+            </div>
+            <span class="text-xs text-gray-400">{{ groupPureAiMode ? '开启' : '关闭' }}</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="bg-white/5 border border-white/10 rounded-xl p-3">
+        <div class="text-sm text-gray-300 font-medium mb-2">群聊首句（故事背景）</div>
+        <div class="flex items-center justify-between mb-2">
+          <div class="text-sm text-gray-400">启用某角色的 First Message 作为开场</div>
+          <button class="flex items-center gap-2" @click="groupFirstMessageEnabled = !groupFirstMessageEnabled">
+            <div class="w-10 h-5 rounded-full relative transition-colors duration-200" :class="groupFirstMessageEnabled ? 'bg-purple-500' : 'bg-gray-700'">
+              <div class="absolute top-1 w-3 h-3 rounded-full bg-white transition-transform duration-200" :class="groupFirstMessageEnabled ? 'left-6' : 'left-1'"></div>
+            </div>
+            <span class="text-xs text-gray-400">{{ groupFirstMessageEnabled ? '启用' : '关闭' }}</span>
+          </button>
+        </div>
+        <div v-if="groupFirstMessageEnabled" class="flex items-center gap-2">
+          <span class="text-xs text-gray-500 shrink-0">选择角色：</span>
+          <select
+            class="flex-1 bg-black/20 border border-white/10 rounded-lg px-2 py-1 text-sm text-gray-200 outline-none"
+            v-model="groupFirstMessageCharacterId"
+            :disabled="selectedMemberIds.length === 0"
+          >
+            <option :value="null">（未选择）</option>
+            <option v-for="id in selectedMemberIds" :key="id" :value="id">
+              {{ getCharacterById(id)?.name || id }}
+            </option>
+          </select>
+        </div>
+        <div class="text-xs text-gray-500 mt-2">创建后会在聊天窗口内直接插入该角色的首句（会写入聊天记录）。</div>
+      </div>
       
       <div>
         <div class="text-sm text-gray-400 mb-3">选择群成员 (至少选择2个角色):</div>
@@ -1553,6 +1738,29 @@ const editingPersonaAvatarUrl = computed(() => {
             <div class="flex-1 min-w-0">
               <div class="font-medium text-sm truncate" :class="selectedMemberIds.includes(c.id) ? 'text-purple-300' : 'text-gray-300'">{{ c.name }}</div>
               <div class="text-xs text-gray-500 truncate">{{ c.description || '暂无简介' }}</div>
+              <div v-if="selectedMemberIds.includes(c.id)" class="mt-2 space-y-1" @click.stop>
+                <div class="text-[10px] text-gray-500">system prompt 插入：</div>
+                <div class="flex flex-wrap gap-3 text-xs text-gray-300">
+                  <label class="flex items-center gap-1 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      class="accent-purple-500"
+                      :checked="(groupMemberInclusions[c.id]?.includePersonality ?? true)"
+                      @change="(e) => { groupMemberInclusions[c.id] = groupMemberInclusions[c.id] || { includePersonality: true, includeScenario: true }; groupMemberInclusions[c.id].includePersonality = (e.target as HTMLInputElement).checked }"
+                    />
+                    Personality
+                  </label>
+                  <label class="flex items-center gap-1 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      class="accent-purple-500"
+                      :checked="(groupMemberInclusions[c.id]?.includeScenario ?? true)"
+                      @change="(e) => { groupMemberInclusions[c.id] = groupMemberInclusions[c.id] || { includePersonality: true, includeScenario: true }; groupMemberInclusions[c.id].includeScenario = (e.target as HTMLInputElement).checked }"
+                    />
+                    Scenario
+                  </label>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -1568,6 +1776,35 @@ const editingPersonaAvatarUrl = computed(() => {
           <NButton type="primary" :disabled="selectedMemberIds.length < 2" class="!bg-purple-500 !hover:bg-purple-600" @click="createGroupChat">
             创建群聊
           </NButton>
+        </NSpace>
+      </div>
+    </NSpace>
+  </NModal>
+
+  <!-- 单聊创建弹窗（沿用群聊弹窗风格） -->
+  <NModal v-model:show="showChatCreator" preset="card" style="width: min(520px, 90vw)" title="新建会话" class="!bg-[#18181c] !border-white/10">
+    <NSpace vertical size="medium">
+      <NFormItem label="会话名称（可选）">
+        <NInput v-model:value="chatTitle" placeholder="新对话" />
+      </NFormItem>
+
+      <div class="bg-white/5 border border-white/10 rounded-xl p-3">
+        <div class="text-sm text-gray-300 font-medium mb-2">本次聊天设置</div>
+        <div class="flex items-center justify-between">
+          <div class="text-sm text-gray-400">纯 AI 模式（不注入 Persona，用户发言将以 system 影响世界）</div>
+          <button class="flex items-center gap-2" @click="chatPureAiMode = !chatPureAiMode">
+            <div class="w-10 h-5 rounded-full relative transition-colors duration-200" :class="chatPureAiMode ? 'bg-brand' : 'bg-gray-700'">
+              <div class="absolute top-1 w-3 h-3 rounded-full bg-white transition-transform duration-200" :class="chatPureAiMode ? 'left-6' : 'left-1'"></div>
+            </div>
+            <span class="text-xs text-gray-400">{{ chatPureAiMode ? '开启' : '关闭' }}</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="flex justify-end pt-2 border-t border-white/10">
+        <NSpace>
+          <NButton @click="showChatCreator = false">取消</NButton>
+          <NButton type="primary" :disabled="!selectedCharacterId" @click="confirmCreateChat">创建</NButton>
         </NSpace>
       </div>
     </NSpace>
@@ -1707,7 +1944,14 @@ const editingPersonaAvatarUrl = computed(() => {
   </NModal>
 
   <!-- 成员设置编辑弹窗 -->
-  <NModal v-model:show="editingMemberId" preset="card" style="width: min(500px, 90vw)" title="成员设置" class="!bg-[#18181c] !border-white/10" @update:show="(v: boolean) => !v && closeMemberSettingsEditor()">
+  <NModal 
+    :show="!!editingMemberId" 
+    preset="card" 
+    style="width: min(500px, 90vw)" 
+    title="成员设置" 
+    class="!bg-[#18181c] !border-white/10" 
+    @update:show="(v: boolean) => !v && closeMemberSettingsEditor()"
+  >
     <NSpace vertical size="medium">
       <!-- 角色信息 -->
       <div v-if="editingMemberId" class="flex items-center gap-3 pb-3 border-b border-white/10">
@@ -1785,6 +2029,25 @@ const editingPersonaAvatarUrl = computed(() => {
           <span class="text-sm text-gray-400 w-12 text-right">{{ Math.round(editingMemberSettings.probability * 100) }}%</span>
         </div>
         <div class="text-xs text-gray-500 mt-1">设置为 100% 表示每轮必定发言，低于 100% 则按概率随机参与</div>
+      </NFormItem>
+
+      <!-- system prompt 插入字段 -->
+      <NFormItem label="system prompt 插入字段">
+        <div class="flex flex-col gap-2 w-full">
+          <div class="flex flex-wrap gap-4">
+            <label class="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+              <input type="checkbox" class="accent-brand" v-model="editingMemberSettings.includePersonality" />
+              插入 Personality
+            </label>
+            <label class="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+              <input type="checkbox" class="accent-brand" v-model="editingMemberSettings.includeScenario" />
+              插入 Scenario
+            </label>
+          </div>
+          <div class="text-xs text-gray-500">
+            关闭后，该成员对应字段将不会被注入到本轮/后续的 system prompt（用于避免多人共享世界观时的重复设定）。
+          </div>
+        </div>
       </NFormItem>
 
       <NSpace justify="end" class="pt-2 border-t border-white/10">

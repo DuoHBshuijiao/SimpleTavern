@@ -27,19 +27,29 @@ export const useChatsStore = defineStore('chats', {
         this.loading = false
       }
     },
-    async create(characterId: string, title?: string) {
-      const chat = await apiPost<Chat>('/api/chats', { characterId, title })
+    async create(characterId: string, title?: string, pureAiMode?: boolean) {
+      const chat = await apiPost<Chat>('/api/chats', { characterId, title, pureAiMode })
       await this.loadList(characterId)
       this.activeChatId = chat.id
       this.activeChat = chat
       return chat
     },
-    async createGroup(characterId: string, memberIds: string[], title?: string) {
+    async createGroup(
+      characterId: string,
+      memberIds: string[],
+      title?: string,
+      pureAiMode?: boolean,
+      firstMessageCharacterId?: string | null,
+      memberSettings?: Record<string, GroupMemberSettings> | null,
+    ) {
       const chat = await apiPost<Chat>('/api/chats', { 
         characterId, 
         title: title || '新群聊',
         isGroup: true,
-        memberIds
+        memberIds,
+        pureAiMode,
+        firstMessageCharacterId: firstMessageCharacterId ?? null,
+        memberSettings: memberSettings ?? null,
       })
       await this.loadGroupList()
       this.activeChatId = chat.id
@@ -141,6 +151,20 @@ export const useChatsStore = defineStore('chats', {
       const chat = await apiPut<Chat>(`/api/chats/${chatId}`, { memberSettings })
       this.activeChat = chat
       return chat
+    },
+
+    // ========== 本地状态更新 (用于流式传输) ==========
+    addLocalMessage(message: any) {
+      if (!this.activeChat) return
+      this.activeChat.messages.push(message)
+    },
+
+    appendLocalMessageContent(messageId: string, delta: string) {
+      if (!this.activeChat) return
+      const msg = this.activeChat.messages.find(m => m.id === messageId)
+      if (msg) {
+        msg.content += delta
+      }
     },
   },
 })

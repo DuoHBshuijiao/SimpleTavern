@@ -10,6 +10,7 @@ export interface GenerationParams {
 export interface ChatOverrides {
   prompt?: string | null
   presetId?: string | null
+  pureAiMode?: boolean | null
   params: GenerationParams
 }
 
@@ -45,6 +46,7 @@ export interface Settings {
     globalSystem: string
   }
   streamEnabled: boolean
+  pureAiMode: boolean
   userPersonas: UserPersona[]
   selectedPersonaId: string | null
   createdAt: string
@@ -81,6 +83,8 @@ export interface GroupMemberSettings {
   temperature?: number | null
   top_p?: number | null
   probability: number  // 参与概率 0-1，默认1
+  includePersonality?: boolean
+  includeScenario?: boolean
 }
 
 export interface Chat {

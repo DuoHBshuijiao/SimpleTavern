@@ -60,6 +60,7 @@ watch(
     if (!settingsStore.settings) await settingsStore.load()
     const s = clone(settingsStore.settings!)
     if (s.streamEnabled === undefined) s.streamEnabled = true
+    if ((s as Settings).pureAiMode === undefined) (s as Settings).pureAiMode = false
     if (!s.apiPresets) s.apiPresets = []
     
     globalDraft.value = s
@@ -252,6 +253,28 @@ async function saveChatOverrides() {
                 </div>
                 <span class="text-xs text-gray-400">
                   {{ globalDraft.streamEnabled ? '已开启' : '已关闭' }}
+                </span>
+              </button>
+            </div>
+
+            <!-- Pure AI Mode Toggle -->
+            <div class="space-y-2">
+              <label class="block text-sm font-medium text-gray-300">纯 AI 模式</label>
+              <button
+                class="flex items-center gap-3 group cursor-pointer w-full text-left"
+                @click="globalDraft.pureAiMode = !globalDraft.pureAiMode"
+              >
+                <div
+                  class="w-10 h-5 rounded-full relative transition-colors duration-200"
+                  :class="globalDraft.pureAiMode ? 'bg-brand' : 'bg-gray-700'"
+                >
+                  <div
+                    class="absolute top-1 w-3 h-3 rounded-full bg-white transition-transform duration-200"
+                    :class="globalDraft.pureAiMode ? 'left-6' : 'left-1'"
+                  ></div>
+                </div>
+                <span class="text-xs text-gray-400">
+                  {{ globalDraft.pureAiMode ? '已开启：不注入用户 Persona，用户发言将以 system 影响世界' : '已关闭：正常对话模式' }}
                 </span>
               </button>
             </div>

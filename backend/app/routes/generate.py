@@ -18,6 +18,14 @@ router = APIRouter(tags=["generate"])
 def _now_iso() -> str:
     return datetime.now().astimezone().isoformat()
 
+def _resolve_pure_ai_mode(settings, chat, runtime) -> bool:
+    # runtimeOverrides > chat.overrides > settings
+    if runtime is not None and getattr(runtime, "pureAiMode", None) is not None:
+        return bool(runtime.pureAiMode)
+    if chat is not None and getattr(chat, "overrides", None) is not None and getattr(chat.overrides, "pureAiMode", None) is not None:
+        return bool(chat.overrides.pureAiMode)
+    return bool(getattr(settings, "pureAiMode", False))
+
 
 def _sse(event: str, data_obj: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data_obj, ensure_ascii=False)}\n\n"
@@ -41,6 +49,8 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
     chat.updatedAt = _now_iso()
     save_chat(chat)
 
+    pure_ai_mode = _resolve_pure_ai_mode(settings, chat, req.runtimeOverrides)
+
     # 组装 prompt/参数优先级：runtimeOverrides > chat.overrides > settings.defaults
     runtime = req.runtimeOverrides
     prompt_parts: list[str] = []
@@ -49,7 +59,7 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
     
     # 构建用户Persona相关提示词
     selected_persona = None
-    if settings.selectedPersonaId and settings.userPersonas:
+    if (not pure_ai_mode) and settings.selectedPersonaId and settings.userPersonas:
         selected_persona = next((p for p in settings.userPersonas if p.id == settings.selectedPersonaId), None)
     
     if selected_persona:
@@ -116,7 +126,11 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
     for m in chat.messages:
-        messages.append({"role": m.role, "content": m.content})
+        if pure_ai_mode and m.role == "user":
+            # 纯 AI 模式：用户发言以 system 身份影响世界/规则
+            messages.append({"role": "system", "content": m.content})
+        else:
+            messages.append({"role": m.role, "content": m.content})
 
     async def event_iter() -> AsyncIterator[str]:
         full_text: list[str] = []
@@ -221,6 +235,7 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
         raise HTTPException(status_code=400, detail="character is not a member of this group")
 
     settings = load_settings()
+    pure_ai_mode = _resolve_pure_ai_mode(settings, chat, req.runtimeOverrides)
     try:
         character = load_character(req.characterId)
     except FileNotFoundError:
@@ -234,7 +249,7 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
     
     # 构建用户Persona相关提示词
     selected_persona = None
-    if settings.selectedPersonaId and settings.userPersonas:
+    if (not pure_ai_mode) and settings.selectedPersonaId and settings.userPersonas:
         selected_persona = next((p for p in settings.userPersonas if p.id == settings.selectedPersonaId), None)
     
     if selected_persona:
@@ -261,12 +276,17 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
         group_context_parts.append(f"{i+1}. {char.name}")
     prompt_parts.append("\n".join(group_context_parts))
     
+    # 获取该角色的独立设置（含 prompt 插入字段开关）
+    member_settings = chat.memberSettings.get(req.characterId)
+    include_personality = True if member_settings is None else bool(getattr(member_settings, "includePersonality", True))
+    include_scenario = True if member_settings is None else bool(getattr(member_settings, "includeScenario", True))
+
     # 构建当前回复角色的提示词
     character_parts: list[str] = []
     character_parts.append(f"你现在扮演的角色是：{character.name}")
-    if character.personality and character.personality.strip():
+    if include_personality and character.personality and character.personality.strip():
         character_parts.append(f"Personality：\n{character.personality.strip()}")
-    if character.scenario and character.scenario.strip():
+    if include_scenario and character.scenario and character.scenario.strip():
         character_parts.append(f"Scenario：\n{character.scenario.strip()}")
     if character.systemPrompt and character.systemPrompt.strip():
         character_parts.append(character.systemPrompt.strip())
@@ -280,9 +300,6 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
         prompt_parts.append(runtime.prompt)
     system_prompt = "\n\n".join([p for p in prompt_parts if p.strip()])
 
-    # 获取该角色的独立设置
-    member_settings = chat.memberSettings.get(req.characterId)
-    
     def pick_param(name: str):
         val = None
         # 优先级: runtime > memberSettings > chat.overrides > settings.generationDefaults
@@ -332,9 +349,12 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
     
     for m in chat.messages:
         if m.role == "user":
-            # 用户消息
-            user_name = selected_persona.name if selected_persona else "用户"
-            messages.append({"role": "user", "content": f"[{user_name}]: {m.content}"})
+            # 用户消息（纯 AI 模式下映射为 system）
+            if pure_ai_mode:
+                messages.append({"role": "system", "content": f"[用户]: {m.content}"})
+            else:
+                user_name = selected_persona.name if selected_persona else "用户"
+                messages.append({"role": "user", "content": f"[{user_name}]: {m.content}"})
         elif m.role == "assistant":
             # 角色消息 - 标注是哪个角色说的
             if m.characterId:
@@ -445,6 +465,7 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
         raise HTTPException(status_code=400, detail="character is not a member of this group")
 
     settings = load_settings()
+    pure_ai_mode = _resolve_pure_ai_mode(settings, chat, None)
     try:
         character = load_character(req.characterId)
     except FileNotFoundError:
@@ -457,7 +478,7 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
     
     # 构建用户Persona相关提示词
     selected_persona = None
-    if settings.selectedPersonaId and settings.userPersonas:
+    if (not pure_ai_mode) and settings.selectedPersonaId and settings.userPersonas:
         selected_persona = next((p for p in settings.userPersonas if p.id == settings.selectedPersonaId), None)
     
     if selected_persona:
@@ -484,13 +505,18 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
         group_context_parts.append(f"{i+1}. {char.name}")
     prompt_parts.append("\n".join(group_context_parts))
     
+    # 获取该角色的独立设置（含 prompt 插入字段开关）
+    member_settings = chat.memberSettings.get(req.characterId)
+    include_personality = True if member_settings is None else bool(getattr(member_settings, "includePersonality", True))
+    include_scenario = True if member_settings is None else bool(getattr(member_settings, "includeScenario", True))
+
     # 构建当前回复角色的提示词
     character_parts: list[str] = []
     character_parts.append(f"你现在扮演的角色是：{character.name}")
     character_parts.append("请根据当前对话内容进行回复（这是一次额外的插话机会）。")
-    if character.personality and character.personality.strip():
+    if include_personality and character.personality and character.personality.strip():
         character_parts.append(f"Personality：\n{character.personality.strip()}")
-    if character.scenario and character.scenario.strip():
+    if include_scenario and character.scenario and character.scenario.strip():
         character_parts.append(f"Scenario：\n{character.scenario.strip()}")
     if character.systemPrompt and character.systemPrompt.strip():
         character_parts.append(character.systemPrompt.strip())
@@ -502,9 +528,6 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
         prompt_parts.append(chat.overrides.prompt)
     system_prompt = "\n\n".join([p for p in prompt_parts if p.strip()])
 
-    # 获取该角色的独立设置
-    member_settings = chat.memberSettings.get(req.characterId)
-    
     def pick_param(name: str):
         val = None
         if member_settings is not None:
@@ -549,8 +572,11 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
     
     for m in chat.messages:
         if m.role == "user":
-            user_name = selected_persona.name if selected_persona else "用户"
-            messages.append({"role": "user", "content": f"[{user_name}]: {m.content}"})
+            if pure_ai_mode:
+                messages.append({"role": "system", "content": f"[用户]: {m.content}"})
+            else:
+                user_name = selected_persona.name if selected_persona else "用户"
+                messages.append({"role": "user", "content": f"[{user_name}]: {m.content}"})
         elif m.role == "assistant":
             if m.characterId:
                 try:

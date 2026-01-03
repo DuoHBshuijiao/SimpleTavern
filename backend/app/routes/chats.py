@@ -19,6 +19,8 @@ def _merge_overrides(existing: Chat, incoming: UpdateChatRequest) -> None:
     ov = incoming.overrides
     if ov.prompt is not None:
         existing.overrides.prompt = ov.prompt
+    if getattr(ov, "pureAiMode", None) is not None:
+        existing.overrides.pureAiMode = ov.pureAiMode
 
     # params 做“只覆盖非 None 字段”的合并，避免一次更新把旧参数清空
     for key in ("model", "temperature", "top_p", "max_tokens"):
@@ -67,6 +69,14 @@ def create_chat(req: CreateChatRequest) -> Chat:
         # 单聊：保持原有逻辑
         chat = Chat(characterId=req.characterId, title=req.title or "新对话")
     
+    # 写入会话级 pureAiMode（None 表示使用全局）
+    chat.overrides.pureAiMode = req.pureAiMode
+    
+    # 群聊创建时可写入 memberSettings
+    if is_group and req.memberSettings:
+        for member_id, s in req.memberSettings.items():
+            chat.memberSettings[member_id] = s
+    
     chat.createdAt = _now_iso()
     chat.updatedAt = _now_iso()
     
@@ -74,7 +84,11 @@ def create_chat(req: CreateChatRequest) -> Chat:
     user_name = ""
     try:
         settings = load_settings()
-        if settings.selectedPersonaId and settings.userPersonas:
+        pure_ai_mode = req.pureAiMode if req.pureAiMode is not None else bool(getattr(settings, "pureAiMode", False))
+        if pure_ai_mode:
+            # 纯 AI 模式不注入 persona，但为了避免 {{user}} 残留，使用通用称呼
+            user_name = "用户"
+        elif settings.selectedPersonaId and settings.userPersonas:
             selected_persona = next((p for p in settings.userPersonas if p.id == settings.selectedPersonaId), None)
             if selected_persona:
                 user_name = selected_persona.name
@@ -82,7 +96,6 @@ def create_chat(req: CreateChatRequest) -> Chat:
         pass
     
     # 单聊时：如果角色有首句，自动添加为 assistant 的第一条消息
-    # 群聊时：不自动添加首句（多角色场景下不合适）
     if not is_group:
         try:
             character = load_character(req.characterId)
@@ -98,6 +111,24 @@ def create_chat(req: CreateChatRequest) -> Chat:
         except FileNotFoundError:
             # 角色不存在时忽略，不影响会话创建
             pass
+    else:
+        # 群聊时：可选择启用某成员的 firstMessage 作为开场背景
+        if req.firstMessageCharacterId:
+            if req.firstMessageCharacterId not in chat.memberIds:
+                raise HTTPException(status_code=400, detail="firstMessageCharacterId is not a member of this group")
+            try:
+                first_char = load_character(req.firstMessageCharacterId)
+                if first_char.firstMessage and first_char.firstMessage.strip():
+                    first_msg = first_char.firstMessage.strip()
+                    if user_name:
+                        first_msg = _replace_user_placeholder(first_msg, user_name)
+                    chat.messages.append(ChatMessage(
+                        role="assistant",
+                        content=first_msg,
+                        characterId=req.firstMessageCharacterId
+                    ))
+            except FileNotFoundError:
+                raise HTTPException(status_code=404, detail="firstMessageCharacter not found")
     
     return save_chat(chat)
 

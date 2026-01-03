@@ -66,6 +66,10 @@ class Settings(BaseModel):
     generationDefaults: GenerationParams = Field(default_factory=GenerationParams)
     prompts: SettingsPrompts = Field(default_factory=SettingsPrompts)
     streamEnabled: bool = True  # 是否启用流式传输
+    # 纯 AI 模式：
+    # - 不注入用户 Persona
+    # - 将用户发言在发送给模型时映射为 system（用于“影响世界/规则”）
+    pureAiMode: bool = False
     userPersonas: list[UserPersona] = Field(default_factory=list)  # 用户Persona列表
     selectedPersonaId: str | None = None  # 当前选中的Persona ID
     createdAt: str = Field(default_factory=_now_iso)
@@ -108,6 +112,8 @@ class ChatOverrides(BaseModel):
 
     prompt: str | None = None
     presetId: str | None = None  # 关联的API预设ID
+    # 会话级纯 AI 模式（None 表示使用全局 settings.pureAiMode）
+    pureAiMode: bool | None = None
     params: GenerationParams = Field(default_factory=GenerationParams)
 
 
@@ -120,6 +126,9 @@ class GroupMemberSettings(BaseModel):
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     top_p: float | None = Field(default=None, ge=0.0, le=1.0)
     probability: float = Field(default=1.0, ge=0.0, le=1.0)  # 参与概率 0-1
+    # system prompt 组装时是否插入该成员的字段（用于避免重复/重叠设定）
+    includePersonality: bool = True
+    includeScenario: bool = True
 
 
 class Chat(BaseModel):
@@ -146,6 +155,12 @@ class CreateChatRequest(BaseModel):
     # 群聊创建参数
     isGroup: bool = False
     memberIds: list[str] | None = None  # 群成员角色ID列表
+    # 本次会话是否启用纯 AI 模式（会写入 chat.overrides.pureAiMode）
+    pureAiMode: bool | None = None
+    # 创建时可一次性写入群成员设置（含参与概率、system prompt 插入字段开关等）
+    memberSettings: dict[str, GroupMemberSettings] | None = None
+    # 群聊：选择启用谁的 firstMessage 作为开场背景（写入 messages 的第一条 assistant 消息）
+    firstMessageCharacterId: str | None = None
 
 
 class AppendMessageRequest(BaseModel):
