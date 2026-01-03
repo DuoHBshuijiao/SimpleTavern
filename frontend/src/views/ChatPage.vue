@@ -9,7 +9,7 @@ import AvatarCropper from '../components/AvatarCropper.vue'
 import ModernAvatar from '../components/ModernAvatar.vue'
 import ModernSelect from '../components/ModernSelect.vue'
 import { postAndConsumeSse } from '../api/sse'
-import { apiPost } from '../api/http'
+import { apiPost, apiPut } from '../api/http'
 
 import {
   NButton,
@@ -49,6 +49,10 @@ const editingPersona = ref<UserPersona | null>(null)
 const isNewPersona = ref(false)
 const showPersonaAvatarCropper = ref(false)
 
+// Persona 切换确认
+const showPersonaSwitchConfirm = ref(false)
+const pendingPersonaId = ref<string | null>(null)
+
 // 群聊相关
 const showGroupCreator = ref(false)
 const selectedMemberIds = ref<string[]>([])
@@ -65,6 +69,17 @@ const groupFirstMessageEnabled = ref(true)
 const groupFirstMessageCharacterId = ref<string | null>(null)
 const groupMemberInclusions = ref<Record<string, { includePersonality: boolean; includeScenario: boolean }>>({})
 
+const groupFirstMessageOptions = computed(() => {
+  const opts = selectedMemberIds.value.map(id => ({
+    label: getCharacterById(id)?.name || id,
+    value: id
+  }))
+  return [
+    { label: '（未选择）', value: '' },
+    ...opts
+  ]
+})
+
 // 成员设置编辑
 const editingMemberId = ref<string | null>(null)
 const editingMemberSettings = ref<GroupMemberSettings>({
@@ -80,6 +95,11 @@ const editingMemberSettings = ref<GroupMemberSettings>({
 // 插话相关
 const showInterjectPanel = ref(false)  // 是否显示插话面板
 const isInterjecting = ref(false)  // 是否正在插话
+const interjectPanelManuallyHidden = ref(false)
+
+// 管理群成员：拖拽排序
+const memberOrderDraft = ref<string[]>([])
+const draggingMemberIdx = ref<number | null>(null)
 
 // 快速模型切换 (聚合所有预设 + 最近使用置顶)
 const chatModelOptions = computed(() => {
@@ -196,6 +216,20 @@ const selectedCharacter = computed(() => {
 
 const activeChat = computed(() => chats.activeChat)
 
+const effectivePureAiMode = computed(() => {
+  const chatOverride = activeChat.value?.overrides?.pureAiMode
+  if (chatOverride !== null && chatOverride !== undefined) return !!chatOverride
+  return !!settings.settings?.pureAiMode
+})
+
+const canInterject = computed(() => {
+  return !!activeChat.value?.isGroup &&
+    !isGenerating.value &&
+    !isInterjecting.value &&
+    !interjectPanelManuallyHidden.value &&
+    (showInterjectPanel.value || effectivePureAiMode.value)
+})
+
 const md = new MarkdownIt({
   html: false, // 禁止原始 HTML，避免模型输出导致 XSS
   linkify: true,
@@ -255,10 +289,16 @@ async function deleteMessage(m: ChatMessage) {
   await chats.deleteMessage(activeChat.value.id, m.id)
 }
 
+const effectiveSelectedPersonaId = computed(() => {
+  // 纯 AI 模式下：Persona 视为未选中（不修改全局 settings，只在当前会话 UI 层遮罩）
+  if (effectivePureAiMode.value) return null
+  return settings.settings?.selectedPersonaId ?? null
+})
+
 // 获取选中的 Persona
 const selectedPersona = computed(() => {
-  if (!settings.settings?.selectedPersonaId || !settings.settings?.userPersonas) return null
-  return settings.settings.userPersonas.find(p => p.id === settings.settings!.selectedPersonaId) ?? null
+  if (!effectiveSelectedPersonaId.value || !settings.settings?.userPersonas) return null
+  return settings.settings.userPersonas.find(p => p.id === effectiveSelectedPersonaId.value) ?? null
 })
 
 // 头像URL
@@ -277,7 +317,7 @@ const userName = computed(() => {
 })
 
 function getMessageLabel(m: ChatMessage) {
-  if (m.role === 'user') return userName.value
+  if (m.role === 'user') return (m.senderName || userName.value)
   if (m.role === 'assistant') {
     // 群聊时根据 characterId 获取角色名称
     if (m.characterId) {
@@ -290,7 +330,10 @@ function getMessageLabel(m: ChatMessage) {
 }
 
 function getMessageAvatar(m: ChatMessage) {
-  if (m.role === 'user') return userAvatarUrl.value
+  if (m.role === 'user') {
+    if (m.senderAvatar) return `/api/avatars/${m.senderAvatar}`
+    return userAvatarUrl.value
+  }
   if (m.role === 'assistant') {
     // 群聊时根据 characterId 获取角色头像
     if (m.characterId) {
@@ -444,10 +487,85 @@ async function savePersona() {
 
 async function selectPersona(id: string) {
   if (!settings.settings) return
-  await settings.save({
-    ...settings.settings,
-    selectedPersonaId: id,
-  })
+  if (settings.settings.selectedPersonaId === id) return
+  // 若在现有对话中切换 persona，弹确认框（新建会话 / 继续对话）
+  if (activeChat.value && (activeChat.value.messages?.length || 0) > 0) {
+    pendingPersonaId.value = id
+    showPersonaSwitchConfirm.value = true
+    return
+  }
+  await settings.save({ ...settings.settings, selectedPersonaId: id })
+}
+
+async function confirmSwitchPersonaNewSession() {
+  if (!settings.settings) return
+  if (!pendingPersonaId.value) return
+  const targetId = pendingPersonaId.value
+  showPersonaSwitchConfirm.value = false
+  pendingPersonaId.value = null
+
+  await settings.save({ ...settings.settings, selectedPersonaId: targetId })
+  if (!activeChat.value) return
+
+  const title = `${activeChat.value.title}（新建会话）`
+  const pure = effectivePureAiMode.value
+  if (activeChat.value.isGroup) {
+    await chats.createGroup(
+      activeChat.value.characterId,
+      [...activeChat.value.memberIds],
+      title,
+      pure,
+      null,
+      activeChat.value.memberSettings || null,
+    )
+  } else {
+    await chats.create(activeChat.value.characterId, title, pure)
+  }
+  scrollToBottom()
+}
+
+async function freezeCurrentUserMessagesSenderSnapshot() {
+  if (!activeChat.value) return
+  const chatId = activeChat.value.id
+  const oldPersonaId = selectedPersona.value?.id ?? null
+  const oldName = selectedPersona.value?.name ?? userName.value
+  const oldAvatar = selectedPersona.value?.avatar ?? null
+
+  const targets = (activeChat.value.messages || []).filter(m =>
+    m.role === 'user' &&
+    !String(m.id).startsWith('local_') &&
+    (!m.senderName || !m.senderAvatar || !m.senderPersonaId)
+  )
+
+  for (const m of targets) {
+    await apiPut(`/api/chats/${chatId}/messages/${m.id}`, {
+      role: 'user',
+      content: m.content,
+      senderPersonaId: oldPersonaId,
+      senderName: oldName,
+      senderAvatar: oldAvatar,
+    })
+  }
+
+  if (targets.length > 0) {
+    await chats.load(chatId)
+  }
+}
+
+async function confirmSwitchPersonaContinue() {
+  if (!settings.settings) return
+  if (!pendingPersonaId.value) return
+  const targetId = pendingPersonaId.value
+  showPersonaSwitchConfirm.value = false
+  pendingPersonaId.value = null
+  // 先固化“切换前”的历史 user 消息发送者信息，避免切换后显示被新 persona 覆盖
+  await freezeCurrentUserMessagesSenderSnapshot()
+  await settings.save({ ...settings.settings, selectedPersonaId: targetId })
+}
+
+function cancelSwitchPersona() {
+  showPersonaSwitchConfirm.value = false
+  pendingPersonaId.value = null
 }
 
 async function deletePersona(id: string) {
@@ -555,6 +673,45 @@ function getCharacterById(id: string) {
   return characters.list.find(c => c.id === id) ?? null
 }
 
+function getChatAvatars(chat: Chat) {
+  const avatars: { src: string | null; name: string }[] = []
+  
+  const chatPure = (chat.overrides?.pureAiMode ?? settings.settings?.pureAiMode) === true
+
+  // 1. User（非纯 AI 模式才展示）
+  if (!chatPure) {
+    const seen = new Set<string>()
+    // 优先使用消息里固化的 sender 快照（支持“切换身份后历史消息不变 + 头像追加”）
+    for (const m of (chat.messages || [])) {
+      if (m.role !== 'user') continue
+      const key = (m.senderPersonaId || '') + '|' + (m.senderAvatar || '') + '|' + (m.senderName || '')
+      if (seen.has(key)) continue
+      seen.add(key)
+      avatars.push({
+        src: m.senderAvatar ? `/api/avatars/${m.senderAvatar}` : null,
+        name: m.senderName || '你',
+      })
+    }
+    // 若还没有任何 user 消息（新会话），用当前选择作为占位
+    if (avatars.length === 0) {
+      if (userAvatarUrl.value) avatars.push({ src: userAvatarUrl.value, name: userName.value })
+      else avatars.push({ src: null, name: '你' })
+    }
+  }
+
+  // 2. Members
+  if (chat.isGroup) {
+    chat.memberIds.forEach(id => {
+       const char = getCharacterById(id)
+       if (char) avatars.push({ src: char.avatar ? `/api/avatars/${char.avatar}` : null, name: char.name })
+    })
+  } else {
+     const char = getCharacterById(chat.characterId)
+     if (char) avatars.push({ src: char.avatar ? `/api/avatars/${char.avatar}` : null, name: char.name })
+  }
+  return avatars
+}
+
 // 群成员角色列表
 const groupMembers = computed(() => {
   if (!activeChat.value?.isGroup) return []
@@ -563,9 +720,53 @@ const groupMembers = computed(() => {
     .filter(c => c !== null)
 })
 
+const managerMemberIds = computed(() => {
+  if (!activeChat.value?.isGroup) return []
+  if (showMemberManager.value && memberOrderDraft.value.length > 0) return memberOrderDraft.value
+  return activeChat.value.memberIds
+})
+
+const groupMembersInManager = computed(() => {
+  if (!activeChat.value?.isGroup) return []
+  return managerMemberIds.value.map(id => getCharacterById(id)).filter(c => c !== null)
+})
+
 // 打开成员管理
 function openMemberManager() {
+  // 初始化排序草稿（用于拖拽）
+  if (activeChat.value?.isGroup) {
+    memberOrderDraft.value = [...activeChat.value.memberIds]
+  } else {
+    memberOrderDraft.value = []
+  }
+  draggingMemberIdx.value = null
   showMemberManager.value = true
+}
+
+function onDragStartMember(idx: number) {
+  draggingMemberIdx.value = idx
+}
+
+function onDropMember(idx: number) {
+  const from = draggingMemberIdx.value
+  if (from === null) return
+  if (from === idx) return
+  const arr = [...memberOrderDraft.value]
+  const [moved] = arr.splice(from, 1)
+  arr.splice(idx, 0, moved!)
+  memberOrderDraft.value = arr
+  draggingMemberIdx.value = null
+}
+
+async function finishMemberManager() {
+  if (activeChat.value?.isGroup) {
+    const cur = activeChat.value.memberIds
+    const next = memberOrderDraft.value
+    if (next.length === cur.length && next.some((v, i) => v !== cur[i])) {
+      await chats.updateMemberOrder(activeChat.value.id, next)
+    }
+  }
+  showMemberManager.value = false
 }
 
 // 添加成员到群聊
@@ -850,11 +1051,14 @@ async function sendUserMessage() {
   isPaused.value = false
   showContinueButton.value = false
   pendingMembers.value = []
-  showInterjectPanel.value = false  // 隐藏插话面板
+  interjectPanelManuallyHidden.value = false
+  // 纯 AI 模式下可随时插话；非纯 AI 模式保持“轮次结束后再插话”
+  showInterjectPanel.value = effectivePureAiMode.value ? true : false
 
   const chatId = activeChat.value.id
   const isGroup = activeChat.value.isGroup
   const now = new Date().toISOString()
+  const userRole = effectivePureAiMode.value ? ('system' as const) : ('user' as const)
 
   isGenerating.value = true
   aborter?.abort()
@@ -884,11 +1088,26 @@ async function sendUserMessage() {
       // 1. 添加用户消息到本地显示
       const localUserId = `local_user_${Date.now()}`
       // activeChat.value.messages.push({ version: 1, id: localUserId, role: 'user', content: text, ts: now })
-      chats.addLocalMessage({ version: 1, id: localUserId, role: 'user', content: text, ts: now })
+      chats.addLocalMessage({
+        version: 1,
+        id: localUserId,
+        role: userRole,
+        content: text,
+        senderPersonaId: userRole === 'user' ? (selectedPersona.value?.id ?? null) : null,
+        senderName: userRole === 'user' ? (selectedPersona.value?.name ?? userName.value) : null,
+        senderAvatar: userRole === 'user' ? (selectedPersona.value?.avatar ?? null) : null,
+        ts: now,
+      })
       scrollToBottom()
       
       // 2. 先保存用户消息到后端（直接调用API，不更新store的activeChat）
-      await apiPost(`/api/chats/${chatId}/messages`, { role: 'user', content: text })
+      await apiPost(`/api/chats/${chatId}/messages`, {
+        role: userRole,
+        content: text,
+        senderPersonaId: userRole === 'user' ? (selectedPersona.value?.id ?? null) : null,
+        senderName: userRole === 'user' ? (selectedPersona.value?.name ?? userName.value) : null,
+        senderAvatar: userRole === 'user' ? (selectedPersona.value?.avatar ?? null) : null,
+      })
       
       // 3. 依次让每个角色回复（可被暂停）
       await runGroupGeneration(chatId, memberIds, useStream, groupDelay, 0)
@@ -899,6 +1118,7 @@ async function sendUserMessage() {
       currentSpeakerIndex.value = -1
       
       // 轮次结束后显示插话面板
+      interjectPanelManuallyHidden.value = false
       showInterjectPanel.value = true
       
     } else {
@@ -908,7 +1128,16 @@ async function sendUserMessage() {
 
       // activeChat.value.messages.push({ version: 1, id: localUserId, role: 'user', content: text, ts: now })
       // activeChat.value.messages.push({ version: 1, id: localAssistantId, role: 'assistant', content: '', ts: now })
-      chats.addLocalMessage({ version: 1, id: localUserId, role: 'user', content: text, ts: now })
+      chats.addLocalMessage({
+        version: 1,
+        id: localUserId,
+        role: userRole,
+        content: text,
+        senderPersonaId: userRole === 'user' ? (selectedPersona.value?.id ?? null) : null,
+        senderName: userRole === 'user' ? (selectedPersona.value?.name ?? userName.value) : null,
+        senderAvatar: userRole === 'user' ? (selectedPersona.value?.avatar ?? null) : null,
+        ts: now,
+      })
       chats.addLocalMessage({ version: 1, id: localAssistantId, role: 'assistant', content: '', ts: now })
       // const assistantMsgIndex = activeChat.value.messages.length - 1
       
@@ -917,7 +1146,13 @@ async function sendUserMessage() {
       if (useStream) {
         await postAndConsumeSse(
           '/api/generate/stream',
-          { chatId, userMessage: text },
+          {
+            chatId,
+            userMessage: text,
+            senderPersonaId: selectedPersona.value?.id ?? null,
+            senderName: selectedPersona.value?.name ?? userName.value,
+            senderAvatar: selectedPersona.value?.avatar ?? null,
+          },
           (evt) => {
             if (evt.event === 'delta') {
               const t = evt.data?.text
@@ -938,7 +1173,13 @@ async function sendUserMessage() {
           assistantMessageId: string | null
           content: string
           error?: string
-        }>('/api/generate/stream', { chatId, userMessage: text })
+        }>('/api/generate/stream', {
+          chatId,
+          userMessage: text,
+          senderPersonaId: selectedPersona.value?.id ?? null,
+          senderName: selectedPersona.value?.name ?? userName.value,
+          senderAvatar: selectedPersona.value?.avatar ?? null,
+        })
         
       if (res.ok) {
         chats.appendLocalMessageContent(localAssistantId, res.content || '')
@@ -993,6 +1234,7 @@ async function startNextRound() {
     await runGroupGeneration(chatId, memberIds, useStream, groupDelay, 0)
     if (isPaused.value) return
 
+    interjectPanelManuallyHidden.value = false
     showInterjectPanel.value = true
   } catch (e: any) {
     streamError.value = e?.message ?? String(e)
@@ -1048,12 +1290,12 @@ const editingPersonaAvatarUrl = computed(() => {
               v-for="p in (settings.settings?.userPersonas || [])"
               :key="p.id"
               class="group flex items-center gap-3 p-2 rounded-xl cursor-pointer transition-all duration-200 border border-transparent"
-              :class="settings.settings?.selectedPersonaId === p.id ? 'bg-brand/10 border-brand/20' : 'hover:bg-white/5'"
+              :class="effectiveSelectedPersonaId === p.id ? 'bg-brand/10 border-brand/20' : 'hover:bg-white/5'"
               @click="selectPersona(p.id)"
             >
               <ModernAvatar :src="p.avatar ? `/api/avatars/${p.avatar}` : null" :name="p.name" :size="36" aspect="1" />
               <div class="flex-1 min-w-0">
-                <div class="font-medium text-sm truncate" :class="settings.settings?.selectedPersonaId === p.id ? 'text-brand' : 'text-gray-300'">{{ p.name }}</div>
+                <div class="font-medium text-sm truncate" :class="effectiveSelectedPersonaId === p.id ? 'text-brand' : 'text-gray-300'">{{ p.name }}</div>
               </div>
               <div class="opacity-0 group-hover:opacity-100 flex gap-1 transition-opacity">
                 <button class="p-1 hover:text-white text-gray-500" @click.stop="openEditPersona(p)">✏</button>
@@ -1154,7 +1396,14 @@ const editingPersonaAvatarUrl = computed(() => {
                 @click="selectGroupChat(c)"
               >
                 <div class="flex items-center gap-2 flex-1 min-w-0 pr-2">
-                  <span class="text-purple-400">👥</span>
+                  <div class="flex -space-x-1.5 overflow-hidden shrink-0">
+                     <template v-for="(avatar, i) in getChatAvatars(c).slice(0, 3)" :key="i">
+                       <ModernAvatar :src="avatar.src" :name="avatar.name" :size="20" aspect="1" rounded="rounded-full" class="ring-1 ring-[#141418] bg-[#141418]" />
+                     </template>
+                     <div v-if="getChatAvatars(c).length > 3" class="w-5 h-5 rounded-full bg-white/10 flex items-center justify-center text-[8px] ring-1 ring-[#141418]">
+                       +{{ getChatAvatars(c).length - 3 }}
+                     </div>
+                  </div>
                   <div v-if="editingChatId === c.id" @click.stop class="flex gap-1 flex-1">
                     <input 
                       v-model="editingTitle" 
@@ -1194,19 +1443,26 @@ const editingPersonaAvatarUrl = computed(() => {
                 :class="chats.activeChatId === c.id ? 'bg-brand/10 text-brand' : 'text-gray-400 hover:bg-white/5 hover:text-gray-200'"
                 @click="chats.load(c.id)"
               >
-                <div class="flex-1 min-w-0 pr-2">
-                  <div v-if="editingChatId === c.id" @click.stop class="flex gap-1">
-                      <input 
-                        v-model="editingTitle" 
-                        class="bg-black/20 border border-brand/50 rounded px-1 py-0.5 text-xs w-full text-white outline-none focus:border-brand"
-                        @keyup.enter="saveTitle"
-                        @keyup.escape="cancelEditTitle"
-                        autoFocus
-                      />
-                      <button class="text-brand hover:text-white" @click="saveTitle">✓</button>
-                      <button class="text-gray-500 hover:text-white" @click="cancelEditTitle">✕</button>
+                <div class="flex items-center gap-2 flex-1 min-w-0 pr-2">
+                  <div class="flex -space-x-1.5 overflow-hidden shrink-0">
+                     <template v-for="(avatar, i) in getChatAvatars(c).slice(0, 2)" :key="i">
+                       <ModernAvatar :src="avatar.src" :name="avatar.name" :size="20" aspect="1" rounded="rounded-full" class="ring-1 ring-[#141418] bg-[#141418]" />
+                     </template>
                   </div>
-                  <div v-else class="truncate">{{ c.title }}</div>
+                  <div class="flex-1 min-w-0">
+                    <div v-if="editingChatId === c.id" @click.stop class="flex gap-1">
+                        <input 
+                          v-model="editingTitle" 
+                          class="bg-black/20 border border-brand/50 rounded px-1 py-0.5 text-xs w-full text-white outline-none focus:border-brand"
+                          @keyup.enter="saveTitle"
+                          @keyup.escape="cancelEditTitle"
+                          autoFocus
+                        />
+                        <button class="text-brand hover:text-white" @click="saveTitle">✓</button>
+                        <button class="text-gray-500 hover:text-white" @click="cancelEditTitle">✕</button>
+                    </div>
+                    <div v-else class="truncate">{{ c.title }}</div>
+                  </div>
                 </div>
                 
                 <div v-if="editingChatId !== c.id" class="opacity-0 group-hover:opacity-100 flex gap-1 transition-opacity">
@@ -1267,9 +1523,9 @@ const editingPersonaAvatarUrl = computed(() => {
                 v-for="(member, idx) in groupMembers" 
                 :key="member.id"
                 class="flex items-center gap-1 shrink-0 bg-white/5 px-2 py-1 rounded-lg transition-colors group/member"
-                :class="showInterjectPanel && !isGenerating && !isInterjecting ? 'cursor-pointer hover:bg-purple-500/20 hover:border-purple-500/50' : ''"
-                :title="showInterjectPanel && !isGenerating && !isInterjecting ? `点击让 ${member.name} 插话` : member.name"
-                @click="showInterjectPanel && !isGenerating && !isInterjecting && triggerInterject(member.id)"
+                :class="canInterject ? 'cursor-pointer hover:bg-purple-500/20 hover:border-purple-500/50' : ''"
+                :title="canInterject ? `点击让 ${member.name} 插话` : member.name"
+                @click="canInterject && triggerInterject(member.id)"
               >
                 <span class="text-xs text-gray-500">{{ idx + 1 }}.</span>
                 <ModernAvatar 
@@ -1278,7 +1534,7 @@ const editingPersonaAvatarUrl = computed(() => {
                   :size="20" 
                   aspect="1"
                   rounded="rounded"
-                  :class="showInterjectPanel && !isGenerating && !isInterjecting ? 'group-hover/member:ring-2 group-hover/member:ring-purple-500' : ''"
+                  :class="canInterject ? 'group-hover/member:ring-2 group-hover/member:ring-purple-500' : ''"
                 />
                 <span class="text-xs text-gray-300 max-w-[60px] truncate">{{ member.name }}</span>
                 <!-- 显示概率标记 -->
@@ -1290,8 +1546,8 @@ const editingPersonaAvatarUrl = computed(() => {
                   {{ Math.round(getMemberSettings(member.id).probability * 100) }}%
                 </span>
               </div>
-              <!-- 用户也是成员 -->
-              <div class="flex items-center gap-1 shrink-0 bg-brand/10 px-2 py-1 rounded-lg border border-brand/20">
+              <!-- 用户也是成员（纯 AI 模式不展示用户头像） -->
+              <div v-if="!effectivePureAiMode" class="flex items-center gap-1 shrink-0 bg-brand/10 px-2 py-1 rounded-lg border border-brand/20">
                 <ModernAvatar 
                   :src="userAvatarUrl" 
                   :name="userName" 
@@ -1322,8 +1578,9 @@ const editingPersonaAvatarUrl = computed(() => {
                    :name="getMessageLabel(m)"
                    :size="40"
                    aspect="1"
+                   object-fit="contain"
                    rounded="rounded-xl"
-                   class="shadow-sm"
+                   class="shadow-sm bg-black/20"
                  />
               </div>
 
@@ -1407,8 +1664,8 @@ const editingPersonaAvatarUrl = computed(() => {
                      </button>
                    </div>
                    <!-- 插话面板 -->
-                   <div v-else-if="showInterjectPanel && activeChat?.isGroup && !isInterjecting" class="flex items-center gap-2 text-xs">
-                     <span class="text-purple-400">💬 轮次结束，点击角色插话：</span>
+                   <div v-else-if="canInterject && activeChat?.isGroup && !isInterjecting" class="flex items-center gap-2 text-xs">
+                     <span class="text-purple-400">💬 点击角色插话：</span>
                      <div class="flex items-center gap-1">
                        <div 
                          v-for="member in groupMembers"
@@ -1429,7 +1686,7 @@ const editingPersonaAvatarUrl = computed(() => {
                      </div>
                      <button 
                        class="ml-2 px-2 py-0.5 text-xs bg-gray-500/20 hover:bg-gray-500/30 text-gray-400 rounded transition-colors"
-                       @click="showInterjectPanel = false"
+                       @click="() => { showInterjectPanel = false; interjectPanelManuallyHidden = true }"
                      >
                        关闭
                      </button>
@@ -1660,6 +1917,23 @@ const editingPersonaAvatarUrl = computed(() => {
     @save="handlePersonaAvatarSave"
   />
 
+  <!-- Persona 切换确认弹窗 -->
+  <NModal v-model:show="showPersonaSwitchConfirm" preset="card" style="width: min(520px, 92vw)" title="切换用户身份" class="!bg-[#18181c] !border-white/10">
+    <div class="space-y-4">
+      <div class="text-sm text-gray-300">
+        你正在尝试切换用户身份，请选择“新建会话”或“仍然继续对话”。
+      </div>
+      <div class="text-xs text-gray-500">
+        提示：继续对话时，历史消息会保持原身份显示；后续新发送的 user 消息将使用新身份。
+      </div>
+      <div class="flex justify-end gap-2 pt-2 border-t border-white/10">
+        <NButton @click="cancelSwitchPersona">取消</NButton>
+        <NButton secondary @click="confirmSwitchPersonaContinue">仍然继续对话</NButton>
+        <NButton type="primary" @click="confirmSwitchPersonaNewSession">新建会话</NButton>
+      </div>
+    </div>
+  </NModal>
+
   <!-- 群聊创建弹窗 -->
   <NModal v-model:show="showGroupCreator" preset="card" style="width: min(600px, 90vw)" title="创建群聊" class="!bg-[#18181c] !border-white/10">
     <NSpace vertical size="medium">
@@ -1696,16 +1970,14 @@ const editingPersonaAvatarUrl = computed(() => {
         </div>
         <div v-if="groupFirstMessageEnabled" class="flex items-center gap-2">
           <span class="text-xs text-gray-500 shrink-0">选择角色：</span>
-          <select
-            class="flex-1 bg-black/20 border border-white/10 rounded-lg px-2 py-1 text-sm text-gray-200 outline-none"
-            v-model="groupFirstMessageCharacterId"
+          <ModernSelect
+            :model-value="groupFirstMessageCharacterId || ''"
+            @update:model-value="(v) => groupFirstMessageCharacterId = v || null"
+            :options="groupFirstMessageOptions"
             :disabled="selectedMemberIds.length === 0"
-          >
-            <option :value="null">（未选择）</option>
-            <option v-for="id in selectedMemberIds" :key="id" :value="id">
-              {{ getCharacterById(id)?.name || id }}
-            </option>
-          </select>
+            placeholder="（未选择）"
+            class="flex-1"
+          />
         </div>
         <div class="text-xs text-gray-500 mt-2">创建后会在聊天窗口内直接插入该角色的首句（会写入聊天记录）。</div>
       </div>
@@ -1815,15 +2087,20 @@ const editingPersonaAvatarUrl = computed(() => {
     <NSpace vertical size="medium">
       <!-- 当前成员 -->
       <div>
-        <div class="text-sm text-gray-400 mb-3">当前成员 (点击配置按钮设置独立参数):</div>
+        <div class="text-sm text-gray-400 mb-3">当前成员（可拖拽调整发言顺序，点击配置按钮设置独立参数）:</div>
         <div class="space-y-2 max-h-[280px] overflow-y-auto pr-2 custom-scrollbar">
           <div 
-            v-for="(member, idx) in groupMembers"
+            v-for="(member, idx) in groupMembersInManager"
             :key="member.id"
             class="flex items-center justify-between p-3 rounded-xl bg-white/5"
+            draggable="true"
+            @dragstart="onDragStartMember(idx)"
+            @dragover.prevent
+            @drop="onDropMember(idx)"
           >
             <div class="flex items-center gap-3 flex-1 min-w-0">
               <span class="text-xs text-gray-500 w-5 shrink-0">{{ idx + 1 }}.</span>
+              <span class="text-gray-500 select-none cursor-move w-4 text-center" title="拖拽排序">≡</span>
               <ModernAvatar 
                 :src="member.avatar ? `/api/avatars/${member.avatar}` : null" 
                 :name="member.name" 
@@ -1861,8 +2138,8 @@ const editingPersonaAvatarUrl = computed(() => {
             </div>
           </div>
           
-          <!-- 用户（不可移除） -->
-          <div class="flex items-center justify-between p-3 rounded-xl bg-brand/5 border border-brand/20">
+          <!-- 用户（不可移除）（纯 AI 模式不展示用户头像） -->
+          <div v-if="!effectivePureAiMode" class="flex items-center justify-between p-3 rounded-xl bg-brand/5 border border-brand/20">
             <div class="flex items-center gap-3">
               <span class="text-xs text-brand/60 w-5">—</span>
               <ModernAvatar 
@@ -1938,7 +2215,7 @@ const editingPersonaAvatarUrl = computed(() => {
       </div>
 
       <div class="flex justify-end pt-2 border-t border-white/10">
-        <NButton @click="showMemberManager = false">完成</NButton>
+        <NButton @click="finishMemberManager">完成</NButton>
       </div>
     </NSpace>
   </NModal>

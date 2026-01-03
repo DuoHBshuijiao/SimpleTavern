@@ -144,6 +144,12 @@ export const useChatsStore = defineStore('chats', {
       await this.load(chatId)
       await this.loadGroupList()
     },
+    async updateMemberOrder(chatId: string, memberIds: string[]) {
+      const chat = await apiPut<Chat>(`/api/chats/${chatId}`, { memberIds })
+      this.activeChat = chat
+      await this.loadGroupList()
+      return chat
+    },
     
     // ========== 成员设置管理 ==========
     async updateMemberSettings(chatId: string, memberId: string, settings: GroupMemberSettings) {

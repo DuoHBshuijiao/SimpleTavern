@@ -104,6 +104,10 @@ class ChatMessage(BaseModel):
     role: ChatRole
     content: str
     characterId: str | None = None  # 群聊中标识发言角色ID
+    # 发送者快照（用于“切换我的身份”后，历史消息仍显示原发言者）
+    senderPersonaId: str | None = None
+    senderName: str | None = None
+    senderAvatar: str | None = None
     ts: str = Field(default_factory=_now_iso)
 
 
@@ -166,11 +170,17 @@ class CreateChatRequest(BaseModel):
 class AppendMessageRequest(BaseModel):
     role: ChatRole
     content: str
+    senderPersonaId: str | None = None
+    senderName: str | None = None
+    senderAvatar: str | None = None
 
 
 class UpdateMessageRequest(BaseModel):
     role: ChatRole
     content: str
+    senderPersonaId: str | None = None
+    senderName: str | None = None
+    senderAvatar: str | None = None
 
 
 class UpdateChatRequest(BaseModel):
@@ -178,11 +188,15 @@ class UpdateChatRequest(BaseModel):
     overrides: ChatOverrides | None = None
     groupDelay: int | None = None  # 群聊角色间延迟时间（毫秒）
     memberSettings: dict[str, GroupMemberSettings] | None = None  # 成员独立设置
+    memberIds: list[str] | None = None  # 群成员顺序（用于拖拽排序）
 
 
 class GenerateStreamRequest(BaseModel):
     chatId: str
     userMessage: str
+    senderPersonaId: str | None = None
+    senderName: str | None = None
+    senderAvatar: str | None = None
     runtimeOverrides: ChatOverrides | None = None
 
 

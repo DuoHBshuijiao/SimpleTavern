@@ -8,6 +8,7 @@ interface Props {
   aspect?: number | string // Aspect ratio, e.g., 1 (square), 0.75 (3:4), or 'auto'
   rounded?: string // Tailwind rounded class, e.g., 'rounded-xl'
   bordered?: boolean
+  objectFit?: 'cover' | 'contain' | 'fill' | 'scale-down' | 'none'
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -17,6 +18,7 @@ const props = withDefaults(defineProps<Props>(), {
   aspect: 1,
   rounded: 'rounded-xl',
   bordered: false,
+  objectFit: 'cover'
 })
 
 const hasError = ref(false)
@@ -85,8 +87,8 @@ const bgColor = computed(() => {
     <img
       v-if="src && !hasError"
       :src="src"
-      class="w-full h-full object-cover transition-opacity duration-300"
-      :class="{ 'opacity-0': !isLoaded, 'opacity-100': isLoaded }"
+      class="w-full h-full transition-opacity duration-300"
+      :class="[{ 'opacity-0': !isLoaded, 'opacity-100': isLoaded }, `object-${objectFit}`]"
       @error="handleError"
       @load="handleLoad"
       alt=""

@@ -86,12 +86,14 @@ def create_chat(req: CreateChatRequest) -> Chat:
         settings = load_settings()
         pure_ai_mode = req.pureAiMode if req.pureAiMode is not None else bool(getattr(settings, "pureAiMode", False))
         if pure_ai_mode:
-            # 纯 AI 模式不注入 persona，但为了避免 {{user}} 残留，使用通用称呼
+            # 纯 AI 模式不注入 persona，为避免 {{user}} 残留，使用通用称呼
             user_name = "用户"
         elif settings.selectedPersonaId and settings.userPersonas:
             selected_persona = next((p for p in settings.userPersonas if p.id == settings.selectedPersonaId), None)
             if selected_persona:
                 user_name = selected_persona.name
+        if not user_name:
+            user_name = "用户"
     except Exception:
         pass
     
@@ -152,6 +154,13 @@ def update_chat(chat_id: str, req: UpdateChatRequest) -> Chat:
         chat.title = req.title
     if req.groupDelay is not None:
         chat.groupDelay = req.groupDelay
+    if req.memberIds is not None:
+        if not chat.isGroup:
+            raise HTTPException(status_code=400, detail="memberIds can only be updated for group chats")
+        # 仅允许重排：成员集合必须一致
+        if set(req.memberIds) != set(chat.memberIds):
+            raise HTTPException(status_code=400, detail="memberIds must contain the same members (reorder only)")
+        chat.memberIds = req.memberIds
     if req.memberSettings is not None:
         # 合并成员设置，只更新传入的成员
         for member_id, settings in req.memberSettings.items():
@@ -168,7 +177,13 @@ def append_message(chat_id: str, req: AppendMessageRequest) -> Chat:
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="chat not found")
 
-    chat.messages.append(ChatMessage(role=req.role, content=req.content))
+    chat.messages.append(ChatMessage(
+        role=req.role,
+        content=req.content,
+        senderPersonaId=getattr(req, "senderPersonaId", None),
+        senderName=getattr(req, "senderName", None),
+        senderAvatar=getattr(req, "senderAvatar", None),
+    ))
     chat.updatedAt = _now_iso()
     return save_chat(chat)
 
@@ -184,6 +199,13 @@ def update_message(chat_id: str, message_id: str, req: UpdateMessageRequest) -> 
         if m.id == message_id:
             m.role = req.role
             m.content = req.content
+            # 可选：更新发送者快照（用于 persona 切换时固化历史消息显示）
+            if getattr(req, "senderPersonaId", None) is not None:
+                m.senderPersonaId = req.senderPersonaId
+            if getattr(req, "senderName", None) is not None:
+                m.senderName = req.senderName
+            if getattr(req, "senderAvatar", None) is not None:
+                m.senderAvatar = req.senderAvatar
             chat.updatedAt = _now_iso()
             return save_chat(chat)
 

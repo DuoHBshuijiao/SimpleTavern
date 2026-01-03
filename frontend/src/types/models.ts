@@ -74,6 +74,10 @@ export interface ChatMessage {
   role: ChatRole
   content: string
   characterId?: string | null  // 群聊中标识发言角色ID
+  // 发送者快照：用于 persona 切换后，历史 user 消息仍显示原发言者
+  senderPersonaId?: string | null
+  senderName?: string | null
+  senderAvatar?: string | null
   ts: string
 }
 

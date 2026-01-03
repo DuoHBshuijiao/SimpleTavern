@@ -44,12 +44,20 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="character not found for chat")
 
+    pure_ai_mode = _resolve_pure_ai_mode(settings, chat, req.runtimeOverrides)
+
     # 先落盘保存用户消息（即使后续模型调用失败也保留用户输入）
-    chat.messages.append(ChatMessage(role="user", content=req.userMessage))
+    # 纯 AI 模式：用户发言以 system 身份影响世界/规则
+    user_role = "system" if pure_ai_mode else "user"
+    chat.messages.append(ChatMessage(
+        role=user_role,
+        content=req.userMessage,
+        senderPersonaId=None if pure_ai_mode else getattr(req, "senderPersonaId", None),
+        senderName=None if pure_ai_mode else getattr(req, "senderName", None),
+        senderAvatar=None if pure_ai_mode else getattr(req, "senderAvatar", None),
+    ))
     chat.updatedAt = _now_iso()
     save_chat(chat)
-
-    pure_ai_mode = _resolve_pure_ai_mode(settings, chat, req.runtimeOverrides)
 
     # 组装 prompt/参数优先级：runtimeOverrides > chat.overrides > settings.defaults
     runtime = req.runtimeOverrides
@@ -127,7 +135,7 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
         messages.append({"role": "system", "content": system_prompt})
     for m in chat.messages:
         if pure_ai_mode and m.role == "user":
-            # 纯 AI 模式：用户发言以 system 身份影响世界/规则
+            # 兼容历史记录：旧版本可能把用户消息存为 user
             messages.append({"role": "system", "content": m.content})
         else:
             messages.append({"role": m.role, "content": m.content})
@@ -353,7 +361,7 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
             if pure_ai_mode:
                 messages.append({"role": "system", "content": f"[用户]: {m.content}"})
             else:
-                user_name = selected_persona.name if selected_persona else "用户"
+                user_name = getattr(m, "senderName", None) or (selected_persona.name if selected_persona else "用户")
                 messages.append({"role": "user", "content": f"[{user_name}]: {m.content}"})
         elif m.role == "assistant":
             # 角色消息 - 标注是哪个角色说的
@@ -575,7 +583,7 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
             if pure_ai_mode:
                 messages.append({"role": "system", "content": f"[用户]: {m.content}"})
             else:
-                user_name = selected_persona.name if selected_persona else "用户"
+                user_name = getattr(m, "senderName", None) or (selected_persona.name if selected_persona else "用户")
                 messages.append({"role": "user", "content": f"[{user_name}]: {m.content}"})
         elif m.role == "assistant":
             if m.characterId:
