@@ -425,6 +425,73 @@ async function deleteCharacter(id: string) {
   }
 }
 
+// 导出角色卡为纯文本
+function exportCharacterCard() {
+  if (!editingCharacter.value) return
+  
+  const card = editingCharacter.value
+  const lines: string[] = []
+  
+  lines.push('='.repeat(60))
+  lines.push(`角色名称: ${card.name}`)
+  lines.push('='.repeat(60))
+  lines.push('')
+  
+  if (card.description) {
+    lines.push('【简介】')
+    lines.push(card.description)
+    lines.push('')
+  }
+  
+  if (card.personality) {
+    lines.push('【Personality（性格/外貌）】')
+    lines.push(card.personality)
+    lines.push('')
+  }
+  
+  if (card.scenario) {
+    lines.push('【Scenario（情景/世界观）】')
+    lines.push(card.scenario)
+    lines.push('')
+  }
+  
+  if (card.systemPrompt) {
+    lines.push('【系统提示词】')
+    lines.push(card.systemPrompt)
+    lines.push('')
+  }
+  
+  if (card.firstMessage) {
+    lines.push('【首句】')
+    lines.push(card.firstMessage)
+    lines.push('')
+  }
+  
+  if (card.exampleDialogue) {
+    lines.push('【示例对话】')
+    lines.push(card.exampleDialogue)
+    lines.push('')
+  }
+  
+  lines.push('='.repeat(60))
+  lines.push(`创建时间: ${card.createdAt ? new Date(card.createdAt).toLocaleString('zh-CN') : '未知'}`)
+  if (card.updatedAt && card.updatedAt !== card.createdAt) {
+    lines.push(`更新时间: ${new Date(card.updatedAt).toLocaleString('zh-CN')}`)
+  }
+  lines.push('='.repeat(60))
+  
+  const content = lines.join('\n')
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `${card.name || '角色卡'}.txt`
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+}
+
 async function handleCharacterAvatarSave(imageData: string) {
   try {
     const res = await apiPost<{ filename: string }>('/api/avatars', { imageData })
@@ -1864,6 +1931,7 @@ const editingPersonaAvatarUrl = computed(() => {
         </NFormItem>
 
         <NSpace justify="end">
+          <NButton secondary @click="exportCharacterCard" :disabled="!editingCharacter">导出为文本</NButton>
           <NButton @click="showCharacterEditor = false">取消</NButton>
           <NButton type="primary" @click="saveCharacter">保存</NButton>
         </NSpace>
