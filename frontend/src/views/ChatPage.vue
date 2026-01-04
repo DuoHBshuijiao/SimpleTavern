@@ -289,6 +289,338 @@ async function deleteMessage(m: ChatMessage) {
   await chats.deleteMessage(activeChat.value.id, m.id)
 }
 
+// 消息重写相关
+// 存储每个消息的多个版本：messageId -> versions[]
+const messageVersions = ref<Map<string, string[]>>(new Map())
+// 存储每个消息当前显示的版本索引：messageId -> currentVersionIndex
+const messageVersionIndex = ref<Map<string, number>>(new Map())
+// 存储消息ID映射：originalMessageId -> currentMessageId（用于重写后关联）
+const messageIdMap = ref<Map<string, string>>(new Map())
+
+// 获取消息的显示内容（考虑版本切换）
+function getMessageDisplayContent(m: ChatMessage): string {
+  // 检查是否有映射的原始消息ID
+  let messageId = m.id
+  for (const [originalId, currentId] of messageIdMap.value.entries()) {
+    if (currentId === m.id) {
+      messageId = originalId
+      break
+    }
+  }
+  
+  const versions = messageVersions.value.get(messageId)
+  if (!versions || versions.length === 0) {
+    return m.content
+  }
+  const currentIndex = messageVersionIndex.value.get(messageId) ?? 0
+  return versions[currentIndex] ?? m.content
+}
+
+// 检查消息是否有多个版本
+function hasMultipleVersions(m: ChatMessage): boolean {
+  // 检查是否有映射的原始消息ID
+  let messageId = m.id
+  for (const [originalId, currentId] of messageIdMap.value.entries()) {
+    if (currentId === m.id) {
+      messageId = originalId
+      break
+    }
+  }
+  
+  const versions = messageVersions.value.get(messageId)
+  return versions ? versions.length > 1 : false
+}
+
+// 获取当前版本索引
+function getCurrentVersionIndex(m: ChatMessage): number {
+  // 检查是否有映射的原始消息ID
+  let messageId = m.id
+  for (const [originalId, currentId] of messageIdMap.value.entries()) {
+    if (currentId === m.id) {
+      messageId = originalId
+      break
+    }
+  }
+  return messageVersionIndex.value.get(messageId) ?? 0
+}
+
+// 获取版本总数
+function getVersionCount(m: ChatMessage): number {
+  // 检查是否有映射的原始消息ID
+  let messageId = m.id
+  for (const [originalId, currentId] of messageIdMap.value.entries()) {
+    if (currentId === m.id) {
+      messageId = originalId
+      break
+    }
+  }
+  const versions = messageVersions.value.get(messageId)
+  return versions ? versions.length : 1
+}
+
+// 切换到上一个版本
+function switchToPreviousVersion(m: ChatMessage) {
+  // 检查是否有映射的原始消息ID
+  let messageId = m.id
+  for (const [originalId, currentId] of messageIdMap.value.entries()) {
+    if (currentId === m.id) {
+      messageId = originalId
+      break
+    }
+  }
+  
+  const versions = messageVersions.value.get(messageId)
+  if (!versions || versions.length <= 1) return
+  const currentIndex = messageVersionIndex.value.get(messageId) ?? 0
+  const newIndex = currentIndex > 0 ? currentIndex - 1 : versions.length - 1
+  messageVersionIndex.value.set(messageId, newIndex)
+  // 更新消息内容以反映当前版本
+  if (activeChat.value) {
+    const msg = activeChat.value.messages.find(msg => msg.id === m.id)
+    if (msg && versions[newIndex]) {
+      msg.content = versions[newIndex]
+    }
+  }
+}
+
+// 切换到下一个版本
+function switchToNextVersion(m: ChatMessage) {
+  // 检查是否有映射的原始消息ID
+  let messageId = m.id
+  for (const [originalId, currentId] of messageIdMap.value.entries()) {
+    if (currentId === m.id) {
+      messageId = originalId
+      break
+    }
+  }
+  
+  const versions = messageVersions.value.get(messageId)
+  if (!versions || versions.length <= 1) return
+  const currentIndex = messageVersionIndex.value.get(messageId) ?? 0
+  const newIndex = currentIndex < versions.length - 1 ? currentIndex + 1 : 0
+  messageVersionIndex.value.set(messageId, newIndex)
+  // 更新消息内容以反映当前版本
+  if (activeChat.value) {
+    const msg = activeChat.value.messages.find(msg => msg.id === m.id)
+    if (msg && versions[newIndex]) {
+      msg.content = versions[newIndex]
+    }
+  }
+}
+
+// 重写消息
+async function rewriteMessage(m: ChatMessage) {
+  if (!activeChat.value) return
+  if (isGenerating.value) return
+  if (m.id.startsWith('local_')) return
+  if (m.role !== 'assistant') return // 只能重写AI的回复
+
+  const chatId = activeChat.value.id
+  const messageIndex = activeChat.value.messages.findIndex(msg => msg.id === m.id)
+  if (messageIndex === -1) return
+
+  // 找到该消息之前的最后一条用户消息
+  let lastUserMessageIndex = -1
+  let lastUserMessage: ChatMessage | null = null
+  for (let i = messageIndex - 1; i >= 0; i--) {
+    const msg = activeChat.value.messages[i]
+    if (msg && (msg.role === 'user' || msg.role === 'system')) {
+      lastUserMessageIndex = i
+      lastUserMessage = msg
+      break
+    }
+  }
+  if (lastUserMessageIndex === -1 || !lastUserMessage) return
+
+  // 保存当前消息内容到版本历史
+  const versions = messageVersions.value.get(m.id) || [m.content]
+  if (!versions.includes(m.content)) {
+    versions.push(m.content)
+  }
+  messageVersions.value.set(m.id, versions)
+  messageVersionIndex.value.set(m.id, versions.length - 1)
+
+  // 删除该消息及其之后的所有消息
+  const messagesToDelete = activeChat.value.messages.slice(messageIndex)
+  for (const msgToDelete of messagesToDelete) {
+    if (!msgToDelete.id.startsWith('local_')) {
+      await chats.deleteMessage(chatId, msgToDelete.id)
+    }
+  }
+
+  // 重新加载聊天以获取最新状态
+  await chats.load(chatId)
+
+  // 重新生成回复
+  isGenerating.value = true
+  streamError.value = null
+  aborter?.abort()
+  aborter = new AbortController()
+
+  const useStream = settings.settings?.streamEnabled !== false
+  const isGroup = activeChat.value.isGroup
+  const characterId = m.characterId || activeChat.value.characterId || ''
+  if (!characterId) return
+
+  try {
+    // 创建本地临时消息
+    const localAssistantId = `local_rewrite_${Date.now()}`
+    const localMsg = {
+      version: 1,
+      id: localAssistantId,
+      role: 'assistant' as const,
+      content: '',
+      characterId,
+      ts: new Date().toISOString()
+    }
+    chats.addLocalMessage(localMsg)
+    scrollToBottom()
+
+    if (isGroup) {
+      // 群聊生成
+      if (useStream) {
+        await postAndConsumeSse(
+          '/api/generate/group',
+          { chatId, characterId },
+          (evt) => {
+            if (evt.event === 'delta') {
+              const t = evt.data?.text
+              if (typeof t === 'string') {
+                chats.appendLocalMessageContent(localAssistantId, t)
+                scrollToBottom()
+              }
+            } else if (evt.event === 'error') {
+              streamError.value = String(evt.data?.message ?? 'unknown error')
+            }
+          },
+          aborter.signal,
+        )
+      } else {
+        const res = await apiPost<{
+          ok: boolean
+          chatId: string
+          assistantMessageId: string | null
+          characterId: string
+          content: string
+          error?: string
+        }>('/api/generate/group', { chatId, characterId })
+        
+        if (res.ok) {
+          chats.appendLocalMessageContent(localAssistantId, res.content || '')
+          scrollToBottom()
+        } else {
+          streamError.value = res.error || 'unknown error'
+        }
+      }
+    } else {
+      // 单聊生成：使用最后一条用户消息的内容重新生成
+      if (useStream) {
+        await postAndConsumeSse(
+          '/api/generate/stream',
+          {
+            chatId,
+            userMessage: lastUserMessage.content,
+            senderPersonaId: lastUserMessage.senderPersonaId ?? selectedPersona.value?.id ?? null,
+            senderName: lastUserMessage.senderName ?? selectedPersona.value?.name ?? userName.value,
+            senderAvatar: lastUserMessage.senderAvatar ?? selectedPersona.value?.avatar ?? null,
+          },
+          (evt) => {
+            if (evt.event === 'delta') {
+              const t = evt.data?.text
+              if (typeof t === 'string') {
+                chats.appendLocalMessageContent(localAssistantId, t)
+                scrollToBottom()
+              }
+            } else if (evt.event === 'error') {
+              streamError.value = String(evt.data?.message ?? 'unknown error')
+            }
+          },
+          aborter?.signal,
+        )
+      } else {
+        const res = await apiPost<{
+          ok: boolean
+          chatId: string
+          assistantMessageId: string | null
+          content: string
+          error?: string
+        }>('/api/generate/stream', {
+          chatId,
+          userMessage: lastUserMessage.content,
+          senderPersonaId: lastUserMessage.senderPersonaId ?? selectedPersona.value?.id ?? null,
+          senderName: lastUserMessage.senderName ?? selectedPersona.value?.name ?? userName.value,
+          senderAvatar: lastUserMessage.senderAvatar ?? selectedPersona.value?.avatar ?? null,
+        })
+        
+        if (res.ok) {
+          chats.appendLocalMessageContent(localAssistantId, res.content || '')
+          scrollToBottom()
+        } else {
+          streamError.value = res.error || 'unknown error'
+        }
+      }
+    }
+  } catch (e: any) {
+    streamError.value = e?.message ?? String(e)
+  } finally {
+    isGenerating.value = false
+    await chats.load(chatId)
+    await settings.load()
+    
+    // 将新生成的消息添加到版本历史中
+    if (activeChat.value) {
+      // 查找新生成的消息（可能是local_rewrite_开头的临时消息，或者后端返回的新消息）
+      const newMsg = activeChat.value.messages.find(msg => 
+        (msg.id.startsWith('local_rewrite_') && msg.role === 'assistant') ||
+        (msg.role === 'assistant' && msg.ts > m.ts)
+      )
+      
+      if (newMsg && newMsg.role === 'assistant') {
+        // 获取原消息的版本历史
+        const originalVersions = messageVersions.value.get(m.id) || [m.content]
+        // 添加新生成的版本
+        const newContent = newMsg.content || ''
+        if (newContent && !originalVersions.includes(newContent)) {
+          originalVersions.push(newContent)
+        }
+        
+        // 如果新消息ID不同，创建映射关系
+        if (newMsg.id !== m.id && !newMsg.id.startsWith('local_')) {
+          messageIdMap.value.set(m.id, newMsg.id)
+          // 迁移版本历史到新ID
+          messageVersions.value.set(m.id, originalVersions)
+          messageVersionIndex.value.set(m.id, originalVersions.length - 1)
+        } else {
+          // 同一消息，更新版本历史
+          messageVersions.value.set(m.id, originalVersions)
+          messageVersionIndex.value.set(m.id, originalVersions.length - 1)
+        }
+      }
+    }
+  }
+}
+
+// 清理消息的其他版本，只保留当前显示的版本
+function cleanupMessageVersions(m: ChatMessage) {
+  // 检查是否有映射的原始消息ID
+  let messageId = m.id
+  for (const [originalId, currentId] of messageIdMap.value.entries()) {
+    if (currentId === m.id) {
+      messageId = originalId
+      break
+    }
+  }
+  
+  const currentIndex = messageVersionIndex.value.get(messageId) ?? 0
+  const versions = messageVersions.value.get(messageId)
+  if (versions && versions.length > 1) {
+    // 只保留当前版本
+    const currentContent = versions[currentIndex] ?? m.content
+    messageVersions.value.set(messageId, [currentContent])
+    messageVersionIndex.value.set(messageId, 0)
+  }
+}
+
 const effectiveSelectedPersonaId = computed(() => {
   // 纯 AI 模式下：Persona 视为未选中（不修改全局 settings，只在当前会话 UI 层遮罩）
   if (effectivePureAiMode.value) return null
@@ -996,14 +1328,26 @@ async function continueGroupChat() {
   
   try {
     await runGroupGeneration(chatId, pendingMembers.value, useStream, groupDelay, 0)
+    
+    // 如果被暂停了，不执行后续的清理
+    if (isPaused.value) return
+    
+    currentSpeakerIndex.value = -1
+    
+    // 轮次结束后显示插话面板
+    interjectPanelManuallyHidden.value = false
+    showInterjectPanel.value = true
   } catch (e: any) {
     streamError.value = e?.message ?? String(e)
   } finally {
-    isGenerating.value = false
-    currentSpeakerIndex.value = -1
-    pendingMembers.value = []
-    await chats.load(chatId)
-    await settings.load()
+    // 只有在没有被暂停的情况下才清理状态
+    if (!isPaused.value) {
+      isGenerating.value = false
+      currentSpeakerIndex.value = -1
+      pendingMembers.value = []
+      await chats.load(chatId)
+      await settings.load()
+    }
   }
 }
 
@@ -1017,7 +1361,10 @@ async function runGroupGeneration(
 ) {
   for (let i = startIndex; i < memberIds.length; i++) {
     const characterId = memberIds[i]
-    currentSpeakerIndex.value = i
+    if (!characterId) continue
+    // 计算在完整成员列表中的实际索引（用于显示）
+    const actualIndex = activeChat.value?.memberIds ? activeChat.value.memberIds.indexOf(characterId) : -1
+    currentSpeakerIndex.value = actualIndex
     
     // 添加角色间延迟（第一个角色不需要）
     if (i > startIndex) {
@@ -1114,18 +1461,70 @@ async function sendUserMessage() {
   draftMessage.value = ''
   streamError.value = null
   
+  const chatId = activeChat.value.id
+  const isGroup = activeChat.value.isGroup
+  const now = new Date().toISOString()
+  const userRole = effectivePureAiMode.value ? ('system' as const) : ('user' as const)
+
+  // 如果是在暂停状态下插话，只保存消息，不触发AI回复
+  if (isGroup && showContinueButton.value) {
+    // 1. 添加用户消息到本地显示
+    const localUserId = `local_user_${Date.now()}`
+    chats.addLocalMessage({
+      version: 1,
+      id: localUserId,
+      role: userRole,
+      content: text,
+      senderPersonaId: userRole === 'user' ? (selectedPersona.value?.id ?? null) : null,
+      senderName: userRole === 'user' ? (selectedPersona.value?.name ?? userName.value) : null,
+      senderAvatar: userRole === 'user' ? (selectedPersona.value?.avatar ?? null) : null,
+      ts: now,
+    })
+    scrollToBottom()
+    
+    // 2. 保存用户消息到后端
+    try {
+      await apiPost(`/api/chats/${chatId}/messages`, {
+        role: userRole,
+        content: text,
+        senderPersonaId: userRole === 'user' ? (selectedPersona.value?.id ?? null) : null,
+        senderName: userRole === 'user' ? (selectedPersona.value?.name ?? userName.value) : null,
+        senderAvatar: userRole === 'user' ? (selectedPersona.value?.avatar ?? null) : null,
+      })
+      await chats.load(chatId)
+    } catch (e: any) {
+      streamError.value = e?.message ?? String(e)
+    }
+    return  // 不触发AI回复，直接返回
+  }
+
+  // 用户发送新消息时，清理所有消息的版本历史，只保留当前显示的版本
+  if (activeChat.value) {
+    for (const msg of activeChat.value.messages) {
+      if (msg.role === 'assistant' && hasMultipleVersions(msg)) {
+        cleanupMessageVersions(msg)
+        // 更新消息内容为当前版本
+        const versions = messageVersions.value.get(msg.id)
+        if (versions && versions.length > 0) {
+          const currentIndex = messageVersionIndex.value.get(msg.id) ?? 0
+          await chats.updateMessage(
+            activeChat.value.id,
+            msg.id,
+            msg.role,
+            versions[currentIndex] ?? msg.content
+          )
+        }
+      }
+    }
+  }
+  
   // 用户发送新消息时，清除暂停状态和继续按钮
   isPaused.value = false
   showContinueButton.value = false
   pendingMembers.value = []
   interjectPanelManuallyHidden.value = false
-  // 纯 AI 模式下可随时插话；非纯 AI 模式保持“轮次结束后再插话”
+  // 纯 AI 模式下可随时插话；非纯 AI 模式保持"轮次结束后再插话"
   showInterjectPanel.value = effectivePureAiMode.value ? true : false
-
-  const chatId = activeChat.value.id
-  const isGroup = activeChat.value.isGroup
-  const now = new Date().toISOString()
-  const userRole = effectivePureAiMode.value ? ('system' as const) : ('user' as const)
 
   isGenerating.value = true
   aborter?.abort()
@@ -1673,11 +2072,41 @@ const editingPersonaAvatarUrl = computed(() => {
                         : 'bg-yellow-500/5 border-yellow-500/10 text-gray-300'
                   ]"
                 >
-                  <div class="md prose prose-invert prose-sm max-w-none prose-p:my-1 prose-headings:my-2 prose-pre:bg-black/30 prose-pre:border prose-pre:border-white/5" v-html="renderMarkdown(m.content)"></div>
+                  <div class="md prose prose-invert prose-sm max-w-none prose-p:my-1 prose-headings:my-2 prose-pre:bg-black/30 prose-pre:border prose-pre:border-white/5" v-html="renderMarkdown(getMessageDisplayContent(m))"></div>
+                </div>
+
+                <!-- 版本切换箭头（仅assistant消息且有多个版本时显示） -->
+                <div v-if="m.role === 'assistant' && hasMultipleVersions(m)" class="flex items-center justify-center gap-2 mt-1 px-1">
+                  <button 
+                    class="text-xs text-gray-500 hover:text-gray-300 transition-colors px-2 py-0.5 rounded hover:bg-white/5"
+                    @click="switchToPreviousVersion(m)"
+                    :title="`上一个版本 (${getCurrentVersionIndex(m) + 1}/${getVersionCount(m)})`"
+                  >
+                    ◀
+                  </button>
+                  <span class="text-xs text-gray-500">
+                    {{ getCurrentVersionIndex(m) + 1 }}/{{ getVersionCount(m) }}
+                  </span>
+                  <button 
+                    class="text-xs text-gray-500 hover:text-gray-300 transition-colors px-2 py-0.5 rounded hover:bg-white/5"
+                    @click="switchToNextVersion(m)"
+                    :title="`下一个版本 (${getCurrentVersionIndex(m) + 1}/${getVersionCount(m)})`"
+                  >
+                    ▶
+                  </button>
                 </div>
 
                 <!-- 底部操作栏 -->
                 <div class="flex items-center gap-2 mt-1 px-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                   <button 
+                     v-if="m.role === 'assistant' && !m.id.startsWith('local_')" 
+                     class="text-xs text-gray-600 hover:text-blue-400 transition-colors" 
+                     @click="rewriteMessage(m)" 
+                     :disabled="isGenerating"
+                     
+                   >
+                     重写
+                   </button>
                    <button class="text-xs text-gray-600 hover:text-brand transition-colors" @click="openEditMessage(m)" :disabled="isGenerating">编辑</button>
                    <NPopconfirm @positive-click="deleteMessage(m)">
                       <template #trigger>
@@ -1782,7 +2211,16 @@ const editingPersonaAvatarUrl = computed(() => {
                       :disabled="!draftMessage.trim() || (isGenerating && !isPaused && !showContinueButton)"
                       @click="sendUserMessage"
                     >
-                      {{ isGenerating && !isPaused && !showContinueButton ? '生成中...' : (showContinueButton ? '插话并重新开始' : '发送') }}
+                      {{ isGenerating && !isPaused && !showContinueButton ? '生成中...' : (showContinueButton ? '插话' : '发送') }}
+                    </button>
+                    <button
+                      v-if="activeChat?.isGroup && showContinueButton"
+                      class="bg-green-500/20 hover:bg-green-500/30 text-green-300 px-4 py-1.5 rounded-lg text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                      :disabled="isGenerating"
+                      @click="continueGroupChat"
+                      title="继续未完成的轮次，让剩余角色发言"
+                    >
+                      继续轮次
                     </button>
                     <button
                       v-if="activeChat?.isGroup"
@@ -2058,7 +2496,7 @@ const editingPersonaAvatarUrl = computed(() => {
           <div 
             v-for="c in characters.list"
             :key="c.id"
-            class="flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all border-2"
+            class="flex items-start gap-3 p-3 rounded-xl cursor-pointer transition-all border-2"
             :class="selectedMemberIds.includes(c.id) ? 'bg-purple-500/10 border-purple-500/50' : 'bg-white/5 border-transparent hover:bg-white/10'"
             @click="toggleMemberSelection(c.id)"
           >
@@ -2067,7 +2505,8 @@ const editingPersonaAvatarUrl = computed(() => {
                 :src="c.avatar ? `/api/avatars/${c.avatar}` : null" 
                 :name="c.name" 
                 :size="40" 
-                :aspect="0.75"
+                aspect="auto"
+                object-fit="contain"
                 rounded="rounded-lg"
               />
               <div 
@@ -2168,14 +2607,15 @@ const editingPersonaAvatarUrl = computed(() => {
             @dragover.prevent
             @drop="onDropMember(idx)"
           >
-            <div class="flex items-center gap-3 flex-1 min-w-0">
+            <div class="flex items-start gap-3 flex-1 min-w-0">
               <span class="text-xs text-gray-500 w-5 shrink-0">{{ idx + 1 }}.</span>
               <span class="text-gray-500 select-none cursor-move w-4 text-center" title="拖拽排序">≡</span>
               <ModernAvatar 
                 :src="member.avatar ? `/api/avatars/${member.avatar}` : null" 
                 :name="member.name" 
                 :size="36" 
-                :aspect="0.75"
+                aspect="auto"
+                object-fit="contain"
                 rounded="rounded-lg"
               />
               <div class="flex-1 min-w-0">
@@ -2235,14 +2675,15 @@ const editingPersonaAvatarUrl = computed(() => {
           <div 
             v-for="c in availableMembers"
             :key="c.id"
-            class="flex items-center gap-3 p-2 rounded-xl bg-white/5 hover:bg-white/10 cursor-pointer transition-colors"
+            class="flex items-start gap-3 p-2 rounded-xl bg-white/5 hover:bg-white/10 cursor-pointer transition-colors"
             @click="addMemberToGroup(c.id)"
           >
             <ModernAvatar 
               :src="c.avatar ? `/api/avatars/${c.avatar}` : null" 
               :name="c.name" 
               :size="32" 
-              :aspect="0.75"
+              aspect="auto"
+              object-fit="contain"
               rounded="rounded-lg"
             />
             <div class="flex-1 min-w-0">
