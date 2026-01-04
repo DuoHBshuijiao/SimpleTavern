@@ -1396,12 +1396,13 @@ const editingPersonaAvatarUrl = computed(() => {
               :class="selectedCharacterId === c.id ? 'bg-white/5 border-brand/20 shadow-sm' : 'hover:bg-white/5'"
               @click="selectedCharacterId = c.id"
             >
-              <!-- 角色头像 (3:4 比例) -->
+              <!-- 角色头像 (自适应高度) -->
               <ModernAvatar 
                 :src="c.avatar ? `/api/avatars/${c.avatar}` : null" 
                 :name="c.name" 
                 :size="56" 
-                :aspect="0.75"
+                aspect="auto"
+                object-fit="contain"
                 rounded="rounded-lg"
                 class="shadow-md"
               />
@@ -1877,7 +1878,8 @@ const editingPersonaAvatarUrl = computed(() => {
               <ModernAvatar 
                 :src="editingCharacterAvatarUrl"
                 :size="120"
-                :aspect="0.75"
+                aspect="auto"
+                object-fit="contain"
                 rounded="rounded-xl"
                 class="border-2 border-brand/40 shadow-lg bg-black/20"
               />

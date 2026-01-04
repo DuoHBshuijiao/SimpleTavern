@@ -26,12 +26,17 @@ const isLoaded = ref(false)
 
 const style = computed(() => {
   const width = typeof props.size === 'number' ? `${props.size}px` : props.size
-  let height = width
+  let height: string | undefined = undefined
   
-  if (typeof props.aspect === 'number') {
+  if (props.aspect === 'auto') {
+    // 高度自适应，不设置固定高度
+    height = 'auto'
+  } else if (typeof props.aspect === 'number') {
     height = typeof props.size === 'number' 
       ? `${props.size / props.aspect}px` 
       : `calc(${props.size} / ${props.aspect})`
+  } else {
+    height = width
   }
 
   return {
@@ -76,7 +81,7 @@ const bgColor = computed(() => {
 
 <template>
   <div
-    class="relative overflow-hidden shrink-0 flex items-center justify-center select-none transition-all duration-300"
+    class="relative overflow-hidden shrink-0 flex items-start justify-center select-none transition-all duration-300"
     :class="[
       rounded,
       bgColor,
@@ -87,8 +92,12 @@ const bgColor = computed(() => {
     <img
       v-if="src && !hasError"
       :src="src"
-      class="w-full h-full transition-opacity duration-300"
-      :class="[{ 'opacity-0': !isLoaded, 'opacity-100': isLoaded }, `object-${objectFit}`]"
+      class="w-full transition-opacity duration-300"
+      :class="[
+        { 'opacity-0': !isLoaded, 'opacity-100': isLoaded },
+        props.aspect === 'auto' ? 'h-auto' : 'h-full',
+        `object-${objectFit}`
+      ]"
       @error="handleError"
       @load="handleLoad"
       alt=""
