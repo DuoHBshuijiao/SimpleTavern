@@ -496,6 +496,7 @@ async function saveEditedMessageAndSend() {
   const editedRole = editingMessageRole.value
   const editedContent = editingMessageContent.value
   const originalMessage = activeChat.value.messages[messageIndex]
+  if (!originalMessage) return
 
   await chats.updateMessage(chatId, messageId, editedRole, editedContent)
 
