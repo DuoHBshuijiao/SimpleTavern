@@ -10,7 +10,7 @@ import portalocker
 
 from datetime import datetime
 
-from app.schemas import Chat, CharacterCard, Settings
+from app.schemas import AssistantChat, AssistantSettings, Chat, CharacterCard, Settings
 
 
 def _repo_root() -> Path:
@@ -34,8 +34,35 @@ def _avatars_dir() -> Path:
     return _data_dir() / "avatars"
 
 
+def _ai_workspace_dir() -> Path:
+    return _data_dir() / "ai_workspace"
+
+
 def _settings_path() -> Path:
     return _data_dir() / "settings.json"
+
+
+def _assistant_settings_path() -> Path:
+    return _data_dir() / "assistant_settings.json"
+
+
+def _assistant_chat_path() -> Path:
+    return _data_dir() / "assistant_chat.json"
+
+
+DEFAULT_ASSISTANT_PROMPT = (
+    "你是“角色卡创建助手 + 聊天伴侣”。\n"
+    "目标：协助用户完善角色卡字段，并在合适时机生成完整角色卡 JSON。\n"
+    "可用工具：read_file、create_file、write_file、delete_file（仅允许 data/ai_workspace/ 目录）。\n"
+    "当你准备好生成角色卡时：\n"
+    "1) 以 JSON 格式组织完整角色卡（包含 version、id、name、description、personality、scenario、firstMessage、"
+    "exampleDialogue、systemPrompt、avatar、createdAt、updatedAt）。\n"
+    "   【重要】exampleDialogue 必须是纯字符串格式，不能是数组！示例对话用换行符分隔，如：\n"
+    "   \"exampleDialogue\": \"用户：你好\\n角色：你好呀！\\n用户：今天怎么样？\\n角色：很开心呢！\"\n"
+    "2) 使用 write_file 将内容写入 data/ai_workspace/character_card.json。\n"
+    "3) 写入后回复用户已生成并可继续调整。假如用户并没有说你可以随意发挥，请你准备详细的问卷调查，询问用户的喜好或想法，然后再使用工具创建文件。\n"
+    "注意：不要在回复中输出多余的 JSON 代码块，避免与工具写入重复。"
+)
 
 
 def ensure_data_initialized() -> None:
@@ -43,10 +70,17 @@ def ensure_data_initialized() -> None:
     _characters_dir().mkdir(parents=True, exist_ok=True)
     _chats_dir().mkdir(parents=True, exist_ok=True)
     _avatars_dir().mkdir(parents=True, exist_ok=True)
+    _ai_workspace_dir().mkdir(parents=True, exist_ok=True)
 
     if not _settings_path().exists():
         settings = Settings()
         write_json(_settings_path(), settings.model_dump(mode="json"))
+    if not _assistant_settings_path().exists():
+        settings = AssistantSettings(prompt=DEFAULT_ASSISTANT_PROMPT)
+        write_json(_assistant_settings_path(), settings.model_dump(mode="json"))
+    if not _assistant_chat_path().exists():
+        chat = AssistantChat()
+        write_json(_assistant_chat_path(), chat.model_dump(mode="json"))
 
 
 @dataclass(frozen=True)
@@ -114,12 +148,24 @@ def settings_path() -> Path:
     return _settings_path()
 
 
+def assistant_settings_path() -> Path:
+    return _assistant_settings_path()
+
+
+def assistant_chat_path() -> Path:
+    return _assistant_chat_path()
+
+
 def characters_dir() -> Path:
     return _characters_dir()
 
 
 def chats_dir() -> Path:
     return _chats_dir()
+
+
+def ai_workspace_dir() -> Path:
+    return _ai_workspace_dir()
 
 
 # ---------- Characters ----------
@@ -278,5 +324,47 @@ def delete_avatar(filename: str) -> None:
     p = avatar_path(filename)
     if p.exists():
         p.unlink(missing_ok=True)
+
+
+# ---------- Assistant ----------
+
+
+def load_assistant_settings() -> AssistantSettings:
+    raw = read_json(_assistant_settings_path())
+    return AssistantSettings.model_validate(raw)
+
+
+def save_assistant_settings(settings: AssistantSettings) -> AssistantSettings:
+    write_json(_assistant_settings_path(), settings.model_dump(mode="json"))
+    return settings
+
+
+def load_assistant_chat() -> AssistantChat:
+    raw = read_json(_assistant_chat_path())
+    return AssistantChat.model_validate(raw)
+
+
+def save_assistant_chat(chat: AssistantChat) -> AssistantChat:
+    write_json(_assistant_chat_path(), chat.model_dump(mode="json"))
+    return chat
+
+
+def clear_assistant_chat() -> None:
+    chat = AssistantChat()
+    write_json(_assistant_chat_path(), chat.model_dump(mode="json"))
+
+
+def clear_ai_workspace() -> None:
+    base = _ai_workspace_dir()
+    if not base.exists():
+        return
+    for p in sorted(base.rglob("*"), key=lambda x: len(str(x)), reverse=True):
+        try:
+            if p.is_file():
+                p.unlink(missing_ok=True)
+            elif p.is_dir():
+                p.rmdir()
+        except Exception:
+            continue
 
 

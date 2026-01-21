@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -74,6 +74,21 @@ class Settings(BaseModel):
     selectedPersonaId: str | None = None  # 当前选中的Persona ID
     createdAt: str = Field(default_factory=_now_iso)
     updatedAt: str = Field(default_factory=_now_iso)
+
+
+class AssistantSettings(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    prompt: str = ""
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+    model: str | None = None
+    presetId: str | None = None  # 关联的API预设ID
+
+
+class AssistantChat(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    messages: list[ChatMessage] = Field(default_factory=list)
 
 
 class CharacterCard(BaseModel):

@@ -9,7 +9,7 @@ import AvatarCropper from '../components/AvatarCropper.vue'
 import ModernAvatar from '../components/ModernAvatar.vue'
 import ModernSelect from '../components/ModernSelect.vue'
 import { postAndConsumeSse } from '../api/sse'
-import { apiPost, apiPut } from '../api/http'
+import { apiDelete, apiGet, apiPost, apiPut } from '../api/http'
 
 import {
   NButton,
@@ -35,7 +35,7 @@ const sidebarCollapsed = ref(false)
 const editingChatId = ref<string | null>(null)
 const editingTitle = ref('')
 const messagesScrollRef = ref<HTMLElement | null>(null)
-let aborter: AbortController | null = null
+const aborter = ref<AbortController | null>(null)
 const STREAM_CHUNK_SIZE = 12
 const STREAM_ANIM_DURATION = 350
 const streamBufferMap = reactive(new Map<string, string>())
@@ -55,6 +55,25 @@ const showCharacterEditor = ref(false)
 const editingCharacter = ref<CharacterCard | null>(null)
 const isNewCharacter = ref(false)
 const showCharacterAvatarCropper = ref(false)
+
+type AssistantMessage = {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  ts: string
+}
+
+const assistantMessages = ref<AssistantMessage[]>([])
+const assistantDraft = ref('')
+const isAssistantGenerating = ref(false)
+const assistantStreamError = ref<string | null>(null)
+const showAssistantSettings = ref(false)
+const assistantSettings = ref({
+  prompt: '',
+  temperature: null as number | null,
+  model: null as string | null,
+})
+let assistantAborter: AbortController | null = null
 
 // Persona 相关
 const showPersonaEditor = ref(false)
@@ -166,6 +185,10 @@ const chatModelOptions = computed(() => {
 
 const currentModel = computed(() => {
   return chats.activeChat?.overrides?.params?.model || settings.settings?.llm.defaultModel || '未设置'
+})
+
+const assistantCurrentModel = computed(() => {
+  return assistantSettings.value.model || settings.settings?.llm.defaultModel || '未设置'
 })
 
 // 处理模型选择
@@ -517,11 +540,12 @@ async function saveEditedMessageAndSend() {
   showInterjectPanel.value = effectivePureAiMode.value ? true : false
 
   isGenerating.value = true
-  aborter?.abort()
-  aborter = new AbortController()
+  aborter.value?.abort()
+  aborter.value = new AbortController()
 
   const useStream = settings.settings?.streamEnabled !== false
   const isGroup = activeChat.value.isGroup
+
   const now = new Date().toISOString()
 
   const senderPersonaId = editedRole === 'user'
@@ -585,7 +609,7 @@ async function saveEditedMessageAndSend() {
                 streamError.value = String(evt.data?.message ?? 'unknown error')
               }
             },
-            aborter?.signal,
+            aborter.value?.signal,
           )
         } finally {
           flushStreamForMessage(localAssistantId)
@@ -803,8 +827,8 @@ async function rewriteMessage(m: ChatMessage) {
   // 重新生成回复
   isGenerating.value = true
   streamError.value = null
-  aborter?.abort()
-  aborter = new AbortController()
+  aborter.value?.abort()
+  aborter.value = new AbortController()
 
   const useStream = settings.settings?.streamEnabled !== false
   const isGroup = activeChat.value.isGroup
@@ -844,7 +868,7 @@ async function rewriteMessage(m: ChatMessage) {
                 streamError.value = String(evt.data?.message ?? 'unknown error')
               }
             },
-            aborter.signal,
+            aborter.value?.signal,
           )
         } finally {
           flushStreamForMessage(localAssistantId)
@@ -893,7 +917,7 @@ async function rewriteMessage(m: ChatMessage) {
                 streamError.value = String(evt.data?.message ?? 'unknown error')
               }
             },
-            aborter?.signal,
+            aborter.value?.signal,
           )
         } finally {
           flushStreamForMessage(localAssistantId)
@@ -1095,16 +1119,236 @@ function newCard(): CharacterCard {
   }
 }
 
-function openCreateCharacter() {
+async function openCreateCharacter() {
   isNewCharacter.value = true
   editingCharacter.value = newCard()
   showCharacterEditor.value = true
+  void loadAssistantState()
+  
+  // 尝试加载 ai_workspace/character_card.json 中已存在的角色卡内容
+  try {
+    const res = await apiGet<{ ok: boolean; card: any; error?: string }>('/api/assistant/workspace/character-card')
+    if (res.ok && res.card) {
+      applyAssistantCard(res.card)
+    }
+  } catch (e) {
+    console.log('No existing character card in workspace or failed to load:', e)
+  }
 }
 
 function openEditCharacter(card: CharacterCard) {
   isNewCharacter.value = false
   editingCharacter.value = JSON.parse(JSON.stringify(card)) as CharacterCard
   showCharacterEditor.value = true
+  void loadAssistantState()
+}
+
+function normalizeAssistantMessages(raw: any[]): AssistantMessage[] {
+  return (raw || [])
+    .filter((m: any) => m && (m.role === 'user' || m.role === 'assistant'))
+    .map((m: any, idx: number) => ({
+      id: m.id ?? `assistant_msg_${Date.now()}_${idx}`,
+      role: m.role,
+      content: m.content ?? '',
+      ts: m.ts ?? new Date().toISOString(),
+    }))
+}
+
+async function loadAssistantSettings() {
+  const res = await apiGet<{ prompt: string; temperature: number | null; model: string | null }>(
+    '/api/assistant/settings',
+  )
+  assistantSettings.value = {
+    prompt: res.prompt ?? '',
+    temperature: res.temperature ?? null,
+    model: res.model ?? null,
+  }
+}
+
+async function saveAssistantSettings() {
+  await apiPut('/api/assistant/settings', assistantSettings.value)
+}
+
+async function saveAssistantSettingsAndClose() {
+  await saveAssistantSettings()
+  showAssistantSettings.value = false
+}
+
+async function loadAssistantChat() {
+  const res = await apiGet<{ messages: any[] }>('/api/assistant/chat')
+  assistantMessages.value = normalizeAssistantMessages(res.messages)
+}
+
+// 助手消息操作逻辑
+const showAssistantMessageEditor = ref(false)
+const editingAssistantMessage = ref<AssistantMessage | null>(null)
+const editingAssistantMessageContent = ref('')
+
+function openEditAssistantMessage(m: AssistantMessage) {
+  editingAssistantMessage.value = m
+  editingAssistantMessageContent.value = m.content
+  showAssistantMessageEditor.value = true
+}
+
+async function saveEditedAssistantMessage() {
+  if (!editingAssistantMessage.value) return
+  const m = editingAssistantMessage.value
+  try {
+    await apiPut(`/api/assistant/chat/messages/${m.id}`, {
+      role: m.role,
+      content: editingAssistantMessageContent.value,
+    })
+    await loadAssistantChat()
+    showAssistantMessageEditor.value = false
+  } catch (e: any) {
+    assistantStreamError.value = e?.message ?? String(e)
+  }
+}
+
+async function deleteAssistantMessage(m: AssistantMessage) {
+  try {
+    await apiDelete(`/api/assistant/chat/messages/${m.id}`)
+    await loadAssistantChat()
+  } catch (e: any) {
+    assistantStreamError.value = e?.message ?? String(e)
+  }
+}
+
+async function rewriteAssistantMessage(m: AssistantMessage) {
+  // 查找这条消息之前的最后一条用户消息
+  const idx = assistantMessages.value.findIndex(msg => msg.id === m.id)
+  if (idx < 0) return
+  
+  let lastUserMsgText = ''
+  // 从当前位置往前找
+  for (let i = idx - 1; i >= 0; i--) {
+    const msg = assistantMessages.value[i]
+    if (!msg) continue
+    if (msg.role === 'user') {
+      lastUserMsgText = msg.content
+      break
+    }
+  }
+
+  // 删除当前及之后的所有消息（或者只删除当前这条，由后端 history 决定）
+  // 逻辑：删除这条 assistant 消息，然后重新触发生成
+  await deleteAssistantMessage(m)
+  
+  if (lastUserMsgText) {
+    assistantDraft.value = lastUserMsgText
+    // 触发重新生成，不追加用户消息（因为已经有了）
+    await sendAssistantMessage(false)
+  }
+}
+
+async function loadAssistantState() {
+  assistantStreamError.value = null
+  try {
+    await Promise.all([loadAssistantSettings(), loadAssistantChat()])
+  } catch (e) {
+    console.error('Failed to load assistant state:', e)
+  }
+}
+
+async function resetAssistantState() {
+  try {
+    await apiPost('/api/assistant/reset', {})
+  } catch (e) {
+    console.error('Failed to reset assistant:', e)
+  } finally {
+    assistantMessages.value = []
+    assistantDraft.value = ''
+    assistantStreamError.value = null
+  }
+}
+
+function applyAssistantCard(card: any) {
+  if (!editingCharacter.value) return
+  const current = editingCharacter.value
+  editingCharacter.value = {
+    ...current,
+    name: card.name ?? current.name,
+    description: card.description ?? current.description,
+    personality: card.personality ?? current.personality,
+    scenario: card.scenario ?? current.scenario,
+    firstMessage: card.firstMessage ?? current.firstMessage,
+    exampleDialogue: card.exampleDialogue ?? current.exampleDialogue,
+    systemPrompt: card.systemPrompt ?? current.systemPrompt,
+    avatar: card.avatar ?? current.avatar,
+  }
+}
+
+async function handleAssistantModelSelect(option: any) {
+  assistantSettings.value.model = option.value
+  await saveAssistantSettings()
+}
+
+async function sendAssistantMessage(appendUserMessage: boolean | Event = true) {
+  const shouldAppend = typeof appendUserMessage === 'boolean' ? appendUserMessage : true
+  const text = assistantDraft.value.trim()
+  if (shouldAppend && !text) return
+  if (isAssistantGenerating.value) return
+  
+  if (shouldAppend) assistantDraft.value = ''
+  assistantStreamError.value = null
+
+  const now = new Date().toISOString()
+  
+  // 本地 UI 预览
+  if (shouldAppend) {
+    assistantMessages.value.push({
+      id: `assistant_user_${Date.now()}`,
+      role: 'user',
+      content: text,
+      ts: now,
+    })
+  }
+  
+  const assistantMsgId = `assistant_ai_${Date.now()}`
+  const assistantMsg: AssistantMessage = {
+    id: assistantMsgId,
+    role: 'assistant',
+    content: '',
+    ts: now,
+  }
+  assistantMessages.value.push(assistantMsg)
+  
+  isAssistantGenerating.value = true
+  assistantAborter?.abort()
+  assistantAborter = new AbortController()
+
+  try {
+    await postAndConsumeSse(
+      '/api/assistant/stream',
+      {
+        userMessage: text,
+        model: assistantSettings.value.model,
+        temperature: assistantSettings.value.temperature,
+        appendUserMessage: shouldAppend
+      },
+      (evt) => {
+        if (evt.event === 'delta') {
+          const t = evt.data?.text
+          if (typeof t === 'string') {
+            assistantMsg.content += t
+          }
+        } else if (evt.event === 'card') {
+          const card = evt.data?.card
+          if (card) applyAssistantCard(card)
+        } else if (evt.event === 'error') {
+          assistantStreamError.value = String(evt.data?.message ?? 'unknown error')
+        }
+      },
+      assistantAborter?.signal,
+    )
+  } catch (e: any) {
+    if (!isAbortError(e)) {
+      assistantStreamError.value = e?.message ?? String(e)
+    }
+  } finally {
+    isAssistantGenerating.value = false
+    await loadAssistantChat()
+  }
 }
 
 async function saveCharacter() {
@@ -1116,6 +1360,13 @@ async function saveCharacter() {
   } else {
     await characters.update(editingCharacter.value.id, editingCharacter.value)
   }
+  await resetAssistantState()
+  showCharacterEditor.value = false
+  editingCharacter.value = null
+}
+
+async function cancelCharacterEdit() {
+  await resetAssistantState()
   showCharacterEditor.value = false
   editingCharacter.value = null
 }
@@ -1636,8 +1887,8 @@ async function triggerInterject(characterId: string) {
   const chatId = activeChat.value.id
   isInterjecting.value = true
   streamError.value = null
-  aborter?.abort()
-  aborter = new AbortController()
+  aborter.value?.abort()
+  aborter.value = new AbortController()
   
   const useStream = settings.settings?.streamEnabled !== false
   
@@ -1674,7 +1925,7 @@ async function triggerInterject(characterId: string) {
               streamError.value = String(evt.data?.message ?? 'unknown error')
             }
           },
-          aborter.signal,
+          aborter.value?.signal,
         )
       } finally {
         flushStreamForMessage(localAssistantId)
@@ -1841,7 +2092,7 @@ async function runGroupGeneration(
               streamError.value = String(evt.data?.message ?? 'unknown error')
             }
           },
-          aborter?.signal,
+          aborter.value?.signal,
         )
       } finally {
         flushStreamForMessage(localAssistantId)
@@ -1955,8 +2206,8 @@ async function sendUserMessage() {
   showInterjectPanel.value = effectivePureAiMode.value ? true : false
 
   isGenerating.value = true
-  aborter?.abort()
-  aborter = new AbortController()
+  aborter.value?.abort()
+  aborter.value = new AbortController()
 
   const useStream = settings.settings?.streamEnabled !== false
 
@@ -2060,7 +2311,7 @@ async function sendUserMessage() {
                 streamError.value = String(evt.data?.message ?? 'unknown error')
               }
             },
-            aborter?.signal,
+            aborter.value?.signal,
           )
         } finally {
           flushStreamForMessage(localAssistantId)
@@ -2122,8 +2373,8 @@ async function startNextRound() {
   const groupDelay = activeChat.value.groupDelay || 1500
 
   isGenerating.value = true
-  aborter?.abort()
-  aborter = new AbortController()
+  aborter.value?.abort()
+  aborter.value = new AbortController()
 
   try {
     const allMemberIds = [...activeChat.value.memberIds]
@@ -2157,10 +2408,10 @@ async function startNextRound() {
 }
 
 function stopStreaming() {
-  if (!aborter) return
+  if (!aborter.value) return
   stopRequested.value = true
   stopStreamingHold.value = true
-  aborter.abort()
+  aborter.value.abort()
   flushAllStreamBuffers()
 }
 
@@ -2539,7 +2790,7 @@ const editingPersonaAvatarUrl = computed(() => {
 
                 <!-- 气泡 -->
                 <div 
-                  class="relative px-5 py-3.5 rounded-2xl text-[15px] leading-7 shadow-sm transition-all duration-200 border"
+                  class="message-bubble relative px-5 py-3.5 rounded-2xl text-[15px] leading-7 shadow-sm transition-all duration-200 border max-w-full min-w-0"
                   :class="[
                     m.role === 'user' 
                       ? 'bg-brand/10 border-brand/20 text-gray-100 rounded-tr-sm hover:border-brand/30' 
@@ -2778,72 +3029,197 @@ const editingPersonaAvatarUrl = computed(() => {
   </NModal>
 
   <!-- 角色编辑弹窗 -->
-  <NModal v-model:show="showCharacterEditor" preset="card" :title="isNewCharacter ? '新建角色' : '编辑角色'" class="!bg-[#18181c] !border-white/10 chat-modal-width-700-90">
-    <NForm v-if="editingCharacter" label-placement="top">
-      <NSpace vertical size="medium">
-        <div class="flex gap-6">
-           <div class="flex flex-col items-center gap-3">
-              <ModernAvatar 
-                :src="editingCharacterAvatarUrl"
-                :size="120"
-                aspect="auto"
-                object-fit="contain"
-                rounded="rounded-xl"
-                class="border-2 border-brand/40 shadow-lg bg-black/20"
-              />
-              <NButton size="small" secondary @click="showCharacterAvatarCropper = true">更换头像</NButton>
-           </div>
-           <div class="flex-1 space-y-4">
-        <NFormItem>
-          <template #label>
-            <span>名称</span>
-            <span class="opacity-60 text-xs ml-2 text-brand">该项参与对话</span>
-          </template>
-                <NInput v-model:value="editingCharacter.name" placeholder="角色名称" />
-              </NFormItem>
-              <NFormItem label="简介">
-                <NInput v-model:value="editingCharacter.description" type="textarea" :autosize="{ minRows: 2, maxRows: 3 }" placeholder="简短描述" />
-              </NFormItem>
-           </div>
+  <NModal v-model:show="showCharacterEditor" preset="card" :title="isNewCharacter ? '新建角色' : '编辑角色'" class="!bg-[#18181c] !border-white/10 chat-modal-width-1200-90">
+    <div v-if="editingCharacter" class="flex gap-6 h-[80vh]">
+      <div class="flex-1 overflow-y-auto pr-2 custom-scrollbar">
+        <NForm label-placement="top">
+          <NSpace vertical size="medium">
+            <div class="flex gap-6">
+               <div class="flex flex-col items-center gap-3">
+                  <ModernAvatar 
+                    :src="editingCharacterAvatarUrl"
+                    :size="120"
+                    aspect="auto"
+                    object-fit="contain"
+                    rounded="rounded-xl"
+                    class="border-2 border-brand/40 shadow-lg bg-black/20"
+                  />
+                  <NButton size="small" secondary @click="showCharacterAvatarCropper = true">更换头像</NButton>
+               </div>
+               <div class="flex-1 space-y-4">
+            <NFormItem>
+              <template #label>
+                <span>名称</span>
+                <span class="opacity-60 text-xs ml-2 text-brand">该项参与对话</span>
+              </template>
+                    <NInput v-model:value="editingCharacter.name" placeholder="角色名称" />
+                  </NFormItem>
+                  <NFormItem label="简介">
+                    <NInput v-model:value="editingCharacter.description" type="textarea" :autosize="{ minRows: 2, maxRows: 3 }" placeholder="简短描述" />
+                  </NFormItem>
+               </div>
+            </div>
+
+            <NFormItem>
+              <template #label>
+                <span>Personality（性格/外貌）</span>
+                <span class="opacity-60 text-xs ml-2 text-brand">该项参与对话</span>
+              </template>
+              <NInput v-model:value="editingCharacter.personality" type="textarea" :autosize="{ minRows: 2, maxRows: 5 }" placeholder="详细设定..." />
+            </NFormItem>
+
+            <NFormItem>
+              <template #label>
+                <span>Scenario（情景/世界观）</span>
+                <span class="opacity-60 text-xs ml-2 text-brand">该项参与对话</span>
+              </template>
+              <NInput v-model:value="editingCharacter.scenario" type="textarea" :autosize="{ minRows: 2, maxRows: 4 }" placeholder="世界背景..." />
+            </NFormItem>
+
+            <NFormItem>
+              <template #label>
+                <span>系统提示词</span>
+                <span class="opacity-60 text-xs ml-2 text-brand">该项参与对话</span>
+              </template>
+              <NInput v-model:value="editingCharacter.systemPrompt" type="textarea" :autosize="{ minRows: 2, maxRows: 6 }" placeholder="回复格式要求..." />
+            </NFormItem>
+
+            <NFormItem>
+              <template #label>
+                <span>首句</span>
+                <span class="opacity-60 text-xs ml-2" v-pre>支持 {{user}} 占位符</span>
+                <span class="opacity-60 text-xs ml-2 text-brand">该项参与对话</span>
+              </template>
+              <NInput v-model:value="editingCharacter.firstMessage" type="textarea" :autosize="{ minRows: 2, maxRows: 4 }" placeholder="开场白..." />
+            </NFormItem>
+
+            <NFormItem label="示例对话">
+              <NInput v-model:value="editingCharacter.exampleDialogue" type="textarea" :autosize="{ minRows: 4, maxRows: 10 }" placeholder="示例对话..." />
+            </NFormItem>
+
+            <NSpace justify="end" class="mt-4 pb-4">
+              <NButton secondary @click="exportCharacterCard" :disabled="!editingCharacter">导出为文本</NButton>
+              <NButton @click="cancelCharacterEdit">取消</NButton>
+              <NButton type="primary" @click="saveCharacter">保存</NButton>
+            </NSpace>
+          </NSpace>
+        </NForm>
+      </div>
+
+      <div class="flex-[0.66] shrink-0 bg-[#141418] border border-white/10 rounded-2xl p-4 flex flex-col shadow-inner">
+        <div class="flex items-center justify-between mb-4 px-1">
+          <span class="text-sm font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-brand animate-pulse"></span>
+            聊天助手
+          </span>
+          <button class="text-gray-500 hover:text-white transition-colors" @click="showAssistantSettings = true">⋯</button>
         </div>
+        <div class="flex-1 overflow-y-auto custom-scrollbar space-y-4 pr-2 mb-4">
+          <div v-if="assistantMessages.length === 0" class="text-xs text-gray-600 text-center py-12 flex flex-col items-center gap-3">
+            <div class="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center text-xl">✨</div>
+            开始和助手对话以完善你的角色卡
+          </div>
+          <div v-for="m in assistantMessages" :key="m.id" class="flex flex-col gap-1 group" :class="m.role === 'user' ? 'items-end' : 'items-start'">
+            <div
+              class="px-4 py-2.5 rounded-2xl text-sm leading-relaxed max-w-[90%] shadow-sm border transition-colors"
+              :class="m.role === 'user' ? 'bg-brand/10 border-brand/20 text-gray-100 rounded-tr-sm' : 'bg-white/5 border-white/5 text-gray-200 rounded-tl-sm'"
+            >
+              <div class="prose prose-invert prose-sm max-w-none" v-html="renderMarkdown(m.content)"></div>
+            </div>
+            <!-- 助手消息操作 -->
+            <div class="flex items-center gap-3 px-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <button 
+                v-if="m.role === 'assistant'" 
+                class="text-[10px] text-gray-600 hover:text-blue-400 transition-colors" 
+                @click="rewriteAssistantMessage(m)" 
+                :disabled="isAssistantGenerating"
+              >
+                重写
+              </button>
+              <button class="text-[10px] text-gray-600 hover:text-brand transition-colors" @click="openEditAssistantMessage(m)" :disabled="isAssistantGenerating">编辑</button>
+              <button class="text-[10px] text-gray-600 hover:text-red-400 transition-colors" @click="deleteAssistantMessage(m)" :disabled="isAssistantGenerating">删除</button>
+            </div>
+          </div>
+        </div>
+        <div class="pt-4 border-t border-white/5">
+          <div class="relative">
+            <NInput
+              v-model:value="assistantDraft"
+              type="textarea"
+              :autosize="{ minRows: 2, maxRows: 6 }"
+              placeholder="输入建议或要求 (Ctrl + Enter)..."
+              class="!bg-black/30 !border-white/5 focus:!border-brand/40"
+              :disabled="isAssistantGenerating"
+              @keydown.ctrl.enter="sendAssistantMessage"
+            />
+          </div>
+          <div class="flex items-center justify-between mt-3 gap-3">
+            <ModernSelect
+              :model-value="assistantCurrentModel"
+              :options="chatModelOptions"
+              placement="top"
+              placeholder="模型..."
+              class="!w-[160px] !text-xs"
+              searchable
+              allow-create
+              @select="handleAssistantModelSelect"
+            />
+            <NButton size="small" type="primary" :loading="isAssistantGenerating" :disabled="!assistantDraft.trim()" @click="sendAssistantMessage" class="px-6">
+              发送
+            </NButton>
+          </div>
+          <div v-if="assistantStreamError" class="text-xs text-red-400 mt-2 bg-red-400/10 p-2 rounded-lg border border-red-400/20 truncate">{{ assistantStreamError }}</div>
+        </div>
+      </div>
+    </div>
+  </NModal>
 
-        <NFormItem>
-          <template #label>
-            <span>Personality（性格/外貌）</span>
-            <span class="opacity-60 text-xs ml-2 text-brand">该项参与对话</span>
-          </template>
-          <NInput v-model:value="editingCharacter.personality" type="textarea" :autosize="{ minRows: 2, maxRows: 5 }" placeholder="详细设定..." />
+  <!-- 助手消息编辑弹窗 -->
+  <NModal v-model:show="showAssistantMessageEditor" preset="card" title="编辑助手消息" class="!bg-[#18181c] !border-white/10 chat-modal-width-520-92">
+    <NForm label-placement="top">
+      <NSpace vertical size="medium">
+        <NFormItem label="内容">
+          <NInput
+            v-model:value="editingAssistantMessageContent"
+            type="textarea"
+            :autosize="{ minRows: 6, maxRows: 12 }"
+            placeholder="输入消息内容..."
+            class="!bg-black/20"
+          />
         </NFormItem>
-
-        <NFormItem>
-          <template #label>
-            <span>Scenario（情景/世界观）</span>
-            <span class="opacity-60 text-xs ml-2 text-brand">该项参与对话</span>
-          </template>
-          <NInput v-model:value="editingCharacter.scenario" type="textarea" :autosize="{ minRows: 2, maxRows: 4 }" placeholder="世界背景..." />
-        </NFormItem>
-
-        <NFormItem>
-          <template #label>
-            <span>系统提示词</span>
-            <span class="opacity-60 text-xs ml-2 text-brand">该项参与对话</span>
-          </template>
-          <NInput v-model:value="editingCharacter.systemPrompt" type="textarea" :autosize="{ minRows: 2, maxRows: 6 }" placeholder="回复格式要求..." />
-        </NFormItem>
-
-        <NFormItem>
-          <template #label>
-            <span>首句</span>
-            <span class="opacity-60 text-xs ml-2">支持 {<!-- -->{user}} 占位符</span>
-            <span class="opacity-60 text-xs ml-2 text-brand">该项参与对话</span>
-          </template>
-          <NInput v-model:value="editingCharacter.firstMessage" type="textarea" :autosize="{ minRows: 2, maxRows: 4 }" placeholder="开场白..." />
-        </NFormItem>
-
         <NSpace justify="end">
-          <NButton secondary @click="exportCharacterCard" :disabled="!editingCharacter">导出为文本</NButton>
-          <NButton @click="showCharacterEditor = false">取消</NButton>
-          <NButton type="primary" @click="saveCharacter">保存</NButton>
+          <NButton @click="showAssistantMessageEditor = false">取消</NButton>
+          <NButton type="primary" @click="saveEditedAssistantMessage">保存</NButton>
+        </NSpace>
+      </NSpace>
+    </NForm>
+  </NModal>
+
+  <!-- 聊天助手设置弹窗 -->
+  <NModal v-model:show="showAssistantSettings" preset="card" title="聊天助手设置" class="!bg-[#18181c] !border-white/10 chat-modal-width-520-92">
+    <NForm label-placement="top">
+      <NSpace vertical size="medium">
+        <NFormItem label="提示词">
+          <NInput
+            v-model:value="assistantSettings.prompt"
+            type="textarea"
+            :autosize="{ minRows: 6, maxRows: 12 }"
+            placeholder="输入聊天助手提示词..."
+            class="!bg-black/20"
+          />
+        </NFormItem>
+        <NFormItem label="温度">
+          <NInputNumber
+            v-model:value="assistantSettings.temperature"
+            :min="0"
+            :max="2"
+            :step="0.1"
+            class="w-full"
+          />
+        </NFormItem>
+        <NSpace justify="end">
+          <NButton @click="showAssistantSettings = false">取消</NButton>
+          <NButton type="primary" @click="saveAssistantSettingsAndClose">保存</NButton>
         </NSpace>
       </NSpace>
     </NForm>
@@ -3345,5 +3721,61 @@ const editingPersonaAvatarUrl = computed(() => {
 .md :deep(a) {
   color: #a78bfa;
   text-decoration: underline;
+}
+
+/* 代码块横向滚动，防止撑开气泡 */
+.message-bubble .md {
+  width: 100%;
+}
+.message-bubble .md .stream-markdown {
+  /* 使用 overflow: hidden 触发 BFC，防止子元素（如 pre）溢出撑开父容器 */
+  overflow: hidden;
+  word-wrap: break-word;
+}
+.message-bubble .md :deep(pre) {
+  overflow-x: auto;
+  max-width: 100%;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+.message-bubble .md :deep(pre)::-webkit-scrollbar {
+  height: 6px;
+}
+.message-bubble .md :deep(pre)::-webkit-scrollbar-track {
+  background: transparent;
+}
+.message-bubble .md :deep(pre)::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+}
+.message-bubble .md :deep(pre):hover::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.25);
+}
+.message-bubble .md :deep(pre code) {
+  display: block;
+  white-space: pre;
+}
+.message-bubble .md :deep(code) {
+  word-break: break-word;
+}
+.message-bubble .md :deep(pre)::-webkit-scrollbar {
+  height: 6px;
+}
+.message-bubble .md :deep(pre)::-webkit-scrollbar-track {
+  background: transparent;
+}
+.message-bubble .md :deep(pre)::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+}
+.message-bubble .md :deep(pre):hover::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.25);
+}
+.message-bubble .md :deep(pre code) {
+  display: block;
+  white-space: pre;
+}
+.message-bubble .md :deep(code) {
+  word-break: break-word;
 }
 </style>
