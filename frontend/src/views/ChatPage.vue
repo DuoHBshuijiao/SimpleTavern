@@ -1127,6 +1127,32 @@ async function deleteCharacter(id: string) {
   }
 }
 
+function getDownloadFilenameFromDisposition(disposition: string | null, fallback: string) {
+  if (!disposition) return fallback
+  const match = /filename="([^"]+)"/i.exec(disposition)
+  if (match?.[1]) return match[1]
+  return fallback
+}
+
+async function exportChat(format: 'txt' | 'json') {
+  if (!activeChat.value) return
+  const r = await fetch(`/api/chats/${activeChat.value.id}/export?format=${format}`)
+  if (!r.ok) {
+    alert(await r.text())
+    return
+  }
+  const blob = await r.blob()
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  const fallback = `${activeChat.value.title || '聊天记录'}.${format}`
+  link.download = getDownloadFilenameFromDisposition(r.headers.get('Content-Disposition'), fallback)
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+}
+
 // 导出角色卡为纯文本
 function exportCharacterCard() {
   if (!editingCharacter.value) return
@@ -2409,6 +2435,12 @@ const editingPersonaAvatarUrl = computed(() => {
               </template>
             </div>
             <div class="pointer-events-auto flex items-center gap-2">
+              <NButton size="small" secondary class="!bg-white/5 !text-gray-300 hover:!bg-white/10" @click="exportChat('txt')">
+                导出TXT
+              </NButton>
+              <NButton size="small" secondary class="!bg-white/5 !text-gray-300 hover:!bg-white/10" @click="exportChat('json')">
+                导出JSON
+              </NButton>
               <NButton v-if="activeChat.isGroup" size="small" secondary class="!bg-purple-500/10 !text-purple-400 hover:!bg-purple-500/20" @click="openMemberManager">
                 管理成员
               </NButton>

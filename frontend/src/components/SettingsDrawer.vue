@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { useChatsStore, useSettingsStore } from '../stores'
+import { useCharactersStore, useChatsStore, useSettingsStore } from '../stores'
 import type { Chat, ChatOverrides, Settings, ApiPreset } from '../types/models'
 import ModernSelect from './ModernSelect.vue'
 import { apiPost } from '../api/http'
@@ -16,6 +16,7 @@ const emit = defineEmits<{
 
 const settingsStore = useSettingsStore()
 const chatsStore = useChatsStore()
+const charactersStore = useCharactersStore()
 
 const tab = ref<'global' | 'presets' | 'chat'>('global')
 const globalDraft = ref<Settings | null>(null)
@@ -25,6 +26,7 @@ const showApiKey = ref(false)
 const editingPresetId = ref<string | null>(null)
 const editingPresetShowApiKey = ref(false)
 const presetModelsLoading = ref(false)
+const importInputRef = ref<HTMLInputElement | null>(null)
 
 // Model Selector Modal State
 const showModelSelector = ref(false)
@@ -191,6 +193,48 @@ async function saveChatOverrides() {
   if (!props.chat || !chatDraft.value) return
   await chatsStore.updateOverrides(props.chat.id, chatDraft.value)
   close()
+}
+
+async function downloadSettingsBackup() {
+  const r = await fetch('/api/settings/backup')
+  if (!r.ok) {
+    alert(await r.text())
+    return
+  }
+  const blob = await r.blob()
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = 'settings-backup.zip'
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+}
+
+function triggerImport() {
+  importInputRef.value?.click()
+}
+
+async function handleImportChange(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  const fd = new FormData()
+  fd.append('file', file)
+  const r = await fetch('/api/import', { method: 'POST', body: fd })
+  if (!r.ok) {
+    alert(await r.text())
+    input.value = ''
+    return
+  }
+  const result = await r.json()
+  await settingsStore.load()
+  await charactersStore.loadAll()
+  await chatsStore.loadGroupList()
+  if (chatsStore.characterId) await chatsStore.loadList(chatsStore.characterId)
+  alert(`导入完成：${(result.imported || []).join(', ') || '无'}${result.warnings?.length ? '\n警告：' + result.warnings.join('; ') : ''}`)
+  input.value = ''
 }
 </script>
 
@@ -360,6 +404,36 @@ async function saveChatOverrides() {
                   step="128" min="1"
                   placeholder="默认"
                   class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-brand/50 outline-none"
+                />
+              </div>
+            </div>
+
+            <div class="h-px bg-white/5 my-4"></div>
+
+            <div class="space-y-3">
+              <div class="text-sm font-medium text-gray-300">数据备份与导入</div>
+              <div class="text-xs text-gray-500">
+                备份会导出全部系统设置（含用户 Persona 头像），导入支持 txt/json/zip 自动识别。
+              </div>
+              <div class="flex gap-2">
+                <button 
+                  class="px-4 py-2 bg-white/5 hover:bg-white/10 text-gray-200 rounded-lg text-sm transition-colors"
+                  @click="downloadSettingsBackup"
+                >
+                  备份设置 (ZIP)
+                </button>
+                <button 
+                  class="px-4 py-2 bg-white/5 hover:bg-white/10 text-gray-200 rounded-lg text-sm transition-colors"
+                  @click="triggerImport"
+                >
+                  导入数据
+                </button>
+                <input
+                  ref="importInputRef"
+                  type="file"
+                  class="hidden"
+                  accept=".txt,.json,.zip"
+                  @change="handleImportChange"
                 />
               </div>
             </div>

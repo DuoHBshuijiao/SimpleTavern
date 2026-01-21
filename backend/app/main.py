@@ -7,6 +7,7 @@ from app.routes.avatars import router as avatars_router
 from app.routes.characters import router as characters_router
 from app.routes.chats import router as chats_router
 from app.routes.generate import router as generate_router
+from app.routes.import_export import router as import_export_router
 from app.routes.settings import router as settings_router
 from app.routes.llm import router as llm_router
 from app.storage import ensure_data_initialized
@@ -40,5 +41,6 @@ app.include_router(chats_router, prefix="/api")
 app.include_router(llm_router, prefix="/api")
 app.include_router(generate_router, prefix="/api")
 app.include_router(avatars_router, prefix="/api")
+app.include_router(import_export_router, prefix="/api")
 
 
