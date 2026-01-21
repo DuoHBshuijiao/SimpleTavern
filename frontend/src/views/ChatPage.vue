@@ -1129,6 +1129,14 @@ async function deleteCharacter(id: string) {
 
 function getDownloadFilenameFromDisposition(disposition: string | null, fallback: string) {
   if (!disposition) return fallback
+  const utf8Match = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(disposition)
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1])
+    } catch {
+      return utf8Match[1]
+    }
+  }
   const match = /filename="([^"]+)"/i.exec(disposition)
   if (match?.[1]) return match[1]
   return fallback
@@ -2699,6 +2707,11 @@ const editingPersonaAvatarUrl = computed(() => {
 
       <!-- 空状态 -->
       <div v-else class="flex flex-col items-center justify-center h-full text-center p-8 opacity-60">
+         <div class="absolute top-4 right-4 pointer-events-auto opacity-100">
+           <NButton size="small" secondary class="!bg-white/5 !text-gray-300 hover:!bg-white/10" @click="showSettings = true">
+             设置
+           </NButton>
+         </div>
          <div class="w-20 h-20 rounded-2xl bg-white/5 mb-6 flex items-center justify-center text-4xl">👋</div>
          <h3 class="text-xl font-bold text-gray-200 mb-2">欢迎来到 SimpleTavern</h3>
          <p class="text-gray-500 mb-8 max-w-md">请在左侧选择一个角色并开始会话，或者创建一个新的角色。</p>
