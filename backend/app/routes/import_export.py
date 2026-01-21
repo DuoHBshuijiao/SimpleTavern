@@ -4,6 +4,7 @@ import io
 import json
 import re
 import zipfile
+from datetime import datetime
 from urllib.parse import quote
 from typing import Any
 
@@ -14,6 +15,8 @@ from app.schemas import Chat, ChatMessage, CharacterCard, Settings
 from app.storage import (
     avatar_path,
     avatars_dir,
+    characters_dir,
+    chats_dir,
     load_character,
     load_chat,
     load_settings,
@@ -157,6 +160,24 @@ def _build_system_prompt_for_chat(chat: Chat, settings: Settings) -> tuple[str, 
     return _build_group_system_prompt(chat, settings, last_speaker_id), last_speaker_id
 
 
+def _chat_export_participants(chat: Chat) -> str:
+    if not chat.isGroup:
+        try:
+            character = load_character(chat.characterId)
+            return character.name or "角色"
+        except FileNotFoundError:
+            return "角色"
+    names: list[str] = []
+    for member_id in chat.memberIds:
+        try:
+            member = load_character(member_id)
+            if member.name:
+                names.append(member.name)
+        except FileNotFoundError:
+            continue
+    return "、".join(names) or "群聊"
+
+
 def _format_message_block(m: ChatMessage) -> list[str]:
     lines = ["[Message]"]
     lines.append(f"id={m.id}")
@@ -205,7 +226,10 @@ def export_chat(chat_id: str, format: str = Query("txt")) -> Response:
 
     settings = load_settings()
     system_prompt, last_speaker_id = _build_system_prompt_for_chat(chat, settings)
-    base_name = _sanitize_filename(chat.title or "chat", "chat")
+    participants = _chat_export_participants(chat)
+    export_date = datetime.now().astimezone()
+    date_str = f"{export_date.year}/{export_date.month}/{export_date.day}"
+    base_name = _sanitize_filename(f"{participants} - {date_str}", "chat")
 
     if format.lower() == "json":
         export_obj = {
@@ -234,7 +258,7 @@ def export_chat(chat_id: str, format: str = Query("txt")) -> Response:
 
 
 @router.get("/settings/backup")
-def backup_settings() -> Response:
+def backup_settings(scope: str = Query("basic")) -> Response:
     settings = load_settings()
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -245,11 +269,29 @@ def backup_settings() -> Response:
             p = avatar_path(persona.avatar)
             if p.exists():
                 zf.write(p, arcname=f"avatars/{p.name}")
+        if scope not in ("basic", "with_characters", "with_chats"):
+            raise HTTPException(status_code=400, detail="unsupported scope")
+        if scope in ("with_characters", "with_chats"):
+            for p in characters_dir().glob("*.json"):
+                zf.write(p, arcname=f"characters/{p.name}")
+            for p in characters_dir().glob("*.json"):
+                try:
+                    card = CharacterCard.model_validate(json.loads(p.read_text(encoding="utf-8")))
+                except Exception:
+                    continue
+                if card.avatar:
+                    avatar_file = avatar_path(card.avatar)
+                    if avatar_file.exists():
+                        zf.write(avatar_file, arcname=f"avatars/{avatar_file.name}")
+        if scope == "with_chats":
+            for p in chats_dir().rglob("*.json"):
+                rel = p.relative_to(chats_dir())
+                zf.write(p, arcname=f"chats/{rel.as_posix()}")
     buffer.seek(0)
     return Response(
         content=buffer.read(),
         media_type="application/zip",
-        headers={"Content-Disposition": 'attachment; filename="settings-backup.zip"'},
+        headers={"Content-Disposition": _content_disposition("settings-backup.zip")},
     )
 
 
@@ -396,6 +438,20 @@ def _import_from_zip(payload: bytes) -> dict[str, Any]:
             data = zf.read(name)
             avatars_dir().mkdir(parents=True, exist_ok=True)
             avatar_path(filename).write_bytes(data)
+        for name in zf.namelist():
+            if name.startswith("characters/") and name.endswith(".json"):
+                raw = json.loads(zf.read(name).decode("utf-8"))
+                card = CharacterCard.model_validate(raw)
+                save_character(card)
+                if "character" not in imported:
+                    imported.append("character")
+        for name in zf.namelist():
+            if name.startswith("chats/") and name.endswith(".json"):
+                raw = json.loads(zf.read(name).decode("utf-8"))
+                chat = Chat.model_validate(raw)
+                save_chat(chat)
+                if "chat" not in imported:
+                    imported.append("chat")
     return {"imported": imported, "warnings": warnings}
 
 

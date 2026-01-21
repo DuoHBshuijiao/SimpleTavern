@@ -114,6 +114,14 @@ def settings_path() -> Path:
     return _settings_path()
 
 
+def characters_dir() -> Path:
+    return _characters_dir()
+
+
+def chats_dir() -> Path:
+    return _chats_dir()
+
+
 # ---------- Characters ----------
 
 

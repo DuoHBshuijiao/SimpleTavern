@@ -195,8 +195,8 @@ async function saveChatOverrides() {
   close()
 }
 
-async function downloadSettingsBackup() {
-  const r = await fetch('/api/settings/backup')
+async function downloadSettingsBackup(scope: 'basic' | 'with_characters' | 'with_chats') {
+  const r = await fetch(`/api/settings/backup?scope=${scope}`)
   if (!r.ok) {
     alert(await r.text())
     return
@@ -418,9 +418,21 @@ async function handleImportChange(e: Event) {
               <div class="flex gap-2">
                 <button 
                   class="px-4 py-2 bg-white/5 hover:bg-white/10 text-gray-200 rounded-lg text-sm transition-colors"
-                  @click="downloadSettingsBackup"
+                  @click="downloadSettingsBackup('basic')"
                 >
-                  备份设置 (ZIP)
+                  基本设置
+                </button>
+                <button 
+                  class="px-4 py-2 bg-white/5 hover:bg-white/10 text-gray-200 rounded-lg text-sm transition-colors"
+                  @click="downloadSettingsBackup('with_characters')"
+                >
+                  包含角色卡
+                </button>
+                <button 
+                  class="px-4 py-2 bg-white/5 hover:bg-white/10 text-gray-200 rounded-lg text-sm transition-colors"
+                  @click="downloadSettingsBackup('with_chats')"
+                >
+                  包含全部聊天记录
                 </button>
                 <button 
                   class="px-4 py-2 bg-white/5 hover:bg-white/10 text-gray-200 rounded-lg text-sm transition-colors"
