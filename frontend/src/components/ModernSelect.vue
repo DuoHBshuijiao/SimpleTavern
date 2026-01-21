@@ -21,6 +21,7 @@ const props = withDefaults(defineProps<{
   disabled?: boolean
   allowCreate?: boolean // 允许输入不存在的选项
   placement?: 'top' | 'bottom'
+  dropdownWidth?: string | number
 }>(), {
   modelValue: '',
   options: () => [],
@@ -29,7 +30,8 @@ const props = withDefaults(defineProps<{
   loading: false,
   disabled: false,
   allowCreate: false,
-  placement: 'bottom'
+  placement: 'bottom',
+  dropdownWidth: ''
 })
 
 const emit = defineEmits<{
@@ -200,8 +202,12 @@ onUnmounted(() => {
     <!-- Dropdown Menu -->
     <div 
       v-if="isOpen"
-      class="absolute left-0 right-0 z-50 mt-1 bg-[#18181c] border border-white/10 rounded-xl shadow-xl overflow-hidden flex flex-col max-h-[260px]"
-      :class="placement === 'top' ? 'bottom-full mb-1' : 'top-full mt-1'"
+      class="absolute z-50 mt-1 bg-[#18181c] border border-white/10 rounded-xl shadow-xl overflow-hidden flex flex-col max-h-[260px]"
+      :class="[
+        placement === 'top' ? 'bottom-full mb-1' : 'top-full mt-1',
+        dropdownWidth ? 'right-0' : 'left-0 right-0'
+      ]"
+      :style="dropdownWidth ? { width: typeof dropdownWidth === 'number' ? dropdownWidth + 'px' : dropdownWidth } : {}"
     >
       <!-- Search Input -->
       <div v-if="searchable || allowCreate" class="p-2 border-b border-white/5">

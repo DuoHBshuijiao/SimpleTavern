@@ -2934,6 +2934,7 @@ const editingPersonaAvatarUrl = computed(() => {
                       placement="top"
                       placeholder="选择模型 (自动关联预设)..."
                       class="!w-[200px] !text-xs"
+                      dropdown-width="410"
                       searchable
                       allow-create
                       @select="handleModelSelect"
@@ -3160,6 +3161,7 @@ const editingPersonaAvatarUrl = computed(() => {
               placement="top"
               placeholder="模型..."
               class="!w-[160px] !text-xs"
+              dropdown-width="410"
               searchable
               allow-create
               @select="handleAssistantModelSelect"
