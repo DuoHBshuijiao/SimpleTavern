@@ -49,22 +49,40 @@ def _assistant_settings_path() -> Path:
 def _assistant_chat_path() -> Path:
     return _data_dir() / "assistant_chat.json"
 
+
+def _assistant_workspace_chat_path() -> Path:
+    return _ai_workspace_dir() / "assistant_workspace_chat.json"
+
 CHAT_RECORD_FILENAME = "chat.json"
 CHAT_MEMORY_FILENAME = "chat_memory.json"
+ASSISTANT_CHAT_FILENAME = "assistant_chat.json"
+ASSISTANT_WORKSPACE_CHAT_FILENAME = "assistant_workspace_chat.json"
 
 
 DEFAULT_ASSISTANT_PROMPT = (
-    "你是“角色卡创建助手 + 聊天伴侣”。\n"
-    "目标：协助用户完善角色卡字段，并在合适时机生成完整角色卡 JSON。\n"
-    "可用工具：read_file、create_file、write_file、delete_file（仅允许 data/ai_workspace/ 目录）。\n"
-    "当你准备好生成角色卡时：\n"
-    "1) 以 JSON 格式组织完整角色卡（包含 version、id、name、description、personality、scenario、firstMessage、"
-    "exampleDialogue、systemPrompt、avatar、createdAt、updatedAt）。\n"
-    "   【重要】exampleDialogue 必须是纯字符串格式，不能是数组！示例对话用换行符分隔，如：\n"
+    "你是“聊天助理（角色卡创建助手 + 会话辅助）”。\n"
+    "目标：只在当前会话内提供帮助，协助用户完善角色卡字段、解释当前对话与长期记忆，并在合适时机生成角色卡 JSON。\n"
+    "范围：仅使用当前会话的数据，不访问或猜测其他会话内容。\n"
+    "工具使用规范（仅在需要时调用）：\n"
+    "- read_file/create_file/write_file/delete_file：必须使用 data/ai_workspace/ 下的相对路径，路径不允许自行杜撰或越界。\n"
+    "- read_chat_json：无需参数。\n"
+    "- read_chat_memory：无需参数。\n"
+    "- list_participants：无需参数。\n"
+    "- read_character_card：只传入一个字符串参数 characterId（从 list_participants 获得）。\n"
+    "- write_chat_memory：只传入一个字符串参数 content；该内容会整段覆盖当前长期记忆（不是追加）。仅在用户明确要求“写入/更新/保存长期记忆”时使用。\n"
+    "- create_file/write_file：参数仅为 path 与 content（均为字符串）。\n"
+    "- delete_file/read_file：参数仅为 path（字符串）。\n"
+    "重要规则：\n"
+    "1) 不要声称已读取/写入文件，除非实际调用了对应工具。\n"
+    "2) 不要使用绝对路径或越出 data/ai_workspace/ 的路径。\n"
+    "3) 工具结果出现不确定时，先向用户澄清再行动。\n"
+    "生成角色卡流程：\n"
+    "1) 组织完整角色卡 JSON（包含 version、id、name、description、personality、scenario、firstMessage、"
+    "exampleDialogue、systemPrompt、avatar（为空，不要填写虚假地址）、createdAt、updatedAt）。\n"
+    "2) 【重要】exampleDialogue 必须是纯字符串而非数组；用换行分隔，如：\n"
     "   \"exampleDialogue\": \"用户：你好\\n角色：你好呀！\\n用户：今天怎么样？\\n角色：很开心呢！\"\n"
-    "2) 使用 write_file 将内容写入 data/ai_workspace/character_card.json。\n"
-    "3) 写入后回复用户已生成并可继续调整。假如用户并没有说你可以随意发挥，请你准备详细的问卷调查，询问用户的喜好或想法，然后再使用工具创建文件。\n"
-    "注意：不要在回复中输出多余的 JSON 代码块，避免与工具写入重复。"
+    "3) 使用 write_file 写入 data/ai_workspace/character_card.json。\n"
+    "4) 写入后用简短文字告知已生成并可继续调整；不要在回复中重复输出整段 JSON。\n"
 )
 
 
@@ -157,6 +175,18 @@ def assistant_settings_path() -> Path:
 
 def assistant_chat_path() -> Path:
     return _assistant_chat_path()
+
+
+def assistant_workspace_chat_path() -> Path:
+    return _assistant_workspace_chat_path()
+
+
+def assistant_chat_path_for_chat(chat_id: str) -> Path:
+    found = _find_chat_path_by_id(chat_id)
+    if found is None:
+        raise FileNotFoundError(chat_id)
+    _, character_id = found
+    return chat_folder(character_id, chat_id) / ASSISTANT_CHAT_FILENAME
 
 
 def characters_dir() -> Path:
@@ -449,6 +479,18 @@ def delete_avatar(filename: str) -> None:
 # ---------- Assistant ----------
 
 
+def _assistant_chat_has_missing_ids(raw: Any) -> bool:
+    if not isinstance(raw, dict):
+        return False
+    messages = raw.get("messages")
+    if not isinstance(messages, list):
+        return False
+    for msg in messages:
+        if isinstance(msg, dict) and not msg.get("id"):
+            return True
+    return False
+
+
 def load_assistant_settings() -> AssistantSettings:
     raw = read_json(_assistant_settings_path())
     return AssistantSettings.model_validate(raw)
@@ -460,8 +502,38 @@ def save_assistant_settings(settings: AssistantSettings) -> AssistantSettings:
 
 
 def load_assistant_chat() -> AssistantChat:
-    raw = read_json(_assistant_chat_path())
-    return AssistantChat.model_validate(raw)
+    path = _assistant_chat_path()
+    raw = read_json(path)
+    chat = AssistantChat.model_validate(raw)
+    if _assistant_chat_has_missing_ids(raw):
+        write_json(path, chat.model_dump(mode="json"))
+    return chat
+
+
+def load_assistant_workspace_chat() -> AssistantChat:
+    path = _assistant_workspace_chat_path()
+    if not path.exists():
+        chat = AssistantChat()
+        write_json(path, chat.model_dump(mode="json"))
+        return chat
+    raw = read_json(path)
+    chat = AssistantChat.model_validate(raw)
+    if _assistant_chat_has_missing_ids(raw):
+        write_json(path, chat.model_dump(mode="json"))
+    return chat
+
+
+def load_assistant_chat_for_chat(chat_id: str) -> AssistantChat:
+    path = assistant_chat_path_for_chat(chat_id)
+    if not path.exists():
+        chat = AssistantChat()
+        write_json(path, chat.model_dump(mode="json"))
+        return chat
+    raw = read_json(path)
+    chat = AssistantChat.model_validate(raw)
+    if _assistant_chat_has_missing_ids(raw):
+        write_json(path, chat.model_dump(mode="json"))
+    return chat
 
 
 def save_assistant_chat(chat: AssistantChat) -> AssistantChat:
@@ -469,9 +541,38 @@ def save_assistant_chat(chat: AssistantChat) -> AssistantChat:
     return chat
 
 
+def save_assistant_workspace_chat(chat: AssistantChat) -> AssistantChat:
+    write_json(_assistant_workspace_chat_path(), chat.model_dump(mode="json"))
+    return chat
+
+
+def save_assistant_chat_for_chat(chat_id: str, chat: AssistantChat) -> AssistantChat:
+    path = assistant_chat_path_for_chat(chat_id)
+    write_json(path, chat.model_dump(mode="json"))
+    return chat
+
+
 def clear_assistant_chat() -> None:
     chat = AssistantChat()
     write_json(_assistant_chat_path(), chat.model_dump(mode="json"))
+
+
+def clear_assistant_workspace_chat() -> None:
+    chat = AssistantChat()
+    write_json(_assistant_workspace_chat_path(), chat.model_dump(mode="json"))
+
+
+def delete_assistant_workspace_chat() -> None:
+    path = _assistant_workspace_chat_path()
+    if path.exists():
+        with _lock_for(path):
+            path.unlink(missing_ok=True)
+
+
+def clear_assistant_chat_for_chat(chat_id: str) -> None:
+    chat = AssistantChat()
+    path = assistant_chat_path_for_chat(chat_id)
+    write_json(path, chat.model_dump(mode="json"))
 
 
 def clear_ai_workspace() -> None:

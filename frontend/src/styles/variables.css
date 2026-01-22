@@ -1,0 +1,106 @@
+/**
+ * 主题变量和设计令牌
+ * 
+ * 用于定义全局颜色、间距、圆角等设计变量
+ * 便于统一修改和主题切换
+ */
+
+@theme {
+  /* ========== 品牌色 ========== */
+  --color-brand: #a230ed;
+  --color-brand-hover: #b558f0;
+  --color-brand-dark: #8e23d1;
+  --color-brand-light: #c77df5;
+  
+  /* ========== 背景色 ========== */
+  --color-dark-bg: #101014;
+  --color-dark-surface: #18181c;
+  --color-dark-lighter: #2d2d33;
+  --color-dark-elevated: #1e1e24;
+  
+  /* ========== 文字色 ========== */
+  --color-text-primary: rgba(255, 255, 255, 0.9);
+  --color-text-secondary: rgba(255, 255, 255, 0.6);
+  --color-text-muted: rgba(255, 255, 255, 0.4);
+  
+  /* ========== 边框色 ========== */
+  --color-border-subtle: rgba(255, 255, 255, 0.05);
+  --color-border-default: rgba(255, 255, 255, 0.1);
+  --color-border-strong: rgba(255, 255, 255, 0.2);
+  
+  /* ========== 状态色 ========== */
+  --color-success: #22c55e;
+  --color-success-bg: rgba(34, 197, 94, 0.2);
+  --color-success-text: #86efac;
+  
+  --color-warning: #f59e0b;
+  --color-warning-bg: rgba(245, 158, 11, 0.2);
+  --color-warning-text: #fcd34d;
+  
+  --color-error: #ef4444;
+  --color-error-bg: rgba(239, 68, 68, 0.2);
+  --color-error-text: #fecaca;
+  
+  --color-info: #3b82f6;
+  --color-info-bg: rgba(59, 130, 246, 0.2);
+  --color-info-text: #93c5fd;
+  
+  /* ========== 特殊色（群聊/角色相关） ========== */
+  --color-purple: #a855f7;
+  --color-purple-bg: rgba(168, 85, 247, 0.2);
+  --color-purple-text: #e9d5ff;
+  
+  --color-assistant: #b76e79;
+  --color-assistant-bg: rgba(183, 110, 121, 0.2);
+  
+  /* ========== 圆角 ========== */
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+  --radius-2xl: 1.5rem;
+  --radius-3xl: 2rem;
+  --radius-full: 9999px;
+  
+  /* ========== 间距 ========== */
+  --spacing-xs: 0.25rem;
+  --spacing-sm: 0.5rem;
+  --spacing-md: 1rem;
+  --spacing-lg: 1.5rem;
+  --spacing-xl: 2rem;
+  --spacing-2xl: 3rem;
+  
+  /* ========== 阴影 ========== */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.3);
+  --shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.3);
+  --shadow-brand: 0 10px 25px rgba(162, 48, 237, 0.2);
+  --shadow-success: 0 10px 25px rgba(34, 197, 94, 0.15);
+  --shadow-error: 0 10px 25px rgba(239, 68, 68, 0.2);
+  --shadow-purple: 0 10px 25px rgba(168, 85, 247, 0.15);
+  
+  /* ========== 过渡 ========== */
+  --transition-fast: 0.15s ease;
+  --transition-normal: 0.2s ease;
+  --transition-slow: 0.3s ease;
+  
+  /* ========== 字体 ========== */
+  --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', Consolas, Monaco, 'Courier New', monospace;
+  
+  /* ========== 字号 ========== */
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+  
+  /* ========== Z-Index 层级 ========== */
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-modal: 300;
+  --z-popover: 400;
+  --z-tooltip: 500;
+}

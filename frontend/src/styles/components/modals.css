@@ -1,0 +1,168 @@
+/**
+ * 弹窗组件样式
+ * 
+ * Modal、Dialog、Drawer 等弹出层样式
+ */
+
+/* ========== 弹窗尺寸工具类 ========== */
+.chat-modal-width-1200-90 {
+  width: min(1200px, 90vw);
+}
+
+.chat-modal-width-700-92 {
+  width: min(700px, 92vw);
+}
+
+.chat-modal-width-700-90 {
+  width: min(700px, 90vw);
+}
+
+.chat-modal-width-600-90 {
+  width: min(600px, 90vw);
+}
+
+.chat-modal-width-520-92 {
+  width: min(520px, 92vw);
+}
+
+.chat-modal-width-520-90 {
+  width: min(520px, 90vw);
+}
+
+.chat-modal-width-500-90 {
+  width: min(500px, 90vw);
+}
+
+/* ========== 基础弹窗样式 ========== */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-md);
+}
+
+.modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+}
+
+.modal-content {
+  position: relative;
+  max-height: calc(100vh - 2rem);
+  background-color: var(--color-dark-surface);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow-xl);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-md) var(--spacing-lg);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.modal-title {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.modal-close {
+  padding: 0.25rem;
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-md);
+  transition: 
+    background-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.modal-close:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+  color: var(--color-text-primary);
+}
+
+.modal-body {
+  flex: 1;
+  padding: var(--spacing-lg);
+  overflow-y: auto;
+}
+
+.modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-md) var(--spacing-lg);
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+/* ========== 抽屉样式 ========== */
+.drawer {
+  position: fixed;
+  z-index: var(--z-modal);
+}
+
+.drawer-right {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 400px;
+  max-width: 90vw;
+  background-color: var(--color-dark-surface);
+  border-left: 1px solid var(--color-border-default);
+  box-shadow: var(--shadow-xl);
+  transform: translateX(100%);
+  transition: transform var(--transition-slow);
+}
+
+.drawer-right.open {
+  transform: translateX(0);
+}
+
+.drawer-left {
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 400px;
+  max-width: 90vw;
+  background-color: var(--color-dark-surface);
+  border-right: 1px solid var(--color-border-default);
+  box-shadow: var(--shadow-xl);
+  transform: translateX(-100%);
+  transition: transform var(--transition-slow);
+}
+
+.drawer-left.open {
+  transform: translateX(0);
+}
+
+/* ========== 弹出确认框 ========== */
+.popconfirm {
+  padding: var(--spacing-md);
+  background-color: var(--color-dark-surface);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
+}
+
+.popconfirm-message {
+  margin-bottom: var(--spacing-md);
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+}
+
+.popconfirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--spacing-sm);
+}

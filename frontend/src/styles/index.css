@@ -1,0 +1,41 @@
+/**
+ * 样式入口文件
+ * 
+ * 按正确顺序导入所有样式
+ * 
+ * 目录结构：
+ * styles/
+ * ├── index.css           # 入口文件（本文件）
+ * ├── variables.css       # 主题变量和设计令牌
+ * ├── base.css            # 全局基础样式
+ * ├── scrollbar.css       # 滚动条样式
+ * ├── animations.css      # 动画样式
+ * ├── utilities.css       # 工具类
+ * └── components/         # 组件样式
+ *     ├── index.css       # 组件入口
+ *     ├── buttons.css     # 按钮
+ *     ├── forms.css       # 表单
+ *     ├── modals.css      # 弹窗
+ *     └── cards.css       # 卡片
+ */
+
+/* 1. Tailwind CSS */
+@import "tailwindcss";
+
+/* 2. 主题变量（必须在 Tailwind 之后，其他样式之前） */
+@import './variables.css';
+
+/* 3. 基础样式 */
+@import './base.css';
+
+/* 4. 滚动条 */
+@import './scrollbar.css';
+
+/* 5. 动画 */
+@import './animations.css';
+
+/* 6. 工具类 */
+@import './utilities.css';
+
+/* 7. 组件样式 */
+@import './components/index.css';

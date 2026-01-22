@@ -2,7 +2,6 @@
 import { ref, onUnmounted, watch, nextTick } from 'vue'
 import Cropper from 'cropperjs'
 import 'cropperjs/dist/cropper.css'
-import { NButton, NModal, NSpace, NText } from 'naive-ui'
 
 const props = defineProps<{
   show: boolean
@@ -42,7 +41,6 @@ watch(imageSrc, async (src) => {
   }
   if (src) {
     await nextTick()
-    // 等待 DOM 更新后再初始化 Cropper
     setTimeout(() => {
       if (imageRef.value && imageSrc.value) {
         cropper.value = new Cropper(imageRef.value, {
@@ -66,7 +64,6 @@ watch(() => props.show, (show) => {
       cropper.value.destroy()
       cropper.value = null
     }
-    // 重置文件输入
     if (fileInputRef.value) {
       fileInputRef.value.value = ''
     }
@@ -107,63 +104,60 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <NModal
-    :show="show"
-    preset="card"
-    class="chat-modal-width-500-90"
-    title="设置头像"
-    @update:show="(v) => emit('update:show', v)"
-  >
-    <NSpace vertical size="large">
-      <!-- 隐藏的文件输入 -->
-      <input
-        ref="fileInputRef"
-        type="file"
-        accept="image/*"
-        class="chat-file-input-hidden"
-        @change="handleFileSelect"
-      />
+  <div v-if="show" class="modal">
+    <div class="modal-backdrop" @click="handleCancel"></div>
+    <div class="modal-content chat-modal-width-500-90">
+      <div class="modal-header">
+        <h3 class="modal-title">设置头像</h3>
+        <button class="modal-close" @click="handleCancel">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="space-y-6">
+          <!-- 隐藏的文件输入 -->
+          <input
+            ref="fileInputRef"
+            type="file"
+            accept="image/*"
+            class="hidden"
+            @change="handleFileSelect"
+          />
 
-      <div v-if="!imageSrc" class="upload-area" @click="triggerFileInput">
-        <div class="upload-content">
-          <NText class="chat-upload-title">
-            点击选择图片
-          </NText>
-          <br />
-          <NText depth="3" class="chat-upload-hint">
-            支持 JPG、PNG、GIF、WebP 格式
-          </NText>
+          <div v-if="!imageSrc" class="upload-area" @click="triggerFileInput">
+            <div class="upload-content">
+              <div class="text-lg font-bold text-brand mb-2">点击选择图片</div>
+              <div class="text-xs text-gray-500">支持 JPG、PNG、GIF、WebP 格式</div>
+            </div>
+          </div>
+
+          <div v-else class="cropper-container">
+            <img ref="imageRef" :src="imageSrc" class="max-w-full block" />
+          </div>
         </div>
       </div>
-
-      <div v-else class="cropper-container">
-        <img ref="imageRef" :src="imageSrc" class="chat-cropper-image" />
-      </div>
-
-      <NSpace justify="end">
-        <NButton @click="handleCancel">取消</NButton>
-        <NButton v-if="imageSrc" @click="resetSelection">重新选择</NButton>
-        <NButton type="primary" :disabled="!imageSrc" @click="handleSave">
+      <div class="modal-footer">
+        <button class="btn btn-secondary" @click="handleCancel">取消</button>
+        <button v-if="imageSrc" class="btn btn-secondary" @click="resetSelection">重新选择</button>
+        <button class="btn btn-primary" :disabled="!imageSrc" @click="handleSave">
           保存头像
-        </NButton>
-      </NSpace>
-    </NSpace>
-  </NModal>
+        </button>
+      </div>
+    </div>
+  </div>
 </template>
 
 <style scoped>
 .upload-area {
-  border: 2px dashed rgba(162, 48, 237, 0.4);
-  border-radius: 8px;
+  border: 2px dashed var(--color-brand);
+  border-radius: var(--radius-lg);
   padding: 40px 20px;
   text-align: center;
   cursor: pointer;
-  transition: all 0.3s;
+  transition: all var(--transition-normal);
   background: rgba(162, 48, 237, 0.05);
 }
 
 .upload-area:hover {
-  border-color: rgba(162, 48, 237, 0.8);
+  border-color: var(--color-brand-hover);
   background: rgba(162, 48, 237, 0.1);
 }
 
@@ -174,7 +168,7 @@ onUnmounted(() => {
 .cropper-container {
   max-height: 400px;
   overflow: hidden;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: rgba(0, 0, 0, 0.3);
 }
 

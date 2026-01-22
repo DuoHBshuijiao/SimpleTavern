@@ -86,7 +86,11 @@ export const useChatsStore = defineStore('chats', {
       }
     },
     async updateOverrides(chatId: string, overrides: ChatOverrides) {
-      const chat = await apiPut<Chat>(`/api/chats/${chatId}`, { overrides })
+      const { memberSettings, ...restOverrides } = overrides
+      const chat = await apiPut<Chat>(`/api/chats/${chatId}`, { 
+        overrides: restOverrides,
+        memberSettings: memberSettings || undefined
+      })
       this.activeChat = chat
       if (this.characterId) await this.loadList(this.characterId)
       return chat

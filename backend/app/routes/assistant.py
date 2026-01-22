@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, AsyncIterator
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -12,6 +13,7 @@ from app.llm.openai_compat import chat_completions_message
 from app.schemas import (
     AssistantChat,
     AssistantSettings,
+    Chat,
     CharacterCard,
     ChatMessage,
     UpdateMessageRequest,
@@ -20,10 +22,21 @@ from app.storage import (
     ai_workspace_dir,
     clear_ai_workspace,
     clear_assistant_chat,
+    clear_assistant_chat_for_chat,
+    clear_assistant_workspace_chat,
+    delete_assistant_workspace_chat,
     load_assistant_chat,
+    load_assistant_chat_for_chat,
+    load_assistant_workspace_chat,
     load_assistant_settings,
+    load_chat,
+    load_chat_memory,
+    load_character,
     load_settings,
     save_assistant_chat,
+    save_assistant_chat_for_chat,
+    save_assistant_workspace_chat,
+    save_chat_memory,
     save_assistant_settings,
 )
 
@@ -36,6 +49,9 @@ class AssistantStreamRequest(BaseModel):
     model: str | None = None
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     appendUserMessage: bool | None = True
+    chatId: str | None = None
+    allowWriteMemory: bool | None = None
+    scope: str | None = None
 
 
 def _sse(event: str, data_obj: dict) -> str:
@@ -94,6 +110,72 @@ def _tool_delete_file(args: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, "path": path_str}
 
 
+def _load_chat_context(chat_id: str) -> Chat | None:
+    try:
+        return load_chat(chat_id)
+    except FileNotFoundError:
+        return None
+
+
+def _tool_read_chat_json(chat_id: str) -> dict[str, Any]:
+    chat = _load_chat_context(chat_id)
+    if chat is None:
+        return {"ok": False, "error": "chat not found", "chatId": chat_id}
+    return {"ok": True, "chat": chat.model_dump(mode="json")}
+
+
+def _tool_read_chat_memory(chat_id: str) -> dict[str, Any]:
+    chat = _load_chat_context(chat_id)
+    if chat is None:
+        return {"ok": False, "error": "chat not found", "chatId": chat_id}
+    try:
+        memory = load_chat_memory(chat.characterId, chat.id)
+    except FileNotFoundError:
+        return {"ok": False, "error": "chat memory not found", "chatId": chat_id}
+    return {"ok": True, "chatId": chat_id, "content": memory}
+
+
+def _tool_write_chat_memory(chat_id: str, args: dict[str, Any]) -> dict[str, Any]:
+    chat = _load_chat_context(chat_id)
+    if chat is None:
+        return {"ok": False, "error": "chat not found", "chatId": chat_id}
+    content = str(args.get("content") or "")
+    save_chat_memory(chat.characterId, chat.id, content)
+    return {"ok": True, "chatId": chat_id}
+
+
+def _tool_read_character_card(chat_id: str, args: dict[str, Any]) -> dict[str, Any]:
+    chat = _load_chat_context(chat_id)
+    if chat is None:
+        return {"ok": False, "error": "chat not found", "chatId": chat_id}
+    target_id = str(args.get("characterId") or "")
+    participant_ids = set(chat.memberIds or [])
+    if not participant_ids:
+        participant_ids.add(chat.characterId)
+    if target_id not in participant_ids:
+        return {"ok": False, "error": "character not in chat", "characterId": target_id}
+    try:
+        card = load_character(target_id)
+    except FileNotFoundError:
+        return {"ok": False, "error": "character not found", "characterId": target_id}
+    return {"ok": True, "character": card.model_dump(mode="json")}
+
+
+def _tool_list_participants(chat_id: str) -> dict[str, Any]:
+    chat = _load_chat_context(chat_id)
+    if chat is None:
+        return {"ok": False, "error": "chat not found", "chatId": chat_id}
+    participant_ids = chat.memberIds if chat.isGroup else [chat.characterId]
+    participants = []
+    for cid in participant_ids:
+        try:
+            card = load_character(cid)
+            participants.append({"id": cid, "name": card.name, "avatar": card.avatar})
+        except FileNotFoundError:
+            participants.append({"id": cid, "name": "", "avatar": ""})
+    return {"ok": True, "participants": participants}
+
+
 def _try_parse_character_card(path_str: str, content: str | None) -> dict[str, Any] | None:
     if Path(path_str).name != "character_card.json":
         return None
@@ -115,8 +197,8 @@ def _try_parse_character_card(path_str: str, content: str | None) -> dict[str, A
     return card.model_dump(mode="json")
 
 
-def _build_tools() -> list[dict[str, Any]]:
-    return [
+def _build_tools(chat_id: str | None, allow_write_memory: bool) -> list[dict[str, Any]]:
+    tools = [
         {
             "type": "function",
             "function": {
@@ -180,9 +262,73 @@ def _build_tools() -> list[dict[str, Any]]:
             },
         },
     ]
+    if chat_id:
+        tools.extend(
+            [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "read_chat_json",
+                        "description": "读取当前聊天 chat.json 的内容",
+                        "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+                    },
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "read_chat_memory",
+                        "description": "读取当前聊天 chat_memory.json 的内容",
+                        "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+                    },
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "read_character_card",
+                        "description": "读取当前聊天参与角色的角色卡",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"characterId": {"type": "string"}},
+                            "required": ["characterId"],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "list_participants",
+                        "description": "列出当前聊天参与角色及其ID",
+                        "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+                    },
+                },
+            ]
+        )
+        if allow_write_memory:
+            tools.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "write_chat_memory",
+                        "description": "写入当前聊天 chat_memory.json 的内容",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"content": {"type": "string"}},
+                            "required": ["content"],
+                            "additionalProperties": False,
+                        },
+                    },
+                }
+            )
+    return tools
 
 
-def _run_tool(name: str, args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any] | None]:
+def _run_tool(
+    name: str,
+    args: dict[str, Any],
+    chat_id: str | None,
+    allow_write_memory: bool,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
     content_for_card: str | None = None
     path_str = str(args.get("path") or "")
     try:
@@ -196,6 +342,16 @@ def _run_tool(name: str, args: dict[str, Any]) -> tuple[dict[str, Any], dict[str
             result = _tool_write_file(args)
         elif name == "delete_file":
             result = _tool_delete_file(args)
+        elif name == "read_chat_json" and chat_id:
+            return _tool_read_chat_json(chat_id), None
+        elif name == "read_chat_memory" and chat_id:
+            return _tool_read_chat_memory(chat_id), None
+        elif name == "write_chat_memory" and chat_id and allow_write_memory:
+            return _tool_write_chat_memory(chat_id, args), None
+        elif name == "read_character_card" and chat_id:
+            return _tool_read_character_card(chat_id, args), None
+        elif name == "list_participants" and chat_id:
+            return _tool_list_participants(chat_id), None
         else:
             return {"ok": False, "error": "unknown tool"}, None
         card = _try_parse_character_card(path_str, content_for_card)
@@ -217,6 +373,82 @@ def _ensure_system_prompt(messages: list[dict[str, Any]], prompt: str) -> None:
         messages[0]["content"] = prompt
         return
     messages.insert(0, {"role": "system", "content": prompt})
+
+
+def _resolve_assistant_chat(chat_id: str | None) -> AssistantChat:
+    if chat_id:
+        try:
+            return load_assistant_chat_for_chat(chat_id)
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="chat not found")
+    return load_assistant_chat()
+
+
+def _save_assistant_chat(chat_id: str | None, chat: AssistantChat) -> AssistantChat:
+    if chat_id:
+        return save_assistant_chat_for_chat(chat_id, chat)
+    return save_assistant_chat(chat)
+
+
+def _clear_assistant_chat(chat_id: str | None) -> None:
+    if chat_id:
+        try:
+            clear_assistant_chat_for_chat(chat_id)
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="chat not found")
+    else:
+        clear_assistant_chat()
+
+
+def _resolve_assistant_chat_by_scope(scope: str | None, chat_id: str | None) -> AssistantChat:
+    if scope == "workspace":
+        return load_assistant_workspace_chat()
+    return _resolve_assistant_chat(chat_id)
+
+
+def _save_assistant_chat_by_scope(scope: str | None, chat_id: str | None, chat: AssistantChat) -> AssistantChat:
+    if scope == "workspace":
+        return save_assistant_workspace_chat(chat)
+    return _save_assistant_chat(chat_id, chat)
+
+
+def _clear_assistant_chat_by_scope(scope: str | None, chat_id: str | None) -> None:
+    if scope == "workspace":
+        clear_assistant_workspace_chat()
+    else:
+        _clear_assistant_chat(chat_id)
+
+
+def _explicit_memory_write_requested(text: str) -> bool:
+    if not text:
+        return False
+    patterns = [
+        r"写入.*记忆",
+        r"更新.*记忆",
+        r"保存.*记忆",
+        r"记录.*记忆",
+        r"写.*长期记忆",
+        r"保存.*长期记忆",
+    ]
+    return any(re.search(p, text) for p in patterns)
+
+
+def _build_chat_participants_prompt(chat_id: str | None) -> str | None:
+    if not chat_id:
+        return None
+    chat = _load_chat_context(chat_id)
+    if chat is None:
+        return None
+    participant_ids = chat.memberIds if chat.isGroup else [chat.characterId]
+    lines = ["当前会话参与角色（含 id）："]
+    for idx, cid in enumerate(participant_ids, start=1):
+        try:
+            card = load_character(cid)
+            name = card.name or ""
+        except FileNotFoundError:
+            name = ""
+        lines.append(f"{idx}. {name} (id: {cid})")
+    return "\n".join(lines)
 
 
 @router.get("/assistant/workspace/character-card")
@@ -244,36 +476,58 @@ def put_assistant_settings(settings: AssistantSettings) -> AssistantSettings:
 
 
 @router.get("/assistant/chat", response_model=AssistantChat)
-def get_assistant_chat() -> AssistantChat:
-    return load_assistant_chat()
+def get_assistant_chat(
+    chatId: str | None = Query(default=None),
+    scope: str | None = Query(default=None),
+) -> AssistantChat:
+    return _resolve_assistant_chat_by_scope(scope, chatId)
 
 
 @router.post("/assistant/reset")
-def reset_assistant() -> dict:
-    clear_assistant_chat()
-    clear_ai_workspace()
+def reset_assistant(
+    chatId: str | None = Query(default=None),
+    scope: str | None = Query(default=None),
+) -> dict:
+    _clear_assistant_chat_by_scope(scope, chatId)
+    if scope != "workspace":
+        clear_ai_workspace()
+    return {"ok": True}
+
+
+@router.post("/assistant/workspace/chat/delete")
+def delete_workspace_chat() -> dict:
+    delete_assistant_workspace_chat()
     return {"ok": True}
 
 
 @router.put("/assistant/chat/messages/{message_id}")
-def update_assistant_message(message_id: str, req: UpdateMessageRequest) -> AssistantChat:
-    chat = load_assistant_chat()
+def update_assistant_message(
+    message_id: str,
+    req: UpdateMessageRequest,
+    chatId: str | None = Query(default=None),
+    scope: str | None = Query(default=None),
+) -> AssistantChat:
+    chat = _resolve_assistant_chat_by_scope(scope, chatId)
     for m in chat.messages:
         if m.id == message_id:
             m.role = req.role
             m.content = req.content
-            save_assistant_chat(chat)
+            _save_assistant_chat_by_scope(scope, chatId, chat)
             return chat
     from fastapi import HTTPException
     raise HTTPException(status_code=404, detail="message not found")
 
 
 @router.delete("/assistant/chat/messages/{message_id}")
-def delete_assistant_message(message_id: str) -> AssistantChat:
-    chat = load_assistant_chat()
+def delete_assistant_message(
+    message_id: str,
+    chatId: str | None = Query(default=None),
+    scope: str | None = Query(default=None),
+) -> AssistantChat:
+    chat = _resolve_assistant_chat_by_scope(scope, chatId)
     new_msgs = [m for m in chat.messages if m.id != message_id]
     chat.messages = new_msgs
-    save_assistant_chat(chat)
+    _save_assistant_chat_by_scope(scope, chatId, chat)
     return chat
 
 
@@ -281,7 +535,9 @@ def delete_assistant_message(message_id: str) -> AssistantChat:
 async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
     settings = load_settings()
     assistant_settings = load_assistant_settings()
-    chat = load_assistant_chat()
+    scope = req.scope
+    chat_id = None if scope == "workspace" else req.chatId
+    chat = _resolve_assistant_chat_by_scope(scope, chat_id)
 
     model = req.model or assistant_settings.model or settings.llm.defaultModel
     temperature = req.temperature if req.temperature is not None else assistant_settings.temperature
@@ -313,13 +569,18 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
         new_user_msg = ChatMessage(role="user", content=req.userMessage)
         existing_messages.append(new_user_msg)
         chat.messages = existing_messages
-        save_assistant_chat(chat)
+        _save_assistant_chat_by_scope(scope, chat_id, chat)
 
     # 准备发送给 LLM 的消息列表
     llm_msgs: list[dict[str, Any]] = []
     _ensure_system_prompt(llm_msgs, assistant_settings.prompt)
+    participants_prompt = _build_chat_participants_prompt(chat_id)
+    if participants_prompt:
+        llm_msgs.append({"role": "system", "content": participants_prompt})
     
     for m in existing_messages:
+        if getattr(m, "toolTrace", False):
+            continue
         msg_dict = {"role": m.role, "content": m.content}
         # 兼容 reasoning_content (如果存储了)
         if hasattr(m, "extra") and isinstance(m.extra, dict) and "reasoning_content" in m.extra:
@@ -329,7 +590,12 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
     if model == "deepseek-reasoner":
         _clear_reasoning_content(llm_msgs)
 
-    tools = _build_tools()
+    allow_write_memory = req.allowWriteMemory
+    if allow_write_memory is None and scope != "workspace":
+        allow_write_memory = _explicit_memory_write_requested(req.userMessage)
+    if scope == "workspace":
+        allow_write_memory = False
+    tools = _build_tools(chat_id, bool(allow_write_memory))
     extra_body = {"thinking": {"type": "enabled"}} if model == "deepseek-reasoner" else None
 
     async def event_iter() -> AsyncIterator[str]:
@@ -377,9 +643,9 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
                 if final_reasoning_content:
                     assistant_msg_obj.model_config["extra"] = {"reasoning_content": final_reasoning_content}
                 
-                chat_to_save = load_assistant_chat()
+                chat_to_save = _resolve_assistant_chat_by_scope(scope, chat_id)
                 chat_to_save.messages.append(assistant_msg_obj)
-                save_assistant_chat(chat_to_save)
+                _save_assistant_chat_by_scope(scope, chat_id, chat_to_save)
                 
                 if final_content:
                     yield _sse("delta", {"text": final_content})
@@ -395,7 +661,16 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
                 except Exception:
                     args = {}
                 
-                result, card = _run_tool(str(fn), args)
+                tool_name = str(fn)
+                result, card = _run_tool(tool_name, args, chat_id, bool(allow_write_memory))
+                trace_content = f"工具调用：{tool_name}"
+                if args:
+                    trace_content += f"\n参数：{json.dumps(args, ensure_ascii=False)}"
+                trace_msg = ChatMessage(role="system", content=trace_content, toolTrace=True)
+                trace_chat = _resolve_assistant_chat_by_scope(scope, chat_id)
+                trace_chat.messages.append(trace_msg)
+                _save_assistant_chat_by_scope(scope, chat_id, trace_chat)
+                yield _sse("tool_trace", {"content": trace_content, "messageId": trace_msg.id})
                 if card:
                     yield _sse("card", {"card": card})
                 

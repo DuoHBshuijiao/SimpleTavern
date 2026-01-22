@@ -13,6 +13,7 @@ export interface ChatOverrides {
   presetId?: string | null
   pureAiMode?: boolean | null
   params: GenerationParams
+  memberSettings?: Record<string, GroupMemberSettings>
 }
 
 export interface UserPersona {
