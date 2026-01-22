@@ -1394,7 +1394,7 @@ const editingPersonaAvatarUrl = computed(() => {
           </div>
           <div class="w-20 h-20 rounded-2xl bg-white/5 mb-6 flex items-center justify-center text-4xl">👋</div>
           <h3 class="text-xl font-bold text-gray-200 mb-2">欢迎来到 SimpleTavern</h3>
-          <p class="text-gray-500 mb-8 max-w-md">请在左侧选择一个角色并开始会话，或者创建一个新的角色。</p>
+          <p class="text-gray-500 mb-8 leading-relaxed px-4 max-w-[468px] w-full">请在左侧选择一个角色并开始会话，或者创建一个新的角色。</p>
           <button class="bg-brand text-white px-6 py-2 rounded-xl hover:bg-brand-hover transition-colors" @click="openCreateCharacter">
             创建新角色
           </button>
