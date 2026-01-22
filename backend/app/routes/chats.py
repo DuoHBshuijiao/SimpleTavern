@@ -1,3 +1,41 @@
+"""
+聊天管理路由模块
+
+提供聊天会话的CRUD操作和消息管理API端点，支持单聊和群聊两种模式。
+
+主要功能：
+    - GET /chats: 获取指定角色的所有聊天会话
+    - GET /chats/groups: 获取所有群聊会话
+    - POST /chats: 创建新聊天会话（支持单聊和群聊）
+    - GET /chats/{chat_id}: 获取指定聊天会话
+    - PUT /chats/{chat_id}: 更新聊天会话信息
+    - DELETE /chats/{chat_id}: 删除聊天会话
+    - POST /chats/{chat_id}/messages: 追加消息
+    - PUT /chats/{chat_id}/messages/{message_id}: 更新消息
+    - DELETE /chats/{chat_id}/messages/{message_id}: 删除消息
+    - POST /chats/{chat_id}/members/{member_id}: 添加群成员
+    - DELETE /chats/{chat_id}/members/{member_id}: 移除群成员
+
+主要函数：
+    - get_chats: 获取指定角色的聊天列表
+    - get_group_chats: 获取所有群聊
+    - create_chat: 创建聊天会话
+    - get_chat: 获取聊天会话
+    - update_chat: 更新聊天会话
+    - append_message: 追加消息
+    - update_message: 更新消息
+    - delete_message: 删除消息
+    - remove_chat: 删除聊天会话
+    - add_member: 添加群成员
+    - remove_member: 移除群成员
+
+文件关系：
+    - 被导入：被main.py导入router
+    - 导入：导入schemas.py的聊天相关模型和storage.py的聊天管理函数
+    - 依赖：依赖schemas.py和storage.py
+    - 位置：路由层，处理聊天相关的HTTP请求
+"""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -11,9 +49,26 @@ router = APIRouter(tags=["chats"])
 
 
 def _now_iso() -> str:
+    """
+    获取当前时间的ISO格式字符串
+    
+    Returns:
+        str: 当前时间的ISO格式字符串
+    """
     return datetime.now().astimezone().isoformat()
 
+
 def _merge_overrides(existing: Chat, incoming: UpdateChatRequest) -> None:
+    """
+    合并聊天覆盖设置
+    
+    将更新请求中的overrides合并到现有聊天对象中。
+    对于params字段，只覆盖非None的值，避免一次更新清空所有旧参数。
+    
+    Args:
+        existing: 现有的聊天对象（会被修改）
+        incoming: 更新请求对象
+    """
     if incoming.overrides is None:
         return
     ov = incoming.overrides
@@ -23,12 +78,9 @@ def _merge_overrides(existing: Chat, incoming: UpdateChatRequest) -> None:
         existing.overrides.longTermMemory = ov.longTermMemory
     if getattr(ov, "pureAiMode", None) is not None:
         existing.overrides.pureAiMode = ov.pureAiMode
-    # 处理 presetId：允许设置为 None（清空预设）或新的预设ID
-    # 使用 hasattr 检查是否传递了该字段，因为用户可能想要清空预设
     if hasattr(ov, "presetId"):
         existing.overrides.presetId = ov.presetId
 
-    # params 做"只覆盖非 None 字段"的合并，避免一次更新把旧参数清空
     for key in ("model", "temperature", "top_p", "max_tokens"):
         val = getattr(ov.params, key, None)
         if val is not None:
@@ -37,17 +89,40 @@ def _merge_overrides(existing: Chat, incoming: UpdateChatRequest) -> None:
 
 @router.get("/chats", response_model=list[Chat])
 def get_chats(characterId: str = Query(...)) -> list[Chat]:
+    """
+    获取指定角色的所有聊天会话
+    
+    Args:
+        characterId: 角色ID（查询参数）
+    
+    Returns:
+        list[Chat]: 聊天会话列表，按更新时间倒序
+    """
     return list_chats(characterId)
 
 
 @router.get("/chats/groups", response_model=list[Chat])
 def get_group_chats() -> list[Chat]:
-    """获取所有群聊"""
+    """
+    获取所有群聊会话
+    
+    Returns:
+        list[Chat]: 群聊会话列表，按更新时间倒序
+    """
     return list_group_chats()
 
 
 def _replace_user_placeholder(text: str, user_name: str) -> str:
-    """替换文本中的 {{user}} 占位符为用户名"""
+    """
+    替换文本中的{{user}}占位符为用户名
+    
+    Args:
+        text: 原始文本
+        user_name: 用户名
+    
+    Returns:
+        str: 替换后的文本
+    """
     if not user_name:
         return text
     return text.replace("{{user}}", user_name)
@@ -55,14 +130,27 @@ def _replace_user_placeholder(text: str, user_name: str) -> str:
 
 @router.post("/chats", response_model=Chat)
 def create_chat(req: CreateChatRequest) -> Chat:
-    # 判断是否为群聊
+    """
+    创建新聊天会话
+    
+    支持单聊和群聊两种模式。对于单聊，如果角色有首条消息，会自动添加为assistant的第一条消息。
+    对于群聊，可以选择启用某个成员的首条消息作为开场。
+    会自动处理用户Persona的绑定和{{user}}占位符的替换。
+    
+    Args:
+        req: 创建聊天请求对象
+    
+    Returns:
+        Chat: 创建后的聊天对象
+    
+    Raises:
+        HTTPException: 群聊时firstMessageCharacterId不是成员或角色不存在时抛出400或404错误
+    """
     is_group = req.isGroup
     
     if is_group:
-        # 群聊：默认标题为"新群聊"，memberIds 必须有至少2个成员
         title = req.title or "新群聊"
         member_ids = req.memberIds or []
-        # 确保 characterId（主角色）也在成员列表中
         if req.characterId and req.characterId not in member_ids:
             member_ids = [req.characterId] + member_ids
         chat = Chat(
@@ -72,13 +160,10 @@ def create_chat(req: CreateChatRequest) -> Chat:
             memberIds=member_ids
         )
     else:
-        # 单聊：保持原有逻辑
         chat = Chat(characterId=req.characterId, title=req.title or "新对话")
     
-    # 写入会话级 pureAiMode（None 表示使用全局）
     chat.overrides.pureAiMode = req.pureAiMode
     
-    # 群聊创建时可写入 memberSettings
     if is_group and req.memberSettings:
         for member_id, s in req.memberSettings.items():
             chat.memberSettings[member_id] = s
@@ -86,14 +171,12 @@ def create_chat(req: CreateChatRequest) -> Chat:
     chat.createdAt = _now_iso()
     chat.updatedAt = _now_iso()
     
-    # 获取用户Persona名称用于替换 {{user}}
     user_name = ""
     pure_ai_mode = req.pureAiMode if req.pureAiMode is not None else False
     try:
         settings = load_settings()
         pure_ai_mode = req.pureAiMode if req.pureAiMode is not None else bool(getattr(settings, "pureAiMode", False))
         if pure_ai_mode:
-            # 纯 AI 模式不注入 persona，为避免 {{user}} 残留，使用通用称呼
             user_name = "用户"
         else:
             persona_id = req.userPersonaId or settings.selectedPersonaId
@@ -107,19 +190,16 @@ def create_chat(req: CreateChatRequest) -> Chat:
     except Exception:
         pass
 
-    # 绑定当前会话的 persona（纯 AI 模式下不绑定）
     if pure_ai_mode:
         chat.userPersonaId = None
     else:
         chat.userPersonaId = req.userPersonaId or (settings.selectedPersonaId if "settings" in locals() else None)
     
-    # 单聊时：如果角色有首句，自动添加为 assistant 的第一条消息
     if not is_group:
         try:
             character = load_character(req.characterId)
             if character.firstMessage and character.firstMessage.strip():
                 first_msg = character.firstMessage.strip()
-                # 替换 {{user}} 为用户Persona名称
                 if user_name:
                     first_msg = _replace_user_placeholder(first_msg, user_name)
                 chat.messages.append(ChatMessage(
@@ -127,10 +207,8 @@ def create_chat(req: CreateChatRequest) -> Chat:
                     content=first_msg
                 ))
         except FileNotFoundError:
-            # 角色不存在时忽略，不影响会话创建
             pass
     else:
-        # 群聊时：可选择启用某成员的 firstMessage 作为开场背景
         if req.firstMessageCharacterId:
             if req.firstMessageCharacterId not in chat.memberIds:
                 raise HTTPException(status_code=400, detail="firstMessageCharacterId is not a member of this group")
@@ -153,6 +231,18 @@ def create_chat(req: CreateChatRequest) -> Chat:
 
 @router.get("/chats/{chat_id}", response_model=Chat)
 def get_chat(chat_id: str) -> Chat:
+    """
+    获取指定聊天会话
+    
+    Args:
+        chat_id: 聊天会话ID
+    
+    Returns:
+        Chat: 聊天对象
+    
+    Raises:
+        HTTPException: 聊天不存在时抛出404错误
+    """
     try:
         return load_chat(chat_id)
     except FileNotFoundError:
@@ -161,6 +251,22 @@ def get_chat(chat_id: str) -> Chat:
 
 @router.put("/chats/{chat_id}", response_model=Chat)
 def update_chat(chat_id: str, req: UpdateChatRequest) -> Chat:
+    """
+    更新聊天会话
+    
+    支持更新标题、群聊延迟、成员列表（仅重排）、成员设置、用户Persona和覆盖设置。
+    对于群聊的memberIds更新，仅允许重排（成员集合必须一致）。
+    
+    Args:
+        chat_id: 聊天会话ID
+        req: 更新请求对象
+    
+    Returns:
+        Chat: 更新后的聊天对象
+    
+    Raises:
+        HTTPException: 聊天不存在、非群聊尝试更新memberIds或成员集合不一致时抛出错误
+    """
     try:
         chat = load_chat(chat_id)
     except FileNotFoundError:
@@ -173,15 +279,12 @@ def update_chat(chat_id: str, req: UpdateChatRequest) -> Chat:
     if req.memberIds is not None:
         if not chat.isGroup:
             raise HTTPException(status_code=400, detail="memberIds can only be updated for group chats")
-        # 仅允许重排：成员集合必须一致
         if set(req.memberIds) != set(chat.memberIds):
             raise HTTPException(status_code=400, detail="memberIds must contain the same members (reorder only)")
         chat.memberIds = req.memberIds
     if req.memberSettings is not None:
-        # 合并成员设置，只更新传入的成员
         for member_id, settings in req.memberSettings.items():
             chat.memberSettings[member_id] = settings
-    # 允许显式更新/清空 userPersonaId
     if "userPersonaId" in req.model_fields_set:
         chat.userPersonaId = req.userPersonaId
     _merge_overrides(chat, req)
@@ -191,6 +294,19 @@ def update_chat(chat_id: str, req: UpdateChatRequest) -> Chat:
 
 @router.post("/chats/{chat_id}/messages", response_model=Chat)
 def append_message(chat_id: str, req: AppendMessageRequest) -> Chat:
+    """
+    向聊天会话追加消息
+    
+    Args:
+        chat_id: 聊天会话ID
+        req: 追加消息请求对象
+    
+    Returns:
+        Chat: 更新后的聊天对象
+    
+    Raises:
+        HTTPException: 聊天不存在时抛出404错误
+    """
     try:
         chat = load_chat(chat_id)
     except FileNotFoundError:
@@ -210,6 +326,23 @@ def append_message(chat_id: str, req: AppendMessageRequest) -> Chat:
 
 @router.put("/chats/{chat_id}/messages/{message_id}", response_model=Chat)
 def update_message(chat_id: str, message_id: str, req: UpdateMessageRequest) -> Chat:
+    """
+    更新聊天会话中的消息
+    
+    支持更新消息的角色、内容、角色ID和发送者快照信息。
+    发送者快照用于在切换Persona时保持历史消息的显示一致性。
+    
+    Args:
+        chat_id: 聊天会话ID
+        message_id: 消息ID
+        req: 更新消息请求对象
+    
+    Returns:
+        Chat: 更新后的聊天对象
+    
+    Raises:
+        HTTPException: 聊天或消息不存在时抛出404错误
+    """
     try:
         chat = load_chat(chat_id)
     except FileNotFoundError:
@@ -220,7 +353,6 @@ def update_message(chat_id: str, message_id: str, req: UpdateMessageRequest) -> 
             m.role = req.role
             m.content = req.content
             m.characterId = req.characterId
-            # 可选：更新发送者快照（用于 persona 切换时固化历史消息显示）
             if getattr(req, "senderPersonaId", None) is not None:
                 m.senderPersonaId = req.senderPersonaId
             if getattr(req, "senderName", None) is not None:
@@ -235,6 +367,19 @@ def update_message(chat_id: str, message_id: str, req: UpdateMessageRequest) -> 
 
 @router.delete("/chats/{chat_id}/messages/{message_id}", response_model=Chat)
 def delete_message(chat_id: str, message_id: str) -> Chat:
+    """
+    删除聊天会话中的消息
+    
+    Args:
+        chat_id: 聊天会话ID
+        message_id: 消息ID
+    
+    Returns:
+        Chat: 更新后的聊天对象
+    
+    Raises:
+        HTTPException: 聊天或消息不存在时抛出404错误
+    """
     try:
         chat = load_chat(chat_id)
     except FileNotFoundError:
@@ -251,16 +396,36 @@ def delete_message(chat_id: str, message_id: str) -> Chat:
 
 @router.delete("/chats/{chat_id}")
 def remove_chat(chat_id: str) -> dict:
+    """
+    删除聊天会话
+    
+    Args:
+        chat_id: 聊天会话ID
+    
+    Returns:
+        dict: 成功响应 {"ok": True}
+    """
     delete_chat(chat_id)
     return {"ok": True}
 
 
-# ========== 群成员管理 ==========
-
-
 @router.post("/chats/{chat_id}/members/{member_id}", response_model=Chat)
 def add_member(chat_id: str, member_id: str) -> Chat:
-    """添加群成员"""
+    """
+    向群聊添加成员
+    
+    只能向群聊添加成员。会检查角色是否存在，如果成员已存在则不做任何操作。
+    
+    Args:
+        chat_id: 聊天会话ID
+        member_id: 要添加的角色ID
+    
+    Returns:
+        Chat: 更新后的聊天对象
+    
+    Raises:
+        HTTPException: 聊天不存在、非群聊、角色不存在时抛出相应错误
+    """
     try:
         chat = load_chat(chat_id)
     except FileNotFoundError:
@@ -269,13 +434,11 @@ def add_member(chat_id: str, member_id: str) -> Chat:
     if not chat.isGroup:
         raise HTTPException(status_code=400, detail="only group chats can add members")
     
-    # 检查角色是否存在
     try:
         load_character(member_id)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="character not found")
     
-    # 添加成员（如果不存在）
     if member_id not in chat.memberIds:
         chat.memberIds.append(member_id)
         chat.updatedAt = _now_iso()
@@ -286,7 +449,21 @@ def add_member(chat_id: str, member_id: str) -> Chat:
 
 @router.delete("/chats/{chat_id}/members/{member_id}", response_model=Chat)
 def remove_member(chat_id: str, member_id: str) -> Chat:
-    """移除群成员"""
+    """
+    从群聊移除成员
+    
+    只能从群聊移除成员。如果成员不存在则不做任何操作。
+    
+    Args:
+        chat_id: 聊天会话ID
+        member_id: 要移除的角色ID
+    
+    Returns:
+        Chat: 更新后的聊天对象
+    
+    Raises:
+        HTTPException: 聊天不存在或非群聊时抛出相应错误
+    """
     try:
         chat = load_chat(chat_id)
     except FileNotFoundError:
@@ -295,7 +472,6 @@ def remove_member(chat_id: str, member_id: str) -> Chat:
     if not chat.isGroup:
         raise HTTPException(status_code=400, detail="only group chats can remove members")
     
-    # 移除成员
     if member_id in chat.memberIds:
         chat.memberIds.remove(member_id)
         chat.updatedAt = _now_iso()

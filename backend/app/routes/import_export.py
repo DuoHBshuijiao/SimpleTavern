@@ -1,3 +1,25 @@
+"""
+导入导出路由模块
+
+提供数据导入导出功能，支持聊天、角色、设置的导出和导入。
+
+主要功能：
+    - GET /chats/{chat_id}/export: 导出聊天会话（支持txt和json格式）
+    - GET /settings/backup: 备份设置（支持basic/with_characters/with_chats三种范围）
+    - POST /import: 导入数据（支持zip/json/txt格式）
+
+主要函数：
+    - export_chat: 导出聊天会话
+    - backup_settings: 备份设置
+    - import_data: 导入数据
+
+文件关系：
+    - 被导入：被main.py导入router
+    - 导入：导入schemas.py的数据模型和storage.py的存储函数
+    - 依赖：依赖schemas.py和storage.py
+    - 位置：路由层，处理数据导入导出相关的HTTP请求
+"""
+
 from __future__ import annotations
 
 import io
@@ -29,6 +51,16 @@ router = APIRouter(tags=["import_export"])
 
 
 def _sanitize_filename(name: str, fallback: str) -> str:
+    """
+    清理文件名，移除非法字符
+    
+    Args:
+        name: 原始文件名
+        fallback: 如果清理后为空则使用的后备名称
+    
+    Returns:
+        str: 清理后的文件名
+    """
     if not name:
         return fallback
     safe = re.sub(r"[\\/:*?\"<>|]+", "_", name).strip()
@@ -36,18 +68,47 @@ def _sanitize_filename(name: str, fallback: str) -> str:
 
 
 def _content_disposition(filename: str) -> str:
+    """
+    生成Content-Disposition头，支持UTF-8编码的文件名
+    
+    Args:
+        filename: 文件名
+    
+    Returns:
+        str: Content-Disposition头字符串
+    """
     ascii_fallback = re.sub(r"[^\x20-\x7E]+", "_", filename).strip() or "download"
     encoded = quote(filename)
     return f'attachment; filename="{ascii_fallback}"; filename*=UTF-8\'\'{encoded}'
 
 
 def _resolve_pure_ai_mode(settings: Settings, chat: Chat) -> bool:
+    """
+    解析纯AI模式（优先级：chat.overrides > settings）
+    
+    Args:
+        settings: 全局设置
+        chat: 聊天对象
+    
+    Returns:
+        bool: 是否启用纯AI模式
+    """
     if getattr(chat, "overrides", None) is not None and getattr(chat.overrides, "pureAiMode", None) is not None:
         return bool(chat.overrides.pureAiMode)
     return bool(getattr(settings, "pureAiMode", False))
 
 
 def _resolve_selected_persona(settings: Settings, chat: Chat) -> Any | None:
+    """
+    解析选中的用户Persona
+    
+    Args:
+        settings: 全局设置
+        chat: 聊天对象
+    
+    Returns:
+        UserPersona | None: 选中的Persona对象
+    """
     persona_id = getattr(chat, "userPersonaId", None) or settings.selectedPersonaId
     if not persona_id or not settings.userPersonas:
         return None
@@ -55,6 +116,16 @@ def _resolve_selected_persona(settings: Settings, chat: Chat) -> Any | None:
 
 
 def _build_user_persona_prompt(settings: Settings, chat: Chat) -> str | None:
+    """
+    构建用户Persona提示词
+    
+    Args:
+        settings: 全局设置
+        chat: 聊天对象
+    
+    Returns:
+        str | None: Persona提示词，不存在返回None
+    """
     selected = _resolve_selected_persona(settings, chat)
     if not selected:
         return None
@@ -67,6 +138,16 @@ def _build_user_persona_prompt(settings: Settings, chat: Chat) -> str | None:
 
 
 def _build_single_system_prompt(chat: Chat, settings: Settings) -> str:
+    """
+    构建单聊系统提示词
+    
+    Args:
+        chat: 聊天对象
+        settings: 全局设置
+    
+    Returns:
+        str: 系统提示词
+    """
     prompt_parts: list[str] = []
     if settings.prompts.globalSystem:
         prompt_parts.append(settings.prompts.globalSystem)
@@ -103,6 +184,17 @@ def _build_single_system_prompt(chat: Chat, settings: Settings) -> str:
 
 
 def _pick_group_export_character(chat: Chat) -> str:
+    """
+    选择群聊导出时的主角色ID（用于构建system prompt）
+    
+    优先选择最后发言的assistant角色，其次选择最后有characterId的消息，最后选择成员列表最后一个。
+    
+    Args:
+        chat: 聊天对象
+    
+    Returns:
+        str: 角色ID
+    """
     for m in reversed(chat.messages):
         if m.role == "assistant" and m.characterId:
             return m.characterId
@@ -115,6 +207,17 @@ def _pick_group_export_character(chat: Chat) -> str:
 
 
 def _build_group_system_prompt(chat: Chat, settings: Settings, character_id: str) -> str:
+    """
+    构建群聊系统提示词
+    
+    Args:
+        chat: 聊天对象
+        settings: 全局设置
+        character_id: 主角色ID
+    
+    Returns:
+        str: 系统提示词
+    """
     prompt_parts: list[str] = []
     if settings.prompts.globalSystem:
         prompt_parts.append(settings.prompts.globalSystem)
@@ -167,6 +270,16 @@ def _build_group_system_prompt(chat: Chat, settings: Settings, character_id: str
 
 
 def _build_system_prompt_for_chat(chat: Chat, settings: Settings) -> tuple[str, str | None]:
+    """
+    为聊天构建系统提示词
+    
+    Args:
+        chat: 聊天对象
+        settings: 全局设置
+    
+    Returns:
+        tuple[str, str | None]: (系统提示词, 群聊时的主角色ID)
+    """
     if not chat.isGroup:
         return _build_single_system_prompt(chat, settings), None
     last_speaker_id = _pick_group_export_character(chat)
@@ -174,6 +287,15 @@ def _build_system_prompt_for_chat(chat: Chat, settings: Settings) -> tuple[str, 
 
 
 def _chat_export_participants(chat: Chat) -> str:
+    """
+    获取聊天参与者名称（用于导出文件名）
+    
+    Args:
+        chat: 聊天对象
+    
+    Returns:
+        str: 参与者名称字符串
+    """
     if not chat.isGroup:
         try:
             character = load_character(chat.characterId)
@@ -192,6 +314,15 @@ def _chat_export_participants(chat: Chat) -> str:
 
 
 def _format_message_block(m: ChatMessage) -> list[str]:
+    """
+    格式化消息块为文本格式
+    
+    Args:
+        m: 消息对象
+    
+    Returns:
+        list[str]: 格式化后的文本行列表
+    """
     lines = ["[Message]"]
     lines.append(f"id={m.id}")
     lines.append(f"ts={m.ts}")
@@ -207,6 +338,17 @@ def _format_message_block(m: ChatMessage) -> list[str]:
 
 
 def _export_chat_text(chat: Chat, system_prompt: str, last_speaker_id: str | None) -> str:
+    """
+    导出聊天为文本格式
+    
+    Args:
+        chat: 聊天对象
+        system_prompt: 系统提示词
+        last_speaker_id: 群聊时的主角色ID
+    
+    Returns:
+        str: 导出的文本内容
+    """
     lines: list[str] = []
     lines.append("SimpleTavern Chat Export")
     lines.append("Version: 1")
@@ -232,6 +374,21 @@ def _export_chat_text(chat: Chat, system_prompt: str, last_speaker_id: str | Non
 
 @router.get("/chats/{chat_id}/export")
 def export_chat(chat_id: str, format: str = Query("txt")) -> Response:
+    """
+    导出聊天会话
+    
+    支持txt和json两种格式。txt格式包含完整的系统提示词和消息内容，json格式包含完整的聊天对象。
+    
+    Args:
+        chat_id: 聊天会话ID
+        format: 导出格式（txt或json），默认为txt
+    
+    Returns:
+        Response: 文件下载响应
+    
+    Raises:
+        HTTPException: 聊天不存在或格式不支持时抛出错误
+    """
     try:
         chat = load_chat(chat_id)
     except FileNotFoundError:
@@ -272,6 +429,23 @@ def export_chat(chat_id: str, format: str = Query("txt")) -> Response:
 
 @router.get("/settings/backup")
 def backup_settings(scope: str = Query("basic")) -> Response:
+    """
+    备份设置
+    
+    将设置、角色、聊天等数据打包为zip文件。支持三种范围：
+    - basic: 仅设置和Persona头像
+    - with_characters: 包含角色和角色头像
+    - with_chats: 包含所有聊天记录
+    
+    Args:
+        scope: 备份范围（basic/with_characters/with_chats），默认为basic
+    
+    Returns:
+        Response: zip文件下载响应
+    
+    Raises:
+        HTTPException: 范围不支持时抛出400错误
+    """
     settings = load_settings()
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -309,6 +483,17 @@ def backup_settings(scope: str = Query("basic")) -> Response:
 
 
 def _parse_character_text(content: str) -> CharacterCard:
+    """
+    解析文本格式的角色卡片
+    
+    支持中文格式的角色卡片文本，使用【标签】格式。
+    
+    Args:
+        content: 角色卡片文本内容
+    
+    Returns:
+        CharacterCard: 解析后的角色卡片对象
+    """
     def pick_section(label: str) -> str:
         pattern = rf"【{re.escape(label)}】\n(.*?)(?:\n【|$)"
         match = re.search(pattern, content, re.S)
@@ -341,6 +526,20 @@ def _parse_character_text(content: str) -> CharacterCard:
 
 
 def _parse_chat_text(content: str) -> Chat:
+    """
+    解析文本格式的聊天导出
+    
+    解析SimpleTavern Chat Export格式的文本文件。
+    
+    Args:
+        content: 聊天导出文本内容
+    
+    Returns:
+        Chat: 解析后的聊天对象
+    
+    Raises:
+        HTTPException: 缺少CharacterId时抛出400错误
+    """
     lines = content.splitlines()
     idx = 0
     header: dict[str, Any] = {}
@@ -403,6 +602,20 @@ def _parse_chat_text(content: str) -> Chat:
 
 
 def _import_from_json(raw: Any) -> dict[str, Any]:
+    """
+    从JSON数据导入
+    
+    自动识别并导入设置、聊天或角色。
+    
+    Args:
+        raw: JSON数据（dict或已解析的对象）
+    
+    Returns:
+        dict[str, Any]: 导入结果 {"imported": [...], "warnings": [...]}
+    
+    Raises:
+        HTTPException: JSON格式无法识别时抛出400错误
+    """
     imported: list[str] = []
     warnings: list[str] = []
 
@@ -433,6 +646,17 @@ def _import_from_json(raw: Any) -> dict[str, Any]:
 
 
 def _import_from_zip(payload: bytes) -> dict[str, Any]:
+    """
+    从ZIP文件导入
+    
+    导入设置、角色、聊天和头像文件。
+    
+    Args:
+        payload: ZIP文件二进制数据
+    
+    Returns:
+        dict[str, Any]: 导入结果 {"imported": [...], "warnings": [...]}
+    """
     imported: list[str] = []
     warnings: list[str] = []
     with zipfile.ZipFile(io.BytesIO(payload)) as zf:
@@ -474,6 +698,23 @@ def _import_from_zip(payload: bytes) -> dict[str, Any]:
 
 @router.post("/import")
 async def import_data(file: UploadFile = File(...)) -> dict:
+    """
+    导入数据
+    
+    自动识别文件格式并导入：
+    - ZIP文件（PK开头）：解压并导入所有内容
+    - JSON文件：导入设置/聊天/角色
+    - TXT文件：解析聊天导出或角色卡片文本
+    
+    Args:
+        file: 上传的文件
+    
+    Returns:
+        dict: 导入结果 {"ok": True, "imported": [...], "warnings": [...]}
+    
+    Raises:
+        HTTPException: 文件为空、格式不支持或解析失败时抛出相应错误
+    """
     payload = await file.read()
     if not payload:
         raise HTTPException(status_code=400, detail="empty file")
