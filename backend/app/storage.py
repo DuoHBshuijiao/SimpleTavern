@@ -49,6 +49,9 @@ def _assistant_settings_path() -> Path:
 def _assistant_chat_path() -> Path:
     return _data_dir() / "assistant_chat.json"
 
+CHAT_RECORD_FILENAME = "chat.json"
+CHAT_MEMORY_FILENAME = "chat_memory.json"
+
 
 DEFAULT_ASSISTANT_PROMPT = (
     "你是“角色卡创建助手 + 聊天伴侣”。\n"
@@ -214,22 +217,77 @@ def chat_dir(character_id: str) -> Path:
     return _chats_dir() / character_id
 
 
-def chat_path(character_id: str, chat_id: str) -> Path:
+def chat_folder(character_id: str, chat_id: str) -> Path:
+    return chat_dir(character_id) / chat_id
+
+
+def chat_record_path(character_id: str, chat_id: str) -> Path:
+    return chat_folder(character_id, chat_id) / CHAT_RECORD_FILENAME
+
+
+def chat_memory_path(character_id: str, chat_id: str) -> Path:
+    return chat_folder(character_id, chat_id) / CHAT_MEMORY_FILENAME
+
+
+def legacy_chat_path(character_id: str, chat_id: str) -> Path:
     return chat_dir(character_id) / f"{chat_id}.json"
+
+
+def _attach_chat_memory(chat: Chat) -> None:
+    try:
+        memory = load_chat_memory(chat.characterId, chat.id)
+    except FileNotFoundError:
+        memory = None
+    if memory is not None:
+        chat.overrides.longTermMemory = memory
+    else:
+        chat.overrides.longTermMemory = None
+
+
+def _load_chat_from_path(path: Path, character_id: str) -> Chat | None:
+    try:
+        chat = Chat.model_validate(read_json(path))
+    except Exception:
+        return None
+    if chat.characterId != character_id:
+        chat.characterId = character_id
+    _attach_chat_memory(chat)
+    return chat
 
 
 def list_chats(character_id: str) -> list[Chat]:
     out: list[Chat] = []
-    for p in list_json_files(chat_dir(character_id)):
-        try:
-            out.append(Chat.model_validate(read_json(p)))
-        except Exception:
+    base = chat_dir(character_id)
+    if not base.exists():
+        return out
+    seen_ids: set[str] = set()
+
+    for entry in base.iterdir():
+        if not entry.is_dir():
             continue
+        record_path = entry / CHAT_RECORD_FILENAME
+        if record_path.exists():
+            chat = _load_chat_from_path(record_path, character_id)
+            if chat is not None:
+                out.append(chat)
+                seen_ids.add(chat.id)
+
+    for p in list_json_files(base):
+        if p.name == CHAT_MEMORY_FILENAME:
+            continue
+        if p.stem in seen_ids:
+            continue
+        if (base / p.stem / CHAT_RECORD_FILENAME).exists():
+            continue
+        chat = _load_chat_from_path(p, character_id)
+        if chat is not None:
+            out.append(chat)
+
     out.sort(key=lambda c: c.updatedAt, reverse=True)
     return out
 
 
-def _find_chat_path_by_id(chat_id: str) -> Path | None:
+def _find_chat_path_by_id(chat_id: str) -> tuple[Path, str] | None:
     # 无 DB：扫描所有角色目录以定位 chatId
     base = _chats_dir()
     if not base.exists():
@@ -237,31 +295,86 @@ def _find_chat_path_by_id(chat_id: str) -> Path | None:
     for character_dir in base.iterdir():
         if not character_dir.is_dir():
             continue
-        p = character_dir / f"{chat_id}.json"
-        if p.exists():
-            return p
+        record_path = character_dir / chat_id / CHAT_RECORD_FILENAME
+        if record_path.exists():
+            return record_path, character_dir.name
+        legacy_path = character_dir / f"{chat_id}.json"
+        if legacy_path.exists():
+            return legacy_path, character_dir.name
     return None
 
 
 def load_chat(chat_id: str) -> Chat:
-    p = _find_chat_path_by_id(chat_id)
-    if p is None:
+    found = _find_chat_path_by_id(chat_id)
+    if found is None:
         raise FileNotFoundError(chat_id)
-    return Chat.model_validate(read_json(p))
-
-
-def save_chat(chat: Chat) -> Chat:
-    p = chat_path(chat.characterId, chat.id)
-    write_json(p, chat.model_dump(mode="json"))
+    p, character_id = found
+    chat = _load_chat_from_path(p, character_id)
+    if chat is None:
+        raise FileNotFoundError(chat_id)
     return chat
 
 
+def save_chat(chat: Chat) -> Chat:
+    memory = getattr(chat.overrides, "longTermMemory", None)
+    if memory is not None and memory.strip():
+        save_chat_memory(chat.characterId, chat.id, memory)
+    else:
+        delete_chat_memory(chat.characterId, chat.id)
+
+    p = chat_record_path(chat.characterId, chat.id)
+    legacy = legacy_chat_path(chat.characterId, chat.id)
+    payload = chat.model_dump(mode="json")
+    if "overrides" in payload:
+        payload["overrides"].pop("longTermMemory", None)
+    write_json(p, payload)
+    if legacy.exists():
+        with _lock_for(legacy):
+            legacy.unlink(missing_ok=True)
+    return chat
+
+
+def load_chat_memory(character_id: str, chat_id: str) -> str | None:
+    path = chat_memory_path(character_id, chat_id)
+    if not path.exists():
+        raise FileNotFoundError(str(path))
+    raw = read_json(path)
+    if isinstance(raw, dict):
+        content = raw.get("longTermMemory", None)
+        if content is None:
+            content = raw.get("content", None)
+        return content
+    if isinstance(raw, str):
+        return raw
+    return None
+
+
+def save_chat_memory(character_id: str, chat_id: str, content: str) -> None:
+    path = chat_memory_path(character_id, chat_id)
+    write_json(path, {"longTermMemory": content})
+
+
+def delete_chat_memory(character_id: str, chat_id: str) -> None:
+    path = chat_memory_path(character_id, chat_id)
+    if path.exists():
+        with _lock_for(path):
+            path.unlink(missing_ok=True)
+
+
 def delete_chat(chat_id: str) -> None:
-    p = _find_chat_path_by_id(chat_id)
-    if p is None:
+    found = _find_chat_path_by_id(chat_id)
+    if found is None:
         return
+    p, character_id = found
     with _lock_for(p):
         p.unlink(missing_ok=True)
+    delete_chat_memory(character_id, chat_id)
+    chat_dir_path = chat_folder(character_id, chat_id)
+    if chat_dir_path.exists():
+        try:
+            chat_dir_path.rmdir()
+        except OSError:
+            pass
 
 
 def delete_chats_by_character(character_id: str) -> None:
@@ -269,9 +382,20 @@ def delete_chats_by_character(character_id: str) -> None:
     char_chat_dir = chat_dir(character_id)
     if not char_chat_dir.exists():
         return
-    for p in list_json_files(char_chat_dir):
-        with _lock_for(p):
-            p.unlink(missing_ok=True)
+    for entry in char_chat_dir.iterdir():
+        if entry.is_dir():
+            for p in sorted(entry.rglob("*"), key=lambda x: len(str(x)), reverse=True):
+                try:
+                    if p.is_file():
+                        with _lock_for(p):
+                            p.unlink(missing_ok=True)
+                    elif p.is_dir():
+                        p.rmdir()
+                except Exception:
+                    continue
+        elif entry.is_file() and entry.suffix.lower() == ".json":
+            with _lock_for(entry):
+                entry.unlink(missing_ok=True)
     # 尝试删除空目录
     try:
         char_chat_dir.rmdir()
@@ -288,13 +412,9 @@ def list_group_chats() -> list[Chat]:
     for character_dir in base.iterdir():
         if not character_dir.is_dir():
             continue
-        for p in list_json_files(character_dir):
-            try:
-                chat = Chat.model_validate(read_json(p))
-                if chat.isGroup:
-                    out.append(chat)
-            except Exception:
-                continue
+        for chat in list_chats(character_dir.name):
+            if chat.isGroup:
+                out.append(chat)
     out.sort(key=lambda c: c.updatedAt, reverse=True)
     return out
 

@@ -19,6 +19,8 @@ def _merge_overrides(existing: Chat, incoming: UpdateChatRequest) -> None:
     ov = incoming.overrides
     if ov.prompt is not None:
         existing.overrides.prompt = ov.prompt
+    if getattr(ov, "longTermMemory", None) is not None:
+        existing.overrides.longTermMemory = ov.longTermMemory
     if getattr(ov, "pureAiMode", None) is not None:
         existing.overrides.pureAiMode = ov.pureAiMode
     # 处理 presetId：允许设置为 None（清空预设）或新的预设ID

@@ -130,6 +130,7 @@ class ChatOverrides(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     prompt: str | None = None
+    longTermMemory: str | None = None
     presetId: str | None = None  # 关联的API预设ID
     # 会话级纯 AI 模式（None 表示使用全局 settings.pureAiMode）
     pureAiMode: bool | None = None

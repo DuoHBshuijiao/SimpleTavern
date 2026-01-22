@@ -45,6 +45,7 @@ function clone<T>(v: T): T {
 function ensureOverrides(v?: Partial<ChatOverrides> | null): ChatOverrides {
   return {
     prompt: v?.prompt ?? null,
+    longTermMemory: v?.longTermMemory ?? null,
     presetId: v?.presetId ?? null,
     params: {
       model: v?.params?.model ?? null,
@@ -595,6 +596,16 @@ async function handleImportChange(e: Event) {
                 v-model="chatDraft.prompt" 
                 rows="4"
                 placeholder="留空则使用角色默认Prompt"
+                class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-brand/50 focus:ring-1 focus:ring-brand/50 outline-none transition-colors resize-none"
+              ></textarea>
+            </div>
+
+            <div class="space-y-1.5">
+              <label class="block text-sm font-medium text-gray-300">长期记忆</label>
+              <textarea 
+                v-model="chatDraft.longTermMemory"
+                rows="4"
+                placeholder="会插入 System Prompt，留空则不启用"
                 class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-brand/50 focus:ring-1 focus:ring-brand/50 outline-none transition-colors resize-none"
               ></textarea>
             </div>

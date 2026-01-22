@@ -9,6 +9,7 @@ export interface GenerationParams {
 
 export interface ChatOverrides {
   prompt?: string | null
+  longTermMemory?: string | null
   presetId?: string | null
   pureAiMode?: boolean | null
   params: GenerationParams

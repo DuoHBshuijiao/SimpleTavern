@@ -95,6 +95,10 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
     if character_parts:
         prompt_parts.append("\n\n".join(character_parts))
     
+    long_term_memory = getattr(chat.overrides, "longTermMemory", None)
+    if long_term_memory and long_term_memory.strip():
+        prompt_parts.append(f"LongTermMemory：\n{long_term_memory.strip()}")
+
     if chat.overrides.prompt:
         prompt_parts.append(chat.overrides.prompt)
     if runtime and runtime.prompt:
@@ -304,6 +308,10 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
     if character_parts:
         prompt_parts.append("\n\n".join(character_parts))
     
+    long_term_memory = getattr(chat.overrides, "longTermMemory", None)
+    if long_term_memory and long_term_memory.strip():
+        prompt_parts.append(f"LongTermMemory：\n{long_term_memory.strip()}")
+
     if chat.overrides.prompt:
         prompt_parts.append(chat.overrides.prompt)
     if runtime and runtime.prompt:
@@ -534,6 +542,10 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
     if character_parts:
         prompt_parts.append("\n\n".join(character_parts))
     
+    long_term_memory = getattr(chat.overrides, "longTermMemory", None)
+    if long_term_memory and long_term_memory.strip():
+        prompt_parts.append(f"LongTermMemory：\n{long_term_memory.strip()}")
+
     if chat.overrides.prompt:
         prompt_parts.append(chat.overrides.prompt)
     system_prompt = "\n\n".join([p for p in prompt_parts if p.strip()])
