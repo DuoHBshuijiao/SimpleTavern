@@ -1,5 +1,48 @@
+/**
+ * SSE（Server-Sent Events）流式传输处理模块
+ *
+ * 提供Server-Sent Events流式数据的接收和处理功能，用于实时接收服务器推送的数据流。
+ *
+ * 主要功能：
+ *    - 解析SSE事件块：解析SSE格式的事件数据
+ *    - 查找事件分隔符：识别SSE事件之间的分隔符（支持LF和CRLF）
+ *    - 消费SSE流：发送POST请求并实时处理返回的SSE事件流
+ *
+ * 主要函数：
+ *    - parseEventBlock: 解析SSE事件块
+ *    - findSseSeparatorIndex: 查找SSE事件分隔符位置
+ *    - postAndConsumeSse: 发送POST请求并消费SSE流
+ *
+ * 实现原理：
+ *    - 使用ReadableStream API读取响应流
+ *    - 按SSE协议格式解析事件（event:和data:字段）
+ *    - 每处理20个事件后让出主线程，避免UI阻塞
+ *    - 支持AbortSignal取消请求
+ *
+ * 文件关系：
+ *    - 被导入：被composables、views等模块导入用于流式数据传输
+ *    - 导入：无
+ *    - 依赖：依赖浏览器fetch API和ReadableStream API
+ *    - 位置：API层，提供SSE流式传输的基础封装
+ */
+
+/**
+ * SSE事件类型
+ *
+ * 表示一个SSE事件，包含事件类型和数据。
+ */
 export type SseEvent = { event: string; data: any }
 
+/**
+ * 解析SSE事件块
+ *
+ * 解析SSE格式的事件块字符串，提取event和data字段。
+ * 支持多行data字段（使用换行符连接）。
+ * 尝试将data解析为JSON，失败则作为字符串返回。
+ *
+ * @param {string} block - SSE事件块字符串
+ * @returns {SseEvent | null} 解析后的事件对象，如果无有效数据则返回null
+ */
 function parseEventBlock(block: string): SseEvent | null {
   const lines = block.split('\n').map((l) => l.trimEnd())
   let event = 'message'
@@ -21,6 +64,15 @@ function parseEventBlock(block: string): SseEvent | null {
   }
 }
 
+/**
+ * 查找SSE事件分隔符位置
+ *
+ * SSE事件之间使用双换行符（\n\n或\r\n\r\n）分隔。
+ * 查找缓冲区中第一个分隔符的位置和长度。
+ *
+ * @param {string} buffer - 待查找的缓冲区字符串
+ * @returns {{ idx: number; sepLen: number } | null} 分隔符位置和长度，如果未找到则返回null
+ */
 function findSseSeparatorIndex(buffer: string): { idx: number; sepLen: number } | null {
   const idxLf = buffer.indexOf('\n\n')
   const idxCrLf = buffer.indexOf('\r\n\r\n')
@@ -32,6 +84,20 @@ function findSseSeparatorIndex(buffer: string): { idx: number; sepLen: number } 
   return { idx: idxCrLf, sepLen: 4 }
 }
 
+/**
+ * 发送POST请求并消费SSE流
+ *
+ * 向指定路径发送POST请求，接收Server-Sent Events流式响应。
+ * 实时解析并处理每个SSE事件，通过回调函数通知调用者。
+ * 每处理20个事件后让出主线程，避免UI阻塞。
+ *
+ * @param {string} path - 请求路径
+ * @param {unknown} body - 请求体数据，会被序列化为JSON
+ * @param {(evt: SseEvent) => void} onEvent - 事件回调函数，每个SSE事件触发一次
+ * @param {AbortSignal} [signal] - 可选的AbortSignal，用于取消请求
+ * @returns {Promise<void>} 流处理完成时返回
+ * @throws {Error} 请求失败时抛出错误，错误信息为响应文本
+ */
 export async function postAndConsumeSse(
   path: string,
   body: unknown,

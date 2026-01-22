@@ -1,4 +1,42 @@
 <script setup lang="ts">
+/**
+ * ModernSelect - 现代化选择器组件
+ *
+ * 组件职责：
+ * - 提供下拉选择功能，支持单选
+ * - 支持搜索过滤选项
+ * - 支持分组选项
+ * - 支持允许创建新选项
+ * - 支持自定义下拉位置和宽度
+ *
+ * Props说明：
+ * - modelValue: 当前选中的值（v-model）
+ * - options: 选项列表，可以是字符串数组、选项对象数组或分组选项数组
+ * - placeholder: 占位符文本
+ * - searchable: 是否可搜索
+ * - loading: 是否加载中
+ * - disabled: 是否禁用
+ * - allowCreate: 是否允许创建新选项
+ * - placement: 下拉位置（'top'或'bottom'）
+ * - dropdownWidth: 下拉框宽度（数字或字符串）
+ *
+ * Emits说明：
+ * - update:modelValue: 更新选中值（v-model）
+ * - change: 值改变时触发
+ * - select: 选择选项时触发，传递完整选项对象
+ *
+ * 使用的Composables：
+ * 无
+ *
+ * 使用的Stores：
+ * 无
+ *
+ * 文件关系：
+ *    - 被导入：被views/ChatPage.vue等组件使用
+ *    - 导入：导入vue的computed、ref、onMounted、onUnmounted、nextTick
+ *    - 依赖：依赖vue
+ *    - 位置：组件层，提供选择器功能
+ */
 import { computed, ref, onMounted, onUnmounted, nextTick } from 'vue'
 
 interface Option {
@@ -45,7 +83,11 @@ const searchQuery = ref('')
 const containerRef = ref<HTMLElement | null>(null)
 const inputRef = ref<HTMLInputElement | null>(null)
 
-// 统一处理 options 格式
+/**
+ * 计算规范化后的选项列表
+ *
+ * 统一处理options格式，将字符串转换为选项对象，将分组选项规范化。
+ */
 const normalizedOptions = computed(() => {
   return props.options.map(opt => {
     if (typeof opt === 'string') {
@@ -64,6 +106,12 @@ const normalizedOptions = computed(() => {
   })
 })
 
+/**
+ * 计算过滤后的选项列表
+ *
+ * 如果可搜索且有搜索查询，则根据查询过滤选项（不区分大小写）。
+ * 支持分组选项的过滤。
+ */
 const filteredOptions = computed(() => {
   if (!props.searchable || !searchQuery.value) return normalizedOptions.value
   const query = searchQuery.value.toLowerCase()
@@ -72,7 +120,6 @@ const filteredOptions = computed(() => {
   
   for (const opt of normalizedOptions.value) {
     if ('options' in opt) {
-       // It's a group
        const filteredSub = opt.options.filter((sub: Option) => 
          sub.label.toLowerCase().includes(query) || 
          sub.value.toLowerCase().includes(query)
@@ -81,7 +128,6 @@ const filteredOptions = computed(() => {
          result.push({ ...opt, options: filteredSub })
        }
     } else {
-       // It's a single option
        if (opt.label.toLowerCase().includes(query) || opt.value.toLowerCase().includes(query)) {
          result.push(opt)
        }
@@ -90,10 +136,15 @@ const filteredOptions = computed(() => {
   return result
 })
 
+/**
+ * 计算选中项的标签
+ *
+ * 根据modelValue从选项列表中查找对应的标签文本。
+ * 如果未找到，则返回modelValue本身。
+ */
 const selectedLabel = computed(() => {
   if (!props.modelValue) return ''
   
-  // Flat search
   for (const opt of normalizedOptions.value) {
      if ('options' in opt) {
         const found = opt.options.find((sub: Option) => sub.value === props.modelValue)
@@ -106,6 +157,11 @@ const selectedLabel = computed(() => {
   return props.modelValue
 })
 
+/**
+ * 切换下拉框状态
+ *
+ * 如果禁用则不执行。如果已打开则关闭，否则打开。
+ */
 function toggle() {
   if (props.disabled) return
   if (isOpen.value) {
@@ -115,6 +171,11 @@ function toggle() {
   }
 }
 
+/**
+ * 打开下拉框
+ *
+ * 设置打开状态，清空搜索查询，如果可搜索则聚焦输入框。
+ */
 function open() {
   isOpen.value = true
   searchQuery.value = ''
@@ -125,10 +186,22 @@ function open() {
   })
 }
 
+/**
+ * 关闭下拉框
+ *
+ * 设置关闭状态。
+ */
 function close() {
   isOpen.value = false
 }
 
+/**
+ * 选择选项
+ *
+ * 触发update:modelValue、change和select事件，然后关闭下拉框。
+ *
+ * @param {Option} opt - 选中的选项
+ */
 function select(opt: Option) {
   emit('update:modelValue', opt.value)
   emit('change', opt.value)
@@ -136,11 +209,12 @@ function select(opt: Option) {
   close()
 }
 
+/**
+ * 处理输入框回车事件
+ *
+ * 如果有第一个匹配项则选择它，如果允许创建且输入框有内容则创建新选项。
+ */
 function handleInputEnter() {
-  // If there is exactly one match (or first match in list), select it?
-  // For safety, only select if we have filtered options.
-  
-  // Flatten filtered options to check first match
   let firstMatch: Option | null = null
   
   if (filteredOptions.value.length > 0) {
@@ -163,7 +237,13 @@ function handleInputEnter() {
   }
 }
 
-// Click outside to close
+/**
+ * 处理点击外部事件
+ *
+ * 当点击下拉框外部时关闭下拉框。
+ *
+ * @param {MouseEvent} event - 鼠标事件
+ */
 function handleClickOutside(event: MouseEvent) {
   if (containerRef.value && !containerRef.value.contains(event.target as Node)) {
     close()

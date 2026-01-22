@@ -1,7 +1,33 @@
 /**
- * useStreamOutput - 流式输出处理逻辑
- * 
- * 负责处理 LLM 流式响应的缓冲、分块动画和 DOM 操作
+ * useStreamOutput - 流式输出处理Composable
+ *
+ * 负责处理LLM流式响应的缓冲、分块动画和DOM操作，实现打字机效果。
+ *
+ * 主要功能：
+ *    - 缓冲流式数据：将接收到的增量数据缓冲，按块处理
+ *    - 分块动画：将文本块添加到DOM并应用动画效果
+ *    - 状态管理：管理待处理块、已提交块等状态
+ *    - DOM操作：直接操作消息内容的DOM元素
+ *
+ * 主要函数：
+ *    - registerStreamMessage: 注册流式消息
+ *    - setMessageContentRef: 设置消息DOM引用
+ *    - appendDeltaBuffered: 追加缓冲的增量内容
+ *    - flushForMessage: 刷新指定消息的缓冲
+ *    - flushAll: 刷新所有消息的缓冲
+ *    - cleanup: 清理所有状态
+ *
+ * 实现原理：
+ *    - 使用缓冲机制，将接收到的增量数据累积到一定大小后再处理
+ *    - 将文本块添加到DOM，应用CSS动画类，实现打字机效果
+ *    - 使用定时器控制动画时长，动画结束后将内容提交到Store
+ *    - 支持多个消息同时进行流式输出
+ *
+ * 文件关系：
+ *    - 被导入：被composables/index.ts导出，被views/ChatPage.vue使用
+ *    - 导入：导入vue的reactive和nextTick
+ *    - 依赖：依赖stores/chats.ts的appendLocalMessageContent方法
+ *    - 位置：Composables层，提供流式输出处理逻辑
  */
 import { reactive, nextTick } from 'vue'
 
@@ -41,14 +67,24 @@ export function useStreamOutput(
   let chunkSeq = 0
 
   /**
-   * 注册一个消息 ID 为流式消息
+   * 注册一个消息ID为流式消息
+   *
+   * 将消息ID添加到活跃消息集合中，标记该消息正在进行流式输出。
+   *
+   * @param {string} messageId - 消息ID
    */
   function registerStreamMessage(messageId: string) {
     activeMessageIds.add(messageId)
   }
 
   /**
-   * 设置消息内容的 DOM 引用
+   * 设置消息内容的DOM引用
+   *
+   * 保存消息内容容器的DOM元素引用，用于后续的DOM操作。
+   * 如果传入null，则清除该消息的引用和相关元素。
+   *
+   * @param {string} messageId - 消息ID
+   * @param {HTMLElement | null} el - DOM元素引用，null表示清除
    */
   function setMessageContentRef(messageId: string, el: HTMLElement | null) {
     if (!el) {
@@ -61,6 +97,13 @@ export function useStreamOutput(
 
   /**
    * 追加流式增量内容（带缓冲）
+   *
+   * 将接收到的增量内容添加到缓冲区。
+   * 当缓冲区累积到CHUNK_SIZE大小时，将完整的块调度处理。
+   * 剩余不足一个块大小的内容保留在缓冲区中。
+   *
+   * @param {string} messageId - 消息ID
+   * @param {string} delta - 增量内容
    */
   function appendDeltaBuffered(messageId: string, delta: string) {
     const current = bufferMap.get(messageId) ?? ''
@@ -80,6 +123,12 @@ export function useStreamOutput(
 
   /**
    * 调度一个文本块的动画
+   *
+   * 创建一个文本块条目，添加到待处理列表，并立即添加到DOM。
+   * 设置定时器，在ANIM_DURATION后完成该块的处理。
+   *
+   * @param {string} messageId - 消息ID
+   * @param {string} chunk - 文本块内容
    */
   function scheduleChunk(messageId: string, chunk: string) {
     if (!chunk) return
@@ -93,7 +142,14 @@ export function useStreamOutput(
   }
 
   /**
-   * 将文本块追加到 DOM
+   * 将文本块追加到DOM
+   *
+   * 在消息内容的markdown容器中，找到最后一个段落或容器本身，
+   * 创建一个span元素，添加stream-append类，并追加到目标元素。
+   * 使用nextTick确保DOM已更新。
+   *
+   * @param {string} messageId - 消息ID
+   * @param {{ id: string; text: string }} entry - 文本块条目
    */
   function appendChunkToDom(messageId: string, entry: { id: string; text: string }) {
     nextTick(() => {
@@ -115,6 +171,12 @@ export function useStreamOutput(
 
   /**
    * 将块元素移动到已提交状态
+   *
+   * 将待处理元素移动到已提交元素映射中，并添加stream-append--done类。
+   * 从待处理映射中删除该元素。
+   *
+   * @param {string} messageId - 消息ID
+   * @param {string} chunkId - 文本块ID
    */
   function moveChunkToCommitted(messageId: string, chunkId: string) {
     const pendingMap = pendingElements.get(messageId)
@@ -135,6 +197,11 @@ export function useStreamOutput(
 
   /**
    * 清理块元素
+   *
+   * 从DOM中移除指定消息的所有块元素，并从映射中删除。
+   *
+   * @param {Map<string, Map<string, HTMLElement>>} map - 元素映射
+   * @param {string} messageId - 消息ID
    */
   function clearChunkElements(map: Map<string, Map<string, HTMLElement>>, messageId: string) {
     const elementMap = map.get(messageId)
@@ -147,6 +214,13 @@ export function useStreamOutput(
 
   /**
    * 追加已提交的文本到消息内容
+   *
+   * 将已完成的文本块内容追加到Store中的消息内容。
+   * 调用chatsStore.appendLocalMessageContent（来自stores/chats.ts）更新状态。
+   * 然后滚动到底部。
+   *
+   * @param {string} messageId - 消息ID
+   * @param {string} text - 要追加的文本
    */
   function appendCommittedText(messageId: string, text: string) {
     if (!text) return
@@ -156,6 +230,13 @@ export function useStreamOutput(
 
   /**
    * 完成一个文本块的处理
+   *
+   * 当定时器触发时调用，表示一个文本块的动画已完成。
+   * 将块从待处理列表移除，添加到已提交文本中，并移动到已提交状态。
+   * 如果所有块都处理完成，则将已提交文本追加到Store并清理DOM元素。
+   *
+   * @param {string} messageId - 消息ID
+   * @param {string} chunkId - 文本块ID
    */
   function finalizeChunk(messageId: string, chunkId: string) {
     const list = pendingChunks.get(messageId)
@@ -185,6 +266,12 @@ export function useStreamOutput(
 
   /**
    * 刷新指定消息的所有流式缓冲
+   *
+   * 立即完成指定消息的所有待处理块，将所有缓冲内容追加到Store。
+   * 清理所有相关的DOM元素和状态。
+   * 用于流式传输结束或取消时。
+   *
+   * @param {string} messageId - 消息ID
    */
   function flushForMessage(messageId: string) {
     const list = pendingChunks.get(messageId)
@@ -215,6 +302,9 @@ export function useStreamOutput(
 
   /**
    * 刷新所有活跃的流式消息
+   *
+   * 遍历所有活跃的消息ID，对每个消息调用flushForMessage。
+   * 用于批量刷新所有流式输出。
    */
   function flushAll() {
     const ids = Array.from(activeMessageIds)
@@ -225,6 +315,9 @@ export function useStreamOutput(
 
   /**
    * 清理所有状态
+   *
+   * 刷新所有消息，然后清空所有状态映射和集合。
+   * 用于组件卸载或重置时。
    */
   function cleanup() {
     flushAll()

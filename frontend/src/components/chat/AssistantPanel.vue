@@ -1,8 +1,46 @@
 <script setup lang="ts">
 /**
  * AssistantPanel - 聊天助手面板组件
- * 
- * 右侧滑出的聊天助手面板，用于与 AI 助手对话
+ *
+ * 组件职责：
+ * - 显示右侧滑出的聊天助手面板
+ * - 显示助手对话消息列表
+ * - 提供消息输入和发送功能
+ * - 支持消息编辑、删除、重写操作
+ * - 支持Markdown渲染
+ * - 提供模型选择和重置功能
+ *
+ * Props说明：
+ * - isOpen: 是否打开面板（v-model:isOpen）
+ * - messages: 助手消息列表（来自composables/useAssistant.ts的AssistantMessage[]类型）
+ * - draft: 输入草稿（v-model:draft）
+ * - isGenerating: 是否正在生成
+ * - streamError: 流式传输错误信息
+ * - currentModel: 当前选中的模型
+ * - modelOptions: 模型选项列表
+ *
+ * Emits说明：
+ * - update:isOpen: 更新打开状态（v-model:isOpen）
+ * - update:draft: 更新输入草稿（v-model:draft）
+ * - send: 发送消息
+ * - reset: 重置对话
+ * - open-settings: 打开设置
+ * - select-model: 选择模型
+ * - edit-message: 编辑消息
+ * - delete-message: 删除消息
+ * - rewrite-message: 重写消息
+ *
+ * 使用的Composables：
+ * 无（通过props接收数据）
+ *
+ * 使用的Stores：
+ * 无
+ *
+ * 文件关系：
+ *    - 被导入：被views/ChatPage.vue使用
+ *    - 导入：导入markdown-it库、composables/useAssistant.ts的AssistantMessage类型、components/ModernSelect.vue
+ *    - 依赖：依赖vue、markdown-it
+ *    - 位置：组件层，提供聊天助手面板功能
  */
 import MarkdownIt from 'markdown-it'
 import type { AssistantMessage } from '../../composables/useAssistant'
@@ -37,22 +75,49 @@ const md = new MarkdownIt({
   breaks: true,
 })
 
+/**
+ * 渲染Markdown
+ *
+ * 使用MarkdownIt渲染Markdown文本为HTML。
+ *
+ * @param {string} text - Markdown文本
+ * @returns {string} 渲染后的HTML
+ */
 function renderMarkdown(text: string) {
   return md.render(text ?? '')
 }
 
+/**
+ * 处理键盘事件
+ *
+ * 当按下Ctrl+Enter时触发发送事件。
+ *
+ * @param {KeyboardEvent} e - 键盘事件
+ */
 function handleKeydown(e: KeyboardEvent) {
   if (e.ctrlKey && e.key === 'Enter') {
     emit('send')
   }
 }
 
+/**
+ * 确认删除消息
+ *
+ * 弹出确认对话框，确认后触发删除消息事件。
+ *
+ * @param {AssistantMessage} m - 要删除的消息
+ */
 function confirmDelete(m: AssistantMessage) {
   if (window.confirm('确定删除？')) {
     emit('delete-message', m)
   }
 }
 
+/**
+ * 确认重置对话
+ *
+ * 弹出确认对话框，确认后触发重置事件。
+ */
 function confirmReset() {
   if (window.confirm('确定清空与助理的所有上下文？')) {
     emit('reset')

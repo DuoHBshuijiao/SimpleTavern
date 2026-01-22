@@ -1,8 +1,37 @@
 <script setup lang="ts">
 /**
- * GroupSettingsModal - 群聊设置弹窗
- * 
- * 管理群成员列表、发言顺序、群聊延迟等
+ * GroupSettingsModal - 群聊设置弹窗组件
+ *
+ * 组件职责：
+ * - 管理群聊设置，包括成员列表、发言顺序、群聊延迟等
+ * - 支持拖拽调整成员发言顺序
+ * - 支持添加和删除成员
+ * - 支持设置群聊延迟时间
+ * - 支持打开成员设置编辑
+ *
+ * Props说明：
+ * - show: 是否显示弹窗（v-model:show）
+ * - chat: 群聊数据（来自types/models.ts的Chat类型）
+ * - characters: 角色列表（来自types/models.ts的CharacterCard[]类型）
+ *
+ * Emits说明：
+ * - update:show: 更新显示状态（v-model:show）
+ * - update:member-ids: 更新成员ID列表（拖拽排序后）
+ * - update:group-delay: 更新群聊延迟时间
+ * - open-member-settings: 打开成员设置编辑，传递成员ID
+ * - save: 保存设置
+ *
+ * 使用的Composables：
+ * 无
+ *
+ * 使用的Stores：
+ * 无
+ *
+ * 文件关系：
+ *    - 被导入：被views/ChatPage.vue使用
+ *    - 导入：导入vue的ref和watch、types/models.ts的类型、components/ModernAvatar.vue
+ *    - 依赖：依赖vue
+ *    - 位置：组件层，提供群聊设置功能
  */
 import { ref, watch } from 'vue'
 import type { Chat, CharacterCard } from '../../types/models'
@@ -33,14 +62,38 @@ watch(() => props.show, (val) => {
   }
 })
 
+/**
+ * 获取角色信息
+ *
+ * 根据角色ID从角色列表中查找角色。
+ *
+ * @param {string} id - 角色ID
+ * @returns {CharacterCard | undefined} 角色信息，如果未找到则返回undefined
+ */
 function getCharacter(id: string) {
   return props.characters.find(c => c.id === id)
 }
 
+/**
+ * 处理拖拽开始
+ *
+ * 记录开始拖拽的成员索引。
+ *
+ * @param {number} idx - 成员索引
+ */
 function handleDragStart(idx: number) {
   draggingIdx.value = idx
 }
 
+/**
+ * 处理拖拽悬停
+ *
+ * 当拖拽到其他位置时，重新排列成员顺序。
+ * 使用数组splice方法移动元素位置。
+ *
+ * @param {DragEvent} e - 拖拽事件
+ * @param {number} idx - 目标索引
+ */
 function handleDragOver(e: DragEvent, idx: number) {
   e.preventDefault()
   if (draggingIdx.value === null || draggingIdx.value === idx) return
@@ -54,14 +107,29 @@ function handleDragOver(e: DragEvent, idx: number) {
   draggingIdx.value = idx
 }
 
+/**
+ * 处理拖拽结束
+ *
+ * 清空拖拽状态。
+ */
 function handleDragEnd() {
   draggingIdx.value = null
 }
 
+/**
+ * 关闭弹窗
+ *
+ * 触发update:show事件，传递false。
+ */
 function close() {
   emit('update:show', false)
 }
 
+/**
+ * 保存设置
+ *
+ * 触发update:member-ids和update:group-delay事件，然后触发save事件。
+ */
 function save() {
   emit('update:member-ids', memberIdsDraft.value)
   emit('update:group-delay', groupDelayDraft.value)

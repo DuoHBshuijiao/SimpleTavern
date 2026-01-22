@@ -1,7 +1,39 @@
 /**
- * useAssistant - 聊天助手逻辑
- * 
- * 负责聊天助手面板的消息管理、设置、流式对话等功能
+ * useAssistant - 聊天助手逻辑Composable
+ *
+ * 负责聊天助手面板的消息管理、设置、流式对话等功能。
+ * 支持两种作用域：chat（聊天作用域）和workspace（工作区作用域）。
+ *
+ * 主要功能：
+ *    - 消息管理：加载、发送、编辑、删除助手消息
+ *    - 设置管理：加载和保存助手设置（提示词、温度、模型等）
+ *    - 流式对话：支持SSE流式接收助手回复
+ *    - 作用域管理：区分聊天作用域和工作区作用域
+ *    - 消息重写：支持重写助手消息
+ *
+ * 主要函数：
+ *    - getState: 获取指定作用域的状态
+ *    - buildPath: 构建助手API路径
+ *    - normalizeMessages: 规范化消息数组
+ *    - allowMemoryWrite: 检测是否允许写入记忆
+ *    - loadSettings: 加载助手设置
+ *    - saveSettings: 保存助手设置
+ *    - loadChat: 加载助手聊天记录
+ *    - loadState: 加载助手完整状态
+ *    - resetChat: 重置聊天作用域
+ *    - resetWorkspaceChat: 重置工作区作用域
+ *    - sendMessage: 发送助手消息
+ *    - openEditMessage: 打开消息编辑
+ *    - saveEditedMessage: 保存编辑的消息
+ *    - deleteMessage: 删除消息
+ *    - rewriteMessage: 重写消息
+ *    - handleModelSelect: 处理模型选择
+ *
+ * 文件关系：
+ *    - 被导入：被composables/index.ts导出，被views/ChatPage.vue使用
+ *    - 导入：导入vue的ref和ComputedRef、api/http.ts的HTTP函数、api/sse.ts的postAndConsumeSse
+ *    - 依赖：依赖vue、api/http.ts、api/sse.ts
+ *    - 位置：Composables层，提供聊天助手逻辑
  */
 import { ref } from 'vue'
 import type { ComputedRef } from 'vue'
@@ -64,7 +96,12 @@ export function useAssistant(options: UseAssistantOptions) {
   }
 
   /**
-   * 获取指定 scope 的状态
+   * 获取指定作用域的状态
+   *
+   * 根据作用域返回对应的状态对象（消息、草稿、错误、生成状态）。
+   *
+   * @param {AssistantScope} scope - 作用域（'chat'或'workspace'）
+   * @returns {object} 状态对象，包含messages、draft、streamError、isGenerating
    */
   function getState(scope: AssistantScope) {
     if (scope === 'workspace') {
@@ -84,7 +121,14 @@ export function useAssistant(options: UseAssistantOptions) {
   }
 
   /**
-   * 构建助手 API 路径
+   * 构建助手API路径
+   *
+   * 根据作用域构建完整的API路径，添加必要的查询参数。
+   * workspace作用域添加scope=workspace，chat作用域添加chatId参数。
+   *
+   * @param {string} base - 基础路径
+   * @param {AssistantScope} scope - 作用域（'chat'或'workspace'）
+   * @returns {string} 完整的API路径
    */
   function buildPath(base: string, scope: AssistantScope): string {
     const params: string[] = []
@@ -101,6 +145,12 @@ export function useAssistant(options: UseAssistantOptions) {
 
   /**
    * 规范化消息数组
+   *
+   * 将原始消息数组转换为标准格式的AssistantMessage数组。
+   * 过滤无效消息，为缺失字段提供默认值。
+   *
+   * @param {any[]} raw - 原始消息数组
+   * @returns {AssistantMessage[]} 规范化后的消息数组
    */
   function normalizeMessages(raw: any[]): AssistantMessage[] {
     return (raw || [])
@@ -115,6 +165,11 @@ export function useAssistant(options: UseAssistantOptions) {
 
   /**
    * 检测是否允许写入记忆
+   *
+   * 通过正则表达式检测用户消息中是否包含写入记忆的指令。
+   *
+   * @param {string} text - 用户消息文本
+   * @returns {boolean} 是否允许写入记忆
    */
   function allowMemoryWrite(text: string): boolean {
     if (!text) return false
@@ -131,6 +186,11 @@ export function useAssistant(options: UseAssistantOptions) {
 
   /**
    * 加载助手设置
+   *
+   * 从服务器加载助手设置（提示词、温度、模型等）。
+   * 使用apiGet函数（来自api/http.ts）发送GET请求到/api/assistant/settings。
+   *
+   * @returns {Promise<void>} 完成时返回
    */
   async function loadSettings() {
     const res = await apiGet<{ prompt: string; temperature: number | null; model: string | null }>(
@@ -145,6 +205,11 @@ export function useAssistant(options: UseAssistantOptions) {
 
   /**
    * 保存助手设置
+   *
+   * 将助手设置保存到服务器。
+   * 使用apiPut函数（来自api/http.ts）发送PUT请求到/api/assistant/settings。
+   *
+   * @returns {Promise<void>} 完成时返回
    */
   async function saveSettings() {
     await apiPut('/api/assistant/settings', assistantSettings.value)
@@ -152,6 +217,10 @@ export function useAssistant(options: UseAssistantOptions) {
 
   /**
    * 保存设置并关闭弹窗
+   *
+   * 保存助手设置，然后关闭设置弹窗。
+   *
+   * @returns {Promise<void>} 完成时返回
    */
   async function saveSettingsAndClose() {
     await saveSettings()
@@ -160,6 +229,12 @@ export function useAssistant(options: UseAssistantOptions) {
 
   /**
    * 加载助手聊天记录
+   *
+   * 从服务器加载指定作用域的助手聊天记录。
+   * 使用apiGet函数（来自api/http.ts）发送GET请求到/api/assistant/chat。
+   *
+   * @param {AssistantScope} scope - 作用域（'chat'或'workspace'）
+   * @returns {Promise<void>} 完成时返回
    */
   async function loadChat(scope: AssistantScope) {
     const state = getState(scope)
@@ -169,6 +244,11 @@ export function useAssistant(options: UseAssistantOptions) {
 
   /**
    * 加载助手完整状态
+   *
+   * 同时加载助手设置和聊天记录。
+   *
+   * @param {AssistantScope} scope - 作用域（'chat'或'workspace'）
+   * @returns {Promise<void>} 完成时返回
    */
   async function loadState(scope: AssistantScope) {
     const state = getState(scope)
@@ -181,7 +261,12 @@ export function useAssistant(options: UseAssistantOptions) {
   }
 
   /**
-   * 重置 chat scope 聊天
+   * 重置聊天作用域
+   *
+   * 重置聊天作用域的聊天记录，清空消息和草稿。
+   * 使用apiPost函数（来自api/http.ts）发送POST请求到/api/assistant/reset。
+   *
+   * @returns {Promise<void>} 完成时返回
    */
   async function resetChat() {
     if (chatId.value) {
@@ -193,7 +278,12 @@ export function useAssistant(options: UseAssistantOptions) {
   }
 
   /**
-   * 重置 workspace scope 聊天
+   * 重置工作区作用域
+   *
+   * 重置工作区作用域的聊天记录，清空消息和草稿。
+   * 使用apiPost函数（来自api/http.ts）发送POST请求到/api/assistant/reset?scope=workspace。
+   *
+   * @returns {Promise<void>} 完成时返回
    */
   async function resetWorkspaceChat() {
     await apiPost('/api/assistant/reset?scope=workspace', {})
@@ -203,7 +293,12 @@ export function useAssistant(options: UseAssistantOptions) {
   }
 
   /**
-   * 删除 workspace 助手聊天
+   * 删除工作区助手聊天
+   *
+   * 删除工作区作用域的助手聊天记录。
+   * 使用apiPost函数（来自api/http.ts）发送POST请求到/api/assistant/workspace/chat/delete。
+   *
+   * @returns {Promise<void>} 完成时返回
    */
   async function deleteWorkspaceChat() {
     await apiPost('/api/assistant/workspace/chat/delete', {})
@@ -211,6 +306,11 @@ export function useAssistant(options: UseAssistantOptions) {
 
   /**
    * 打开消息编辑弹窗
+   *
+   * 打开助手消息编辑弹窗，加载消息内容到编辑状态。
+   *
+   * @param {AssistantMessage} m - 要编辑的消息
+   * @param {AssistantScope} scope - 作用域（'chat'或'workspace'）
    */
   function openEditMessage(m: AssistantMessage, scope: AssistantScope) {
     editingAssistantMessage.value = m
@@ -221,6 +321,8 @@ export function useAssistant(options: UseAssistantOptions) {
 
   /**
    * 关闭消息编辑弹窗
+   *
+   * 关闭助手消息编辑弹窗，清空编辑状态。
    */
   function closeEditMessage() {
     showAssistantMessageEditor.value = false
@@ -231,6 +333,12 @@ export function useAssistant(options: UseAssistantOptions) {
 
   /**
    * 保存编辑的消息
+   *
+   * 将编辑后的助手消息保存到服务器。
+   * 使用apiPut函数（来自api/http.ts）发送PUT请求到/api/assistant/chat/messages/{id}。
+   * 保存成功后重新加载聊天记录。
+   *
+   * @returns {Promise<void>} 完成时返回
    */
   async function saveEditedMessage() {
     if (!editingAssistantMessage.value) return
@@ -252,6 +360,14 @@ export function useAssistant(options: UseAssistantOptions) {
 
   /**
    * 删除消息
+   *
+   * 删除指定的助手消息。
+   * 使用apiDelete函数（来自api/http.ts）发送DELETE请求到/api/assistant/chat/messages/{id}。
+   * 删除成功后重新加载聊天记录。
+   *
+   * @param {AssistantMessage} m - 要删除的消息
+   * @param {AssistantScope} scope - 作用域（'chat'或'workspace'）
+   * @returns {Promise<void>} 完成时返回
    */
   async function deleteMessage(m: AssistantMessage, scope: AssistantScope) {
     try {
@@ -265,6 +381,13 @@ export function useAssistant(options: UseAssistantOptions) {
 
   /**
    * 重写助手消息
+   *
+   * 删除指定的助手消息，然后使用上一个用户消息重新生成回复。
+   * 如果找到上一个用户消息，则将其设置为草稿并发送。
+   *
+   * @param {AssistantMessage} m - 要重写的消息
+   * @param {AssistantScope} scope - 作用域（'chat'或'workspace'）
+   * @returns {Promise<void>} 完成时返回
    */
   async function rewriteMessage(m: AssistantMessage, scope: AssistantScope) {
     const state = getState(scope)
@@ -291,6 +414,15 @@ export function useAssistant(options: UseAssistantOptions) {
 
   /**
    * 发送助手消息
+   *
+   * 发送用户消息给助手，接收流式回复。
+   * 使用postAndConsumeSse函数（来自api/sse.ts）发送POST请求到/api/assistant/stream。
+   * 支持实时接收delta事件更新消息内容，支持tool_trace事件显示工具调用，支持card事件接收角色卡。
+   *
+   * @param {AssistantScope} scope - 作用域（'chat'或'workspace'）
+   * @param {boolean | Event} appendUserMessage - 是否追加用户消息到消息列表
+   * @param {(card: any) => void} [onCardReceived] - 接收角色卡的回调函数（可选）
+   * @returns {Promise<void>} 完成时返回
    */
   async function sendMessage(
     scope: AssistantScope, 
@@ -382,6 +514,11 @@ export function useAssistant(options: UseAssistantOptions) {
 
   /**
    * 处理模型选择
+   *
+   * 更新助手设置中的模型，并保存到服务器。
+   *
+   * @param {{ value: string }} option - 模型选项，包含value字段
+   * @returns {Promise<void>} 完成时返回
    */
   async function handleModelSelect(option: { value: string }) {
     assistantSettings.value.model = option.value

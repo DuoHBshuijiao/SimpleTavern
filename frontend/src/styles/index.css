@@ -1,22 +1,46 @@
 /**
  * 样式入口文件
- * 
- * 按正确顺序导入所有样式
- * 
+ *
+ * 按正确顺序导入所有样式文件，确保样式层叠顺序正确。
+ *
+ * 主要功能：
+ *    - 导入Tailwind CSS：提供工具类
+ *    - 导入主题变量：提供CSS变量
+ *    - 导入基础样式：提供全局重置和排版
+ *    - 导入滚动条样式：自定义滚动条外观
+ *    - 导入动画样式：提供动画效果
+ *    - 导入工具类：提供自定义工具类
+ *    - 导入组件样式：提供组件特定样式
+ *
+ * 导入顺序说明：
+ *    1. Tailwind CSS：基础工具类框架
+ *    2. variables.css：CSS变量定义（必须在Tailwind之后，其他样式之前）
+ *    3. base.css：全局基础样式
+ *    4. scrollbar.css：滚动条样式
+ *    5. animations.css：动画样式
+ *    6. utilities.css：工具类样式
+ *    7. components/index.css：组件样式
+ *
  * 目录结构：
- * styles/
- * ├── index.css           # 入口文件（本文件）
- * ├── variables.css       # 主题变量和设计令牌
- * ├── base.css            # 全局基础样式
- * ├── scrollbar.css       # 滚动条样式
- * ├── animations.css      # 动画样式
- * ├── utilities.css       # 工具类
- * └── components/         # 组件样式
- *     ├── index.css       # 组件入口
- *     ├── buttons.css     # 按钮
- *     ├── forms.css       # 表单
- *     ├── modals.css      # 弹窗
- *     └── cards.css       # 卡片
+ *    styles/
+ *    ├── index.css           # 入口文件（本文件）
+ *    ├── variables.css       # 主题变量和设计令牌
+ *    ├── base.css            # 全局基础样式
+ *    ├── scrollbar.css       # 滚动条样式
+ *    ├── animations.css      # 动画样式
+ *    ├── utilities.css       # 工具类
+ *    └── components/         # 组件样式
+ *        ├── index.css       # 组件入口
+ *        ├── buttons.css     # 按钮
+ *        ├── forms.css       # 表单
+ *        ├── modals.css      # 弹窗
+ *        └── cards.css       # 卡片
+ *
+ * 文件关系：
+ *    - 被导入：被main.ts导入作为应用样式入口
+ *    - 导入：导入所有样式子文件
+ *    - 依赖：依赖tailwindcss、所有样式子文件
+ *    - 位置：样式层，作为样式系统的入口
  */
 
 /* 1. Tailwind CSS */

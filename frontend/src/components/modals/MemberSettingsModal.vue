@@ -1,8 +1,35 @@
 <script setup lang="ts">
 /**
- * MemberSettingsModal - 群聊成员设置弹窗
- * 
- * 编辑单个群成员的专属设置：模型、温度、top_p、发言概率等
+ * MemberSettingsModal - 群聊成员设置弹窗组件
+ *
+ * 组件职责：
+ * - 编辑单个群成员的专属设置
+ * - 支持设置模型、温度、top_p、发言概率等参数
+ * - 支持设置是否包含性格和场景描述
+ *
+ * Props说明：
+ * - show: 是否显示弹窗（v-model:show）
+ * - memberId: 成员角色ID
+ * - settings: 成员设置（来自types/models.ts的GroupMemberSettings类型，v-model:settings）
+ * - character: 成员角色信息（来自types/models.ts的CharacterCard类型）
+ * - modelOptions: 模型选项列表
+ *
+ * Emits说明：
+ * - update:show: 更新显示状态（v-model:show）
+ * - update:settings: 更新成员设置（v-model:settings）
+ * - save: 保存设置
+ *
+ * 使用的Composables：
+ * 无
+ *
+ * 使用的Stores：
+ * 无
+ *
+ * 文件关系：
+ *    - 被导入：被views/ChatPage.vue使用
+ *    - 导入：导入types/models.ts的类型、components/ModernAvatar.vue、components/ModernSelect.vue
+ *    - 依赖：依赖vue
+ *    - 位置：组件层，提供成员设置编辑功能
  */
 import type { GroupMemberSettings, CharacterCard } from '../../types/models'
 import ModernAvatar from '../ModernAvatar.vue'
@@ -22,22 +49,49 @@ const emit = defineEmits<{
   'save': []
 }>()
 
+/**
+ * 更新设置字段
+ *
+ * 更新成员设置的指定字段，触发update:settings事件。
+ *
+ * @template K - 字段键类型
+ * @param {K} field - 字段名
+ * @param {GroupMemberSettings[K]} value - 字段值
+ */
 function updateField<K extends keyof GroupMemberSettings>(field: K, value: GroupMemberSettings[K]) {
   emit('update:settings', { ...props.settings, [field]: value })
 }
 
+/**
+ * 处理模型选择
+ *
+ * 更新成员设置的模型和预设ID。
+ * 如果值为空字符串，则转换为null。
+ *
+ * @param {{ value: string; presetId?: string }} opt - 模型选项
+ */
 function handleModelSelect(opt: { value: string; presetId?: string }) {
   emit('update:settings', { 
     ...props.settings, 
-    model: opt.value || null,  // Convert empty string to null
+    model: opt.value || null,
     presetId: opt.presetId ?? null 
   })
 }
 
+/**
+ * 关闭弹窗
+ *
+ * 触发update:show事件，传递false。
+ */
 function close() {
   emit('update:show', false)
 }
 
+/**
+ * 保存设置
+ *
+ * 触发save事件。
+ */
 function save() {
   emit('save')
 }

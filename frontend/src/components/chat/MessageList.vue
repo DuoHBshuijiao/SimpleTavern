@@ -1,8 +1,49 @@
 <script setup lang="ts">
 /**
  * MessageList - 消息列表组件
- * 
- * 显示聊天消息列表，支持版本切换、编辑、删除、重写等操作
+ *
+ * 组件职责：
+ * - 显示聊天消息列表，包括用户消息、助手消息和系统消息
+ * - 支持消息版本切换（查看不同版本）
+ * - 支持消息编辑、删除、重写操作
+ * - 支持Markdown渲染
+ * - 自动滚动到底部
+ * - 为流式输出设置DOM引用
+ *
+ * Props说明：
+ * - messages: 消息列表（来自types/models.ts的ChatMessage[]类型）
+ * - isGroup: 是否为群聊
+ * - selectedCharacter: 当前选中的角色（来自types/models.ts的CharacterCard类型）
+ * - characters: 角色列表（来自types/models.ts的CharacterCard[]类型）
+ * - selectedPersona: 当前选中的用户身份（来自types/models.ts的UserPersona类型）
+ * - userName: 用户名称
+ * - userAvatarUrl: 用户头像URL
+ * - characterAvatarUrl: 角色头像URL
+ * - isGenerating: 是否正在生成
+ * - getDisplayContent: 获取消息显示内容的函数（来自composables/useMessageVersions.ts）
+ * - hasMultipleVersions: 检查是否有多个版本的函数（来自composables/useMessageVersions.ts）
+ * - getCurrentVersionIndex: 获取当前版本索引的函数（来自composables/useMessageVersions.ts）
+ * - getVersionCount: 获取版本总数的函数（来自composables/useMessageVersions.ts）
+ *
+ * Emits说明：
+ * - edit-message: 编辑消息
+ * - delete-message: 删除消息
+ * - rewrite-message: 重写消息
+ * - switch-previous-version: 切换到上一个版本
+ * - switch-next-version: 切换到下一个版本
+ * - set-content-ref: 设置消息内容的DOM引用（用于流式输出，传递给composables/useStreamOutput.ts）
+ *
+ * 使用的Composables：
+ * 无（通过props接收函数）
+ *
+ * 使用的Stores：
+ * 无
+ *
+ * 文件关系：
+ *    - 被导入：被views/ChatPage.vue使用
+ *    - 导入：导入vue的ref和nextTick、types/models.ts的类型、components/ModernAvatar.vue、markdown-it库
+ *    - 依赖：依赖vue、markdown-it
+ *    - 位置：组件层，提供消息列表显示功能
  */
 import { ref, nextTick } from 'vue'
 import type { ChatMessage, CharacterCard, UserPersona } from '../../types/models'
@@ -48,20 +89,51 @@ const md = new MarkdownIt({
   breaks: true,
 })
 
+/**
+ * 规范化Markdown输入
+ *
+ * 将Markdown中的引用语法（[name]:）中的冒号替换为中文冒号，避免被解析为链接定义。
+ *
+ * @param {string} text - Markdown文本
+ * @returns {string} 规范化后的文本
+ */
 function normalizeMarkdownInput(text: string) {
   return (text ?? '').replace(/(^|\n)\[([^\]\n]+)\]:(\s*)/g, (_m, p1, name, sp) => `${p1}[${name}]：${sp}`)
 }
 
+/**
+ * 渲染Markdown
+ *
+ * 使用MarkdownIt渲染Markdown文本为HTML。
+ *
+ * @param {string} text - Markdown文本
+ * @returns {string} 渲染后的HTML
+ */
 function renderMarkdown(text: string) {
   return md.render(normalizeMarkdownInput(text))
 }
 
-// 获取角色信息
+/**
+ * 获取角色信息
+ *
+ * 根据角色ID从角色列表中查找角色。
+ *
+ * @param {string} id - 角色ID
+ * @returns {CharacterCard | null} 角色信息，如果未找到则返回null
+ */
 function getCharacterById(id: string): CharacterCard | null {
   return props.characters.find(c => c.id === id) ?? null
 }
 
-// 获取消息标签
+/**
+ * 获取消息标签
+ *
+ * 根据消息角色和内容返回要显示的名称标签。
+ * 用户消息显示发送者名称，助手消息显示角色名称，系统消息显示"系统"。
+ *
+ * @param {ChatMessage} m - 消息对象（来自types/models.ts）
+ * @returns {string} 消息标签
+ */
 function getMessageLabel(m: ChatMessage): string {
   if (m.role === 'user') return (m.senderName || props.userName)
   if (m.role === 'assistant') {
@@ -74,7 +146,15 @@ function getMessageLabel(m: ChatMessage): string {
   return '系统'
 }
 
-// 获取消息头像
+/**
+ * 获取消息头像
+ *
+ * 根据消息角色和内容返回头像URL。
+ * 用户消息优先使用发送者头像，助手消息优先使用角色头像。
+ *
+ * @param {ChatMessage} m - 消息对象（来自types/models.ts）
+ * @returns {string | null} 头像URL，如果未找到则返回null
+ */
 function getMessageAvatar(m: ChatMessage): string | null {
   if (m.role === 'user') {
     if (m.senderAvatar) return `/api/avatars/${m.senderAvatar}`
@@ -90,14 +170,25 @@ function getMessageAvatar(m: ChatMessage): string | null {
   return null
 }
 
-// 确认删除
+/**
+ * 确认删除消息
+ *
+ * 弹出确认对话框，确认后触发删除消息事件。
+ *
+ * @param {ChatMessage} m - 要删除的消息（来自types/models.ts）
+ */
 function confirmDelete(m: ChatMessage) {
   if (window.confirm('确定删除？')) {
     emit('delete-message', m)
   }
 }
 
-// 滚动到底部
+/**
+ * 滚动到底部
+ *
+ * 滚动消息列表容器到底部，显示最新消息。
+ * 使用nextTick确保DOM更新后再滚动。
+ */
 function scrollToBottom() {
   nextTick(() => {
     if (scrollRef.value) {

@@ -1,11 +1,64 @@
 <script setup lang="ts">
 /**
  * ChatPage - 聊天页面主组件
- * 
- * 职责：
- * - 协调各子组件和 composables
- * - 管理页面级状态
- * - 处理核心业务流程（消息发送、生成等）
+ *
+ * 组件职责：
+ * - 作为聊天页面的主容器，协调所有子组件和composables
+ * - 管理页面级状态（选中的角色、草稿消息、生成状态等）
+ * - 处理核心业务流程（消息发送、流式生成、群聊管理等）
+ * - 处理用户身份和角色的选择与管理
+ * - 处理聊天会话的创建、选择、删除等操作
+ * - 集成聊天助手面板
+ *
+ * 主要功能：
+ *    - 消息发送：处理用户消息发送，支持单聊和群聊
+ *    - 流式生成：处理LLM流式响应，实现打字机效果
+ *    - 群聊管理：处理群聊的创建、成员管理、插话等
+ *    - 消息操作：处理消息编辑、删除、重写、版本切换
+ *    - 角色管理：处理角色的创建、编辑、删除
+ *    - 身份管理：处理用户身份的创建、编辑、删除、切换
+ *    - 设置管理：打开设置抽屉，管理全局和聊天设置
+ *
+ * 主要函数：
+ *    - sendUserMessage: 发送用户消息
+ *    - runGroupGeneration: 运行群聊生成
+ *    - continueGroupChat: 继续群聊
+ *    - startNextRound: 开始下一轮群聊
+ *    - triggerInterject: 触发插话
+ *    - stopStreaming: 停止流式传输
+ *    - handlePrimaryAction: 处理主要操作
+ *    - handleRewriteMessage: 处理消息重写
+ *    - handleSaveAndSend: 处理保存并发送
+ *    - createChat: 创建聊天
+ *    - selectChat: 选择聊天
+ *    - deleteChat: 删除聊天
+ *    - openCreateCharacter: 打开创建角色
+ *    - openEditCharacter: 打开编辑角色
+ *    - saveCharacter: 保存角色
+ *    - deleteCharacter: 删除角色
+ *    - handleCreateGroup: 处理群聊创建
+ *    - handleUpdateMemberIds: 处理成员ID更新
+ *    - handleUpdateGroupDelay: 处理群聊延迟更新
+ *    - handleModelSelect: 处理模型选择
+ *    - scrollToBottom: 滚动到底部
+ *
+ * 使用的Composables：
+ *    - useStreamOutput: 来自composables/useStreamOutput.ts，处理流式输出
+ *    - useMessageVersions: 来自composables/useMessageVersions.ts，管理消息版本
+ *    - useGroupChat: 来自composables/useGroupChat.ts，处理群聊逻辑
+ *    - useAssistant: 来自composables/useAssistant.ts，处理聊天助手
+ *    - useChatActions: 来自composables/useChatActions.ts，处理聊天操作
+ *
+ * 使用的Stores：
+ *    - useSettingsStore: 来自stores/settings.ts，管理设置
+ *    - useCharactersStore: 来自stores/characters.ts，管理角色
+ *    - useChatsStore: 来自stores/chats.ts，管理聊天会话
+ *
+ * 文件关系：
+ *    - 被导入：被router/index.ts导入作为聊天页面路由组件
+ *    - 导入：导入vue的computed、onMounted、ref、watch、nextTick、stores/index.ts的Store、types/models.ts的类型、composables/index.ts的composables、components下的所有组件、api/http.ts和api/sse.ts的API函数
+ *    - 依赖：依赖vue、stores、composables、components、api
+ *    - 位置：视图层，作为聊天页面的主组件
  */
 import { computed, onMounted, ref, watch, nextTick } from 'vue'
 import { useCharactersStore, useChatsStore, useSettingsStore } from '../stores'
@@ -52,25 +105,55 @@ const aborter = ref<AbortController | null>(null)
 const stopRequested = ref(false)
 const stopStreamingHold = ref(false)
 
-// ========== 计算属性 ==========
+/**
+ * 计算选中的角色
+ *
+ * 根据selectedCharacterId从角色列表中查找角色。
+ */
 const selectedCharacter = computed(() => {
   if (!selectedCharacterId.value) return null
   return characters.list.find((c) => c.id === selectedCharacterId.value) ?? null
 })
 
+/**
+ * 计算当前激活的聊天
+ *
+ * 从chatsStore获取当前激活的聊天会话。
+ */
 const activeChat = computed(() => chats.activeChat)
+
+/**
+ * 计算助手聊天ID
+ *
+ * 获取当前激活聊天的ID，用于助手作用域。
+ */
 const assistantChatId = computed(() => activeChat.value?.id ?? null)
 
+/**
+ * 计算角色头像URL
+ *
+ * 根据选中角色的头像字段生成头像URL。
+ */
 const characterAvatarUrl = computed(() => {
   if (!selectedCharacter.value?.avatar) return null
   return `/api/avatars/${selectedCharacter.value.avatar}`
 })
 
+/**
+ * 计算用户头像URL
+ *
+ * 根据选中身份的头像字段生成头像URL。
+ */
 const userAvatarUrl = computed(() => {
   if (!selectedPersona.value?.avatar) return null
   return `/api/avatars/${selectedPersona.value.avatar}`
 })
 
+/**
+ * 计算用户名称
+ *
+ * 返回选中身份的名称，如果没有则返回"你"。
+ */
 const userName = computed(() => {
   return selectedPersona.value?.name || '你'
 })
@@ -97,12 +180,27 @@ const assistant = useAssistant({
   chatId: assistantChatId,
 })
 
-// Persona 相关计算
+/**
+ * 获取用户身份信息
+ *
+ * 根据身份ID从设置中的身份列表查找身份。
+ *
+ * @param {string | null | undefined} id - 身份ID
+ * @returns {UserPersona | null} 身份信息，如果未找到或ID为空则返回null
+ */
 function getPersonaById(id: string | null | undefined) {
   if (!id || !settings.settings?.userPersonas) return null
   return settings.settings.userPersonas.find(p => p.id === id) ?? null
 }
 
+/**
+ * 从聊天中获取最后一个用户消息的身份ID
+ *
+ * 遍历聊天消息，找到最后一个用户消息的身份ID（用于身份切换时保持历史消息显示）。
+ *
+ * @param {Chat | null | undefined} chat - 聊天会话（来自types/models.ts）
+ * @returns {string | null} 身份ID，如果未找到则返回null
+ */
 function getLastUserPersonaIdFromChat(chat: Chat | null | undefined) {
   if (!chat?.messages?.length) return null
   for (let i = chat.messages.length - 1; i >= 0; i--) {
@@ -112,6 +210,12 @@ function getLastUserPersonaIdFromChat(chat: Chat | null | undefined) {
   return null
 }
 
+/**
+ * 计算有效的选中身份ID
+ *
+ * 优先使用聊天会话的身份ID，其次使用聊天中最后一个用户消息的身份ID，
+ * 再次使用全局设置中的选中身份ID。如果为纯AI模式则返回null。
+ */
 const effectiveSelectedPersonaId = computed(() => {
   if (group.effectivePureAiMode.value) return null
   const chat = activeChat.value
@@ -121,6 +225,11 @@ const effectiveSelectedPersonaId = computed(() => {
     ?? null
 })
 
+/**
+ * 计算选中的身份
+ *
+ * 根据effectiveSelectedPersonaId获取身份信息。
+ */
 const selectedPersona = computed(() => {
   return getPersonaById(effectiveSelectedPersonaId.value)
 })
@@ -136,20 +245,42 @@ const actions = useChatActions({
   charactersStore: characters as any,
 })
 
-// ========== 群聊设置相关 ==========
+/**
+ * 处理成员ID更新
+ *
+ * 更新群聊的成员顺序。
+ * 使用chatsStore.updateMemberOrder（来自stores/chats.ts）更新。
+ *
+ * @param {string[]} memberIds - 新的成员ID顺序列表
+ * @returns {Promise<void>} 完成时返回
+ */
 async function handleUpdateMemberIds(memberIds: string[]) {
   if (activeChat.value) {
     await chats.updateMemberOrder(activeChat.value.id, memberIds)
   }
 }
 
+/**
+ * 处理群聊延迟更新
+ *
+ * 更新群聊中角色发言之间的延迟时间。
+ * 使用chatsStore.updateGroupDelay（来自stores/chats.ts）更新。
+ *
+ * @param {number} delay - 延迟时间（毫秒）
+ * @returns {Promise<void>} 完成时返回
+ */
 async function handleUpdateGroupDelay(delay: number) {
   if (activeChat.value) {
     await chats.updateGroupDelay(activeChat.value.id, delay)
   }
 }
 
-// ========== 模型选择相关 ==========
+/**
+ * 计算聊天模型选项
+ *
+ * 根据设置生成聊天模型选项列表，包括"最近使用"、各API预设的模型、全局配置的模型候选。
+ * 按预设分组，每个选项包含label、value和presetId。
+ */
 const chatModelOptions = computed(() => {
   const options: any[] = []
   if (!settings.settings) return []
@@ -190,14 +321,34 @@ const chatModelOptions = computed(() => {
   return options
 })
 
+/**
+ * 计算当前聊天模型
+ *
+ * 优先使用聊天覆盖设置中的模型，其次使用全局默认模型，都没有则返回"未设置"。
+ */
 const currentModel = computed(() => {
   return chats.activeChat?.overrides?.params?.model || settings.settings?.llm.defaultModel || '未设置'
 })
 
+/**
+ * 计算助手当前模型
+ *
+ * 优先使用助手设置中的模型，其次使用全局默认模型，都没有则返回"未设置"。
+ */
 const assistantCurrentModel = computed(() => {
   return assistant.assistantSettings.value.model || settings.settings?.llm.defaultModel || '未设置'
 })
 
+/**
+ * 处理模型选择
+ *
+ * 更新聊天会话的模型设置。
+ * 如果选项包含presetId，则使用该presetId；否则从API预设中查找匹配的预设。
+ * 使用chatsStore.updateOverrides（来自stores/chats.ts）更新设置。
+ *
+ * @param {any} option - 模型选项，包含value和可选的presetId
+ * @returns {Promise<void>} 完成时返回
+ */
 async function handleModelSelect(option: any) {
   if (!chats.activeChat) return
   const overrides = { ...chats.activeChat.overrides }
@@ -214,7 +365,12 @@ async function handleModelSelect(option: any) {
   await chats.updateOverrides(chats.activeChat.id, overrides)
 }
 
-// ========== 滚动和引用 ==========
+/**
+ * 滚动到底部
+ *
+ * 滚动消息列表到底部，用于显示最新消息。
+ * 使用nextTick确保DOM更新后再滚动。
+ */
 const messageListRef = ref<InstanceType<typeof MessageList> | null>(null)
 
 function scrollToBottom() {
@@ -223,7 +379,11 @@ function scrollToBottom() {
   })
 }
 
-// ========== 群成员相关 ==========
+/**
+ * 计算群聊成员列表
+ *
+ * 如果是群聊，则根据memberIds从角色列表中查找对应的角色卡片。
+ */
 const groupMembers = computed(() => {
   if (!activeChat.value?.isGroup) return []
   return activeChat.value.memberIds
@@ -231,17 +391,45 @@ const groupMembers = computed(() => {
     .filter((c): c is CharacterCard => c !== null)
 })
 
-// ========== 流式相关计算 ==========
+/**
+ * 计算是否启用流式传输
+ *
+ * 检查全局设置中是否启用了流式传输（默认为true）。
+ */
 const isStreamEnabled = computed(() => settings.settings?.streamEnabled !== false)
+
+/**
+ * 计算是否正在流式传输
+ *
+ * 检查是否启用流式传输且（正在生成或正在插话）。
+ */
 const isStreamingActive = computed(() => isStreamEnabled.value && (isGenerating.value || group.isInterjecting.value))
+
+/**
+ * 计算是否有草稿消息
+ *
+ * 检查输入框是否有非空内容。
+ */
 const hasDraftMessage = computed(() => !!draftMessage.value.trim())
 
-// ========== 辅助函数 ==========
+/**
+ * 检查是否为AbortError
+ *
+ * 判断错误是否为AbortError（请求被取消）。
+ *
+ * @param {any} e - 错误对象
+ * @returns {boolean} 是否为AbortError
+ */
 function isAbortError(e: any) {
   return e?.name === 'AbortError'
 }
 
-// ========== 生命周期 ==========
+/**
+ * 组件挂载时的初始化
+ *
+ * 加载设置、角色列表和群聊列表。
+ * 如果没有选中角色，则自动选中第一个角色。
+ */
 onMounted(async () => {
   if (!settings.settings) await settings.load()
   await characters.loadAll()
@@ -253,11 +441,21 @@ onMounted(async () => {
   }
 })
 
-// ========== Watchers ==========
+/**
+ * 监听助手面板打开状态
+ *
+ * 当助手面板打开时，加载聊天作用域的助手状态。
+ */
 watch(assistant.isAssistantPanelOpen, (next) => {
   if (next) void assistant.loadState('chat')
 })
 
+/**
+ * 监听选中角色ID变化
+ *
+ * 当选中角色变化时，加载该角色的聊天列表，并自动选择第一个聊天。
+ * 使用immediate选项，在组件挂载时立即执行一次。
+ */
 watch(
   () => selectedCharacterId.value,
   async (cid) => {
@@ -275,6 +473,11 @@ watch(
   { immediate: true },
 )
 
+/**
+ * 监听助手聊天ID变化
+ *
+ * 当助手聊天ID变化且助手面板打开时，重新加载聊天作用域的助手状态。
+ */
 watch(
   () => assistantChatId.value,
   (next, prev) => {
@@ -284,6 +487,11 @@ watch(
   },
 )
 
+/**
+ * 监听角色编辑弹窗状态
+ *
+ * 当角色编辑弹窗关闭时，删除工作区助手聊天，如果助手面板打开则加载聊天作用域状态。
+ */
 watch(actions.showCharacterEditor, (next, prev) => {
   if (!next && prev && actions.editingCharacter.value) {
     void assistant.deleteWorkspaceChat()
@@ -293,7 +501,21 @@ watch(actions.showCharacterEditor, (next, prev) => {
   }
 })
 
-// ========== 核心业务方法 ==========
+/**
+ * 运行群聊生成
+ *
+ * 依次让群聊中的每个成员发言，支持流式和非流式两种模式。
+ * 每个成员发言前会延迟指定时间（groupDelay）。
+ * 支持暂停和继续功能。
+ * 使用postAndConsumeSse函数（来自api/sse.ts）或apiPost函数（来自api/http.ts）发送请求。
+ *
+ * @param {string} chatId - 聊天ID
+ * @param {string[]} memberIds - 要发言的成员ID列表
+ * @param {boolean} useStream - 是否使用流式传输
+ * @param {number} groupDelay - 成员发言之间的延迟时间（毫秒）
+ * @param {number} startIndex - 开始索引（用于继续暂停的群聊）
+ * @returns {Promise<void>} 完成时返回
+ */
 async function runGroupGeneration(
   chatId: string, 
   memberIds: string[], 
@@ -382,6 +604,17 @@ async function runGroupGeneration(
   group.showContinueButton.value = false
 }
 
+/**
+ * 发送用户消息
+ *
+ * 发送用户消息并触发AI回复生成。
+ * 支持单聊和群聊两种模式。
+ * 支持流式和非流式两种生成方式。
+ * 在发送前会清理消息版本历史。
+ * 使用postAndConsumeSse函数（来自api/sse.ts）或apiPost函数（来自api/http.ts）发送请求。
+ *
+ * @returns {Promise<void>} 完成时返回
+ */
 async function sendUserMessage() {
   const text = draftMessage.value.trim()
   if (!text) return
@@ -564,6 +797,14 @@ async function sendUserMessage() {
   }
 }
 
+/**
+ * 继续群聊
+ *
+ * 继续之前暂停的群聊，让剩余成员继续发言。
+ * 使用runGroupGeneration函数继续生成。
+ *
+ * @returns {Promise<void>} 完成时返回
+ */
 async function continueGroupChat() {
   if (!activeChat.value || group.pendingMembers.value.length === 0) return
   
@@ -601,6 +842,15 @@ async function continueGroupChat() {
   }
 }
 
+/**
+ * 开始下一轮群聊
+ *
+ * 在群聊中开始新的一轮对话，让所有成员依次发言。
+ * 根据成员的概率设置筛选参与本轮对话的成员。
+ * 使用runGroupGeneration函数生成回复。
+ *
+ * @returns {Promise<void>} 完成时返回
+ */
 async function startNextRound() {
   if (!activeChat.value) return
   if (!activeChat.value.isGroup) return
@@ -640,6 +890,16 @@ async function startNextRound() {
   }
 }
 
+/**
+ * 触发插话
+ *
+ * 在群聊中触发指定角色的插话（在非轮次时间发言）。
+ * 支持流式和非流式两种模式。
+ * 使用postAndConsumeSse函数（来自api/sse.ts）或apiPost函数（来自api/http.ts）发送请求到/api/generate/interject。
+ *
+ * @param {string} characterId - 要插话的角色ID
+ * @returns {Promise<void>} 完成时返回
+ */
 async function triggerInterject(characterId: string) {
   if (!activeChat.value || isGenerating.value || group.isInterjecting.value) return
   
@@ -718,6 +978,12 @@ async function triggerInterject(characterId: string) {
   }
 }
 
+/**
+ * 停止流式传输
+ *
+ * 停止当前正在进行的流式生成。
+ * 取消请求，刷新所有流式缓冲，但不重新加载聊天数据。
+ */
 function stopStreaming() {
   if (!aborter.value) return
   stopRequested.value = true
@@ -726,6 +992,16 @@ function stopStreaming() {
   stream.flushAll()
 }
 
+/**
+ * 处理主要操作
+ *
+ * 根据当前状态执行相应的主要操作：
+ * - 如果正在流式传输，则停止
+ * - 如果显示继续按钮且有草稿，则发送消息
+ * - 如果显示继续按钮且无草稿，则继续群聊
+ * - 如果是群聊且无草稿，则开始下一轮
+ * - 否则发送消息
+ */
 function handlePrimaryAction() {
   if (isStreamingActive.value) {
     stopStreaming()
@@ -746,7 +1022,13 @@ function handlePrimaryAction() {
   sendUserMessage()
 }
 
-// ========== 消息版本操作 ==========
+/**
+ * 切换到上一个版本
+ *
+ * 使用versions.switchToPreviousVersion（来自composables/useMessageVersions.ts）切换到消息的上一个版本。
+ *
+ * @param {ChatMessage} m - 消息对象（来自types/models.ts）
+ */
 function handleSwitchPreviousVersion(m: ChatMessage) {
   const newContent = versions.switchToPreviousVersion(m)
   if (newContent !== null && activeChat.value) {
@@ -755,6 +1037,13 @@ function handleSwitchPreviousVersion(m: ChatMessage) {
   }
 }
 
+/**
+ * 切换到下一个版本
+ *
+ * 使用versions.switchToNextVersion（来自composables/useMessageVersions.ts）切换到消息的下一个版本。
+ *
+ * @param {ChatMessage} m - 消息对象（来自types/models.ts）
+ */
 function handleSwitchNextVersion(m: ChatMessage) {
   const newContent = versions.switchToNextVersion(m)
   if (newContent !== null && activeChat.value) {
@@ -763,7 +1052,17 @@ function handleSwitchNextVersion(m: ChatMessage) {
   }
 }
 
-// ========== 消息操作 ==========
+/**
+ * 处理消息重写
+ *
+ * 重写指定的助手消息，保存当前版本，删除该消息及之后的所有消息，然后重新生成。
+ * 支持单聊和群聊两种模式，支持流式和非流式两种生成方式。
+ * 使用versions.saveVersion和addNewVersion（来自composables/useMessageVersions.ts）管理版本。
+ * 使用postAndConsumeSse函数（来自api/sse.ts）或apiPost函数（来自api/http.ts）发送请求。
+ *
+ * @param {ChatMessage} m - 要重写的消息（来自types/models.ts）
+ * @returns {Promise<void>} 完成时返回
+ */
 async function handleRewriteMessage(m: ChatMessage) {
   if (!activeChat.value) return
   if (isGenerating.value) return
@@ -931,12 +1230,27 @@ async function handleRewriteMessage(m: ChatMessage) {
   }
 }
 
-// ========== 会话管理 ==========
+/**
+ * 开始编辑标题
+ *
+ * 设置正在编辑的聊天ID和标题，用于内联编辑。
+ *
+ * @param {string} chatId - 聊天ID
+ * @param {string} currentTitle - 当前标题
+ */
 function startEditTitle(chatId: string, currentTitle: string) {
   editingChatId.value = chatId
   editingTitle.value = currentTitle
 }
 
+/**
+ * 保存标题
+ *
+ * 保存编辑后的聊天标题。
+ * 使用chatsStore.rename（来自stores/chats.ts）更新标题。
+ *
+ * @returns {Promise<void>} 完成时返回
+ */
 async function saveTitle() {
   if (!editingChatId.value || !editingTitle.value.trim()) return
   await chats.rename(editingChatId.value, editingTitle.value.trim())
@@ -944,27 +1258,72 @@ async function saveTitle() {
   editingTitle.value = ''
 }
 
+/**
+ * 取消编辑标题
+ *
+ * 取消标题编辑，清空编辑状态。
+ */
 function cancelEditTitle() {
   editingChatId.value = null
   editingTitle.value = ''
 }
 
+/**
+ * 创建聊天
+ *
+ * 为当前选中的角色创建新的聊天会话。
+ * 使用chatsStore.create（来自stores/chats.ts）创建聊天。
+ *
+ * @returns {Promise<void>} 完成时返回
+ */
 async function createChat() {
   if (!selectedCharacterId.value) return
   await chats.create(selectedCharacterId.value)
   scrollToBottom()
 }
 
+/**
+ * 删除聊天
+ *
+ * 删除指定的聊天会话。
+ * 使用chatsStore.remove（来自stores/chats.ts）删除聊天。
+ *
+ * @param {string} chatId - 聊天ID
+ * @returns {Promise<void>} 完成时返回
+ */
 async function deleteChat(chatId: string) {
   await chats.remove(chatId)
 }
 
+/**
+ * 选择聊天
+ *
+ * 加载并选择指定的聊天会话。
+ * 使用chatsStore.load（来自stores/chats.ts）加载聊天数据。
+ *
+ * @param {Chat} chat - 聊天会话（来自types/models.ts）
+ * @returns {Promise<void>} 完成时返回
+ */
 async function selectChat(chat: Chat) {
   await chats.load(chat.id)
   scrollToBottom()
 }
 
-// ========== 群聊创建 ==========
+/**
+ * 处理群聊创建
+ *
+ * 根据GroupCreatorModal传递的数据创建群聊。
+ * 为每个成员创建默认设置，包括是否包含性格和场景描述。
+ * 使用chatsStore.createGroup（来自stores/chats.ts）创建群聊。
+ *
+ * @param {object} data - 群聊创建数据
+ * @param {string} data.title - 群聊标题
+ * @param {string[]} data.memberIds - 成员ID列表
+ * @param {boolean} data.pureAiMode - 是否纯AI模式
+ * @param {string | null} data.firstMessageCharacterId - 首句发言角色ID
+ * @param {Record<string, { includePersonality: boolean; includeScenario: boolean }>} data.memberInclusions - 成员包含项设置
+ * @returns {Promise<void>} 完成时返回
+ */
 const showGroupCreator = ref(false)
 
 async function handleCreateGroup(data: {
@@ -1004,7 +1363,17 @@ async function handleCreateGroup(data: {
   scrollToBottom()
 }
 
-// ========== 角色管理 ==========
+/**
+ * 打开创建角色
+ *
+ * 打开角色编辑弹窗，设置为新建模式。
+ * 重置工作区助手聊天，加载助手状态，并尝试获取工作区中的角色卡数据。
+ * 使用actions.openCreateCharacter（来自composables/useChatActions.ts）打开编辑。
+ * 使用assistant.resetWorkspaceChat和loadState（来自composables/useAssistant.ts）管理助手状态。
+ * 使用apiGet函数（来自api/http.ts）获取工作区角色卡。
+ *
+ * @returns {Promise<void>} 完成时返回
+ */
 async function openCreateCharacter() {
   actions.openCreateCharacter()
   await assistant.resetWorkspaceChat()
@@ -1020,12 +1389,33 @@ async function openCreateCharacter() {
   }
 }
 
+/**
+ * 打开编辑角色
+ *
+ * 打开角色编辑弹窗，设置为编辑模式，加载角色数据。
+ * 重置工作区助手聊天，加载助手状态。
+ * 使用actions.openEditCharacter（来自composables/useChatActions.ts）打开编辑。
+ * 使用assistant.resetWorkspaceChat和loadState（来自composables/useAssistant.ts）管理助手状态。
+ *
+ * @param {CharacterCard} card - 要编辑的角色卡片（来自types/models.ts）
+ * @returns {Promise<void>} 完成时返回
+ */
 async function openEditCharacter(card: CharacterCard) {
   actions.openEditCharacter(card)
   await assistant.resetWorkspaceChat()
   void assistant.loadState('workspace')
 }
 
+/**
+ * 保存角色
+ *
+ * 保存角色卡片，如果保存成功则选中该角色。
+ * 删除工作区助手聊天，如果助手面板打开则加载聊天作用域状态。
+ * 使用actions.saveCharacter（来自composables/useChatActions.ts）保存角色。
+ * 使用assistant.deleteWorkspaceChat和loadState（来自composables/useAssistant.ts）管理助手状态。
+ *
+ * @returns {Promise<void>} 完成时返回
+ */
 async function saveCharacter() {
   const id = await actions.saveCharacter()
   if (id) {
@@ -1035,12 +1425,31 @@ async function saveCharacter() {
   if (assistant.isAssistantPanelOpen.value) await assistant.loadState('chat')
 }
 
+/**
+ * 取消角色编辑
+ *
+ * 取消角色编辑，删除工作区助手聊天，如果助手面板打开则加载聊天作用域状态。
+ * 使用actions.cancelCharacterEdit（来自composables/useChatActions.ts）取消编辑。
+ * 使用assistant.deleteWorkspaceChat和loadState（来自composables/useAssistant.ts）管理助手状态。
+ *
+ * @returns {Promise<void>} 完成时返回
+ */
 async function cancelCharacterEdit() {
   await assistant.deleteWorkspaceChat()
   if (assistant.isAssistantPanelOpen.value) await assistant.loadState('chat')
   actions.cancelCharacterEdit()
 }
 
+/**
+ * 删除角色
+ *
+ * 删除指定的角色卡片。
+ * 如果删除的是当前选中的角色，则选中第一个可用角色。
+ * 使用actions.deleteCharacter（来自composables/useChatActions.ts）删除角色。
+ *
+ * @param {string} id - 角色ID
+ * @returns {Promise<void>} 完成时返回
+ */
 async function deleteCharacter(id: string) {
   const nextId = await actions.deleteCharacter(id)
   if (selectedCharacterId.value === id) {
@@ -1048,7 +1457,16 @@ async function deleteCharacter(id: string) {
   }
 }
 
-// ========== Persona 管理 ==========
+/**
+ * 确认切换身份（新建会话）
+ *
+ * 切换用户身份，并创建新的聊天会话。
+ * 保存新的选中身份，然后基于当前聊天创建新会话（标题添加"（新建会话）"）。
+ * 使用settingsStore.save（来自stores/settings.ts）保存设置。
+ * 使用chatsStore.create或createGroup（来自stores/chats.ts）创建新会话。
+ *
+ * @returns {Promise<void>} 完成时返回
+ */
 async function confirmSwitchPersonaNewSession() {
   if (!settings.settings) return
   if (!actions.pendingPersonaId.value) return
@@ -1078,6 +1496,17 @@ async function confirmSwitchPersonaNewSession() {
   scrollToBottom()
 }
 
+/**
+ * 确认切换身份（继续对话）
+ *
+ * 切换用户身份，但继续当前对话。
+ * 先固化历史user消息的发送者快照，然后保存新的选中身份，更新聊天会话的身份ID。
+ * 使用actions.freezeUserMessagesSenderSnapshot（来自composables/useChatActions.ts）固化快照。
+ * 使用settingsStore.save（来自stores/settings.ts）保存设置。
+ * 使用chatsStore.updateUserPersonaId（来自stores/chats.ts）更新聊天身份。
+ *
+ * @returns {Promise<void>} 完成时返回
+ */
 async function confirmSwitchPersonaContinue() {
   if (!settings.settings) return
   if (!actions.pendingPersonaId.value) return
@@ -1092,7 +1521,16 @@ async function confirmSwitchPersonaContinue() {
   }
 }
 
-// ========== 编辑后发送 ==========
+/**
+ * 处理保存并发送
+ *
+ * 保存编辑后的消息，删除该消息之后的所有消息，然后重新生成回复。
+ * 支持单聊和群聊两种模式，支持流式和非流式两种生成方式。
+ * 使用chatsStore.updateMessage和deleteMessage（来自stores/chats.ts）更新和删除消息。
+ * 使用postAndConsumeSse函数（来自api/sse.ts）或apiPost函数（来自api/http.ts）发送请求。
+ *
+ * @returns {Promise<void>} 完成时返回
+ */
 async function handleSaveAndSend() {
   if (!activeChat.value) return
   if (!actions.editingMessageId.value) return
@@ -1204,12 +1642,21 @@ async function handleSaveAndSend() {
   }
 }
 
-// ========== 计算属性 - 用于组件 ==========
+/**
+ * 计算编辑中的角色头像URL
+ *
+ * 根据编辑中的角色头像字段生成头像URL。
+ */
 const editingCharacterAvatarUrl = computed(() => {
   if (!actions.editingCharacter.value?.avatar) return null
   return `/api/avatars/${actions.editingCharacter.value.avatar}`
 })
 
+/**
+ * 计算编辑中的身份头像URL
+ *
+ * 根据编辑中的身份头像字段生成头像URL。
+ */
 const editingPersonaAvatarUrl = computed(() => {
   if (!actions.editingPersona.value?.avatar) return null
   return `/api/avatars/${actions.editingPersona.value.avatar}`

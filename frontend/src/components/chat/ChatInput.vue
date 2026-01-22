@@ -1,8 +1,57 @@
 <script setup lang="ts">
 /**
- * ChatInput - 输入区域组件
- * 
- * 包含：消息输入框、模型选择、发送按钮、群聊状态显示、插话面板等
+ * ChatInput - 聊天输入组件
+ *
+ * 组件职责：
+ * - 提供消息输入框和发送功能
+ * - 显示群聊状态（当前发言者、暂停状态等）
+ * - 提供插话面板，允许在群聊中触发角色插话
+ * - 提供模型选择功能
+ * - 根据状态显示不同的按钮标签和样式
+ *
+ * Props说明：
+ * - modelValue: 输入框内容（v-model）
+ * - isGenerating: 是否正在生成
+ * - streamError: 流式传输错误信息
+ * - isGroup: 是否为群聊
+ * - groupMembers: 群聊成员列表
+ * - currentSpeakerIndex: 当前发言者索引
+ * - isPaused: 是否暂停
+ * - showContinueButton: 是否显示继续按钮
+ * - pendingMembersCount: 待发言成员数量
+ * - canInterject: 是否可以插话
+ * - showInterjectPanel: 是否显示插话面板
+ * - isInterjecting: 是否正在插话
+ * - effectivePureAiMode: 是否为纯AI模式
+ * - isStreamingActive: 是否正在流式传输
+ * - userAvatarUrl: 用户头像URL
+ * - userName: 用户名称
+ * - currentModel: 当前选中的模型
+ * - modelOptions: 模型选项列表
+ * - getMemberSettings: 获取成员设置的函数（来自composables/useGroupChat.ts）
+ *
+ * Emits说明：
+ * - update:modelValue: 更新输入框内容（v-model）
+ * - send: 发送消息
+ * - primary-action: 主要操作（发送/停止/继续等）
+ * - pause-group: 暂停群聊
+ * - continue-group: 继续群聊
+ * - trigger-interject: 触发插话，传递角色ID
+ * - hide-interject: 隐藏插话面板
+ * - select-model: 选择模型
+ * - toggle-assistant: 切换助手面板
+ *
+ * 使用的Composables：
+ * 无（通过props接收函数）
+ *
+ * 使用的Stores：
+ * 无
+ *
+ * 文件关系：
+ *    - 被导入：被views/ChatPage.vue使用
+ *    - 导入：导入vue的computed、types/models.ts的类型、components/ModernAvatar.vue、components/ModernSelect.vue
+ *    - 依赖：依赖vue
+ *    - 位置：组件层，提供聊天输入功能
  */
 import { computed } from 'vue'
 import type { CharacterCard, GroupMemberSettings } from '../../types/models'
@@ -52,9 +101,18 @@ const emit = defineEmits<{
   'toggle-assistant': []
 }>()
 
-// 计算属性
+/**
+ * 计算是否有草稿消息
+ *
+ * 检查输入框是否有非空内容。
+ */
 const hasDraftMessage = computed(() => !!props.modelValue.trim())
 
+/**
+ * 计算主要操作按钮标签
+ *
+ * 根据当前状态（流式传输、继续按钮、群聊等）返回相应的按钮标签。
+ */
 const primaryActionLabel = computed(() => {
   if (props.isStreamingActive) return '停止'
   if (props.showContinueButton && props.isGroup) {
@@ -66,6 +124,11 @@ const primaryActionLabel = computed(() => {
   return props.isGenerating && !props.isPaused && !props.showContinueButton ? '生成中...' : '发送'
 })
 
+/**
+ * 计算主要操作按钮是否禁用
+ *
+ * 根据当前状态判断按钮是否应该禁用。
+ */
 const primaryActionDisabled = computed(() => {
   if (props.isStreamingActive) return false
   if (props.showContinueButton && props.isGroup) return false
@@ -73,6 +136,11 @@ const primaryActionDisabled = computed(() => {
   return !hasDraftMessage.value || (props.isGenerating && !props.isPaused && !props.showContinueButton)
 })
 
+/**
+ * 计算主要操作按钮样式类
+ *
+ * 根据当前状态返回相应的CSS类名。
+ */
 const primaryActionClass = computed(() => {
   if (props.isStreamingActive) return 'chat-action-button--stop'
   if (props.showContinueButton && props.isGroup) {
@@ -84,6 +152,11 @@ const primaryActionClass = computed(() => {
   return 'chat-action-button--primary'
 })
 
+/**
+ * 计算输入框占位符
+ *
+ * 根据当前状态返回相应的占位符文本。
+ */
 const inputPlaceholder = computed(() => {
   if (props.isGenerating && props.isGroup && !props.isPaused) {
     return '等待角色发言完成...'
@@ -94,10 +167,22 @@ const inputPlaceholder = computed(() => {
   return '发送消息...'
 })
 
+/**
+ * 计算输入框是否禁用
+ *
+ * 在生成中且未暂停且未显示继续按钮时禁用输入框。
+ */
 const inputDisabled = computed(() => {
   return props.isGenerating && !props.isPaused && !props.showContinueButton
 })
 
+/**
+ * 处理键盘事件
+ *
+ * 当按下Ctrl+Enter时触发发送事件。
+ *
+ * @param {KeyboardEvent} e - 键盘事件
+ */
 function handleKeydown(e: KeyboardEvent) {
   if (e.ctrlKey && e.key === 'Enter') {
     emit('send')

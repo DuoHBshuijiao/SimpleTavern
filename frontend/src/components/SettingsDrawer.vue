@@ -1,4 +1,38 @@
 <script setup lang="ts">
+/**
+ * SettingsDrawer - 设置抽屉组件
+ *
+ * 组件职责：
+ * - 提供应用设置的编辑界面
+ * - 管理全局设置（LLM配置、API预设、生成参数等）
+ * - 管理聊天覆盖设置（提示词、长期记忆、生成参数等）
+ * - 支持导入导出设置
+ * - 支持API预设管理
+ * - 支持模型候选列表管理
+ *
+ * Props说明：
+ * - show: 是否显示抽屉（v-model:show）
+ * - chat: 当前聊天会话（来自types/models.ts的Chat类型，用于编辑聊天覆盖设置）
+ * - initialTab: 初始标签页（'global'、'presets'或'chat'）
+ *
+ * Emits说明：
+ * - update:show: 更新显示状态（v-model:show）
+ * - open-member-settings: 打开成员设置编辑，传递成员ID
+ *
+ * 使用的Composables：
+ * 无
+ *
+ * 使用的Stores：
+ * - useSettingsStore: 来自stores/settings.ts，用于管理设置
+ * - useChatsStore: 来自stores/chats.ts，用于更新聊天设置
+ * - useCharactersStore: 来自stores/characters.ts，用于获取角色列表
+ *
+ * 文件关系：
+ *    - 被导入：被views/ChatPage.vue使用
+ *    - 导入：导入vue的computed、ref、watch、stores/index.ts的Store、types/models.ts的类型、components/ModernSelect.vue、components/ModelSelectorModal.vue、api/http.ts的apiPost
+ *    - 依赖：依赖vue、stores、api/http.ts
+ *    - 位置：组件层，提供设置管理功能
+ */
 import { computed, ref, watch } from 'vue'
 import { useCharactersStore, useChatsStore, useSettingsStore } from '../stores'
 import type { Chat, ChatOverrides, Settings, ApiPreset } from '../types/models'
@@ -41,14 +75,36 @@ const candidateModels = ref<string[]>([])
 const selectedCandidateModels = ref<Set<string>>(new Set())
 const modelSelectorQuery = ref('')
 
+/**
+ * 关闭抽屉
+ *
+ * 触发update:show事件，传递false。
+ */
 function close() {
   emit('update:show', false)
 }
 
+/**
+ * 深拷贝对象
+ *
+ * 使用JSON序列化和反序列化实现深拷贝。
+ *
+ * @template T - 对象类型
+ * @param {T} v - 要拷贝的对象
+ * @returns {T} 拷贝后的对象
+ */
 function clone<T>(v: T): T {
   return JSON.parse(JSON.stringify(v)) as T
 }
 
+/**
+ * 确保覆盖设置格式正确
+ *
+ * 确保返回的ChatOverrides对象包含所有必需字段，缺失字段使用null。
+ *
+ * @param {Partial<ChatOverrides> | null | undefined} v - 部分覆盖设置
+ * @returns {ChatOverrides} 完整的覆盖设置对象（来自types/models.ts）
+ */
 function ensureOverrides(v?: Partial<ChatOverrides> | null): ChatOverrides {
   return {
     prompt: v?.prompt ?? null,
@@ -82,11 +138,21 @@ watch(
   },
 )
 
+/**
+ * 计算当前编辑的预设
+ *
+ * 根据editingPresetId从全局草稿的API预设列表中查找预设。
+ */
 const editingPreset = computed(() => {
   if (!globalDraft.value) return null
   return globalDraft.value.apiPresets.find(p => p.id === editingPresetId.value) || null
 })
 
+/**
+ * 创建新预设
+ *
+ * 创建一个新的API预设，使用默认值，并设置为当前编辑的预设。
+ */
 function createPreset() {
   if (!globalDraft.value) return
   const newPreset: ApiPreset = {
@@ -100,6 +166,14 @@ function createPreset() {
   editingPresetId.value = newPreset.id
 }
 
+/**
+ * 删除预设
+ *
+ * 弹出确认对话框，确认后删除指定的API预设。
+ * 如果删除的是当前编辑的预设，则选择第一个预设。
+ *
+ * @param {string} id - 预设ID
+ */
 function deletePreset(id: string) {
   if (!globalDraft.value) return
   if (!confirm('确定删除此预设？')) return
@@ -109,6 +183,15 @@ function deletePreset(id: string) {
   }
 }
 
+/**
+ * 打开模型选择器
+ *
+ * 测试预设的API连接，获取可用模型列表，然后打开模型选择器弹窗。
+ * 使用apiPost函数（来自api/http.ts）发送POST请求到/api/llm/test-models。
+ *
+ * @param {ApiPreset} preset - API预设（来自types/models.ts）
+ * @returns {Promise<void>} 完成时返回
+ */
 async function openModelSelector(preset: ApiPreset) {
     if (presetModelsLoading.value) return
     presetModelsLoading.value = true
@@ -128,6 +211,13 @@ async function openModelSelector(preset: ApiPreset) {
     }
 }
 
+/**
+ * 切换候选模型选择
+ *
+ * 切换指定模型的选中状态（选中/取消选中）。
+ *
+ * @param {string} m - 模型名称
+ */
 function toggleCandidate(m: string) {
     if (selectedCandidateModels.value.has(m)) {
         selectedCandidateModels.value.delete(m)
@@ -136,6 +226,11 @@ function toggleCandidate(m: string) {
     }
 }
 
+/**
+ * 保存模型选择
+ *
+ * 将选中的模型列表保存到当前编辑的预设中，然后关闭模型选择器。
+ */
 function saveModelSelection() {
     if (editingPreset.value) {
         editingPreset.value.models = Array.from(selectedCandidateModels.value)
@@ -143,12 +238,22 @@ function saveModelSelection() {
     showModelSelector.value = false
 }
 
+/**
+ * 计算过滤后的候选模型
+ *
+ * 根据搜索查询过滤候选模型列表，不区分大小写。
+ */
 const filteredCandidates = computed(() => {
     if (!modelSelectorQuery.value) return candidateModels.value
     const q = modelSelectorQuery.value.toLowerCase()
     return candidateModels.value.filter(m => m.toLowerCase().includes(q))
 })
 
+/**
+ * 计算聊天模型选项
+ *
+ * 根据全局草稿中的API预设生成聊天模型选项列表，按预设分组。
+ */
 const chatModelOptions = computed(() => {
   const options: any[] = []
   if (!globalDraft.value) return []
@@ -165,6 +270,13 @@ const chatModelOptions = computed(() => {
   return options
 })
 
+/**
+ * 处理聊天模型选择
+ *
+ * 更新聊天覆盖设置中的模型和预设ID。
+ *
+ * @param {any} option - 模型选项，包含value和可选的presetId
+ */
 function handleChatModelSelect(option: any) {
   if (chatDraft.value) {
      chatDraft.value.params.model = option.value
@@ -174,18 +286,43 @@ function handleChatModelSelect(option: any) {
   }
 }
 
+/**
+ * 保存全局设置
+ *
+ * 将全局设置草稿保存到服务器，然后关闭抽屉。
+ * 使用settingsStore.save（来自stores/settings.ts）保存设置。
+ *
+ * @returns {Promise<void>} 完成时返回
+ */
 async function saveGlobal() {
   if (!globalDraft.value) return
   await settingsStore.save(globalDraft.value)
   close()
 }
 
+/**
+ * 保存聊天覆盖设置
+ *
+ * 将聊天覆盖设置草稿保存到服务器，然后关闭抽屉。
+ * 使用chatsStore.updateOverrides（来自stores/chats.ts）更新设置。
+ *
+ * @returns {Promise<void>} 完成时返回
+ */
 async function saveChatOverrides() {
   if (!props.chat || !chatDraft.value) return
   await chatsStore.updateOverrides(props.chat.id, chatDraft.value)
   close()
 }
 
+/**
+ * 下载设置备份
+ *
+ * 下载设置备份文件（ZIP格式）。
+ * 发送GET请求到/api/settings/backup?scope={scope}，下载返回的文件。
+ *
+ * @param {'basic' | 'with_characters' | 'with_chats'} scope - 备份范围（基础、包含角色、包含聊天）
+ * @returns {Promise<void>} 完成时返回
+ */
 async function downloadSettingsBackup(scope: 'basic' | 'with_characters' | 'with_chats') {
   const r = await fetch(`/api/settings/backup?scope=${scope}`)
   if (!r.ok) {
@@ -203,10 +340,25 @@ async function downloadSettingsBackup(scope: 'basic' | 'with_characters' | 'with
   URL.revokeObjectURL(url)
 }
 
+/**
+ * 触发导入
+ *
+ * 程序化触发隐藏的文件输入框点击事件。
+ */
 function triggerImport() {
   importInputRef.value?.click()
 }
 
+/**
+ * 处理导入文件选择
+ *
+ * 当用户选择导入文件时，上传文件到服务器，然后重新加载所有数据。
+ * 发送POST请求到/api/import，上传FormData格式的文件。
+ * 导入成功后重新加载设置、角色列表和聊天列表。
+ *
+ * @param {Event} e - 文件选择事件
+ * @returns {Promise<void>} 完成时返回
+ */
 async function handleImportChange(e: Event) {
   const input = e.target as HTMLInputElement
   const file = input.files?.[0]

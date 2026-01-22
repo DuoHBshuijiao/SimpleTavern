@@ -1,8 +1,57 @@
 <script setup lang="ts">
 /**
  * ChatSidebar - 侧边栏组件
- * 
- * 包含：用户身份选择、角色列表、会话历史列表
+ *
+ * 组件职责：
+ * - 显示用户身份列表，支持选择、创建、编辑、删除身份
+ * - 显示角色列表，支持选择、创建、编辑、删除角色
+ * - 显示聊天会话历史列表（单聊和群聊），支持选择、创建、重命名、删除会话
+ * - 支持侧边栏折叠/展开
+ *
+ * Props说明：
+ * - collapsed: 是否折叠
+ * - personas: 用户身份列表（来自types/models.ts的UserPersona[]类型）
+ * - selectedPersonaId: 当前选中的身份ID
+ * - effectivePureAiMode: 是否纯AI模式
+ * - characters: 角色列表（来自types/models.ts的CharacterCard[]类型）
+ * - selectedCharacterId: 当前选中的角色ID
+ * - chatList: 单聊列表（来自types/models.ts的Chat[]类型）
+ * - groupList: 群聊列表（来自types/models.ts的Chat[]类型）
+ * - activeChatId: 当前激活的聊天ID
+ * - editingChatId: 正在编辑标题的聊天ID
+ * - editingTitle: 正在编辑的标题
+ *
+ * Emits说明：
+ * - update:collapsed: 更新折叠状态
+ * - update:selectedCharacterId: 更新选中的角色ID
+ * - update:editingTitle: 更新编辑中的标题
+ * - select-persona: 选择身份
+ * - edit-persona: 编辑身份
+ * - create-persona: 创建身份
+ * - delete-persona: 删除身份
+ * - edit-character: 编辑角色
+ * - create-character: 创建角色
+ * - delete-character: 删除角色
+ * - select-chat: 选择单聊
+ * - select-group: 选择群聊
+ * - create-chat: 创建单聊
+ * - create-group: 创建群聊
+ * - start-edit-title: 开始编辑标题
+ * - save-title: 保存标题
+ * - cancel-edit-title: 取消编辑标题
+ * - delete-chat: 删除聊天
+ *
+ * 使用的Composables：
+ * 无
+ *
+ * 使用的Stores：
+ * 无（通过props接收数据）
+ *
+ * 文件关系：
+ *    - 被导入：被components/chat/index.ts导出，被views/ChatPage.vue使用
+ *    - 导入：导入types/models.ts的类型、components/ModernAvatar.vue组件
+ *    - 依赖：依赖vue、types/models.ts
+ *    - 位置：组件层，提供侧边栏功能
  */
 import type { CharacterCard, UserPersona, Chat } from '../../types/models'
 import ModernAvatar from '../ModernAvatar.vue'
@@ -48,18 +97,40 @@ const emit = defineEmits<{
   'delete-chat': [chatId: string]
 }>()
 
-// 辅助函数：获取角色信息
+/**
+ * 获取角色信息
+ *
+ * 根据角色ID从角色列表中查找角色。
+ *
+ * @param {string} id - 角色ID
+ * @returns {CharacterCard | null} 角色信息，如果未找到则返回null
+ */
 function getCharacterById(id: string): CharacterCard | null {
   return props.characters.find(c => c.id === id) ?? null
 }
 
-// 辅助函数：获取 Persona 信息
+/**
+ * 获取用户身份信息
+ *
+ * 根据身份ID从身份列表中查找身份。
+ *
+ * @param {string | null | undefined} id - 身份ID
+ * @returns {UserPersona | null} 身份信息，如果未找到或ID为空则返回null
+ */
 function getPersonaById(id: string | null | undefined): UserPersona | null {
   if (!id) return null
   return props.personas.find(p => p.id === id) ?? null
 }
 
-// 获取会话的头像列表
+/**
+ * 获取会话的头像列表
+ *
+ * 根据聊天会话类型（单聊/群聊）和模式（纯AI/普通）获取要显示的头像列表。
+ * 对于单聊，返回用户和角色的头像；对于群聊，返回用户和所有成员的头像。
+ *
+ * @param {Chat} chat - 聊天会话（来自types/models.ts）
+ * @returns {{ src: string | null; name: string }[]} 头像列表，包含src和name
+ */
 function getChatAvatars(chat: Chat): { src: string | null; name: string }[] {
   const avatars: { src: string | null; name: string }[] = []
   
@@ -104,20 +175,47 @@ function getChatAvatars(chat: Chat): { src: string | null; name: string }[] {
   return avatars
 }
 
+/**
+ * 切换侧边栏折叠状态
+ *
+ * 切换侧边栏的折叠/展开状态。
+ */
 const toggleCollapsed = () => emit('update:collapsed', !props.collapsed)
 
+/**
+ * 确认删除身份
+ *
+ * 弹出确认对话框，确认后删除指定身份。
+ *
+ * @param {string} id - 身份ID
+ */
 function confirmDeletePersona(id: string) {
   if (window.confirm('确定删除这个身份？')) {
     emit('delete-persona', id)
   }
 }
 
+/**
+ * 确认删除角色
+ *
+ * 弹出确认对话框，确认后删除指定角色。
+ *
+ * @param {string} id - 角色ID
+ */
 function confirmDeleteCharacter(id: string) {
   if (window.confirm('确定删除这个角色？')) {
     emit('delete-character', id)
   }
 }
 
+/**
+ * 确认删除聊天
+ *
+ * 弹出确认对话框，确认后删除指定聊天会话。
+ *
+ * @param {string} id - 聊天ID
+ * @param {boolean} isGroup - 是否为群聊
+ */
 function confirmDeleteChat(id: string, isGroup: boolean) {
   if (window.confirm(isGroup ? '确定删除群聊？' : '确定删除会话？')) {
     emit('delete-chat', id)

@@ -1,6 +1,39 @@
 <script setup lang="ts">
 /**
- * MessageEditorModal - 消息编辑弹窗
+ * MessageEditorModal - 消息编辑弹窗组件
+ *
+ * 组件职责：
+ * - 提供消息编辑界面，允许修改消息角色和内容
+ * - 支持选择消息发送者（系统/角色/用户）
+ * - 支持保存或保存并发送（重新生成）
+ *
+ * Props说明：
+ * - show: 是否显示弹窗（v-model:show）
+ * - messageId: 消息ID
+ * - messageRole: 消息角色（来自types/models.ts的ChatRole类型）
+ * - messageContent: 消息内容（v-model:messageContent）
+ * - characterAvatarUrl: 角色头像URL
+ * - userAvatarUrl: 用户头像URL
+ * - isGenerating: 是否正在生成
+ *
+ * Emits说明：
+ * - update:show: 更新显示状态（v-model:show）
+ * - update:messageRole: 更新消息角色（v-model:messageRole）
+ * - update:messageContent: 更新消息内容（v-model:messageContent）
+ * - save: 保存消息
+ * - save-and-send: 保存并发送（重新生成）
+ *
+ * 使用的Composables：
+ * 无
+ *
+ * 使用的Stores：
+ * 无
+ *
+ * 文件关系：
+ *    - 被导入：被views/ChatPage.vue使用
+ *    - 导入：导入types/models.ts的ChatMessage类型、components/ModernAvatar.vue
+ *    - 依赖：依赖vue
+ *    - 位置：组件层，提供消息编辑功能
  */
 import type { ChatMessage } from '../../types/models'
 import ModernAvatar from '../ModernAvatar.vue'

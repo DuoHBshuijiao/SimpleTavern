@@ -1,7 +1,34 @@
 /**
- * useGroupChat - 群聊核心逻辑
- * 
- * 负责群聊的暂停/继续、轮次管理、插话等功能
+ * useGroupChat - 群聊核心逻辑Composable
+ *
+ * 负责群聊的暂停/继续、轮次管理、插话等功能。
+ *
+ * 主要功能：
+ *    - 暂停/继续：控制群聊的暂停和继续
+ *    - 成员筛选：根据概率筛选参与本轮对话的成员
+ *    - 插话管理：管理插话面板的显示和隐藏
+ *    - 状态管理：管理当前发言者、待发言成员等状态
+ *
+ * 主要函数：
+ *    - getMemberSettings: 获取成员设置
+ *    - filterMembersByProbability: 根据概率筛选成员
+ *    - delay: 延迟函数
+ *    - pauseGroupChat: 暂停群聊
+ *    - resetGroupState: 重置群聊状态
+ *    - setPausedState: 设置暂停状态
+ *    - showInterject: 显示插话面板
+ *    - hideInterject: 隐藏插话面板
+ *    - getGroupDelay: 获取群聊延迟时间
+ *
+ * 计算属性：
+ *    - effectivePureAiMode: 计算是否为纯AI模式
+ *    - canInterject: 计算是否可以插话
+ *
+ * 文件关系：
+ *    - 被导入：被composables/index.ts导出，被views/ChatPage.vue使用
+ *    - 导入：导入vue的ref和computed、types/models.ts的类型
+ *    - 依赖：依赖vue、stores/settings.ts（通过参数传入）
+ *    - 位置：Composables层，提供群聊逻辑
  */
 import { ref, computed } from 'vue'
 import type { Ref } from 'vue'
@@ -34,7 +61,11 @@ export function useGroupChat(deps: GroupChatDeps) {
   const interjectPanelManuallyHidden = ref(false)
 
   /**
-   * 计算是否为纯 AI 模式
+   * 计算是否为纯AI模式
+   *
+   * 优先使用聊天会话的覆盖设置，如果没有则使用全局设置。
+   *
+   * @returns {boolean} 是否为纯AI模式
    */
   const effectivePureAiMode = computed(() => {
     const chatOverride = activeChat.value?.overrides?.pureAiMode
@@ -44,6 +75,10 @@ export function useGroupChat(deps: GroupChatDeps) {
 
   /**
    * 计算是否可以插话
+   *
+   * 只有在群聊、未生成中、未插话中、插话面板未手动隐藏、且显示插话面板或纯AI模式时才能插话。
+   *
+   * @returns {boolean} 是否可以插话
    */
   const canInterject = computed(() => {
     return !!activeChat.value?.isGroup &&
@@ -55,6 +90,11 @@ export function useGroupChat(deps: GroupChatDeps) {
 
   /**
    * 获取成员设置
+   *
+   * 获取群聊中指定成员的个性化设置，如果不存在则返回默认设置。
+   *
+   * @param {string} memberId - 成员角色ID
+   * @returns {GroupMemberSettings} 成员设置（来自types/models.ts）
    */
   function getMemberSettings(memberId: string): GroupMemberSettings {
     return activeChat.value?.memberSettings?.[memberId] ?? {
@@ -70,6 +110,12 @@ export function useGroupChat(deps: GroupChatDeps) {
 
   /**
    * 根据概率筛选本轮参与的成员
+   *
+   * 根据每个成员的参与概率（probability）随机决定是否参与本轮对话。
+   * 如果所有成员都被跳过，则至少随机选择一个成员参与。
+   *
+   * @param {string[]} allMemberIds - 所有成员ID列表
+   * @returns {string[]} 筛选后的成员ID列表
    */
   function filterMembersByProbability(allMemberIds: string[]): string[] {
     const memberIds = allMemberIds.filter(memberId => {
@@ -89,6 +135,11 @@ export function useGroupChat(deps: GroupChatDeps) {
 
   /**
    * 延迟函数
+   *
+   * 创建一个延迟指定毫秒数的Promise，用于群聊中角色发言之间的延迟。
+   *
+   * @param {number} ms - 延迟毫秒数
+   * @returns {Promise<void>} 延迟完成的Promise
    */
   function delay(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms))
@@ -96,6 +147,8 @@ export function useGroupChat(deps: GroupChatDeps) {
 
   /**
    * 暂停群聊
+   *
+   * 设置暂停状态，停止当前轮次的生成。
    */
   function pauseGroupChat() {
     isPaused.value = true
@@ -103,6 +156,8 @@ export function useGroupChat(deps: GroupChatDeps) {
 
   /**
    * 重置群聊状态
+   *
+   * 重置所有群聊相关状态，包括暂停状态、待发言成员、当前发言者等。
    */
   function resetGroupState() {
     isPaused.value = false
@@ -114,6 +169,10 @@ export function useGroupChat(deps: GroupChatDeps) {
 
   /**
    * 设置暂停状态
+   *
+   * 当群聊被暂停时，保存剩余待发言的成员列表，显示继续按钮。
+   *
+   * @param {string[]} members - 剩余待发言的成员ID列表
    */
   function setPausedState(members: string[]) {
     pendingMembers.value = members
@@ -124,6 +183,8 @@ export function useGroupChat(deps: GroupChatDeps) {
 
   /**
    * 显示插话面板
+   *
+   * 显示插话面板，允许用户在群聊中触发某个角色插话。
    */
   function showInterject() {
     interjectPanelManuallyHidden.value = false
@@ -132,6 +193,8 @@ export function useGroupChat(deps: GroupChatDeps) {
 
   /**
    * 隐藏插话面板
+   *
+   * 隐藏插话面板，并标记为手动隐藏，防止自动显示。
    */
   function hideInterject() {
     showInterjectPanel.value = false
@@ -140,6 +203,10 @@ export function useGroupChat(deps: GroupChatDeps) {
 
   /**
    * 获取群聊延迟时间
+   *
+   * 获取群聊中角色发言之间的延迟时间（毫秒），如果未设置则返回默认值1500。
+   *
+   * @returns {number} 延迟时间（毫秒）
    */
   function getGroupDelay(): number {
     return activeChat.value?.groupDelay || 1500

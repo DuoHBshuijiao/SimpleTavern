@@ -1,6 +1,33 @@
 <script setup lang="ts">
 /**
- * GroupCreatorModal - 群聊创建弹窗
+ * GroupCreatorModal - 群聊创建弹窗组件
+ *
+ * 组件职责：
+ * - 提供群聊创建界面，选择成员、设置标题等
+ * - 支持选择多个角色作为群聊成员
+ * - 支持设置纯AI模式
+ * - 支持设置首句发言角色
+ * - 支持设置每个成员的包含项（性格、场景）
+ *
+ * Props说明：
+ * - show: 是否显示弹窗（v-model:show）
+ * - characters: 角色列表（来自types/models.ts的CharacterCard[]类型）
+ *
+ * Emits说明：
+ * - update:show: 更新显示状态（v-model:show）
+ * - create: 创建群聊，传递创建数据（标题、成员ID列表、纯AI模式、首句角色ID、成员包含项）
+ *
+ * 使用的Composables：
+ * 无
+ *
+ * 使用的Stores：
+ * 无
+ *
+ * 文件关系：
+ *    - 被导入：被views/ChatPage.vue使用
+ *    - 导入：导入vue的ref、computed、watch、types/models.ts的CharacterCard类型、components/ModernAvatar.vue、components/ModernSelect.vue
+ *    - 依赖：依赖vue
+ *    - 位置：组件层，提供群聊创建功能
  */
 import { ref, computed, watch } from 'vue'
 import type { CharacterCard } from '../../types/models'
@@ -43,6 +70,11 @@ watch(() => props.show, (newVal) => {
   }
 })
 
+/**
+ * 计算首句发言角色选项
+ *
+ * 根据已选中的成员生成首句发言角色的选项列表。
+ */
 const groupFirstMessageOptions = computed(() => {
   const opts = selectedMemberIds.value.map(id => {
     const char = props.characters.find(c => c.id === id)
@@ -57,6 +89,15 @@ const groupFirstMessageOptions = computed(() => {
   ]
 })
 
+/**
+ * 切换成员选择
+ *
+ * 切换指定角色的选中状态。
+ * 如果取消选中，则删除该成员的包含项设置；如果首句角色被取消，则选择第一个成员。
+ * 如果选中，则创建默认的包含项设置；如果还没有首句角色，则设置为该角色。
+ *
+ * @param {string} characterId - 角色ID
+ */
 function toggleMemberSelection(characterId: string) {
   const idx = selectedMemberIds.value.indexOf(characterId)
   if (idx >= 0) {
@@ -76,6 +117,11 @@ function toggleMemberSelection(characterId: string) {
   }
 }
 
+/**
+ * 处理创建群聊
+ *
+ * 验证成员数量（至少2个），然后触发create事件，传递群聊创建数据。
+ */
 function handleCreate() {
   if (selectedMemberIds.value.length < 2) return
   

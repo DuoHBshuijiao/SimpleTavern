@@ -1,7 +1,19 @@
 /**
- * 组件样式入口
- * 
- * 导入所有组件级样式
+ * 组件样式入口文件
+ *
+ * 统一导入所有组件级样式文件。
+ *
+ * 主要功能：
+ *    - 导入按钮样式：buttons.css
+ *    - 导入表单样式：forms.css
+ *    - 导入弹窗样式：modals.css
+ *    - 导入卡片样式：cards.css
+ *
+ * 文件关系：
+ *    - 被导入：被styles/index.css导入
+ *    - 导入：导入buttons.css、forms.css、modals.css、cards.css
+ *    - 依赖：依赖styles/variables.css的CSS变量
+ *    - 位置：样式层，提供组件样式的统一入口
  */
 
 @import './buttons.css';

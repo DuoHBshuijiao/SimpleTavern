@@ -1,4 +1,34 @@
 <script setup lang="ts">
+/**
+ * ModelSelectorModal - 模型选择器弹窗组件
+ *
+ * 组件职责：
+ * - 提供模型筛选和选择功能
+ * - 支持搜索过滤模型
+ * - 支持多选模型
+ * - 支持全选/取消全选当前筛选结果
+ *
+ * Props说明：
+ * - show: 是否显示弹窗（v-model:show）
+ * - models: 模型列表
+ * - loading: 是否加载中
+ *
+ * Emits说明：
+ * - update:show: 更新显示状态（v-model:show）
+ * - confirm: 确认选择，传递选中的模型列表
+ *
+ * 使用的Composables：
+ * 无
+ *
+ * 使用的Stores：
+ * 无
+ *
+ * 文件关系：
+ *    - 被导入：被components/SettingsDrawer.vue使用
+ *    - 导入：导入vue的computed、ref、watch
+ *    - 依赖：依赖vue
+ *    - 位置：组件层，提供模型选择功能
+ */
 import { computed, ref, watch } from 'vue'
 
 const props = defineProps<{
@@ -25,12 +55,24 @@ watch(
   }
 )
 
+/**
+ * 计算过滤后的模型列表
+ *
+ * 根据搜索查询过滤模型列表，不区分大小写。
+ */
 const filteredModels = computed(() => {
   if (!searchQuery.value) return props.models
   const q = searchQuery.value.toLowerCase()
   return props.models.filter(m => m.toLowerCase().includes(q))
 })
 
+/**
+ * 切换模型选择
+ *
+ * 切换指定模型的选中状态（选中/取消选中）。
+ *
+ * @param {string} m - 模型名称
+ */
 function toggle(m: string) {
   if (selectedModels.value.has(m)) {
     selectedModels.value.delete(m)
@@ -39,18 +81,38 @@ function toggle(m: string) {
   }
 }
 
+/**
+ * 全选当前筛选结果
+ *
+ * 将当前筛选结果中的所有模型添加到选中集合。
+ */
 function selectAllFiltered() {
   filteredModels.value.forEach(m => selectedModels.value.add(m))
 }
 
+/**
+ * 取消全选当前筛选结果
+ *
+ * 从选中集合中移除当前筛选结果中的所有模型。
+ */
 function deselectAllFiltered() {
   filteredModels.value.forEach(m => selectedModels.value.delete(m))
 }
 
+/**
+ * 关闭弹窗
+ *
+ * 触发update:show事件，传递false。
+ */
 function close() {
   emit('update:show', false)
 }
 
+/**
+ * 确认选择
+ *
+ * 触发confirm事件，传递选中的模型列表，然后关闭弹窗。
+ */
 function confirm() {
   emit('confirm', Array.from(selectedModels.value))
   close()

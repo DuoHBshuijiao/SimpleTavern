@@ -1,4 +1,33 @@
 <script setup lang="ts">
+/**
+ * AvatarCropper - 头像裁剪组件
+ *
+ * 组件职责：
+ * - 提供头像图片选择和裁剪功能
+ * - 使用cropperjs库实现图片裁剪
+ * - 支持圆形裁剪（用于头像）
+ * - 将裁剪后的图片转换为base64格式
+ *
+ * Props说明：
+ * - show: 是否显示弹窗（v-model:show）
+ * - currentAvatar: 当前头像URL（可选，用于预览）
+ *
+ * Emits说明：
+ * - update:show: 更新显示状态（v-model:show）
+ * - save: 保存裁剪后的图片，传递base64编码的图片数据
+ *
+ * 使用的Composables：
+ * 无
+ *
+ * 使用的Stores：
+ * 无
+ *
+ * 文件关系：
+ *    - 被导入：被views/ChatPage.vue使用用于裁剪角色和身份头像
+ *    - 导入：导入vue的ref、onUnmounted、watch、nextTick，cropperjs库
+ *    - 依赖：依赖vue、cropperjs
+ *    - 位置：组件层，提供头像裁剪功能
+ */
 import { ref, onUnmounted, watch, nextTick } from 'vue'
 import Cropper from 'cropperjs'
 import 'cropperjs/dist/cropper.css'
@@ -18,6 +47,13 @@ const imageSrc = ref<string | null>(null)
 const cropper = ref<Cropper | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 
+/**
+ * 处理文件选择
+ *
+ * 当用户选择图片文件时，使用FileReader读取文件并转换为base64格式。
+ *
+ * @param {Event} event - 文件选择事件
+ */
 function handleFileSelect(event: Event) {
   const target = event.target as HTMLInputElement
   const file = target.files?.[0]
@@ -30,6 +66,11 @@ function handleFileSelect(event: Event) {
   reader.readAsDataURL(file)
 }
 
+/**
+ * 触发文件输入
+ *
+ * 程序化触发隐藏的文件输入框点击事件。
+ */
 function triggerFileInput() {
   fileInputRef.value?.click()
 }
@@ -70,6 +111,11 @@ watch(() => props.show, (show) => {
   }
 })
 
+/**
+ * 处理保存
+ *
+ * 获取裁剪后的画布，转换为256x256的PNG格式base64数据，然后触发save事件并关闭弹窗。
+ */
 function handleSave() {
   if (!cropper.value) return
 
@@ -85,10 +131,20 @@ function handleSave() {
   emit('update:show', false)
 }
 
+/**
+ * 处理取消
+ *
+ * 关闭弹窗，不保存裁剪结果。
+ */
 function handleCancel() {
   emit('update:show', false)
 }
 
+/**
+ * 重置选择
+ *
+ * 清空已选择的图片，允许重新选择。
+ */
 function resetSelection() {
   imageSrc.value = null
   if (fileInputRef.value) {
