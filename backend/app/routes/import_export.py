@@ -47,10 +47,15 @@ def _resolve_pure_ai_mode(settings: Settings, chat: Chat) -> bool:
     return bool(getattr(settings, "pureAiMode", False))
 
 
-def _build_user_persona_prompt(settings: Settings) -> str | None:
-    if not settings.selectedPersonaId or not settings.userPersonas:
+def _resolve_selected_persona(settings: Settings, chat: Chat) -> Any | None:
+    persona_id = getattr(chat, "userPersonaId", None) or settings.selectedPersonaId
+    if not persona_id or not settings.userPersonas:
         return None
-    selected = next((p for p in settings.userPersonas if p.id == settings.selectedPersonaId), None)
+    return next((p for p in settings.userPersonas if p.id == persona_id), None)
+
+
+def _build_user_persona_prompt(settings: Settings, chat: Chat) -> str | None:
+    selected = _resolve_selected_persona(settings, chat)
     if not selected:
         return None
     parts: list[str] = []
@@ -67,7 +72,7 @@ def _build_single_system_prompt(chat: Chat, settings: Settings) -> str:
         prompt_parts.append(settings.prompts.globalSystem)
 
     if not _resolve_pure_ai_mode(settings, chat):
-        persona_prompt = _build_user_persona_prompt(settings)
+        persona_prompt = _build_user_persona_prompt(settings, chat)
         if persona_prompt:
             prompt_parts.append(persona_prompt)
 
@@ -86,6 +91,10 @@ def _build_single_system_prompt(chat: Chat, settings: Settings) -> str:
             prompt_parts.append("\n\n".join(character_parts))
     except FileNotFoundError:
         pass
+
+    long_term_memory = getattr(chat.overrides, "longTermMemory", None)
+    if long_term_memory and long_term_memory.strip():
+        prompt_parts.append(f"LongTermMemory：\n{long_term_memory.strip()}")
 
     if chat.overrides.prompt:
         prompt_parts.append(chat.overrides.prompt)
@@ -111,7 +120,7 @@ def _build_group_system_prompt(chat: Chat, settings: Settings, character_id: str
         prompt_parts.append(settings.prompts.globalSystem)
 
     if not _resolve_pure_ai_mode(settings, chat):
-        persona_prompt = _build_user_persona_prompt(settings)
+        persona_prompt = _build_user_persona_prompt(settings, chat)
         if persona_prompt:
             prompt_parts.append(persona_prompt)
 
@@ -146,6 +155,10 @@ def _build_group_system_prompt(chat: Chat, settings: Settings, character_id: str
             prompt_parts.append("\n\n".join(character_parts))
     except FileNotFoundError:
         pass
+
+    long_term_memory = getattr(chat.overrides, "longTermMemory", None)
+    if long_term_memory and long_term_memory.strip():
+        prompt_parts.append(f"LongTermMemory：\n{long_term_memory.strip()}")
 
     if chat.overrides.prompt:
         prompt_parts.append(chat.overrides.prompt)
@@ -403,6 +416,8 @@ def _import_from_json(raw: Any) -> dict[str, Any]:
         return {"imported": imported, "warnings": warnings}
 
     if isinstance(raw, dict) and ("messages" in raw and "characterId" in raw):
+        raw.pop("systemPrompt", None)
+        raw.pop("lastSpeakerCharacterId", None)
         chat = Chat.model_validate(raw)
         save_chat(chat)
         imported.append("chat")
@@ -448,6 +463,8 @@ def _import_from_zip(payload: bytes) -> dict[str, Any]:
         for name in zf.namelist():
             if name.startswith("chats/") and name.endswith(".json"):
                 raw = json.loads(zf.read(name).decode("utf-8"))
+                raw.pop("systemPrompt", None)
+                raw.pop("lastSpeakerCharacterId", None)
                 chat = Chat.model_validate(raw)
                 save_chat(chat)
                 if "chat" not in imported:
