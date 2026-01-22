@@ -160,6 +160,8 @@ class Chat(BaseModel):
     title: str = "新对话"
     messages: list[ChatMessage] = Field(default_factory=list)
     overrides: ChatOverrides = Field(default_factory=ChatOverrides)
+    # 当前会话绑定的用户 Persona（用于消息显示与 prompt 注入）
+    userPersonaId: str | None = None
     # 群聊相关字段
     isGroup: bool = False  # 是否为群聊
     memberIds: list[str] = Field(default_factory=list)  # 群成员角色ID列表 (用户始终是成员)
@@ -172,6 +174,8 @@ class Chat(BaseModel):
 class CreateChatRequest(BaseModel):
     characterId: str
     title: str | None = None
+    # 当前会话绑定的用户 Persona（可选）
+    userPersonaId: str | None = None
     # 群聊创建参数
     isGroup: bool = False
     memberIds: list[str] | None = None  # 群成员角色ID列表
@@ -207,6 +211,7 @@ class UpdateChatRequest(BaseModel):
     groupDelay: int | None = None  # 群聊角色间延迟时间（毫秒）
     memberSettings: dict[str, GroupMemberSettings] | None = None  # 成员独立设置
     memberIds: list[str] | None = None  # 群成员顺序（用于拖拽排序）
+    userPersonaId: str | None = None
 
 
 class GenerateStreamRequest(BaseModel):

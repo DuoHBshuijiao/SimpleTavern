@@ -99,6 +99,7 @@ export interface Chat {
   title: string
   messages: ChatMessage[]
   overrides: ChatOverrides
+  userPersonaId?: string | null
   // 群聊相关字段
   isGroup: boolean
   memberIds: string[]

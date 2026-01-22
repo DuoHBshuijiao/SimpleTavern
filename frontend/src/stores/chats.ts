@@ -27,8 +27,8 @@ export const useChatsStore = defineStore('chats', {
         this.loading = false
       }
     },
-    async create(characterId: string, title?: string, pureAiMode?: boolean) {
-      const chat = await apiPost<Chat>('/api/chats', { characterId, title, pureAiMode })
+    async create(characterId: string, title?: string, pureAiMode?: boolean, userPersonaId?: string | null) {
+      const chat = await apiPost<Chat>('/api/chats', { characterId, title, pureAiMode, userPersonaId })
       await this.loadList(characterId)
       this.activeChatId = chat.id
       this.activeChat = chat
@@ -41,6 +41,7 @@ export const useChatsStore = defineStore('chats', {
       pureAiMode?: boolean,
       firstMessageCharacterId?: string | null,
       memberSettings?: Record<string, GroupMemberSettings> | null,
+      userPersonaId?: string | null,
     ) {
       const chat = await apiPost<Chat>('/api/chats', { 
         characterId, 
@@ -50,6 +51,7 @@ export const useChatsStore = defineStore('chats', {
         pureAiMode,
         firstMessageCharacterId: firstMessageCharacterId ?? null,
         memberSettings: memberSettings ?? null,
+        userPersonaId: userPersonaId ?? null,
       })
       await this.loadGroupList()
       this.activeChatId = chat.id
@@ -98,6 +100,13 @@ export const useChatsStore = defineStore('chats', {
     async updateGroupDelay(chatId: string, groupDelay: number) {
       const chat = await apiPut<Chat>(`/api/chats/${chatId}`, { groupDelay })
       this.activeChat = chat
+      await this.loadGroupList()
+      return chat
+    },
+    async updateUserPersonaId(chatId: string, userPersonaId: string | null) {
+      const chat = await apiPut<Chat>(`/api/chats/${chatId}`, { userPersonaId })
+      this.activeChat = chat
+      if (this.characterId) await this.loadList(this.characterId)
       await this.loadGroupList()
       return chat
     },

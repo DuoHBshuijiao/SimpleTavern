@@ -1015,16 +1015,33 @@ function cleanupMessageVersions(m: ChatMessage) {
   }
 }
 
+function getPersonaById(id: string | null | undefined) {
+  if (!id || !settings.settings?.userPersonas) return null
+  return settings.settings.userPersonas.find(p => p.id === id) ?? null
+}
+
+function getLastUserPersonaIdFromChat(chat: Chat | null | undefined) {
+  if (!chat?.messages?.length) return null
+  for (let i = chat.messages.length - 1; i >= 0; i--) {
+    const m = chat.messages[i]
+    if (m?.role === 'user' && m.senderPersonaId) return m.senderPersonaId
+  }
+  return null
+}
+
 const effectiveSelectedPersonaId = computed(() => {
   // 纯 AI 模式下：Persona 视为未选中（不修改全局 settings，只在当前会话 UI 层遮罩）
   if (effectivePureAiMode.value) return null
-  return settings.settings?.selectedPersonaId ?? null
+  const chat = activeChat.value
+  return chat?.userPersonaId
+    ?? getLastUserPersonaIdFromChat(chat)
+    ?? settings.settings?.selectedPersonaId
+    ?? null
 })
 
 // 获取选中的 Persona
 const selectedPersona = computed(() => {
-  if (!effectiveSelectedPersonaId.value || !settings.settings?.userPersonas) return null
-  return settings.settings.userPersonas.find(p => p.id === effectiveSelectedPersonaId.value) ?? null
+  return getPersonaById(effectiveSelectedPersonaId.value)
 })
 
 // 头像URL
@@ -1541,7 +1558,7 @@ async function savePersona() {
 
 async function selectPersona(id: string) {
   if (!settings.settings) return
-  if (settings.settings.selectedPersonaId === id) return
+  if (settings.settings.selectedPersonaId === id && activeChat.value?.userPersonaId === id) return
   // 若在现有对话中切换 persona，弹确认框（新建会话 / 继续对话）
   if (activeChat.value && (activeChat.value.messages?.length || 0) > 0) {
     pendingPersonaId.value = id
@@ -1549,6 +1566,9 @@ async function selectPersona(id: string) {
     return
   }
   await settings.save({ ...settings.settings, selectedPersonaId: id })
+  if (activeChat.value && activeChat.value.userPersonaId !== id) {
+    await chats.updateUserPersonaId(activeChat.value.id, id)
+  }
 }
 
 async function confirmSwitchPersonaNewSession() {
@@ -1563,6 +1583,7 @@ async function confirmSwitchPersonaNewSession() {
 
   const title = `${activeChat.value.title}（新建会话）`
   const pure = effectivePureAiMode.value
+  const personaId = pure ? null : targetId
   if (activeChat.value.isGroup) {
     await chats.createGroup(
       activeChat.value.characterId,
@@ -1571,9 +1592,10 @@ async function confirmSwitchPersonaNewSession() {
       pure,
       null,
       activeChat.value.memberSettings || null,
+      personaId,
     )
   } else {
-    await chats.create(activeChat.value.characterId, title, pure)
+    await chats.create(activeChat.value.characterId, title, pure, personaId)
   }
   scrollToBottom()
 }
@@ -1615,6 +1637,9 @@ async function confirmSwitchPersonaContinue() {
   // 先固化“切换前”的历史 user 消息发送者信息，避免切换后显示被新 persona 覆盖
   await freezeCurrentUserMessagesSenderSnapshot()
   await settings.save({ ...settings.settings, selectedPersonaId: targetId })
+  if (activeChat.value) {
+    await chats.updateUserPersonaId(activeChat.value.id, targetId)
+  }
 }
 
 function cancelSwitchPersona() {
@@ -1696,6 +1721,7 @@ async function createGroupChat() {
   }
 
   const firstMsgId = groupFirstMessageEnabled.value ? groupFirstMessageCharacterId.value : null
+  const personaId = groupPureAiMode.value ? null : effectiveSelectedPersonaId.value
   await chats.createGroup(
     firstMember,
     selectedMemberIds.value,
@@ -1703,6 +1729,7 @@ async function createGroupChat() {
     groupPureAiMode.value,
     firstMsgId,
     memberSettings,
+    personaId ?? null,
   )
   showGroupCreator.value = false
   selectedMemberIds.value = []
@@ -1711,7 +1738,8 @@ async function createGroupChat() {
 
 async function confirmCreateChat() {
   if (!selectedCharacterId.value) return
-  await chats.create(selectedCharacterId.value, chatTitle.value.trim() || undefined, chatPureAiMode.value)
+  const personaId = chatPureAiMode.value ? null : effectiveSelectedPersonaId.value
+  await chats.create(selectedCharacterId.value, chatTitle.value.trim() || undefined, chatPureAiMode.value, personaId ?? null)
   showChatCreator.value = false
   chatTitle.value = ''
 }
@@ -1731,6 +1759,7 @@ function getChatAvatars(chat: Chat) {
   const avatars: { src: string | null; name: string }[] = []
   
   const chatPure = (chat.overrides?.pureAiMode ?? settings.settings?.pureAiMode) === true
+  const chatPersona = getPersonaById(chat.userPersonaId) || getPersonaById(getLastUserPersonaIdFromChat(chat))
 
   // 1. User（非纯 AI 模式才展示）
   if (!chatPure) {
@@ -1748,8 +1777,16 @@ function getChatAvatars(chat: Chat) {
     }
     // 若还没有任何 user 消息（新会话），用当前选择作为占位
     if (avatars.length === 0) {
-      if (userAvatarUrl.value) avatars.push({ src: userAvatarUrl.value, name: userName.value })
-      else avatars.push({ src: null, name: '你' })
+      if (chatPersona) {
+        avatars.push({
+          src: chatPersona.avatar ? `/api/avatars/${chatPersona.avatar}` : null,
+          name: chatPersona.name || '你',
+        })
+      } else if (userAvatarUrl.value) {
+        avatars.push({ src: userAvatarUrl.value, name: userName.value })
+      } else {
+        avatars.push({ src: null, name: '你' })
+      }
     }
   }
 

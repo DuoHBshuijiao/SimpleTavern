@@ -27,6 +27,15 @@ def _resolve_pure_ai_mode(settings, chat, runtime) -> bool:
     return bool(getattr(settings, "pureAiMode", False))
 
 
+def _resolve_selected_persona(settings, chat, pure_ai_mode):
+    if pure_ai_mode:
+        return None
+    persona_id = getattr(chat, "userPersonaId", None) or getattr(settings, "selectedPersonaId", None)
+    if not persona_id or not getattr(settings, "userPersonas", None):
+        return None
+    return next((p for p in settings.userPersonas if p.id == persona_id), None)
+
+
 def _sse(event: str, data_obj: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data_obj, ensure_ascii=False)}\n\n"
 
@@ -68,10 +77,7 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
         prompt_parts.append(settings.prompts.globalSystem)
     
     # 构建用户Persona相关提示词
-    selected_persona = None
-    if (not pure_ai_mode) and settings.selectedPersonaId and settings.userPersonas:
-        selected_persona = next((p for p in settings.userPersonas if p.id == settings.selectedPersonaId), None)
-    
+    selected_persona = _resolve_selected_persona(settings, chat, pure_ai_mode)
     if selected_persona:
         user_persona_parts: list[str] = []
         if selected_persona.name and selected_persona.name.strip():
@@ -262,10 +268,7 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
         prompt_parts.append(settings.prompts.globalSystem)
     
     # 构建用户Persona相关提示词
-    selected_persona = None
-    if (not pure_ai_mode) and settings.selectedPersonaId and settings.userPersonas:
-        selected_persona = next((p for p in settings.userPersonas if p.id == settings.selectedPersonaId), None)
-    
+    selected_persona = _resolve_selected_persona(settings, chat, pure_ai_mode)
     if selected_persona:
         user_persona_parts: list[str] = []
         if selected_persona.name and selected_persona.name.strip():
@@ -495,10 +498,7 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
         prompt_parts.append(settings.prompts.globalSystem)
     
     # 构建用户Persona相关提示词
-    selected_persona = None
-    if (not pure_ai_mode) and settings.selectedPersonaId and settings.userPersonas:
-        selected_persona = next((p for p in settings.userPersonas if p.id == settings.selectedPersonaId), None)
-    
+    selected_persona = _resolve_selected_persona(settings, chat, pure_ai_mode)
     if selected_persona:
         user_persona_parts: list[str] = []
         if selected_persona.name and selected_persona.name.strip():

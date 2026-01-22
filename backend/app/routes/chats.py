@@ -88,20 +88,30 @@ def create_chat(req: CreateChatRequest) -> Chat:
     
     # 获取用户Persona名称用于替换 {{user}}
     user_name = ""
+    pure_ai_mode = req.pureAiMode if req.pureAiMode is not None else False
     try:
         settings = load_settings()
         pure_ai_mode = req.pureAiMode if req.pureAiMode is not None else bool(getattr(settings, "pureAiMode", False))
         if pure_ai_mode:
             # 纯 AI 模式不注入 persona，为避免 {{user}} 残留，使用通用称呼
             user_name = "用户"
-        elif settings.selectedPersonaId and settings.userPersonas:
-            selected_persona = next((p for p in settings.userPersonas if p.id == settings.selectedPersonaId), None)
+        else:
+            persona_id = req.userPersonaId or settings.selectedPersonaId
+            selected_persona = None
+            if persona_id and settings.userPersonas:
+                selected_persona = next((p for p in settings.userPersonas if p.id == persona_id), None)
             if selected_persona:
                 user_name = selected_persona.name
         if not user_name:
             user_name = "用户"
     except Exception:
         pass
+
+    # 绑定当前会话的 persona（纯 AI 模式下不绑定）
+    if pure_ai_mode:
+        chat.userPersonaId = None
+    else:
+        chat.userPersonaId = req.userPersonaId or (settings.selectedPersonaId if "settings" in locals() else None)
     
     # 单聊时：如果角色有首句，自动添加为 assistant 的第一条消息
     if not is_group:
@@ -171,6 +181,9 @@ def update_chat(chat_id: str, req: UpdateChatRequest) -> Chat:
         # 合并成员设置，只更新传入的成员
         for member_id, settings in req.memberSettings.items():
             chat.memberSettings[member_id] = settings
+    # 允许显式更新/清空 userPersonaId
+    if "userPersonaId" in req.model_fields_set:
+        chat.userPersonaId = req.userPersonaId
     _merge_overrides(chat, req)
     chat.updatedAt = _now_iso()
     return save_chat(chat)
