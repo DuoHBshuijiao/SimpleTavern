@@ -139,11 +139,13 @@ const bgColor = computed(() => {
 
 <template>
   <div
-    class="relative overflow-hidden shrink-0 flex items-start justify-center select-none transition-all duration-300"
+    class="relative overflow-hidden shrink-0 flex items-start justify-center select-none transition-all duration-300 shadow-sm"
     :class="[
       rounded,
       bgColor,
-      bordered ? 'ring-1 ring-white/10' : ''
+      // Liquid Glass enhancement: default subtle border for glass feel
+      'border border-white/10', 
+      bordered ? 'ring-2 ring-white/20' : ''
     ]"
     :style="style"
   >
@@ -160,7 +162,7 @@ const bgColor = computed(() => {
       @load="handleLoad"
       alt=""
     />
-    <span v-else class="font-bold">
+    <span v-else class="font-bold self-center">
       {{ initials }}
     </span>
     
@@ -169,6 +171,8 @@ const bgColor = computed(() => {
       v-if="src && !isLoaded && !hasError" 
       class="absolute inset-0 bg-white/5 animate-pulse"
     ></div>
+    
+    <!-- Glass overlay for shine effect -->
+    <div class="absolute inset-0 bg-gradient-to-tr from-white/5 to-transparent pointer-events-none"></div>
   </div>
 </template>
-

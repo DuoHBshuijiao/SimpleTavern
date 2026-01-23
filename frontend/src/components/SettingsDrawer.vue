@@ -38,6 +38,7 @@ import { useCharactersStore, useChatsStore, useSettingsStore } from '../stores'
 import type { Chat, ChatOverrides, Settings, ApiPreset } from '../types/models'
 import ModernSelect from './ModernSelect.vue'
 import { apiPost } from '../api/http'
+import { X, Eye, EyeOff, Check, Loader2 } from 'lucide-vue-next'
 
 const props = defineProps<{
   show: boolean
@@ -385,36 +386,40 @@ async function handleImportChange(e: Event) {
   <Transition name="drawer">
     <div v-if="show" class="fixed inset-0 z-50 flex justify-end">
       <!-- Backdrop -->
-      <div class="absolute inset-0 bg-black/50 backdrop-blur-sm transition-opacity" @click="close"></div>
+      <div 
+        class="absolute inset-0 bg-black/50 backdrop-blur-sm transition-opacity" 
+        style="backdrop-filter: blur(2px); background-clip: unset; -webkit-background-clip: unset; color: rgba(255, 255, 255, 0); opacity: 0.4;"
+        @click="close"
+      ></div>
 
       <!-- Drawer Panel -->
       <div 
-        class="relative w-[500px] max-w-[90vw] bg-[#18181c] border-l border-white/10 shadow-2xl flex flex-col h-full"
+        class="absolute right-4 top-4 bottom-4 w-[500px] max-w-[calc(90vw-32px)] glass-panel-floating rounded-2xl shadow-2xl flex flex-col"
       >
         <!-- Header -->
-        <div class="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-[#141418]">
+        <div class="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-white/5 rounded-t-2xl">
           <h2 class="text-lg font-bold text-gray-100">设置</h2>
           <button class="text-gray-400 hover:text-white transition-colors" @click="close">
-            ✕
+            <X class="w-5 h-5" />
           </button>
         </div>
 
         <!-- Tabs -->
-        <div class="flex border-b border-white/5 bg-[#141418]">
+        <div class="flex border-b border-white/5 bg-black/10" style="opacity: 1; color: rgba(229, 231, 235, 0);">
           <button
             v-for="t in ['global', 'presets', 'chat']"
             :key="t"
             class="flex-1 py-3 text-sm font-medium transition-colors relative"
             :class="tab === t ? 'text-brand' : 'text-gray-400 hover:text-gray-200'"
+            :style="tab === t ? 'opacity: 1; margin-top: 6px; margin-bottom: 6px;' : 'opacity: 1; margin-top: 6px; margin-bottom: 6px;'"
             @click="tab = t as any"
           >
             {{ t === 'global' ? '全局设置' : t === 'presets' ? 'API 预设' : '当前会话' }}
-            <div v-if="tab === t" class="absolute bottom-0 left-0 right-0 h-0.5 bg-brand"></div>
           </button>
         </div>
 
         <!-- Content -->
-        <div class="flex-1 overflow-y-auto p-6 custom-scrollbar bg-[#18181c]">
+        <div class="flex-1 overflow-y-auto p-6 custom-scrollbar bg-transparent">
           <!-- Global Settings -->
           <div v-if="tab === 'global'" class="space-y-6">
             <div v-if="!globalDraft" class="text-center text-gray-500 py-8">加载中...</div>
@@ -491,7 +496,7 @@ async function handleImportChange(e: Event) {
                     class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 p-1"
                     @click="showApiKey = !showApiKey"
                   >
-                    {{ showApiKey ? '👁️' : '🔒' }}
+                    <component :is="showApiKey ? Eye : EyeOff" class="w-4 h-4" />
                   </button>
                 </div>
               </div>
@@ -624,7 +629,9 @@ async function handleImportChange(e: Event) {
                               @click="editingPresetId = p.id"
                           >
                               <span class="truncate">{{ p.name }}</span>
-                              <button class="opacity-0 group-hover:opacity-100 text-gray-500 hover:text-red-400 px-1" @click.stop="deletePreset(p.id)">×</button>
+                              <button class="opacity-0 group-hover:opacity-100 text-gray-500 hover:text-red-400 px-1" @click.stop="deletePreset(p.id)">
+                                <X class="w-3 h-3" />
+                              </button>
                           </div>
                            <div v-if="globalDraft.apiPresets.length === 0" class="text-xs text-gray-600 text-center py-4">无预设</div>
                       </div>
@@ -664,7 +671,7 @@ async function handleImportChange(e: Event) {
                                       class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300"
                                       @click="editingPresetShowApiKey = !editingPresetShowApiKey"
                                   >
-                                      {{ editingPresetShowApiKey ? '👁️' : '🔒' }}
+                                      <component :is="editingPresetShowApiKey ? Eye : EyeOff" class="w-4 h-4" />
                                   </button>
                                </div>
                           </div>
@@ -677,7 +684,7 @@ async function handleImportChange(e: Event) {
                                       :disabled="presetModelsLoading"
                                       @click="openModelSelector(editingPreset!)"
                                    >
-                                      <span v-if="presetModelsLoading" class="animate-spin">⟳</span>
+                                      <Loader2 v-if="presetModelsLoading" class="animate-spin w-3 h-3" />
                                       <span>从 API 获取并筛选</span>
                                    </button>
                                </div>
@@ -685,7 +692,9 @@ async function handleImportChange(e: Event) {
                                    <div class="flex flex-wrap gap-2">
                                        <div v-for="(m, idx) in editingPreset.models" :key="m" class="bg-white/5 rounded px-2 py-1 text-xs text-gray-300 flex items-center gap-1">
                                            {{ m }}
-                                           <button class="hover:text-red-400" @click="editingPreset!.models.splice(idx, 1)">×</button>
+                                           <button class="hover:text-red-400" @click="editingPreset!.models.splice(idx, 1)">
+                                            <X class="w-3 h-3" />
+                                           </button>
                                        </div>
                                         <div v-if="!editingPreset.models.length" class="text-xs text-gray-600 w-full text-center py-4">
                                             点击上方“从 API 获取”或手动添加
@@ -831,13 +840,15 @@ async function handleImportChange(e: Event) {
     <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" @click="showModelSelector = false"></div>
     
     <!-- Modal -->
-    <div class="relative w-full max-w-lg bg-[#18181c] border border-white/10 rounded-xl shadow-2xl flex flex-col max-h-[85vh] m-4">
-      <div class="p-4 border-b border-white/10 flex justify-between items-center bg-[#141418] rounded-t-xl">
+    <div class="relative w-full max-w-lg glass-panel rounded-2xl shadow-2xl flex flex-col max-h-[85vh] m-4">
+      <div class="p-4 border-b border-white/10 flex justify-between items-center bg-white/5 rounded-t-2xl">
         <h3 class="font-bold text-gray-200">选择模型</h3>
-        <button class="text-gray-400 hover:text-white" @click="showModelSelector = false">✕</button>
+        <button class="text-gray-400 hover:text-white" @click="showModelSelector = false">
+            <X class="w-5 h-5" />
+        </button>
       </div>
       
-      <div class="p-3 border-b border-white/10 bg-[#18181c]">
+      <div class="p-3 border-b border-white/10 bg-transparent">
         <input 
           v-model="modelSelectorQuery" 
           placeholder="筛选模型..." 
@@ -846,7 +857,7 @@ async function handleImportChange(e: Event) {
         />
       </div>
       
-      <div class="flex-1 overflow-y-auto p-2 bg-[#18181c]">
+      <div class="flex-1 overflow-y-auto p-2 bg-transparent">
         <div v-if="filteredCandidates.length === 0" class="text-center text-gray-500 py-8 text-sm">
           未找到模型
         </div>
@@ -861,14 +872,14 @@ async function handleImportChange(e: Event) {
               class="w-4 h-4 rounded border flex items-center justify-center transition-colors"
               :class="selectedCandidateModels.has(m) ? 'bg-brand border-brand' : 'border-gray-600'"
             >
-              <span v-if="selectedCandidateModels.has(m)" class="text-white text-[10px]">✓</span>
+              <Check v-if="selectedCandidateModels.has(m)" class="text-white w-2.5 h-2.5" />
             </div>
             <span class="text-sm text-gray-300" :class="selectedCandidateModels.has(m) ? 'text-white font-medium' : ''">{{ m }}</span>
           </div>
         </div>
       </div>
       
-      <div class="p-4 border-t border-white/10 flex justify-between items-center bg-[#141418] rounded-b-xl">
+      <div class="p-4 border-t border-white/10 flex justify-between items-center bg-white/5 rounded-b-2xl">
         <div class="text-xs text-gray-500">已选 {{ selectedCandidateModels.size }} 个模型</div>
         <div class="flex gap-2">
           <button class="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors" @click="showModelSelector = false">取消</button>
@@ -890,14 +901,14 @@ async function handleImportChange(e: Event) {
   opacity: 0;
 }
 
-.drawer-enter-active .relative,
-.drawer-leave-active .relative {
+.drawer-enter-active .glass-panel-floating,
+.drawer-leave-active .glass-panel-floating {
   transition: transform 0.3s ease-out;
 }
 
-.drawer-enter-from .relative,
-.drawer-leave-to .relative {
-  transform: translateX(100%);
+.drawer-enter-from .glass-panel-floating,
+.drawer-leave-to .glass-panel-floating {
+  transform: translateX(calc(100% + 1.5rem));
 }
 
 .custom-scrollbar::-webkit-scrollbar {

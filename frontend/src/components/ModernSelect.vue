@@ -38,6 +38,7 @@
  *    - 位置：组件层，提供选择器功能
  */
 import { computed, ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { Check, Loader2, ChevronDown } from 'lucide-vue-next'
 
 interface Option {
   label: string
@@ -263,9 +264,9 @@ onUnmounted(() => {
   <div ref="containerRef" class="relative group w-full">
     <!-- Trigger -->
     <div 
-      class="flex items-center justify-between w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 transition-colors cursor-pointer"
+      class="flex items-center justify-between w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 transition-all cursor-pointer shadow-sm"
       :class="[
-        disabled ? 'opacity-50 cursor-not-allowed' : 'hover:bg-white/5 hover:border-brand/30',
+        disabled ? 'opacity-50 cursor-not-allowed' : 'hover:bg-white/10 hover:border-brand/30',
         isOpen ? '!border-brand/50 ring-1 ring-brand/20' : ''
       ]"
       @click="toggle"
@@ -274,15 +275,15 @@ onUnmounted(() => {
         {{ selectedLabel || placeholder }}
       </div>
       <div class="flex items-center gap-2 ml-2 text-gray-500">
-         <span v-if="loading" class="animate-spin text-brand">⟳</span>
-         <span v-else class="text-[10px] transition-transform duration-200" :class="isOpen ? 'rotate-180' : ''">▼</span>
+         <Loader2 v-if="loading" class="animate-spin text-brand w-3 h-3" />
+         <ChevronDown v-else class="w-3 h-3 transition-transform duration-200" :class="isOpen ? 'rotate-180' : ''" />
       </div>
     </div>
 
     <!-- Dropdown Menu -->
     <div 
       v-if="isOpen"
-      class="absolute z-50 mt-1 bg-[#18181c] border border-white/10 rounded-xl shadow-xl overflow-hidden flex flex-col max-h-[260px]"
+      class="absolute z-dropdown mt-1 glass-panel rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[260px] animate-in fade-in zoom-in-95 duration-200"
       :class="[
         placement === 'top' ? 'bottom-full mb-1' : 'top-full mt-1',
         dropdownWidth ? 'right-0' : 'left-0 right-0'
@@ -295,7 +296,7 @@ onUnmounted(() => {
           ref="inputRef"
           v-model="searchQuery"
           type="text"
-          class="w-full bg-black/20 border border-white/5 rounded-lg px-2 py-1.5 text-xs text-gray-200 focus:border-brand/50 focus:outline-none placeholder-gray-600"
+          class="w-full bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-gray-200 focus:border-brand/50 focus:outline-none placeholder-gray-500 focus:bg-white/10 transition-colors"
           :placeholder="allowCreate ? '搜索或输入新值...' : '搜索...'"
           @keydown.enter.prevent="handleInputEnter"
         />
@@ -311,23 +312,23 @@ onUnmounted(() => {
                 v-for="opt in item.options" 
                 :key="opt.value"
                 class="px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors flex items-center justify-between group/item pl-4"
-                :class="modelValue === opt.value ? 'bg-brand/10 text-brand' : 'text-gray-300 hover:bg-white/5'"
+                :class="modelValue === opt.value ? 'bg-brand/20 text-brand' : 'text-gray-300 hover:bg-white/5'"
                 @click="select(opt)"
               >
                 <span class="truncate">{{ opt.label }}</span>
-                <span v-if="modelValue === opt.value" class="text-brand text-xs">✓</span>
+                <Check v-if="modelValue === opt.value" class="text-brand w-3 h-3" />
               </div>
            </div>
            
            <!-- Single Option -->
-           <div 
+            <div 
               v-else 
               class="px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors flex items-center justify-between group/item"
-              :class="modelValue === (item as Option).value ? 'bg-brand/10 text-brand' : 'text-gray-300 hover:bg-white/5'"
+              :class="modelValue === (item as Option).value ? 'bg-brand/20 text-brand' : 'text-gray-300 hover:bg-white/5'"
               @click="select(item as Option)"
             >
               <span class="truncate">{{ (item as Option).label }}</span>
-              <span v-if="modelValue === (item as Option).value" class="text-brand text-xs">✓</span>
+              <Check v-if="modelValue === (item as Option).value" class="text-brand w-3 h-3" />
             </div>
         </template>
 

@@ -54,7 +54,10 @@
  *    - 位置：组件层，提供侧边栏功能
  */
 import type { CharacterCard, UserPersona, Chat } from '../../types/models'
+import { computed, ref } from 'vue'
 import ModernAvatar from '../ModernAvatar.vue'
+
+import { Pencil, Trash2, Users, Check, X, ChevronRight, ChevronLeft } from 'lucide-vue-next'
 
 const props = defineProps<{
   collapsed: boolean
@@ -189,10 +192,33 @@ const toggleCollapsed = () => emit('update:collapsed', !props.collapsed)
  *
  * @param {string} id - 身份ID
  */
-function confirmDeletePersona(id: string) {
-  if (window.confirm('确定删除这个身份？')) {
-    emit('delete-persona', id)
-  }
+const deleteConfirm = ref<{
+  type: 'persona' | 'character' | 'chat'
+  id: string
+  label: string
+  isGroup?: boolean
+} | null>(null)
+
+const deleteConfirmTitle = computed(() => {
+  const target = deleteConfirm.value
+  if (!target) return ''
+  if (target.type === 'persona') return '删除身份'
+  if (target.type === 'character') return '删除角色'
+  return target.isGroup ? '删除群聊' : '删除会话'
+})
+
+const deleteConfirmMessage = computed(() => {
+  const target = deleteConfirm.value
+  if (!target) return ''
+  if (target.type === 'persona') return `确定删除身份“${target.label}”？此操作无法撤销。`
+  if (target.type === 'character') return `确定删除角色“${target.label}”？此操作无法撤销。`
+  return target.isGroup
+    ? `确定删除群聊“${target.label}”？此操作无法撤销。`
+    : `确定删除会话“${target.label}”？此操作无法撤销。`
+})
+
+function confirmDeletePersona(persona: UserPersona) {
+  deleteConfirm.value = { type: 'persona', id: persona.id, label: persona.name || '未命名身份' }
 }
 
 /**
@@ -202,10 +228,8 @@ function confirmDeletePersona(id: string) {
  *
  * @param {string} id - 角色ID
  */
-function confirmDeleteCharacter(id: string) {
-  if (window.confirm('确定删除这个角色？')) {
-    emit('delete-character', id)
-  }
+function confirmDeleteCharacter(character: CharacterCard) {
+  deleteConfirm.value = { type: 'character', id: character.id, label: character.name || '未命名角色' }
 }
 
 /**
@@ -216,19 +240,36 @@ function confirmDeleteCharacter(id: string) {
  * @param {string} id - 聊天ID
  * @param {boolean} isGroup - 是否为群聊
  */
-function confirmDeleteChat(id: string, isGroup: boolean) {
-  if (window.confirm(isGroup ? '确定删除群聊？' : '确定删除会话？')) {
-    emit('delete-chat', id)
+function confirmDeleteChat(chat: Chat) {
+  deleteConfirm.value = {
+    type: 'chat',
+    id: chat.id,
+    label: chat.title || '未命名会话',
+    isGroup: chat.isGroup,
   }
+}
+
+function cancelDelete() {
+  deleteConfirm.value = null
+}
+
+function confirmDelete() {
+  const target = deleteConfirm.value
+  if (!target) return
+  if (target.type === 'persona') emit('delete-persona', target.id)
+  if (target.type === 'character') emit('delete-character', target.id)
+  if (target.type === 'chat') emit('delete-chat', target.id)
+  deleteConfirm.value = null
 }
 </script>
 
 <template>
   <aside 
-    class="flex flex-col border-r border-white/5 bg-[#141418] transition-all duration-300 relative flex-shrink-0"
-    :class="collapsed ? '-ml-80 w-80' : 'w-80'"
+    class="flex flex-col glass-panel-floating rounded-2xl transition-all duration-300 relative flex-shrink-0 my-4 h-[calc(100vh-2rem)]"
+    :class="collapsed ? '-ml-[21rem] w-80 opacity-0 pointer-events-none' : 'ml-4 w-80 opacity-100'"
+    style="contain: content; will-change: margin-left, opacity;"
   >
-    <div class="flex flex-col h-full overflow-hidden">
+    <div class="flex flex-col h-full overflow-hidden rounded-2xl">
       
       <!-- 用户身份区域 (头部) -->
       <div class="p-4 bg-black/10 border-b border-white/5 shrink-0">
@@ -246,17 +287,22 @@ function confirmDeleteChat(id: string, isGroup: boolean) {
           <div 
             v-for="p in personas"
             :key="p.id"
-            class="group flex items-center gap-3 p-2 rounded-xl cursor-pointer transition-all duration-200 border border-transparent"
-            :class="selectedPersonaId === p.id ? 'bg-brand/10 border-brand/20' : 'hover:bg-white/5'"
+            class="group flex items-center gap-3 p-2 rounded-xl transition-all duration-200 border-y border-r border-transparent border-l-2"
+            :class="selectedPersonaId === p.id ? 'bg-brand/10 border-l-brand' : 'border-l-transparent hover:bg-white/5'"
+            style="border: 1px solid rgba(255, 255, 255, 0.1);"
             @click="emit('select-persona', p.id)"
           >
             <ModernAvatar :src="p.avatar ? `/api/avatars/${p.avatar}` : null" :name="p.name" :size="36" aspect="1" />
             <div class="flex-1 min-w-0">
               <div class="font-medium text-sm truncate" :class="selectedPersonaId === p.id ? 'text-brand' : 'text-gray-300'">{{ p.name }}</div>
             </div>
-            <div class="opacity-0 group-hover:opacity-100 flex gap-1 transition-opacity">
-              <button class="p-1 hover:text-white text-gray-500" @click.stop="emit('edit-persona', p)">✏</button>
-              <button class="p-1 hover:text-red-400 text-gray-500" @click.stop="confirmDeletePersona(p.id)">🗑</button>
+            <div class="opacity-60 group-hover:opacity-100 flex gap-1 transition-opacity ml-auto bg-black/40 rounded-lg backdrop-blur-sm p-0.5">
+              <button class="p-1 hover:text-white text-gray-400 transition-colors" @click.stop="emit('edit-persona', p)">
+                <Pencil class="w-3.5 h-3.5" />
+              </button>
+              <button class="p-1 hover:text-red-400 text-gray-400 transition-colors" @click.stop="confirmDeletePersona(p)">
+                <Trash2 class="w-3.5 h-3.5" />
+              </button>
             </div>
           </div>
           
@@ -282,8 +328,9 @@ function confirmDeleteChat(id: string, isGroup: boolean) {
           <div 
             v-for="c in characters"
             :key="c.id"
-            class="group relative flex items-start gap-3 p-3 rounded-2xl cursor-pointer transition-all duration-200 border border-transparent"
-            :class="selectedCharacterId === c.id ? 'bg-white/5 border-brand/20 shadow-sm' : 'hover:bg-white/5'"
+            class="group relative flex items-start gap-3 p-3 rounded-2xl transition-all duration-200 border-y border-r border-transparent border-l-2"
+            :class="selectedCharacterId === c.id ? 'bg-white/5 border-l-brand shadow-sm' : 'border-l-transparent hover:bg-white/5'"
+            style="border: 1px solid rgba(255, 255, 255, 0.1);"
             @click="emit('update:selectedCharacterId', c.id)"
           >
             <ModernAvatar 
@@ -303,9 +350,13 @@ function confirmDeleteChat(id: string, isGroup: boolean) {
               <div class="text-xs text-gray-500 line-clamp-3 mt-1 leading-relaxed">{{ c.description || '暂无简介' }}</div>
             </div>
 
-            <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-black/60 rounded-lg backdrop-blur-sm p-0.5 flex">
-              <button class="p-1.5 hover:text-white text-gray-400" @click.stop="emit('edit-character', c)">✏</button>
-              <button class="p-1.5 hover:text-red-400 text-gray-400" @click.stop="confirmDeleteCharacter(c.id)">🗑</button>
+            <div class="absolute top-3 right-2 opacity-60 group-hover:opacity-100 transition-opacity bg-black/40 rounded-lg backdrop-blur-sm p-0.5 flex gap-1">
+              <button class="p-1.5 hover:text-white text-gray-400 transition-colors" @click.stop="emit('edit-character', c)">
+                <Pencil class="w-4 h-4" />
+              </button>
+              <button class="p-1.5 hover:text-red-400 text-gray-400 transition-colors" @click.stop="confirmDeleteCharacter(c)">
+                <Trash2 class="w-4 h-4" />
+              </button>
             </div>
           </div>
         </div>
@@ -320,7 +371,6 @@ function confirmDeleteChat(id: string, isGroup: boolean) {
               class="text-xs bg-purple-500/20 hover:bg-purple-500/30 text-purple-400 px-2 py-1 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed" 
               :disabled="characters.length < 2" 
               @click="emit('create-group')"
-              title="创建群聊"
             >
               + 群聊
             </button>
@@ -337,13 +387,13 @@ function confirmDeleteChat(id: string, isGroup: boolean) {
           <!-- 群聊列表 -->
           <div v-if="groupList.length > 0" class="mb-3">
             <div class="text-[10px] text-purple-400 uppercase tracking-wider px-2 mb-1 flex items-center gap-1">
-              <span>👥</span> 群聊
+              <Users class="w-3 h-3" /> 群聊
             </div>
             <div 
               v-for="c in groupList"
               :key="c.id"
-              class="group flex items-center justify-between p-2 rounded-lg cursor-pointer text-sm mb-1 transition-colors"
-              :class="activeChatId === c.id ? 'bg-purple-500/10 text-purple-400' : 'text-gray-400 hover:bg-white/5 hover:text-gray-200'"
+              class="group flex items-center justify-between p-2 rounded-lg cursor-pointer text-sm mb-1 transition-colors border-l-2"
+              :class="activeChatId === c.id ? 'bg-purple-500/10 text-purple-400 border-l-purple-400' : 'text-gray-400 border-l-transparent hover:bg-white/5 hover:text-gray-200'"
               @click="emit('select-group', c)"
             >
               <div class="flex items-center gap-2 flex-1 min-w-0 pr-2 max-w-[calc(100%-60px)]">
@@ -364,16 +414,24 @@ function confirmDeleteChat(id: string, isGroup: boolean) {
                     @keyup.escape="emit('cancel-edit-title')"
                     autofocus
                   />
-                  <button class="text-purple-400 hover:text-white" @click="emit('save-title')">✓</button>
-                  <button class="text-gray-500 hover:text-white" @click="emit('cancel-edit-title')">✕</button>
+                  <button class="text-purple-400 hover:text-white" @click="emit('save-title')">
+                    <Check class="w-3 h-3" />
+                  </button>
+                  <button class="text-gray-500 hover:text-white" @click="emit('cancel-edit-title')">
+                    <X class="w-3 h-3" />
+                  </button>
                 </div>
                 <div v-else class="truncate flex-1">{{ c.title }}</div>
                 <span class="text-[10px] text-gray-600 shrink-0">({{ c.memberIds.length }}人)</span>
               </div>
               
-              <div v-if="editingChatId !== c.id" class="flex gap-1 shrink-0 ml-auto bg-black/40 rounded-md backdrop-blur-sm">
-                <button class="p-1 hover:text-white text-gray-300" @click.stop="emit('start-edit-title', c.id, c.title)" title="重命名">✏</button>
-                <button class="p-1 hover:text-red-400 text-gray-300" @click.stop="confirmDeleteChat(c.id, true)" title="删除">🗑</button>
+              <div v-if="editingChatId !== c.id" class="flex gap-1 shrink-0 ml-auto bg-black/40 rounded-md backdrop-blur-sm opacity-60 group-hover:opacity-100 transition-opacity">
+                <button class="p-1 hover:text-white text-gray-300 transition-colors" @click.stop="emit('start-edit-title', c.id, c.title)">
+                  <Pencil class="w-3.5 h-3.5" />
+                </button>
+                <button class="p-1 hover:text-red-400 text-gray-300 transition-colors" @click.stop="confirmDeleteChat(c)">
+                  <Trash2 class="w-3.5 h-3.5" />
+                </button>
               </div>
             </div>
           </div>
@@ -386,8 +444,8 @@ function confirmDeleteChat(id: string, isGroup: boolean) {
             <div 
               v-for="c in chatList.filter(chat => !chat.isGroup)"
               :key="c.id"
-              class="group flex items-center justify-between p-2 rounded-lg cursor-pointer text-sm mb-1 transition-colors"
-              :class="activeChatId === c.id ? 'bg-brand/10 text-brand' : 'text-gray-400 hover:bg-white/5 hover:text-gray-200'"
+              class="group flex items-center justify-between p-2 rounded-lg cursor-pointer text-sm mb-1 transition-colors border-l-2"
+              :class="activeChatId === c.id ? 'bg-brand/10 text-brand border-l-brand' : 'text-gray-400 border-l-transparent hover:bg-white/5 hover:text-gray-200'"
               @click="emit('select-chat', c)"
             >
               <div class="flex items-center gap-2 flex-1 min-w-0 pr-2 max-w-[calc(100%-60px)]">
@@ -406,16 +464,24 @@ function confirmDeleteChat(id: string, isGroup: boolean) {
                       @keyup.escape="emit('cancel-edit-title')"
                       autofocus
                     />
-                    <button class="text-brand hover:text-white" @click="emit('save-title')">✓</button>
-                    <button class="text-gray-500 hover:text-white" @click="emit('cancel-edit-title')">✕</button>
+                    <button class="text-brand hover:text-white" @click="emit('save-title')">
+                      <Check class="w-3 h-3" />
+                    </button>
+                    <button class="text-gray-500 hover:text-white" @click="emit('cancel-edit-title')">
+                      <X class="w-3 h-3" />
+                    </button>
                   </div>
                   <div v-else class="truncate">{{ c.title }}</div>
                 </div>
               </div>
               
-              <div v-if="editingChatId !== c.id" class="flex gap-1 shrink-0 ml-auto bg-black/40 rounded-md backdrop-blur-sm">
-                <button class="p-1 hover:text-white text-gray-300" @click.stop="emit('start-edit-title', c.id, c.title)" title="重命名">✏</button>
-                <button class="p-1 hover:text-red-400 text-gray-300" @click.stop="confirmDeleteChat(c.id, false)" title="删除">🗑</button>
+              <div v-if="editingChatId !== c.id" class="flex gap-1 shrink-0 ml-auto bg-black/40 rounded-md backdrop-blur-sm opacity-60 group-hover:opacity-100 transition-opacity">
+                <button class="p-1 hover:text-white text-gray-300 transition-colors" @click.stop="emit('start-edit-title', c.id, c.title)">
+                  <Pencil class="w-3.5 h-3.5" />
+                </button>
+                <button class="p-1 hover:text-red-400 text-gray-300 transition-colors" @click.stop="confirmDeleteChat(c)">
+                  <Trash2 class="w-3.5 h-3.5" />
+                </button>
               </div>
             </div>
           </div>
@@ -427,13 +493,30 @@ function confirmDeleteChat(id: string, isGroup: boolean) {
     </div>
   </aside>
 
+  <!-- 删除确认弹窗 -->
+  <div v-if="deleteConfirm" class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/40 backdrop-blur-sm">
+    <div class="w-[320px] rounded-2xl border border-white/10 bg-slate-900/70 backdrop-blur-xl shadow-2xl p-4 text-gray-200">
+      <div class="text-sm font-semibold text-slate-50">{{ deleteConfirmTitle }}</div>
+      <div class="text-xs text-slate-400 mt-2 leading-relaxed">{{ deleteConfirmMessage }}</div>
+      <div class="mt-4 flex justify-end gap-2">
+        <button class="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 transition-colors" @click="cancelDelete">
+          取消
+        </button>
+        <button class="px-3 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 transition-colors" @click="confirmDelete">
+          删除
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- 侧边栏开关 -->
   <div 
-    class="absolute left-0 top-1/2 -translate-y-1/2 z-50 cursor-pointer p-2 bg-brand/30 hover:bg-brand/50 rounded-r-lg backdrop-blur-sm transition-colors border border-l-0 border-brand/40 shadow-lg"
+    class="fixed top-1/2 -translate-y-1/2 z-50 cursor-pointer p-2 bg-brand/30 hover:bg-brand/50 rounded-r-lg backdrop-blur-sm transition-all duration-300 border border-l-0 border-brand/40 shadow-lg"
+    :class="collapsed ? 'left-0' : 'left-[21rem]'"
     @click="toggleCollapsed"
     title="切换侧边栏"
   >
-    <span class="text-xs text-white">{{ collapsed ? '▶' : '◀' }}</span>
+    <component :is="collapsed ? ChevronRight : ChevronLeft" class="w-3 h-3 text-white" />
   </div>
 </template>
 

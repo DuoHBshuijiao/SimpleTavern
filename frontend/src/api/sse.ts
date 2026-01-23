@@ -31,7 +31,7 @@
  *
  * 表示一个SSE事件，包含事件类型和数据。
  */
-export type SseEvent = { event: string; data: any }
+export type SseEvent = { event: string; data: unknown }
 
 /**
  * 解析SSE事件块

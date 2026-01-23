@@ -160,74 +160,55 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div v-if="show" class="modal">
-    <div class="modal-backdrop" @click="handleCancel"></div>
-    <div class="modal-content chat-modal-width-500-90">
-      <div class="modal-header">
-        <h3 class="modal-title">设置头像</h3>
-        <button class="modal-close" @click="handleCancel">×</button>
-      </div>
-      <div class="modal-body">
-        <div class="space-y-6">
-          <!-- 隐藏的文件输入 -->
-          <input
-            ref="fileInputRef"
-            type="file"
-            accept="image/*"
-            class="hidden"
-            @change="handleFileSelect"
-          />
+  <Transition name="modal">
+    <div v-if="show" class="modal">
+      <div class="modal-backdrop" @click="handleCancel"></div>
+      <div class="modal-content chat-modal-width-500-90 glass-panel">
+        <div class="modal-header">
+          <h3 class="modal-title text-slate-50">设置头像</h3>
+          <button class="modal-close" @click="handleCancel">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="space-y-6">
+            <!-- 隐藏的文件输入 -->
+            <input
+              ref="fileInputRef"
+              type="file"
+              accept="image/*"
+              class="hidden"
+              @change="handleFileSelect"
+            />
 
-          <div v-if="!imageSrc" class="upload-area" @click="triggerFileInput">
-            <div class="upload-content">
-              <div class="text-lg font-bold text-brand mb-2">点击选择图片</div>
-              <div class="text-xs text-gray-500">支持 JPG、PNG、GIF、WebP 格式</div>
+            <div 
+              v-if="!imageSrc" 
+              class="upload-area border-2 border-dashed border-white/20 bg-white/5 hover:bg-white/10 hover:border-white/30 transition-all rounded-xl p-10 text-center cursor-pointer" 
+              @click="triggerFileInput"
+            >
+              <div class="upload-content pointer-events-none">
+                <div class="text-lg font-bold text-brand mb-2">点击选择图片</div>
+                <div class="text-xs text-gray-500">支持 JPG、PNG、GIF、WebP 格式</div>
+              </div>
+            </div>
+
+            <div v-else class="cropper-container bg-black/20 rounded-xl overflow-hidden max-h-[400px]">
+              <img ref="imageRef" :src="imageSrc" class="max-w-full block" />
             </div>
           </div>
-
-          <div v-else class="cropper-container">
-            <img ref="imageRef" :src="imageSrc" class="max-w-full block" />
-          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary bg-white/5 hover:bg-white/10 text-gray-300 border border-white/5" @click="handleCancel">取消</button>
+          <button v-if="imageSrc" class="btn btn-secondary bg-white/5 hover:bg-white/10 text-gray-300 border border-white/5" @click="resetSelection">重新选择</button>
+          <button class="btn btn-primary bg-brand hover:bg-brand-hover text-white shadow-lg shadow-brand/20" :disabled="!imageSrc" @click="handleSave">
+            保存头像
+          </button>
         </div>
       </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" @click="handleCancel">取消</button>
-        <button v-if="imageSrc" class="btn btn-secondary" @click="resetSelection">重新选择</button>
-        <button class="btn btn-primary" :disabled="!imageSrc" @click="handleSave">
-          保存头像
-        </button>
-      </div>
     </div>
-  </div>
+  </Transition>
 </template>
 
 <style scoped>
-.upload-area {
-  border: 2px dashed var(--color-brand);
-  border-radius: var(--radius-lg);
-  padding: 40px 20px;
-  text-align: center;
-  cursor: pointer;
-  transition: all var(--transition-normal);
-  background: rgba(162, 48, 237, 0.05);
-}
-
-.upload-area:hover {
-  border-color: var(--color-brand-hover);
-  background: rgba(162, 48, 237, 0.1);
-}
-
-.upload-content {
-  pointer-events: none;
-}
-
-.cropper-container {
-  max-height: 400px;
-  overflow: hidden;
-  border-radius: var(--radius-lg);
-  background: rgba(0, 0, 0, 0.3);
-}
-
+/* Removed styles replaced by Tailwind classes */
 .cropper-container :deep(.cropper-view-box),
 .cropper-container :deep(.cropper-face) {
   border-radius: 50%;

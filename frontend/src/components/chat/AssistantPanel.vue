@@ -45,6 +45,20 @@
 import MarkdownIt from 'markdown-it'
 import type { AssistantMessage } from '../../composables/useAssistant'
 import ModernSelect from '../ModernSelect.vue'
+import { Sparkles, Loader2, MoreHorizontal, X } from 'lucide-vue-next'
+
+interface ModelOption {
+  label: string
+  value: string
+  presetId?: string | null
+}
+
+interface ModelOptionGroup {
+  label: string
+  options: ModelOption[]
+}
+
+type ModelOptions = (ModelOption | ModelOptionGroup | string)[]
 
 const props = defineProps<{
   isOpen: boolean
@@ -53,7 +67,7 @@ const props = defineProps<{
   isGenerating: boolean
   streamError: string | null
   currentModel: string
-  modelOptions: any[]
+  modelOptions: ModelOptions
 }>()
 
 const emit = defineEmits<{
@@ -62,7 +76,7 @@ const emit = defineEmits<{
   'send': []
   'reset': []
   'open-settings': []
-  'select-model': [option: any]
+  'select-model': [option: { value: string }]
   'edit-message': [m: AssistantMessage]
   'delete-message': [m: AssistantMessage]
   'rewrite-message': [m: AssistantMessage]
@@ -127,25 +141,32 @@ function confirmReset() {
 
 <template>
   <aside
-    class="h-full bg-[#141418] border-l border-white/10 shadow-inner transition-all duration-300 overflow-hidden flex flex-col"
-    :class="isOpen ? 'w-[360px] opacity-100' : 'w-0 opacity-0 pointer-events-none'"
+    class="fixed right-4 top-4 bottom-4 glass-panel-floating rounded-2xl shadow-2xl transition-all duration-300 overflow-hidden flex flex-col z-20"
+    :class="isOpen ? 'translate-x-0 w-[360px] opacity-100' : 'translate-x-[calc(100%+20px)] w-[360px] opacity-0 pointer-events-none'"
+    style="contain: content; will-change: transform, opacity;"
   >
     <!-- 头部 -->
-    <div class="flex items-center justify-between px-4 py-3 border-b border-white/10">
+    <div class="flex items-center justify-between px-4 py-3 border-b border-white/5 shrink-0 bg-white/5 backdrop-blur-md">
       <span class="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2">
         <span class="w-2 h-2 rounded-full bg-[#b76e79] animate-pulse"></span>
         聊天助手
       </span>
       <div class="flex items-center gap-2">
-        <button class="text-gray-500 hover:text-white transition-colors" @click="emit('open-settings')">⋯</button>
-        <button class="text-gray-500 hover:text-white transition-colors" @click="emit('update:isOpen', false)">×</button>
+        <button class="text-gray-500 hover:text-white transition-colors" @click="emit('open-settings')">
+            <MoreHorizontal class="w-4 h-4" />
+        </button>
+        <button class="text-gray-500 hover:text-white transition-colors" @click="emit('update:isOpen', false)">
+            <X class="w-4 h-4" />
+        </button>
       </div>
     </div>
 
     <!-- 消息列表 -->
     <div class="flex-1 overflow-y-auto custom-scrollbar space-y-4 px-4 py-3">
       <div v-if="messages.length === 0" class="text-xs text-gray-600 text-center py-12 flex flex-col items-center gap-3">
-        <div class="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center text-xl">✨</div>
+        <div class="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center text-xl">
+            <Sparkles class="w-6 h-6 text-yellow-400" />
+        </div>
         开始和助手对话以获得帮助
       </div>
       <div
@@ -157,10 +178,10 @@ function confirmReset() {
         <div
           class="px-4 py-2.5 rounded-2xl text-sm leading-relaxed max-w-[90%] shadow-sm border transition-colors"
           :class="m.role === 'user'
-            ? 'bg-[#b76e79]/20 border-[#b76e79]/30 text-gray-100 rounded-tr-sm'
+            ? 'bg-brand/20 backdrop-blur-sm border-brand/20 text-gray-100 rounded-tr-sm'
             : (m.role === 'system'
-              ? 'bg-[#0f0f12] border-white/10 text-gray-400 rounded-lg text-xs'
-              : 'bg-white/5 border-white/5 text-gray-200 rounded-tl-sm')"
+              ? 'bg-yellow-500/10 border-yellow-500/20 text-gray-300 rounded-lg text-xs'
+              : 'bg-white/5 backdrop-blur-md border-white/10 text-gray-200 rounded-tl-sm')"
         >
           <div class="prose prose-invert prose-sm max-w-none" v-html="renderMarkdown(m.content)"></div>
         </div>
@@ -193,12 +214,12 @@ function confirmReset() {
     </div>
 
     <!-- 输入区域 -->
-    <div class="pt-4 pb-4 px-4 border-t border-white/10">
+    <div class="pt-4 pb-4 px-4 border-t border-white/5 bg-black/10 backdrop-blur-sm">
       <div class="relative">
         <textarea
           :value="draft"
           @input="emit('update:draft', ($event.target as HTMLTextAreaElement).value)"
-          class="input textarea h-24 !bg-black/30 !border-white/5 focus:!border-[#b76e79]/40"
+          class="input textarea h-24 !bg-white/5 !border-white/10 focus:!border-brand/40 focus:!bg-white/10 backdrop-blur-md"
           placeholder="输入建议或要求 (Ctrl + Enter)..."
           :disabled="isGenerating"
           @keydown="handleKeydown"
@@ -223,7 +244,7 @@ function confirmReset() {
             :disabled="!draft.trim() || isGenerating" 
             @click="emit('send')"
           >
-            <span v-if="isGenerating" class="animate-spin mr-2">⌛</span>
+            <Loader2 v-if="isGenerating" class="animate-spin w-3 h-3 mr-2" />
             发送
           </button>
         </div>

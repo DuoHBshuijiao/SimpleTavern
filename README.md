@@ -4,6 +4,42 @@
 后端：FastAPI（SSE 流式）  
 存储：本地 `data/` 下按文件拆分的 JSON（无数据库）
 
+## Liquid Glass UI System
+
+本项目采用了全新的 "Liquid Glass" UI 设计系统，旨在提供现代化、沉浸式的用户体验。
+
+### 设计理念
+
+- **液态玻璃 (Liquid Glass)**: 结合了深度磨砂玻璃效果 (`backdrop-blur`) 和流动的光影，创造出层次分明且通透的视觉体验。
+- **沉浸式暗色 (Immersive Dark)**: 基于 Slate-950 的深色背景，搭配 Blue-500 作为强调色，减少视觉疲劳，增强沉浸感。
+- **大圆角 (Large Radius)**: 全局使用 `rounded-2xl` (1.5rem) 大圆角，传递友好、现代的视觉语言。
+
+### 核心类与组件
+
+- **.glass-panel**: 核心容器类，提供磨砂玻璃背景和精细的边框效果。
+- **.glass-button**: 玻璃拟态按钮，支持 hover 发光效果。
+- **.glass-input**: 玻璃拟态输入框，专注时高亮。
+- **Icons**: 全面采用 `lucide-vue-next` 图标库，保持视觉一致性。
+
+### 主题定制
+
+主题变量定义在 `src/styles/variables.css` 中，您可以轻松修改核心颜色：
+
+```css
+:root {
+  /* 品牌色 */
+  --color-brand: #3b82f6; /* Blue-500 */
+  
+  /* 背景色 */
+  --color-dark-bg: #020617; /* Slate-950 */
+  
+  /* 玻璃效果 */
+  --glass-bg: rgba(15, 23, 42, 0.7);
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --glass-shine: rgba(255, 255, 255, 0.05);
+}
+```
+
 ## 环境要求
 
 - **Python 3.7+** 和 pip

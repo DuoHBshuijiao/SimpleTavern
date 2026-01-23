@@ -42,7 +42,8 @@ import type { Ref, ComputedRef } from 'vue'
 import type { 
   Chat, 
   ChatMessage, 
-  CharacterCard, 
+  CharacterCard,
+  Settings, 
   UserPersona, 
   GroupMemberSettings 
 } from '../types/models'
@@ -65,7 +66,7 @@ export interface ChatActionsDeps {
       userPersonas?: UserPersona[]
       selectedPersonaId?: string | null
     } | null
-    save: (settings: any) => Promise<void>
+    save: (settings: Settings) => Promise<void>
     load: () => Promise<void>
   }
   charactersStore: {
@@ -294,21 +295,23 @@ export function useChatActions(deps: ChatActionsDeps) {
    * 将助手生成的角色卡数据应用到当前编辑的角色卡片中。
    * 只更新有值的字段，保留原有字段。
    *
-   * @param {any} card - 助手生成的角色卡数据
+   * @param {unknown} card - 助手生成的角色卡数据
    */
-  function applyAssistantCard(card: any) {
+  function applyAssistantCard(card: unknown) {
     if (!editingCharacter.value) return
+    if (!card || typeof card !== 'object') return
     const current = editingCharacter.value
+    const cardObj = card as Record<string, unknown>
     editingCharacter.value = {
       ...current,
-      name: card.name ?? current.name,
-      description: card.description ?? current.description,
-      personality: card.personality ?? current.personality,
-      scenario: card.scenario ?? current.scenario,
-      firstMessage: card.firstMessage ?? current.firstMessage,
-      exampleDialogue: card.exampleDialogue ?? current.exampleDialogue,
-      systemPrompt: card.systemPrompt ?? current.systemPrompt,
-      avatar: card.avatar ?? current.avatar,
+      name: (typeof cardObj.name === 'string' ? cardObj.name : undefined) ?? current.name,
+      description: (typeof cardObj.description === 'string' ? cardObj.description : undefined) ?? current.description,
+      personality: (typeof cardObj.personality === 'string' ? cardObj.personality : undefined) ?? current.personality,
+      scenario: (typeof cardObj.scenario === 'string' ? cardObj.scenario : undefined) ?? current.scenario,
+      firstMessage: (typeof cardObj.firstMessage === 'string' ? cardObj.firstMessage : undefined) ?? current.firstMessage,
+      exampleDialogue: (typeof cardObj.exampleDialogue === 'string' ? cardObj.exampleDialogue : undefined) ?? current.exampleDialogue,
+      systemPrompt: (typeof cardObj.systemPrompt === 'string' ? cardObj.systemPrompt : undefined) ?? current.systemPrompt,
+      avatar: (typeof cardObj.avatar === 'string' ? cardObj.avatar : undefined) ?? current.avatar,
     }
   }
 
@@ -387,11 +390,15 @@ export function useChatActions(deps: ChatActionsDeps) {
       }
     }
     
-    await settingsStore.save({
-      ...settingsStore.settings,
-      userPersonas: personas,
-      selectedPersonaId: editingPersona.value.id,
-    })
+    const currentSettings = settingsStore.settings
+    if (currentSettings) {
+      // 使用双重类型断言，因为我们知道 currentSettings 是完整的 Settings 对象
+      await settingsStore.save({
+        ...currentSettings,
+        userPersonas: personas,
+        selectedPersonaId: editingPersona.value.id,
+      } as unknown as Settings)
+    }
     
     showPersonaEditor.value = false
     editingPersona.value = null
@@ -418,7 +425,14 @@ export function useChatActions(deps: ChatActionsDeps) {
       return
     }
     
-    await settingsStore.save({ ...settingsStore.settings, selectedPersonaId: id })
+    const currentSettings = settingsStore.settings
+    if (currentSettings) {
+      // 使用双重类型断言，因为我们知道 currentSettings 是完整的 Settings 对象
+      await settingsStore.save({
+        ...currentSettings,
+        selectedPersonaId: id,
+      } as unknown as Settings)
+    }
     if (activeChat.value && activeChat.value.userPersonaId !== id) {
       await chatsStore.updateUserPersonaId(activeChat.value.id, id)
     }
@@ -445,13 +459,15 @@ export function useChatActions(deps: ChatActionsDeps) {
    * @returns {Promise<void>} 完成时返回
    */
   async function deletePersona(id: string) {
-    if (!settingsStore.settings) return
-    const personas = (settingsStore.settings.userPersonas || []).filter(p => p.id !== id)
+    const currentSettings = settingsStore.settings
+    if (!currentSettings) return
+    const personas = (currentSettings.userPersonas || []).filter(p => p.id !== id)
+    // 使用类型断言，因为我们知道 currentSettings 是完整的 Settings 对象
     await settingsStore.save({
-      ...settingsStore.settings,
+      ...currentSettings,
       userPersonas: personas,
       selectedPersonaId: personas[0]?.id ?? null,
-    })
+    } as unknown as Settings)
   }
 
   /**

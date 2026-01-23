@@ -149,15 +149,18 @@ export function useAssistant(options: UseAssistantOptions) {
    * 将原始消息数组转换为标准格式的AssistantMessage数组。
    * 过滤无效消息，为缺失字段提供默认值。
    *
-   * @param {any[]} raw - 原始消息数组
+   * @param {unknown[]} raw - 原始消息数组
    * @returns {AssistantMessage[]} 规范化后的消息数组
    */
-  function normalizeMessages(raw: any[]): AssistantMessage[] {
+  function normalizeMessages(raw: unknown[]): AssistantMessage[] {
     return (raw || [])
-      .filter((m: any) => m && (m.role === 'user' || m.role === 'assistant' || m.role === 'system'))
-      .map((m: any, idx: number) => ({
+      .filter((m): m is { role?: string; id?: string; content?: string; ts?: string } => 
+        m !== null && typeof m === 'object' && (m as { role?: string }).role !== undefined
+      )
+      .filter((m) => m.role === 'user' || m.role === 'assistant' || m.role === 'system')
+      .map((m, idx: number) => ({
         id: m.id ?? `assistant_msg_${Date.now()}_${idx}`,
-        role: m.role,
+        role: m.role as 'user' | 'assistant' | 'system',
         content: m.content ?? '',
         ts: m.ts ?? new Date().toISOString(),
       }))
@@ -238,7 +241,7 @@ export function useAssistant(options: UseAssistantOptions) {
    */
   async function loadChat(scope: AssistantScope) {
     const state = getState(scope)
-    const res = await apiGet<{ messages: any[] }>(buildPath('/api/assistant/chat', scope))
+    const res = await apiGet<{ messages: unknown[] }>(buildPath('/api/assistant/chat', scope))
     state.messages.value = normalizeMessages(res.messages)
   }
 
@@ -352,9 +355,10 @@ export function useAssistant(options: UseAssistantOptions) {
       })
       await loadChat(scope)
       closeEditMessage()
-    } catch (e: any) {
+    } catch (e: unknown) {
       const state = getState(scope)
-      state.streamError.value = e?.message ?? String(e)
+      const error = e instanceof Error ? e.message : String(e)
+      state.streamError.value = error
     }
   }
 
@@ -373,9 +377,10 @@ export function useAssistant(options: UseAssistantOptions) {
     try {
       await apiDelete(buildPath(`/api/assistant/chat/messages/${m.id}`, scope))
       await loadChat(scope)
-    } catch (e: any) {
+    } catch (e: unknown) {
       const state = getState(scope)
-      state.streamError.value = e?.message ?? String(e)
+      const error = e instanceof Error ? e.message : String(e)
+      state.streamError.value = error
     }
   }
 
@@ -421,13 +426,13 @@ export function useAssistant(options: UseAssistantOptions) {
    *
    * @param {AssistantScope} scope - 作用域（'chat'或'workspace'）
    * @param {boolean | Event} appendUserMessage - 是否追加用户消息到消息列表
-   * @param {(card: any) => void} [onCardReceived] - 接收角色卡的回调函数（可选）
+   * @param {(card: unknown) => void} [onCardReceived] - 接收角色卡的回调函数（可选）
    * @returns {Promise<void>} 完成时返回
    */
   async function sendMessage(
     scope: AssistantScope, 
     appendUserMessage: boolean | Event = true,
-    onCardReceived?: (card: any) => void
+    onCardReceived?: (card: unknown) => void
   ) {
     const state = getState(scope)
     const shouldAppend = typeof appendUserMessage === 'boolean' ? appendUserMessage : true
@@ -477,34 +482,40 @@ export function useAssistant(options: UseAssistantOptions) {
         },
         (evt) => {
           if (evt.event === 'delta') {
-            const t = evt.data?.text
+            const data = evt.data as { text?: string } | undefined
+            const t = data?.text
             if (typeof t === 'string') {
               assistantMsg.content += t
             }
           } else if (evt.event === 'tool_trace') {
-            const content = evt.data?.content
+            const data = evt.data as { content?: string; messageId?: string } | undefined
+            const content = data?.content
             if (typeof content === 'string' && content.trim()) {
               state.messages.value.push({
-                id: evt.data?.messageId || `assistant_tool_${Date.now()}`,
+                id: data?.messageId || `assistant_tool_${Date.now()}`,
                 role: 'system',
                 content,
                 ts: new Date().toISOString(),
               })
             }
           } else if (evt.event === 'card') {
-            const card = evt.data?.card
+            const data = evt.data as { card?: unknown } | undefined
+            const card = data?.card
             if (card && onCardReceived) {
               onCardReceived(card)
             }
           } else if (evt.event === 'error') {
-            state.streamError.value = String(evt.data?.message ?? 'unknown error')
+            const data = evt.data as { message?: string } | undefined
+            state.streamError.value = String(data?.message ?? 'unknown error')
           }
         },
         assistantAborters[scope]?.signal,
       )
-    } catch (e: any) {
-      if (e?.name !== 'AbortError') {
-        state.streamError.value = e?.message ?? String(e)
+    } catch (e: unknown) {
+      if (e instanceof Error && e.name !== 'AbortError') {
+        state.streamError.value = e.message
+      } else if (!(e instanceof Error) || e.name !== 'AbortError') {
+        state.streamError.value = String(e)
       }
     } finally {
       state.isGenerating.value = false

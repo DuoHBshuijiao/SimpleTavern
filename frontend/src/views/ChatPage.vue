@@ -80,6 +80,7 @@ import SettingsDrawer from '../components/SettingsDrawer.vue'
 import AvatarCropper from '../components/AvatarCropper.vue'
 import ModernAvatar from '../components/ModernAvatar.vue'
 import ModernSelect from '../components/ModernSelect.vue'
+import { Users, Settings, Sparkles, Loader2, X, MoreHorizontal } from 'lucide-vue-next'
 
 // API
 import { postAndConsumeSse } from '../api/sse'
@@ -275,6 +276,17 @@ async function handleUpdateGroupDelay(delay: number) {
   }
 }
 
+interface ModelOption {
+  label: string
+  value: string
+  presetId: string | null
+}
+
+interface ModelOptionGroup {
+  label: string
+  options: ModelOption[]
+}
+
 /**
  * 计算聊天模型选项
  *
@@ -282,7 +294,7 @@ async function handleUpdateGroupDelay(delay: number) {
  * 按预设分组，每个选项包含label、value和presetId。
  */
 const chatModelOptions = computed(() => {
-  const options: any[] = []
+  const options: ModelOptionGroup[] = []
   if (!settings.settings) return []
 
   const recentModels = settings.settings.llm.usedModels || []
@@ -562,12 +574,14 @@ async function runGroupGeneration(
           (evt) => {
             if (stopRequested.value) return
             if (evt.event === 'delta') {
-              const t = evt.data?.text
+              const data = evt.data as { text?: string } | undefined
+              const t = data?.text
               if (typeof t === 'string') {
                 stream.appendDeltaBuffered(localAssistantId, t)
               }
             } else if (evt.event === 'error') {
-              streamError.value = String(evt.data?.message ?? 'unknown error')
+              const data = evt.data as { message?: string } | undefined
+              streamError.value = String(data?.message ?? 'unknown error')
             }
           },
           aborter.value?.signal,
@@ -744,12 +758,14 @@ async function sendUserMessage() {
             (evt) => {
               if (stopRequested.value) return
               if (evt.event === 'delta') {
-                const t = evt.data?.text
+                const data = evt.data as { text?: string } | undefined
+                const t = data?.text
                 if (typeof t === 'string') {
                   stream.appendDeltaBuffered(localAssistantId, t)
                 }
               } else if (evt.event === 'error') {
-                streamError.value = String(evt.data?.message ?? 'unknown error')
+                const data = evt.data as { message?: string } | undefined
+                streamError.value = String(data?.message ?? 'unknown error')
               }
             },
             aborter.value?.signal,
@@ -933,12 +949,14 @@ async function triggerInterject(characterId: string) {
           (evt) => {
             if (stopRequested.value) return
             if (evt.event === 'delta') {
-              const t = evt.data?.text
+              const data = evt.data as { text?: string } | undefined
+              const t = data?.text
               if (typeof t === 'string') {
                 stream.appendDeltaBuffered(localAssistantId, t)
               }
             } else if (evt.event === 'error') {
-              streamError.value = String(evt.data?.message ?? 'unknown error')
+              const data = evt.data as { message?: string } | undefined
+              streamError.value = String(data?.message ?? 'unknown error')
             }
           },
           aborter.value?.signal,
@@ -1126,12 +1144,14 @@ async function handleRewriteMessage(m: ChatMessage) {
             (evt) => {
               if (stopRequested.value) return
               if (evt.event === 'delta') {
-                const t = evt.data?.text
+                const data = evt.data as { text?: string } | undefined
+                const t = data?.text
                 if (typeof t === 'string') {
                   stream.appendDeltaBuffered(localAssistantId, t)
                 }
               } else if (evt.event === 'error') {
-                streamError.value = String(evt.data?.message ?? 'unknown error')
+                const data = evt.data as { message?: string } | undefined
+                streamError.value = String(data?.message ?? 'unknown error')
               }
             },
             aborter.value?.signal,
@@ -1171,12 +1191,14 @@ async function handleRewriteMessage(m: ChatMessage) {
             (evt) => {
               if (stopRequested.value) return
               if (evt.event === 'delta') {
-                const t = evt.data?.text
+                const data = evt.data as { text?: string } | undefined
+                const t = data?.text
                 if (typeof t === 'string') {
                   stream.appendDeltaBuffered(localAssistantId, t)
                 }
               } else if (evt.event === 'error') {
-                streamError.value = String(evt.data?.message ?? 'unknown error')
+                const data = evt.data as { message?: string } | undefined
+                streamError.value = String(data?.message ?? 'unknown error')
               }
             },
             aborter.value?.signal,
@@ -1597,12 +1619,14 @@ async function handleSaveAndSend() {
             (evt) => {
               if (stopRequested.value) return
               if (evt.event === 'delta') {
-                const t = evt.data?.text
+                const data = evt.data as { text?: string } | undefined
+                const t = data?.text
                 if (typeof t === 'string') {
                   stream.appendDeltaBuffered(localAssistantId, t)
                 }
               } else if (evt.event === 'error') {
-                streamError.value = String(evt.data?.message ?? 'unknown error')
+                const data = evt.data as { message?: string } | undefined
+                streamError.value = String(data?.message ?? 'unknown error')
               }
             },
             aborter.value?.signal,
@@ -1664,7 +1688,7 @@ const editingPersonaAvatarUrl = computed(() => {
 </script>
 
 <template>
-  <div class="flex h-screen w-full bg-dark-bg text-gray-200 overflow-hidden font-sans">
+  <div class="flex h-screen w-full bg-gradient-to-br from-[#0f172a] to-[#1e293b] text-gray-200 overflow-hidden font-sans">
     
     <!-- 左侧侧边栏 -->
     <ChatSidebar
@@ -1701,16 +1725,19 @@ const editingPersonaAvatarUrl = computed(() => {
 
     <!-- 右侧主区域 + 助理面板 -->
     <div class="flex-1 flex min-w-0 relative">
-      <main class="flex-1 flex flex-col relative min-w-0 bg-[#101014] transition-all duration-300">
+      <main class="flex-1 flex flex-col relative min-w-0 bg-transparent transition-all duration-300">
       
         <!-- 聊天内容区 -->
         <div v-if="(selectedCharacter || activeChat?.isGroup) && activeChat" class="flex flex-col h-full relative">
           <!-- 顶部标题栏 -->
-          <header class="absolute top-0 left-0 right-0 z-10 flex flex-col bg-gradient-to-b from-[#101014] via-[#101014]/90 to-transparent pointer-events-none">
+          <header 
+            class="absolute top-0 left-0 right-0 z-10 flex flex-col bg-gradient-to-b from-[#0f172a] via-[#0f172a]/90 to-transparent pointer-events-none"
+            style="transform: translateZ(0);"
+          >
             <div class="h-14 flex items-center justify-between px-6">
               <div class="pointer-events-auto flex items-center gap-3">
                 <template v-if="activeChat.isGroup">
-                  <span class="text-purple-400">👥</span>
+                  <span class="text-purple-400"><Users class="w-4 h-4" /></span>
                   <h2 class="text-lg font-bold text-purple-300 shadow-sm">{{ activeChat.title }}</h2>
                   <span class="text-xs text-gray-500">({{ activeChat.memberIds.length }}个角色)</span>
                   <button 
@@ -1718,7 +1745,7 @@ const editingPersonaAvatarUrl = computed(() => {
                     title="群聊设置"
                     @click="showGroupSettings = true"
                   >
-                    ⚙
+                    <Settings class="w-4 h-4" />
                   </button>
                 </template>
                 <template v-else>
@@ -1869,14 +1896,7 @@ const editingPersonaAvatarUrl = computed(() => {
     />
 
     <!-- 设置抽屉 -->
-    <SettingsDrawer 
-      v-model:show="showSettings" 
-      :chat="activeChat" 
-      :initial-tab="settingsTab" 
-      @open-member-settings="actions.openMemberSettingsEditor"
-    />
-
-    <!-- 消息编辑弹窗 -->
+          <!-- 消息编辑弹窗 -->
     <MessageEditorModal
       :show="actions.showMessageEditor.value"
       :message-id="actions.editingMessageId.value"
@@ -1890,6 +1910,14 @@ const editingPersonaAvatarUrl = computed(() => {
       @update:message-content="actions.editingMessageContent.value = $event"
       @save="actions.saveEditedMessage"
       @save-and-send="handleSaveAndSend"
+    />
+
+    <!-- 设置抽屉 -->
+    <SettingsDrawer 
+      v-model:show="showSettings" 
+      :chat="activeChat" 
+      :initial-tab="settingsTab" 
+      @open-member-settings="actions.openMemberSettingsEditor"
     />
 
     <!-- 群聊创建弹窗 -->
@@ -1927,10 +1955,12 @@ const editingPersonaAvatarUrl = computed(() => {
 <!-- 角色编辑弹窗 -->
   <div v-if="actions.showCharacterEditor.value" class="modal">
     <div class="modal-backdrop" @click="cancelCharacterEdit"></div>
-    <div class="modal-content chat-modal-width-1200-90">
+    <div class="modal-content chat-modal-width-1200-90 glass-panel stained-glass">
       <div class="modal-header">
         <h3 class="modal-title">{{ actions.isNewCharacter.value ? '新建角色' : '编辑角色' }}</h3>
-        <button class="modal-close" @click="cancelCharacterEdit">×</button>
+        <button class="modal-close" @click="cancelCharacterEdit">
+            <X class="w-5 h-5" />
+        </button>
       </div>
       <div class="modal-body">
         <div v-if="actions.editingCharacter.value" class="flex gap-6 h-[70vh]">
@@ -2004,17 +2034,21 @@ const editingPersonaAvatarUrl = computed(() => {
           </div>
 
           <!-- 角色编辑助手 -->
-          <div class="flex-[0.66] shrink-0 bg-[#141418] border border-white/10 rounded-2xl p-4 flex flex-col shadow-inner">
+          <div class="flex-[0.66] shrink-0 glass-panel rounded-2xl p-4 flex flex-col shadow-inner">
             <div class="flex items-center justify-between mb-4 px-1">
               <span class="text-sm font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2">
                 <span class="w-2 h-2 rounded-full bg-brand animate-pulse"></span>
                 聊天助手
               </span>
-              <button class="text-gray-500 hover:text-white transition-colors" @click="assistant.showAssistantSettings.value = true">⋯</button>
+              <button class="text-gray-500 hover:text-white transition-colors" @click="assistant.showAssistantSettings.value = true">
+                <MoreHorizontal class="w-4 h-4" />
+              </button>
             </div>
             <div class="flex-1 overflow-y-auto custom-scrollbar space-y-4 pr-2 mb-4">
               <div v-if="assistant.workspaceAssistantMessages.value.length === 0" class="text-xs text-gray-600 text-center py-12 flex flex-col items-center gap-3">
-                <div class="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center text-xl">✨</div>
+                <div class="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center text-xl">
+                    <Sparkles class="w-6 h-6 text-yellow-400" />
+                </div>
                 开始和助手对话以完善你的角色卡
               </div>
               <div v-for="m in assistant.workspaceAssistantMessages.value" :key="m.id" class="flex flex-col gap-1 group" :class="m.role === 'user' ? 'items-end' : 'items-start'">
@@ -2051,7 +2085,7 @@ const editingPersonaAvatarUrl = computed(() => {
                   :disabled="!assistant.workspaceAssistantDraft.value.trim() || assistant.isWorkspaceAssistantGenerating.value" 
                   @click="assistant.sendMessage('workspace', true, actions.applyAssistantCard)"
                 >
-                  <span v-if="assistant.isWorkspaceAssistantGenerating.value" class="animate-spin mr-2">⌛</span>
+                  <Loader2 v-if="assistant.isWorkspaceAssistantGenerating.value" class="animate-spin w-4 h-4 mr-2" />
                   发送
                 </button>
               </div>
@@ -2070,10 +2104,12 @@ const editingPersonaAvatarUrl = computed(() => {
   <!-- Persona 编辑弹窗 -->
   <div v-if="actions.showPersonaEditor.value" class="modal">
     <div class="modal-backdrop" @click="actions.showPersonaEditor.value = false"></div>
-    <div class="modal-content chat-modal-width-500-90">
+    <div class="modal-content chat-modal-width-500-90 glass-panel stained-glass">
       <div class="modal-header">
         <h3 class="modal-title">{{ actions.isNewPersona.value ? '新建身份' : '编辑身份' }}</h3>
-        <button class="modal-close" @click="actions.showPersonaEditor.value = false">×</button>
+        <button class="modal-close" @click="actions.showPersonaEditor.value = false">
+            <X class="w-5 h-5" />
+        </button>
       </div>
       <div class="modal-body">
         <div v-if="actions.editingPersona.value" class="space-y-6">
@@ -2116,7 +2152,9 @@ const editingPersonaAvatarUrl = computed(() => {
     <div class="modal-content chat-modal-width-520-92">
       <div class="modal-header">
         <h3 class="modal-title">切换用户身份</h3>
-        <button class="modal-close" @click="actions.cancelSwitchPersona">×</button>
+        <button class="modal-close" @click="actions.cancelSwitchPersona">
+            <X class="w-5 h-5" />
+        </button>
       </div>
       <div class="modal-body">
         <div class="space-y-4">
@@ -2142,7 +2180,9 @@ const editingPersonaAvatarUrl = computed(() => {
     <div class="modal-content chat-modal-width-520-92">
       <div class="modal-header">
         <h3 class="modal-title">聊天助手设置</h3>
-        <button class="modal-close" @click="assistant.showAssistantSettings.value = false">×</button>
+        <button class="modal-close" @click="assistant.showAssistantSettings.value = false">
+            <X class="w-5 h-5" />
+        </button>
       </div>
       <div class="modal-body">
         <div class="space-y-6">

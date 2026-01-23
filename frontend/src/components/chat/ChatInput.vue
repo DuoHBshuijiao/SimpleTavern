@@ -57,6 +57,18 @@ import { computed } from 'vue'
 import type { CharacterCard, GroupMemberSettings } from '../../types/models'
 import ModernAvatar from '../ModernAvatar.vue'
 import ModernSelect from '../ModernSelect.vue'
+import { MessageSquare } from 'lucide-vue-next'
+
+interface ModelOption {
+  label: string
+  value: string
+  presetId?: string | null
+}
+
+interface ModelOptionGroup {
+  label: string
+  options: ModelOption[]
+}
 
 const props = defineProps<{
   // 输入状态
@@ -83,7 +95,7 @@ const props = defineProps<{
   
   // 模型选择
   currentModel: string
-  modelOptions: any[]
+  modelOptions: (ModelOption | ModelOptionGroup | string)[]
   
   // 辅助函数
   getMemberSettings: (memberId: string) => GroupMemberSettings
@@ -191,14 +203,20 @@ function handleKeydown(e: KeyboardEvent) {
 </script>
 
 <template>
-  <div class="shrink-0 p-4 pb-6 w-full max-w-4xl mx-auto z-20 relative overflow-visible">
-    <div class="relative bg-[#18181c] border border-white/10 rounded-2xl shadow-xl p-3 flex flex-col gap-2 transition-colors focus-within:border-brand/40 focus-within:ring-1 focus-within:ring-brand/20">
+  <div class="shrink-0 p-4 pb-6 w-full max-w-4xl mx-auto z-20 relative overflow-visible" style="color: rgba(229, 231, 235, 1); background-color: unset; background: unset; opacity: 1;">
+    <!-- 
+      Refactored Container:
+      - Uses bg-slate-900/70 and backdrop-blur-xl for strong glass effect
+      - Uses border-white/10 for subtle border
+      - Removed hardcoded hex colors
+    -->
+    <div class="relative bg-slate-900/70 backdrop-blur-xl border border-white/10 rounded-2xl shadow-xl p-3 flex flex-col gap-2 transition-all focus-within:border-brand/40 focus-within:ring-1 focus-within:ring-brand/20 focus-within:bg-slate-900/80" style="opacity: 1;">
       <textarea
         :value="modelValue"
         @input="emit('update:modelValue', ($event.target as HTMLTextAreaElement).value)"
         :placeholder="inputPlaceholder"
         :disabled="inputDisabled"
-        class="input textarea !bg-transparent !border-0 text-base resize-none min-h-[80px]"
+        class="input textarea !bg-transparent !border-0 text-base resize-none min-h-[80px] text-primary placeholder-gray-500"
         :class="inputDisabled ? 'opacity-50' : ''"
         @keydown="handleKeydown"
       ></textarea>
@@ -211,7 +229,7 @@ function handleKeydown(e: KeyboardEvent) {
             <span>{{ groupMembers[currentSpeakerIndex]?.name || '角色' }} 正在发言...</span>
             <span class="text-gray-500">({{ currentSpeakerIndex + 1 }}/{{ groupMembers.length }})</span>
             <button 
-              class="ml-2 px-2 py-0.5 text-xs bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-400 rounded transition-colors"
+              class="ml-2 px-2 py-0.5 text-xs bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-400 rounded transition-colors border border-yellow-500/20"
               @click="emit('pause-group')"
             >
               暂停
@@ -222,7 +240,7 @@ function handleKeydown(e: KeyboardEvent) {
           <div v-else-if="showContinueButton && pendingMembersCount > 0" class="flex items-center gap-2 text-xs text-green-400">
             <span>轮次已暂停，还有 {{ pendingMembersCount }} 位角色待发言</span>
             <button 
-              class="px-3 py-1 text-xs bg-green-500/20 hover:bg-green-500/30 text-green-400 rounded transition-colors font-medium"
+              class="px-3 py-1 text-xs bg-green-500/20 hover:bg-green-500/30 text-green-400 rounded transition-colors font-medium border border-green-500/20"
               @click="emit('continue-group')"
             >
               继续轮次
@@ -231,7 +249,7 @@ function handleKeydown(e: KeyboardEvent) {
           
           <!-- 插话面板 -->
           <div v-else-if="canInterject && isGroup && !isInterjecting" class="flex items-center gap-2 text-xs">
-            <span class="text-purple-400">💬 点击角色插话：</span>
+            <span class="text-purple-400 flex items-center gap-1"><MessageSquare class="w-3 h-3" /> 点击角色插话：</span>
             <div class="flex items-center gap-1">
               <div 
                 v-for="member in groupMembers"
@@ -245,13 +263,13 @@ function handleKeydown(e: KeyboardEvent) {
                   :name="member.name" 
                   :size="24" 
                   aspect="1"
-                  rounded="rounded"
+                  rounded="rounded-lg"
                   class="ring-2 ring-purple-500/50 hover:ring-purple-500"
                 />
               </div>
             </div>
             <button 
-              class="ml-2 px-2 py-0.5 text-xs bg-gray-500/20 hover:bg-gray-500/30 text-gray-400 rounded transition-colors"
+              class="ml-2 px-2 py-0.5 text-xs bg-white/5 hover:bg-white/10 text-gray-400 rounded transition-colors border border-white/5"
               @click="emit('hide-interject')"
             >
               关闭
@@ -281,8 +299,8 @@ function handleKeydown(e: KeyboardEvent) {
             @select="emit('select-model', $event)"
           />
           <button 
-            class="chat-action-button"
-            :class="primaryActionClass"
+            class="chat-action-button shadow-lg transition-all active:scale-95"
+            :class="[primaryActionClass, primaryActionDisabled ? 'opacity-50 cursor-not-allowed' : 'hover:shadow-brand hover:-translate-y-0.5']"
             :disabled="primaryActionDisabled"
             @click="emit('primary-action')"
           >
@@ -292,13 +310,13 @@ function handleKeydown(e: KeyboardEvent) {
       </div>
     </div>
     
-    <div class="text-center mt-2 text-xs text-gray-600">
+    <div class="text-center mt-2 text-xs text-gray-500">
       Markdown 支持 · Ctrl + Enter 发送
     </div>
     
     <!-- 助理按钮 -->
     <button
-      class="absolute -right-16 bottom-10 w-12 h-12 rounded-xl bg-[#b76e79] text-white font-bold shadow-lg shadow-[#b76e79]/30 hover:bg-[#c27a85] transition-colors border border-white/10"
+      class="assistant-button w-12 h-12 rounded-xl bg-assistant text-white font-bold shadow-lg shadow-assistant/30 hover:bg-assistant/80 transition-all border border-white/10 hover:scale-105 active:scale-95 flex items-center justify-center backdrop-blur-sm z-50"
       title="聊天助手"
       @click="emit('toggle-assistant')"
     >
@@ -308,11 +326,29 @@ function handleKeydown(e: KeyboardEvent) {
 </template>
 
 <style scoped>
+@reference "tailwindcss";
+
 /* 组件特有样式，保持 scoped */
 .textarea {
   scrollbar-width: none;
 }
 .textarea::-webkit-scrollbar {
   display: none;
+}
+
+.assistant-button {
+  position: absolute;
+  right: -4rem; /* -right-16 */
+  bottom: 2.5rem; /* bottom-10 */
+  margin-top: 49px;
+  margin-bottom: 49px;
+}
+
+@media (max-width: 2220px) {
+  .assistant-button {
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+  }
 }
 </style>

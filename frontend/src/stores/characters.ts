@@ -59,8 +59,9 @@ export const useCharactersStore = defineStore('characters', {
       this.error = null
       try {
         this.list = await apiGet<CharacterCard[]>('/api/characters')
-      } catch (e: any) {
-        this.error = e?.message ?? String(e)
+      } catch (e: unknown) {
+        const error = e instanceof Error ? e.message : String(e)
+        this.error = error
         throw e
       } finally {
         this.loading = false

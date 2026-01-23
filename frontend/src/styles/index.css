@@ -7,6 +7,7 @@
  *    - 导入Tailwind CSS：提供工具类
  *    - 导入主题变量：提供CSS变量
  *    - 导入基础样式：提供全局重置和排版
+ *    - 导入Glass样式：提供Liquid Glass风格样式
  *    - 导入滚动条样式：自定义滚动条外观
  *    - 导入动画样式：提供动画效果
  *    - 导入工具类：提供自定义工具类
@@ -16,16 +17,18 @@
  *    1. Tailwind CSS：基础工具类框架
  *    2. variables.css：CSS变量定义（必须在Tailwind之后，其他样式之前）
  *    3. base.css：全局基础样式
- *    4. scrollbar.css：滚动条样式
- *    5. animations.css：动画样式
- *    6. utilities.css：工具类样式
- *    7. components/index.css：组件样式
+ *    4. glass.css：Glass Morphism 样式
+ *    5. scrollbar.css：滚动条样式
+ *    6. animations.css：动画样式
+ *    7. utilities.css：工具类样式
+ *    8. components/index.css：组件样式
  *
  * 目录结构：
  *    styles/
  *    ├── index.css           # 入口文件（本文件）
  *    ├── variables.css       # 主题变量和设计令牌
  *    ├── base.css            # 全局基础样式
+ *    ├── glass.css           # Glass Morphism 样式
  *    ├── scrollbar.css       # 滚动条样式
  *    ├── animations.css      # 动画样式
  *    ├── utilities.css       # 工具类
@@ -52,14 +55,17 @@
 /* 3. 基础样式 */
 @import './base.css';
 
-/* 4. 滚动条 */
+/* 4. Glass Morphism 样式 */
+@import './glass.css';
+
+/* 5. 滚动条 */
 @import './scrollbar.css';
 
-/* 5. 动画 */
+/* 6. 动画 */
 @import './animations.css';
 
-/* 6. 工具类 */
+/* 7. 工具类 */
 @import './utilities.css';
 
-/* 7. 组件样式 */
+/* 8. 组件样式 */
 @import './components/index.css';

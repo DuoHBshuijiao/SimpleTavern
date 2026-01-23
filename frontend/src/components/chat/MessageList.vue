@@ -49,6 +49,7 @@ import { ref, nextTick } from 'vue'
 import type { ChatMessage, CharacterCard, UserPersona } from '../../types/models'
 import ModernAvatar from '../ModernAvatar.vue'
 import MarkdownIt from 'markdown-it'
+import { Settings, ChevronLeft, ChevronRight } from 'lucide-vue-next'
 
 const props = defineProps<{
   messages: ChatMessage[]
@@ -205,9 +206,10 @@ defineExpose({ scrollToBottom, scrollRef })
   <div 
     ref="scrollRef" 
     class="flex-1 overflow-y-auto p-4 pb-4 scroll-smooth custom-scrollbar" 
-    :class="isGroup ? 'pt-28' : 'pt-20'"
+    :class="isGroup ? 'pt-32' : 'pt-24'"
+    style="contain: content; transform: translateZ(0);"
   >
-    <div class="max-w-4xl mx-auto space-y-8">
+    <div class="max-w-4xl mx-auto space-y-8" style="padding-top: 98px;">
       <div 
         v-for="m in messages" 
         :key="m.id" 
@@ -217,7 +219,7 @@ defineExpose({ scrollToBottom, scrollRef })
         <!-- 头像 -->
         <div class="flex-shrink-0 mt-1">
           <div v-if="m.role === 'system'" class="w-10 h-10 rounded-full bg-yellow-500/20 flex items-center justify-center text-yellow-500">
-            ⚙
+            <Settings class="w-6 h-6" />
           </div>
           <ModernAvatar 
             v-else
@@ -245,10 +247,10 @@ defineExpose({ scrollToBottom, scrollRef })
             class="message-bubble relative px-5 py-3.5 rounded-2xl text-[15px] leading-7 shadow-sm transition-all duration-200 border max-w-full min-w-0"
             :class="[
               m.role === 'user' 
-                ? 'bg-brand/10 border-brand/20 text-gray-100 rounded-tr-sm hover:border-brand/30' 
+                ? 'bg-brand/20 backdrop-blur-sm border-brand/20 text-gray-100 rounded-tr-sm hover:border-brand/30' 
                 : m.role === 'assistant'
-                  ? 'bg-[#1e1e24] border-white/5 text-gray-200 rounded-tl-sm hover:bg-[#232329]'
-                  : 'bg-yellow-500/5 border-yellow-500/10 text-gray-300',
+                  ? 'bg-white/5 backdrop-blur-md border-white/10 text-gray-200 rounded-tl-sm hover:bg-white/10'
+                  : 'bg-yellow-500/10 border-yellow-500/20 text-gray-300',
             ]"
           >
             <div
@@ -266,7 +268,7 @@ defineExpose({ scrollToBottom, scrollRef })
               @click="emit('switch-previous-version', m)"
               :title="`上一个版本 (${getCurrentVersionIndex(m) + 1}/${getVersionCount(m)})`"
             >
-              ◀
+              <ChevronLeft class="w-3 h-3" />
             </button>
             <span class="text-xs text-gray-500">
               {{ getCurrentVersionIndex(m) + 1 }}/{{ getVersionCount(m) }}
@@ -276,7 +278,7 @@ defineExpose({ scrollToBottom, scrollRef })
               @click="emit('switch-next-version', m)"
               :title="`下一个版本 (${getCurrentVersionIndex(m) + 1}/${getVersionCount(m)})`"
             >
-              ▶
+              <ChevronRight class="w-3 h-3" />
             </button>
           </div>
 

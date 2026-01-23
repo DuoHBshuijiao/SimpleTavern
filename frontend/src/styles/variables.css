@@ -28,58 +28,58 @@
 
 @theme {
   /* ========== 品牌色 ========== */
-  --color-brand: #a230ed;
-  --color-brand-hover: #b558f0;
-  --color-brand-dark: #8e23d1;
-  --color-brand-light: #c77df5;
+  --color-brand: #3b82f6; /* Blue-500 */
+  --color-brand-hover: #60a5fa; /* Blue-400 */
+  --color-brand-dark: #2563eb; /* Blue-600 */
+  --color-brand-light: #93c5fd; /* Blue-300 */
   
-  /* ========== 背景色 ========== */
-  --color-dark-bg: #101014;
-  --color-dark-surface: #18181c;
-  --color-dark-lighter: #2d2d33;
-  --color-dark-elevated: #1e1e24;
+  /* ========== 背景色 (Liquid Glass Dark) ========== */
+  --color-dark-bg: #0f172a; /* Slate-950 */
+  --color-dark-surface: rgba(30, 41, 59, 0.7); /* Slate-900 / 70% */
+  --color-dark-lighter: rgba(51, 65, 85, 0.5); /* Slate-700 / 50% */
+  --color-dark-elevated: rgba(30, 41, 59, 0.9); /* Slate-900 / 90% */
   
-  /* ========== 文字色 ========== */
-  --color-text-primary: rgba(255, 255, 255, 0.9);
-  --color-text-secondary: rgba(255, 255, 255, 0.6);
-  --color-text-muted: rgba(255, 255, 255, 0.4);
+  /* ========== 文字色 (Slate) ========== */
+  --color-text-primary: #f8fafc; /* Slate-50 */
+  --color-text-secondary: #94a3b8; /* Slate-400 */
+  --color-text-muted: #64748b; /* Slate-500 */
   
-  /* ========== 边框色 ========== */
-  --color-border-subtle: rgba(255, 255, 255, 0.05);
+  /* ========== 边框色 (Subtle) ========== */
+  --color-border-subtle: rgba(255, 255, 255, 0.05); /* Very subtle */
   --color-border-default: rgba(255, 255, 255, 0.1);
-  --color-border-strong: rgba(255, 255, 255, 0.2);
+  --color-border-strong: rgba(255, 255, 255, 0.15);
   
   /* ========== 状态色 ========== */
   --color-success: #22c55e;
-  --color-success-bg: rgba(34, 197, 94, 0.2);
+  --color-success-bg: rgba(34, 197, 94, 0.15);
   --color-success-text: #86efac;
   
   --color-warning: #f59e0b;
-  --color-warning-bg: rgba(245, 158, 11, 0.2);
+  --color-warning-bg: rgba(245, 158, 11, 0.15);
   --color-warning-text: #fcd34d;
   
   --color-error: #ef4444;
-  --color-error-bg: rgba(239, 68, 68, 0.2);
+  --color-error-bg: rgba(239, 68, 68, 0.15);
   --color-error-text: #fecaca;
   
   --color-info: #3b82f6;
-  --color-info-bg: rgba(59, 130, 246, 0.2);
+  --color-info-bg: rgba(59, 130, 246, 0.15);
   --color-info-text: #93c5fd;
   
   /* ========== 特殊色（群聊/角色相关） ========== */
   --color-purple: #a855f7;
-  --color-purple-bg: rgba(168, 85, 247, 0.2);
+  --color-purple-bg: rgba(168, 85, 247, 0.15);
   --color-purple-text: #e9d5ff;
   
   --color-assistant: #b76e79;
-  --color-assistant-bg: rgba(183, 110, 121, 0.2);
+  --color-assistant-bg: rgba(183, 110, 121, 0.15);
   
-  /* ========== 圆角 ========== */
+  /* ========== 圆角 (Large Radius) ========== */
   --radius-sm: 0.375rem;
   --radius-md: 0.5rem;
-  --radius-lg: 0.75rem;
-  --radius-xl: 1rem;
-  --radius-2xl: 1.5rem;
+  --radius-lg: 0.75rem; /* Increased */
+  --radius-xl: 1rem;    /* Increased */
+  --radius-2xl: 1.5rem; /* Increased */
   --radius-3xl: 2rem;
   --radius-full: 9999px;
   
@@ -96,9 +96,9 @@
   --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.3);
   --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.3);
   --shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.3);
-  --shadow-brand: 0 10px 25px rgba(162, 48, 237, 0.2);
+  --shadow-brand: 0 10px 25px rgba(59, 130, 246, 0.15); /* Updated for blue brand */
   --shadow-success: 0 10px 25px rgba(34, 197, 94, 0.15);
-  --shadow-error: 0 10px 25px rgba(239, 68, 68, 0.2);
+  --shadow-error: 0 10px 25px rgba(239, 68, 68, 0.15);
   --shadow-purple: 0 10px 25px rgba(168, 85, 247, 0.15);
   
   /* ========== 过渡 ========== */

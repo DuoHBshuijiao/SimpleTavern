@@ -30,6 +30,7 @@
  *    - 位置：组件层，提供模型选择功能
  */
 import { computed, ref, watch } from 'vue'
+import { X, Check, Loader2 } from 'lucide-vue-next'
 
 const props = defineProps<{
   show: boolean
@@ -120,67 +121,71 @@ function confirm() {
 </script>
 
 <template>
-  <div v-if="show" class="modal">
-    <div class="modal-backdrop" @click="close"></div>
-    <div class="modal-content chat-modal-width-520-92 max-h-[80vh]">
-      <div class="modal-header">
-        <h3 class="modal-title">筛选模型</h3>
-        <button class="modal-close" @click="close">✕</button>
-      </div>
+  <Transition name="modal">
+    <div v-if="show" class="modal">
+      <div class="modal-backdrop" @click="close"></div>
+      <div class="modal-content chat-modal-width-520-92 max-h-[80vh] glass-panel">
+        <div class="modal-header">
+          <h3 class="modal-title text-slate-50">筛选模型</h3>
+          <button class="modal-close" @click="close">
+              <X class="w-5 h-5" />
+          </button>
+        </div>
 
-      <div class="modal-body flex flex-col min-h-0">
-        <div class="space-y-4 flex-1 flex flex-col min-h-0">
-          <div class="form-group">
-            <input 
-              v-model="searchQuery"
-              type="text"
-              placeholder="搜索模型..."
-              class="input"
-            />
-          </div>
+        <div class="modal-body flex flex-col min-h-0">
+          <div class="space-y-4 flex-1 flex flex-col min-h-0">
+            <div class="form-group">
+              <input 
+                v-model="searchQuery"
+                type="text"
+                placeholder="搜索模型..."
+                class="input bg-black/20 border-white/10 focus:border-brand/50"
+              />
+            </div>
 
-          <div class="flex items-center justify-between text-xs text-gray-400">
-            <span>共 {{ props.models.length }} 个模型，当前显示 {{ filteredModels.length }} 个</span>
-            <div class="flex gap-2">
-              <button class="hover:text-brand transition-colors" @click="selectAllFiltered">全选当前</button>
-              <button class="hover:text-gray-200 transition-colors" @click="deselectAllFiltered">取消当前</button>
+            <div class="flex items-center justify-between text-xs text-gray-400">
+              <span>共 {{ props.models.length }} 个模型，当前显示 {{ filteredModels.length }} 个</span>
+              <div class="flex gap-2">
+                <button class="hover:text-brand transition-colors" @click="selectAllFiltered">全选当前</button>
+                <button class="hover:text-gray-200 transition-colors" @click="deselectAllFiltered">取消当前</button>
+              </div>
             </div>
-          </div>
 
-          <div class="flex-1 overflow-y-auto custom-scrollbar bg-black/20 rounded-lg border border-white/5 p-2 min-h-[200px]">
-            <div v-if="loading" class="flex items-center justify-center h-full text-gray-500">
-              <span class="animate-spin mr-2">⟳</span> 加载中...
-            </div>
-            <div v-else-if="filteredModels.length === 0" class="text-center text-gray-600 py-8">
-              未找到匹配模型
-            </div>
-            <div v-else class="space-y-1">
-              <div 
-                v-for="m in filteredModels" 
-                :key="m"
-                class="flex items-center gap-3 px-2 py-1.5 rounded hover:bg-white/5 cursor-pointer select-none transition-colors"
-                @click="toggle(m)"
-              >
+            <div class="flex-1 overflow-y-auto custom-scrollbar bg-black/20 rounded-lg border border-white/5 p-2 min-h-[200px]">
+              <div v-if="loading" class="flex items-center justify-center h-full text-gray-500">
+                <Loader2 class="animate-spin w-4 h-4 mr-2" /> 加载中...
+              </div>
+              <div v-else-if="filteredModels.length === 0" class="text-center text-gray-600 py-8">
+                未找到匹配模型
+              </div>
+              <div v-else class="space-y-1">
                 <div 
-                  class="w-4 h-4 rounded border flex items-center justify-center transition-colors"
-                  :class="selectedModels.has(m) ? 'bg-brand border-brand' : 'border-gray-600'"
+                  v-for="m in filteredModels" 
+                  :key="m"
+                  class="flex items-center gap-3 px-2 py-1.5 rounded hover:bg-white/5 cursor-pointer select-none transition-colors"
+                  @click="toggle(m)"
                 >
-                  <span v-if="selectedModels.has(m)" class="text-white text-[10px] font-bold">✓</span>
+                  <div 
+                    class="w-4 h-4 rounded border flex items-center justify-center transition-colors"
+                    :class="selectedModels.has(m) ? 'bg-brand border-brand' : 'border-gray-600'"
+                  >
+                    <Check v-if="selectedModels.has(m)" class="text-white w-2.5 h-2.5" />
+                  </div>
+                  <span class="text-sm text-gray-300 truncate">{{ m }}</span>
                 </div>
-                <span class="text-sm text-gray-300 truncate">{{ m }}</span>
               </div>
             </div>
           </div>
         </div>
-      </div>
 
-      <div class="modal-footer">
-        <span class="text-xs text-gray-400 mr-auto">已选中 {{ selectedModels.size }} 个</span>
-        <button class="btn btn-secondary" @click="close">取消</button>
-        <button class="btn btn-primary" @click="confirm">添加选中项</button>
+        <div class="modal-footer">
+          <span class="text-xs text-gray-400 mr-auto">已选中 {{ selectedModels.size }} 个</span>
+          <button class="btn btn-secondary bg-white/5 hover:bg-white/10 text-gray-300 border border-white/5" @click="close">取消</button>
+          <button class="btn btn-primary bg-brand hover:bg-brand-hover text-white shadow-lg shadow-brand/20" @click="confirm">添加选中项</button>
+        </div>
       </div>
     </div>
-  </div>
+  </Transition>
 </template>
 
 <style scoped>

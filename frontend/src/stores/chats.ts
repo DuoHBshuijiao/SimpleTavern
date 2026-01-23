@@ -50,7 +50,7 @@
 
 import { defineStore } from 'pinia'
 
-import type { Chat, ChatOverrides, GroupMemberSettings } from '../types/models'
+import type { Chat, ChatMessage, ChatOverrides, GroupMemberSettings } from '../types/models'
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/http'
 
 /**
@@ -84,8 +84,9 @@ export const useChatsStore = defineStore('chats', {
       this.error = null
       try {
         this.list = await apiGet<Chat[]>(`/api/chats?characterId=${encodeURIComponent(characterId)}`)
-      } catch (e: any) {
-        this.error = e?.message ?? String(e)
+      } catch (e: unknown) {
+        const error = e instanceof Error ? e.message : String(e)
+        this.error = error
         throw e
       } finally {
         this.loading = false
@@ -164,8 +165,9 @@ export const useChatsStore = defineStore('chats', {
       this.error = null
       try {
         this.groupList = await apiGet<Chat[]>('/api/chats/groups')
-      } catch (e: any) {
-        this.error = e?.message ?? String(e)
+      } catch (e: unknown) {
+        const error = e instanceof Error ? e.message : String(e)
+        this.error = error
         throw e
       } finally {
         this.loading = false
@@ -190,8 +192,9 @@ export const useChatsStore = defineStore('chats', {
         this.activeChatId = chat.id
         this.activeChat = chat
         return chat
-      } catch (e: any) {
-        this.error = e?.message ?? String(e)
+      } catch (e: unknown) {
+        const error = e instanceof Error ? e.message : String(e)
+        this.error = error
         throw e
       } finally {
         this.loading = false
@@ -416,9 +419,9 @@ export const useChatsStore = defineStore('chats', {
      * 用于流式传输时，在本地状态中添加临时消息，实现实时预览。
      * 不发送网络请求，仅更新本地状态。
      *
-     * @param {any} message - 消息对象
+     * @param {ChatMessage} message - 消息对象
      */
-    addLocalMessage(message: any) {
+    addLocalMessage(message: ChatMessage) {
       if (!this.activeChat) return
       this.activeChat.messages.push(message)
     },

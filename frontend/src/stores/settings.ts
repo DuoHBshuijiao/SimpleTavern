@@ -53,8 +53,9 @@ export const useSettingsStore = defineStore('settings', {
       this.error = null
       try {
         this.settings = await apiGet<Settings>('/api/settings')
-      } catch (e: any) {
-        this.error = e?.message ?? String(e)
+      } catch (e: unknown) {
+        const error = e instanceof Error ? e.message : String(e)
+        this.error = error
         throw e
       } finally {
         this.loading = false
@@ -74,8 +75,9 @@ export const useSettingsStore = defineStore('settings', {
       this.error = null
       try {
         this.settings = await apiPut<Settings>('/api/settings', next)
-      } catch (e: any) {
-        this.error = e?.message ?? String(e)
+      } catch (e: unknown) {
+        const error = e instanceof Error ? e.message : String(e)
+        this.error = error
         throw e
       } finally {
         this.loading = false
