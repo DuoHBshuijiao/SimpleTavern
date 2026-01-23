@@ -1,0 +1,254 @@
+/**
+ * 按钮组件样式文件
+ *
+ * 定义统一的按钮设计系统，包括基础按钮、尺寸变体、颜色变体、聊天操作按钮等。
+ *
+ * 主要功能：
+ *    - 基础按钮样式：统一的按钮基础样式，包括过渡效果和悬停效果
+ *    - 尺寸变体：xs、sm、lg三种尺寸
+ *    - 颜色变体：primary（主要）、secondary（次要）、ghost（幽灵）、danger（危险）、success（成功）
+ *    - 聊天操作按钮：专门用于聊天界面的操作按钮，包括primary、continue、next、stop等变体
+ *    - 图标按钮：用于图标按钮的样式
+ *    - 按钮组：多个按钮组合的样式
+ *
+ * 设计元素：
+ *    - 基础按钮：内联flex布局，居中对齐，圆角，过渡效果，悬停时轻微上移
+ *    - 主要按钮：品牌色背景，白色文字，品牌色阴影
+ *    - 次要按钮：深色背景，边框，悬停时变亮
+ *    - 幽灵按钮：透明背景，悬停时显示背景
+ *    - 危险按钮：错误色背景和文字
+ *    - 成功按钮：成功色背景和文字
+ *    - 聊天操作按钮：专门用于聊天界面的按钮，有独特的样式和变体
+ *
+ * 原理：
+ *    - 使用transition实现平滑的过渡效果
+ *    - 使用transform实现悬停时的轻微移动效果
+ *    - 使用box-shadow实现阴影效果
+ *
+ * 文件关系：
+ *    - 被导入：被styles/components/index.css导入
+ *    - 导入：无
+ *    - 依赖：依赖styles/variables.css的CSS变量
+ *    - 位置：样式层，提供按钮组件样式
+ */
+
+/* ========== 基础按钮 ========== */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-radius: var(--radius-lg);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  line-height: 1.5;
+  color: var(--color-text-primary);
+  background-color: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: 
+    background-color var(--transition-fast),
+    color var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    transform var(--transition-fast);
+  user-select: none;
+  white-space: nowrap;
+}
+
+.btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* ========== 尺寸变体 ========== */
+.btn-xs {
+  padding: 0.25rem 0.5rem;
+  font-size: var(--text-xs);
+  border-radius: var(--radius-md);
+}
+
+.btn-sm {
+  padding: 0.375rem 0.75rem;
+  font-size: var(--text-sm);
+}
+
+.btn-lg {
+  padding: 0.75rem 1.5rem;
+  font-size: var(--text-base);
+}
+
+/* ========== 颜色变体 ========== */
+.btn-primary {
+  background-color: var(--color-brand);
+  color: white;
+  box-shadow: var(--shadow-brand);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background-color: var(--color-brand-hover);
+}
+
+.btn-secondary {
+  background-color: var(--color-dark-lighter);
+  border-color: var(--color-border-default);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background-color: var(--color-dark-elevated);
+  border-color: var(--color-border-strong);
+}
+
+.btn-ghost {
+  background-color: transparent;
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.btn-danger {
+  background-color: var(--color-error-bg);
+  color: var(--color-error-text);
+  box-shadow: var(--shadow-error);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background-color: rgba(239, 68, 68, 0.3);
+}
+
+.btn-success {
+  background-color: var(--color-success-bg);
+  color: var(--color-success-text);
+  box-shadow: var(--shadow-success);
+}
+
+.btn-success:hover:not(:disabled) {
+  background-color: rgba(34, 197, 94, 0.3);
+}
+
+/* ========== 聊天操作按钮（保留原有类名以兼容） ========== */
+.chat-action-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 0.375rem 1rem;
+  border-radius: 0.6rem;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: #f8fafc;
+  border: 1px solid transparent;
+  transition: 
+    background-color var(--transition-normal),
+    color var(--transition-normal),
+    border-color var(--transition-normal),
+    box-shadow var(--transition-normal);
+  box-shadow: var(--shadow-brand);
+}
+
+.chat-action-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.chat-action-button--primary {
+  background-color: var(--color-brand);
+  color: white;
+  box-shadow: var(--shadow-brand);
+  border-color: rgba(147, 197, 253, 0.2); /* brand-light/20 */
+}
+
+.chat-action-button--primary:hover:not(:disabled) {
+  background-color: var(--color-brand-hover);
+  border-color: rgba(147, 197, 253, 0.3); /* brand-light/30 */
+}
+
+.chat-action-button--continue {
+  background-color: rgba(22, 163, 74, 0.8); /* green-600/80 */
+  color: white;
+  border-color: rgba(74, 222, 128, 0.2); /* green-400/20 */
+  box-shadow: var(--shadow-success);
+  backdrop-filter: blur(4px);
+}
+
+.chat-action-button--continue:hover:not(:disabled) {
+  background-color: rgb(22, 163, 74); /* green-600 */
+  border-color: rgba(74, 222, 128, 0.3);
+}
+
+.chat-action-button--next {
+  background-color: rgba(147, 51, 234, 0.8); /* purple-600/80 */
+  color: white;
+  border-color: rgba(192, 132, 252, 0.2); /* purple-400/20 */
+  box-shadow: var(--shadow-purple);
+  backdrop-filter: blur(4px);
+}
+
+.chat-action-button--next:hover:not(:disabled) {
+  background-color: rgb(147, 51, 234); /* purple-600 */
+  border-color: rgba(192, 132, 252, 0.3);
+}
+
+.chat-action-button--stop {
+  background-color: rgba(239, 68, 68, 0.8); /* red-500/80 */
+  color: white;
+  border-color: rgba(248, 113, 113, 0.2); /* red-400/20 */
+  box-shadow: var(--shadow-error);
+  backdrop-filter: blur(4px);
+}
+
+.chat-action-button--stop:hover:not(:disabled) {
+  background-color: rgb(239, 68, 68); /* red-500 */
+  border-color: rgba(248, 113, 113, 0.3);
+}
+
+/* ========== 图标按钮 ========== */
+.btn-icon {
+  padding: 0.5rem;
+  border-radius: var(--radius-lg);
+}
+
+.btn-icon-sm {
+  padding: 0.375rem;
+  border-radius: var(--radius-md);
+}
+
+.btn-icon-lg {
+  padding: 0.75rem;
+  border-radius: var(--radius-xl);
+}
+
+/* ========== 按钮组 ========== */
+.btn-group {
+  display: inline-flex;
+}
+
+.btn-group .btn {
+  border-radius: 0;
+}
+
+.btn-group .btn:first-child {
+  border-top-left-radius: var(--radius-lg);
+  border-bottom-left-radius: var(--radius-lg);
+}
+
+.btn-group .btn:last-child {
+  border-top-right-radius: var(--radius-lg);
+  border-bottom-right-radius: var(--radius-lg);
+}
+
+.btn-group .btn + .btn {
+  margin-left: -1px;
+}

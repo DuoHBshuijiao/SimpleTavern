@@ -1,0 +1,281 @@
+/**
+ * 数据模型类型定义模块
+ *
+ * 定义应用中使用的所有TypeScript类型和接口，包括聊天、角色、设置等核心数据模型。
+ *
+ * 主要功能：
+ *    - 定义聊天相关类型：ChatRole、ChatMessage、Chat等
+ *    - 定义角色相关类型：CharacterCard
+ *    - 定义用户身份类型：UserPersona
+ *    - 定义设置相关类型：Settings、ApiPreset、GenerationParams等
+ *    - 定义群聊相关类型：GroupMemberSettings、ChatOverrides等
+ *
+ * 主要类型：
+ *    - ChatRole: 聊天消息角色类型
+ *    - GenerationParams: LLM生成参数
+ *    - ChatOverrides: 聊天覆盖设置
+ *    - UserPersona: 用户身份
+ *    - ApiPreset: API预设配置
+ *    - Settings: 应用设置
+ *    - CharacterCard: 角色卡片
+ *    - ChatMessage: 聊天消息
+ *    - GroupMemberSettings: 群聊成员设置
+ *    - Chat: 聊天会话
+ *
+ * 文件关系：
+ *    - 被导入：被stores、composables、components、views等模块导入用于类型定义
+ *    - 导入：无
+ *    - 依赖：无
+ *    - 位置：类型定义层，提供全局类型定义
+ */
+
+/**
+ * 聊天消息角色类型
+ *
+ * 定义消息的发送者角色：系统、用户或助手。
+ */
+export type ChatRole = 'system' | 'user' | 'assistant'
+
+/**
+ * LLM生成参数接口
+ *
+ * 定义调用LLM API时的生成参数配置。
+ *
+ * 字段说明：
+ *    - model: 模型名称
+ *    - temperature: 温度参数，控制输出的随机性（0-2）
+ *    - top_p: 核采样参数，控制输出的多样性
+ *    - max_tokens: 最大生成token数
+ */
+export interface GenerationParams {
+  model?: string | null
+  temperature?: number | null
+  top_p?: number | null
+  max_tokens?: number | null
+}
+
+/**
+ * 聊天覆盖设置接口
+ *
+ * 定义聊天会话的覆盖设置，用于覆盖全局设置。
+ *
+ * 字段说明：
+ *    - prompt: 自定义提示词
+ *    - longTermMemory: 长期记忆内容
+ *    - presetId: API预设ID
+ *    - pureAiMode: 纯AI模式（不包含用户消息）
+ *    - params: LLM生成参数
+ *    - memberSettings: 群聊成员设置（仅群聊使用）
+ */
+export interface ChatOverrides {
+  prompt?: string | null
+  longTermMemory?: string | null
+  presetId?: string | null
+  pureAiMode?: boolean | null
+  params: GenerationParams
+  memberSettings?: Record<string, GroupMemberSettings>
+}
+
+/**
+ * 用户身份接口
+ *
+ * 定义用户的身份信息，用于在聊天中标识用户。
+ *
+ * 字段说明：
+ *    - id: 身份唯一标识
+ *    - name: 身份名称
+ *    - description: 身份描述
+ *    - avatar: 头像文件名
+ *    - createdAt: 创建时间（ISO格式）
+ *    - updatedAt: 更新时间（ISO格式）
+ */
+export interface UserPersona {
+  id: string
+  name: string
+  description: string
+  avatar: string
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * API预设配置接口
+ *
+ * 定义LLM API的预设配置，包括基础URL、API密钥和可用模型列表。
+ *
+ * 字段说明：
+ *    - id: 预设唯一标识
+ *    - name: 预设名称
+ *    - baseUrl: API基础URL
+ *    - apiKey: API密钥
+ *    - models: 可用模型列表
+ */
+export interface ApiPreset {
+  id: string
+  name: string
+  baseUrl: string
+  apiKey: string
+  models: string[]
+}
+
+/**
+ * 应用设置接口
+ *
+ * 定义应用的全局设置，包括LLM配置、API预设、生成默认值等。
+ *
+ * 字段说明：
+ *    - version: 设置版本号
+ *    - llm: LLM配置（基础URL、API密钥、默认模型等）
+ *    - apiPresets: API预设列表
+ *    - generationDefaults: 生成参数默认值
+ *    - prompts: 提示词配置
+ *    - streamEnabled: 是否启用流式输出
+ *    - pureAiMode: 全局纯AI模式
+ *    - userPersonas: 用户身份列表
+ *    - selectedPersonaId: 当前选中的身份ID
+ *    - createdAt: 创建时间（ISO格式）
+ *    - updatedAt: 更新时间（ISO格式）
+ */
+export interface Settings {
+  version: number
+  llm: {
+    baseUrl: string
+    apiKey: string
+    defaultModel: string
+    modelCandidates: string[]
+    usedModels: string[]
+  }
+  apiPresets: ApiPreset[]
+  generationDefaults: GenerationParams
+  prompts: {
+    globalSystem: string
+  }
+  streamEnabled: boolean
+  pureAiMode: boolean
+  userPersonas: UserPersona[]
+  selectedPersonaId: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * 角色卡片接口
+ *
+ * 定义角色的完整信息，包括性格、场景、首句等。
+ *
+ * 字段说明：
+ *    - version: 卡片版本号
+ *    - id: 角色唯一标识
+ *    - name: 角色名称
+ *    - description: 角色简介
+ *    - personality: 性格/外貌描述
+ *    - scenario: 情景/世界观描述
+ *    - firstMessage: 首句消息
+ *    - exampleDialogue: 示例对话
+ *    - systemPrompt: 系统提示词
+ *    - avatar: 头像文件名
+ *    - createdAt: 创建时间（ISO格式）
+ *    - updatedAt: 更新时间（ISO格式）
+ */
+export interface CharacterCard {
+  version: number
+  id: string
+  name: string
+  description: string
+  personality: string
+  scenario: string
+  firstMessage: string
+  exampleDialogue: string
+  systemPrompt: string
+  avatar: string
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * 聊天消息接口
+ *
+ * 定义聊天中的一条消息，包括内容、角色、发送者信息等。
+ *
+ * 字段说明：
+ *    - version: 消息版本号
+ *    - id: 消息唯一标识
+ *    - role: 消息角色（system/user/assistant）
+ *    - content: 消息内容
+ *    - characterId: 群聊中标识发言角色ID（仅assistant消息使用）
+ *    - senderPersonaId: 发送者身份ID（用于persona切换后，历史user消息仍显示原发言者）
+ *    - senderName: 发送者名称（快照）
+ *    - senderAvatar: 发送者头像（快照）
+ *    - ts: 时间戳（ISO格式）
+ */
+export interface ChatMessage {
+  version: number
+  id: string
+  role: ChatRole
+  content: string
+  characterId?: string | null
+  senderPersonaId?: string | null
+  senderName?: string | null
+  senderAvatar?: string | null
+  ts: string
+}
+
+/**
+ * 群聊成员设置接口
+ *
+ * 定义群聊中每个成员的个性化设置，包括模型、参数、参与概率等。
+ *
+ * 字段说明：
+ *    - model: 使用的模型（覆盖全局设置）
+ *    - presetId: API预设ID
+ *    - temperature: 温度参数（覆盖全局设置）
+ *    - top_p: 核采样参数（覆盖全局设置）
+ *    - probability: 参与概率（0-1，默认1，用于随机决定是否参与本轮对话）
+ *    - includePersonality: 是否包含性格描述
+ *    - includeScenario: 是否包含场景描述
+ */
+export interface GroupMemberSettings {
+  model?: string | null
+  presetId?: string | null
+  temperature?: number | null
+  top_p?: number | null
+  probability: number
+  includePersonality?: boolean
+  includeScenario?: boolean
+}
+
+/**
+ * 聊天会话接口
+ *
+ * 定义一次完整的聊天会话，包括消息列表、设置、成员信息等。
+ *
+ * 字段说明：
+ *    - version: 会话版本号
+ *    - id: 会话唯一标识
+ *    - characterId: 主角色ID（单聊）或第一个成员ID（群聊）
+ *    - title: 会话标题
+ *    - messages: 消息列表
+ *    - overrides: 覆盖设置
+ *    - userPersonaId: 用户身份ID
+ *    - isGroup: 是否为群聊
+ *    - memberIds: 群聊成员ID列表（仅群聊使用）
+ *    - memberSettings: 群聊成员设置映射（characterId -> settings，仅群聊使用）
+ *    - groupDelay: 群聊角色间延迟时间（毫秒，仅群聊使用）
+ *    - createdAt: 创建时间（ISO格式）
+ *    - updatedAt: 更新时间（ISO格式）
+ */
+export interface Chat {
+  version: number
+  id: string
+  characterId: string
+  title: string
+  messages: ChatMessage[]
+  overrides: ChatOverrides
+  userPersonaId?: string | null
+  isGroup: boolean
+  memberIds: string[]
+  memberSettings: Record<string, GroupMemberSettings>
+  groupDelay: number
+  createdAt: string
+  updatedAt: string
+}

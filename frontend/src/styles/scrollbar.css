@@ -1,0 +1,92 @@
+/**
+ * 滚动条样式文件
+ *
+ * 自定义滚动条外观，提供多种滚动条变体。
+ *
+ * 主要功能：
+ *    - 全局滚动条样式：自定义WebKit和Firefox滚动条
+ *    - 细滚动条：用于紧凑区域（如侧边栏）
+ *    - 隐藏滚动条：保留滚动功能但隐藏滚动条
+ *    - 暗色滚动条：更暗的滚动条样式
+ *    - 品牌色滚动条：使用品牌色的滚动条样式
+ *
+ * 设计元素：
+ *    - 全局滚动条：6px宽度，透明轨道，半透明白色滑块
+ *    - 细滚动条：4px宽度，用于紧凑区域
+ *    - 隐藏滚动条：完全隐藏但保留滚动功能
+ *    - 暗色滚动条：更暗的滑块颜色
+ *    - 品牌色滚动条：使用品牌色的滑块
+ *
+ * 原理：
+ *    - 使用::-webkit-scrollbar伪元素自定义WebKit浏览器滚动条
+ *    - 使用scrollbar-width和scrollbar-color属性自定义Firefox滚动条
+ *
+ * 文件关系：
+ *    - 被导入：被styles/index.css导入
+ *    - 导入：无
+ *    - 依赖：无
+ *    - 位置：样式层，提供滚动条样式
+ */
+
+/* ========== 全局滚动条 ========== */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+}
+
+/* ========== 细滚动条（用于侧边栏等紧凑区域） ========== */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  border-radius: 2px;
+}
+
+/* ========== 隐藏滚动条（保留滚动功能） ========== */
+.scrollbar-hidden {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hidden::-webkit-scrollbar {
+  display: none;
+}
+
+/* ========== 暗色滚动条变体 ========== */
+.scrollbar-dark::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.scrollbar-dark::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* ========== 品牌色滚动条变体 ========== */
+.scrollbar-brand::-webkit-scrollbar-thumb {
+  background: rgba(162, 48, 237, 0.3);
+}
+
+.scrollbar-brand::-webkit-scrollbar-thumb:hover {
+  background: rgba(162, 48, 237, 0.5);
+}

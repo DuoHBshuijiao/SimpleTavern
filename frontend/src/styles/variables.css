@@ -1,0 +1,127 @@
+/**
+ * 主题变量和设计令牌样式文件
+ *
+ * 定义全局CSS变量，包括颜色、间距、圆角、阴影、过渡、字体等设计令牌。
+ * 使用@theme规则定义，便于统一修改和主题切换。
+ *
+ * 主要功能：
+ *    - 定义品牌色：主色、悬停色、深色、浅色
+ *    - 定义背景色：深色背景、表面、浅色、提升
+ *    - 定义文字色：主要、次要、静音
+ *    - 定义边框色：微妙、默认、强调
+ *    - 定义状态色：成功、警告、错误、信息
+ *    - 定义特殊色：紫色（群聊）、助手色
+ *    - 定义圆角：从小到大各种尺寸
+ *    - 定义间距：从小到大各种尺寸
+ *    - 定义阴影：各种尺寸和颜色的阴影
+ *    - 定义过渡：快速、正常、慢速
+ *    - 定义字体：无衬线字体、等宽字体
+ *    - 定义字号：从小到大各种尺寸
+ *    - 定义Z-Index层级：下拉、粘性、弹窗、弹出框、工具提示
+ *
+ * 文件关系：
+ *    - 被导入：被styles/index.css导入，作为样式系统的变量基础
+ *    - 导入：无
+ *    - 依赖：无
+ *    - 位置：样式层，提供全局CSS变量定义
+ */
+
+@theme {
+  /* ========== 品牌色 ========== */
+  --color-brand: #3b82f6; /* Blue-500 */
+  --color-brand-hover: #60a5fa; /* Blue-400 */
+  --color-brand-dark: #2563eb; /* Blue-600 */
+  --color-brand-light: #93c5fd; /* Blue-300 */
+  
+  /* ========== 背景色 (Liquid Glass Dark) ========== */
+  --color-dark-bg: #0f172a; /* Slate-950 */
+  --color-dark-surface: rgba(30, 41, 59, 0.7); /* Slate-900 / 70% */
+  --color-dark-lighter: rgba(51, 65, 85, 0.5); /* Slate-700 / 50% */
+  --color-dark-elevated: rgba(30, 41, 59, 0.9); /* Slate-900 / 90% */
+  
+  /* ========== 文字色 (Slate) ========== */
+  --color-text-primary: #f8fafc; /* Slate-50 */
+  --color-text-secondary: #94a3b8; /* Slate-400 */
+  --color-text-muted: #64748b; /* Slate-500 */
+  
+  /* ========== 边框色 (Subtle) ========== */
+  --color-border-subtle: rgba(255, 255, 255, 0.05); /* Very subtle */
+  --color-border-default: rgba(255, 255, 255, 0.1);
+  --color-border-strong: rgba(255, 255, 255, 0.15);
+  
+  /* ========== 状态色 ========== */
+  --color-success: #22c55e;
+  --color-success-bg: rgba(34, 197, 94, 0.15);
+  --color-success-text: #86efac;
+  
+  --color-warning: #f59e0b;
+  --color-warning-bg: rgba(245, 158, 11, 0.15);
+  --color-warning-text: #fcd34d;
+  
+  --color-error: #ef4444;
+  --color-error-bg: rgba(239, 68, 68, 0.15);
+  --color-error-text: #fecaca;
+  
+  --color-info: #3b82f6;
+  --color-info-bg: rgba(59, 130, 246, 0.15);
+  --color-info-text: #93c5fd;
+  
+  /* ========== 特殊色（群聊/角色相关） ========== */
+  --color-purple: #a855f7;
+  --color-purple-bg: rgba(168, 85, 247, 0.15);
+  --color-purple-text: #e9d5ff;
+  
+  --color-assistant: #b76e79;
+  --color-assistant-bg: rgba(183, 110, 121, 0.15);
+  
+  /* ========== 圆角 (Large Radius) ========== */
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem; /* Increased */
+  --radius-xl: 1rem;    /* Increased */
+  --radius-2xl: 1.5rem; /* Increased */
+  --radius-3xl: 2rem;
+  --radius-full: 9999px;
+  
+  /* ========== 间距 ========== */
+  --spacing-xs: 0.25rem;
+  --spacing-sm: 0.5rem;
+  --spacing-md: 1rem;
+  --spacing-lg: 1.5rem;
+  --spacing-xl: 2rem;
+  --spacing-2xl: 3rem;
+  
+  /* ========== 阴影 ========== */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.3);
+  --shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.3);
+  --shadow-brand: 0 10px 25px rgba(59, 130, 246, 0.15); /* Updated for blue brand */
+  --shadow-success: 0 10px 25px rgba(34, 197, 94, 0.15);
+  --shadow-error: 0 10px 25px rgba(239, 68, 68, 0.15);
+  --shadow-purple: 0 10px 25px rgba(168, 85, 247, 0.15);
+  
+  /* ========== 过渡 ========== */
+  --transition-fast: 0.15s ease;
+  --transition-normal: 0.2s ease;
+  --transition-slow: 0.3s ease;
+  
+  /* ========== 字体 ========== */
+  --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', Consolas, Monaco, 'Courier New', monospace;
+  
+  /* ========== 字号 ========== */
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+  
+  /* ========== Z-Index 层级 ========== */
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-modal: 300;
+  --z-popover: 400;
+  --z-tooltip: 500;
+}

@@ -1,0 +1,19 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+
+node_modules/
+dist/
+
+data/
+
+temp_commit_msg.txt
+思考模式 _ DeepSeek API Docs.md
+Tool Calls _ DeepSeek API Docs.md
+ChatPage_old_discard.vue
+.cursor
+.shared
+功能清单.md
