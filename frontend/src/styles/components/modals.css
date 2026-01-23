@@ -1,198 +1,82 @@
 /**
  * 弹窗组件样式文件
- *
- * 定义Modal、Dialog、Drawer等弹出层组件的样式。
- *
- * 主要功能：
- *    - 弹窗尺寸工具类：定义不同宽度的弹窗（响应式，使用min函数）
- *    - 基础弹窗样式：弹窗容器、背景、内容、头部、主体、底部
- *    - 抽屉样式：右侧和左侧抽屉，支持滑入动画
- *    - 弹出确认框：小型确认弹窗样式
- *
- * 设计元素：
- *    - 弹窗容器：固定定位，全屏覆盖，居中显示，z-index层级
- *    - 弹窗背景：半透明黑色背景，模糊效果（backdrop-filter）
- *    - 弹窗内容：深色表面背景，边框，大圆角，阴影，最大高度限制
- *    - 弹窗头部：flex布局，两端对齐，底部边框，标题和关闭按钮
- *    - 弹窗主体：弹性布局，内边距，可滚动
- *    - 弹窗底部：flex布局，右对齐，顶部边框，按钮间距
- *    - 抽屉：固定定位，从右侧或左侧滑入，使用transform实现动画
- *
- * 布局：
- *    - 弹窗：使用flex布局，垂直方向，居中显示
- *    - 抽屉：固定定位，从屏幕边缘滑入
- *
- * 原理：
- *    - 响应式宽度：使用min()函数实现，在小屏幕上使用vw单位
- *    - 抽屉动画：使用transform translateX实现滑入效果
- *    - 背景模糊：使用backdrop-filter blur实现毛玻璃效果
- *
- * 文件关系：
- *    - 被导入：被styles/components/index.css导入
- *    - 导入：无
- *    - 依赖：依赖styles/variables.css的CSS变量
- *    - 位置：样式层，提供弹窗组件样式
+ * 风格：Radical Swiss Modernism 2.0 (High Contrast, Sharp)
  */
 
-/* ========== 弹窗尺寸工具类 ========== */
-.chat-modal-width-1200-90 {
-  width: min(1200px, 90vw);
-}
-
-.chat-modal-width-700-92 {
-  width: min(700px, 92vw);
-}
-
-.chat-modal-width-700-90 {
-  width: min(700px, 90vw);
-}
-
-.chat-modal-width-600-90 {
-  width: min(600px, 90vw);
-}
-
-.chat-modal-width-520-92 {
-  width: min(520px, 92vw);
-}
-
-.chat-modal-width-520-90 {
-  width: min(520px, 90vw);
-}
-
-.chat-modal-width-500-90 {
-  width: min(500px, 90vw);
-}
-
-/* ========== 基础弹窗样式 ========== */
-.modal {
+/* ========== 遮罩层 ========== */
+.modal-overlay {
   position: fixed;
   inset: 0;
+  background-color: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(4px); 
   z-index: var(--z-modal);
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: var(--spacing-md);
+  padding: var(--spacing-lg);
+  opacity: 0;
+  animation: fade-in var(--transition-fast) forwards;
 }
 
-.modal-backdrop {
-  position: absolute;
-  inset: 0;
-  background-color: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(4px);
-}
-
-.modal-content {
-  position: relative;
-  max-height: calc(100vh - 2rem);
-  background-color: var(--color-dark-surface);
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-2xl);
-  box-shadow: var(--shadow-xl);
+/* ========== 弹窗容器 ========== */
+.modal-container {
+  background-color: var(--color-dark-bg);
+  border: 4px solid var(--color-text-primary);
+  border-radius: var(--radius-sm);
+  width: 100%;
+  max-height: 95vh;
   overflow: hidden;
+  box-shadow: 20px 20px 0px var(--color-brand);
+  transform: scale(0.98);
+  opacity: 0;
+  animation: scale-in var(--transition-normal) forwards;
   display: flex;
-  flex-direction: column;
+  flex-col: column;
 }
 
+/* ========== 弹窗头部 ========== */
 .modal-header {
+  padding: 1.5rem 2rem;
+  border-bottom: 2px solid var(--color-text-primary);
+  background-color: var(--color-text-primary);
+  color: var(--color-text-inverse);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--spacing-md) var(--spacing-lg);
-  border-bottom: 1px solid var(--color-border-subtle);
+  shrink-0: 0;
 }
 
 .modal-title {
-  font-size: var(--text-lg);
-  font-weight: 600;
-  color: var(--color-text-primary);
+  font-size: 1.25rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
 }
 
 .modal-close {
-  padding: 0.25rem;
-  color: var(--color-text-secondary);
-  border-radius: var(--radius-md);
-  transition: 
-    background-color var(--transition-fast),
-    color var(--transition-fast);
+  font-size: 1.5rem;
+  font-weight: 900;
+  cursor: pointer;
+  transition: transform var(--transition-fast);
 }
 
 .modal-close:hover {
-  background-color: rgba(255, 255, 255, 0.05);
-  color: var(--color-text-primary);
+  transform: rotate(90deg);
 }
 
-.modal-body {
-  flex: 1;
-  padding: var(--spacing-lg);
+/* ========== 弹窗内容 ========== */
+.modal-content {
+  padding: 2rem;
   overflow-y: auto;
 }
 
+/* ========== 弹窗底部 ========== */
 .modal-footer {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--spacing-sm);
-  padding: var(--spacing-md) var(--spacing-lg);
-  border-top: 1px solid var(--color-border-subtle);
-}
-
-/* ========== 抽屉样式 ========== */
-.drawer {
-  position: fixed;
-  z-index: var(--z-modal);
-}
-
-.drawer-right {
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: 400px;
-  max-width: 90vw;
-  background-color: var(--color-dark-surface);
-  border-left: 1px solid var(--color-border-default);
-  box-shadow: var(--shadow-xl);
-  transform: translateX(100%);
-  transition: transform var(--transition-slow);
-}
-
-.drawer-right.open {
-  transform: translateX(0);
-}
-
-.drawer-left {
-  top: 0;
-  left: 0;
-  bottom: 0;
-  width: 400px;
-  max-width: 90vw;
-  background-color: var(--color-dark-surface);
-  border-right: 1px solid var(--color-border-default);
-  box-shadow: var(--shadow-xl);
-  transform: translateX(-100%);
-  transition: transform var(--transition-slow);
-}
-
-.drawer-left.open {
-  transform: translateX(0);
-}
-
-/* ========== 弹出确认框 ========== */
-.popconfirm {
-  padding: var(--spacing-md);
-  background-color: var(--color-dark-surface);
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-lg);
-}
-
-.popconfirm-message {
-  margin-bottom: var(--spacing-md);
-  font-size: var(--text-sm);
-  color: var(--color-text-primary);
-}
-
-.popconfirm-actions {
+  padding: 1.5rem 2rem;
+  border-top: 2px solid var(--color-border-strong);
+  background-color: var(--color-surface);
   display: flex;
   justify-content: flex-end;
-  gap: var(--spacing-sm);
+  gap: 1.5rem;
+  shrink-0: 0;
 }

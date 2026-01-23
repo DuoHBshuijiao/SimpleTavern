@@ -1,33 +1,7 @@
 <script setup lang="ts">
 /**
- * GroupCreatorModal - 群聊创建弹窗组件
- *
- * 组件职责：
- * - 提供群聊创建界面，选择成员、设置标题等
- * - 支持选择多个角色作为群聊成员
- * - 支持设置纯AI模式
- * - 支持设置首句发言角色
- * - 支持设置每个成员的包含项（性格、场景）
- *
- * Props说明：
- * - show: 是否显示弹窗（v-model:show）
- * - characters: 角色列表（来自types/models.ts的CharacterCard[]类型）
- *
- * Emits说明：
- * - update:show: 更新显示状态（v-model:show）
- * - create: 创建群聊，传递创建数据（标题、成员ID列表、纯AI模式、首句角色ID、成员包含项）
- *
- * 使用的Composables：
- * 无
- *
- * 使用的Stores：
- * 无
- *
- * 文件关系：
- *    - 被导入：被views/ChatPage.vue使用
- *    - 导入：导入vue的ref、computed、watch、types/models.ts的CharacterCard类型、components/ModernAvatar.vue、components/ModernSelect.vue
- *    - 依赖：依赖vue
- *    - 位置：组件层，提供群聊创建功能
+ * GroupCreatorModal - 群聊创建弹窗
+ * 风格：Obsidian Brutalist
  */
 import { ref, computed, watch } from 'vue'
 import type { CharacterCard } from '../../types/models'
@@ -50,7 +24,6 @@ const emit = defineEmits<{
   }]
 }>()
 
-// 本地状态
 const selectedMemberIds = ref<string[]>([])
 const groupTitle = ref('')
 const groupPureAiMode = ref(false)
@@ -58,7 +31,6 @@ const groupFirstMessageEnabled = ref(true)
 const groupFirstMessageCharacterId = ref<string | null>(null)
 const groupMemberInclusions = ref<Record<string, { includePersonality: boolean; includeScenario: boolean }>>({})
 
-// 重置状态
 watch(() => props.show, (newVal) => {
   if (newVal) {
     selectedMemberIds.value = []
@@ -70,34 +42,14 @@ watch(() => props.show, (newVal) => {
   }
 })
 
-/**
- * 计算首句发言角色选项
- *
- * 根据已选中的成员生成首句发言角色的选项列表。
- */
 const groupFirstMessageOptions = computed(() => {
   const opts = selectedMemberIds.value.map(id => {
     const char = props.characters.find(c => c.id === id)
-    return {
-      label: char?.name || id,
-      value: id
-    }
+    return { label: char?.name || id, value: id }
   })
-  return [
-    { label: '（未选择）', value: '' },
-    ...opts
-  ]
+  return [{ label: 'NONE', value: '' }, ...opts]
 })
 
-/**
- * 切换成员选择
- *
- * 切换指定角色的选中状态。
- * 如果取消选中，则删除该成员的包含项设置；如果首句角色被取消，则选择第一个成员。
- * 如果选中，则创建默认的包含项设置；如果还没有首句角色，则设置为该角色。
- *
- * @param {string} characterId - 角色ID
- */
 function toggleMemberSelection(characterId: string) {
   const idx = selectedMemberIds.value.indexOf(characterId)
   if (idx >= 0) {
@@ -117,16 +69,10 @@ function toggleMemberSelection(characterId: string) {
   }
 }
 
-/**
- * 处理创建群聊
- *
- * 验证成员数量（至少2个），然后触发create事件，传递群聊创建数据。
- */
 function handleCreate() {
   if (selectedMemberIds.value.length < 2) return
-  
   emit('create', {
-    title: groupTitle.value || '新群聊',
+    title: groupTitle.value || 'NEW GROUP',
     memberIds: selectedMemberIds.value,
     pureAiMode: groupPureAiMode.value,
     firstMessageCharacterId: groupFirstMessageEnabled.value ? groupFirstMessageCharacterId.value : null,
@@ -137,110 +83,93 @@ function handleCreate() {
 </script>
 
 <template>
-  <div v-if="show" class="modal">
+  <div v-if="show" class="modal-overlay">
     <div class="modal-backdrop" @click="emit('update:show', false)"></div>
-    <div class="modal-content chat-modal-width-600-90">
+    <div class="modal-container max-w-4xl h-[90vh]">
       <div class="modal-header">
-        <h3 class="modal-title">创建群聊</h3>
-        <button class="modal-close" @click="emit('update:show', false)">×</button>
+        <h3 class="modal-title">Initialize Group Protocol</h3>
+        <button class="modal-close" @click="emit('update:show', false)">✕</button>
       </div>
-      <div class="modal-body">
-        <div class="space-y-6">
-          <div class="form-group">
-            <label class="label">群聊名称</label>
-            <input v-model="groupTitle" class="input" placeholder="新群聊" />
-          </div>
+      
+      <div class="modal-content flex flex-col h-full overflow-hidden p-0">
+        <div class="flex-1 overflow-y-auto p-8 custom-scrollbar space-y-12">
+          <!-- 基本信息 -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-12">
+            <div class="space-y-8">
+              <div class="form-group">
+                <label class="label text-brand">Group Designation</label>
+                <input v-model="groupTitle" class="input text-xl font-black uppercase" placeholder="NAME YOUR GROUP..." />
+              </div>
 
-          <div class="bg-white/5 border border-white/10 rounded-xl p-3">
-            <div class="text-sm text-gray-300 font-medium mb-2">本次聊天设置</div>
-            <div class="flex items-center justify-between">
-              <div class="text-sm text-gray-400">纯 AI 模式（不注入 Persona，用户发言将以 system 影响世界）</div>
-              <button
-                class="flex items-center gap-2"
-                @click="groupPureAiMode = !groupPureAiMode"
-              >
-                <div class="w-10 h-5 rounded-full relative transition-colors duration-200" :class="groupPureAiMode ? 'bg-brand' : 'bg-gray-700'">
-                  <div class="absolute top-1 w-3 h-3 rounded-full bg-white transition-transform duration-200" :class="groupPureAiMode ? 'left-6' : 'left-1'"></div>
+              <div class="bg-dark-surface border border-strong p-6 space-y-6">
+                <div class="flex items-center justify-between">
+                  <div class="flex flex-col">
+                    <span class="text-[10px] font-black uppercase text-text-primary tracking-widest">Pure AI Mode</span>
+                    <span class="text-[8px] text-text-muted uppercase tracking-widest mt-1">User as System entity</span>
+                  </div>
+                  <button @click="groupPureAiMode = !groupPureAiMode" class="w-12 h-6 border-2 border-strong relative transition-colors" :class="groupPureAiMode ? 'bg-brand border-brand' : 'bg-transparent'">
+                    <div class="absolute top-0.5 left-0.5 w-4 h-4 bg-white transition-transform" :class="groupPureAiMode ? 'translate-x-6' : 'translate-x-0'"></div>
+                  </button>
                 </div>
-                <span class="text-xs text-gray-400">{{ groupPureAiMode ? '开启' : '关闭' }}</span>
-              </button>
-            </div>
-          </div>
 
-          <div class="bg-white/5 border border-white/10 rounded-xl p-3">
-            <div class="text-sm text-gray-300 font-medium mb-2">群聊首句（故事背景）</div>
-            <div class="flex items-center justify-between mb-2">
-              <div class="text-sm text-gray-400">启用某角色的 First Message 作为开场</div>
-              <button class="flex items-center gap-2" @click="groupFirstMessageEnabled = !groupFirstMessageEnabled">
-                <div class="w-10 h-5 rounded-full relative transition-colors duration-200" :class="groupFirstMessageEnabled ? 'bg-purple-500' : 'bg-gray-700'">
-                  <div class="absolute top-1 w-3 h-3 rounded-full bg-white transition-transform duration-200" :class="groupFirstMessageEnabled ? 'left-6' : 'left-1'"></div>
-                </div>
-                <span class="text-xs text-gray-400">{{ groupFirstMessageEnabled ? '启用' : '关闭' }}</span>
-              </button>
-            </div>
-            <div v-if="groupFirstMessageEnabled" class="flex items-center gap-2">
-              <span class="text-xs text-gray-500 shrink-0">选择角色：</span>
-              <ModernSelect
-                :model-value="groupFirstMessageCharacterId || ''"
-                @update:model-value="(v) => groupFirstMessageCharacterId = v || null"
-                :options="groupFirstMessageOptions"
-                :disabled="selectedMemberIds.length === 0"
-                placeholder="（未选择）"
-                class="flex-1"
-              />
-            </div>
-            <div class="text-xs text-gray-500 mt-2">创建后会在聊天窗口内直接插入该角色的首句（会写入聊天记录）。</div>
-          </div>
-          
-          <div>
-            <div class="text-sm text-gray-400 mb-3">选择群成员 (至少选择2个角色):</div>
-            <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
-              <div 
-                v-for="c in characters"
-                :key="c.id"
-                class="flex items-start gap-3 p-3 rounded-xl cursor-pointer transition-all border-2"
-                :class="selectedMemberIds.includes(c.id) ? 'bg-purple-500/10 border-purple-500/50' : 'bg-white/5 border-transparent hover:bg-white/10'"
-                @click="toggleMemberSelection(c.id)"
-              >
-                <div class="relative shrink-0">
-                  <ModernAvatar 
-                    :src="c.avatar ? `/api/avatars/${c.avatar}` : null" 
-                    :name="c.name" 
-                    :size="40" 
-                    aspect="auto"
-                    object-fit="contain"
-                    rounded="rounded-lg"
-                  />
-                  <div 
-                    v-if="selectedMemberIds.includes(c.id)"
-                    class="absolute -top-1 -right-1 w-5 h-5 bg-purple-500 rounded-full flex items-center justify-center text-white text-xs font-bold"
-                  >
-                    {{ selectedMemberIds.indexOf(c.id) + 1 }}
+                <div class="pt-6 border-t border-strong">
+                  <div class="flex items-center justify-between mb-4">
+                    <div class="flex flex-col">
+                      <span class="text-[10px] font-black uppercase text-text-primary tracking-widest">Initialization Msg</span>
+                      <span class="text-[8px] text-text-muted uppercase tracking-widest mt-1">Start with character line</span>
+                    </div>
+                    <button @click="groupFirstMessageEnabled = !groupFirstMessageEnabled" class="w-12 h-6 border-2 border-strong relative transition-colors" :class="groupFirstMessageEnabled ? 'bg-brand border-brand' : 'bg-transparent'">
+                      <div class="absolute top-0.5 left-0.5 w-4 h-4 bg-white transition-transform" :class="groupFirstMessageEnabled ? 'translate-x-6' : 'translate-x-0'"></div>
+                    </button>
+                  </div>
+                  <div v-if="groupFirstMessageEnabled">
+                    <ModernSelect
+                      :model-value="groupFirstMessageCharacterId || ''"
+                      @update:model-value="(v) => groupFirstMessageCharacterId = v || null"
+                      :options="groupFirstMessageOptions"
+                      :disabled="selectedMemberIds.length === 0"
+                      class="w-full"
+                    />
                   </div>
                 </div>
-                <div class="flex-1 min-w-0">
-                  <div class="font-medium text-sm truncate" :class="selectedMemberIds.includes(c.id) ? 'text-purple-300' : 'text-gray-300'">{{ c.name }}</div>
-                  <div class="text-xs text-gray-500 truncate">{{ c.description || '暂无简介' }}</div>
-                  <div v-if="selectedMemberIds.includes(c.id)" class="mt-2 space-y-1" @click.stop>
-                    <div class="text-[10px] text-gray-500">system prompt 插入：</div>
-                    <div class="flex flex-wrap gap-3 text-xs text-gray-300">
-                      <label class="flex items-center gap-1 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          class="accent-purple-500"
-                          :checked="(groupMemberInclusions[c.id]?.includePersonality ?? true)"
-                          @change="(e) => { const checked = (e.target as HTMLInputElement).checked; const inc = groupMemberInclusions[c.id] ?? { includePersonality: true, includeScenario: true }; groupMemberInclusions[c.id] = inc; inc.includePersonality = checked }"
-                        />
-                        Personality
+              </div>
+            </div>
+
+            <!-- 成员选择 -->
+            <div class="space-y-6">
+              <label class="label text-brand">Select Entities ({{ selectedMemberIds.length }}/2+)</label>
+              <div class="grid grid-cols-1 gap-2 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                <div 
+                  v-for="c in characters"
+                  :key="c.id"
+                  class="group flex items-start gap-4 p-4 border transition-all cursor-pointer"
+                  :class="selectedMemberIds.includes(c.id) ? 'bg-brand/5 border-brand' : 'bg-dark-surface border-strong hover:border-text-secondary'"
+                  @click="toggleMemberSelection(c.id)"
+                >
+                  <div class="relative shrink-0">
+                    <ModernAvatar 
+                      :src="c.avatar ? `/api/avatars/${c.avatar}` : null" 
+                      :name="c.name" 
+                      :size="40" 
+                      rounded="rounded-none"
+                      class="border border-subtle"
+                    />
+                    <div v-if="selectedMemberIds.includes(c.id)" class="absolute -top-2 -right-2 w-5 h-5 bg-brand text-text-inverse text-[10px] font-black flex items-center justify-center">
+                      {{ selectedMemberIds.indexOf(c.id) + 1 }}
+                    </div>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <div class="font-black text-xs truncate uppercase" :class="selectedMemberIds.includes(c.id) ? 'text-brand' : 'text-text-primary'">{{ c.name }}</div>
+                    <div class="text-[8px] text-text-muted truncate uppercase tracking-widest mt-1">{{ c.description || 'NO LOGS' }}</div>
+                    
+                    <div v-if="selectedMemberIds.includes(c.id)" class="mt-4 flex gap-4" @click.stop>
+                      <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" class="w-3 h-3 border border-strong bg-transparent checked:bg-brand appearance-none" :checked="(groupMemberInclusions[c.id]?.includePersonality ?? true)" @change="(e) => { groupMemberInclusions[c.id].includePersonality = (e.target as HTMLInputElement).checked }" />
+                        <span class="text-[8px] font-bold text-text-muted uppercase">Pers.</span>
                       </label>
-                      <label class="flex items-center gap-1 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          class="accent-purple-500"
-                          :checked="(groupMemberInclusions[c.id]?.includeScenario ?? true)"
-                          @change="(e) => { const checked = (e.target as HTMLInputElement).checked; const inc = groupMemberInclusions[c.id] ?? { includePersonality: true, includeScenario: true }; groupMemberInclusions[c.id] = inc; inc.includeScenario = checked }"
-                        />
-                        Scenario
+                      <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" class="w-3 h-3 border border-strong bg-transparent checked:bg-brand appearance-none" :checked="(groupMemberInclusions[c.id]?.includeScenario ?? true)" @change="(e) => { groupMemberInclusions[c.id].includeScenario = (e.target as HTMLInputElement).checked }" />
+                        <span class="text-[8px] font-bold text-text-muted uppercase">Scen.</span>
                       </label>
                     </div>
                   </div>
@@ -250,29 +179,14 @@ function handleCreate() {
           </div>
         </div>
       </div>
+
       <div class="modal-footer">
-        <div class="text-sm text-gray-500 mr-auto">
-          已选择 {{ selectedMemberIds.length }} 个角色
-          <span v-if="selectedMemberIds.length < 2" class="text-yellow-500">(至少需要2个)</span>
+        <div v-if="selectedMemberIds.length < 2" class="text-[9px] font-black text-error uppercase tracking-widest mr-auto flex items-center gap-2">
+          <span class="w-1.5 h-1.5 bg-error animate-pulse"></span> Min. 2 entities required
         </div>
-        <button class="btn btn-secondary" @click="emit('update:show', false)">取消</button>
-        <button class="btn btn-primary" :disabled="selectedMemberIds.length < 2" @click="handleCreate">
-          创建群聊
-        </button>
+        <button class="btn btn-secondary text-[10px] px-8" @click="emit('update:show', false)">ABORT</button>
+        <button class="btn btn-primary text-[10px] px-12" :disabled="selectedMemberIds.length < 2" @click="handleCreate">INITIALIZE</button>
       </div>
     </div>
   </div>
 </template>
-
-<style scoped>
-.custom-scrollbar::-webkit-scrollbar {
-  width: 4px;
-}
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
-}
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 2px;
-}
-</style>

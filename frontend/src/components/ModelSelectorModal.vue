@@ -1,33 +1,7 @@
 <script setup lang="ts">
 /**
- * ModelSelectorModal - 模型选择器弹窗组件
- *
- * 组件职责：
- * - 提供模型筛选和选择功能
- * - 支持搜索过滤模型
- * - 支持多选模型
- * - 支持全选/取消全选当前筛选结果
- *
- * Props说明：
- * - show: 是否显示弹窗（v-model:show）
- * - models: 模型列表
- * - loading: 是否加载中
- *
- * Emits说明：
- * - update:show: 更新显示状态（v-model:show）
- * - confirm: 确认选择，传递选中的模型列表
- *
- * 使用的Composables：
- * 无
- *
- * 使用的Stores：
- * 无
- *
- * 文件关系：
- *    - 被导入：被components/SettingsDrawer.vue使用
- *    - 导入：导入vue的computed、ref、watch
- *    - 依赖：依赖vue
- *    - 位置：组件层，提供模型选择功能
+ * ModelSelectorModal - 模型选择器
+ * 风格：Obsidian Brutalist
  */
 import { computed, ref, watch } from 'vue'
 
@@ -45,156 +19,72 @@ const emit = defineEmits<{
 const searchQuery = ref('')
 const selectedModels = ref<Set<string>>(new Set())
 
-watch(
-  () => props.show,
-  (val) => {
-    if (val) {
-      searchQuery.value = ''
-      selectedModels.value = new Set()
-    }
-  }
-)
+watch(() => props.show, (val) => { if (val) { searchQuery.value = ''; selectedModels.value = new Set() } })
 
-/**
- * 计算过滤后的模型列表
- *
- * 根据搜索查询过滤模型列表，不区分大小写。
- */
 const filteredModels = computed(() => {
   if (!searchQuery.value) return props.models
   const q = searchQuery.value.toLowerCase()
   return props.models.filter(m => m.toLowerCase().includes(q))
 })
 
-/**
- * 切换模型选择
- *
- * 切换指定模型的选中状态（选中/取消选中）。
- *
- * @param {string} m - 模型名称
- */
 function toggle(m: string) {
-  if (selectedModels.value.has(m)) {
-    selectedModels.value.delete(m)
-  } else {
-    selectedModels.value.add(m)
-  }
+  if (selectedModels.value.has(m)) selectedModels.value.delete(m)
+  else selectedModels.value.add(m)
 }
 
-/**
- * 全选当前筛选结果
- *
- * 将当前筛选结果中的所有模型添加到选中集合。
- */
-function selectAllFiltered() {
-  filteredModels.value.forEach(m => selectedModels.value.add(m))
-}
-
-/**
- * 取消全选当前筛选结果
- *
- * 从选中集合中移除当前筛选结果中的所有模型。
- */
-function deselectAllFiltered() {
-  filteredModels.value.forEach(m => selectedModels.value.delete(m))
-}
-
-/**
- * 关闭弹窗
- *
- * 触发update:show事件，传递false。
- */
-function close() {
-  emit('update:show', false)
-}
-
-/**
- * 确认选择
- *
- * 触发confirm事件，传递选中的模型列表，然后关闭弹窗。
- */
 function confirm() {
   emit('confirm', Array.from(selectedModels.value))
-  close()
+  emit('update:show', false)
 }
 </script>
 
 <template>
-  <div v-if="show" class="modal">
-    <div class="modal-backdrop" @click="close"></div>
-    <div class="modal-content chat-modal-width-520-92 max-h-[80vh]">
+  <div v-if="show" class="modal-overlay">
+    <div class="modal-backdrop" @click="emit('update:show', false)"></div>
+    <div class="modal-container max-w-2xl h-[80vh]">
       <div class="modal-header">
-        <h3 class="modal-title">筛选模型</h3>
-        <button class="modal-close" @click="close">✕</button>
+        <h3 class="modal-title">Engine Pulse Scanner</h3>
+        <button class="modal-close" @click="emit('update:show', false)">✕</button>
       </div>
 
-      <div class="modal-body flex flex-col min-h-0">
-        <div class="space-y-4 flex-1 flex flex-col min-h-0">
-          <div class="form-group">
-            <input 
-              v-model="searchQuery"
-              type="text"
-              placeholder="搜索模型..."
-              class="input"
-            />
-          </div>
+      <div class="modal-content flex flex-col h-full overflow-hidden p-8 space-y-6">
+        <input v-model="searchQuery" placeholder="FILTER ENGINE NODES..." class="input text-xl font-black uppercase" />
 
-          <div class="flex items-center justify-between text-xs text-gray-400">
-            <span>共 {{ props.models.length }} 个模型，当前显示 {{ filteredModels.length }} 个</span>
-            <div class="flex gap-2">
-              <button class="hover:text-brand transition-colors" @click="selectAllFiltered">全选当前</button>
-              <button class="hover:text-gray-200 transition-colors" @click="deselectAllFiltered">取消当前</button>
-            </div>
+        <div class="flex items-center justify-between">
+          <span class="text-[9px] font-black text-text-muted uppercase tracking-widest">
+            Total: {{ props.models.length }} // Filtered: {{ filteredModels.length }}
+          </span>
+          <div class="flex gap-4">
+            <button class="text-[9px] font-black text-brand underline" @click="filteredModels.forEach(m => selectedModels.add(m))">SELECT ALL</button>
+            <button class="text-[9px] font-black text-text-muted underline" @click="filteredModels.forEach(m => selectedModels.delete(m))">CLEAR ALL</button>
           </div>
+        </div>
 
-          <div class="flex-1 overflow-y-auto custom-scrollbar bg-black/20 rounded-lg border border-white/5 p-2 min-h-[200px]">
-            <div v-if="loading" class="flex items-center justify-center h-full text-gray-500">
-              <span class="animate-spin mr-2">⟳</span> 加载中...
-            </div>
-            <div v-else-if="filteredModels.length === 0" class="text-center text-gray-600 py-8">
-              未找到匹配模型
-            </div>
-            <div v-else class="space-y-1">
-              <div 
-                v-for="m in filteredModels" 
-                :key="m"
-                class="flex items-center gap-3 px-2 py-1.5 rounded hover:bg-white/5 cursor-pointer select-none transition-colors"
-                @click="toggle(m)"
-              >
-                <div 
-                  class="w-4 h-4 rounded border flex items-center justify-center transition-colors"
-                  :class="selectedModels.has(m) ? 'bg-brand border-brand' : 'border-gray-600'"
-                >
-                  <span v-if="selectedModels.has(m)" class="text-white text-[10px] font-bold">✓</span>
-                </div>
-                <span class="text-sm text-gray-300 truncate">{{ m }}</span>
-              </div>
+        <div class="flex-1 overflow-y-auto custom-scrollbar border border-strong bg-dark-surface p-2">
+          <div v-if="loading" class="flex flex-col items-center justify-center h-full gap-4">
+            <div class="w-8 h-8 border-4 border-brand border-t-transparent animate-spin"></div>
+            <span class="text-[10px] font-black text-brand uppercase tracking-widest">Scanning Network...</span>
+          </div>
+          <div v-else class="grid grid-cols-1 md:grid-cols-2 gap-1">
+            <div 
+              v-for="m in filteredModels" 
+              :key="m"
+              class="flex items-center gap-4 px-4 py-3 border border-transparent hover:border-brand cursor-pointer transition-all"
+              :class="selectedModels.has(m) ? 'bg-brand/10 border-brand' : 'bg-dark-bg'"
+              @click="toggle(m)"
+            >
+              <div class="w-3 h-3 border border-strong" :class="selectedModels.has(m) ? 'bg-brand' : ''"></div>
+              <span class="text-[10px] font-bold uppercase tracking-tight" :class="selectedModels.has(m) ? 'text-brand' : 'text-text-secondary'">{{ m }}</span>
             </div>
           </div>
         </div>
       </div>
 
       <div class="modal-footer">
-        <span class="text-xs text-gray-400 mr-auto">已选中 {{ selectedModels.size }} 个</span>
-        <button class="btn btn-secondary" @click="close">取消</button>
-        <button class="btn btn-primary" @click="confirm">添加选中项</button>
+        <span class="text-[10px] font-black text-brand mr-auto">{{ selectedModels.size }} NODES CACHED</span>
+        <button class="btn btn-secondary text-[10px] px-8" @click="emit('update:show', false)">ABORT</button>
+        <button class="btn btn-primary text-[10px] px-12" @click="confirm">CONFIRM LINK</button>
       </div>
     </div>
   </div>
 </template>
-
-<style scoped>
-.custom-scrollbar::-webkit-scrollbar {
-  width: 4px;
-}
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
-}
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 2px;
-}
-.custom-scrollbar:hover::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
-}
-</style>

@@ -1,32 +1,7 @@
 <script setup lang="ts">
 /**
- * AvatarCropper - 头像裁剪组件
- *
- * 组件职责：
- * - 提供头像图片选择和裁剪功能
- * - 使用cropperjs库实现图片裁剪
- * - 支持圆形裁剪（用于头像）
- * - 将裁剪后的图片转换为base64格式
- *
- * Props说明：
- * - show: 是否显示弹窗（v-model:show）
- * - currentAvatar: 当前头像URL（可选，用于预览）
- *
- * Emits说明：
- * - update:show: 更新显示状态（v-model:show）
- * - save: 保存裁剪后的图片，传递base64编码的图片数据
- *
- * 使用的Composables：
- * 无
- *
- * 使用的Stores：
- * 无
- *
- * 文件关系：
- *    - 被导入：被views/ChatPage.vue使用用于裁剪角色和身份头像
- *    - 导入：导入vue的ref、onUnmounted、watch、nextTick，cropperjs库
- *    - 依赖：依赖vue、cropperjs
- *    - 位置：组件层，提供头像裁剪功能
+ * AvatarCropper - 头像裁剪
+ * 风格：Obsidian Brutalist
  */
 import { ref, onUnmounted, watch, nextTick } from 'vue'
 import Cropper from 'cropperjs'
@@ -47,189 +22,65 @@ const imageSrc = ref<string | null>(null)
 const cropper = ref<Cropper | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 
-/**
- * 处理文件选择
- *
- * 当用户选择图片文件时，使用FileReader读取文件并转换为base64格式。
- *
- * @param {Event} event - 文件选择事件
- */
 function handleFileSelect(event: Event) {
-  const target = event.target as HTMLInputElement
-  const file = target.files?.[0]
+  const file = (event.target as HTMLInputElement).files?.[0]
   if (!file) return
-
   const reader = new FileReader()
-  reader.onload = (e) => {
-    imageSrc.value = e.target?.result as string
-  }
+  reader.onload = (e) => imageSrc.value = e.target?.result as string
   reader.readAsDataURL(file)
 }
 
-/**
- * 触发文件输入
- *
- * 程序化触发隐藏的文件输入框点击事件。
- */
-function triggerFileInput() {
-  fileInputRef.value?.click()
-}
-
 watch(imageSrc, async (src) => {
-  if (cropper.value) {
-    cropper.value.destroy()
-    cropper.value = null
-  }
+  if (cropper.value) { cropper.value.destroy(); cropper.value = null }
   if (src) {
     await nextTick()
     setTimeout(() => {
-      if (imageRef.value && imageSrc.value) {
+      if (imageRef.value) {
         cropper.value = new Cropper(imageRef.value, {
-          aspectRatio: 1,
-          viewMode: 1,
-          dragMode: 'move',
-          autoCropArea: 1,
-          cropBoxMovable: true,
-          cropBoxResizable: true,
-          background: false,
+          aspectRatio: 1, viewMode: 1, background: false,
         })
       }
     }, 150)
   }
 })
 
-watch(() => props.show, (show) => {
-  if (!show) {
-    imageSrc.value = null
-    if (cropper.value) {
-      cropper.value.destroy()
-      cropper.value = null
-    }
-    if (fileInputRef.value) {
-      fileInputRef.value.value = ''
-    }
-  }
-})
-
-/**
- * 处理保存
- *
- * 获取裁剪后的画布，转换为256x256的PNG格式base64数据，然后触发save事件并关闭弹窗。
- */
 function handleSave() {
   if (!cropper.value) return
-
-  const canvas = cropper.value.getCroppedCanvas({
-    width: 256,
-    height: 256,
-    imageSmoothingEnabled: true,
-    imageSmoothingQuality: 'high',
-  })
-
-  const imageData = canvas.toDataURL('image/png')
-  emit('save', imageData)
+  const canvas = cropper.value.getCroppedCanvas({ width: 256, height: 256 })
+  emit('save', canvas.toDataURL('image/png'))
   emit('update:show', false)
 }
-
-/**
- * 处理取消
- *
- * 关闭弹窗，不保存裁剪结果。
- */
-function handleCancel() {
-  emit('update:show', false)
-}
-
-/**
- * 重置选择
- *
- * 清空已选择的图片，允许重新选择。
- */
-function resetSelection() {
-  imageSrc.value = null
-  if (fileInputRef.value) {
-    fileInputRef.value.value = ''
-  }
-}
-
-onUnmounted(() => {
-  if (cropper.value) {
-    cropper.value.destroy()
-  }
-})
 </script>
 
 <template>
-  <div v-if="show" class="modal">
-    <div class="modal-backdrop" @click="handleCancel"></div>
-    <div class="modal-content chat-modal-width-500-90">
+  <div v-if="show" class="modal-overlay">
+    <div class="modal-backdrop" @click="emit('update:show', false)"></div>
+    <div class="modal-container max-w-xl h-auto">
       <div class="modal-header">
-        <h3 class="modal-title">设置头像</h3>
-        <button class="modal-close" @click="handleCancel">×</button>
+        <h3 class="modal-title">Neural Asset Editor</h3>
+        <button class="modal-close" @click="emit('update:show', false)">✕</button>
       </div>
-      <div class="modal-body">
-        <div class="space-y-6">
-          <!-- 隐藏的文件输入 -->
-          <input
-            ref="fileInputRef"
-            type="file"
-            accept="image/*"
-            class="hidden"
-            @change="handleFileSelect"
-          />
+      <div class="modal-content">
+        <input ref="fileInputRef" type="file" accept="image/*" class="hidden" @change="handleFileSelect" />
+        
+        <div v-if="!imageSrc" class="border-2 border-dashed border-strong p-16 text-center cursor-pointer hover:border-brand transition-all" @click="fileInputRef?.click()">
+          <div class="text-xl font-black uppercase tracking-tighter text-brand">Select Neural Link Image</div>
+          <div class="text-[10px] font-bold text-text-muted uppercase tracking-widest mt-2">JPG / PNG / WEBP SUPPORTED</div>
+        </div>
 
-          <div v-if="!imageSrc" class="upload-area" @click="triggerFileInput">
-            <div class="upload-content">
-              <div class="text-lg font-bold text-brand mb-2">点击选择图片</div>
-              <div class="text-xs text-gray-500">支持 JPG、PNG、GIF、WebP 格式</div>
-            </div>
-          </div>
-
-          <div v-else class="cropper-container">
-            <img ref="imageRef" :src="imageSrc" class="max-w-full block" />
-          </div>
+        <div v-else class="bg-black border border-strong">
+          <img ref="imageRef" :src="imageSrc" class="max-w-full block" />
         </div>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-secondary" @click="handleCancel">取消</button>
-        <button v-if="imageSrc" class="btn btn-secondary" @click="resetSelection">重新选择</button>
-        <button class="btn btn-primary" :disabled="!imageSrc" @click="handleSave">
-          保存头像
-        </button>
+        <button class="btn btn-secondary text-[10px]" @click="emit('update:show', false)">ABORT</button>
+        <button v-if="imageSrc" class="btn btn-secondary text-[10px]" @click="imageSrc = null">RESELECT</button>
+        <button class="btn btn-primary text-[10px] px-12" :disabled="!imageSrc" @click="handleSave">COMMIT ASSET</button>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.upload-area {
-  border: 2px dashed var(--color-brand);
-  border-radius: var(--radius-lg);
-  padding: 40px 20px;
-  text-align: center;
-  cursor: pointer;
-  transition: all var(--transition-normal);
-  background: rgba(162, 48, 237, 0.05);
-}
-
-.upload-area:hover {
-  border-color: var(--color-brand-hover);
-  background: rgba(162, 48, 237, 0.1);
-}
-
-.upload-content {
-  pointer-events: none;
-}
-
-.cropper-container {
-  max-height: 400px;
-  overflow: hidden;
-  border-radius: var(--radius-lg);
-  background: rgba(0, 0, 0, 0.3);
-}
-
-.cropper-container :deep(.cropper-view-box),
-.cropper-container :deep(.cropper-face) {
-  border-radius: 50%;
-}
+:deep(.cropper-view-box), :deep(.cropper-face) { border-radius: 0; outline: 1px solid var(--color-brand); }
 </style>

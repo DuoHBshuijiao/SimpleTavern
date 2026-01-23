@@ -1,127 +1,70 @@
 /**
- * 主题变量和设计令牌样式文件
- *
- * 定义全局CSS变量，包括颜色、间距、圆角、阴影、过渡、字体等设计令牌。
- * 使用@theme规则定义，便于统一修改和主题切换。
- *
- * 主要功能：
- *    - 定义品牌色：主色、悬停色、深色、浅色
- *    - 定义背景色：深色背景、表面、浅色、提升
- *    - 定义文字色：主要、次要、静音
- *    - 定义边框色：微妙、默认、强调
- *    - 定义状态色：成功、警告、错误、信息
- *    - 定义特殊色：紫色（群聊）、助手色
- *    - 定义圆角：从小到大各种尺寸
- *    - 定义间距：从小到大各种尺寸
- *    - 定义阴影：各种尺寸和颜色的阴影
- *    - 定义过渡：快速、正常、慢速
- *    - 定义字体：无衬线字体、等宽字体
- *    - 定义字号：从小到大各种尺寸
- *    - 定义Z-Index层级：下拉、粘性、弹窗、弹出框、工具提示
- *
- * 文件关系：
- *    - 被导入：被styles/index.css导入，作为样式系统的变量基础
- *    - 导入：无
- *    - 依赖：无
- *    - 位置：样式层，提供全局CSS变量定义
+ * Obsidian Brutalist 设计系统
+ * 风格：Radical Dark, Industrial, AI-Native
  */
 
 @theme {
-  /* ========== 品牌色 ========== */
-  --color-brand: #a230ed;
-  --color-brand-hover: #b558f0;
-  --color-brand-dark: #8e23d1;
-  --color-brand-light: #c77df5;
+  /* ========== 核心调色盘 (Obsidian & Safety Orange) ========== */
+  --color-brand: #FF4D00;       /* 鲜亮的工业橙 */
+  --color-brand-hover: #FF6622;
+  --color-brand-dark: #CC3E00;
+  --color-brand-light: #FF8855;
   
-  /* ========== 背景色 ========== */
-  --color-dark-bg: #101014;
-  --color-dark-surface: #18181c;
-  --color-dark-lighter: #2d2d33;
-  --color-dark-elevated: #1e1e24;
-  
-  /* ========== 文字色 ========== */
-  --color-text-primary: rgba(255, 255, 255, 0.9);
-  --color-text-secondary: rgba(255, 255, 255, 0.6);
-  --color-text-muted: rgba(255, 255, 255, 0.4);
-  
-  /* ========== 边框色 ========== */
+  --color-accent: #00F5FF;      /* 辅助色：霓虹青 (用于状态或特殊提示) */
+
+  /* ========== 极暗背景 (True Dark) ========== */
+  --color-dark-bg: #050505;       /* 接近纯黑 */
+  --color-dark-surface: #0F0F10;  /* 表面层 */
+  --color-dark-lighter: #1A1A1C;  /* 悬浮层 */
+  --color-dark-elevated: #242426;
+
+  /* ========== 文字 (Monochrome High Contrast) ========== */
+  --color-text-primary: #FFFFFF;   
+  --color-text-secondary: #888888; 
+  --color-text-muted: #444444;     
+  --color-text-inverse: #000000;   
+
+  /* ========== 边框 (Hairline System) ========== */
   --color-border-subtle: rgba(255, 255, 255, 0.05);
   --color-border-default: rgba(255, 255, 255, 0.1);
   --color-border-strong: rgba(255, 255, 255, 0.2);
-  
-  /* ========== 状态色 ========== */
-  --color-success: #22c55e;
-  --color-success-bg: rgba(34, 197, 94, 0.2);
-  --color-success-text: #86efac;
-  
-  --color-warning: #f59e0b;
-  --color-warning-bg: rgba(245, 158, 11, 0.2);
-  --color-warning-text: #fcd34d;
-  
-  --color-error: #ef4444;
-  --color-error-bg: rgba(239, 68, 68, 0.2);
-  --color-error-text: #fecaca;
-  
-  --color-info: #3b82f6;
-  --color-info-bg: rgba(59, 130, 246, 0.2);
-  --color-info-text: #93c5fd;
-  
-  /* ========== 特殊色（群聊/角色相关） ========== */
-  --color-purple: #a855f7;
-  --color-purple-bg: rgba(168, 85, 247, 0.2);
-  --color-purple-text: #e9d5ff;
-  
-  --color-assistant: #b76e79;
-  --color-assistant-bg: rgba(183, 110, 121, 0.2);
-  
-  /* ========== 圆角 ========== */
-  --radius-sm: 0.375rem;
-  --radius-md: 0.5rem;
-  --radius-lg: 0.75rem;
-  --radius-xl: 1rem;
-  --radius-2xl: 1.5rem;
-  --radius-3xl: 2rem;
-  --radius-full: 9999px;
-  
+
+  /* ========== 状态色 (Industrial) ========== */
+  --color-success: #00FF41; /* 经典终端绿 */
+  --color-warning: #FFB800;
+  --color-error: #FF0000;
+
+  /* ========== 布局常量 ========== */
+  --header-height: 4rem;
+  --sidebar-width: 280px;
+
+  /* ========== 圆角 (Absolute Zero) ========== */
+  --radius-xs: 0px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+
   /* ========== 间距 ========== */
   --spacing-xs: 0.25rem;
   --spacing-sm: 0.5rem;
   --spacing-md: 1rem;
   --spacing-lg: 1.5rem;
-  --spacing-xl: 2rem;
-  --spacing-2xl: 3rem;
-  
-  /* ========== 阴影 ========== */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.3);
-  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.3);
-  --shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.3);
-  --shadow-brand: 0 10px 25px rgba(162, 48, 237, 0.2);
-  --shadow-success: 0 10px 25px rgba(34, 197, 94, 0.15);
-  --shadow-error: 0 10px 25px rgba(239, 68, 68, 0.2);
-  --shadow-purple: 0 10px 25px rgba(168, 85, 247, 0.15);
-  
-  /* ========== 过渡 ========== */
-  --transition-fast: 0.15s ease;
-  --transition-normal: 0.2s ease;
-  --transition-slow: 0.3s ease;
-  
-  /* ========== 字体 ========== */
-  --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --font-mono: 'JetBrains Mono', 'Fira Code', Consolas, Monaco, 'Courier New', monospace;
-  
+  --spacing-xl: 3rem;
+
+  /* ========== 阴影 (None, use borders) ========== */
+  --shadow-brand: 0 0 20px rgba(255, 77, 0, 0.15);
+
+  /* ========== 字体 (Swiss + Mono) ========== */
+  --font-sans: 'Inter', 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'Space Mono', 'JetBrains Mono', monospace;
+  --font-display: 'Inter', sans-serif;
+
   /* ========== 字号 ========== */
-  --text-xs: 0.75rem;
-  --text-sm: 0.875rem;
-  --text-base: 1rem;
-  --text-lg: 1.125rem;
-  --text-xl: 1.25rem;
-  --text-2xl: 1.5rem;
-  
-  /* ========== Z-Index 层级 ========== */
-  --z-dropdown: 100;
-  --z-sticky: 200;
-  --z-modal: 300;
-  --z-popover: 400;
-  --z-tooltip: 500;
+  --text-xs: 0.65rem;
+  --text-sm: 0.8rem;
+  --text-base: 0.95rem;
+  --text-lg: 1.1rem;
+  --text-xl: 1.4rem;
+  --text-2xl: 2rem;
 }

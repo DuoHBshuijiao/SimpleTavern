@@ -1,41 +1,7 @@
 <script setup lang="ts">
 /**
  * ModernSelect - 现代化选择器组件
- *
- * 组件职责：
- * - 提供下拉选择功能，支持单选
- * - 支持搜索过滤选项
- * - 支持分组选项
- * - 支持允许创建新选项
- * - 支持自定义下拉位置和宽度
- *
- * Props说明：
- * - modelValue: 当前选中的值（v-model）
- * - options: 选项列表，可以是字符串数组、选项对象数组或分组选项数组
- * - placeholder: 占位符文本
- * - searchable: 是否可搜索
- * - loading: 是否加载中
- * - disabled: 是否禁用
- * - allowCreate: 是否允许创建新选项
- * - placement: 下拉位置（'top'或'bottom'）
- * - dropdownWidth: 下拉框宽度（数字或字符串）
- *
- * Emits说明：
- * - update:modelValue: 更新选中值（v-model）
- * - change: 值改变时触发
- * - select: 选择选项时触发，传递完整选项对象
- *
- * 使用的Composables：
- * 无
- *
- * 使用的Stores：
- * 无
- *
- * 文件关系：
- *    - 被导入：被views/ChatPage.vue等组件使用
- *    - 导入：导入vue的computed、ref、onMounted、onUnmounted、nextTick
- *    - 依赖：依赖vue
- *    - 位置：组件层，提供选择器功能
+ * 风格：Swiss Modernism 2.0 (Bold, Sharp)
  */
 import { computed, ref, onMounted, onUnmounted, nextTick } from 'vue'
 
@@ -57,13 +23,13 @@ const props = withDefaults(defineProps<{
   searchable?: boolean
   loading?: boolean
   disabled?: boolean
-  allowCreate?: boolean // 允许输入不存在的选项
+  allowCreate?: boolean 
   placement?: 'top' | 'bottom'
   dropdownWidth?: string | number
 }>(), {
   modelValue: '',
   options: () => [],
-  placeholder: '请选择...',
+  placeholder: 'SELECT...',
   searchable: false,
   loading: false,
   disabled: false,
@@ -75,7 +41,7 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   (e: 'update:modelValue', value: string): void
   (e: 'change', value: string): void
-  (e: 'select', option: Option): void // 新增，方便上层获取完整option对象(包含presetId等)
+  (e: 'select', option: Option): void 
 }>()
 
 const isOpen = ref(false)
@@ -83,11 +49,6 @@ const searchQuery = ref('')
 const containerRef = ref<HTMLElement | null>(null)
 const inputRef = ref<HTMLInputElement | null>(null)
 
-/**
- * 计算规范化后的选项列表
- *
- * 统一处理options格式，将字符串转换为选项对象，将分组选项规范化。
- */
 const normalizedOptions = computed(() => {
   return props.options.map(opt => {
     if (typeof opt === 'string') {
@@ -106,12 +67,6 @@ const normalizedOptions = computed(() => {
   })
 })
 
-/**
- * 计算过滤后的选项列表
- *
- * 如果可搜索且有搜索查询，则根据查询过滤选项（不区分大小写）。
- * 支持分组选项的过滤。
- */
 const filteredOptions = computed(() => {
   if (!props.searchable || !searchQuery.value) return normalizedOptions.value
   const query = searchQuery.value.toLowerCase()
@@ -136,12 +91,6 @@ const filteredOptions = computed(() => {
   return result
 })
 
-/**
- * 计算选中项的标签
- *
- * 根据modelValue从选项列表中查找对应的标签文本。
- * 如果未找到，则返回modelValue本身。
- */
 const selectedLabel = computed(() => {
   if (!props.modelValue) return ''
   
@@ -157,11 +106,6 @@ const selectedLabel = computed(() => {
   return props.modelValue
 })
 
-/**
- * 切换下拉框状态
- *
- * 如果禁用则不执行。如果已打开则关闭，否则打开。
- */
 function toggle() {
   if (props.disabled) return
   if (isOpen.value) {
@@ -171,11 +115,6 @@ function toggle() {
   }
 }
 
-/**
- * 打开下拉框
- *
- * 设置打开状态，清空搜索查询，如果可搜索则聚焦输入框。
- */
 function open() {
   isOpen.value = true
   searchQuery.value = ''
@@ -186,22 +125,10 @@ function open() {
   })
 }
 
-/**
- * 关闭下拉框
- *
- * 设置关闭状态。
- */
 function close() {
   isOpen.value = false
 }
 
-/**
- * 选择选项
- *
- * 触发update:modelValue、change和select事件，然后关闭下拉框。
- *
- * @param {Option} opt - 选中的选项
- */
 function select(opt: Option) {
   emit('update:modelValue', opt.value)
   emit('change', opt.value)
@@ -209,11 +136,6 @@ function select(opt: Option) {
   close()
 }
 
-/**
- * 处理输入框回车事件
- *
- * 如果有第一个匹配项则选择它，如果允许创建且输入框有内容则创建新选项。
- */
 function handleInputEnter() {
   let firstMatch: Option | null = null
   
@@ -237,13 +159,6 @@ function handleInputEnter() {
   }
 }
 
-/**
- * 处理点击外部事件
- *
- * 当点击下拉框外部时关闭下拉框。
- *
- * @param {MouseEvent} event - 鼠标事件
- */
 function handleClickOutside(event: MouseEvent) {
   if (containerRef.value && !containerRef.value.contains(event.target as Node)) {
     close()
@@ -261,42 +176,42 @@ onUnmounted(() => {
 
 <template>
   <div ref="containerRef" class="relative group w-full">
-    <!-- Trigger -->
+    <!-- Trigger - Sharp, Bold -->
     <div 
-      class="flex items-center justify-between w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 transition-colors cursor-pointer"
+      class="flex items-center justify-between w-full bg-surface border border-strong rounded-sm px-4 py-2 text-xs font-black uppercase tracking-widest text-text-primary transition-all cursor-pointer"
       :class="[
-        disabled ? 'opacity-50 cursor-not-allowed' : 'hover:bg-white/5 hover:border-brand/30',
-        isOpen ? '!border-brand/50 ring-1 ring-brand/20' : ''
+        disabled ? 'opacity-30 cursor-not-allowed' : 'hover:border-brand',
+        isOpen ? '!border-brand ring-4 ring-brand/5' : ''
       ]"
       @click="toggle"
     >
-      <div class="truncate select-none" :class="!modelValue ? 'text-gray-500' : ''">
+      <div class="truncate select-none" :class="!modelValue ? 'text-text-muted' : ''">
         {{ selectedLabel || placeholder }}
       </div>
-      <div class="flex items-center gap-2 ml-2 text-gray-500">
-         <span v-if="loading" class="animate-spin text-brand">⟳</span>
-         <span v-else class="text-[10px] transition-transform duration-200" :class="isOpen ? 'rotate-180' : ''">▼</span>
+      <div class="flex items-center gap-2 ml-2 text-brand">
+         <span v-if="loading" class="animate-spin">⟳</span>
+         <span v-else class="text-[8px] transition-transform duration-200" :class="isOpen ? 'rotate-180' : ''">▼</span>
       </div>
     </div>
 
-    <!-- Dropdown Menu -->
+    <!-- Dropdown Menu - Radical Swiss -->
     <div 
       v-if="isOpen"
-      class="absolute z-50 mt-1 bg-[#18181c] border border-white/10 rounded-xl shadow-xl overflow-hidden flex flex-col max-h-[260px]"
+      class="absolute z-50 mt-1 bg-dark-bg border-2 border-brand rounded-sm shadow-xl overflow-hidden flex flex-col max-h-[300px]"
       :class="[
-        placement === 'top' ? 'bottom-full mb-1' : 'top-full mt-1',
+        placement === 'top' ? 'bottom-full mb-2' : 'top-full mt-2',
         dropdownWidth ? 'right-0' : 'left-0 right-0'
       ]"
       :style="dropdownWidth ? { width: typeof dropdownWidth === 'number' ? dropdownWidth + 'px' : dropdownWidth } : {}"
     >
       <!-- Search Input -->
-      <div v-if="searchable || allowCreate" class="p-2 border-b border-white/5">
+      <div v-if="searchable || allowCreate" class="p-3 border-b border-subtle">
         <input 
           ref="inputRef"
           v-model="searchQuery"
           type="text"
-          class="w-full bg-black/20 border border-white/5 rounded-lg px-2 py-1.5 text-xs text-gray-200 focus:border-brand/50 focus:outline-none placeholder-gray-600"
-          :placeholder="allowCreate ? '搜索或输入新值...' : '搜索...'"
+          class="w-full bg-surface border border-strong rounded-sm px-3 py-2 text-xs font-bold uppercase tracking-widest text-text-primary focus:border-brand focus:outline-none placeholder-text-muted"
+          :placeholder="allowCreate ? 'ENTER VALUE...' : 'SEARCH...'"
           @keydown.enter.prevent="handleInputEnter"
         />
       </div>
@@ -304,36 +219,36 @@ onUnmounted(() => {
       <!-- Options List -->
       <div class="overflow-y-auto custom-scrollbar p-1">
         <template v-for="(item, idx) in filteredOptions" :key="idx">
-           <!-- Group Header -->
-           <div v-if="'options' in item" class="px-2 py-1">
-              <div class="text-[10px] font-bold text-gray-500 uppercase tracking-wider px-1 mb-1">{{ item.label }}</div>
+           <!-- Group Header - Bold Swiss -->
+           <div v-if="'options' in item" class="mt-4 first:mt-0 mb-2">
+              <div class="text-[8px] font-black text-brand uppercase tracking-[0.3em] px-4 py-1 bg-brand/5 border-y border-brand/10">{{ item.label }}</div>
               <div 
                 v-for="opt in item.options" 
                 :key="opt.value"
-                class="px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors flex items-center justify-between group/item pl-4"
-                :class="modelValue === opt.value ? 'bg-brand/10 text-brand' : 'text-gray-300 hover:bg-white/5'"
+                class="px-4 py-3 text-[10px] font-bold uppercase tracking-widest cursor-pointer transition-colors flex items-center justify-between group/item"
+                :class="modelValue === opt.value ? 'bg-brand text-text-inverse' : 'text-text-secondary hover:bg-white/5'"
                 @click="select(opt)"
               >
                 <span class="truncate">{{ opt.label }}</span>
-                <span v-if="modelValue === opt.value" class="text-brand text-xs">✓</span>
+                <span v-if="modelValue === opt.value" class="font-black">SELECTED</span>
               </div>
            </div>
            
            <!-- Single Option -->
            <div 
               v-else 
-              class="px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors flex items-center justify-between group/item"
-              :class="modelValue === (item as Option).value ? 'bg-brand/10 text-brand' : 'text-gray-300 hover:bg-white/5'"
+              class="px-4 py-3 text-[10px] font-bold uppercase tracking-widest cursor-pointer transition-colors flex items-center justify-between group/item"
+              :class="modelValue === (item as Option).value ? 'bg-brand text-text-inverse' : 'text-text-secondary hover:bg-white/5'"
               @click="select(item as Option)"
             >
               <span class="truncate">{{ (item as Option).label }}</span>
-              <span v-if="modelValue === (item as Option).value" class="text-brand text-xs">✓</span>
+              <span v-if="modelValue === (item as Option).value" class="font-black">SELECTED</span>
             </div>
         </template>
 
-        <div v-if="filteredOptions.length === 0" class="px-3 py-4 text-center text-xs text-gray-500">
-           <span v-if="allowCreate && searchQuery">按回车使用 "{{ searchQuery }}"</span>
-           <span v-else>无匹配项</span>
+        <div v-if="filteredOptions.length === 0" class="px-4 py-8 text-center text-[10px] font-black text-text-muted uppercase tracking-[0.2em]">
+           <span v-if="allowCreate && searchQuery">PRESS ENTER TO USE: "{{ searchQuery }}"</span>
+           <span v-else>PROTOCOL NOT FOUND</span>
         </div>
       </div>
     </div>
@@ -342,16 +257,12 @@ onUnmounted(() => {
 
 <style scoped>
 .custom-scrollbar::-webkit-scrollbar {
-  width: 4px;
+  width: 2px;
 }
 .custom-scrollbar::-webkit-scrollbar-track {
   background: transparent;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.1);
-  border-radius: 2px;
-}
-.custom-scrollbar:hover::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
 }
 </style>

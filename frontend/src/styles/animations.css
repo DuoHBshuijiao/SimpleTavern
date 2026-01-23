@@ -1,63 +1,24 @@
 /**
  * 动画样式文件
  *
- * 定义全局可复用的CSS动画效果，包括流式输出动画、淡入动画、滑入动画等。
- *
- * 主要功能：
- *    - 流式输出动画：用于LLM流式响应时的打字机效果
- *    - 淡入动画：基础淡入、向上淡入、向下淡入
- *    - 缩放淡入：缩放和淡入组合动画
- *    - 脉冲动画：用于加载状态指示
- *    - 旋转动画：用于加载图标
- *    - 弹跳动画：用于强调元素
- *    - 滑入动画：从右侧或左侧滑入
- *    - 骨架屏闪烁：用于加载占位
- *    - 打字机光标：闪烁光标效果
- *
- * 设计元素：
- *    - 流式输出动画：stream-append类，实现打字机效果的淡入动画
- *    - 淡入动画：fade-in、fade-in-up、fade-in-down类
- *    - 缩放淡入：scale-in类，从0.95缩放到1
- *    - 脉冲动画：pulse类，透明度在1和0.5之间变化
- *    - 旋转动画：spin类，360度旋转
- *    - 弹跳动画：bounce类，上下移动
- *    - 滑入动画：slide-in-right、slide-in-left类
- *    - 骨架屏闪烁：shimmer类，使用渐变背景实现闪烁效果
- *    - 打字机光标：blink类，闪烁效果
- *
- * 原理：
- *    - 使用@keyframes定义动画关键帧
- *    - 使用animation属性应用动画
- *    - 流式输出动画通过opacity从0到1的过渡实现淡入效果
- *    - 骨架屏闪烁通过移动渐变背景位置实现
- *
- * 文件关系：
- *    - 被导入：被styles/index.css导入
- *    - 导入：无
- *    - 依赖：依赖styles/variables.css的CSS变量
- *    - 位置：样式层，提供动画效果
+ * 风格：Swiss Modernism 2.0 Motion-Driven
+ * 特点：平滑 (Smooth), 物理感 (Physical), 响应迅速 (Responsive)
  */
 
-/* ========== 流式输出动画 ========== */
+/* ========== 流式输出动画 (Typewriter) ========== */
 @keyframes stream-chunk-fade {
-  0% { opacity: 0.7; }
-  50% { opacity: 1; }
-  100% { opacity: 1; }
+  0% { opacity: 0; transform: translateY(2px); }
+  100% { opacity: 1; transform: translateY(0); }
 }
 
 .stream-chunk-fade {
-  animation: stream-chunk-fade 0.35s ease;
-}
-
-@keyframes stream-append-fade {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  animation: stream-chunk-fade 0.2s ease-out forwards;
 }
 
 .stream-append {
   display: inline;
   opacity: 0;
-  animation: stream-append-fade 0.35s ease forwards;
+  animation: stream-chunk-fade 0.2s ease-out forwards;
 }
 
 .stream-append--done {
@@ -65,29 +26,21 @@
   animation: none;
 }
 
-.stream-markdown {
-  display: inline;
-}
-
-/* ========== 淡入动画 ========== */
+/* ========== 基础淡入 (Fade In) ========== */
 @keyframes fade-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .animate-fade-in {
-  animation: fade-in var(--transition-normal) ease;
+  animation: fade-in var(--transition-normal) forwards;
 }
 
-/* ========== 向上淡入 ========== */
+/* ========== 向上淡入 (Fade In Up - Common in Swiss Layouts) ========== */
 @keyframes fade-in-up {
   from {
     opacity: 0;
-    transform: translateY(10px);
+    transform: translateY(20px);
   }
   to {
     opacity: 1;
@@ -96,14 +49,14 @@
 }
 
 .animate-fade-in-up {
-  animation: fade-in-up var(--transition-normal) ease;
+  animation: fade-in-up var(--transition-slow) forwards;
 }
 
-/* ========== 向下淡入 ========== */
+/* ========== 向下淡入 (Fade In Down) ========== */
 @keyframes fade-in-down {
   from {
     opacity: 0;
-    transform: translateY(-10px);
+    transform: translateY(-20px);
   }
   to {
     opacity: 1;
@@ -112,14 +65,14 @@
 }
 
 .animate-fade-in-down {
-  animation: fade-in-down var(--transition-normal) ease;
+  animation: fade-in-down var(--transition-slow) forwards;
 }
 
-/* ========== 缩放淡入 ========== */
+/* ========== 缩放淡入 (Scale In - Pop effect) ========== */
 @keyframes scale-in {
   from {
     opacity: 0;
-    transform: scale(0.95);
+    transform: scale(0.92);
   }
   to {
     opacity: 1;
@@ -128,90 +81,62 @@
 }
 
 .animate-scale-in {
-  animation: scale-in var(--transition-normal) ease;
+  animation: scale-in var(--transition-spring) forwards; /* Use spring for pop */
 }
 
-/* ========== 脉冲动画 ========== */
+/* ========== 脉冲 (Pulse - Status) ========== */
 @keyframes pulse {
-  0%, 100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.5;
-  }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
 }
 
 .animate-pulse {
   animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
-/* ========== 旋转动画 ========== */
+/* ========== 旋转 (Spin - Loading) ========== */
 @keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .animate-spin {
   animation: spin 1s linear infinite;
 }
 
-/* ========== 弹跳动画 ========== */
+/* ========== 弹跳 (Bounce - Attention) ========== */
 @keyframes bounce {
-  0%, 100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-5px);
-  }
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
 }
 
 .animate-bounce {
-  animation: bounce 0.6s ease-in-out infinite;
+  animation: bounce 0.8s var(--transition-spring) infinite;
 }
 
-/* ========== 滑入动画 ========== */
+/* ========== 滑入 (Slide In - Panels/Drawers) ========== */
 @keyframes slide-in-right {
-  from {
-    transform: translateX(100%);
-    opacity: 0;
-  }
-  to {
-    transform: translateX(0);
-    opacity: 1;
-  }
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
 }
 
 .animate-slide-in-right {
-  animation: slide-in-right var(--transition-slow) ease;
+  animation: slide-in-right var(--transition-slow) forwards;
 }
 
 @keyframes slide-in-left {
-  from {
-    transform: translateX(-100%);
-    opacity: 0;
-  }
-  to {
-    transform: translateX(0);
-    opacity: 1;
-  }
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
 }
 
 .animate-slide-in-left {
-  animation: slide-in-left var(--transition-slow) ease;
+  animation: slide-in-left var(--transition-slow) forwards;
 }
 
-/* ========== 骨架屏闪烁 ========== */
+/* ========== 骨架屏闪烁 (Shimmer - Loading State) ========== */
 @keyframes shimmer {
-  0% {
-    background-position: -200% 0;
-  }
-  100% {
-    background-position: 200% 0;
-  }
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
 }
 
 .animate-shimmer {
@@ -222,19 +147,27 @@
     var(--color-dark-surface) 75%
   );
   background-size: 200% 100%;
-  animation: shimmer 1.5s infinite;
+  animation: shimmer 1.5s infinite linear;
 }
 
-/* ========== 打字机光标 ========== */
-@keyframes blink {
-  0%, 50% {
-    opacity: 1;
-  }
-  51%, 100% {
-    opacity: 0;
-  }
+/* ========== 悬停提升 (Hover Lift - Microinteraction) ========== */
+.hover-lift {
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
 }
 
-.animate-blink {
-  animation: blink 1s step-end infinite;
+.hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+/* ========== 列表交错动画 (Staggered List) ========== */
+/* Use in Vue with <TransitionGroup> or specific staggered classes */
+.stagger-enter-active,
+.stagger-leave-active {
+  transition: all var(--transition-normal);
+}
+.stagger-enter-from,
+.stagger-leave-to {
+  opacity: 0;
+  transform: translateY(10px);
 }

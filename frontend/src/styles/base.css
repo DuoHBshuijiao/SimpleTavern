@@ -1,39 +1,11 @@
 /**
  * 全局基础样式文件
- *
- * 定义HTML元素的基础样式和重置规则，包括排版、链接、按钮、输入框等。
- *
- * 主要功能：
- *    - 全局样式重置：设置根元素字体、颜色方案、背景色
- *    - 盒模型重置：统一使用border-box
- *    - 链接样式：品牌色链接，悬停效果
- *    - 按钮重置：移除默认样式，设置指针样式
- *    - 输入框重置：继承字体和字号
- *    - 列表重置：移除默认列表样式
- *    - 图片样式：响应式图片
- *    - 选中文本样式：品牌色背景
- *    - 焦点样式：品牌色轮廓
- *    - Prose/Markdown样式：段落、标题、强调、代码、引用、表格等
- *
- * 设计元素：
- *    - 链接：品牌色，悬停时变亮
- *    - 按钮：无默认样式，继承字体
- *    - 输入框：继承字体和字号
- *    - 图片：响应式，最大宽度100%
- *    - 选中文本：品牌色背景，白色文字
- *    - 焦点：品牌色轮廓，2px宽度
- *    - Prose：Markdown内容样式，包括段落、标题、代码块、引用、表格等
- *
- * 文件关系：
- *    - 被导入：被styles/index.css导入
- *    - 导入：无
- *    - 依赖：依赖styles/variables.css的CSS变量
- *    - 位置：样式层，提供全局基础样式
+ * 风格：Radical Swiss Modernism 2.0 (Bold Typography, High Contrast)
  */
 
 :root {
   font-family: var(--font-sans);
-  line-height: 1.5;
+  line-height: 1.4;
   font-weight: 400;
 
   color-scheme: dark;
@@ -57,17 +29,21 @@ body {
   padding: 0;
   min-height: 100vh;
   background-color: var(--color-dark-bg);
+  overflow-x: hidden;
 }
 
 /* ========== 链接 ========== */
 a {
   color: var(--color-brand);
   text-decoration: none;
-  transition: color var(--transition-fast);
+  transition: all var(--transition-fast);
+  font-weight: 900;
+  border-bottom: 2px solid transparent;
 }
 
 a:hover {
-  color: var(--color-brand-hover);
+  color: var(--color-text-primary);
+  border-bottom-color: var(--color-brand);
 }
 
 /* ========== 按钮重置 ========== */
@@ -107,99 +83,81 @@ img {
   display: block;
 }
 
-/* ========== 选中文本样式 ========== */
+/* ========== 选中文本样式 (Inverted) ========== */
 ::selection {
-  background-color: var(--color-brand);
-  color: white;
+  background-color: var(--color-text-primary);
+  color: var(--color-text-inverse);
 }
 
 /* ========== 焦点样式 ========== */
 :focus-visible {
   outline: 2px solid var(--color-brand);
-  outline-offset: 2px;
+  outline-offset: 4px;
+}
+
+/* ========== 排版系统 (Bold Swiss) ========== */
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-display);
+  font-weight: 900;
+  line-height: 1;
+  margin-top: 0;
+  letter-spacing: -0.05em;
+  text-transform: uppercase;
+  color: var(--color-text-primary);
+}
+
+h1 { font-size: 5rem; }
+h2 { font-size: 3rem; }
+h3 { font-size: 2rem; }
+h4 { font-size: 1.5rem; }
+
+p {
+  margin-top: 0;
+  margin-bottom: 1.5em;
+  max-width: 70ch;
 }
 
 /* ========== Prose / Markdown 内容样式 ========== */
+.prose {
+  color: var(--color-text-primary);
+}
+
 .prose p {
-  margin-bottom: 0.75em;
+  margin-bottom: 1.5em;
+  line-height: 1.7;
 }
 
-.prose p:last-child {
-  margin-bottom: 0;
-}
-
-.prose h1, .prose h2, .prose h3, .prose h4 {
+.prose h1, .prose h2, .prose h3 {
   color: var(--color-text-primary);
-  font-weight: 700;
-  margin-top: 1.5em;
-  margin-bottom: 0.5em;
-}
-
-.prose h1 { font-size: 1.5em; }
-.prose h2 { font-size: 1.25em; }
-.prose h3 { font-size: 1.125em; }
-
-.prose em,
-.prose i {
-  font-style: italic;
-  color: #9ca3af;
-}
-
-.prose strong,
-.prose b {
-  font-weight: 600;
-  color: var(--color-text-primary);
+  margin-top: 3rem;
+  margin-bottom: 1.5rem;
 }
 
 .prose code {
   font-family: var(--font-mono);
-  font-size: 0.875em;
-  background-color: rgba(255, 255, 255, 0.1);
-  padding: 0.125rem 0.375rem;
-  border-radius: var(--radius-sm);
+  font-size: 0.9em;
+  background-color: var(--color-dark-lighter);
+  padding: 0.2rem 0.4rem;
+  border-radius: 0;
+  color: var(--color-brand-light);
 }
 
 .prose pre {
   font-family: var(--font-mono);
-  background-color: rgba(0, 0, 0, 0.3);
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-md);
-  padding: var(--spacing-md);
+  background-color: #000;
+  border: none;
+  border-left: 4px solid var(--color-brand);
+  padding: 2rem;
   overflow-x: auto;
-}
-
-.prose pre code {
-  background: none;
-  padding: 0;
+  margin: 2.5rem 0;
 }
 
 .prose blockquote {
-  border-left: 3px solid var(--color-brand);
-  padding-left: var(--spacing-md);
-  margin-left: 0;
+  border-left: 8px solid var(--color-dark-lighter);
+  background-color: var(--color-surface);
+  padding: 2rem;
+  margin: 2.5rem 0;
   color: var(--color-text-secondary);
   font-style: italic;
-}
-
-.prose hr {
-  border: none;
-  border-top: 1px solid var(--color-border-default);
-  margin: var(--spacing-lg) 0;
-}
-
-.prose table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.prose th,
-.prose td {
-  border: 1px solid var(--color-border-default);
-  padding: var(--spacing-sm) var(--spacing-md);
-  text-align: left;
-}
-
-.prose th {
-  background-color: var(--color-dark-surface);
-  font-weight: 600;
+  font-size: 1.2rem;
 }

@@ -1,192 +1,33 @@
 /**
- * 卡片和面板组件样式文件
- *
- * 定义卡片、面板、消息气泡等容器组件的样式。
- *
- * 主要功能：
- *    - 基础卡片：标准卡片样式，包括可悬停和选中状态
- *    - 卡片内容区域：头部、标题、副标题、主体、底部
- *    - 紧凑卡片：减少内边距的紧凑版本
- *    - 面板：用于内容展示的面板样式
- *    - 消息气泡：用户、助手、系统消息的气泡样式
- *    - 头像卡片：用于显示头像和信息的卡片
- *    - 设置项卡片：用于设置项的卡片样式
- *
- * 设计元素：
- *    - 基础卡片：深色表面背景，微妙边框，大圆角，可悬停和选中
- *    - 卡片内容区域：头部有底部边框，主体有内边距，底部有顶部边框和背景
- *    - 消息气泡：用户消息使用品牌色背景，助手消息使用深色背景，系统消息使用警告色背景
- *    - 头像卡片：flex布局，居中对齐，可悬停和选中
- *    - 设置项卡片：flex布局，两端对齐，用于设置项展示
- *
- * 布局：
- *    - 卡片：使用flex布局，垂直方向
- *    - 头像卡片：使用flex布局，水平方向，居中对齐
- *    - 设置项卡片：使用flex布局，水平方向，两端对齐
- *
- * 文件关系：
- *    - 被导入：被styles/components/index.css导入
- *    - 导入：无
- *    - 依赖：依赖styles/variables.css的CSS变量
- *    - 位置：样式层，提供卡片和面板组件样式
+ * 卡片组件样式文件
+ * 风格：Radical Swiss Modernism 2.0 (Geometric, Hard Shadows)
  */
 
-/* ========== 基础卡片 ========== */
 .card {
-  background-color: var(--color-dark-surface);
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-2xl);
-  overflow: hidden;
-}
-
-.card-hoverable {
-  transition: 
-    border-color var(--transition-fast),
-    box-shadow var(--transition-fast),
-    transform var(--transition-fast);
-  cursor: pointer;
-}
-
-.card-hoverable:hover {
-  border-color: var(--color-border-default);
-  box-shadow: var(--shadow-md);
-  transform: translateY(-2px);
-}
-
-.card-selected {
-  border-color: var(--color-brand);
-  background-color: rgba(162, 48, 237, 0.05);
-}
-
-/* ========== 卡片内容区域 ========== */
-.card-header {
-  padding: var(--spacing-md) var(--spacing-lg);
-  border-bottom: 1px solid var(--color-border-subtle);
-}
-
-.card-title {
-  font-size: var(--text-base);
-  font-weight: 600;
-  color: var(--color-text-primary);
-}
-
-.card-subtitle {
-  font-size: var(--text-sm);
-  color: var(--color-text-secondary);
-  margin-top: 0.25rem;
-}
-
-.card-body {
+  background-color: var(--color-surface);
+  border: 2px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
   padding: var(--spacing-lg);
+  box-shadow: var(--shadow-md);
+  transition: all var(--transition-normal);
 }
 
-.card-footer {
-  padding: var(--spacing-md) var(--spacing-lg);
-  border-top: 1px solid var(--color-border-subtle);
-  background-color: rgba(0, 0, 0, 0.1);
+.card:hover {
+  border-color: var(--color-brand);
+  transform: translate(-2px, -2px);
+  box-shadow: var(--shadow-lg);
 }
 
-/* ========== 紧凑卡片 ========== */
-.card-compact .card-header,
-.card-compact .card-footer {
-  padding: var(--spacing-sm) var(--spacing-md);
-}
-
-.card-compact .card-body {
-  padding: var(--spacing-md);
-}
-
-/* ========== 面板 ========== */
-.panel {
-  background-color: var(--color-dark-elevated);
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-xl);
-  padding: var(--spacing-md);
-}
-
-.panel-inset {
-  background-color: rgba(0, 0, 0, 0.2);
-  border: 1px solid var(--color-border-subtle);
-}
-
-/* ========== 消息气泡 ========== */
+/* ========== 消息气泡 (Modern AI Bubbles) ========== */
+/* Handled mainly in MessageList.vue but base classes here */
 .message-bubble {
   position: relative;
-  padding: 0.875rem 1.25rem;
-  border-radius: var(--radius-2xl);
-  font-size: var(--text-base);
-  line-height: 1.75;
-  transition: 
-    background-color var(--transition-fast),
-    border-color var(--transition-fast);
+  max-width: 100%;
 }
 
-.message-bubble--user {
-  background-color: rgba(162, 48, 237, 0.1);
-  border: 1px solid rgba(162, 48, 237, 0.2);
-  color: var(--color-text-primary);
-  border-top-right-radius: var(--radius-sm);
-}
-
-.message-bubble--user:hover {
-  border-color: rgba(162, 48, 237, 0.3);
-}
-
-.message-bubble--assistant {
-  background-color: var(--color-dark-elevated);
-  border: 1px solid var(--color-border-subtle);
-  color: var(--color-text-primary);
-  border-top-left-radius: var(--radius-sm);
-}
-
-.message-bubble--assistant:hover {
-  background-color: var(--color-dark-lighter);
-}
-
-.message-bubble--system {
-  background-color: rgba(245, 158, 11, 0.05);
-  border: 1px solid rgba(245, 158, 11, 0.1);
-  color: var(--color-text-secondary);
-}
-
-/* ========== 头像卡片 ========== */
-.avatar-card {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-md);
-  padding: var(--spacing-sm) var(--spacing-md);
-  border-radius: var(--radius-xl);
-  transition: background-color var(--transition-fast);
-  cursor: pointer;
-}
-
-.avatar-card:hover {
-  background-color: rgba(255, 255, 255, 0.05);
-}
-
-.avatar-card-selected {
-  background-color: rgba(162, 48, 237, 0.1);
-  border: 1px solid rgba(162, 48, 237, 0.2);
-}
-
-/* ========== 设置项卡片 ========== */
-.setting-card {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--spacing-md);
-  background-color: rgba(255, 255, 255, 0.02);
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-xl);
-}
-
-.setting-card-label {
-  font-size: var(--text-sm);
-  color: var(--color-text-secondary);
-}
-
-.setting-card-description {
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
-  margin-top: 0.25rem;
+/* ========== 阴影卡片 ========== */
+.card-elevated {
+  background-color: var(--color-surface);
+  box-shadow: var(--shadow-xl);
+  border: 2px solid var(--color-text-primary);
 }

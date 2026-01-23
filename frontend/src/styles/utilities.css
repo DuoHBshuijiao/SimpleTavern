@@ -1,40 +1,27 @@
 /**
  * 工具类样式文件
  *
- * 提供常用的单一用途CSS工具类，补充Tailwind CSS的功能。
- *
- * 主要功能：
- *    - 文件上传相关：隐藏文件输入、上传标题和提示样式
- *    - 文本截断：单行和多行文本截断
- *    - 文本对齐：左、中、右对齐
- *    - 文本颜色：主要、次要、静音、品牌、状态色
- *    - 背景色：表面、提升、浅色
- *    - Flex布局：方向、换行、对齐、间距
- *    - 间距：内边距和外边距
- *    - 尺寸：宽度、高度、最小尺寸
- *    - 定位：相对、绝对、固定、粘性
- *    - 溢出：隐藏、自动滚动
- *    - 可见性：可见、隐藏、透明度
- *    - 交互：指针、禁用、选择
- *    - 过渡：全部、颜色、透明度、变换
- *    - 边框：各种边框样式
- *    - 圆角：各种圆角尺寸
- *    - 阴影：各种阴影效果
- *    - Z-Index：层级管理
- *    - 悬浮显示操作：鼠标悬停时显示操作按钮
- *
- * 设计元素：
- *    - 文本截断：单行使用ellipsis，多行使用line-clamp
- *    - Flex工具类：提供常用的Flex布局工具类
- *    - 间距工具类：提供常用的内边距和外边距
- *    - 过渡工具类：提供颜色、透明度、变换等过渡效果
- *
- * 文件关系：
- *    - 被导入：被styles/index.css导入
- *    - 导入：无
- *    - 依赖：依赖styles/variables.css的CSS变量
- *    - 位置：样式层，提供工具类样式
+ * 风格：Swiss Modernism 2.0 (Grid Utilities)
  */
+
+/* ========== 网格系统 (Grid System) ========== */
+.grid { display: grid; }
+
+.grid-cols-1 { grid-template-columns: repeat(1, minmax(0, 1fr)); }
+.grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.grid-cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.grid-cols-6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.grid-cols-12 { grid-template-columns: repeat(12, minmax(0, 1fr)); }
+
+/* 常见 Swiss 布局比例 */
+.grid-swiss-sidebar { grid-template-columns: 280px 1fr; }
+.grid-swiss-detail { grid-template-columns: 1fr 320px; }
+
+/* 跨列 */
+.col-span-1 { grid-column: span 1 / span 1; }
+.col-span-2 { grid-column: span 2 / span 2; }
+.col-span-full { grid-column: 1 / -1; }
 
 /* ========== 文件上传相关 ========== */
 .chat-file-input-hidden {
@@ -43,7 +30,8 @@
 
 .chat-upload-title {
   font-size: var(--text-base);
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--color-text-primary);
+  font-weight: 600;
 }
 
 .chat-upload-hint {
@@ -77,17 +65,11 @@
   overflow: hidden;
 }
 
-.line-clamp-3 {
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
 /* ========== 文本对齐 ========== */
 .text-left { text-align: left; }
 .text-center { text-align: center; }
 .text-right { text-align: right; }
+.text-justify { text-align: justify; }
 
 /* ========== 文本颜色 ========== */
 .text-primary { color: var(--color-text-primary); }
@@ -97,19 +79,24 @@
 .text-success { color: var(--color-success); }
 .text-warning { color: var(--color-warning); }
 .text-error { color: var(--color-error); }
+.text-inverse { color: var(--color-text-inverse); }
 
 /* ========== 背景色 ========== */
 .bg-surface { background-color: var(--color-dark-surface); }
 .bg-elevated { background-color: var(--color-dark-elevated); }
 .bg-lighter { background-color: var(--color-dark-lighter); }
+.bg-brand { background-color: var(--color-brand); }
 
 /* ========== Flex 工具类 ========== */
 .flex { display: flex; }
 .inline-flex { display: inline-flex; }
 .flex-col { flex-direction: column; }
+.flex-row { flex-direction: row; }
 .flex-wrap { flex-wrap: wrap; }
+.flex-nowrap { flex-wrap: nowrap; }
 .flex-1 { flex: 1; }
 .flex-shrink-0 { flex-shrink: 0; }
+.grow { flex-grow: 1; }
 
 .items-start { align-items: flex-start; }
 .items-center { align-items: center; }
@@ -120,21 +107,21 @@
 .justify-center { justify-content: center; }
 .justify-end { justify-content: flex-end; }
 .justify-between { justify-content: space-between; }
+.justify-around { justify-content: space-around; }
 
-.gap-1 { gap: 0.25rem; }
-.gap-2 { gap: 0.5rem; }
-.gap-3 { gap: 0.75rem; }
-.gap-4 { gap: 1rem; }
-.gap-6 { gap: 1.5rem; }
-.gap-8 { gap: 2rem; }
+.gap-1 { gap: var(--spacing-xs); }
+.gap-2 { gap: var(--spacing-sm); }
+.gap-4 { gap: var(--spacing-md); }
+.gap-6 { gap: var(--spacing-lg); }
+.gap-8 { gap: var(--spacing-xl); }
 
 /* ========== 间距工具类 ========== */
 .p-0 { padding: 0; }
-.p-1 { padding: 0.25rem; }
-.p-2 { padding: 0.5rem; }
-.p-3 { padding: 0.75rem; }
-.p-4 { padding: 1rem; }
-.p-6 { padding: 1.5rem; }
+.p-2 { padding: var(--spacing-sm); }
+.p-4 { padding: var(--spacing-md); }
+.p-6 { padding: var(--spacing-lg); }
+.px-4 { padding-left: var(--spacing-md); padding-right: var(--spacing-md); }
+.py-2 { padding-top: var(--spacing-sm); padding-bottom: var(--spacing-sm); }
 
 .m-0 { margin: 0; }
 .m-auto { margin: auto; }
@@ -143,8 +130,9 @@
 /* ========== 尺寸 ========== */
 .w-full { width: 100%; }
 .h-full { height: 100%; }
+.w-screen { width: 100vw; }
+.h-screen { height: 100vh; }
 .min-h-screen { min-height: 100vh; }
-.min-w-0 { min-width: 0; }
 
 /* ========== 定位 ========== */
 .relative { position: relative; }
@@ -161,8 +149,7 @@
 /* ========== 溢出 ========== */
 .overflow-hidden { overflow: hidden; }
 .overflow-auto { overflow: auto; }
-.overflow-x-auto { overflow-x: auto; }
-.overflow-y-auto { overflow-y: auto; }
+.overflow-visible { overflow: visible; }
 
 /* ========== 可见性 ========== */
 .visible { visibility: visible; }
@@ -190,10 +177,6 @@
     border-color var(--transition-fast);
 }
 
-.transition-opacity {
-  transition: opacity var(--transition-fast);
-}
-
 .transition-transform {
   transition: transform var(--transition-fast);
 }
@@ -201,38 +184,32 @@
 /* ========== 边框 ========== */
 .border { border: 1px solid var(--color-border-default); }
 .border-subtle { border: 1px solid var(--color-border-subtle); }
-.border-strong { border: 1px solid var(--color-border-strong); }
-.border-brand { border: 1px solid var(--color-brand); }
 .border-t { border-top: 1px solid var(--color-border-default); }
 .border-b { border-bottom: 1px solid var(--color-border-default); }
 .border-l { border-left: 1px solid var(--color-border-default); }
 .border-r { border-right: 1px solid var(--color-border-default); }
 
 /* ========== 圆角 ========== */
+.rounded-sm { border-radius: var(--radius-sm); }
 .rounded { border-radius: var(--radius-md); }
 .rounded-lg { border-radius: var(--radius-lg); }
 .rounded-xl { border-radius: var(--radius-xl); }
-.rounded-2xl { border-radius: var(--radius-2xl); }
 .rounded-full { border-radius: var(--radius-full); }
 
 /* ========== 阴影 ========== */
+.shadow-sm { box-shadow: var(--shadow-sm); }
 .shadow { box-shadow: var(--shadow-md); }
 .shadow-lg { box-shadow: var(--shadow-lg); }
 .shadow-xl { box-shadow: var(--shadow-xl); }
 
-/* ========== Z-Index ========== */
-.z-10 { z-index: 10; }
-.z-20 { z-index: 20; }
-.z-50 { z-index: 50; }
-.z-dropdown { z-index: var(--z-dropdown); }
-.z-modal { z-index: var(--z-modal); }
-
 /* ========== 悬浮显示操作按钮 ========== */
 .hover-show-actions .actions {
   opacity: 0;
-  transition: opacity var(--transition-fast);
+  transform: translateX(10px);
+  transition: opacity var(--transition-fast), transform var(--transition-fast);
 }
 
 .hover-show-actions:hover .actions {
   opacity: 1;
+  transform: translateX(0);
 }

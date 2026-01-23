@@ -1,37 +1,7 @@
 <script setup lang="ts">
 /**
- * SettingsDrawer - 设置抽屉组件
- *
- * 组件职责：
- * - 提供应用设置的编辑界面
- * - 管理全局设置（LLM配置、API预设、生成参数等）
- * - 管理聊天覆盖设置（提示词、长期记忆、生成参数等）
- * - 支持导入导出设置
- * - 支持API预设管理
- * - 支持模型候选列表管理
- *
- * Props说明：
- * - show: 是否显示抽屉（v-model:show）
- * - chat: 当前聊天会话（来自types/models.ts的Chat类型，用于编辑聊天覆盖设置）
- * - initialTab: 初始标签页（'global'、'presets'或'chat'）
- *
- * Emits说明：
- * - update:show: 更新显示状态（v-model:show）
- * - open-member-settings: 打开成员设置编辑，传递成员ID
- *
- * 使用的Composables：
- * 无
- *
- * 使用的Stores：
- * - useSettingsStore: 来自stores/settings.ts，用于管理设置
- * - useChatsStore: 来自stores/chats.ts，用于更新聊天设置
- * - useCharactersStore: 来自stores/characters.ts，用于获取角色列表
- *
- * 文件关系：
- *    - 被导入：被views/ChatPage.vue使用
- *    - 导入：导入vue的computed、ref、watch、stores/index.ts的Store、types/models.ts的类型、components/ModernSelect.vue、components/ModelSelectorModal.vue、api/http.ts的apiPost
- *    - 依赖：依赖vue、stores、api/http.ts
- *    - 位置：组件层，提供设置管理功能
+ * SettingsDrawer - 设置面板
+ * 风格：Obsidian Brutalist (High Density)
  */
 import { computed, ref, watch } from 'vue'
 import { useCharactersStore, useChatsStore, useSettingsStore } from '../stores'
@@ -55,56 +25,24 @@ const chatsStore = useChatsStore()
 const charactersStore = useCharactersStore()
 
 const tab = ref<'global' | 'presets' | 'chat'>('global')
-
-watch(() => props.initialTab, (newTab) => {
-  if (newTab) tab.value = newTab
-}, { immediate: true })
+watch(() => props.initialTab, (newTab) => { if (newTab) tab.value = newTab }, { immediate: true })
 
 const globalDraft = ref<Settings | null>(null)
 const chatDraft = ref<ChatOverrides | null>(null)
-
 const showApiKey = ref(false)
 const editingPresetId = ref<string | null>(null)
 const editingPresetShowApiKey = ref(false)
 const presetModelsLoading = ref(false)
 const importInputRef = ref<HTMLInputElement | null>(null)
 
-// Model Selector Modal State
 const showModelSelector = ref(false)
 const candidateModels = ref<string[]>([])
 const selectedCandidateModels = ref<Set<string>>(new Set())
 const modelSelectorQuery = ref('')
 
-/**
- * 关闭抽屉
- *
- * 触发update:show事件，传递false。
- */
-function close() {
-  emit('update:show', false)
-}
+function close() { emit('update:show', false) }
+function clone<T>(v: T): T { return JSON.parse(JSON.stringify(v)) }
 
-/**
- * 深拷贝对象
- *
- * 使用JSON序列化和反序列化实现深拷贝。
- *
- * @template T - 对象类型
- * @param {T} v - 要拷贝的对象
- * @returns {T} 拷贝后的对象
- */
-function clone<T>(v: T): T {
-  return JSON.parse(JSON.stringify(v)) as T
-}
-
-/**
- * 确保覆盖设置格式正确
- *
- * 确保返回的ChatOverrides对象包含所有必需字段，缺失字段使用null。
- *
- * @param {Partial<ChatOverrides> | null | undefined} v - 部分覆盖设置
- * @returns {ChatOverrides} 完整的覆盖设置对象（来自types/models.ts）
- */
 function ensureOverrides(v?: Partial<ChatOverrides> | null): ChatOverrides {
   return {
     prompt: v?.prompt ?? null,
@@ -119,798 +57,227 @@ function ensureOverrides(v?: Partial<ChatOverrides> | null): ChatOverrides {
   }
 }
 
-watch(
-  () => props.show,
-  async (open) => {
-    if (!open) return
-    if (!settingsStore.settings) await settingsStore.load()
-    const s = clone(settingsStore.settings!)
-    if (s.streamEnabled === undefined) s.streamEnabled = true
-    if ((s as Settings).pureAiMode === undefined) (s as Settings).pureAiMode = false
-    if (!s.apiPresets) s.apiPresets = []
-    
-    globalDraft.value = s
-    chatDraft.value = props.chat ? clone(props.chat.overrides) : ensureOverrides()
-    
-    if (s.apiPresets.length > 0 && !editingPresetId.value) {
-        editingPresetId.value = s.apiPresets[0]?.id ?? null
-    }
-  },
-)
-
-/**
- * 计算当前编辑的预设
- *
- * 根据editingPresetId从全局草稿的API预设列表中查找预设。
- */
-const editingPreset = computed(() => {
-  if (!globalDraft.value) return null
-  return globalDraft.value.apiPresets.find(p => p.id === editingPresetId.value) || null
+watch(() => props.show, async (open) => {
+  if (!open) return
+  if (!settingsStore.settings) await settingsStore.load()
+  const s = clone(settingsStore.settings!)
+  globalDraft.value = s
+  chatDraft.value = props.chat ? clone(props.chat.overrides) : ensureOverrides()
+  if (s.apiPresets.length > 0 && !editingPresetId.value) editingPresetId.value = s.apiPresets[0].id
 })
 
-/**
- * 创建新预设
- *
- * 创建一个新的API预设，使用默认值，并设置为当前编辑的预设。
- */
-function createPreset() {
-  if (!globalDraft.value) return
-  const newPreset: ApiPreset = {
-    id: crypto.randomUUID().replace(/-/g, ''),
-    name: '新 API 预设',
-    baseUrl: 'https://api.openai.com',
-    apiKey: '',
-    models: []
-  }
-  globalDraft.value.apiPresets.push(newPreset)
-  editingPresetId.value = newPreset.id
-}
+const editingPreset = computed(() => globalDraft.value?.apiPresets.find(p => p.id === editingPresetId.value) || null)
 
-/**
- * 删除预设
- *
- * 弹出确认对话框，确认后删除指定的API预设。
- * 如果删除的是当前编辑的预设，则选择第一个预设。
- *
- * @param {string} id - 预设ID
- */
-function deletePreset(id: string) {
-  if (!globalDraft.value) return
-  if (!confirm('确定删除此预设？')) return
-  globalDraft.value.apiPresets = globalDraft.value.apiPresets.filter(p => p.id !== id)
-  if (editingPresetId.value === id) {
-    editingPresetId.value = globalDraft.value.apiPresets[0]?.id || null
-  }
-}
-
-/**
- * 打开模型选择器
- *
- * 测试预设的API连接，获取可用模型列表，然后打开模型选择器弹窗。
- * 使用apiPost函数（来自api/http.ts）发送POST请求到/api/llm/test-models。
- *
- * @param {ApiPreset} preset - API预设（来自types/models.ts）
- * @returns {Promise<void>} 完成时返回
- */
-async function openModelSelector(preset: ApiPreset) {
-    if (presetModelsLoading.value) return
-    presetModelsLoading.value = true
-    try {
-        const models = await apiPost<string[]>('/api/llm/test-models', {
-            baseUrl: preset.baseUrl,
-            apiKey: preset.apiKey
-        })
-        candidateModels.value = models
-        selectedCandidateModels.value = new Set(preset.models)
-        modelSelectorQuery.value = ''
-        showModelSelector.value = true
-    } catch (e) {
-        alert('获取模型失败: ' + String(e))
-    } finally {
-        presetModelsLoading.value = false
-    }
-}
-
-/**
- * 切换候选模型选择
- *
- * 切换指定模型的选中状态（选中/取消选中）。
- *
- * @param {string} m - 模型名称
- */
-function toggleCandidate(m: string) {
-    if (selectedCandidateModels.value.has(m)) {
-        selectedCandidateModels.value.delete(m)
-    } else {
-        selectedCandidateModels.value.add(m)
-    }
-}
-
-/**
- * 保存模型选择
- *
- * 将选中的模型列表保存到当前编辑的预设中，然后关闭模型选择器。
- */
-function saveModelSelection() {
-    if (editingPreset.value) {
-        editingPreset.value.models = Array.from(selectedCandidateModels.value)
-    }
-    showModelSelector.value = false
-}
-
-/**
- * 计算过滤后的候选模型
- *
- * 根据搜索查询过滤候选模型列表，不区分大小写。
- */
-const filteredCandidates = computed(() => {
-    if (!modelSelectorQuery.value) return candidateModels.value
-    const q = modelSelectorQuery.value.toLowerCase()
-    return candidateModels.value.filter(m => m.toLowerCase().includes(q))
-})
-
-/**
- * 计算聊天模型选项
- *
- * 根据全局草稿中的API预设生成聊天模型选项列表，按预设分组。
- */
-const chatModelOptions = computed(() => {
-  const options: any[] = []
-  if (!globalDraft.value) return []
-
-  for (const preset of globalDraft.value.apiPresets) {
-      if (preset.models && preset.models.length > 0) {
-          options.push({
-              label: preset.name,
-              options: preset.models.map(m => ({ label: m, value: m, presetId: preset.id }))
-          })
-      }
-  }
-  
-  return options
-})
-
-/**
- * 处理聊天模型选择
- *
- * 更新聊天覆盖设置中的模型和预设ID。
- *
- * @param {any} option - 模型选项，包含value和可选的presetId
- */
-function handleChatModelSelect(option: any) {
-  if (chatDraft.value) {
-     chatDraft.value.params.model = option.value
-     if (option.presetId) {
-         chatDraft.value.presetId = option.presetId
-     }
-  }
-}
-
-/**
- * 保存全局设置
- *
- * 将全局设置草稿保存到服务器，然后关闭抽屉。
- * 使用settingsStore.save（来自stores/settings.ts）保存设置。
- *
- * @returns {Promise<void>} 完成时返回
- */
 async function saveGlobal() {
   if (!globalDraft.value) return
   await settingsStore.save(globalDraft.value)
   close()
 }
 
-/**
- * 保存聊天覆盖设置
- *
- * 将聊天覆盖设置草稿保存到服务器，然后关闭抽屉。
- * 使用chatsStore.updateOverrides（来自stores/chats.ts）更新设置。
- *
- * @returns {Promise<void>} 完成时返回
- */
 async function saveChatOverrides() {
   if (!props.chat || !chatDraft.value) return
   await chatsStore.updateOverrides(props.chat.id, chatDraft.value)
   close()
 }
 
-/**
- * 下载设置备份
- *
- * 下载设置备份文件（ZIP格式）。
- * 发送GET请求到/api/settings/backup?scope={scope}，下载返回的文件。
- *
- * @param {'basic' | 'with_characters' | 'with_chats'} scope - 备份范围（基础、包含角色、包含聊天）
- * @returns {Promise<void>} 完成时返回
- */
-async function downloadSettingsBackup(scope: 'basic' | 'with_characters' | 'with_chats') {
+async function downloadSettingsBackup(scope: string) {
   const r = await fetch(`/api/settings/backup?scope=${scope}`)
-  if (!r.ok) {
-    alert(await r.text())
-    return
-  }
   const blob = await r.blob()
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = 'settings-backup.zip'
-  document.body.appendChild(link)
+  link.download = `backup-${scope}-${Date.now()}.zip`
   link.click()
-  document.body.removeChild(link)
-  URL.revokeObjectURL(url)
 }
 
-/**
- * 触发导入
- *
- * 程序化触发隐藏的文件输入框点击事件。
- */
-function triggerImport() {
-  importInputRef.value?.click()
-}
-
-/**
- * 处理导入文件选择
- *
- * 当用户选择导入文件时，上传文件到服务器，然后重新加载所有数据。
- * 发送POST请求到/api/import，上传FormData格式的文件。
- * 导入成功后重新加载设置、角色列表和聊天列表。
- *
- * @param {Event} e - 文件选择事件
- * @returns {Promise<void>} 完成时返回
- */
 async function handleImportChange(e: Event) {
-  const input = e.target as HTMLInputElement
-  const file = input.files?.[0]
+  const file = (e.target as HTMLInputElement).files?.[0]
   if (!file) return
   const fd = new FormData()
   fd.append('file', file)
-  const r = await fetch('/api/import', { method: 'POST', body: fd })
-  if (!r.ok) {
-    alert(await r.text())
-    input.value = ''
-    return
-  }
-  const result = await r.json()
-  await settingsStore.load()
-  await charactersStore.loadAll()
-  await chatsStore.loadGroupList()
-  if (chatsStore.characterId) await chatsStore.loadList(chatsStore.characterId)
-  alert(`导入完成：${(result.imported || []).join(', ') || '无'}${result.warnings?.length ? '\n警告：' + result.warnings.join('; ') : ''}`)
-  input.value = ''
+  await fetch('/api/import', { method: 'POST', body: fd })
+  location.reload()
 }
 </script>
 
 <template>
   <Transition name="drawer">
     <div v-if="show" class="fixed inset-0 z-50 flex justify-end">
-      <!-- Backdrop -->
-      <div class="absolute inset-0 bg-black/50 backdrop-blur-sm transition-opacity" @click="close"></div>
+      <div class="absolute inset-0 bg-black/80 backdrop-blur-md" @click="close"></div>
 
-      <!-- Drawer Panel -->
-      <div 
-        class="relative w-[500px] max-w-[90vw] bg-[#18181c] border-l border-white/10 shadow-2xl flex flex-col h-full"
-      >
+      <div class="relative w-[600px] max-w-full bg-dark-bg border-l border-strong shadow-2xl flex flex-col h-full">
         <!-- Header -->
-        <div class="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-[#141418]">
-          <h2 class="text-lg font-bold text-gray-100">设置</h2>
-          <button class="text-gray-400 hover:text-white transition-colors" @click="close">
-            ✕
-          </button>
+        <div class="flex items-center justify-between px-8 py-6 border-b border-strong bg-dark-surface">
+          <h2 class="text-xl font-black uppercase tracking-tighter text-text-primary">System Config</h2>
+          <button class="text-text-muted hover:text-error transition-colors" @click="close">✕</button>
         </div>
 
         <!-- Tabs -->
-        <div class="flex border-b border-white/5 bg-[#141418]">
+        <div class="flex border-b border-strong bg-dark-surface">
           <button
             v-for="t in ['global', 'presets', 'chat']"
             :key="t"
-            class="flex-1 py-3 text-sm font-medium transition-colors relative"
-            :class="tab === t ? 'text-brand' : 'text-gray-400 hover:text-gray-200'"
+            class="flex-1 py-4 text-[10px] font-black uppercase tracking-[0.3em] transition-all relative"
+            :class="tab === t ? 'text-brand bg-brand/5' : 'text-text-muted hover:text-text-secondary'"
             @click="tab = t as any"
           >
-            {{ t === 'global' ? '全局设置' : t === 'presets' ? 'API 预设' : '当前会话' }}
-            <div v-if="tab === t" class="absolute bottom-0 left-0 right-0 h-0.5 bg-brand"></div>
+            {{ t }}
+            <div v-if="tab === t" class="absolute bottom-0 left-0 right-0 h-1 bg-brand"></div>
           </button>
         </div>
 
         <!-- Content -->
-        <div class="flex-1 overflow-y-auto p-6 custom-scrollbar bg-[#18181c]">
-          <!-- Global Settings -->
-          <div v-if="tab === 'global'" class="space-y-6">
-            <div v-if="!globalDraft" class="text-center text-gray-500 py-8">加载中...</div>
-            <div v-else class="space-y-5">
-              <div class="text-xs text-gray-500 bg-white/5 p-3 rounded-lg border border-white/5">
-                这里配置全局默认的 API 参数。如果配置了 "API 预设"，建议优先使用预设功能以便管理不同服务商。
-              </div>
-
-              <!-- Stream Toggle -->
-              <div class="space-y-2">
-                <label class="block text-sm font-medium text-gray-300">流式传输 (Streaming)</label>
-                <button 
-                  class="flex items-center gap-3 group cursor-pointer w-full text-left"
-                  @click="globalDraft.streamEnabled = !globalDraft.streamEnabled"
-                >
-                  <div 
-                    class="w-10 h-5 rounded-full relative transition-colors duration-200"
-                    :class="globalDraft.streamEnabled ? 'bg-brand' : 'bg-gray-700'"
-                  >
-                    <div 
-                      class="absolute top-1 w-3 h-3 rounded-full bg-white transition-transform duration-200"
-                      :class="globalDraft.streamEnabled ? 'left-6' : 'left-1'"
-                    ></div>
-                  </div>
-                  <span class="text-xs text-gray-400">
-                    {{ globalDraft.streamEnabled ? '已开启' : '已关闭' }}
-                  </span>
-                </button>
-              </div>
-
-              <!-- Pure AI Mode Toggle -->
-              <div class="space-y-2">
-                <label class="block text-sm font-medium text-gray-300">纯 AI 模式</label>
-                <button
-                  class="flex items-center gap-3 group cursor-pointer w-full text-left"
-                  @click="globalDraft.pureAiMode = !globalDraft.pureAiMode"
-                >
-                  <div
-                    class="w-10 h-5 rounded-full relative transition-colors duration-200"
-                    :class="globalDraft.pureAiMode ? 'bg-brand' : 'bg-gray-700'"
-                  >
-                    <div
-                      class="absolute top-1 w-3 h-3 rounded-full bg-white transition-transform duration-200"
-                      :class="globalDraft.pureAiMode ? 'left-6' : 'left-1'"
-                    ></div>
-                  </div>
-                  <span class="text-xs text-gray-400">
-                    {{ globalDraft.pureAiMode ? '已开启：不注入用户 Persona，用户发言将以 system 影响世界' : '已关闭：正常对话模式' }}
-                  </span>
-                </button>
-              </div>
-
-              <!-- Base URL -->
-              <div class="space-y-1.5">
-                <label class="block text-sm font-medium text-gray-300">默认 API Base URL</label>
-                <input 
-                  v-model="globalDraft.llm.baseUrl" 
-                  type="text" 
-                  placeholder="https://api.openai.com"
-                  class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-brand/50 focus:ring-1 focus:ring-brand/50 outline-none transition-colors"
-                />
-              </div>
-
-              <!-- API Key -->
-              <div class="space-y-1.5">
-                <label class="block text-sm font-medium text-gray-300">默认 API Key</label>
-                <div class="relative">
-                  <input 
-                    v-model="globalDraft.llm.apiKey" 
-                    :type="showApiKey ? 'text' : 'password'"
-                    class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 pr-10 text-sm text-gray-200 focus:border-brand/50 focus:ring-1 focus:ring-brand/50 outline-none transition-colors"
-                  />
-                  <button 
-                    class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 p-1"
-                    @click="showApiKey = !showApiKey"
-                  >
-                    {{ showApiKey ? '👁️' : '🔒' }}
-                  </button>
-                </div>
-              </div>
-
-              <div class="space-y-1.5">
-                 <label class="block text-sm font-medium text-gray-300">默认模型名称</label>
-                 <input 
-                    v-model="globalDraft.llm.defaultModel" 
-                    type="text" 
-                    class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-brand/50 outline-none"
-                    placeholder="例如: gpt-3.5-turbo"
-                 />
-              </div>
-
-              <div class="h-px bg-white/5 my-4"></div>
-
-              <!-- Global System Prompt -->
-              <div class="space-y-1.5">
-                <label class="block text-sm font-medium text-gray-300">全局 System Prompt</label>
-                <textarea 
-                  v-model="globalDraft.prompts.globalSystem" 
-                  rows="4"
-                  class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-brand/50 focus:ring-1 focus:ring-brand/50 outline-none transition-colors resize-none"
-                ></textarea>
-              </div>
-
-              <!-- Parameters (Ensured Visibility) -->
-              <div class="grid grid-cols-2 gap-4 pt-2">
-                <div class="space-y-1.5">
-                  <label class="block text-sm font-medium text-gray-300">Temperature</label>
-                  <input 
-                    v-model.number="globalDraft.generationDefaults.temperature" 
-                    type="number" 
-                    step="0.1" min="0" max="2"
-                    placeholder="默认"
-                    class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-brand/50 outline-none"
-                  />
-                </div>
-                <div class="space-y-1.5">
-                  <label class="block text-sm font-medium text-gray-300">Top P</label>
-                  <input 
-                    v-model.number="globalDraft.generationDefaults.top_p" 
-                    type="number" 
-                    step="0.1" min="0" max="1"
-                    placeholder="默认"
-                    class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-brand/50 outline-none"
-                  />
-                </div>
-                <div class="space-y-1.5">
-                  <label class="block text-sm font-medium text-gray-300">Max Tokens</label>
-                  <input 
-                    v-model.number="globalDraft.generationDefaults.max_tokens" 
-                    type="number" 
-                    step="128" min="1"
-                    placeholder="默认"
-                    class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-brand/50 outline-none"
-                  />
-                </div>
-              </div>
-
-              <div class="h-px bg-white/5 my-4"></div>
-
-              <div class="space-y-3">
-                <div class="text-sm font-medium text-gray-300">数据备份与导入</div>
-                <div class="text-xs text-gray-500">
-                  备份会导出全部系统设置（含用户 Persona 头像），导入支持 txt/json/zip 自动识别。
-                </div>
-                <div class="flex gap-2">
-                  <button 
-                    class="px-4 py-2 bg-white/5 hover:bg-white/10 text-gray-200 rounded-lg text-sm transition-colors"
-                    @click="downloadSettingsBackup('basic')"
-                  >
-                    基本设置
-                  </button>
-                  <button 
-                    class="px-4 py-2 bg-white/5 hover:bg-white/10 text-gray-200 rounded-lg text-sm transition-colors"
-                    @click="downloadSettingsBackup('with_characters')"
-                  >
-                    包含角色卡
-                  </button>
-                  <button 
-                    class="px-4 py-2 bg-white/5 hover:bg-white/10 text-gray-200 rounded-lg text-sm transition-colors"
-                    @click="downloadSettingsBackup('with_chats')"
-                  >
-                    包含全部聊天记录
-                  </button>
-                  <button 
-                    class="px-4 py-2 bg-white/5 hover:bg-white/10 text-gray-200 rounded-lg text-sm transition-colors"
-                    @click="triggerImport"
-                  >
-                    导入数据
-                  </button>
-                  <input
-                    ref="importInputRef"
-                    type="file"
-                    class="hidden"
-                    accept=".txt,.json,.zip"
-                    @change="handleImportChange"
-                  />
-                </div>
-              </div>
-
-               <div class="pt-4 flex justify-end">
-                <button 
-                  class="px-6 py-2 bg-brand hover:bg-brand-hover text-white rounded-lg font-medium shadow-lg shadow-brand/20 transition-all"
-                  @click="saveGlobal"
-                >
-                  保存全局设置
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <!-- Presets Management -->
-          <div v-else-if="tab === 'presets'" class="space-y-6 h-full flex flex-col">
-              <div v-if="!globalDraft" class="text-center text-gray-500 py-8">加载中...</div>
-              <div v-else class="flex flex-1 min-h-0 gap-4">
-                  <!-- Preset List -->
-                  <div class="w-1/3 flex flex-col border-r border-white/5 pr-4">
-                      <div class="flex justify-between items-center mb-3">
-                          <span class="text-sm font-bold text-gray-400">预设列表</span>
-                          <button class="text-xs bg-brand/20 text-brand px-2 py-1 rounded hover:bg-brand/30 transition-colors" @click="createPreset">+ 新建</button>
-                      </div>
-                      <div class="flex-1 overflow-y-auto space-y-1 custom-scrollbar">
-                          <div 
-                              v-for="p in globalDraft.apiPresets" 
-                              :key="p.id"
-                              class="px-3 py-2 rounded-lg cursor-pointer text-sm transition-colors flex justify-between items-center group"
-                              :class="editingPresetId === p.id ? 'bg-brand/10 text-brand' : 'text-gray-400 hover:bg-white/5'"
-                              @click="editingPresetId = p.id"
-                          >
-                              <span class="truncate">{{ p.name }}</span>
-                              <button class="opacity-0 group-hover:opacity-100 text-gray-500 hover:text-red-400 px-1" @click.stop="deletePreset(p.id)">×</button>
-                          </div>
-                           <div v-if="globalDraft.apiPresets.length === 0" class="text-xs text-gray-600 text-center py-4">无预设</div>
-                      </div>
-                  </div>
-
-                  <!-- Preset Editor -->
-                  <div class="flex-1 flex flex-col min-w-0" v-if="editingPreset">
-                       <div class="space-y-4 overflow-y-auto custom-scrollbar pr-2 pb-4">
-                          <div class="space-y-1.5">
-                              <label class="block text-xs font-medium text-gray-400">预设名称</label>
-                              <input 
-                                  v-model="editingPreset.name" 
-                                  type="text" 
-                                  class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-gray-200 focus:border-brand/50 outline-none"
-                              />
-                          </div>
-
-                           <div class="space-y-1.5">
-                              <label class="block text-xs font-medium text-gray-400">Base URL</label>
-                              <input 
-                                  v-model="editingPreset.baseUrl" 
-                                  type="text" 
-                                  placeholder="https://api.openai.com"
-                                  class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-gray-200 focus:border-brand/50 outline-none"
-                              />
-                          </div>
-
-                          <div class="space-y-1.5">
-                              <label class="block text-xs font-medium text-gray-400">API Key</label>
-                               <div class="relative">
-                                  <input 
-                                      v-model="editingPreset.apiKey" 
-                                      :type="editingPresetShowApiKey ? 'text' : 'password'"
-                                      class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-1.5 pr-8 text-sm text-gray-200 focus:border-brand/50 outline-none"
-                                  />
-                                  <button 
-                                      class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300"
-                                      @click="editingPresetShowApiKey = !editingPresetShowApiKey"
-                                  >
-                                      {{ editingPresetShowApiKey ? '👁️' : '🔒' }}
-                                  </button>
-                               </div>
-                          </div>
-
-                          <div class="space-y-2">
-                               <div class="flex justify-between items-center">
-                                   <label class="block text-xs font-medium text-gray-400">模型列表</label>
-                                   <button 
-                                      class="text-xs text-brand hover:text-brand-hover flex items-center gap-1" 
-                                      :disabled="presetModelsLoading"
-                                      @click="openModelSelector(editingPreset!)"
-                                   >
-                                      <span v-if="presetModelsLoading" class="animate-spin">⟳</span>
-                                      <span>从 API 获取并筛选</span>
-                                   </button>
-                               </div>
-                               <div class="bg-black/20 border border-white/10 rounded-lg p-2 min-h-[100px] max-h-[200px] overflow-y-auto custom-scrollbar">
-                                   <div class="flex flex-wrap gap-2">
-                                       <div v-for="(m, idx) in editingPreset.models" :key="m" class="bg-white/5 rounded px-2 py-1 text-xs text-gray-300 flex items-center gap-1">
-                                           {{ m }}
-                                           <button class="hover:text-red-400" @click="editingPreset!.models.splice(idx, 1)">×</button>
-                                       </div>
-                                        <div v-if="!editingPreset.models.length" class="text-xs text-gray-600 w-full text-center py-4">
-                                            点击上方“从 API 获取”或手动添加
-                                        </div>
-                                   </div>
-                               </div>
-                               <!-- 手动添加模型 -->
-                                <div class="flex gap-2">
-                                   <input 
-                                      type="text" 
-                                      placeholder="手动输入模型名..."
-                                      class="flex-1 bg-black/20 border border-white/10 rounded px-2 py-1 text-xs text-gray-200 outline-none focus:border-brand/50"
-                                      @keydown.enter="(e) => {
-                                          const val = (e.target as HTMLInputElement).value.trim();
-                                          if(val && !editingPreset!.models.includes(val)) {
-                                              editingPreset!.models.push(val);
-                                              (e.target as HTMLInputElement).value = '';
-                                          }
-                                      }"
-                                   />
-                                </div>
-                          </div>
-                       </div>
-                  </div>
-                  <div v-else class="flex-1 flex items-center justify-center text-gray-600 text-sm">
-                      选择或创建一个预设
-                  </div>
-              </div>
+        <div class="flex-1 overflow-y-auto p-8 custom-scrollbar space-y-12">
+          
+          <!-- GLOBAL TAB -->
+          <div v-if="tab === 'global' && globalDraft" class="space-y-10">
+            <div class="space-y-6">
+              <label class="label text-brand">Core Engine Settings</label>
               
-               <div class="pt-2 flex justify-end">
-                <button 
-                  class="px-6 py-2 bg-brand hover:bg-brand-hover text-white rounded-lg font-medium shadow-lg shadow-brand/20 transition-all"
-                  @click="saveGlobal"
-                >
-                  保存所有配置
-                </button>
-              </div>
-          </div>
-
-          <!-- Chat Specific Settings -->
-          <div v-else class="space-y-6">
-            <div v-if="!chat" class="text-center text-gray-500 py-8">请先选择一个会话</div>
-            <div v-else-if="chatDraft && globalDraft" class="space-y-5">
-               <div class="text-xs text-gray-500 bg-white/5 p-3 rounded-lg border border-white/5">
-                这些设置仅应用于当前会话，并会覆盖全局设置。模型选择将自动关联对应的 API 预设。
-              </div>
-
-              <div class="space-y-1.5">
-                <label class="block text-sm font-medium text-gray-300">会话 System Prompt (Override)</label>
-                <textarea 
-                  v-model="chatDraft.prompt" 
-                  rows="4"
-                  placeholder="留空则使用角色默认Prompt"
-                  class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-brand/50 focus:ring-1 focus:ring-brand/50 outline-none transition-colors resize-none"
-                ></textarea>
-              </div>
-
-              <div class="space-y-1.5">
-                <label class="block text-sm font-medium text-gray-300">长期记忆</label>
-                <textarea 
-                  v-model="chatDraft.longTermMemory"
-                  rows="4"
-                  placeholder="会插入 System Prompt，留空则不启用"
-                  class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-brand/50 focus:ring-1 focus:ring-brand/50 outline-none transition-colors resize-none"
-                ></textarea>
-              </div>
-
-               <div class="space-y-1.5">
-                <label class="block text-sm font-medium text-gray-300">模型覆盖</label>
-                <ModernSelect
-                  v-model="chatDraft.params.model"
-                  :options="chatModelOptions"
-                  searchable
-                  allow-create
-                  placeholder="选择模型 (自动关联预设)..."
-                  @select="handleChatModelSelect"
-                />
-                <div v-if="chatDraft?.presetId" class="text-xs text-brand mt-1 flex items-center gap-1">
-                    <span>🔗 已关联 API 预设:</span>
-                    <span class="font-bold">{{ globalDraft?.apiPresets.find(p => p.id === chatDraft?.presetId)?.name || 'Unknown' }}</span>
+              <div class="grid grid-cols-1 gap-6 bg-dark-surface border border-strong p-6">
+                <div class="flex items-center justify-between">
+                  <span class="text-[10px] font-black uppercase tracking-widest">Streaming Engine</span>
+                  <button @click="globalDraft.streamEnabled = !globalDraft.streamEnabled" class="w-10 h-5 border border-strong relative">
+                    <div class="absolute top-0.5 left-0.5 w-3.5 h-3.5 bg-white transition-transform" :class="globalDraft.streamEnabled ? 'translate-x-5 bg-brand' : 'translate-x-0'"></div>
+                  </button>
+                </div>
+                <div class="flex items-center justify-between">
+                  <span class="text-[10px] font-black uppercase tracking-widest">Pure AI Protocol</span>
+                  <button @click="globalDraft.pureAiMode = !globalDraft.pureAiMode" class="w-10 h-5 border border-strong relative">
+                    <div class="absolute top-0.5 left-0.5 w-3.5 h-3.5 bg-white transition-transform" :class="globalDraft.pureAiMode ? 'translate-x-5 bg-brand' : 'translate-x-0'"></div>
+                  </button>
                 </div>
               </div>
 
-               <div class="grid grid-cols-2 gap-4">
-                <div class="space-y-1.5">
-                  <label class="block text-sm font-medium text-gray-300">Temperature</label>
-                  <input 
-                    v-model.number="chatDraft.params.temperature" 
-                    type="number" 
-                    step="0.1" min="0" max="2"
-                    placeholder="使用全局"
-                    class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-brand/50 outline-none"
-                  />
+              <div class="space-y-4">
+                <div class="form-group">
+                  <label class="label">Default API Base</label>
+                  <input v-model="globalDraft.llm.baseUrl" class="input font-mono text-xs" />
                 </div>
-                <div class="space-y-1.5">
-                  <label class="block text-sm font-medium text-gray-300">Top P</label>
-                  <input 
-                    v-model.number="chatDraft.params.top_p" 
-                    type="number" 
-                    step="0.1" min="0" max="1"
-                    placeholder="使用全局"
-                    class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-brand/50 outline-none"
-                  />
-                </div>
-                <div class="space-y-1.5">
-                  <label class="block text-sm font-medium text-gray-300">Max Tokens</label>
-                  <input 
-                    v-model.number="chatDraft.params.max_tokens" 
-                    type="number" 
-                    step="128" min="1"
-                    placeholder="使用全局"
-                    class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-brand/50 outline-none"
-                  />
+                <div class="form-group">
+                  <label class="label">Default API Key</label>
+                  <div class="relative">
+                    <input v-model="globalDraft.llm.apiKey" :type="showApiKey ? 'text' : 'password'" class="input font-mono text-xs pr-10" />
+                    <button class="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary" @click="showApiKey = !showApiKey">{{ showApiKey ? 'HIDE' : 'SHOW' }}</button>
+                  </div>
                 </div>
               </div>
+            </div>
 
-              <!-- Group Member Settings (Removed, moved to independent GroupSettingsModal) -->
+            <div class="space-y-6">
+              <label class="label text-brand">Generation Parameters</label>
+              <div class="grid grid-cols-3 gap-4">
+                <div class="form-group">
+                  <label class="label text-[8px]">Temperature</label>
+                  <input v-model.number="globalDraft.generationDefaults.temperature" type="number" step="0.1" class="input font-mono text-xs" />
+                </div>
+                <div class="form-group">
+                  <label class="label text-[8px]">Top P</label>
+                  <input v-model.number="globalDraft.generationDefaults.top_p" type="number" step="0.05" class="input font-mono text-xs" />
+                </div>
+                <div class="form-group">
+                  <label class="label text-[8px]">Max Tokens</label>
+                  <input v-model.number="globalDraft.generationDefaults.max_tokens" type="number" class="input font-mono text-xs" />
+                </div>
+              </div>
+            </div>
 
-               <div class="pt-4 flex justify-end gap-3">
-                <button 
-                  class="px-4 py-2 text-gray-400 hover:text-white transition-colors"
-                  @click="close"
-                >
-                  取消
-                </button>
-                <button 
-                  class="px-6 py-2 bg-brand hover:bg-brand-hover text-white rounded-lg font-medium shadow-lg shadow-brand/20 transition-all"
-                  @click="saveChatOverrides(); saveGlobal()"
-                >
-                  保存设置
-                </button>
+            <div class="space-y-6">
+              <label class="label text-brand">Data Management</label>
+              <div class="grid grid-cols-2 gap-2">
+                <button class="btn btn-secondary text-[8px] py-3" @click="downloadSettingsBackup('basic')">BACKUP CONFIG</button>
+                <button class="btn btn-secondary text-[8px] py-3" @click="downloadSettingsBackup('with_characters')">+ CHARACTERS</button>
+                <button class="btn btn-secondary text-[8px] py-3" @click="downloadSettingsBackup('with_chats')">+ HISTORY</button>
+                <button class="btn btn-accent text-[8px] py-3" @click="importInputRef?.click()">IMPORT DATA</button>
+                <input ref="importInputRef" type="file" class="hidden" @change="handleImportChange" />
               </div>
             </div>
           </div>
+
+          <!-- PRESETS TAB -->
+          <div v-else-if="tab === 'presets' && globalDraft" class="space-y-8 flex flex-col h-full overflow-hidden">
+             <div class="flex gap-6 h-full overflow-hidden">
+                <div class="w-1/3 border-r border-strong pr-6 space-y-4">
+                   <button class="btn btn-primary w-full text-[9px]" @click="globalDraft.apiPresets.push({id: Date.now().toString(), name: 'NEW PRESET', baseUrl:'', apiKey:'', models:[]})">ADD PRESET</button>
+                   <div class="space-y-1 overflow-y-auto max-h-[500px] custom-scrollbar">
+                      <div v-for="p in globalDraft.apiPresets" :key="p.id" 
+                        class="p-3 border border-strong text-[10px] font-bold uppercase cursor-pointer hover:border-brand transition-all"
+                        :class="editingPresetId === p.id ? 'bg-brand text-text-inverse border-brand' : 'text-text-muted'"
+                        @click="editingPresetId = p.id"
+                      >
+                        {{ p.name }}
+                      </div>
+                   </div>
+                </div>
+                <div v-if="editingPreset" class="flex-1 space-y-6 overflow-y-auto pr-2 custom-scrollbar">
+                   <div class="form-group">
+                      <label class="label text-brand">Preset Name</label>
+                      <input v-model="editingPreset.name" class="input uppercase font-black" />
+                   </div>
+                   <div class="form-group">
+                      <label class="label">Base URL</label>
+                      <input v-model="editingPreset.baseUrl" class="input font-mono text-xs" />
+                   </div>
+                   <div class="form-group">
+                      <label class="label">API Key</label>
+                      <input v-model="editingPreset.apiKey" type="password" class="input font-mono text-xs" />
+                   </div>
+                   <div class="space-y-4">
+                      <div class="flex justify-between items-center">
+                        <label class="label text-brand">Models</label>
+                        <button class="text-[8px] font-black text-brand underline">FETCH FROM API</button>
+                      </div>
+                      <div class="flex flex-wrap gap-2">
+                        <div v-for="(m, i) in editingPreset.models" :key="m" class="px-2 py-1 bg-dark-surface border border-strong text-[9px] font-mono flex items-center gap-2">
+                          {{ m }}
+                          <button class="text-error" @click="editingPreset.models.splice(i, 1)">✕</button>
+                        </div>
+                      </div>
+                   </div>
+                </div>
+             </div>
+          </div>
+
+          <!-- CHAT TAB -->
+          <div v-else-if="tab === 'chat' && chatDraft" class="space-y-10">
+             <div class="space-y-6">
+                <label class="label text-brand">Session Override</label>
+                <div class="form-group">
+                  <label class="label">System Prompt Override</label>
+                  <textarea v-model="chatDraft.prompt" rows="6" class="input textarea font-mono text-xs" placeholder="LEAVE BLANK FOR DEFAULT..."></textarea>
+                </div>
+                <div class="form-group">
+                  <label class="label">Long Term Memory</label>
+                  <textarea v-model="chatDraft.longTermMemory" rows="4" class="input textarea font-mono text-xs" placeholder="INJECTED PERSISTENT CONTEXT..."></textarea>
+                </div>
+             </div>
+             <div class="space-y-6">
+                <label class="label text-brand">Session Engine</label>
+                <ModernSelect v-model="chatDraft.params.model" :options="[]" placeholder="SELECT ENGINE..." />
+                <div class="grid grid-cols-3 gap-4">
+                  <input v-model.number="chatDraft.params.temperature" type="number" placeholder="TEMP" class="input font-mono text-xs" />
+                  <input v-model.number="chatDraft.params.top_p" type="number" placeholder="TOP P" class="input font-mono text-xs" />
+                  <input v-model.number="chatDraft.params.max_tokens" type="number" placeholder="MAX T" class="input font-mono text-xs" />
+                </div>
+             </div>
+          </div>
+
+        </div>
+
+        <!-- Footer -->
+        <div class="p-8 border-t border-strong bg-dark-surface flex justify-end gap-4">
+          <button class="btn btn-secondary px-8" @click="close">CANCEL</button>
+          <button class="btn btn-primary px-12" @click="tab === 'chat' ? saveChatOverrides() : saveGlobal()">SAVE ALL</button>
         </div>
       </div>
     </div>
   </Transition>
-
-  <!-- Model Selector Modal -->
-  <div v-if="showModelSelector" class="fixed inset-0 z-[60] flex items-center justify-center">
-    <!-- Backdrop -->
-    <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" @click="showModelSelector = false"></div>
-    
-    <!-- Modal -->
-    <div class="relative w-full max-w-lg bg-[#18181c] border border-white/10 rounded-xl shadow-2xl flex flex-col max-h-[85vh] m-4">
-      <div class="p-4 border-b border-white/10 flex justify-between items-center bg-[#141418] rounded-t-xl">
-        <h3 class="font-bold text-gray-200">选择模型</h3>
-        <button class="text-gray-400 hover:text-white" @click="showModelSelector = false">✕</button>
-      </div>
-      
-      <div class="p-3 border-b border-white/10 bg-[#18181c]">
-        <input 
-          v-model="modelSelectorQuery" 
-          placeholder="筛选模型..." 
-          class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-brand/50 outline-none"
-          autoFocus
-        />
-      </div>
-      
-      <div class="flex-1 overflow-y-auto p-2 bg-[#18181c]">
-        <div v-if="filteredCandidates.length === 0" class="text-center text-gray-500 py-8 text-sm">
-          未找到模型
-        </div>
-        <div v-else class="space-y-1">
-          <div 
-            v-for="m in filteredCandidates" 
-            :key="m"
-            class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 cursor-pointer transition-colors"
-            @click="toggleCandidate(m)"
-          >
-            <div 
-              class="w-4 h-4 rounded border flex items-center justify-center transition-colors"
-              :class="selectedCandidateModels.has(m) ? 'bg-brand border-brand' : 'border-gray-600'"
-            >
-              <span v-if="selectedCandidateModels.has(m)" class="text-white text-[10px]">✓</span>
-            </div>
-            <span class="text-sm text-gray-300" :class="selectedCandidateModels.has(m) ? 'text-white font-medium' : ''">{{ m }}</span>
-          </div>
-        </div>
-      </div>
-      
-      <div class="p-4 border-t border-white/10 flex justify-between items-center bg-[#141418] rounded-b-xl">
-        <div class="text-xs text-gray-500">已选 {{ selectedCandidateModels.size }} 个模型</div>
-        <div class="flex gap-2">
-          <button class="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors" @click="showModelSelector = false">取消</button>
-          <button class="px-4 py-2 text-sm bg-brand hover:bg-brand-hover text-white rounded-lg shadow-lg shadow-brand/20 transition-all" @click="saveModelSelection">确认</button>
-        </div>
-      </div>
-    </div>
-  </div>
 </template>
 
 <style scoped>
-.drawer-enter-active,
-.drawer-leave-active {
-  transition: all 0.3s ease-out;
-}
-
-.drawer-enter-from,
-.drawer-leave-to {
-  opacity: 0;
-}
-
-.drawer-enter-active .relative,
-.drawer-leave-active .relative {
-  transition: transform 0.3s ease-out;
-}
-
-.drawer-enter-from .relative,
-.drawer-leave-to .relative {
-  transform: translateX(100%);
-}
-
-.custom-scrollbar::-webkit-scrollbar {
-  width: 4px;
-}
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
-}
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 2px;
-}
-.custom-scrollbar:hover::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
-}
+.drawer-enter-active, .drawer-leave-active { transition: opacity 0.2s ease; }
+.drawer-enter-from, .drawer-leave-to { opacity: 0; }
+.drawer-enter-active .relative { transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1); }
+.drawer-enter-from .relative { transform: translateX(100%); }
+.custom-scrollbar::-webkit-scrollbar { width: 1px; }
 </style>

@@ -1,57 +1,7 @@
 <script setup lang="ts">
 /**
- * ChatInput - 聊天输入组件
- *
- * 组件职责：
- * - 提供消息输入框和发送功能
- * - 显示群聊状态（当前发言者、暂停状态等）
- * - 提供插话面板，允许在群聊中触发角色插话
- * - 提供模型选择功能
- * - 根据状态显示不同的按钮标签和样式
- *
- * Props说明：
- * - modelValue: 输入框内容（v-model）
- * - isGenerating: 是否正在生成
- * - streamError: 流式传输错误信息
- * - isGroup: 是否为群聊
- * - groupMembers: 群聊成员列表
- * - currentSpeakerIndex: 当前发言者索引
- * - isPaused: 是否暂停
- * - showContinueButton: 是否显示继续按钮
- * - pendingMembersCount: 待发言成员数量
- * - canInterject: 是否可以插话
- * - showInterjectPanel: 是否显示插话面板
- * - isInterjecting: 是否正在插话
- * - effectivePureAiMode: 是否为纯AI模式
- * - isStreamingActive: 是否正在流式传输
- * - userAvatarUrl: 用户头像URL
- * - userName: 用户名称
- * - currentModel: 当前选中的模型
- * - modelOptions: 模型选项列表
- * - getMemberSettings: 获取成员设置的函数（来自composables/useGroupChat.ts）
- *
- * Emits说明：
- * - update:modelValue: 更新输入框内容（v-model）
- * - send: 发送消息
- * - primary-action: 主要操作（发送/停止/继续等）
- * - pause-group: 暂停群聊
- * - continue-group: 继续群聊
- * - trigger-interject: 触发插话，传递角色ID
- * - hide-interject: 隐藏插话面板
- * - select-model: 选择模型
- * - toggle-assistant: 切换助手面板
- *
- * 使用的Composables：
- * 无（通过props接收函数）
- *
- * 使用的Stores：
- * 无
- *
- * 文件关系：
- *    - 被导入：被views/ChatPage.vue使用
- *    - 导入：导入vue的computed、types/models.ts的类型、components/ModernAvatar.vue、components/ModernSelect.vue
- *    - 依赖：依赖vue
- *    - 位置：组件层，提供聊天输入功能
+ * ChatInput - 聊天输入
+ * 风格：Obsidian Brutalist (Command Line Style)
  */
 import { computed } from 'vue'
 import type { CharacterCard, GroupMemberSettings } from '../../types/models'
@@ -59,12 +9,9 @@ import ModernAvatar from '../ModernAvatar.vue'
 import ModernSelect from '../ModernSelect.vue'
 
 const props = defineProps<{
-  // 输入状态
   modelValue: string
   isGenerating: boolean
   streamError: string | null
-  
-  // 群聊相关
   isGroup: boolean
   groupMembers: CharacterCard[]
   currentSpeakerIndex: number
@@ -76,16 +23,10 @@ const props = defineProps<{
   isInterjecting: boolean
   effectivePureAiMode: boolean
   isStreamingActive: boolean
-  
-  // 用户信息
   userAvatarUrl: string | null
   userName: string
-  
-  // 模型选择
   currentModel: string
   modelOptions: any[]
-  
-  // 辅助函数
   getMemberSettings: (memberId: string) => GroupMemberSettings
 }>()
 
@@ -101,189 +42,91 @@ const emit = defineEmits<{
   'toggle-assistant': []
 }>()
 
-/**
- * 计算是否有草稿消息
- *
- * 检查输入框是否有非空内容。
- */
 const hasDraftMessage = computed(() => !!props.modelValue.trim())
 
-/**
- * 计算主要操作按钮标签
- *
- * 根据当前状态（流式传输、继续按钮、群聊等）返回相应的按钮标签。
- */
 const primaryActionLabel = computed(() => {
-  if (props.isStreamingActive) return '停止'
-  if (props.showContinueButton && props.isGroup) {
-    return hasDraftMessage.value ? '插话' : '继续轮次'
-  }
-  if (props.isGroup && !hasDraftMessage.value) {
-    return '开始下一轮'
-  }
-  return props.isGenerating && !props.isPaused && !props.showContinueButton ? '生成中...' : '发送'
+  if (props.isStreamingActive) return 'ABORT'
+  if (props.showContinueButton && props.isGroup) return hasDraftMessage.value ? 'INTERJECT' : 'RESUME'
+  if (props.isGroup && !hasDraftMessage.value) return 'NEXT ROUND'
+  return props.isGenerating ? 'SYNCING...' : 'DISPATCH'
 })
 
-/**
- * 计算主要操作按钮是否禁用
- *
- * 根据当前状态判断按钮是否应该禁用。
- */
-const primaryActionDisabled = computed(() => {
-  if (props.isStreamingActive) return false
-  if (props.showContinueButton && props.isGroup) return false
-  if (props.isGroup && !hasDraftMessage.value) return props.isGenerating
-  return !hasDraftMessage.value || (props.isGenerating && !props.isPaused && !props.showContinueButton)
-})
-
-/**
- * 计算主要操作按钮样式类
- *
- * 根据当前状态返回相应的CSS类名。
- */
 const primaryActionClass = computed(() => {
-  if (props.isStreamingActive) return 'chat-action-button--stop'
-  if (props.showContinueButton && props.isGroup) {
-    return hasDraftMessage.value ? 'chat-action-button--primary' : 'chat-action-button--continue'
-  }
-  if (props.isGroup && !hasDraftMessage.value) {
-    return 'chat-action-button--next'
-  }
-  return 'chat-action-button--primary'
+  if (props.isStreamingActive) return 'btn-danger'
+  if (props.showContinueButton && props.isGroup) return hasDraftMessage.value ? 'btn-primary' : 'btn-accent'
+  return 'btn-primary'
 })
 
-/**
- * 计算输入框占位符
- *
- * 根据当前状态返回相应的占位符文本。
- */
-const inputPlaceholder = computed(() => {
-  if (props.isGenerating && props.isGroup && !props.isPaused) {
-    return '等待角色发言完成...'
-  }
-  if (props.showContinueButton) {
-    return '输入消息插话，或点击继续轮次...'
-  }
-  return '发送消息...'
-})
-
-/**
- * 计算输入框是否禁用
- *
- * 在生成中且未暂停且未显示继续按钮时禁用输入框。
- */
-const inputDisabled = computed(() => {
-  return props.isGenerating && !props.isPaused && !props.showContinueButton
-})
-
-/**
- * 处理键盘事件
- *
- * 当按下Ctrl+Enter时触发发送事件。
- *
- * @param {KeyboardEvent} e - 键盘事件
- */
 function handleKeydown(e: KeyboardEvent) {
-  if (e.ctrlKey && e.key === 'Enter') {
-    emit('send')
-  }
+  if (e.ctrlKey && e.key === 'Enter') emit('send')
 }
 </script>
 
 <template>
-  <div class="shrink-0 p-4 pb-6 w-full max-w-4xl mx-auto z-20 relative overflow-visible">
-    <div class="relative bg-[#18181c] border border-white/10 rounded-2xl shadow-xl p-3 flex flex-col gap-2 transition-colors focus-within:border-brand/40 focus-within:ring-1 focus-within:ring-brand/20">
+  <div class="shrink-0 p-8 pt-0 w-full max-w-5xl mx-auto z-20 relative">
+    <!-- Obsidian Input Container -->
+    <div class="relative bg-dark-surface border border-strong transition-all focus-within:border-brand shadow-2xl">
+      
+      <!-- Status Line -->
+      <div class="flex items-center px-4 py-2 border-b border-strong bg-dark-bg/50 overflow-hidden">
+        <div v-if="isGroup && isGenerating && currentSpeakerIndex >= 0" class="flex items-center gap-3">
+          <span class="w-1.5 h-1.5 bg-brand animate-pulse"></span>
+          <span class="text-[8px] font-black uppercase text-brand tracking-widest">Active Node: {{ groupMembers[currentSpeakerIndex]?.name }}</span>
+          <button class="text-[8px] font-black text-text-muted hover:text-warning underline" @click="emit('pause-group')">PAUSE_SEQUENCE</button>
+        </div>
+        <div v-else-if="showContinueButton && pendingMembersCount > 0" class="flex items-center gap-3">
+          <span class="w-1.5 h-1.5 bg-success"></span>
+          <span class="text-[8px] font-black uppercase text-success tracking-widest">Sequence Paused: {{ pendingMembersCount }} Nodes Remaining</span>
+          <button class="text-[8px] font-black text-text-muted hover:text-success underline" @click="emit('continue-group')">RESUME_PROTOCOL</button>
+        </div>
+        <div v-else-if="streamError" class="text-[8px] font-black uppercase text-error tracking-widest truncate">SYNC_ERROR: {{ streamError }}</div>
+        <div v-else class="text-[8px] font-black uppercase text-text-muted tracking-[0.3em]">Neural Link Established // Dispatch Ready</div>
+      </div>
+
       <textarea
         :value="modelValue"
         @input="emit('update:modelValue', ($event.target as HTMLTextAreaElement).value)"
-        :placeholder="inputPlaceholder"
-        :disabled="inputDisabled"
-        class="input textarea !bg-transparent !border-0 text-base resize-none min-h-[80px]"
-        :class="inputDisabled ? 'opacity-50' : ''"
+        placeholder="ENTER DATA FOR DISPATCH..."
+        :disabled="isGenerating && !isPaused && !showContinueButton"
+        class="w-full bg-transparent p-6 text-lg font-bold uppercase tracking-tight resize-none min-h-[120px] outline-none placeholder:text-text-muted/30"
         @keydown="handleKeydown"
       ></textarea>
       
-      <div class="flex items-center justify-between pt-2 border-t border-white/5">
-        <div class="flex-1 min-w-0">
-          <!-- 群聊发言状态指示器 -->
-          <div v-if="isGroup && isGenerating && currentSpeakerIndex >= 0" class="flex items-center gap-2 text-xs text-purple-400">
-            <span class="animate-pulse">●</span>
-            <span>{{ groupMembers[currentSpeakerIndex]?.name || '角色' }} 正在发言...</span>
-            <span class="text-gray-500">({{ currentSpeakerIndex + 1 }}/{{ groupMembers.length }})</span>
-            <button 
-              class="ml-2 px-2 py-0.5 text-xs bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-400 rounded transition-colors"
-              @click="emit('pause-group')"
-            >
-              暂停
-            </button>
-          </div>
-          
-          <!-- 继续轮次按钮 -->
-          <div v-else-if="showContinueButton && pendingMembersCount > 0" class="flex items-center gap-2 text-xs text-green-400">
-            <span>轮次已暂停，还有 {{ pendingMembersCount }} 位角色待发言</span>
-            <button 
-              class="px-3 py-1 text-xs bg-green-500/20 hover:bg-green-500/30 text-green-400 rounded transition-colors font-medium"
-              @click="emit('continue-group')"
-            >
-              继续轮次
-            </button>
-          </div>
-          
-          <!-- 插话面板 -->
-          <div v-else-if="canInterject && isGroup && !isInterjecting" class="flex items-center gap-2 text-xs">
-            <span class="text-purple-400">💬 点击角色插话：</span>
-            <div class="flex items-center gap-1">
-              <div 
-                v-for="member in groupMembers"
-                :key="member.id"
-                class="cursor-pointer hover:scale-110 transition-transform"
-                :title="`让 ${member.name} 插话`"
-                @click="emit('trigger-interject', member.id)"
-              >
-                <ModernAvatar 
-                  :src="member.avatar ? `/api/avatars/${member.avatar}` : null" 
-                  :name="member.name" 
-                  :size="24" 
-                  aspect="1"
-                  rounded="rounded"
-                  class="ring-2 ring-purple-500/50 hover:ring-purple-500"
-                />
-              </div>
-            </div>
-            <button 
-              class="ml-2 px-2 py-0.5 text-xs bg-gray-500/20 hover:bg-gray-500/30 text-gray-400 rounded transition-colors"
-              @click="emit('hide-interject')"
-            >
-              关闭
-            </button>
-          </div>
-          
-          <!-- 插话中状态 -->
-          <div v-else-if="isInterjecting" class="flex items-center gap-2 text-xs text-purple-400">
-            <span class="animate-pulse">●</span>
-            <span>正在插话...</span>
-          </div>
-          
-          <!-- 错误信息 -->
-          <div v-else-if="streamError" class="text-xs text-red-400 truncate">{{ streamError }}</div>
-        </div>
-        
-        <div class="flex items-center gap-3">
+      <!-- Bottom Control Bar -->
+      <div class="flex items-center justify-between p-4 border-t border-strong bg-dark-bg/30">
+        <div class="flex items-center gap-6">
           <ModernSelect
             :model-value="currentModel"
             :options="modelOptions"
             placement="top"
-            placeholder="选择模型 (自动关联预设)..."
-            class="!w-[200px] !text-xs"
-            dropdown-width="410"
             searchable
             allow-create
+            class="!w-[220px] !text-[9px] font-black border-none !bg-transparent"
             @select="emit('select-model', $event)"
           />
+          
+          <div v-if="canInterject && isGroup" class="flex items-center gap-2 border-l border-strong pl-6">
+            <span class="text-[8px] font-black text-text-muted uppercase tracking-widest mr-2">Interject Node:</span>
+            <div class="flex gap-1">
+              <div v-for="m in groupMembers" :key="m.id" 
+                class="w-6 h-6 border border-subtle hover:border-brand cursor-pointer transition-all"
+                @click="emit('trigger-interject', m.id)"
+              >
+                <ModernAvatar :name="m.name" :src="m.avatar ? `/api/avatars/${m.avatar}` : null" :size="24" rounded="rounded-none" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-4">
+          <div class="hidden sm:flex flex-col items-end text-[8px] font-black text-text-muted uppercase tracking-widest pr-4 border-r border-strong leading-none">
+            <span>Markdown Enabled</span>
+            <span class="mt-1">Ctrl + Enter</span>
+          </div>
           <button 
-            class="chat-action-button"
+            class="btn px-12 py-3 text-[10px] tracking-[0.3em]"
             :class="primaryActionClass"
-            :disabled="primaryActionDisabled"
+            :disabled="!hasDraftMessage && !isStreamingActive && !(isGroup && (showContinueButton || !isGenerating))"
             @click="emit('primary-action')"
           >
             {{ primaryActionLabel }}
@@ -291,28 +134,18 @@ function handleKeydown(e: KeyboardEvent) {
         </div>
       </div>
     </div>
-    
-    <div class="text-center mt-2 text-xs text-gray-600">
-      Markdown 支持 · Ctrl + Enter 发送
-    </div>
-    
-    <!-- 助理按钮 -->
+
+    <!-- Floating Assistant Core -->
     <button
-      class="absolute -right-16 bottom-10 w-12 h-12 rounded-xl bg-[#b76e79] text-white font-bold shadow-lg shadow-[#b76e79]/30 hover:bg-[#c27a85] transition-colors border border-white/10"
-      title="聊天助手"
+      class="absolute -right-20 bottom-12 w-12 h-12 bg-dark-bg border border-brand/50 flex flex-col items-center justify-center gap-1 group hover:bg-brand transition-all shadow-xl"
       @click="emit('toggle-assistant')"
     >
-      助理
+      <span class="text-[10px] font-black text-brand group-hover:text-text-inverse leading-none">A.I.</span>
+      <div class="w-4 h-0.5 bg-brand group-hover:bg-text-inverse"></div>
     </button>
   </div>
 </template>
 
 <style scoped>
-/* 组件特有样式，保持 scoped */
-.textarea {
-  scrollbar-width: none;
-}
-.textarea::-webkit-scrollbar {
-  display: none;
-}
+textarea { scrollbar-width: none; }
 </style>

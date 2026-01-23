@@ -1,46 +1,7 @@
 <script setup lang="ts">
 /**
  * AssistantPanel - 聊天助手面板组件
- *
- * 组件职责：
- * - 显示右侧滑出的聊天助手面板
- * - 显示助手对话消息列表
- * - 提供消息输入和发送功能
- * - 支持消息编辑、删除、重写操作
- * - 支持Markdown渲染
- * - 提供模型选择和重置功能
- *
- * Props说明：
- * - isOpen: 是否打开面板（v-model:isOpen）
- * - messages: 助手消息列表（来自composables/useAssistant.ts的AssistantMessage[]类型）
- * - draft: 输入草稿（v-model:draft）
- * - isGenerating: 是否正在生成
- * - streamError: 流式传输错误信息
- * - currentModel: 当前选中的模型
- * - modelOptions: 模型选项列表
- *
- * Emits说明：
- * - update:isOpen: 更新打开状态（v-model:isOpen）
- * - update:draft: 更新输入草稿（v-model:draft）
- * - send: 发送消息
- * - reset: 重置对话
- * - open-settings: 打开设置
- * - select-model: 选择模型
- * - edit-message: 编辑消息
- * - delete-message: 删除消息
- * - rewrite-message: 重写消息
- *
- * 使用的Composables：
- * 无（通过props接收数据）
- *
- * 使用的Stores：
- * 无
- *
- * 文件关系：
- *    - 被导入：被views/ChatPage.vue使用
- *    - 导入：导入markdown-it库、composables/useAssistant.ts的AssistantMessage类型、components/ModernSelect.vue
- *    - 依赖：依赖vue、markdown-it
- *    - 位置：组件层，提供聊天助手面板功能
+ * 风格：Radical Swiss Modernism 2.0 (Sharp, High Contrast)
  */
 import MarkdownIt from 'markdown-it'
 import type { AssistantMessage } from '../../composables/useAssistant'
@@ -68,58 +29,30 @@ const emit = defineEmits<{
   'rewrite-message': [m: AssistantMessage]
 }>()
 
-// Markdown 渲染器
 const md = new MarkdownIt({
   html: false,
   linkify: true,
   breaks: true,
 })
 
-/**
- * 渲染Markdown
- *
- * 使用MarkdownIt渲染Markdown文本为HTML。
- *
- * @param {string} text - Markdown文本
- * @returns {string} 渲染后的HTML
- */
 function renderMarkdown(text: string) {
   return md.render(text ?? '')
 }
 
-/**
- * 处理键盘事件
- *
- * 当按下Ctrl+Enter时触发发送事件。
- *
- * @param {KeyboardEvent} e - 键盘事件
- */
 function handleKeydown(e: KeyboardEvent) {
   if (e.ctrlKey && e.key === 'Enter') {
     emit('send')
   }
 }
 
-/**
- * 确认删除消息
- *
- * 弹出确认对话框，确认后触发删除消息事件。
- *
- * @param {AssistantMessage} m - 要删除的消息
- */
 function confirmDelete(m: AssistantMessage) {
-  if (window.confirm('确定删除？')) {
+  if (window.confirm('Delete this entry?')) {
     emit('delete-message', m)
   }
 }
 
-/**
- * 确认重置对话
- *
- * 弹出确认对话框，确认后触发重置事件。
- */
 function confirmReset() {
-  if (window.confirm('确定清空与助理的所有上下文？')) {
+  if (window.confirm('Clear all assistant protocol context?')) {
     emit('reset')
   }
 }
@@ -127,109 +60,105 @@ function confirmReset() {
 
 <template>
   <aside
-    class="h-full bg-[#141418] border-l border-white/10 shadow-inner transition-all duration-300 overflow-hidden flex flex-col"
-    :class="isOpen ? 'w-[360px] opacity-100' : 'w-0 opacity-0 pointer-events-none'"
+    class="h-full bg-dark-bg border-l border-strong shadow-2xl transition-all duration-300 overflow-hidden flex flex-col"
+    :class="isOpen ? 'w-[400px] opacity-100' : 'w-0 opacity-0 pointer-events-none'"
   >
-    <!-- 头部 -->
-    <div class="flex items-center justify-between px-4 py-3 border-b border-white/10">
-      <span class="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2">
-        <span class="w-2 h-2 rounded-full bg-[#b76e79] animate-pulse"></span>
-        聊天助手
+    <!-- Header - Bold Swiss -->
+    <div class="flex items-center justify-between px-6 py-4 border-b border-strong bg-surface">
+      <span class="text-xs font-black text-brand uppercase tracking-[0.3em] flex items-center gap-3">
+        <span class="w-2 h-2 bg-brand animate-pulse"></span>
+        Assistant Protocol
       </span>
-      <div class="flex items-center gap-2">
-        <button class="text-gray-500 hover:text-white transition-colors" @click="emit('open-settings')">⋯</button>
-        <button class="text-gray-500 hover:text-white transition-colors" @click="emit('update:isOpen', false)">×</button>
+      <div class="flex items-center gap-4">
+        <button class="text-text-muted hover:text-brand transition-colors text-lg" @click="emit('open-settings')">⚙</button>
+        <button class="text-text-muted hover:text-error transition-colors text-lg" @click="emit('update:isOpen', false)">✕</button>
       </div>
     </div>
 
-    <!-- 消息列表 -->
-    <div class="flex-1 overflow-y-auto custom-scrollbar space-y-4 px-4 py-3">
-      <div v-if="messages.length === 0" class="text-xs text-gray-600 text-center py-12 flex flex-col items-center gap-3">
-        <div class="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center text-xl">✨</div>
-        开始和助手对话以获得帮助
+    <!-- Message List -->
+    <div class="flex-1 overflow-y-auto custom-scrollbar space-y-8 px-6 py-6">
+      <div v-if="messages.length === 0" class="text-[10px] font-black text-text-muted text-center py-20 flex flex-col items-center gap-4 uppercase tracking-[0.2em]">
+        <div class="text-4xl text-brand">?</div>
+        Initialize session to begin
       </div>
       <div
         v-for="m in messages"
         :key="m.id"
-        class="flex flex-col gap-1 group"
+        class="flex flex-col gap-2 group"
         :class="m.role === 'user' ? 'items-end' : (m.role === 'system' ? 'items-center' : 'items-start')"
       >
+        <span class="text-[8px] font-black uppercase tracking-widest text-text-muted">{{ m.role }}</span>
         <div
-          class="px-4 py-2.5 rounded-2xl text-sm leading-relaxed max-w-[90%] shadow-sm border transition-colors"
+          class="p-4 rounded-sm text-sm leading-relaxed w-full border transition-all"
           :class="m.role === 'user'
-            ? 'bg-[#b76e79]/20 border-[#b76e79]/30 text-gray-100 rounded-tr-sm'
+            ? 'bg-brand/5 border-brand/30 text-text-primary'
             : (m.role === 'system'
-              ? 'bg-[#0f0f12] border-white/10 text-gray-400 rounded-lg text-xs'
-              : 'bg-white/5 border-white/5 text-gray-200 rounded-tl-sm')"
+              ? 'bg-dark-bg border-dashed border-subtle text-text-muted text-[10px] italic'
+              : 'bg-surface border-subtle text-text-secondary')"
         >
           <div class="prose prose-invert prose-sm max-w-none" v-html="renderMarkdown(m.content)"></div>
         </div>
-        <!-- 消息操作 -->
-        <div v-if="m.role !== 'system'" class="flex items-center gap-3 px-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <!-- Actions -->
+        <div v-if="m.role !== 'system'" class="flex items-center gap-4 px-1 opacity-0 group-hover:opacity-100 transition-opacity">
           <button
             v-if="m.role === 'assistant'"
-            class="text-[10px] text-gray-600 hover:text-blue-400 transition-colors"
+            class="text-[10px] font-black text-text-muted hover:text-brand uppercase tracking-widest"
             @click="emit('rewrite-message', m)"
             :disabled="isGenerating"
           >
-            重写
+            Regen
           </button>
           <button 
-            class="text-[10px] text-gray-600 hover:text-brand transition-colors" 
+            class="text-[10px] font-black text-text-muted hover:text-brand uppercase tracking-widest" 
             @click="emit('edit-message', m)" 
             :disabled="isGenerating"
           >
-            编辑
+            Edit
           </button>
           <button 
-            class="text-[10px] text-gray-600 hover:text-red-400 transition-colors" 
+            class="text-[10px] font-black text-text-muted hover:text-error uppercase tracking-widest" 
             :disabled="isGenerating"
             @click="confirmDelete(m)"
           >
-            删除
+            Del
           </button>
         </div>
       </div>
     </div>
 
-    <!-- 输入区域 -->
-    <div class="pt-4 pb-4 px-4 border-t border-white/10">
+    <!-- Input Area -->
+    <div class="p-6 border-t border-strong bg-surface">
       <div class="relative">
         <textarea
           :value="draft"
           @input="emit('update:draft', ($event.target as HTMLTextAreaElement).value)"
-          class="input textarea h-24 !bg-black/30 !border-white/5 focus:!border-[#b76e79]/40"
-          placeholder="输入建议或要求 (Ctrl + Enter)..."
+          class="input textarea h-32 !bg-dark-bg !border-strong font-mono text-xs uppercase tracking-tighter"
+          placeholder="DISPATCH COMMAND..."
           :disabled="isGenerating"
           @keydown="handleKeydown"
         ></textarea>
       </div>
-      <div class="flex items-center justify-between mt-3 gap-3">
+      <div class="flex items-center justify-between mt-4 gap-4">
         <ModernSelect
           :model-value="currentModel"
           :options="modelOptions"
           placement="top"
-          placeholder="模型..."
-          class="!w-[160px] !text-xs"
-          dropdown-width="410"
-          searchable
-          allow-create
+          class="!w-[180px] !text-[10px] font-black"
           @select="emit('select-model', $event)"
         />
         <div class="flex items-center gap-2">
-          <button class="btn btn-sm btn-secondary" :disabled="isGenerating" @click="confirmReset">清空</button>
+          <button class="btn btn-xs btn-secondary font-black uppercase tracking-widest" :disabled="isGenerating" @click="confirmReset">Reset</button>
           <button 
-            class="btn btn-sm btn-primary px-6" 
+            class="btn btn-sm btn-primary px-8 font-black uppercase tracking-widest" 
             :disabled="!draft.trim() || isGenerating" 
             @click="emit('send')"
           >
-            <span v-if="isGenerating" class="animate-spin mr-2">⌛</span>
-            发送
+            {{ isGenerating ? 'WAIT' : 'SEND' }}
           </button>
         </div>
       </div>
-      <div v-if="streamError" class="text-xs text-red-400 mt-2 bg-red-400/10 p-2 rounded-lg border border-red-400/20 truncate">
-        {{ streamError }}
+      <div v-if="streamError" class="text-[10px] font-black uppercase tracking-widest text-error border border-error px-3 py-2 mt-4 truncate">
+        PROTOCOL ERROR: {{ streamError }}
       </div>
     </div>
   </aside>
@@ -237,16 +166,12 @@ function confirmReset() {
 
 <style scoped>
 .custom-scrollbar::-webkit-scrollbar {
-  width: 4px;
+  width: 2px;
 }
 .custom-scrollbar::-webkit-scrollbar-track {
   background: transparent;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 2px;
-}
-.custom-scrollbar:hover::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.05);
 }
 </style>

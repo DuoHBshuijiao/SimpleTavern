@@ -1,57 +1,7 @@
 <script setup lang="ts">
 /**
  * ChatSidebar - 侧边栏组件
- *
- * 组件职责：
- * - 显示用户身份列表，支持选择、创建、编辑、删除身份
- * - 显示角色列表，支持选择、创建、编辑、删除角色
- * - 显示聊天会话历史列表（单聊和群聊），支持选择、创建、重命名、删除会话
- * - 支持侧边栏折叠/展开
- *
- * Props说明：
- * - collapsed: 是否折叠
- * - personas: 用户身份列表（来自types/models.ts的UserPersona[]类型）
- * - selectedPersonaId: 当前选中的身份ID
- * - effectivePureAiMode: 是否纯AI模式
- * - characters: 角色列表（来自types/models.ts的CharacterCard[]类型）
- * - selectedCharacterId: 当前选中的角色ID
- * - chatList: 单聊列表（来自types/models.ts的Chat[]类型）
- * - groupList: 群聊列表（来自types/models.ts的Chat[]类型）
- * - activeChatId: 当前激活的聊天ID
- * - editingChatId: 正在编辑标题的聊天ID
- * - editingTitle: 正在编辑的标题
- *
- * Emits说明：
- * - update:collapsed: 更新折叠状态
- * - update:selectedCharacterId: 更新选中的角色ID
- * - update:editingTitle: 更新编辑中的标题
- * - select-persona: 选择身份
- * - edit-persona: 编辑身份
- * - create-persona: 创建身份
- * - delete-persona: 删除身份
- * - edit-character: 编辑角色
- * - create-character: 创建角色
- * - delete-character: 删除角色
- * - select-chat: 选择单聊
- * - select-group: 选择群聊
- * - create-chat: 创建单聊
- * - create-group: 创建群聊
- * - start-edit-title: 开始编辑标题
- * - save-title: 保存标题
- * - cancel-edit-title: 取消编辑标题
- * - delete-chat: 删除聊天
- *
- * 使用的Composables：
- * 无
- *
- * 使用的Stores：
- * 无（通过props接收数据）
- *
- * 文件关系：
- *    - 被导入：被components/chat/index.ts导出，被views/ChatPage.vue使用
- *    - 导入：导入types/models.ts的类型、components/ModernAvatar.vue组件
- *    - 依赖：依赖vue、types/models.ts
- *    - 位置：组件层，提供侧边栏功能
+ * 风格：Radical Swiss Modernism 2.0
  */
 import type { CharacterCard, UserPersona, Chat } from '../../types/models'
 import ModernAvatar from '../ModernAvatar.vue'
@@ -97,47 +47,21 @@ const emit = defineEmits<{
   'delete-chat': [chatId: string]
 }>()
 
-/**
- * 获取角色信息
- *
- * 根据角色ID从角色列表中查找角色。
- *
- * @param {string} id - 角色ID
- * @returns {CharacterCard | null} 角色信息，如果未找到则返回null
- */
 function getCharacterById(id: string): CharacterCard | null {
   return props.characters.find(c => c.id === id) ?? null
 }
 
-/**
- * 获取用户身份信息
- *
- * 根据身份ID从身份列表中查找身份。
- *
- * @param {string | null | undefined} id - 身份ID
- * @returns {UserPersona | null} 身份信息，如果未找到或ID为空则返回null
- */
 function getPersonaById(id: string | null | undefined): UserPersona | null {
   if (!id) return null
   return props.personas.find(p => p.id === id) ?? null
 }
 
-/**
- * 获取会话的头像列表
- *
- * 根据聊天会话类型（单聊/群聊）和模式（纯AI/普通）获取要显示的头像列表。
- * 对于单聊，返回用户和角色的头像；对于群聊，返回用户和所有成员的头像。
- *
- * @param {Chat} chat - 聊天会话（来自types/models.ts）
- * @returns {{ src: string | null; name: string }[]} 头像列表，包含src和name
- */
 function getChatAvatars(chat: Chat): { src: string | null; name: string }[] {
   const avatars: { src: string | null; name: string }[] = []
   
   const chatPure = (chat.overrides?.pureAiMode ?? props.effectivePureAiMode) === true
   const chatPersona = getPersonaById(chat.userPersonaId)
 
-  // 1. User（非纯 AI 模式才展示）
   if (!chatPure) {
     const seen = new Set<string>()
     for (const m of (chat.messages || [])) {
@@ -162,7 +86,6 @@ function getChatAvatars(chat: Chat): { src: string | null; name: string }[] {
     }
   }
 
-  // 2. Members
   if (chat.isGroup) {
     chat.memberIds.forEach(id => {
       const char = getCharacterById(id)
@@ -175,47 +98,20 @@ function getChatAvatars(chat: Chat): { src: string | null; name: string }[] {
   return avatars
 }
 
-/**
- * 切换侧边栏折叠状态
- *
- * 切换侧边栏的折叠/展开状态。
- */
 const toggleCollapsed = () => emit('update:collapsed', !props.collapsed)
 
-/**
- * 确认删除身份
- *
- * 弹出确认对话框，确认后删除指定身份。
- *
- * @param {string} id - 身份ID
- */
 function confirmDeletePersona(id: string) {
   if (window.confirm('确定删除这个身份？')) {
     emit('delete-persona', id)
   }
 }
 
-/**
- * 确认删除角色
- *
- * 弹出确认对话框，确认后删除指定角色。
- *
- * @param {string} id - 角色ID
- */
 function confirmDeleteCharacter(id: string) {
   if (window.confirm('确定删除这个角色？')) {
     emit('delete-character', id)
   }
 }
 
-/**
- * 确认删除聊天
- *
- * 弹出确认对话框，确认后删除指定聊天会话。
- *
- * @param {string} id - 聊天ID
- * @param {boolean} isGroup - 是否为群聊
- */
 function confirmDeleteChat(id: string, isGroup: boolean) {
   if (window.confirm(isGroup ? '确定删除群聊？' : '确定删除会话？')) {
     emit('delete-chat', id)
@@ -225,175 +121,167 @@ function confirmDeleteChat(id: string, isGroup: boolean) {
 
 <template>
   <aside 
-    class="flex flex-col border-r border-white/5 bg-[#141418] transition-all duration-300 relative flex-shrink-0"
-    :class="collapsed ? '-ml-80 w-80' : 'w-80'"
+    class="flex flex-col border-r border-strong bg-dark-bg transition-all duration-300 relative flex-shrink-0"
+    :class="collapsed ? '-ml-[320px] w-[320px]' : 'w-[320px]'"
   >
     <div class="flex flex-col h-full overflow-hidden">
       
       <!-- 用户身份区域 (头部) -->
-      <div class="p-4 bg-black/10 border-b border-white/5 shrink-0">
-        <div class="flex items-center justify-between mb-3">
-          <span class="text-xs font-bold text-gray-400 uppercase tracking-wider">我的身份</span>
+      <div class="p-6 bg-surface border-b border-subtle shrink-0">
+        <div class="flex items-center justify-between mb-4">
+          <span class="text-xs font-black text-text-muted uppercase tracking-widest">User Persona</span>
           <button 
-            class="text-xs text-brand hover:text-brand-hover transition-colors px-2 py-0.5 rounded hover:bg-white/5" 
+            class="text-[10px] font-bold text-brand hover:text-brand-hover transition-colors px-2 py-1 border border-brand/20 hover:border-brand" 
             @click="emit('create-persona')"
           >
-            + 新建
+            NEW
           </button>
         </div>
         
-        <div class="space-y-2 max-h-[140px] overflow-y-auto pr-1 custom-scrollbar">
+        <div class="space-y-1 max-h-[160px] overflow-y-auto pr-1 custom-scrollbar">
           <div 
             v-for="p in personas"
             :key="p.id"
-            class="group flex items-center gap-3 p-2 rounded-xl cursor-pointer transition-all duration-200 border border-transparent"
-            :class="selectedPersonaId === p.id ? 'bg-brand/10 border-brand/20' : 'hover:bg-white/5'"
+            class="group flex items-center gap-3 p-2 rounded-sm cursor-pointer transition-all duration-100 border border-transparent"
+            :class="selectedPersonaId === p.id ? 'bg-brand/5 border-brand/20' : 'hover:bg-white/5'"
             @click="emit('select-persona', p.id)"
           >
-            <ModernAvatar :src="p.avatar ? `/api/avatars/${p.avatar}` : null" :name="p.name" :size="36" aspect="1" />
+            <ModernAvatar :src="p.avatar ? `/api/avatars/${p.avatar}` : null" :name="p.name" :size="32" aspect="1" rounded="rounded-sm" />
             <div class="flex-1 min-w-0">
-              <div class="font-medium text-sm truncate" :class="selectedPersonaId === p.id ? 'text-brand' : 'text-gray-300'">{{ p.name }}</div>
+              <div class="font-bold text-sm truncate" :class="selectedPersonaId === p.id ? 'text-brand' : 'text-text-primary'">{{ p.name }}</div>
             </div>
             <div class="opacity-0 group-hover:opacity-100 flex gap-1 transition-opacity">
-              <button class="p-1 hover:text-white text-gray-500" @click.stop="emit('edit-persona', p)">✏</button>
-              <button class="p-1 hover:text-red-400 text-gray-500" @click.stop="confirmDeletePersona(p.id)">🗑</button>
+              <button class="p-1 hover:text-brand text-text-muted" @click.stop="emit('edit-persona', p)">✏</button>
+              <button class="p-1 hover:text-error text-text-muted" @click.stop="confirmDeletePersona(p.id)">🗑</button>
             </div>
           </div>
           
-          <div v-if="!personas.length" class="text-xs text-gray-500 text-center py-2">
-            点击上方新建创建你的第一个身份
+          <div v-if="!personas.length" class="text-[10px] text-text-muted text-center py-4 uppercase tracking-widest">
+            No personas defined
           </div>
         </div>
       </div>
 
       <!-- 角色列表区域 (中间，弹性伸缩) -->
-      <div class="flex-1 overflow-y-auto min-h-0 custom-scrollbar p-3">
-        <div class="flex items-center justify-between mb-2 px-1">
-          <span class="text-xs font-bold text-gray-400 uppercase tracking-wider">角色列表</span>
+      <div class="flex-1 overflow-y-auto min-h-0 custom-scrollbar p-4">
+        <div class="flex items-center justify-between mb-4 px-2">
+          <span class="text-xs font-black text-text-muted uppercase tracking-widest">Characters</span>
           <button 
-            class="text-xs text-brand hover:text-brand-hover transition-colors px-2 py-0.5 rounded hover:bg-white/5" 
+            class="text-[10px] font-bold text-brand hover:text-brand-hover transition-colors px-2 py-1 border border-brand/20 hover:border-brand" 
             @click="emit('create-character')"
           >
-            + 新建
+            ADD
           </button>
         </div>
 
-        <div class="grid grid-cols-1 gap-2">
+        <div class="grid grid-cols-1 gap-1">
           <div 
             v-for="c in characters"
             :key="c.id"
-            class="group relative flex items-start gap-3 p-3 rounded-2xl cursor-pointer transition-all duration-200 border border-transparent"
-            :class="selectedCharacterId === c.id ? 'bg-white/5 border-brand/20 shadow-sm' : 'hover:bg-white/5'"
+            class="group relative flex items-center gap-4 p-3 rounded-sm cursor-pointer transition-all duration-100 border border-transparent"
+            :class="selectedCharacterId === c.id ? 'bg-surface border-subtle shadow-sm' : 'hover:bg-white/5'"
             @click="emit('update:selectedCharacterId', c.id)"
           >
             <ModernAvatar 
               :src="c.avatar ? `/api/avatars/${c.avatar}` : null" 
               :name="c.name" 
-              :size="56" 
+              :size="48" 
               aspect="auto"
               object-fit="contain"
-              rounded="rounded-lg"
-              class="shadow-md"
+              rounded="rounded-sm"
+              class="bg-black/20"
             />
             
-            <div class="flex-1 min-w-0 flex flex-col h-[74px]">
-              <div class="flex justify-between items-start">
-                <div class="font-bold text-sm truncate" :class="selectedCharacterId === c.id ? 'text-brand-300' : 'text-gray-200'">{{ c.name }}</div>
-              </div>
-              <div class="text-xs text-gray-500 line-clamp-3 mt-1 leading-relaxed">{{ c.description || '暂无简介' }}</div>
+            <div class="flex-1 min-w-0 flex flex-col justify-center">
+              <div class="font-black text-sm truncate uppercase tracking-tight" :class="selectedCharacterId === c.id ? 'text-brand' : 'text-text-primary'">{{ c.name }}</div>
+              <div class="text-[10px] text-text-muted line-clamp-1 mt-0.5 leading-tight">{{ c.description || 'No description' }}</div>
             </div>
 
-            <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-black/60 rounded-lg backdrop-blur-sm p-0.5 flex">
-              <button class="p-1.5 hover:text-white text-gray-400" @click.stop="emit('edit-character', c)">✏</button>
-              <button class="p-1.5 hover:text-red-400 text-gray-400" @click.stop="confirmDeleteCharacter(c.id)">🗑</button>
+            <div class="absolute top-1/2 -translate-y-1/2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex">
+              <button class="p-2 hover:text-brand text-text-muted" @click.stop="emit('edit-character', c)">✏</button>
+              <button class="p-2 hover:text-error text-text-muted" @click.stop="confirmDeleteCharacter(c.id)">🗑</button>
             </div>
           </div>
         </div>
       </div>
 
       <!-- 会话列表区域 (底部) -->
-      <div class="h-1/3 min-h-[150px] border-t border-white/5 bg-black/10 flex flex-col">
-        <div class="p-3 pb-1 shrink-0 flex items-center justify-between">
-          <span class="text-xs font-bold text-gray-400 uppercase tracking-wider">历史会话</span>
+      <div class="h-1/3 min-h-[200px] border-t border-strong bg-surface flex flex-col">
+        <div class="p-4 pb-2 shrink-0 flex items-center justify-between">
+          <span class="text-xs font-black text-text-muted uppercase tracking-widest">History</span>
           <div class="flex gap-2">
             <button 
-              class="text-xs bg-purple-500/20 hover:bg-purple-500/30 text-purple-400 px-2 py-1 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed" 
+              class="text-[10px] font-bold bg-brand/10 hover:bg-brand/20 text-brand px-2 py-1 rounded-sm border border-brand/20 transition-colors disabled:opacity-30" 
               :disabled="characters.length < 2" 
               @click="emit('create-group')"
-              title="创建群聊"
             >
-              + 群聊
+              + GROUP
             </button>
             <button 
-              class="text-xs bg-brand/20 hover:bg-brand/30 text-brand px-2 py-1 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed" 
+              class="text-[10px] font-bold bg-brand/10 hover:bg-brand/20 text-brand px-2 py-1 rounded-sm border border-brand/20 transition-colors disabled:opacity-30" 
               :disabled="!selectedCharacterId" 
               @click="emit('create-chat')"
             >
-              新建会话
+              + CHAT
             </button>
           </div>
         </div>
         <div class="flex-1 overflow-y-auto p-2 custom-scrollbar">
           <!-- 群聊列表 -->
-          <div v-if="groupList.length > 0" class="mb-3">
-            <div class="text-[10px] text-purple-400 uppercase tracking-wider px-2 mb-1 flex items-center gap-1">
-              <span>👥</span> 群聊
+          <div v-if="groupList.length > 0" class="mb-4">
+            <div class="text-[10px] font-black text-brand uppercase tracking-widest px-3 mb-2 flex items-center gap-2">
+              <span class="w-1.5 h-1.5 bg-brand"></span> Group Chats
             </div>
             <div 
               v-for="c in groupList"
               :key="c.id"
-              class="group flex items-center justify-between p-2 rounded-lg cursor-pointer text-sm mb-1 transition-colors"
-              :class="activeChatId === c.id ? 'bg-purple-500/10 text-purple-400' : 'text-gray-400 hover:bg-white/5 hover:text-gray-200'"
+              class="group flex items-center justify-between p-3 rounded-sm cursor-pointer text-xs mb-1 transition-colors border border-transparent"
+              :class="activeChatId === c.id ? 'bg-dark-bg border-subtle text-brand' : 'text-text-secondary hover:bg-white/5'"
               @click="emit('select-group', c)"
             >
-              <div class="flex items-center gap-2 flex-1 min-w-0 pr-2 max-w-[calc(100%-60px)]">
-                <div class="flex -space-x-1.5 overflow-hidden shrink-0">
+              <div class="flex items-center gap-3 flex-1 min-w-0">
+                <div class="flex -space-x-2 overflow-hidden shrink-0">
                   <template v-for="(avatar, i) in getChatAvatars(c).slice(0, 3)" :key="i">
-                    <ModernAvatar :src="avatar.src" :name="avatar.name" :size="20" aspect="1" rounded="rounded-full" class="ring-1 ring-[#141418] bg-[#141418]" />
+                    <ModernAvatar :src="avatar.src" :name="avatar.name" :size="20" aspect="1" rounded="rounded-sm" class="ring-1 ring-surface bg-surface" />
                   </template>
-                  <div v-if="getChatAvatars(c).length > 3" class="w-5 h-5 rounded-full bg-white/10 flex items-center justify-center text-[8px] ring-1 ring-[#141418]">
-                    +{{ getChatAvatars(c).length - 3 }}
-                  </div>
                 </div>
                 <div v-if="editingChatId === c.id" @click.stop class="flex gap-1 flex-1">
                   <input 
                     :value="editingTitle"
                     @input="emit('update:editingTitle', ($event.target as HTMLInputElement).value)"
-                    class="bg-black/20 border border-purple-500/50 rounded px-1 py-0.5 text-xs w-full text-white outline-none focus:border-purple-500"
+                    class="bg-black/40 border border-brand/50 rounded-sm px-2 py-1 text-[10px] w-full text-white outline-none focus:border-brand"
                     @keyup.enter="emit('save-title')"
                     @keyup.escape="emit('cancel-edit-title')"
                     autofocus
                   />
-                  <button class="text-purple-400 hover:text-white" @click="emit('save-title')">✓</button>
-                  <button class="text-gray-500 hover:text-white" @click="emit('cancel-edit-title')">✕</button>
+                  <button class="text-brand hover:text-white" @click="emit('save-title')">✓</button>
                 </div>
-                <div v-else class="truncate flex-1">{{ c.title }}</div>
-                <span class="text-[10px] text-gray-600 shrink-0">({{ c.memberIds.length }}人)</span>
+                <div v-else class="truncate font-bold uppercase tracking-tight flex-1">{{ c.title }}</div>
               </div>
               
-              <div v-if="editingChatId !== c.id" class="flex gap-1 shrink-0 ml-auto bg-black/40 rounded-md backdrop-blur-sm">
-                <button class="p-1 hover:text-white text-gray-300" @click.stop="emit('start-edit-title', c.id, c.title)" title="重命名">✏</button>
-                <button class="p-1 hover:text-red-400 text-gray-300" @click.stop="confirmDeleteChat(c.id, true)" title="删除">🗑</button>
+              <div v-if="editingChatId !== c.id" class="flex gap-1 shrink-0 group-hover:opacity-100 transition-opacity">
+                <button class="p-1 text-text-muted hover:text-brand" @click.stop="emit('start-edit-title', c.id, c.title)">✏</button>
+                <button class="p-1 text-text-muted hover:text-error" @click.stop="confirmDeleteChat(c.id, true)">🗑</button>
               </div>
             </div>
           </div>
 
           <!-- 单聊列表 -->
           <div v-if="chatList.filter(c => !c.isGroup).length > 0">
-            <div v-if="groupList.length > 0" class="text-[10px] text-gray-500 uppercase tracking-wider px-2 mb-1">
-              单聊
+            <div v-if="groupList.length > 0" class="text-[10px] font-black text-text-muted uppercase tracking-widest px-3 mb-2">
+              Direct Messages
             </div>
             <div 
               v-for="c in chatList.filter(chat => !chat.isGroup)"
               :key="c.id"
-              class="group flex items-center justify-between p-2 rounded-lg cursor-pointer text-sm mb-1 transition-colors"
-              :class="activeChatId === c.id ? 'bg-brand/10 text-brand' : 'text-gray-400 hover:bg-white/5 hover:text-gray-200'"
+              class="group flex items-center justify-between p-3 rounded-sm cursor-pointer text-xs mb-1 transition-colors border border-transparent"
+              :class="activeChatId === c.id ? 'bg-dark-bg border-subtle text-brand' : 'text-text-secondary hover:bg-white/5'"
               @click="emit('select-chat', c)"
             >
-              <div class="flex items-center gap-2 flex-1 min-w-0 pr-2 max-w-[calc(100%-60px)]">
-                <div class="flex -space-x-1.5 overflow-hidden shrink-0">
+              <div class="flex items-center gap-3 flex-1 min-w-0">
+                <div class="flex -space-x-2 overflow-hidden shrink-0">
                   <template v-for="(avatar, i) in getChatAvatars(c).slice(0, 2)" :key="i">
-                    <ModernAvatar :src="avatar.src" :name="avatar.name" :size="20" aspect="1" rounded="rounded-full" class="ring-1 ring-[#141418] bg-[#141418]" />
+                    <ModernAvatar :src="avatar.src" :name="avatar.name" :size="20" aspect="1" rounded="rounded-sm" class="ring-1 ring-surface bg-surface" />
                   </template>
                 </div>
                 <div class="flex-1 min-w-0">
@@ -401,26 +289,25 @@ function confirmDeleteChat(id: string, isGroup: boolean) {
                     <input 
                       :value="editingTitle"
                       @input="emit('update:editingTitle', ($event.target as HTMLInputElement).value)"
-                      class="bg-black/20 border border-brand/50 rounded px-1 py-0.5 text-xs w-full text-white outline-none focus:border-brand"
+                      class="bg-black/40 border border-brand/50 rounded-sm px-2 py-1 text-[10px] w-full text-white outline-none focus:border-brand"
                       @keyup.enter="emit('save-title')"
                       @keyup.escape="emit('cancel-edit-title')"
                       autofocus
                     />
                     <button class="text-brand hover:text-white" @click="emit('save-title')">✓</button>
-                    <button class="text-gray-500 hover:text-white" @click="emit('cancel-edit-title')">✕</button>
                   </div>
-                  <div v-else class="truncate">{{ c.title }}</div>
+                  <div v-else class="truncate font-bold uppercase tracking-tight">{{ c.title }}</div>
                 </div>
               </div>
               
-              <div v-if="editingChatId !== c.id" class="flex gap-1 shrink-0 ml-auto bg-black/40 rounded-md backdrop-blur-sm">
-                <button class="p-1 hover:text-white text-gray-300" @click.stop="emit('start-edit-title', c.id, c.title)" title="重命名">✏</button>
-                <button class="p-1 hover:text-red-400 text-gray-300" @click.stop="confirmDeleteChat(c.id, false)" title="删除">🗑</button>
+              <div v-if="editingChatId !== c.id" class="flex gap-1 shrink-0 group-hover:opacity-100 transition-opacity">
+                <button class="p-1 text-text-muted hover:text-brand" @click.stop="emit('start-edit-title', c.id, c.title)">✏</button>
+                <button class="p-1 text-text-muted hover:text-error" @click.stop="confirmDeleteChat(c.id, false)">🗑</button>
               </div>
             </div>
           </div>
-          <div v-if="!chatList.length && !groupList.length" class="text-center text-xs text-gray-600 py-4">
-            无历史会话
+          <div v-if="!chatList.length && !groupList.length" class="text-[10px] text-text-muted text-center py-8 uppercase tracking-widest">
+            Empty history
           </div>
         </div>
       </div>
@@ -429,26 +316,26 @@ function confirmDeleteChat(id: string, isGroup: boolean) {
 
   <!-- 侧边栏开关 -->
   <div 
-    class="absolute left-0 top-1/2 -translate-y-1/2 z-50 cursor-pointer p-2 bg-brand/30 hover:bg-brand/50 rounded-r-lg backdrop-blur-sm transition-colors border border-l-0 border-brand/40 shadow-lg"
+    class="absolute left-0 top-1/2 -translate-y-1/2 z-50 cursor-pointer p-2 bg-brand text-white rounded-r-sm transition-transform duration-300"
+    :class="collapsed ? 'translate-x-0' : 'translate-x-0'"
     @click="toggleCollapsed"
-    title="切换侧边栏"
+    title="Toggle Sidebar"
   >
-    <span class="text-xs text-white">{{ collapsed ? '▶' : '◀' }}</span>
+    <span class="text-[10px] font-black">{{ collapsed ? '▶' : '◀' }}</span>
   </div>
 </template>
 
 <style scoped>
 .custom-scrollbar::-webkit-scrollbar {
-  width: 4px;
+  width: 2px;
 }
 .custom-scrollbar::-webkit-scrollbar-track {
   background: transparent;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.05);
 }
 .custom-scrollbar:hover::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.1);
 }
 </style>

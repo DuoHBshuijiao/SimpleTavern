@@ -1,59 +1,24 @@
 /**
  * 表单组件样式文件
- *
- * 定义输入框、文本域、复选框、开关等表单元素的样式。
- *
- * 主要功能：
- *    - 基础输入框：标准输入框样式，包括悬停和焦点状态
- *    - 输入框尺寸：sm、lg两种尺寸变体
- *    - 文本域：多行文本输入，支持自动调整高度
- *    - 聊天输入框：覆盖Naive UI的输入框样式
- *    - 输入框组：多个输入框组合
- *    - 复选框：自定义复选框样式
- *    - 开关：自定义开关样式
- *    - 表单标签：标签样式，包括必填标记
- *    - 表单提示：提示和错误信息样式
- *    - 表单组：表单字段组容器
- *
- * 设计元素：
- *    - 基础输入框：深色表面背景，默认边框，焦点时品牌色边框和阴影
- *    - 文本域：最小高度80px，可垂直调整大小
- *    - 复选框：自定义外观，选中时品牌色背景和白色勾选图标
- *    - 开关：深色轨道，白色滑块，激活时品牌色轨道，滑块右移
- *    - 表单标签：块级显示，底部边距，次要文字颜色
- *    - 表单提示：小字号，静音文字颜色
- *    - 表单错误：小字号，错误色文字
- *
- * 原理：
- *    - 输入框焦点效果：使用box-shadow实现品牌色光晕效果
- *    - 复选框选中状态：使用background-image显示SVG勾选图标
- *    - 开关激活状态：使用transform translateX移动滑块位置
- *
- * 文件关系：
- *    - 被导入：被styles/components/index.css导入
- *    - 导入：无
- *    - 依赖：依赖styles/variables.css的CSS变量
- *    - 位置：样式层，提供表单组件样式
+ * 风格：Swiss Modernism 2.0 (Clean, Grid-aligned)
  */
 
 /* ========== 基础输入框 ========== */
 .input {
   width: 100%;
-  padding: 0.5rem 0.75rem;
+  padding: 0.625rem 1rem;
+  font-family: var(--font-sans);
   font-size: var(--text-sm);
-  line-height: 1.5;
   color: var(--color-text-primary);
-  background-color: var(--color-dark-surface);
+  background-color: var(--color-dark-surface); /* Darker background for inputs */
   border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-lg);
-  transition: 
-    border-color var(--transition-fast),
-    box-shadow var(--transition-fast),
-    background-color var(--transition-fast);
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
 }
 
 .input::placeholder {
   color: var(--color-text-muted);
+  opacity: 0.7;
 }
 
 .input:hover:not(:disabled):not(:focus) {
@@ -63,7 +28,8 @@
 .input:focus {
   outline: none;
   border-color: var(--color-brand);
-  box-shadow: 0 0 0 3px rgba(162, 48, 237, 0.15);
+  background-color: var(--color-dark-bg);
+  box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.2); /* Brand glow */
 }
 
 .input:disabled {
@@ -72,121 +38,58 @@
   background-color: var(--color-dark-lighter);
 }
 
-/* ========== 输入框尺寸 ========== */
-.input-sm {
-  padding: 0.375rem 0.5rem;
-  font-size: var(--text-xs);
-  border-radius: var(--radius-md);
-}
-
-.input-lg {
-  padding: 0.75rem 1rem;
-  font-size: var(--text-base);
-  border-radius: var(--radius-xl);
-}
-
 /* ========== 文本域 ========== */
 .textarea {
-  min-height: 80px;
+  min-height: 100px;
   resize: vertical;
+  line-height: 1.6;
 }
 
-.textarea-auto {
-  resize: none;
-  overflow: hidden;
-}
-
-/* ========== 聊天输入框（Naive UI 覆盖） ========== */
-.chat-input-textarea {
-  --n-border: none;
-  --n-box-shadow-focus: none;
-}
-
-/* ========== 输入框组 ========== */
-.input-group {
-  display: flex;
-  align-items: stretch;
-}
-
-.input-group .input {
-  border-radius: 0;
-}
-
-.input-group .input:first-child {
-  border-top-left-radius: var(--radius-lg);
-  border-bottom-left-radius: var(--radius-lg);
-}
-
-.input-group .input:last-child {
-  border-top-right-radius: var(--radius-lg);
-  border-bottom-right-radius: var(--radius-lg);
-}
-
-.input-group-addon {
-  display: flex;
-  align-items: center;
-  padding: 0 0.75rem;
-  font-size: var(--text-sm);
-  color: var(--color-text-secondary);
-  background-color: var(--color-dark-lighter);
-  border: 1px solid var(--color-border-default);
-}
-
-.input-group-addon:first-child {
-  border-right: none;
-  border-top-left-radius: var(--radius-lg);
-  border-bottom-left-radius: var(--radius-lg);
-}
-
-.input-group-addon:last-child {
-  border-left: none;
-  border-top-right-radius: var(--radius-lg);
-  border-bottom-right-radius: var(--radius-lg);
-}
-
-/* ========== 复选框 ========== */
+/* ========== 复选框 (Custom Swiss Checkbox) ========== */
 .checkbox {
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.75rem;
   cursor: pointer;
   user-select: none;
 }
 
 .checkbox input[type="checkbox"] {
   appearance: none;
-  width: 1rem;
-  height: 1rem;
+  width: 1.25rem;
+  height: 1.25rem;
   border: 1px solid var(--color-border-strong);
-  border-radius: var(--radius-sm);
-  background-color: var(--color-dark-surface);
+  border-radius: 2px; /* Very sharp */
+  background-color: transparent;
   cursor: pointer;
-  transition: 
-    background-color var(--transition-fast),
-    border-color var(--transition-fast);
+  position: relative;
+  transition: all var(--transition-fast);
 }
 
 .checkbox input[type="checkbox"]:checked {
   background-color: var(--color-brand);
   border-color: var(--color-brand);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z'/%3E%3C/svg%3E");
-  background-size: 12px;
-  background-position: center;
-  background-repeat: no-repeat;
 }
 
-.checkbox input[type="checkbox"]:focus-visible {
-  outline: 2px solid var(--color-brand);
-  outline-offset: 2px;
+.checkbox input[type="checkbox"]:checked::after {
+  content: '';
+  position: absolute;
+  top: 45%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(45deg);
+  width: 5px;
+  height: 10px;
+  border-right: 2px solid white;
+  border-bottom: 2px solid white;
 }
 
-/* ========== 开关 ========== */
+/* ========== 开关 (Switch) ========== */
 .switch {
   position: relative;
   display: inline-flex;
   align-items: center;
-  width: 2.5rem;
-  height: 1.25rem;
+  width: 2.75rem;
+  height: 1.5rem;
   cursor: pointer;
 }
 
@@ -194,7 +97,7 @@
   width: 100%;
   height: 100%;
   background-color: var(--color-dark-lighter);
-  border-radius: var(--radius-full);
+  border-radius: 999px; /* Pill shape */
   transition: background-color var(--transition-normal);
 }
 
@@ -204,13 +107,14 @@
 
 .switch-thumb {
   position: absolute;
-  top: 0.125rem;
-  left: 0.125rem;
-  width: 1rem;
-  height: 1rem;
+  top: 2px;
+  left: 2px;
+  width: calc(1.5rem - 4px);
+  height: calc(1.5rem - 4px);
   background-color: white;
-  border-radius: var(--radius-full);
-  transition: transform var(--transition-normal);
+  border-radius: 50%;
+  transition: transform var(--transition-spring);
+  box-shadow: var(--shadow-sm);
 }
 
 .switch-track.active + .switch-thumb,
@@ -218,38 +122,14 @@
   transform: translateX(1.25rem);
 }
 
-/* ========== 表单标签 ========== */
+/* ========== 标签 (Label) ========== */
 .label {
   display: block;
   margin-bottom: 0.5rem;
-  font-size: var(--text-sm);
-  font-weight: 500;
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
   color: var(--color-text-secondary);
-}
-
-.label-required::after {
-  content: " *";
-  color: var(--color-error);
-}
-
-/* ========== 表单提示 ========== */
-.form-hint {
-  margin-top: 0.375rem;
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
-}
-
-.form-error {
-  margin-top: 0.375rem;
-  font-size: var(--text-xs);
-  color: var(--color-error);
-}
-
-/* ========== 表单组 ========== */
-.form-group {
-  margin-bottom: var(--spacing-md);
-}
-
-.form-group:last-child {
-  margin-bottom: 0;
 }
