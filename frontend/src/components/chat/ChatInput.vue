@@ -342,6 +342,7 @@ function handleKeydown(e: KeyboardEvent) {
   bottom: 2.5rem; /* bottom-10 */
   margin-top: 49px;
   margin-bottom: 49px;
+  background-color: var(--color-border-subtle);
 }
 
 @media (max-width: 2220px) {

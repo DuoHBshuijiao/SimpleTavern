@@ -28,65 +28,67 @@
  *    - 位置：样式层，提供滚动条样式
  */
 
-/* ========== 全局滚动条 ========== */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
+@layer utilities {
+  /* ========== 全局滚动条 ========== */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
 
-::-webkit-scrollbar-track {
-  background: transparent;
-}
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
 
-::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 3px;
-}
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+  }
 
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
-}
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.2);
+  }
 
-/* Firefox */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
-}
+  /* Firefox */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+  }
 
-/* ========== 细滚动条（用于侧边栏等紧凑区域） ========== */
-.scrollbar-thin::-webkit-scrollbar {
-  width: 4px;
-  height: 4px;
-}
+  /* ========== 细滚动条（用于侧边栏等紧凑区域） ========== */
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
 
-.scrollbar-thin::-webkit-scrollbar-thumb {
-  border-radius: 2px;
-}
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    border-radius: 2px;
+  }
 
-/* ========== 隐藏滚动条（保留滚动功能） ========== */
-.scrollbar-hidden {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-}
+  /* ========== 隐藏滚动条（保留滚动功能） ========== */
+  .scrollbar-hidden {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
 
-.scrollbar-hidden::-webkit-scrollbar {
-  display: none;
-}
+  .scrollbar-hidden::-webkit-scrollbar {
+    display: none;
+  }
 
-/* ========== 暗色滚动条变体 ========== */
-.scrollbar-dark::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.05);
-}
+  /* ========== 暗色滚动条变体 ========== */
+  .scrollbar-dark::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.05);
+  }
 
-.scrollbar-dark::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.1);
-}
+  .scrollbar-dark::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.1);
+  }
 
-/* ========== 品牌色滚动条变体 ========== */
-.scrollbar-brand::-webkit-scrollbar-thumb {
-  background: rgba(162, 48, 237, 0.3);
-}
+  /* ========== 品牌色滚动条变体 ========== */
+  .scrollbar-brand::-webkit-scrollbar-thumb {
+    background: rgba(162, 48, 237, 0.3);
+  }
 
-.scrollbar-brand::-webkit-scrollbar-thumb:hover {
-  background: rgba(162, 48, 237, 0.5);
+  .scrollbar-brand::-webkit-scrollbar-thumb:hover {
+    background: rgba(162, 48, 237, 0.5);
+  }
 }

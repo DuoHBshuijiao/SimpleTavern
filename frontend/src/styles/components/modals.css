@@ -34,213 +34,215 @@
  *    - 位置：样式层，提供弹窗组件样式
  */
 
-/* ========== 弹窗尺寸工具类 ========== */
-.chat-modal-width-1200-90 {
-  width: min(1200px, 90vw);
-}
+@layer components {
+  /* ========== 弹窗尺寸工具类 ========== */
+  .chat-modal-width-1200-90 {
+    width: min(1200px, 90vw);
+  }
 
-.chat-modal-width-700-92 {
-  width: min(700px, 92vw);
-}
+  .chat-modal-width-700-92 {
+    width: min(700px, 92vw);
+  }
 
-.chat-modal-width-700-90 {
-  width: min(700px, 90vw);
-}
+  .chat-modal-width-700-90 {
+    width: min(700px, 90vw);
+  }
 
-.chat-modal-width-600-90 {
-  width: min(600px, 90vw);
-}
+  .chat-modal-width-600-90 {
+    width: min(600px, 90vw);
+  }
 
-.chat-modal-width-520-92 {
-  width: min(520px, 92vw);
-}
+  .chat-modal-width-520-92 {
+    width: min(520px, 92vw);
+  }
 
-.chat-modal-width-520-90 {
-  width: min(520px, 90vw);
-}
+  .chat-modal-width-520-90 {
+    width: min(520px, 90vw);
+  }
 
-.chat-modal-width-500-90 {
-  width: min(500px, 90vw);
-}
+  .chat-modal-width-500-90 {
+    width: min(500px, 90vw);
+  }
 
-/* ========== 基础弹窗样式 ========== */
-.modal {
-  position: fixed;
-  inset: 0;
-  z-index: var(--z-modal);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: var(--spacing-md);
-}
+  /* ========== 基础弹窗样式 ========== */
+  .modal {
+    position: fixed;
+    inset: 0;
+    z-index: var(--z-modal);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--spacing-md);
+  }
 
-.modal-backdrop {
-  position: absolute;
-  inset: 0;
-  background-color: rgb(0 0 0 / 0.2); /* bg-black/20 */
-  backdrop-filter: blur(2px); /* backdrop-blur-sm */
-  opacity: 0.6;
-  color: rgba(229, 231, 235, 0.61);
-}
+  .modal-backdrop {
+    position: absolute;
+    inset: 0;
+    background-color: rgb(0 0 0 / 0.2); /* bg-black/20 */
+    backdrop-filter: blur(2px); /* backdrop-blur-sm */
+    opacity: 0.6;
+    color: rgba(229, 231, 235, 0.61);
+  }
 
-.modal-content {
-  position: relative;
-  max-height: calc(100vh - 2rem);
-  
-  /* Liquid Glass Style */
-  background-color: rgba(65, 99, 155, 0.15);
-  background-image: none;
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-  border: 1px solid rgb(255 255 255 / 0.1); /* border-white/10 */
-  box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25); /* shadow-2xl */
-  
-  border-radius: 1rem; /* rounded-2xl */
-  
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  opacity: 1;
+  .modal-content {
+    position: relative;
+    max-height: calc(100vh - 2rem);
+    
+    /* Liquid Glass Style */
+    background-color: rgba(65, 99, 155, 0.15);
+    background-image: none;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    border: 1px solid rgb(255 255 255 / 0.1); /* border-white/10 */
+    box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25); /* shadow-2xl */
+    
+    border-radius: 1rem; /* rounded-2xl */
+    
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    opacity: 1;
 
-  /* 性能优化：提升合成层 */
-  transform: translateZ(0);
-  will-change: transform, opacity;
-}
+    /* 性能优化：提升合成层 */
+    transform: translateZ(0);
+    will-change: transform, opacity;
+  }
 
-.modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--spacing-md) var(--spacing-lg);
-  border-bottom: 1px solid rgb(255 255 255 / 0.1); /* border-white/10 */
-}
+  .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--spacing-md) var(--spacing-lg);
+    border-bottom: 1px solid rgb(255 255 255 / 0.1); /* border-white/10 */
+  }
 
-.modal-title {
-  font-size: var(--text-lg);
-  font-weight: 600;
-  color: #f8fafc; /* text-slate-50 (text-primary) */
-}
+  .modal-title {
+    font-size: var(--text-lg);
+    font-weight: 600;
+    color: #f8fafc; /* text-slate-50 (text-primary) */
+  }
 
-.modal-close {
-  padding: 0.25rem;
-  color: var(--color-text-secondary);
-  border-radius: var(--radius-md);
-  transition: 
-    background-color var(--transition-fast),
-    color var(--transition-fast);
-}
+  .modal-close {
+    padding: 0.25rem;
+    color: var(--color-text-secondary);
+    border-radius: var(--radius-md);
+    transition: 
+      background-color var(--transition-fast),
+      color var(--transition-fast);
+  }
 
-.modal-close:hover {
-  background-color: rgba(255, 255, 255, 0.1);
-  color: var(--color-text-primary);
-}
+  .modal-close:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+    color: var(--color-text-primary);
+  }
 
-.modal-body {
-  flex: 1;
-  padding: var(--spacing-lg);
-  overflow-y: auto;
-}
+  .modal-body {
+    flex: 1;
+    padding: var(--spacing-lg);
+    overflow-y: auto;
+  }
 
-.modal-footer {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--spacing-sm);
-  padding: var(--spacing-md) var(--spacing-lg);
-  border-top: 1px solid rgb(255 255 255 / 0.1); /* border-white/10 */
-}
+  .modal-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-md) var(--spacing-lg);
+    border-top: 1px solid rgb(255 255 255 / 0.1); /* border-white/10 */
+  }
 
-/* ========== Vue Transition Animations ========== */
-.modal-enter-active,
-.modal-leave-active {
-  transition: opacity 0.3s ease, transform 0.3s ease;
-}
+  /* ========== Vue Transition Animations ========== */
+  .modal-enter-active,
+  .modal-leave-active {
+    transition: opacity 0.3s ease, transform 0.3s ease;
+  }
 
-.modal-enter-active .modal-content,
-.modal-leave-active .modal-content {
-  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
+  .modal-enter-active .modal-content,
+  .modal-leave-active .modal-content {
+    transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
 
-.modal-enter-from,
-.modal-leave-to {
-  opacity: 0;
-}
+  .modal-enter-from,
+  .modal-leave-to {
+    opacity: 0;
+  }
 
-.modal-enter-from .modal-content,
-.modal-leave-to .modal-content {
-  transform: scale(0.95) translateY(10px);
-}
+  .modal-enter-from .modal-content,
+  .modal-leave-to .modal-content {
+    transform: scale(0.95) translateY(10px);
+  }
 
-.modal-enter-to,
-.modal-leave-from {
-  opacity: 1;
-}
+  .modal-enter-to,
+  .modal-leave-from {
+    opacity: 1;
+  }
 
-.modal-enter-to .modal-content,
-.modal-leave-from .modal-content {
-  transform: scale(1) translateY(0);
-}
+  .modal-enter-to .modal-content,
+  .modal-leave-from .modal-content {
+    transform: scale(1) translateY(0);
+  }
 
 
-/* ========== 抽屉样式 ========== */
-.drawer {
-  position: fixed;
-  z-index: var(--z-modal);
-}
+  /* ========== 抽屉样式 ========== */
+  .drawer {
+    position: fixed;
+    z-index: var(--z-modal);
+  }
 
-.drawer-right {
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: 400px;
-  max-width: 90vw;
-  background-color: var(--color-dark-surface);
-  border-left: 1px solid var(--color-border-default);
-  box-shadow: var(--shadow-xl);
-  transform: translateX(100%);
-  transition: transform var(--transition-slow);
-  will-change: transform; /* 性能优化 */
-}
+  .drawer-right {
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 400px;
+    max-width: 90vw;
+    background-color: var(--color-dark-surface);
+    border-left: 1px solid var(--color-border-default);
+    box-shadow: var(--shadow-xl);
+    transform: translateX(100%);
+    transition: transform var(--transition-slow);
+    will-change: transform; /* 性能优化 */
+  }
 
-.drawer-right.open {
-  transform: translateX(0);
-}
+  .drawer-right.open {
+    transform: translateX(0);
+  }
 
-.drawer-left {
-  top: 0;
-  left: 0;
-  bottom: 0;
-  width: 400px;
-  max-width: 90vw;
-  background-color: var(--color-dark-surface);
-  border-right: 1px solid var(--color-border-default);
-  box-shadow: var(--shadow-xl);
-  transform: translateX(-100%);
-  transition: transform var(--transition-slow);
-  will-change: transform; /* 性能优化 */
-}
+  .drawer-left {
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 400px;
+    max-width: 90vw;
+    background-color: var(--color-dark-surface);
+    border-right: 1px solid var(--color-border-default);
+    box-shadow: var(--shadow-xl);
+    transform: translateX(-100%);
+    transition: transform var(--transition-slow);
+    will-change: transform; /* 性能优化 */
+  }
 
-.drawer-left.open {
-  transform: translateX(0);
-}
+  .drawer-left.open {
+    transform: translateX(0);
+  }
 
-/* ========== 弹出确认框 ========== */
-.popconfirm {
-  padding: var(--spacing-md);
-  background-color: var(--color-dark-surface);
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-lg);
-}
+  /* ========== 弹出确认框 ========== */
+  .popconfirm {
+    padding: var(--spacing-md);
+    background-color: var(--color-dark-surface);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-lg);
+  }
 
-.popconfirm-message {
-  margin-bottom: var(--spacing-md);
-  font-size: var(--text-sm);
-  color: var(--color-text-primary);
-}
+  .popconfirm-message {
+    margin-bottom: var(--spacing-md);
+    font-size: var(--text-sm);
+    color: var(--color-text-primary);
+  }
 
-.popconfirm-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--spacing-sm);
+  .popconfirm-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--spacing-sm);
+  }
 }

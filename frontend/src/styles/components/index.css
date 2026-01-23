@@ -16,7 +16,9 @@
  *    - 位置：样式层，提供组件样式的统一入口
  */
 
-@import './buttons.css';
-@import './forms.css';
-@import './modals.css';
-@import './cards.css';
+@layer components {
+  @import './buttons.css';
+  @import './forms.css';
+  @import './modals.css';
+  @import './cards.css';
+}
