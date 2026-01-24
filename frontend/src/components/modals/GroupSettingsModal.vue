@@ -142,7 +142,7 @@ function save() {
   <Transition name="modal">
     <div v-if="show && chat" class="modal">
       <div class="modal-backdrop" @click="close"></div>
-      <div class="modal-content chat-modal-width-600-90 glass-panel stained-glass">
+      <div class="modal-content chat-modal-width-600-90 glass-panel bg-gradient-to-br from-slate-900/30 to-slate-800/25 backdrop-blur-2xl backdrop-saturate-[1.8] border border-white/10">
         <div class="modal-header">
           <h3 class="modal-title text-slate-50">群聊设置 - {{ chat.title }}</h3>
           <button class="modal-close" @click="close">

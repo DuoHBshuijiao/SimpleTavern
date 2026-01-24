@@ -88,7 +88,7 @@ function handleClickOutside(e: MouseEvent) {
       <div 
         v-if="show"
         ref="popoverRef"
-        class="fixed z-[100] min-w-[240px] max-w-[300px] p-4 rounded-xl glass-panel-floating shadow-2xl flex flex-col gap-3"
+        class="fixed z-[100] min-w-[240px] max-w-[300px] p-4 rounded-xl bg-gradient-to-br from-slate-800/70 to-slate-700/50 backdrop-blur-xl backdrop-saturate-[1.8] border border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.3)] flex flex-col gap-3"
         :style="{ 
           top: `${position.top}px`, 
           left: `${position.left}px`,

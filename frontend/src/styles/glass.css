@@ -49,20 +49,23 @@
     background-color: rgba(255, 255, 255, 0.02);
   }
 
-  /* 悬浮玻璃面板 */
-  .glass-panel-floating {
-    background: linear-gradient(135deg, rgba(30, 41, 59, 0.7), rgba(51, 65, 85, 0.5));
-    backdrop-filter: blur(20px) saturate(180%);
-    -webkit-backdrop-filter: blur(20px) saturate(180%);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-  }
-
-  /* 染色玻璃效果 */
-  .stained-glass {
-    background: linear-gradient(135deg, rgba(15, 23, 42, 0.3), rgba(30, 41, 59, 0.25));
-    backdrop-filter: blur(24px) saturate(180%);
-    -webkit-backdrop-filter: blur(24px) saturate(180%);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-  }
+  /*
+   * 弃用：.glass-panel-floating 与 .stained-glass 已改用 Tailwind 工具类
+   *
+   * 原因：esbuild 在压缩 CSS 时会导致 backdrop-filter 中多个函数之间的空格丢失，
+   * 例如 `blur(20px) saturate(180%)` 被错误合并为 `blur(20px)saturate(180%)`，
+   * 使 saturate 失效。Tailwind 的 backdrop-blur-*、backdrop-saturate-* 等工具类
+   * 通过 CSS 变量组合生成最终样式，经构建后不会出现该问题。
+   *
+   * 替代用法示例：
+   *
+   * 悬浮玻璃面板 (.glass-panel-floating)：
+   *   class="bg-gradient-to-br from-slate-800/70 to-slate-700/50 backdrop-blur-xl
+   *          backdrop-saturate-[1.8] border border-white/10
+   *          shadow-[0_8px_32px_rgba(0,0,0,0.3)]"
+   *
+   * 染色玻璃效果 (.stained-glass)：
+   *   class="bg-gradient-to-br from-slate-900/30 to-slate-800/25 backdrop-blur-2xl
+   *          backdrop-saturate-[1.8] border border-white/10"
+   */
 }

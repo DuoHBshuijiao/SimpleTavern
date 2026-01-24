@@ -394,7 +394,7 @@ async function handleImportChange(e: Event) {
 
       <!-- Drawer Panel -->
       <div 
-        class="absolute right-4 top-4 bottom-4 w-[500px] max-w-[calc(90vw-32px)] glass-panel-floating rounded-2xl shadow-2xl flex flex-col"
+        class="absolute right-4 top-4 bottom-4 w-[500px] max-w-[calc(90vw-32px)] drawer-panel bg-gradient-to-br from-slate-800/70 to-slate-700/50 backdrop-blur-xl backdrop-saturate-[1.8] border border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.3)] rounded-2xl flex flex-col"
       >
         <!-- Header -->
         <div class="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-white/5 rounded-t-2xl">
@@ -901,13 +901,13 @@ async function handleImportChange(e: Event) {
   opacity: 0;
 }
 
-.drawer-enter-active .glass-panel-floating,
-.drawer-leave-active .glass-panel-floating {
+.drawer-enter-active .drawer-panel,
+.drawer-leave-active .drawer-panel {
   transition: transform 0.3s ease-out;
 }
 
-.drawer-enter-from .glass-panel-floating,
-.drawer-leave-to .glass-panel-floating {
+.drawer-enter-from .drawer-panel,
+.drawer-leave-to .drawer-panel {
   transform: translateX(calc(100% + 1.5rem));
 }
 

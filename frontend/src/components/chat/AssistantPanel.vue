@@ -184,7 +184,7 @@ function confirmReset(event: Event) {
 
 <template>
   <aside
-    class="fixed right-4 top-4 bottom-4 glass-panel-floating rounded-2xl shadow-2xl transition-all duration-300 overflow-hidden flex flex-col z-20"
+    class="fixed right-4 top-4 bottom-4 bg-gradient-to-br from-slate-800/70 to-slate-700/50 backdrop-blur-xl backdrop-saturate-[1.8] border border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.3)] rounded-2xl transition-all duration-300 overflow-hidden flex flex-col z-20"
     :class="isOpen ? 'translate-x-0 w-[360px] opacity-100' : 'translate-x-[calc(100%+20px)] w-[360px] opacity-0 pointer-events-none'"
     style="contain: content; will-change: transform, opacity;"
   >

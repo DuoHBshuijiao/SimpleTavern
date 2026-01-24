@@ -1971,7 +1971,7 @@ const editingPersonaAvatarUrl = computed(() => {
 <!-- 角色编辑弹窗 -->
   <div v-if="actions.showCharacterEditor.value" class="modal">
     <div class="modal-backdrop" @click="cancelCharacterEdit"></div>
-    <div class="modal-content chat-modal-width-1200-90 glass-panel stained-glass">
+    <div class="modal-content chat-modal-width-1200-90 glass-panel bg-gradient-to-br from-slate-900/30 to-slate-800/25 backdrop-blur-2xl backdrop-saturate-[1.8] border border-white/10">
       <div class="modal-header">
         <h3 class="modal-title">{{ actions.isNewCharacter.value ? '新建角色' : '编辑角色' }}</h3>
         <button class="modal-close" @click="cancelCharacterEdit">
@@ -2120,7 +2120,7 @@ const editingPersonaAvatarUrl = computed(() => {
   <!-- Persona 编辑弹窗 -->
   <div v-if="actions.showPersonaEditor.value" class="modal">
     <div class="modal-backdrop" @click="actions.showPersonaEditor.value = false"></div>
-    <div class="modal-content chat-modal-width-500-90 glass-panel stained-glass">
+    <div class="modal-content chat-modal-width-500-90 glass-panel bg-gradient-to-br from-slate-900/30 to-slate-800/25 backdrop-blur-2xl backdrop-saturate-[1.8] border border-white/10">
       <div class="modal-header">
         <h3 class="modal-title">{{ actions.isNewPersona.value ? '新建身份' : '编辑身份' }}</h3>
         <button class="modal-close" @click="actions.showPersonaEditor.value = false">

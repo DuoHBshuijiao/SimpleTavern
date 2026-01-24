@@ -62,7 +62,7 @@ const emit = defineEmits<{
   <Transition name="modal">
     <div v-if="show" class="modal">
       <div class="modal-backdrop" @click="emit('update:show', false)"></div>
-      <div class="modal-content chat-modal-width-700-92 glass-panel-floating border-white/10 shadow-2xl">
+      <div class="modal-content chat-modal-width-700-92 bg-gradient-to-br from-slate-800/70 to-slate-700/50 backdrop-blur-xl backdrop-saturate-[1.8] border border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.3)]">
         <div class="modal-header border-b border-white/5">
           <h3 class="modal-title text-gray-100 font-semibold tracking-wide">编辑消息</h3>
           <button class="modal-close text-gray-400 hover:text-white transition-colors p-1 rounded-lg hover:bg-white/10" @click="emit('update:show', false)">
