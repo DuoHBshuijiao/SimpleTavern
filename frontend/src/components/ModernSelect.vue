@@ -82,7 +82,10 @@ const emit = defineEmits<{
 const isOpen = ref(false)
 const searchQuery = ref('')
 const containerRef = ref<HTMLElement | null>(null)
+const triggerRef = ref<HTMLElement | null>(null)
+const dropdownRef = ref<HTMLElement | null>(null)
 const inputRef = ref<HTMLInputElement | null>(null)
+const dropdownStyle = ref<Record<string, string>>({})
 
 /**
  * 计算规范化后的选项列表
@@ -173,14 +176,44 @@ function toggle() {
 }
 
 /**
+ * 计算并更新下拉框的 fixed 定位样式（用于 Teleport 到 body 时脱离父级 overflow 裁剪）
+ */
+function updateDropdownPosition() {
+  const trigger = triggerRef.value
+  if (!trigger) return
+  const rect = trigger.getBoundingClientRect()
+  const style: Record<string, string> = { position: 'fixed' }
+  if (props.placement === 'top') {
+    style.bottom = `${window.innerHeight - rect.top + 4}px`
+    style.top = 'auto'
+  } else {
+    style.top = `${rect.bottom + 4}px`
+    style.bottom = 'auto'
+  }
+  if (props.dropdownWidth) {
+    const raw = props.dropdownWidth
+    const w = typeof raw === 'number' ? `${raw}px` : (/^\d+$/.test(String(raw)) ? `${raw}px` : String(raw))
+    style.width = w
+    style.right = `${window.innerWidth - rect.right}px`
+    style.left = 'auto'
+  } else {
+    style.left = `${rect.left}px`
+    style.width = `${rect.width}px`
+  }
+  dropdownStyle.value = style
+}
+
+/**
  * 打开下拉框
  *
  * 设置打开状态，清空搜索查询，如果可搜索则聚焦输入框。
+ * 使用 Teleport 时在 nextTick 中计算下拉的 fixed 定位。
  */
 function open() {
   isOpen.value = true
   searchQuery.value = ''
   nextTick(() => {
+    updateDropdownPosition()
     if (props.searchable && inputRef.value) {
       inputRef.value.focus()
     }
@@ -246,9 +279,9 @@ function handleInputEnter() {
  * @param {MouseEvent} event - 鼠标事件
  */
 function handleClickOutside(event: MouseEvent) {
-  if (containerRef.value && !containerRef.value.contains(event.target as Node)) {
-    close()
-  }
+  const target = event.target as Node
+  if (containerRef.value?.contains(target) || dropdownRef.value?.contains(target)) return
+  close()
 }
 
 onMounted(() => {
@@ -263,7 +296,8 @@ onUnmounted(() => {
 <template>
   <div ref="containerRef" class="relative group w-full">
     <!-- Trigger -->
-    <div 
+    <div
+      ref="triggerRef"
       class="flex items-center justify-between w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 transition-all cursor-pointer shadow-sm"
       :class="[
         disabled ? 'opacity-50 cursor-not-allowed' : 'hover:bg-white/10 hover:border-brand/30',
@@ -280,16 +314,14 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- Dropdown Menu -->
-    <div 
-      v-if="isOpen"
-      class="absolute z-dropdown mt-1 glass-panel rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[260px] animate-in fade-in zoom-in-95 duration-200"
-      :class="[
-        placement === 'top' ? 'bottom-full mb-1' : 'top-full mt-1',
-        dropdownWidth ? 'right-0' : 'left-0 right-0'
-      ]"
-      :style="dropdownWidth ? { width: typeof dropdownWidth === 'number' ? dropdownWidth + 'px' : dropdownWidth } : {}"
-    >
+    <!-- Dropdown Menu（Teleport 到 body 避免被父级 overflow-hidden 裁剪） -->
+    <Teleport to="body">
+      <div
+        v-if="isOpen"
+        ref="dropdownRef"
+        class="z-dropdown glass-panel rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[320px] animate-in fade-in zoom-in-95 duration-200"
+        :style="dropdownStyle"
+      >
       <!-- Search Input -->
       <div v-if="searchable || allowCreate" class="p-2 border-b border-white/5">
         <input 
@@ -338,6 +370,7 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
+    </Teleport>
   </div>
 </template>
 

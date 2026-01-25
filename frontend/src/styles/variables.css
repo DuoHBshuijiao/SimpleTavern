@@ -119,7 +119,7 @@
   --text-2xl: 1.5rem;
   
   /* ========== Z-Index 层级 ========== */
-  --z-dropdown: 100;
+  --z-dropdown: 350; /* 高于 --z-modal(300)，保证在角色卡等弹窗内打开时下拉不被遮挡 */
   --z-sticky: 200;
   --z-modal: 300;
   --z-popover: 400;
