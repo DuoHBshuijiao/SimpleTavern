@@ -342,6 +342,19 @@ def _tool_list_participants(chat_id: str) -> dict[str, Any]:
     return {"ok": True, "participants": participants}
 
 
+def _tool_time_is() -> dict[str, Any]:
+    """
+    工具：获取当前时间
+    
+    Returns:
+        dict[str, Any]: 工具执行结果，包含当前时间（格式：YYYY/MM/DD - HH:MM:SS）
+    """
+    from datetime import datetime
+    now = datetime.now()
+    time_str = now.strftime("%Y/%m/%d - %H:%M:%S")
+    return {"ok": True, "time": time_str}
+
+
 def _try_parse_character_card(path_str: str, content: str | None) -> dict[str, Any] | None:
     """
     尝试解析角色卡片
@@ -389,6 +402,18 @@ def _build_tools(chat_id: str | None, allow_write_memory: bool) -> list[dict[str
         list[dict[str, Any]]: 工具定义列表
     """
     tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "time_is",
+                "description": "获取当前时间",
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": False,
+                },
+            },
+        },
         {
             "type": "function",
             "function": {
@@ -534,6 +559,8 @@ def _run_tool(
     content_for_card: str | None = None
     path_str = str(args.get("path") or "")
     try:
+        if name == "time_is":
+            return _tool_time_is(), None
         if name == "read_file":
             return _tool_read_file(args), None
         if name == "create_file":
