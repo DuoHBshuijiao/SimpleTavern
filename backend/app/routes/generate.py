@@ -153,13 +153,20 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
     if settings.prompts.globalSystem:
         prompt_parts.append(settings.prompts.globalSystem)
     
-    selected_persona = _resolve_selected_persona(settings, chat, pure_ai_mode)
-    if selected_persona:
+    # 用户 persona：优先使用请求体中的 userPersona（保证首条消息等场景下即使用户未保存设置也能带上正确身份）
+    persona_for_prompt = None
+    if not pure_ai_mode:
+        req_persona = getattr(req, "userPersona", None)
+        if req_persona and (getattr(req_persona, "name", None) or getattr(req_persona, "description", None)):
+            persona_for_prompt = req_persona
+        if persona_for_prompt is None:
+            persona_for_prompt = _resolve_selected_persona(settings, chat, pure_ai_mode)
+    if persona_for_prompt:
         user_persona_parts: list[str] = []
-        if selected_persona.name and selected_persona.name.strip():
-            user_persona_parts.append(f"user姓名：{selected_persona.name.strip()}")
-        if selected_persona.description and selected_persona.description.strip():
-            user_persona_parts.append(f"User简介：\n{selected_persona.description.strip()}")
+        if persona_for_prompt.name and persona_for_prompt.name.strip():
+            user_persona_parts.append(f"user姓名：{persona_for_prompt.name.strip()}")
+        if persona_for_prompt.description and persona_for_prompt.description.strip():
+            user_persona_parts.append(f"User简介：\n{persona_for_prompt.description.strip()}")
         if user_persona_parts:
             prompt_parts.append("\n".join(user_persona_parts))
     

@@ -754,6 +754,7 @@ async function sendUserMessage() {
               senderPersonaId: selectedPersona.value?.id ?? null,
               senderName: selectedPersona.value?.name ?? userName.value,
               senderAvatar: selectedPersona.value?.avatar ?? null,
+              userPersona: selectedPersona.value ?? null,
             },
             (evt) => {
               if (stopRequested.value) return
@@ -787,6 +788,7 @@ async function sendUserMessage() {
           senderPersonaId: selectedPersona.value?.id ?? null,
           senderName: selectedPersona.value?.name ?? userName.value,
           senderAvatar: selectedPersona.value?.avatar ?? null,
+          userPersona: selectedPersona.value ?? null,
         })
         
         if (res.ok) {
@@ -1187,6 +1189,7 @@ async function handleRewriteMessage(m: ChatMessage) {
               senderPersonaId: lastUserMessage.senderPersonaId ?? selectedPersona.value?.id ?? null,
               senderName: lastUserMessage.senderName ?? selectedPersona.value?.name ?? userName.value,
               senderAvatar: lastUserMessage.senderAvatar ?? selectedPersona.value?.avatar ?? null,
+              userPersona: selectedPersona.value ?? null,
             },
             (evt) => {
               if (stopRequested.value) return
@@ -1216,6 +1219,7 @@ async function handleRewriteMessage(m: ChatMessage) {
           chatId,
           userMessage: lastUserMessage.content,
           appendUserMessage: false,
+          userPersona: selectedPersona.value ?? null,
         })
         
         if (res.ok) {
@@ -1615,6 +1619,7 @@ async function handleSaveAndSend() {
               chatId,
               userMessage: editedContent,
               appendUserMessage: false,
+              userPersona: selectedPersona.value ?? null,
             },
             (evt) => {
               if (stopRequested.value) return
@@ -1640,6 +1645,7 @@ async function handleSaveAndSend() {
           chatId,
           userMessage: editedContent,
           appendUserMessage: false,
+          userPersona: selectedPersona.value ?? null,
         })
 
         if (res.ok) {

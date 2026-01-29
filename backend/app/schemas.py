@@ -496,6 +496,7 @@ class GenerateStreamRequest(BaseModel):
         senderPersonaId: 发送者Persona ID
         senderName: 发送者名称
         senderAvatar: 发送者头像
+        userPersona: 当前用户Persona完整对象（优先用于 system prompt，避免未保存设置时丢失）
         runtimeOverrides: 运行时覆盖设置，优先级最高
     """
     chatId: str
@@ -504,6 +505,7 @@ class GenerateStreamRequest(BaseModel):
     senderPersonaId: str | None = None
     senderName: str | None = None
     senderAvatar: str | None = None
+    userPersona: UserPersona | None = None
     runtimeOverrides: ChatOverrides | None = None
 
 
