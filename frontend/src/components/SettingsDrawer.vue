@@ -834,13 +834,14 @@ async function handleImportChange(e: Event) {
     </div>
   </Transition>
 
-  <!-- Model Selector Modal -->
-  <div v-if="showModelSelector" class="fixed inset-0 z-[60] flex items-center justify-center">
-    <!-- Backdrop -->
-    <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" @click="showModelSelector = false"></div>
-    
-    <!-- Modal -->
-    <div class="relative w-full max-w-lg glass-panel rounded-2xl shadow-2xl flex flex-col max-h-[85vh] m-4">
+  <!-- Model Selector Modal（Teleport 到 body 避免被父级 flex/窄容器限制宽度） -->
+  <Teleport to="body">
+    <div v-if="showModelSelector" class="fixed inset-0 z-[60] flex items-center justify-center">
+      <!-- Backdrop -->
+      <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" @click="showModelSelector = false"></div>
+      
+      <!-- Modal -->
+      <div class="relative w-full max-w-lg min-w-[300px] glass-panel rounded-2xl shadow-2xl flex flex-col max-h-[85vh] m-4">
       <div class="p-4 border-b border-white/10 flex justify-between items-center bg-white/5 rounded-t-2xl">
         <h3 class="font-bold text-gray-200">选择模型</h3>
         <button class="text-gray-400 hover:text-white" @click="showModelSelector = false">
@@ -888,6 +889,7 @@ async function handleImportChange(e: Event) {
       </div>
     </div>
   </div>
+  </Teleport>
 </template>
 
 <style scoped>
