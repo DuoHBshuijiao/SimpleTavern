@@ -53,6 +53,7 @@ export interface AssistantSettings {
   prompt: string
   temperature: number | null
   model: string | null
+  presetId: string | null
 }
 
 export interface UseAssistantOptions {
@@ -81,6 +82,7 @@ export function useAssistant(options: UseAssistantOptions) {
     prompt: '',
     temperature: null,
     model: null,
+    presetId: null,
   })
 
   // 消息编辑状态
@@ -196,13 +198,14 @@ export function useAssistant(options: UseAssistantOptions) {
    * @returns {Promise<void>} 完成时返回
    */
   async function loadSettings() {
-    const res = await apiGet<{ prompt: string; temperature: number | null; model: string | null }>(
+    const res = await apiGet<{ prompt: string; temperature: number | null; model: string | null; presetId?: string | null }>(
       '/api/assistant/settings',
     )
     assistantSettings.value = {
       prompt: res.prompt ?? '',
       temperature: res.temperature ?? null,
       model: res.model ?? null,
+      presetId: res.presetId ?? null,
     }
   }
 
@@ -526,13 +529,15 @@ export function useAssistant(options: UseAssistantOptions) {
   /**
    * 处理模型选择
    *
-   * 更新助手设置中的模型，并保存到服务器。
+   * 更新助手设置中的模型和关联的 API 预设 ID，并保存到服务器。
+   * 若选项带 presetId 则使用该预设；否则清空 presetId，由后端按模型匹配预设。
    *
-   * @param {{ value: string }} option - 模型选项，包含value字段
+   * @param {{ value: string; presetId?: string | null }} option - 模型选项，含 value 与可选的 presetId
    * @returns {Promise<void>} 完成时返回
    */
-  async function handleModelSelect(option: { value: string }) {
+  async function handleModelSelect(option: { value: string; presetId?: string | null }) {
     assistantSettings.value.model = option.value
+    assistantSettings.value.presetId = option.presetId ?? null
     await saveSettings()
   }
 

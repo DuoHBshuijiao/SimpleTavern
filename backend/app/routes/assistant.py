@@ -957,8 +957,18 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
     api_key = settings.llm.apiKey
 
     preset_id = assistant_settings.presetId
-    if preset_id:
+    found_preset = None
+    if preset_id and settings.apiPresets:
         found_preset = next((p for p in settings.apiPresets if p.id == preset_id), None)
+        if found_preset:
+            base_url = found_preset.baseUrl
+            api_key = found_preset.apiKey
+    # 当未关联预设或未找到时，根据当前模型在预设列表中查找所属预设，避免错误使用顺位第一的预设
+    if not found_preset and model and settings.apiPresets:
+        found_preset = next(
+            (p for p in settings.apiPresets if p.models and model in p.models),
+            None,
+        )
         if found_preset:
             base_url = found_preset.baseUrl
             api_key = found_preset.apiKey

@@ -186,7 +186,7 @@ DEFAULT_ASSISTANT_PROMPT = (
     "3) 工具结果出现不确定时，先向用户澄清再行动。\n"
     "\n"
     "生成角色卡流程：\n"
-    "1) 组织完整角色卡 JSON（包含 version、id、name、description、personality、scenario、firstMessage、exampleDialogue、systemPrompt、avatar（为空，不要填写虚假地址）、createdAt、updatedAt）。\n"
+    "1) 组织完整角色卡 JSON（包含 version、id（不要填写此项，系统将自动生成）、name、description、personality、scenario、firstMessage、exampleDialogue、systemPrompt、avatar（为空，不要填写虚假地址）、createdAt（不要填写此项，系统将自动生成）、updatedAt（不要填写此项，系统将自动生成））。\n"
     "2) 【重要】exampleDialogue 必须是纯字符串而非数组；用换行分隔，如：\n"
     "   \"exampleDialogue\": \"用户：你好\\n角色：你好呀！\\n用户：今天怎么样？\\n角色：很开心呢！\"\n"
     "3) 使用 write_file 写入 data/ai_workspace/character_card.json。\n"

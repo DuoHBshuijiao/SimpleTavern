@@ -78,7 +78,7 @@ const emit = defineEmits<{
   'send': []
   'reset': []
   'open-settings': []
-  'select-model': [option: { value: string }]
+  'select-model': [option: { value: string; presetId?: string | null }]
   'edit-message': [m: AssistantMessage]
   'delete-message': [m: AssistantMessage]
   'rewrite-message': [m: AssistantMessage]
