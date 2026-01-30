@@ -65,6 +65,11 @@ def _normalize_base_url(base_url: str) -> str:
     return base + "/v1"
 
 
+# OpenRouter 等平台用于展示来源的请求头（可选，便于在 openrouter.ai 等站点被识别）
+_APP_REFERER = "https://github.com/DuoHBshuijiao/SimpleTavern"
+_APP_TITLE = "SimpleTavern"
+
+
 def _auth_headers(api_key: str) -> dict[str, str]:
     """
     生成认证请求头
@@ -78,6 +83,18 @@ def _auth_headers(api_key: str) -> dict[str, str]:
     if not api_key:
         return {}
     return {"Authorization": f"Bearer {api_key}"}
+
+
+def _common_headers(api_key: str) -> dict[str, str]:
+    """
+    生成通用请求头（认证 + 应用标识）。
+    应用标识头用于 OpenRouter 等平台展示来源与标题。
+    """
+    return {
+        "HTTP-Referer": _APP_REFERER,
+        "X-Title": _APP_TITLE,
+        **_auth_headers(api_key),
+    }
 
 
 async def list_models_openai_compat(base_url: str, api_key: str) -> list[str]:
@@ -94,7 +111,7 @@ async def list_models_openai_compat(base_url: str, api_key: str) -> list[str]:
         list[str]: 模型ID列表，按字母顺序排序并去重。如果请求失败返回空列表
     """
     url = _normalize_base_url(base_url) + "/models"
-    headers = {"Accept": "application/json", **_auth_headers(api_key)}
+    headers = {"Accept": "application/json", **_common_headers(api_key)}
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.get(url, headers=headers)
@@ -240,7 +257,7 @@ async def chat_completions(
     headers = {
         "Accept": "application/json",
         "Content-Type": "application/json",
-        **_auth_headers(api_key),
+        **_common_headers(api_key),
     }
 
     payload = _build_payload(
@@ -304,7 +321,7 @@ async def chat_completions_message(
     headers = {
         "Accept": "application/json",
         "Content-Type": "application/json",
-        **_auth_headers(api_key),
+        **_common_headers(api_key),
     }
     payload = _build_payload(
         model=model,
@@ -371,7 +388,7 @@ async def stream_chat_completions(
     headers = {
         "Accept": "text/event-stream",
         "Content-Type": "application/json",
-        **_auth_headers(api_key),
+        **_common_headers(api_key),
     }
 
     payload = _build_payload(
