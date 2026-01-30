@@ -514,6 +514,27 @@ watch(actions.showCharacterEditor, (next, prev) => {
 })
 
 /**
+ * 根据当前聊天窗口动态更新页面标题
+ *
+ * 无激活聊天时显示 SimpleTavern；
+ * 单聊窗口显示 SimpleTavern-角色名；
+ * 群聊窗口显示 SimpleTavern-群聊名。
+ */
+watch(
+  () => {
+    const chat = activeChat.value
+    if (!chat) return 'SimpleTavern'
+    if (chat.isGroup) return `SimpleTavern-${chat.title}`
+    const char = characters.list.find((c) => c.id === chat.characterId)
+    return char ? `SimpleTavern-${char.name}` : `SimpleTavern-${chat.title}`
+  },
+  (title) => {
+    document.title = title
+  },
+  { immediate: true },
+)
+
+/**
  * 运行群聊生成
  *
  * 依次让群聊中的每个成员发言，支持流式和非流式两种模式。
