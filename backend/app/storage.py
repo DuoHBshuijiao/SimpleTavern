@@ -110,6 +110,16 @@ def _ai_workspace_dir() -> Path:
     return _data_dir() / "ai_workspace"
 
 
+def _fonts_dir() -> Path:
+    """
+    获取字体目录路径
+    
+    Returns:
+        Path: data/fonts目录的Path对象
+    """
+    return _data_dir() / "fonts"
+
+
 def _settings_path() -> Path:
     """
     获取设置文件路径
@@ -211,6 +221,7 @@ def ensure_data_initialized() -> None:
     _characters_dir().mkdir(parents=True, exist_ok=True)
     _chats_dir().mkdir(parents=True, exist_ok=True)
     _avatars_dir().mkdir(parents=True, exist_ok=True)
+    _fonts_dir().mkdir(parents=True, exist_ok=True)
     _ai_workspace_dir().mkdir(parents=True, exist_ok=True)
 
     if not _settings_path().exists():
@@ -957,6 +968,45 @@ def delete_avatar(filename: str) -> None:
     p = avatar_path(filename)
     if p.exists():
         p.unlink(missing_ok=True)
+
+
+def fonts_dir() -> Path:
+    """
+    获取字体目录路径（公开接口）
+
+    Returns:
+        Path: data/fonts 目录路径
+    """
+    return _fonts_dir()
+
+
+def font_path(filename: str) -> Path:
+    """
+    获取字体文件路径
+
+    Args:
+        filename: 字体文件名
+
+    Returns:
+        Path: 字体文件完整路径
+    """
+    return _fonts_dir() / filename
+
+
+def save_font(filename: str, data: bytes) -> str:
+    """
+    保存字体文件到 data/fonts，不随备份导出。
+
+    Args:
+        filename: 字体文件名（需为安全文件名）
+        data: 字体文件二进制数据
+
+    Returns:
+        str: 保存的文件名
+    """
+    p = font_path(filename)
+    p.write_bytes(data)
+    return filename
 
 
 def _assistant_chat_has_missing_ids(raw: Any) -> bool:

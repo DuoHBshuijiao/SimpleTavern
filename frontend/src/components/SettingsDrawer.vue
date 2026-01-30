@@ -37,8 +37,11 @@ import { computed, ref, watch } from 'vue'
 import { useCharactersStore, useChatsStore, useSettingsStore } from '../stores'
 import type { Chat, ChatOverrides, Settings, ApiPreset } from '../types/models'
 import ModernSelect from './ModernSelect.vue'
-import { apiPost } from '../api/http'
+import { apiGet, apiPost } from '../api/http'
+import { useAppFont } from '../composables/useAppFont'
 import { X, Eye, EyeOff, Check, Loader2 } from 'lucide-vue-next'
+
+const { applyFont } = useAppFont()
 
 const props = defineProps<{
   show: boolean
@@ -69,6 +72,8 @@ const editingPresetId = ref<string | null>(null)
 const editingPresetShowApiKey = ref(false)
 const presetModelsLoading = ref(false)
 const importInputRef = ref<HTMLInputElement | null>(null)
+const fontList = ref<string[]>([])
+const fontInputRef = ref<HTMLInputElement | null>(null)
 
 // Model Selector Modal State
 const showModelSelector = ref(false)
@@ -129,10 +134,17 @@ watch(
     if (s.streamEnabled === undefined) s.streamEnabled = true
     if ((s as Settings).pureAiMode === undefined) (s as Settings).pureAiMode = false
     if (!s.apiPresets) s.apiPresets = []
-    
+    if (s.selectedFont === undefined) (s as Settings).selectedFont = null
+
     globalDraft.value = s
     chatDraft.value = props.chat ? clone(props.chat.overrides) : ensureOverrides()
-    
+
+    try {
+      fontList.value = await apiGet<string[]>('/api/fonts')
+    } catch {
+      fontList.value = []
+    }
+
     if (s.apiPresets.length > 0 && !editingPresetId.value) {
         editingPresetId.value = s.apiPresets[0]?.id ?? null
     }
@@ -251,6 +263,39 @@ const filteredCandidates = computed(() => {
 })
 
 /**
+ * 字体选项：系统默认 + 已导入的字体列表
+ */
+const fontOptions = computed(() => {
+  const list = fontList.value.map((f) => ({
+    label: f.replace(/\.[^.]+$/, '') || f,
+    value: f,
+  }))
+  return [{ label: '系统默认', value: '' }, ...list]
+})
+
+/** 字体选择器 v-model：空字符串表示系统默认，与选项 value 一致 */
+const fontModel = computed({
+  get: () => globalDraft.value?.selectedFont ?? '',
+  set: (v: string) => {
+    if (globalDraft.value) globalDraft.value.selectedFont = v || null
+  },
+})
+
+/** 选择字体时实时应用（草稿未保存也会生效） */
+watch(
+  () => (props.show && tab.value === 'global' ? globalDraft.value?.selectedFont : null),
+  (v) => applyFont(v ?? null),
+  { immediate: true }
+)
+/** 关闭抽屉时恢复为已保存的字体 */
+watch(
+  () => props.show,
+  (open) => {
+    if (!open) applyFont(settingsStore.settings?.selectedFont ?? null)
+  }
+)
+
+/**
  * 计算聊天模型选项
  *
  * 根据全局草稿中的API预设生成聊天模型选项列表，按预设分组。
@@ -348,6 +393,38 @@ async function downloadSettingsBackup(scope: 'basic' | 'with_characters' | 'with
  */
 function triggerImport() {
   importInputRef.value?.click()
+}
+
+/**
+ * 触发导入字体
+ */
+function triggerFontImport() {
+  fontInputRef.value?.click()
+}
+
+/**
+ * 处理导入字体：上传到 data/fonts，刷新列表并设为当前选中，实时应用。
+ * 字体不随备份导出。
+ */
+async function handleFontImport(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  input.value = ''
+  const fd = new FormData()
+  fd.append('file', file)
+  try {
+    const r = await fetch('/api/fonts', { method: 'POST', body: fd })
+    if (!r.ok) throw new Error(await r.text())
+    const { filename } = (await r.json()) as { filename: string }
+    fontList.value = await apiGet<string[]>('/api/fonts')
+    if (globalDraft.value) {
+      globalDraft.value.selectedFont = filename
+      applyFont(filename)
+    }
+  } catch (err) {
+    alert('导入字体失败: ' + String(err))
+  }
 }
 
 /**
@@ -558,6 +635,35 @@ async function handleImportChange(e: Event) {
               </div>
 
               <div class="h-px bg-white/5 my-4"></div>
+
+              <!-- 字体自定义 -->
+              <div class="space-y-3">
+                <div class="text-sm font-medium text-gray-300">字体</div>
+                <div class="flex gap-2 items-center">
+                  <ModernSelect
+                    v-model="fontModel"
+                    :options="fontOptions"
+                    placement="top"
+                    searchable
+                    placeholder="选择字体..."
+                    class="flex-1 min-w-0"
+                  />
+                  <button
+                    type="button"
+                    class="px-4 py-2 bg-white/5 hover:bg-white/10 text-gray-200 rounded-lg text-sm transition-colors whitespace-nowrap"
+                    @click="triggerFontImport"
+                  >
+                    导入字体
+                  </button>
+                  <input
+                    ref="fontInputRef"
+                    type="file"
+                    class="hidden"
+                    accept=".ttf,.otf,.woff,.woff2"
+                    @change="handleFontImport"
+                  />
+                </div>
+              </div>
 
               <div class="space-y-3">
                 <div class="text-sm font-medium text-gray-300">数据备份与导入</div>

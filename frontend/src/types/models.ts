@@ -154,6 +154,8 @@ export interface Settings {
   pureAiMode: boolean
   userPersonas: UserPersona[]
   selectedPersonaId: string | null
+  /** 当前选中的自定义字体文件名，存于 data/fonts，不随备份导出 */
+  selectedFont?: string | null
   createdAt: string
   updatedAt: string
 }

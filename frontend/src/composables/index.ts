@@ -36,3 +36,5 @@ export type {
 
 export { useChatActions } from './useChatActions'
 export type { UseChatActions, ChatActionsDeps } from './useChatActions'
+
+export { useAppFont, applyFont } from './useAppFont'

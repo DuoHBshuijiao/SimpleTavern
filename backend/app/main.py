@@ -33,6 +33,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.routes.avatars import router as avatars_router
 from app.routes.characters import router as characters_router
 from app.routes.chats import router as chats_router
+from app.routes.font import router as font_router
 from app.routes.generate import router as generate_router
 from app.routes.import_export import router as import_export_router
 from app.routes.settings import router as settings_router
@@ -81,5 +82,6 @@ app.include_router(chats_router, prefix="/api")
 app.include_router(llm_router, prefix="/api")
 app.include_router(generate_router, prefix="/api")
 app.include_router(avatars_router, prefix="/api")
+app.include_router(font_router, prefix="/api")
 app.include_router(import_export_router, prefix="/api")
 app.include_router(assistant_router, prefix="/api")

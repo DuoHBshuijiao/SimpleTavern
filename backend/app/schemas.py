@@ -190,6 +190,7 @@ class Settings(BaseModel):
     pureAiMode: bool = False
     userPersonas: list[UserPersona] = Field(default_factory=list)
     selectedPersonaId: str | None = None
+    selectedFont: str | None = None  # 当前选中的自定义字体文件名，存于 data/fonts，不随备份导出
     createdAt: str = Field(default_factory=_now_iso)
     updatedAt: str = Field(default_factory=_now_iso)
 
