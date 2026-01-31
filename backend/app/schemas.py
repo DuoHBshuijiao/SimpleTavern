@@ -191,6 +191,7 @@ class Settings(BaseModel):
     userPersonas: list[UserPersona] = Field(default_factory=list)
     selectedPersonaId: str | None = None
     selectedFont: str | None = None  # 当前选中的自定义字体文件名，存于 data/fonts，不随备份导出
+    messageFontSize: int | None = None  # 聊天窗口内消息文字字号（仅作用于消息气泡内容）
     createdAt: str = Field(default_factory=_now_iso)
     updatedAt: str = Field(default_factory=_now_iso)
 

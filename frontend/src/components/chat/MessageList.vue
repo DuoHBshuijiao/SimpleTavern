@@ -45,12 +45,20 @@
  *    - 依赖：依赖vue、markdown-it
  *    - 位置：组件层，提供消息列表显示功能
  */
-import { ref, nextTick } from 'vue'
+import { ref, nextTick, computed } from 'vue'
 import type { ChatMessage, CharacterCard, UserPersona } from '../../types/models'
+import { useSettingsStore } from '../../stores'
 import ModernAvatar from '../ModernAvatar.vue'
 import ConfirmPopover from '../ConfirmPopover.vue'
 import MarkdownIt from 'markdown-it'
 import { Settings, ChevronLeft, ChevronRight } from 'lucide-vue-next'
+
+const settingsStore = useSettingsStore()
+/** 仅作用于消息气泡内文字的字号（来自全局设置） */
+const messageContentFontSizeStyle = computed(() => {
+  const px = settingsStore.settings?.messageFontSize
+  return px != null ? { fontSize: `${px}px` } : {}
+})
 
 const props = defineProps<{
   messages: ChatMessage[]
@@ -275,6 +283,7 @@ defineExpose({ scrollToBottom, scrollRef })
           >
             <div
               class="md prose prose-invert prose-sm max-w-none prose-p:my-1 prose-headings:my-2 prose-pre:bg-black/30 prose-pre:border prose-pre:border-white/5"
+              :style="messageContentFontSizeStyle"
               :ref="(el) => emit('set-content-ref', m.id, el as HTMLElement | null)"
             >
               <div class="stream-markdown" v-html="renderMarkdown(getDisplayContent(m))"></div>

@@ -135,6 +135,7 @@ watch(
     if ((s as Settings).pureAiMode === undefined) (s as Settings).pureAiMode = false
     if (!s.apiPresets) s.apiPresets = []
     if (s.selectedFont === undefined) (s as Settings).selectedFont = null
+    if ((s as Settings).messageFontSize === undefined) (s as Settings).messageFontSize = null
 
     globalDraft.value = s
     chatDraft.value = props.chat ? clone(props.chat.overrides) : ensureOverrides()
@@ -294,6 +295,23 @@ watch(
     if (!open) applyFont(settingsStore.settings?.selectedFont ?? null)
   }
 )
+
+/** 消息字号（仅作用于聊天窗口消息气泡），无默认值 */
+const messageFontSizeModel = computed({
+  get: () => globalDraft.value?.messageFontSize ?? '',
+  set: (v: number | '' | unknown) => {
+    if (!globalDraft.value) return
+    if (v === '' || v == null || Number.isNaN(Number(v))) globalDraft.value.messageFontSize = null
+    else globalDraft.value.messageFontSize = Math.max(8, Math.min(72, Number(v)))
+  },
+})
+
+function stepMessageFontSize(delta: number) {
+  if (!globalDraft.value) return
+  const current = globalDraft.value.messageFontSize ?? 15
+  const next = Math.max(8, Math.min(72, current + delta))
+  globalDraft.value.messageFontSize = next
+}
 
 /**
  * 计算聊天模型选项
@@ -640,14 +658,42 @@ async function handleImportChange(e: Event) {
               <div class="space-y-3">
                 <div class="text-sm font-medium text-gray-300">字体</div>
                 <div class="flex gap-2 items-center">
-                  <ModernSelect
-                    v-model="fontModel"
-                    :options="fontOptions"
-                    placement="top"
-                    searchable
-                    placeholder="选择字体..."
-                    class="flex-1 min-w-0"
-                  />
+                  <div class="relative group flex-1 min-w-0 max-w-[172px]">
+                    <ModernSelect
+                      v-model="fontModel"
+                      :options="fontOptions"
+                      placement="top"
+                      searchable
+                      placeholder="选择字体..."
+                      class="w-full min-w-0"
+                    />
+                  </div>
+                  <div class="flex items-center gap-1 bg-white/5 border border-white/10 rounded-lg px-1 py-0.5">
+                    <button
+                      type="button"
+                      class="p-1.5 text-gray-400 hover:text-gray-200 hover:bg-white/10 rounded transition-colors"
+                      aria-label="减小字号"
+                      @click="stepMessageFontSize(-1)"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                    </button>
+                    <input
+                      v-model.number="messageFontSizeModel"
+                      type="number"
+                      min="8"
+                      max="72"
+                      placeholder=""
+                      class="w-10 bg-transparent border-0 text-center text-sm text-gray-200 focus:outline-none focus:ring-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    />
+                    <button
+                      type="button"
+                      class="p-1.5 text-gray-400 hover:text-gray-200 hover:bg-white/10 rounded transition-colors"
+                      aria-label="增大字号"
+                      @click="stepMessageFontSize(1)"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                    </button>
+                  </div>
                   <button
                     type="button"
                     class="px-4 py-2 bg-white/5 hover:bg-white/10 text-gray-200 rounded-lg text-sm transition-colors whitespace-nowrap"

@@ -156,6 +156,8 @@ export interface Settings {
   selectedPersonaId: string | null
   /** 当前选中的自定义字体文件名，存于 data/fonts，不随备份导出 */
   selectedFont?: string | null
+  /** 聊天窗口内消息文字字号（仅作用于消息气泡内容），不指定则不覆盖 */
+  messageFontSize?: number | null
   createdAt: string
   updatedAt: string
 }
