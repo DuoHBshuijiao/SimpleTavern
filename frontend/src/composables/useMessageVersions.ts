@@ -232,6 +232,24 @@ export function useMessageVersions() {
   }
 
   /**
+   * 更新当前显示版本的内容（用于编辑保存后同步版本列表）
+   *
+   * 当用户编辑并保存一条有多版本的消息时，将当前显示版本的内容更新为编辑后的内容。
+   *
+   * @param {string} messageId - 当前消息ID
+   * @param {string} newContent - 编辑后的内容
+   */
+  function updateCurrentVersionContent(messageId: string, newContent: string) {
+    const originalId = getOriginalMessageId(messageId)
+    const versions = messageVersions.value.get(originalId)
+    const currentIndex = messageVersionIndex.value.get(originalId) ?? 0
+    if (versions && currentIndex >= 0 && currentIndex < versions.length) {
+      versions[currentIndex] = newContent
+      messageVersions.value.set(originalId, [...versions])
+    }
+  }
+
+  /**
    * 清除指定消息的版本历史
    *
    * 清除指定消息的所有版本数据和ID映射。
@@ -282,6 +300,7 @@ export function useMessageVersions() {
     cleanupVersions,
     clearVersions,
     clearAll,
+    updateCurrentVersionContent,
   }
 }
 

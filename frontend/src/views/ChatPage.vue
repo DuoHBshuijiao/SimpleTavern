@@ -1124,7 +1124,9 @@ async function handleRewriteMessage(m: ChatMessage) {
   }
   if (!lastUserMessage) return
 
-  versions.saveVersion(m.id, m.content)
+  const originalMessageId = versions.getOriginalMessageId(m.id)
+  const displayContent = versions.getDisplayContent(m)
+  versions.saveVersion(originalMessageId, displayContent)
 
   const messagesToDelete = activeChat.value.messages.slice(messageIndex)
   for (const msgToDelete of messagesToDelete) {
@@ -1265,13 +1267,13 @@ async function handleRewriteMessage(m: ChatMessage) {
     }
     await settings.load()
     
-    // 添加新版本
+    // 添加新版本（使用原始消息ID以累积同一链条上的多版本）
     if (!skippedReload && activeChat.value) {
       const newMsg = activeChat.value.messages.find(msg => 
         msg.role === 'assistant' && msg.ts > m.ts
       )
       if (newMsg) {
-        versions.addNewVersion(m.id, newMsg.id, newMsg.content)
+        versions.addNewVersion(originalMessageId, newMsg.id, newMsg.content)
       }
     }
   }
@@ -1569,6 +1571,26 @@ async function confirmSwitchPersonaContinue() {
 }
 
 /**
+ * 处理仅保存编辑的消息
+ *
+ * 保存编辑后的消息到服务器；若该消息有多版本，则同步更新当前版本内容与本地消息显示。
+ *
+ * @returns {Promise<void>} 完成时返回
+ */
+async function handleSaveEditedMessage() {
+  const messageId = actions.editingMessageId.value
+  const newContent = actions.editingMessageContent.value
+  if (messageId && activeChat.value && newContent !== undefined) {
+    const msg = activeChat.value.messages.find(m => m.id === messageId)
+    if (msg && versions.hasMultipleVersions(msg)) {
+      versions.updateCurrentVersionContent(messageId, newContent)
+      msg.content = newContent
+    }
+  }
+  await actions.saveEditedMessage()
+}
+
+/**
  * 处理保存并发送
  *
  * 保存编辑后的消息，删除该消息之后的所有消息，然后重新生成回复。
@@ -1846,7 +1868,7 @@ const editingPersonaAvatarUrl = computed(() => {
             :has-multiple-versions="versions.hasMultipleVersions"
             :get-current-version-index="versions.getCurrentVersionIndex"
             :get-version-count="versions.getVersionCount"
-            @edit-message="actions.openEditMessage"
+            @edit-message="(m) => actions.openEditMessage(m, versions.getDisplayContent(m))"
             @delete-message="actions.deleteMessage"
             @rewrite-message="handleRewriteMessage"
             @switch-previous-version="handleSwitchPreviousVersion"
@@ -1935,7 +1957,7 @@ const editingPersonaAvatarUrl = computed(() => {
       @update:show="actions.showMessageEditor.value = $event"
       @update:message-role="actions.editingMessageRole.value = $event"
       @update:message-content="actions.editingMessageContent.value = $event"
-      @save="actions.saveEditedMessage"
+      @save="handleSaveEditedMessage"
       @save-and-send="handleSaveAndSend"
     />
 

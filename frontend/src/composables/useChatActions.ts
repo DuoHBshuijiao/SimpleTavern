@@ -99,16 +99,18 @@ export function useChatActions(deps: ChatActionsDeps) {
    *
    * 打开消息编辑弹窗，加载消息内容到编辑状态。
    * 如果正在生成中或消息是本地消息，则不执行。
+   * 当提供 initialContent 时使用该内容（用于多版本消息显示当前浏览的版本）。
    *
    * @param {ChatMessage} m - 要编辑的消息（来自types/models.ts）
+   * @param {string} [initialContent] - 可选，初始编辑内容（如当前版本的显示内容）
    */
-  function openEditMessage(m: ChatMessage) {
+  function openEditMessage(m: ChatMessage, initialContent?: string) {
     if (!activeChat.value) return
     if (isGenerating.value) return
     if (m.id.startsWith('local_')) return
     editingMessageId.value = m.id
     editingMessageRole.value = m.role
-    editingMessageContent.value = m.content
+    editingMessageContent.value = initialContent ?? m.content
     showMessageEditor.value = true
   }
 
