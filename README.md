@@ -4,43 +4,20 @@
 后端：FastAPI（SSE 流式）  
 存储：本地 `data/` 下按文件拆分的 JSON（无数据库）
 
-## Liquid Glass UI System（设计目标）
+## 特色功能
 
-本项目最初的 UI 设计目标是 "Liquid Glass"（液态玻璃）风格：在磨砂玻璃的基础上加入更强的“流动光影 / 液态折射”动态质感，提供现代化、沉浸式的用户体验。  
-受限于实现复杂度与维护成本，目前仓库内实际落地的是**较轻量的现代玻璃效果（Modern Glass）**：以 `backdrop-blur`、半透明叠层、细边框与高光为主，尽量保持清爽与可读性。
+1. **聊天助理**  
+   内置可调用工具的 AI Agent 系统：支持聊剧情、总结长期记忆、生成角色卡等，与角色扮演流程深度结合。
 
-### 设计理念
+2. **群聊模式自定义**  
+   群聊下可为不同角色分别绑定 AI 模型、提示词、温度等参数，避免千人一面，实现更细粒度的表现控制。
 
-- **液态玻璃 (Liquid Glass，设计目标)**: 在深度磨砂玻璃效果 (`backdrop-blur`) 的基础上，进一步引入流动光影与更真实的折射/反射层次。
-- **现代玻璃 (Modern Glass，当前实现)**: 以半透明叠层 + 轻量高光/阴影 + 细边框为主的玻璃拟态，强调可读性与性能。
-- **沉浸式暗色 (Immersive Dark)**: 基于 Slate-950 的深色背景，搭配 Blue-500 作为强调色，减少视觉疲劳，增强沉浸感。
-- **大圆角 (Large Radius)**: 全局使用 `rounded-2xl` (1.5rem) 大圆角，传递友好、现代的视觉语言。
+---
 
-### 核心类与组件
+## UI 与主题定制
 
-- **.glass-panel**: 核心容器类，提供磨砂玻璃背景和精细的边框效果。
-- **.glass-button**: 玻璃拟态按钮，支持 hover 发光效果。
-- **.glass-input**: 玻璃拟态输入框，专注时高亮。
-- **Icons**: 全面采用 `lucide-vue-next` 图标库，保持视觉一致性。
-
-### 主题定制
-
-主题变量定义在 `src/styles/variables.css` 中，您可以轻松修改核心颜色：
-
-```css
-:root {
-  /* 品牌色 */
-  --color-brand: #3b82f6; /* Blue-500 */
-  
-  /* 背景色 */
-  --color-dark-bg: #020617; /* Slate-950 */
-  
-  /* 玻璃效果 */
-  --glass-bg: rgba(15, 23, 42, 0.7);
-  --glass-border: rgba(255, 255, 255, 0.1);
-  --glass-shine: rgba(255, 255, 255, 0.05);
-}
-```
+界面采用现代玻璃拟态风格（半透明、磨砂、细边框）。  
+主题定制：在 `frontend/src/styles/variables.css` 中修改 `:root` 下的 CSS 变量（如 `--color-brand`、`--color-dark-bg`、`--glass-bg` 等）即可调整品牌色、背景与玻璃效果。
 
 ## 环境要求
 
@@ -87,7 +64,7 @@
    ./deploy.sh
    ```
 
-### 方法二：安卓 Termux 命令行安装部署教程（请忽略，除非你拥有自行编译python的能力）
+### 方法二：安卓 Termux 命令行安装部署教程（请忽略，除非具备自行编译 Python 的能力）
 
 > 重要：**请不要把项目放在 `/sdcard`（共享存储）里运行**。Termux 在共享存储下经常会遇到权限/挂载限制，导致 `python -m venv` 创建虚拟环境失败。  
 > 推荐做法：用 `git clone` 把源码直接放到 Termux 的私有目录（`$HOME`）中。
@@ -107,7 +84,7 @@ git clone https://github.com/DuoHBshuijiao/SimpleTavern.git
 cd SimpleTavern
 ```
 
-> 可选：如果你必须用 Releases 的 zip 包，也请**在 `$HOME` 下解压**（不要在 `/sdcard` 下解压/运行）。
+> 可选：若需使用 Releases 的 zip 包，请**在 `$HOME` 下解压**（不要在 `/sdcard` 下解压/运行）。
 
 3. **运行一键部署脚本**
 
@@ -285,10 +262,10 @@ npm run preview -- --port 4173 --host &
 
 ## 配置模型（OpenAI 兼容）
 
-在应用内"设置"里配置：
-- **Base URL**：例如 `https://api.openai.com` 或你的兼容网关地址
+在应用内「设置」里配置：
+- **Base URL**：例如 `https://api.openai.com` 或自建/第三方兼容网关地址
 - **API Key**：明文存储到 `data/settings.json`
-- **Model**：例如 `gpt-4o-mini`（取决于你的服务端支持）
+- **Model**：例如 `gpt-4o-mini`（视所用服务端支持情况而定）
 
 ## 常见问题
 
