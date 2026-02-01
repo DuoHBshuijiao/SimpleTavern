@@ -12,6 +12,7 @@ import platform
 import time
 import webbrowser
 import shutil
+import hashlib
 from pathlib import Path
 
 # 颜色输出
@@ -203,6 +204,68 @@ def check_deployment_status(venv_dir, frontend_dir):
     
     is_ready = all(status.values())
     return is_ready, status
+
+# 前端源码 hash 校验：排除的目录与文件
+_FRONTEND_HASH_EXCLUDE_DIRS = {".vscode", "dist", "node_modules"}
+_FRONTEND_HASH_EXCLUDE_FILES = {".gitignore"}
+_BUILD_HASH_FILENAME = ".build-hash"
+
+def compute_frontend_source_hash(frontend_dir: Path) -> str:
+    """对 frontend 目录内源码计算 hash，排除 .vscode、dist、node_modules 及 .gitignore。"""
+    h = hashlib.sha256()
+    collected = []
+    for root, dirs, files in os.walk(frontend_dir, topdown=True):
+        root_path = Path(root)
+        dirs[:] = [d for d in dirs if d not in _FRONTEND_HASH_EXCLUDE_DIRS]
+        for f in files:
+            if f in _FRONTEND_HASH_EXCLUDE_FILES:
+                continue
+            collected.append(root_path / f)
+    for p in sorted(collected, key=lambda x: x.as_posix()):
+        try:
+            with open(p, "rb") as fp:
+                while True:
+                    chunk = fp.read(65536)
+                    if not chunk:
+                        break
+                    h.update(chunk)
+        except Exception:
+            pass
+    return h.hexdigest()
+
+def get_saved_build_hash(frontend_dir: Path) -> str | None:
+    """读取 dist 内保存的构建 hash，不存在或无效则返回 None。"""
+    path = frontend_dir / "dist" / _BUILD_HASH_FILENAME
+    if not path.is_file():
+        return None
+    try:
+        content = path.read_text(encoding="utf-8").strip()
+        return content if content else None
+    except Exception:
+        return None
+
+def save_build_hash(frontend_dir: Path, hash_value: str) -> None:
+    """将构建 hash 写入 dist 目录。"""
+    dist_dir = frontend_dir / "dist"
+    dist_dir.mkdir(parents=True, exist_ok=True)
+    (dist_dir / _BUILD_HASH_FILENAME).write_text(hash_value, encoding="utf-8")
+
+def need_frontend_build(frontend_dir: Path) -> tuple[bool, str]:
+    """
+    判断是否需要执行前端 build。
+    返回 (need_build, reason)。
+    需要 build：dist 不存在或无效、未检测到 hash、hash 与当前源码不一致。
+    """
+    dist_dir = frontend_dir / "dist"
+    if not dist_dir.exists() or not (dist_dir / "index.html").exists():
+        return True, "dist 不存在或无效"
+    saved = get_saved_build_hash(frontend_dir)
+    if saved is None:
+        return True, "未检测到构建 hash"
+    current = compute_frontend_source_hash(frontend_dir)
+    if current != saved:
+        return True, "源码已变更，hash 不一致"
+    return False, "hash 一致，跳过构建"
 
 def wait_for_exit():
     """等待用户按键后退出"""
@@ -403,20 +466,21 @@ def main():
         else:
             print_info("前端依赖已安装，跳过")
             print()
-        
-        # 构建前端
-        if not status['dist_exists']:
-            print_info("构建前端...")
-            if not run_command([npm_cmd, "run", "build"], cwd=frontend_dir):
-                print_error("前端构建失败")
-                wait_for_exit()
-                sys.exit(1)
-            
-            print_success("前端构建完成")
-            print()
-        else:
-            print_info("前端已构建，跳过")
-            print()
+    
+    # 前端构建（按 hash 决定是否执行）
+    need_build, reason = need_frontend_build(frontend_dir)
+    if need_build:
+        print_info(reason)
+        print_info("构建前端...")
+        if not run_command([npm_cmd, "run", "build"], cwd=frontend_dir):
+            print_error("前端构建失败")
+            wait_for_exit()
+            sys.exit(1)
+        save_build_hash(frontend_dir, compute_frontend_source_hash(frontend_dir))
+        print_success("前端构建完成")
+    else:
+        print_info(reason)
+    print()
     
     # 启动服务
     backend_process, frontend_process, backend_url, frontend_url = start_services(
@@ -431,9 +495,7 @@ def main():
     print_info(f"前端地址: {frontend_url}")
     print_info(f"虚拟环境: {venv_dir}")
     if platform.system() == "Windows":
-        print_info("Windows 提示：已分别打开后端/前端控制台窗口；也可在本窗口按 Ctrl+C 一键停止两者")
-    print()
-    print_warning("按 Ctrl+C 停止服务")
+        print_info("请分别关闭前端、后端控制台窗口，再关闭本窗口。")
     print()
     
     # 等待用户中断
