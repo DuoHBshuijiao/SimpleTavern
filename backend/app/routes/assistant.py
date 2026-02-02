@@ -949,8 +949,9 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
     chat = _resolve_assistant_chat_by_scope(scope, chat_id)
 
     model = req.model or assistant_settings.model or settings.llm.defaultModel
+    thinking_enabled = bool(getattr(settings, "thinkingMode", False))
     temperature = req.temperature if req.temperature is not None else assistant_settings.temperature
-    if model == "deepseek-reasoner":
+    if model == "deepseek-reasoner" or thinking_enabled:
         temperature = None
 
     base_url = settings.llm.baseUrl
@@ -1001,7 +1002,7 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
              msg_dict["reasoning_content"] = m.extra["reasoning_content"]
         llm_msgs.append(msg_dict)
 
-    if model == "deepseek-reasoner":
+    if model == "deepseek-reasoner" or thinking_enabled:
         _clear_reasoning_content(llm_msgs)
 
     allow_write_memory = req.allowWriteMemory
@@ -1010,7 +1011,6 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
     if scope == "workspace":
         allow_write_memory = False
     tools = _build_tools(chat_id, bool(allow_write_memory))
-    thinking_enabled = bool(getattr(settings, "thinkingMode", False))
     extra_body = {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
 
     async def event_iter() -> AsyncIterator[str]:
