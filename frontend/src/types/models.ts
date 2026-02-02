@@ -152,6 +152,8 @@ export interface Settings {
   }
   streamEnabled: boolean
   pureAiMode: boolean
+  /** 思考模式：开启时 API 请求带 thinking.type=enabled，关闭时带 disabled（默认） */
+  thinkingMode?: boolean
   userPersonas: UserPersona[]
   selectedPersonaId: string | null
   /** 当前选中的自定义字体文件名，存于 data/fonts，不随备份导出 */

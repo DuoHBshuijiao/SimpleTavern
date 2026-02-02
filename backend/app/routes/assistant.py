@@ -1010,7 +1010,8 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
     if scope == "workspace":
         allow_write_memory = False
     tools = _build_tools(chat_id, bool(allow_write_memory))
-    extra_body = {"thinking": {"type": "enabled"}} if model == "deepseek-reasoner" else None
+    thinking_enabled = bool(getattr(settings, "thinkingMode", False))
+    extra_body = {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
 
     async def event_iter() -> AsyncIterator[str]:
         """

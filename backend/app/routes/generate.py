@@ -241,6 +241,9 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
         else:
             messages.append({"role": m.role, "content": m.content})
 
+    thinking_enabled = bool(getattr(settings, "thinkingMode", False))
+    extra_body = {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
+
     async def event_iter() -> AsyncIterator[str]:
         """
         流式事件迭代器
@@ -258,6 +261,7 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
                 temperature=temperature,
                 top_p=top_p,
                 max_tokens=max_tokens,
+                extra_body=extra_body,
             ):
                 full_text.append(delta.text)
                 yield _sse("delta", {"text": delta.text})
@@ -294,6 +298,7 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
                 temperature=temperature,
                 top_p=top_p,
                 max_tokens=max_tokens,
+                extra_body=extra_body,
             )
             assistant_content = result.text.strip()
             assistant_msg = None
@@ -491,6 +496,9 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
         else:
             messages.append({"role": m.role, "content": m.content})
 
+    thinking_enabled = bool(getattr(settings, "thinkingMode", False))
+    extra_body = {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
+
     async def event_iter():
         """
         流式事件迭代器
@@ -508,6 +516,7 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
                 temperature=temperature,
                 top_p=top_p,
                 max_tokens=max_tokens,
+                extra_body=extra_body,
             ):
                 full_text.append(delta.text)
                 yield _sse("delta", {"text": delta.text})
@@ -542,6 +551,7 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
                 temperature=temperature,
                 top_p=top_p,
                 max_tokens=max_tokens,
+                extra_body=extra_body,
             )
             assistant_content = result.text.strip()
             assistant_msg = None
@@ -731,6 +741,9 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
         else:
             messages.append({"role": m.role, "content": m.content})
 
+    thinking_enabled = bool(getattr(settings, "thinkingMode", False))
+    extra_body = {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
+
     async def event_iter():
         """
         流式事件迭代器
@@ -748,6 +761,7 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
                 temperature=temperature,
                 top_p=top_p,
                 max_tokens=max_tokens,
+                extra_body=extra_body,
             ):
                 full_text.append(delta.text)
                 yield _sse("delta", {"text": delta.text})
@@ -782,6 +796,7 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
                 temperature=temperature,
                 top_p=top_p,
                 max_tokens=max_tokens,
+                extra_body=extra_body,
             )
             assistant_content = result.text.strip()
             assistant_msg = None

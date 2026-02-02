@@ -188,6 +188,7 @@ class Settings(BaseModel):
     prompts: SettingsPrompts = Field(default_factory=SettingsPrompts)
     streamEnabled: bool = True
     pureAiMode: bool = False
+    thinkingMode: bool = False  # 思考模式：True 时 extra_body 传 {"thinking": {"type": "enabled"}}，否则传 disabled
     userPersonas: list[UserPersona] = Field(default_factory=list)
     selectedPersonaId: str | None = None
     selectedFont: str | None = None  # 当前选中的自定义字体文件名，存于 data/fonts，不随备份导出
