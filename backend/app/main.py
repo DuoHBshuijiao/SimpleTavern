@@ -39,6 +39,7 @@ from app.routes.import_export import router as import_export_router
 from app.routes.settings import router as settings_router
 from app.routes.llm import router as llm_router
 from app.routes.assistant import router as assistant_router
+from app.routes.tokenizer import router as tokenizer_router
 from app.storage import ensure_data_initialized
 
 
@@ -85,3 +86,4 @@ app.include_router(avatars_router, prefix="/api")
 app.include_router(font_router, prefix="/api")
 app.include_router(import_export_router, prefix="/api")
 app.include_router(assistant_router, prefix="/api")
+app.include_router(tokenizer_router, prefix="/api")

@@ -81,6 +81,13 @@ const candidateModels = ref<string[]>([])
 const selectedCandidateModels = ref<Set<string>>(new Set())
 const modelSelectorQuery = ref('')
 
+// Token 估算（长期记忆 / 对话长度）
+const memoryTokenEstimate = ref<number | null>(null)
+const chatTokenEstimate = ref<number | null>(null)
+const memoryTokenLoading = ref(false)
+const chatTokenLoading = ref(false)
+let memoryDebounceTimer: ReturnType<typeof setTimeout> | null = null
+
 /**
  * 关闭抽屉
  *
@@ -125,6 +132,38 @@ function ensureOverrides(v?: Partial<ChatOverrides> | null): ChatOverrides {
   }
 }
 
+async function fetchMemoryTokenCount() {
+  memoryTokenLoading.value = true
+  memoryTokenEstimate.value = null
+  try {
+    const text = chatDraft.value?.longTermMemory ?? ''
+    const res = await apiPost<{ tokens: number | null }>('/api/tokenizer/count', { text })
+    memoryTokenEstimate.value = res.tokens
+  } catch {
+    memoryTokenEstimate.value = null
+  } finally {
+    memoryTokenLoading.value = false
+  }
+}
+
+async function fetchChatTokenCount() {
+  const c = props.chat
+  if (!c?.id) {
+    chatTokenEstimate.value = null
+    return
+  }
+  chatTokenLoading.value = true
+  chatTokenEstimate.value = null
+  try {
+    const res = await apiGet<{ tokens: number | null }>(`/api/tokenizer/chat-count?chatId=${encodeURIComponent(c.id)}`)
+    chatTokenEstimate.value = res.tokens
+  } catch {
+    chatTokenEstimate.value = null
+  } finally {
+    chatTokenLoading.value = false
+  }
+}
+
 watch(
   () => props.show,
   async (open) => {
@@ -150,6 +189,31 @@ watch(
     if (s.apiPresets.length > 0 && !editingPresetId.value) {
         editingPresetId.value = s.apiPresets[0]?.id ?? null
     }
+
+    memoryTokenEstimate.value = null
+    chatTokenEstimate.value = null
+    if (tab.value === 'chat' && props.chat) {
+      fetchMemoryTokenCount()
+      fetchChatTokenCount()
+    }
+  },
+)
+
+watch(
+  () => chatDraft.value?.longTermMemory,
+  () => {
+    if (memoryDebounceTimer) clearTimeout(memoryDebounceTimer)
+    memoryDebounceTimer = setTimeout(() => {
+      memoryDebounceTimer = null
+      if (props.show && tab.value === 'chat') fetchMemoryTokenCount()
+    }, 400)
+  },
+)
+
+watch(
+  () => [props.chat?.id, tab.value] as const,
+  ([chatId, t]) => {
+    if (props.show && t === 'chat' && chatId) fetchChatTokenCount()
   },
 )
 
@@ -161,6 +225,18 @@ watch(
 const editingPreset = computed(() => {
   if (!globalDraft.value) return null
   return globalDraft.value.apiPresets.find(p => p.id === editingPresetId.value) || null
+})
+
+const memoryTokenDisplay = computed(() => {
+  if (memoryTokenLoading.value) return '…'
+  if (memoryTokenEstimate.value === null) return '—'
+  return String(memoryTokenEstimate.value)
+})
+
+const chatTokenDisplay = computed(() => {
+  if (chatTokenLoading.value) return '…'
+  if (chatTokenEstimate.value === null) return '—'
+  return String(chatTokenEstimate.value)
 })
 
 /**
@@ -928,7 +1004,13 @@ async function handleImportChange(e: Event) {
               </div>
 
               <div class="space-y-1.5">
-                <label class="block text-sm font-medium text-gray-300">长期记忆</label>
+                <div class="flex items-center justify-between gap-4">
+                  <label class="block text-sm font-medium text-gray-300">长期记忆</label>
+                  <div class="text-right text-xs text-gray-400 shrink-0">
+                    <div>记忆长度估算：{{ memoryTokenDisplay }} tokens</div>
+                    <div>对话长度估算：{{ chatTokenDisplay }} tokens</div>
+                  </div>
+                </div>
                 <textarea 
                   v-model="chatDraft.longTermMemory"
                   rows="4"

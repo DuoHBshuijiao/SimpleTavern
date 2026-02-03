@@ -4,3 +4,4 @@ httpx>=0.25
 portalocker>=2.8
 pydantic>=2.6
 python-multipart>=0.0.6
+transformers>=4.36
