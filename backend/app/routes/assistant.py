@@ -836,6 +836,26 @@ def get_assistant_chat(
     return _resolve_assistant_chat_by_scope(scope, chatId)
 
 
+class AppendAssistantMessageRequest(BaseModel):
+    """追加助手消息请求"""
+    role: str = "assistant"
+    content: str = ""
+
+
+@router.post("/assistant/chat/messages", response_model=AssistantChat)
+def append_assistant_message(
+    req: AppendAssistantMessageRequest,
+    chatId: str | None = Query(default=None),
+    scope: str | None = Query(default=None),
+) -> AssistantChat:
+    """
+    向助手聊天追加一条消息（用于流式中断时保存截断内容）。
+    """
+    chat = _resolve_assistant_chat_by_scope(scope, chatId)
+    chat.messages.append(ChatMessage(role=req.role, content=req.content))
+    return _save_assistant_chat_by_scope(scope, chatId, chat)
+
+
 @router.post("/assistant/reset")
 def reset_assistant(
     chatId: str | None = Query(default=None),

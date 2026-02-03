@@ -471,6 +471,7 @@ export function useAssistant(options: UseAssistantOptions) {
     assistantAborters[scope]?.abort()
     assistantAborters[scope] = new AbortController()
 
+    let aborted = false
     try {
       await postAndConsumeSse(
         '/api/assistant/stream',
@@ -515,13 +516,25 @@ export function useAssistant(options: UseAssistantOptions) {
         assistantAborters[scope]?.signal,
       )
     } catch (e: unknown) {
-      if (e instanceof Error && e.name !== 'AbortError') {
+      if (e instanceof Error && e.name === 'AbortError') {
+        aborted = true
+      } else if (e instanceof Error) {
         state.streamError.value = e.message
-      } else if (!(e instanceof Error) || e.name !== 'AbortError') {
+      } else {
         state.streamError.value = String(e)
       }
     } finally {
       state.isGenerating.value = false
+      if (aborted && assistantMsg.content.trim()) {
+        try {
+          await apiPost(buildPath('/api/assistant/chat/messages', scope), {
+            role: 'assistant',
+            content: assistantMsg.content,
+          })
+        } catch (_) {
+          // 持久化失败时仍重新加载，避免本地与服务器不一致
+        }
+      }
       await loadChat(scope)
     }
   }

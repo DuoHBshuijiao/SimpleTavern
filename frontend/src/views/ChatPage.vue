@@ -828,6 +828,7 @@ async function sendUserMessage() {
     isGenerating.value = false
     group.currentSpeakerIndex.value = -1
     if (stopStreamingHold.value) {
+      await persistLocalStreamingMessages(chatId)
       stopStreamingHold.value = false
     } else {
       await chats.load(chatId)
@@ -868,13 +869,18 @@ async function continueGroupChat() {
     }
   } finally {
     const skippedReload = stopStreamingHold.value
-    if (skippedReload) stopStreamingHold.value = false
+    if (skippedReload) {
+      await persistLocalStreamingMessages(chatId)
+      stopStreamingHold.value = false
+    }
     if (!group.isPaused.value) {
       isGenerating.value = false
       group.currentSpeakerIndex.value = -1
       group.pendingMembers.value = []
       if (!skippedReload) {
         await chats.load(chatId)
+        await settings.load()
+      } else {
         await settings.load()
       }
     }
@@ -921,9 +927,14 @@ async function startNextRound() {
     isGenerating.value = false
     group.currentSpeakerIndex.value = -1
     const skippedReload = stopStreamingHold.value
-    if (skippedReload) stopStreamingHold.value = false
-    if (!group.isPaused.value && !skippedReload) {
-      await chats.load(chatId)
+    if (skippedReload) {
+      await persistLocalStreamingMessages(chatId)
+      stopStreamingHold.value = false
+    }
+    if (!group.isPaused.value) {
+      if (!skippedReload) {
+        await chats.load(chatId)
+      }
       await settings.load()
     }
   }
@@ -1012,6 +1023,7 @@ async function triggerInterject(characterId: string) {
   } finally {
     group.isInterjecting.value = false
     if (stopStreamingHold.value) {
+      await persistLocalStreamingMessages(chatId)
       stopStreamingHold.value = false
     } else {
       await chats.load(chatId)
@@ -1031,6 +1043,27 @@ function stopStreaming() {
   stopStreamingHold.value = true
   aborter.value.abort()
   stream.flushAll()
+}
+
+/**
+ * 将当前会话中未持久化的本地流式消息（被截断的内容）保存到后端并重新加载
+ * 用于用户点击终止后：打字机缓冲已通过 flushAll 写入本地消息，此处持久化并同步为可编辑的服务器消息
+ */
+async function persistLocalStreamingMessages(chatId: string) {
+  const chat = activeChat.value
+  if (!chat?.messages?.length) return
+  const localAssistantMessages = chat.messages.filter(
+    (m) => m.role === 'assistant' && m.id.startsWith('local_')
+  )
+  for (const m of localAssistantMessages) {
+    const content = (m.content || '').trim()
+    if (content) {
+      await chats.appendMessage(chatId, 'assistant', content, {
+        characterId: m.characterId ?? undefined,
+      })
+    }
+  }
+  await chats.load(chatId)
 }
 
 /**
@@ -1261,6 +1294,7 @@ async function handleRewriteMessage(m: ChatMessage) {
     isGenerating.value = false
     const skippedReload = stopStreamingHold.value
     if (skippedReload) {
+      await persistLocalStreamingMessages(chatId)
       stopStreamingHold.value = false
     } else {
       await chats.load(chatId)
@@ -1707,6 +1741,7 @@ async function handleSaveAndSend() {
     isGenerating.value = false
     group.currentSpeakerIndex.value = -1
     if (stopStreamingHold.value) {
+      await persistLocalStreamingMessages(chatId)
       stopStreamingHold.value = false
     } else {
       await chats.load(chatId)
