@@ -221,8 +221,19 @@ export function useAssistant(options: UseAssistantOptions) {
    *
    * @returns {Promise<void>} 完成时返回
    */
+  /** 将 context_size 规范为 number | null：0、NaN、undefined 视为“未启用”即 null */
+  function normalizeContextSize(v: number | null | undefined): number | null {
+    if (v == null || Number.isNaN(v) || v < 1) return null
+    return v
+  }
+
   async function saveSettings() {
-    await apiPut('/api/assistant/settings', assistantSettings.value)
+    const payload = {
+      ...assistantSettings.value,
+      context_size: normalizeContextSize(assistantSettings.value.context_size),
+    }
+    await apiPut('/api/assistant/settings', payload)
+    assistantSettings.value.context_size = payload.context_size
   }
 
   /**

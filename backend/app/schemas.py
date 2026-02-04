@@ -76,7 +76,7 @@ class GenerationParams(BaseModel):
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     top_p: float | None = Field(default=None, ge=0.0, le=1.0)
     max_tokens: int | None = Field(default=None, ge=1)
-    context_size: int | None = Field(default=None, ge=1, description="上下文总长度限制(token)，长期记忆+最近消息<=此值")
+    context_size: int | None = Field(default=None, ge=0, description="上下文总长度限制(token)，0或空表示未启用；长期记忆+最近消息<=此值")
 
 
 class SettingsPrompts(BaseModel):
@@ -216,7 +216,7 @@ class AssistantSettings(BaseModel):
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     model: str | None = None
     presetId: str | None = None
-    context_size: int | None = Field(default=None, ge=1, description="上下文总长度限制(token)，最近消息裁剪用")
+    context_size: int | None = Field(default=None, ge=0, description="上下文总长度限制(token)，0或空表示未启用；最近消息裁剪用")
 
 
 class AssistantChat(BaseModel):

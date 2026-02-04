@@ -438,7 +438,10 @@ function handleChatModelSelect(option: any) {
  */
 async function saveGlobal() {
   if (!globalDraft.value) return
-  await settingsStore.save(globalDraft.value)
+  const draft = { ...globalDraft.value, generationDefaults: { ...globalDraft.value.generationDefaults } }
+  draft.generationDefaults.context_size = normalizeContextSize(draft.generationDefaults.context_size)
+  await settingsStore.save(draft)
+  globalDraft.value.generationDefaults.context_size = draft.generationDefaults.context_size
   close()
 }
 
@@ -450,9 +453,18 @@ async function saveGlobal() {
  *
  * @returns {Promise<void>} 完成时返回
  */
+/** Context Size：0、NaN、undefined 视为“未启用”即 null */
+function normalizeContextSize(v: number | null | undefined): number | null {
+  if (v == null || Number.isNaN(v) || v < 1) return null
+  return v
+}
+
 async function saveChatOverrides() {
   if (!props.chat || !chatDraft.value) return
-  await chatsStore.updateOverrides(props.chat.id, chatDraft.value)
+  const draft = { ...chatDraft.value, params: { ...chatDraft.value.params } }
+  draft.params.context_size = normalizeContextSize(draft.params.context_size)
+  await chatsStore.updateOverrides(props.chat.id, draft)
+  chatDraft.value.params.context_size = draft.params.context_size
   close()
 }
 
@@ -755,8 +767,8 @@ async function handleImportChange(e: Event) {
                   <input 
                     v-model.number="globalDraft.generationDefaults.context_size" 
                     type="number" 
-                    step="1024" min="1"
-                    placeholder="默认不限制"
+                    step="1024" min="0"
+                    placeholder="未启用（默认不限制）"
                     class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-brand/50 outline-none"
                   />
                 </div>
@@ -1083,8 +1095,8 @@ async function handleImportChange(e: Event) {
                   <input 
                     v-model.number="chatDraft.params.context_size" 
                     type="number" 
-                    step="1024" min="1"
-                    placeholder="使用全局"
+                    step="1024" min="0"
+                    placeholder="未启用（使用全局）"
                     class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-brand/50 outline-none"
                   />
                 </div>

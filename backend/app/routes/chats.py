@@ -81,9 +81,10 @@ def _merge_overrides(existing: Chat, incoming: UpdateChatRequest) -> None:
     if hasattr(ov, "presetId"):
         existing.overrides.presetId = ov.presetId
 
-    for key in ("model", "temperature", "top_p", "max_tokens"):
+    for key in ("model", "temperature", "top_p", "max_tokens", "context_size"):
         val = getattr(ov.params, key, None)
-        if val is not None:
+        # context_size 允许显式设为 None 表示“未启用”；其他参数仅在有值时覆盖
+        if key == "context_size" or val is not None:
             setattr(existing.overrides.params, key, val)
 
 
