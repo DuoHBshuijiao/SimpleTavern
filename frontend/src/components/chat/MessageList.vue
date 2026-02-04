@@ -295,7 +295,7 @@ defineExpose({ scrollToBottom, scrollRef })
               style="font-size: 10px; line-height: 1;"
             >
               <span class="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" aria-hidden="true"></span>
-              <span class="text-gray-400" style="font-size: 10px;">已保存.</span>
+              <span class="text-gray-400" style="font-size: 10px;">已保存</span>
             </div>
           </div>
 
