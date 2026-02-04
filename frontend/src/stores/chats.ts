@@ -325,15 +325,19 @@ export const useChatsStore = defineStore('chats', {
      * 更新聊天会话中的一条消息。
      * 使用apiPut函数（来自api/http.ts）发送PUT请求到/api/chats/{chatId}/messages/{messageId}。
      * 更新成功后自动刷新单聊列表（如果存在characterId）。
+     * 群聊时传入 characterId 以保持该条消息的发言人不变。
      *
      * @param {string} chatId - 聊天ID
      * @param {string} messageId - 消息ID
      * @param {'system' | 'user' | 'assistant'} role - 消息角色
      * @param {string} content - 消息内容
+     * @param {string | null | undefined} [characterId] - 群聊时发言人角色ID，传入以保持发言人
      * @returns {Promise<Chat>} 更新后的聊天会话
      */
-    async updateMessage(chatId: string, messageId: string, role: 'system' | 'user' | 'assistant', content: string) {
-      const chat = await apiPut<Chat>(`/api/chats/${chatId}/messages/${messageId}`, { role, content })
+    async updateMessage(chatId: string, messageId: string, role: 'system' | 'user' | 'assistant', content: string, characterId?: string | null) {
+      const body: { role: string; content: string; characterId?: string | null } = { role, content }
+      if (characterId !== undefined) body.characterId = characterId
+      const chat = await apiPut<Chat>(`/api/chats/${chatId}/messages/${messageId}`, body)
       this.activeChat = chat
       if (this.characterId) await this.loadList(this.characterId)
       return chat

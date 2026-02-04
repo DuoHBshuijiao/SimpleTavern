@@ -698,7 +698,7 @@ async function sendUserMessage() {
     for (const msg of activeChat.value.messages) {
       if (msg.role === 'assistant' && versions.hasMultipleVersions(msg)) {
         const content = versions.cleanupVersions(msg)
-        await chats.updateMessage(activeChat.value.id, msg.id, msg.role, content)
+        await chats.updateMessage(activeChat.value.id, msg.id, msg.role, content, msg.characterId)
       }
     }
   }
@@ -1650,7 +1650,7 @@ async function handleSaveAndSend() {
   const originalMessage = activeChat.value.messages[messageIndex]
   if (!originalMessage) return
 
-  await chats.updateMessage(chatId, messageId, editedRole, editedContent)
+  await chats.updateMessage(chatId, messageId, editedRole, editedContent, originalMessage.characterId)
 
   const messagesToDelete = activeChat.value.messages.slice(messageIndex + 1)
   for (const msgToDelete of messagesToDelete) {

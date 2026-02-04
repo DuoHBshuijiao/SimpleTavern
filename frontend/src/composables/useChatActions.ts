@@ -55,7 +55,7 @@ export interface ChatActionsDeps {
   selectedPersona: ComputedRef<UserPersona | null>
   userName: ComputedRef<string>
   chatsStore: {
-    updateMessage: (chatId: string, messageId: string, role: string, content: string) => Promise<void>
+    updateMessage: (chatId: string, messageId: string, role: string, content: string, characterId?: string | null) => Promise<void>
     deleteMessage: (chatId: string, messageId: string) => Promise<void>
     load: (chatId: string) => Promise<void>
     updateUserPersonaId: (chatId: string, personaId: string) => Promise<void>
@@ -93,6 +93,8 @@ export function useChatActions(deps: ChatActionsDeps) {
   const editingMessageId = ref<string | null>(null)
   const editingMessageRole = ref<ChatMessage['role']>('assistant')
   const editingMessageContent = ref('')
+  /** 群聊时当前编辑消息的发言人角色ID，保存时传回后端以保持发言人不变 */
+  const editingMessageCharacterId = ref<string | null | undefined>(undefined)
 
   /**
    * 打开消息编辑
@@ -100,6 +102,7 @@ export function useChatActions(deps: ChatActionsDeps) {
    * 打开消息编辑弹窗，加载消息内容到编辑状态。
    * 如果正在生成中或消息是本地消息，则不执行。
    * 当提供 initialContent 时使用该内容（用于多版本消息显示当前浏览的版本）。
+   * 群聊时会记录该消息的 characterId，保存时传回以保持发言人不变。
    *
    * @param {ChatMessage} m - 要编辑的消息（来自types/models.ts）
    * @param {string} [initialContent] - 可选，初始编辑内容（如当前版本的显示内容）
@@ -111,6 +114,7 @@ export function useChatActions(deps: ChatActionsDeps) {
     editingMessageId.value = m.id
     editingMessageRole.value = m.role
     editingMessageContent.value = initialContent ?? m.content
+    editingMessageCharacterId.value = m.characterId
     showMessageEditor.value = true
   }
 
@@ -123,13 +127,14 @@ export function useChatActions(deps: ChatActionsDeps) {
     showMessageEditor.value = false
     editingMessageId.value = null
     editingMessageContent.value = ''
+    editingMessageCharacterId.value = undefined
   }
 
   /**
    * 保存编辑的消息
    *
    * 将编辑后的消息内容保存到服务器。
-   * 使用chatsStore.updateMessage（来自stores/chats.ts）更新消息。
+   * 群聊时传入原消息的 characterId，避免发言人被覆盖为其他角色。
    *
    * @returns {Promise<void>} 完成时返回
    */
@@ -142,6 +147,7 @@ export function useChatActions(deps: ChatActionsDeps) {
       editingMessageId.value,
       editingMessageRole.value,
       editingMessageContent.value,
+      editingMessageCharacterId.value,
     )
     closeEditMessage()
   }

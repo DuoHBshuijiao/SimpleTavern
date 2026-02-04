@@ -352,7 +352,9 @@ def update_message(chat_id: str, message_id: str, req: UpdateMessageRequest) -> 
         if m.id == message_id:
             m.role = req.role
             m.content = req.content
-            m.characterId = req.characterId
+            # 仅当客户端显式传入 characterId 时更新，避免群聊中编辑仅改内容时覆盖发言人
+            if req.characterId is not None:
+                m.characterId = req.characterId
             if getattr(req, "senderPersonaId", None) is not None:
                 m.senderPersonaId = req.senderPersonaId
             if getattr(req, "senderName", None) is not None:
