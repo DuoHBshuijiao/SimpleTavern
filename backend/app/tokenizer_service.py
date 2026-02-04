@@ -53,3 +53,60 @@ def count_tokens(text: str | None) -> int | None:
         return len(tok.encode(text, add_special_tokens=False))
     except Exception:
         return None
+
+
+def _count_message_tokens(msg: dict) -> int | None:
+    """单条消息的 token 数（role + content，可选 reasoning_content）。"""
+    role = msg.get("role", "unknown")
+    content = (msg.get("content") or "") or ""
+    parts = [f"{role}: {content}"]
+    if msg.get("reasoning_content"):
+        parts.append(str(msg["reasoning_content"]))
+    return count_tokens("\n".join(parts))
+
+
+def trim_messages_to_context(
+    messages: list[dict],
+    context_size: int,
+    long_term_memory_text: str | None = None,
+) -> list[dict]:
+    """
+    按 context_size 裁剪消息列表：长期记忆长度 + 最近消息（FIFO，从最新往后）<= context_size。
+
+    Args:
+        messages: 消息列表，每项为 dict，含 role、content 等。
+        context_size: 上下文总限制（token 数）。
+        long_term_memory_text: 长期记忆文本，其 token 数占用预算。
+
+    Returns:
+        裁剪后的消息列表（保持时间顺序）；若 tokenizer 不可用或 context_size 无效则返回原列表。
+    """
+    if not messages or context_size < 1:
+        return list(messages)
+    memory_tokens = count_tokens(long_term_memory_text)
+    if memory_tokens is None:
+        return list(messages)
+    budget = context_size - memory_tokens
+    if budget <= 0:
+        return []
+    # 每条消息的 token 数（从后往前算，便于 FIFO）
+    token_counts: list[int | None] = []
+    for m in messages:
+        n = _count_message_tokens(m)
+        token_counts.append(n)
+    if any(t is None for t in token_counts):
+        return list(messages)
+    # 从最新消息往后取，直到超出 budget
+    total = 0
+    keep_indices: list[int] = []
+    for i in range(len(messages) - 1, -1, -1):
+        t = token_counts[i]
+        if t is None:
+            break
+        if total + t <= budget:
+            total += t
+            keep_indices.append(i)
+        else:
+            break
+    keep_indices.reverse()
+    return [messages[i] for i in keep_indices]

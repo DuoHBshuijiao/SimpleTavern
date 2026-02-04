@@ -71,6 +71,7 @@ from app.storage import (
     save_chat_memory,
     save_assistant_settings,
 )
+from app.tokenizer_service import trim_messages_to_context
 
 
 router = APIRouter(tags=["assistant"])
@@ -1008,19 +1009,24 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
         chat.messages = existing_messages
         _save_assistant_chat_by_scope(scope, chat_id, chat)
 
-    llm_msgs: list[dict[str, Any]] = []
-    _ensure_system_prompt(llm_msgs, assistant_settings.prompt)
-    participants_prompt = _build_chat_participants_prompt(chat_id)
-    if participants_prompt:
-        llm_msgs.append({"role": "system", "content": participants_prompt})
-    
+    conversation: list[dict[str, Any]] = []
     for m in existing_messages:
         if getattr(m, "toolTrace", False):
             continue
         msg_dict = {"role": m.role, "content": m.content}
         if hasattr(m, "extra") and isinstance(m.extra, dict) and "reasoning_content" in m.extra:
-             msg_dict["reasoning_content"] = m.extra["reasoning_content"]
-        llm_msgs.append(msg_dict)
+            msg_dict["reasoning_content"] = m.extra["reasoning_content"]
+        conversation.append(msg_dict)
+    context_size = getattr(assistant_settings, "context_size", None)
+    if context_size and context_size >= 1:
+        conversation = trim_messages_to_context(conversation, context_size, None)
+
+    llm_msgs: list[dict[str, Any]] = []
+    _ensure_system_prompt(llm_msgs, assistant_settings.prompt)
+    participants_prompt = _build_chat_participants_prompt(chat_id)
+    if participants_prompt:
+        llm_msgs.append({"role": "system", "content": participants_prompt})
+    llm_msgs.extend(conversation)
 
     if model == "deepseek-reasoner" or thinking_enabled:
         _clear_reasoning_content(llm_msgs)

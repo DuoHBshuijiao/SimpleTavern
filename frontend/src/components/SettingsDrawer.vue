@@ -128,6 +128,7 @@ function ensureOverrides(v?: Partial<ChatOverrides> | null): ChatOverrides {
       temperature: v?.params?.temperature ?? null,
       top_p: v?.params?.top_p ?? null,
       max_tokens: v?.params?.max_tokens ?? null,
+      context_size: v?.params?.context_size ?? null,
     },
   }
 }
@@ -749,7 +750,18 @@ async function handleImportChange(e: Event) {
                     class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-brand/50 outline-none"
                   />
                 </div>
+                <div class="space-y-1.5">
+                  <label class="block text-sm font-medium text-gray-300">Context Size</label>
+                  <input 
+                    v-model.number="globalDraft.generationDefaults.context_size" 
+                    type="number" 
+                    step="1024" min="1"
+                    placeholder="默认不限制"
+                    class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-brand/50 outline-none"
+                  />
+                </div>
               </div>
+              <p class="text-xs text-gray-500 mt-2">实际上下文总限制长度为该 Context Size 限制加上角色卡、用户信息、自定义系统提示词。</p>
 
               <div class="h-px bg-white/5 my-4"></div>
 
@@ -1066,7 +1078,18 @@ async function handleImportChange(e: Event) {
                     class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-brand/50 outline-none"
                   />
                 </div>
+                <div class="space-y-1.5">
+                  <label class="block text-sm font-medium text-gray-300">Context Size</label>
+                  <input 
+                    v-model.number="chatDraft.params.context_size" 
+                    type="number" 
+                    step="1024" min="1"
+                    placeholder="使用全局"
+                    class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-brand/50 outline-none"
+                  />
+                </div>
               </div>
+              <p class="text-xs text-gray-500 mt-2">实际上下文总限制长度为该 Context Size 限制加上角色卡、用户信息、自定义系统提示词。</p>
 
               <!-- Group Member Settings (Removed, moved to independent GroupSettingsModal) -->
 

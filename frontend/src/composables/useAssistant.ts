@@ -54,6 +54,8 @@ export interface AssistantSettings {
   temperature: number | null
   model: string | null
   presetId: string | null
+  /** 上下文总长度限制（token），用于裁剪最近消息 */
+  context_size: number | null
 }
 
 export interface UseAssistantOptions {
@@ -83,6 +85,7 @@ export function useAssistant(options: UseAssistantOptions) {
     temperature: null,
     model: null,
     presetId: null,
+    context_size: null,
   })
 
   // 消息编辑状态
@@ -198,7 +201,7 @@ export function useAssistant(options: UseAssistantOptions) {
    * @returns {Promise<void>} 完成时返回
    */
   async function loadSettings() {
-    const res = await apiGet<{ prompt: string; temperature: number | null; model: string | null; presetId?: string | null }>(
+    const res = await apiGet<{ prompt: string; temperature: number | null; model: string | null; presetId?: string | null; context_size?: number | null }>(
       '/api/assistant/settings',
     )
     assistantSettings.value = {
@@ -206,6 +209,7 @@ export function useAssistant(options: UseAssistantOptions) {
       temperature: res.temperature ?? null,
       model: res.model ?? null,
       presetId: res.presetId ?? null,
+      context_size: res.context_size ?? null,
     }
   }
 

@@ -52,6 +52,8 @@ export interface GenerationParams {
   temperature?: number | null
   top_p?: number | null
   max_tokens?: number | null
+  /** 上下文总长度限制（token 数），用于裁剪最近消息；实际总限制 = context_size + 角色卡/用户信息/系统提示词 */
+  context_size?: number | null
 }
 
 /**

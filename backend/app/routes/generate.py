@@ -32,6 +32,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from app.llm.openai_compat import chat_completions, stream_chat_completions
 from app.schemas import ChatMessage, GenerateStreamRequest, GroupGenerateRequest, SingleInterjectRequest
 from app.storage import load_character, load_chat, load_settings, save_chat, save_settings
+from app.tokenizer_service import trim_messages_to_context
 
 
 router = APIRouter(tags=["generate"])
@@ -216,6 +217,7 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
     temperature = pick_param("temperature")
     top_p = pick_param("top_p")
     max_tokens = pick_param("max_tokens")
+    context_size = pick_param("context_size")
 
     preset_id = None
     if runtime and runtime.presetId:
@@ -232,14 +234,20 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
             base_url = found_preset.baseUrl
             api_key = found_preset.apiKey
 
-    messages = []
-    if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
+    conversation: list[dict] = []
     for m in chat.messages:
         if pure_ai_mode and m.role == "user":
-            messages.append({"role": "system", "content": m.content})
+            conversation.append({"role": "system", "content": m.content})
         else:
-            messages.append({"role": m.role, "content": m.content})
+            conversation.append({"role": m.role, "content": m.content})
+    if context_size and context_size >= 1:
+        long_term_memory = getattr(chat.overrides, "longTermMemory", None) or ""
+        conversation = trim_messages_to_context(conversation, context_size, long_term_memory or None)
+
+    messages: list[dict] = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.extend(conversation)
 
     thinking_enabled = bool(getattr(settings, "thinkingMode", False))
     extra_body = {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
@@ -455,6 +463,7 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
     temperature = pick_param("temperature")
     top_p = pick_param("top_p")
     max_tokens = pick_param("max_tokens")
+    context_size = pick_param("context_size")
 
     preset_id = None
     if member_settings and member_settings.presetId:
@@ -473,28 +482,33 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
             base_url = found_preset.baseUrl
             api_key = found_preset.apiKey
 
-    messages = []
-    if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
-    
+    conversation: list[dict] = []
     for m in chat.messages:
         if m.role == "user":
             if pure_ai_mode:
-                messages.append({"role": "system", "content": f"[用户]: {m.content}"})
+                conversation.append({"role": "system", "content": f"[用户]: {m.content}"})
             else:
                 user_name = getattr(m, "senderName", None) or (selected_persona.name if selected_persona else "用户")
-                messages.append({"role": "user", "content": f"[{user_name}]: {m.content}"})
+                conversation.append({"role": "user", "content": f"[{user_name}]: {m.content}"})
         elif m.role == "assistant":
             if m.characterId:
                 try:
                     msg_char = load_character(m.characterId)
-                    messages.append({"role": "assistant", "content": f"[{msg_char.name}]: {m.content}"})
+                    conversation.append({"role": "assistant", "content": f"[{msg_char.name}]: {m.content}"})
                 except FileNotFoundError:
-                    messages.append({"role": "assistant", "content": m.content})
+                    conversation.append({"role": "assistant", "content": m.content})
             else:
-                messages.append({"role": "assistant", "content": m.content})
+                conversation.append({"role": "assistant", "content": m.content})
         else:
-            messages.append({"role": m.role, "content": m.content})
+            conversation.append({"role": m.role, "content": m.content})
+    if context_size and context_size >= 1:
+        long_term_memory = getattr(chat.overrides, "longTermMemory", None) or ""
+        conversation = trim_messages_to_context(conversation, context_size, long_term_memory or None)
+
+    messages: list[dict] = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.extend(conversation)
 
     thinking_enabled = bool(getattr(settings, "thinkingMode", False))
     extra_body = {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
@@ -702,6 +716,7 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
     temperature = pick_param("temperature")
     top_p = pick_param("top_p")
     max_tokens = pick_param("max_tokens")
+    context_size = pick_param("context_size")
 
     preset_id = None
     if member_settings and member_settings.presetId:
@@ -718,28 +733,33 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
             base_url = found_preset.baseUrl
             api_key = found_preset.apiKey
 
-    messages = []
-    if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
-    
+    conversation: list[dict] = []
     for m in chat.messages:
         if m.role == "user":
             if pure_ai_mode:
-                messages.append({"role": "system", "content": f"[用户]: {m.content}"})
+                conversation.append({"role": "system", "content": f"[用户]: {m.content}"})
             else:
                 user_name = getattr(m, "senderName", None) or (selected_persona.name if selected_persona else "用户")
-                messages.append({"role": "user", "content": f"[{user_name}]: {m.content}"})
+                conversation.append({"role": "user", "content": f"[{user_name}]: {m.content}"})
         elif m.role == "assistant":
             if m.characterId:
                 try:
                     msg_char = load_character(m.characterId)
-                    messages.append({"role": "assistant", "content": f"[{msg_char.name}]: {m.content}"})
+                    conversation.append({"role": "assistant", "content": f"[{msg_char.name}]: {m.content}"})
                 except FileNotFoundError:
-                    messages.append({"role": "assistant", "content": m.content})
+                    conversation.append({"role": "assistant", "content": m.content})
             else:
-                messages.append({"role": "assistant", "content": m.content})
+                conversation.append({"role": "assistant", "content": m.content})
         else:
-            messages.append({"role": m.role, "content": m.content})
+            conversation.append({"role": m.role, "content": m.content})
+    if context_size and context_size >= 1:
+        long_term_memory = getattr(chat.overrides, "longTermMemory", None) or ""
+        conversation = trim_messages_to_context(conversation, context_size, long_term_memory or None)
+
+    messages: list[dict] = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.extend(conversation)
 
     thinking_enabled = bool(getattr(settings, "thinkingMode", False))
     extra_body = {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
