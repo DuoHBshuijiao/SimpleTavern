@@ -2310,21 +2310,12 @@ const editingPersonaAvatarUrl = computed(() => {
             <input
               v-model.number="assistant.assistantSettings.value.context_size"
               type="number"
-<<<<<<< Current (Your changes)
-              min="1"
-              step="1024"
-              class="input w-full"
-              placeholder="不限制"
-            />
-            <p class="text-xs text-gray-500 mt-1">实际上下文总限制长度为该 Context Size 限制加上角色卡、用户信息、自定义系统提示词。</p>
-=======
               min="0"
               step="1024"
               class="input w-full"
               placeholder="未启用（不限制）"
             />
             <p class="text-xs text-gray-500 mt-1">填 0 或留空表示未启用。实际上下文总限制长度为该 Context Size 限制加上角色卡、用户信息、自定义系统提示词。</p>
->>>>>>> Incoming (Background Agent changes)
           </div>
         </div>
       </div>
