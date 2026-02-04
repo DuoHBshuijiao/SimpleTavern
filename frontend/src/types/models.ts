@@ -226,6 +226,8 @@ export interface ChatMessage {
   senderName?: string | null
   senderAvatar?: string | null
   ts: string
+  /** 长期记忆在上一条保存后、本条消息之后被更新；仅最新一条带此标记的消息存在 */
+  memoryUpdatedAfterThis?: boolean
 }
 
 /**

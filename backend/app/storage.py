@@ -45,7 +45,7 @@ import portalocker
 
 from datetime import datetime
 
-from app.schemas import AssistantChat, AssistantSettings, Chat, CharacterCard, Settings
+from app.schemas import AssistantChat, AssistantSettings, Chat, ChatMessage, CharacterCard, Settings
 
 
 def _repo_root() -> Path:
@@ -750,16 +750,32 @@ def load_chat(chat_id: str) -> Chat:
     return chat
 
 
+def mark_last_message_memory_updated(chat: Chat) -> None:
+    """
+    在长期记忆更新后，清除所有消息的 memoryUpdatedAfterThis，仅在最新一条消息的 extra 中写入 memoryUpdatedAfterThis = True。
+    不执行保存，由调用方 save_chat。
+    """
+    if not chat.messages:
+        return
+    for i, msg in enumerate(chat.messages):
+        d = msg.model_dump(mode="json")
+        d.pop("memoryUpdatedAfterThis", None)
+        chat.messages[i] = ChatMessage.model_validate(d)
+    d = chat.messages[-1].model_dump(mode="json")
+    d["memoryUpdatedAfterThis"] = True
+    chat.messages[-1] = ChatMessage.model_validate(d)
+
+
 def save_chat(chat: Chat) -> Chat:
     """
     保存聊天会话
-    
+
     如果聊天对象中有长期记忆，会单独保存到chat_memory.json文件。
     同时会删除旧格式的聊天文件（如果存在）。
-    
+
     Args:
         chat: 聊天对象
-    
+
     Returns:
         Chat: 保存后的聊天对象
     """

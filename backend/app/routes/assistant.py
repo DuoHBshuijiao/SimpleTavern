@@ -68,6 +68,8 @@ from app.storage import (
     save_assistant_chat,
     save_assistant_chat_for_chat,
     save_assistant_workspace_chat,
+    mark_last_message_memory_updated,
+    save_chat,
     save_chat_memory,
     save_assistant_settings,
 )
@@ -287,6 +289,9 @@ def _tool_write_chat_memory(chat_id: str, args: dict[str, Any]) -> dict[str, Any
         return {"ok": False, "error": "chat not found", "chatId": chat_id}
     content = str(args.get("content") or "")
     save_chat_memory(chat.characterId, chat.id, content)
+    chat.overrides.longTermMemory = content
+    mark_last_message_memory_updated(chat)
+    save_chat(chat)
     return {"ok": True, "chatId": chat_id}
 
 

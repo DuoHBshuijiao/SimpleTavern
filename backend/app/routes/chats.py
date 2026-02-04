@@ -43,7 +43,7 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, Query
 
 from app.schemas import AppendMessageRequest, Chat, ChatMessage, CreateChatRequest, UpdateChatRequest, UpdateMessageRequest
-from app.storage import delete_chat, list_chats, list_group_chats, load_character, load_chat, load_settings, save_chat
+from app.storage import delete_chat, list_chats, list_group_chats, load_character, load_chat, load_settings, mark_last_message_memory_updated, save_chat
 
 router = APIRouter(tags=["chats"])
 
@@ -289,6 +289,8 @@ def update_chat(chat_id: str, req: UpdateChatRequest) -> Chat:
     if "userPersonaId" in req.model_fields_set:
         chat.userPersonaId = req.userPersonaId
     _merge_overrides(chat, req)
+    if req.overrides is not None and getattr(req.overrides, "longTermMemory", None) is not None:
+        mark_last_message_memory_updated(chat)
     chat.updatedAt = _now_iso()
     return save_chat(chat)
 

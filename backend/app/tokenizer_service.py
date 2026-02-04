@@ -65,6 +65,17 @@ def _count_message_tokens(msg: dict) -> int | None:
     return count_tokens("\n".join(parts))
 
 
+def count_tokens_for_messages(messages: list[dict]) -> int | None:
+    """对消息列表逐条计数并求和，任一失败则返回 None。"""
+    total = 0
+    for m in messages:
+        n = _count_message_tokens(m)
+        if n is None:
+            return None
+        total += n
+    return total
+
+
 def trim_messages_to_context(
     messages: list[dict],
     context_size: int,

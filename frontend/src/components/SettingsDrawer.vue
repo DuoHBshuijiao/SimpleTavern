@@ -84,6 +84,8 @@ const modelSelectorQuery = ref('')
 // Token 估算（长期记忆 / 对话长度）
 const memoryTokenEstimate = ref<number | null>(null)
 const chatTokenEstimate = ref<number | null>(null)
+const messagesSinceLastMemoryUpdate = ref<number | null>(null)
+const tokensSinceLastMemoryUpdate = ref<number | null>(null)
 const memoryTokenLoading = ref(false)
 const chatTokenLoading = ref(false)
 let memoryDebounceTimer: ReturnType<typeof setTimeout> | null = null
@@ -151,15 +153,27 @@ async function fetchChatTokenCount() {
   const c = props.chat
   if (!c?.id) {
     chatTokenEstimate.value = null
+    messagesSinceLastMemoryUpdate.value = null
+    tokensSinceLastMemoryUpdate.value = null
     return
   }
   chatTokenLoading.value = true
   chatTokenEstimate.value = null
+  messagesSinceLastMemoryUpdate.value = null
+  tokensSinceLastMemoryUpdate.value = null
   try {
-    const res = await apiGet<{ tokens: number | null }>(`/api/tokenizer/chat-count?chatId=${encodeURIComponent(c.id)}`)
+    const res = await apiGet<{
+      tokens: number | null
+      messagesSinceLastMemoryUpdate: number | null
+      tokensSinceLastMemoryUpdate: number | null
+    }>(`/api/tokenizer/chat-count?chatId=${encodeURIComponent(c.id)}`)
     chatTokenEstimate.value = res.tokens
+    messagesSinceLastMemoryUpdate.value = res.messagesSinceLastMemoryUpdate ?? null
+    tokensSinceLastMemoryUpdate.value = res.tokensSinceLastMemoryUpdate ?? null
   } catch {
     chatTokenEstimate.value = null
+    messagesSinceLastMemoryUpdate.value = null
+    tokensSinceLastMemoryUpdate.value = null
   } finally {
     chatTokenLoading.value = false
   }
@@ -193,6 +207,8 @@ watch(
 
     memoryTokenEstimate.value = null
     chatTokenEstimate.value = null
+    messagesSinceLastMemoryUpdate.value = null
+    tokensSinceLastMemoryUpdate.value = null
     if (tab.value === 'chat' && props.chat) {
       fetchMemoryTokenCount()
       fetchChatTokenCount()
@@ -1033,6 +1049,9 @@ async function handleImportChange(e: Event) {
                   <div class="text-right text-xs text-gray-400 shrink-0">
                     <div>记忆长度估算：{{ memoryTokenDisplay }} tokens</div>
                     <div>对话长度估算：{{ chatTokenDisplay }} tokens</div>
+                    <div v-if="messagesSinceLastMemoryUpdate != null && tokensSinceLastMemoryUpdate != null" class="text-gray-500">
+                      距离上次保存记忆已过去了：~{{ messagesSinceLastMemoryUpdate }} 条消息，约 {{ tokensSinceLastMemoryUpdate }} tokens
+                    </div>
                   </div>
                 </div>
                 <textarea 
