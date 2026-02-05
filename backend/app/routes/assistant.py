@@ -273,9 +273,9 @@ def _tool_read_chat_memory(chat_id: str) -> dict[str, Any]:
     return {"ok": True, "chatId": chat_id, "content": memory}
 
 
-def _tool_write_chat_memory(chat_id: str, args: dict[str, Any]) -> dict[str, Any]:
+def _tool_overwrite_chat_memory(chat_id: str, args: dict[str, Any]) -> dict[str, Any]:
     """
-    工具：写入聊天长期记忆
+    工具：覆盖聊天长期记忆
     
     Args:
         chat_id: 聊天会话ID
@@ -530,8 +530,8 @@ def _build_tools(chat_id: str | None, allow_write_memory: bool) -> list[dict[str
                 {
                     "type": "function",
                     "function": {
-                        "name": "write_chat_memory",
-                        "description": "写入当前聊天 chat_memory.json 的内容",
+                        "name": "overwrite_chat_memory",
+                        "description": "覆盖当前聊天 chat_memory.json 的内容",
                         "parameters": {
                             "type": "object",
                             "properties": {"content": {"type": "string"}},
@@ -581,8 +581,8 @@ def _run_tool(
             return _tool_read_whole_chat_json(chat_id), None
         elif name == "read_chat_memory" and chat_id:
             return _tool_read_chat_memory(chat_id), None
-        elif name == "write_chat_memory" and chat_id and allow_write_memory:
-            return _tool_write_chat_memory(chat_id, args), None
+        elif name == "overwrite_chat_memory" and chat_id and allow_write_memory:
+            return _tool_overwrite_chat_memory(chat_id, args), None
         elif name == "read_character_card" and chat_id:
             return _tool_read_character_card(chat_id, args), None
         elif name == "list_participants" and chat_id:
