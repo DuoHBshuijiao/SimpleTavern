@@ -783,7 +783,7 @@ async function handleImportChange(e: Event) {
                   <input 
                     v-model.number="globalDraft.generationDefaults.context_size" 
                     type="number" 
-                    step="1024" min="0"
+                    min="0"
                     placeholder="未启用（默认不限制）"
                     class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-brand/50 outline-none"
                   />
@@ -1114,7 +1114,7 @@ async function handleImportChange(e: Event) {
                   <input 
                     v-model.number="chatDraft.params.context_size" 
                     type="number" 
-                    step="1024" min="0"
+                    min="0"
                     placeholder="未启用（使用全局）"
                     class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-brand/50 outline-none"
                   />

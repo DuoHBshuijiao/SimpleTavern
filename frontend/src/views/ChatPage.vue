@@ -2311,7 +2311,6 @@ const editingPersonaAvatarUrl = computed(() => {
               v-model.number="assistant.assistantSettings.value.context_size"
               type="number"
               min="0"
-              step="1024"
               class="input w-full"
               placeholder="未启用（不限制）"
             />
