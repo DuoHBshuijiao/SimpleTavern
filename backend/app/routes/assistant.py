@@ -237,15 +237,15 @@ def _load_chat_context(chat_id: str) -> Chat | None:
         return None
 
 
-def _tool_read_chat_json(chat_id: str) -> dict[str, Any]:
+def _tool_read_whole_chat_json(chat_id: str) -> dict[str, Any]:
     """
-    工具：读取聊天JSON
+    工具：读取全部聊天记录（完整 chat.json 内容）
     
     Args:
         chat_id: 聊天会话ID
     
     Returns:
-        dict[str, Any]: 工具执行结果
+        dict[str, Any]: 工具执行结果，包含全部聊天记录
     """
     chat = _load_chat_context(chat_id)
     if chat is None:
@@ -489,8 +489,8 @@ def _build_tools(chat_id: str | None, allow_write_memory: bool) -> list[dict[str
                 {
                     "type": "function",
                     "function": {
-                        "name": "read_chat_json",
-                        "description": "读取当前聊天 chat.json 的内容",
+                        "name": "read_whole_chat_json",
+                        "description": "读取当前聊天的全部聊天记录（完整 chat.json 内容）",
                         "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
                     },
                 },
@@ -577,8 +577,8 @@ def _run_tool(
             result = _tool_write_file(args)
         elif name == "delete_file":
             result = _tool_delete_file(args)
-        elif name == "read_chat_json" and chat_id:
-            return _tool_read_chat_json(chat_id), None
+        elif name == "read_whole_chat_json" and chat_id:
+            return _tool_read_whole_chat_json(chat_id), None
         elif name == "read_chat_memory" and chat_id:
             return _tool_read_chat_memory(chat_id), None
         elif name == "write_chat_memory" and chat_id and allow_write_memory:
