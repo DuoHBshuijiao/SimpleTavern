@@ -685,14 +685,24 @@ def _import_from_zip(payload: bytes) -> dict[str, Any]:
                 if "character" not in imported:
                     imported.append("character")
         for name in zf.namelist():
-            if name.startswith("chats/") and name.endswith(".json"):
-                raw = json.loads(zf.read(name).decode("utf-8"))
-                raw.pop("systemPrompt", None)
-                raw.pop("lastSpeakerCharacterId", None)
-                chat = Chat.model_validate(raw)
-                save_chat(chat)
-                if "chat" not in imported:
-                    imported.append("chat")
+            # 只处理聊天记录文件 chat.json，跳过 chat_memory.json 等
+            if not name.startswith("chats/") or not name.endswith("/chat.json"):
+                continue
+            parts = name.split("/")
+            # 路径格式: chats/{character_id}/{chat_id}/chat.json
+            if len(parts) != 4:
+                continue
+            character_id_from_path = parts[1]
+            raw = json.loads(zf.read(name).decode("utf-8"))
+            raw.pop("systemPrompt", None)
+            raw.pop("lastSpeakerCharacterId", None)
+            # 若 JSON 中缺少 characterId（历史/导出兼容），从路径补全
+            if not raw.get("characterId"):
+                raw["characterId"] = character_id_from_path
+            chat = Chat.model_validate(raw)
+            save_chat(chat)
+            if "chat" not in imported:
+                imported.append("chat")
     return {"imported": imported, "warnings": warnings}
 
 
