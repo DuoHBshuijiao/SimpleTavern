@@ -288,8 +288,15 @@ def update_chat(chat_id: str, req: UpdateChatRequest) -> Chat:
             chat.memberSettings[member_id] = settings
     if "userPersonaId" in req.model_fields_set:
         chat.userPersonaId = req.userPersonaId
+    # 仅在本次请求真正修改了长期记忆内容时才标记 memoryUpdatedAfterThis，避免仅切换模型等操作时误触发
+    incoming_memory = getattr(req.overrides, "longTermMemory", None) if req.overrides else None
+    current_memory = getattr(chat.overrides, "longTermMemory", None) or ""
+    memory_actually_changed = (
+        incoming_memory is not None
+        and (incoming_memory or "") != (current_memory or "")
+    )
     _merge_overrides(chat, req)
-    if req.overrides is not None and getattr(req.overrides, "longTermMemory", None) is not None:
+    if memory_actually_changed:
         mark_last_message_memory_updated(chat)
     chat.updatedAt = _now_iso()
     return save_chat(chat)
