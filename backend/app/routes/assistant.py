@@ -240,10 +240,10 @@ def _load_chat_context(chat_id: str) -> Chat | None:
 def _tool_read_whole_chat_json(chat_id: str) -> dict[str, Any]:
     """
     工具：读取全部聊天记录（完整 chat.json 内容）
-    
+
     Args:
         chat_id: 聊天会话ID
-    
+
     Returns:
         dict[str, Any]: 工具执行结果，包含全部聊天记录
     """
@@ -251,6 +251,55 @@ def _tool_read_whole_chat_json(chat_id: str) -> dict[str, Any]:
     if chat is None:
         return {"ok": False, "error": "chat not found", "chatId": chat_id}
     return {"ok": True, "chat": chat.model_dump(mode="json")}
+
+
+def _tool_read_latest_chat_json(chat_id: str) -> dict[str, Any]:
+    """
+    工具：读取自上一次记忆更新标记到最新的聊天记录（用于总结的上下文）。
+    若不存在 memoryUpdatedAfterThis 标记，则与 read_whole_chat_json 行为一致，返回完整聊天记录。
+
+    Args:
+        chat_id: 聊天会话ID
+
+    Returns:
+        dict[str, Any]: 工具执行结果，包含从标记到最新的聊天记录或完整记录
+    """
+    chat = _load_chat_context(chat_id)
+    if chat is None:
+        return {"ok": False, "error": "chat not found", "chatId": chat_id}
+    payload = chat.model_dump(mode="json")
+    messages = payload.get("messages") or []
+    start_index = 0
+    for i, m in enumerate(messages):
+        if m.get("memoryUpdatedAfterThis") is True:
+            start_index = i
+            break
+    payload["messages"] = messages[start_index:]
+    return {"ok": True, "chat": payload}
+
+
+def _tool_append_chat_memory(chat_id: str, args: dict[str, Any]) -> dict[str, Any]:
+    """
+    工具：在已有长期记忆末尾换行后追加传入的字符串内容（助手默认使用的记忆添加方式）。
+
+    Args:
+        chat_id: 聊天会话ID
+        args: 工具参数，包含 content 字符串
+
+    Returns:
+        dict[str, Any]: 工具执行结果
+    """
+    chat = _load_chat_context(chat_id)
+    if chat is None:
+        return {"ok": False, "error": "chat not found", "chatId": chat_id}
+    content = str(args.get("content") or "").strip()
+    current = (getattr(chat.overrides, "longTermMemory", None) or "").strip()
+    new_content = (current + "\n" + content).strip() if current else content
+    save_chat_memory(chat.characterId, chat.id, new_content)
+    chat.overrides.longTermMemory = new_content
+    mark_last_message_memory_updated(chat)
+    save_chat(chat)
+    return {"ok": True, "chatId": chat_id}
 
 
 def _tool_read_chat_memory(chat_id: str) -> dict[str, Any]:
@@ -489,6 +538,14 @@ def _build_tools(chat_id: str | None, allow_write_memory: bool) -> list[dict[str
                 {
                     "type": "function",
                     "function": {
+                        "name": "read_latest_chat_json",
+                        "description": "读取自上次记忆更新到最新的聊天记录（默认聊天读取工具，用于总结的上下文）；无标记时等同完整记录",
+                        "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+                    },
+                },
+                {
+                    "type": "function",
+                    "function": {
                         "name": "read_whole_chat_json",
                         "description": "读取当前聊天的全部聊天记录（完整 chat.json 内容）",
                         "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
@@ -526,20 +583,35 @@ def _build_tools(chat_id: str | None, allow_write_memory: bool) -> list[dict[str
             ]
         )
         if allow_write_memory:
-            tools.append(
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "overwrite_chat_memory",
-                        "description": "覆盖当前聊天 chat_memory.json 的内容",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {"content": {"type": "string"}},
-                            "required": ["content"],
-                            "additionalProperties": False,
+            tools.extend(
+                [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "append_chat_memory",
+                            "description": "在长期记忆末尾换行后追加内容（默认记忆添加工具）",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {"content": {"type": "string"}},
+                                "required": ["content"],
+                                "additionalProperties": False,
+                            },
                         },
                     },
-                }
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "overwrite_chat_memory",
+                            "description": "覆盖当前聊天 chat_memory.json 的全部内容（仅在用户明确要求重写全部记忆时使用）",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {"content": {"type": "string"}},
+                                "required": ["content"],
+                                "additionalProperties": False,
+                            },
+                        },
+                    },
+                ]
             )
     return tools
 
@@ -577,10 +649,14 @@ def _run_tool(
             result = _tool_write_file(args)
         elif name == "delete_file":
             result = _tool_delete_file(args)
+        elif name == "read_latest_chat_json" and chat_id:
+            return _tool_read_latest_chat_json(chat_id), None
         elif name == "read_whole_chat_json" and chat_id:
             return _tool_read_whole_chat_json(chat_id), None
         elif name == "read_chat_memory" and chat_id:
             return _tool_read_chat_memory(chat_id), None
+        elif name == "append_chat_memory" and chat_id and allow_write_memory:
+            return _tool_append_chat_memory(chat_id, args), None
         elif name == "overwrite_chat_memory" and chat_id and allow_write_memory:
             return _tool_overwrite_chat_memory(chat_id, args), None
         elif name == "read_character_card" and chat_id:
