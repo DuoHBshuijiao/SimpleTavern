@@ -44,6 +44,7 @@ from app.storage import (
     load_settings,
     save_character,
     save_chat,
+    save_chat_memory,
     save_settings,
 )
 
@@ -685,7 +686,7 @@ def _import_from_zip(payload: bytes) -> dict[str, Any]:
                 if "character" not in imported:
                     imported.append("character")
         for name in zf.namelist():
-            # 只处理聊天记录文件 chat.json，跳过 chat_memory.json 等
+            # 只处理聊天记录文件 chat.json
             if not name.startswith("chats/") or not name.endswith("/chat.json"):
                 continue
             parts = name.split("/")
@@ -703,6 +704,26 @@ def _import_from_zip(payload: bytes) -> dict[str, Any]:
             save_chat(chat)
             if "chat" not in imported:
                 imported.append("chat")
+        # 恢复长期记忆：处理 zip 中的 chat_memory.json（与 load_chat_memory 格式兼容）
+        for name in zf.namelist():
+            if not name.startswith("chats/") or not name.endswith("/chat_memory.json"):
+                continue
+            parts = name.split("/")
+            # 路径格式: chats/{character_id}/{chat_id}/chat_memory.json
+            if len(parts) != 4:
+                continue
+            character_id_from_path = parts[1]
+            chat_id_from_path = parts[2]
+            try:
+                raw = json.loads(zf.read(name).decode("utf-8"))
+                content = raw.get("longTermMemory") if isinstance(raw, dict) else None
+                if content is None and isinstance(raw, dict):
+                    content = raw.get("content")
+                content = (content or "").strip()
+                if content:
+                    save_chat_memory(character_id_from_path, chat_id_from_path, content)
+            except Exception:
+                continue
     return {"imported": imported, "warnings": warnings}
 
 
