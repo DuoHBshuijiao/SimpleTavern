@@ -33,7 +33,7 @@
  *    - 依赖：依赖vue、stores、api/http.ts
  *    - 位置：组件层，提供设置管理功能
  */
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useCharactersStore, useChatsStore, useSettingsStore } from '../stores'
 import type { Chat, ChatOverrides, Settings, ApiPreset } from '../types/models'
 import ModernSelect from './ModernSelect.vue'
@@ -59,10 +59,16 @@ const chatsStore = useChatsStore()
 const charactersStore = useCharactersStore()
 
 const tab = ref<'global' | 'presets' | 'chat'>('global')
+const preloaded = ref(false)
+const chatTabEverOpened = ref(false)
 
 watch(() => props.initialTab, (newTab) => {
   if (newTab) tab.value = newTab
 }, { immediate: true })
+
+watch(tab, (t) => {
+  if (t === 'chat') chatTabEverOpened.value = true
+})
 
 const globalDraft = ref<Settings | null>(null)
 const chatDraft = ref<ChatOverrides | null>(null)
@@ -179,6 +185,20 @@ async function fetchChatTokenCount() {
   }
 }
 
+onMounted(() => {
+  setTimeout(async () => {
+    if (!settingsStore.settings) await settingsStore.load()
+    if (fontList.value.length === 0) {
+      try {
+        fontList.value = await apiGet<string[]>('/api/fonts')
+      } catch {
+        fontList.value = []
+      }
+    }
+    preloaded.value = true
+  }, 150)
+})
+
 watch(
   () => props.show,
   async (open) => {
@@ -195,10 +215,12 @@ watch(
     globalDraft.value = s
     chatDraft.value = props.chat ? clone(props.chat.overrides) : ensureOverrides()
 
-    try {
-      fontList.value = await apiGet<string[]>('/api/fonts')
-    } catch {
-      fontList.value = []
+    if (fontList.value.length === 0) {
+      try {
+        fontList.value = await apiGet<string[]>('/api/fonts')
+      } catch {
+        fontList.value = []
+      }
     }
 
     if (s.apiPresets.length > 0 && !editingPresetId.value) {
@@ -584,19 +606,18 @@ async function handleImportChange(e: Event) {
 </script>
 
 <template>
-  <Transition name="drawer">
-    <div v-if="show" class="fixed inset-0 z-50 flex justify-end">
-      <!-- Backdrop -->
-      <div 
-        class="absolute inset-0 bg-black/50 backdrop-blur-sm transition-opacity" 
-        style="backdrop-filter: blur(2px); background-clip: unset; -webkit-background-clip: unset; color: rgba(255, 255, 255, 0); opacity: 0.4;"
-        @click="close"
-      ></div>
+  <div class="drawer-wrapper fixed inset-0 z-50 flex justify-end" :class="{ 'is-open': show }">
+    <!-- Backdrop -->
+    <div
+      class="drawer-backdrop absolute inset-0 bg-black/50 backdrop-blur-sm"
+      style="backdrop-filter: blur(2px); background-clip: unset; -webkit-background-clip: unset; color: rgba(255, 255, 255, 0);"
+      @click="close"
+    ></div>
 
-      <!-- Drawer Panel -->
-      <div 
-        class="absolute right-4 top-4 bottom-4 w-[500px] max-w-[calc(90vw-32px)] drawer-panel bg-gradient-to-br from-slate-800/70 to-slate-700/50 backdrop-blur-xl backdrop-saturate-[1.8] border border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.3)] rounded-2xl flex flex-col"
-      >
+    <!-- Drawer Panel -->
+    <div
+      class="drawer-panel absolute right-4 top-4 bottom-4 w-[500px] max-w-[calc(90vw-32px)] bg-gradient-to-br from-slate-800/70 to-slate-700/50 backdrop-blur-xl backdrop-saturate-[1.8] border border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.3)] rounded-2xl flex flex-col"
+    >
         <!-- Header -->
         <div class="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-white/5 rounded-t-2xl">
           <h2 class="text-lg font-bold text-gray-100">设置</h2>
@@ -622,7 +643,7 @@ async function handleImportChange(e: Event) {
         <!-- Content -->
         <div class="flex-1 overflow-y-auto p-6 custom-scrollbar bg-transparent">
           <!-- Global Settings -->
-          <div v-if="tab === 'global'" class="space-y-6">
+          <div v-if="preloaded" v-show="tab === 'global'" class="space-y-6">
             <div v-if="!globalDraft" class="text-center text-gray-500 py-8">加载中...</div>
             <div v-else class="space-y-5">
               <div class="text-xs text-gray-500 bg-white/5 p-3 rounded-lg border border-white/5">
@@ -902,7 +923,7 @@ async function handleImportChange(e: Event) {
           </div>
 
           <!-- Presets Management -->
-          <div v-else-if="tab === 'presets'" class="space-y-6 h-full flex flex-col">
+          <div v-if="preloaded" v-show="tab === 'presets'" class="space-y-6 h-full flex flex-col">
               <div v-if="!globalDraft" class="text-center text-gray-500 py-8">加载中...</div>
               <div v-else class="flex flex-1 min-h-0 gap-4">
                   <!-- Preset List -->
@@ -1026,7 +1047,7 @@ async function handleImportChange(e: Event) {
           </div>
 
           <!-- Chat Specific Settings -->
-          <div v-else class="space-y-6">
+          <div v-if="chatTabEverOpened" v-show="tab === 'chat'" class="space-y-6">
             <div v-if="!chat" class="text-center text-gray-500 py-8">请先选择一个会话</div>
             <div v-else-if="chatDraft && globalDraft" class="space-y-5">
                <div class="text-xs text-gray-500 bg-white/5 p-3 rounded-lg border border-white/5">
@@ -1142,8 +1163,7 @@ async function handleImportChange(e: Event) {
           </div>
         </div>
       </div>
-    </div>
-  </Transition>
+  </div>
 
   <!-- Model Selector Modal（Teleport 到 body 避免被父级 flex/窄容器限制宽度） -->
   <Teleport to="body">
@@ -1204,24 +1224,27 @@ async function handleImportChange(e: Event) {
 </template>
 
 <style scoped>
-.drawer-enter-active,
-.drawer-leave-active {
-  transition: all 0.3s ease-out;
-}
-
-.drawer-enter-from,
-.drawer-leave-to {
+.drawer-wrapper {
   opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease-out;
 }
-
-.drawer-enter-active .drawer-panel,
-.drawer-leave-active .drawer-panel {
+.drawer-wrapper.is-open {
+  opacity: 1;
+  pointer-events: auto;
+}
+.drawer-wrapper .drawer-panel {
   transition: transform 0.3s ease-out;
-}
-
-.drawer-enter-from .drawer-panel,
-.drawer-leave-to .drawer-panel {
   transform: translateX(calc(100% + 1.5rem));
+}
+.drawer-wrapper.is-open .drawer-panel {
+  transform: translateX(0);
+}
+.drawer-wrapper .drawer-backdrop {
+  opacity: 0.4;
+}
+.drawer-wrapper:not(.is-open) .drawer-backdrop {
+  opacity: 0;
 }
 
 .custom-scrollbar::-webkit-scrollbar {
