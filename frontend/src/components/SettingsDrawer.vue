@@ -376,18 +376,18 @@ const fontModel = computed({
   },
 })
 
-/** 选择字体时实时应用（草稿未保存也会生效） */
+/**
+ * 应用字体：抽屉打开时始终使用草稿中的 selectedFont（不随 tab 切换而变），
+ * 避免在切换到 API 预设/当前会话时误设为默认字体导致闪烁与性能问题；
+ * 抽屉关闭时使用已保存的 store 设置。
+ */
 watch(
-  () => (props.show && tab.value === 'global' ? globalDraft.value?.selectedFont : null),
+  () =>
+    props.show
+      ? (globalDraft.value?.selectedFont ?? null)
+      : (settingsStore.settings?.selectedFont ?? null),
   (v) => applyFont(v ?? null),
   { immediate: true }
-)
-/** 关闭抽屉时恢复为已保存的字体 */
-watch(
-  () => props.show,
-  (open) => {
-    if (!open) applyFont(settingsStore.settings?.selectedFont ?? null)
-  }
 )
 
 /** 消息字号（仅作用于聊天窗口消息气泡），无默认值 */
