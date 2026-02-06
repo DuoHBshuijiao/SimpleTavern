@@ -34,6 +34,14 @@ def _get_tokenizer():
         return None
 
 
+def warmup_tokenizer() -> None:
+    """
+    在应用启动时预加载 tokenizer，避免首次请求时触发 transformers/PyTorch 检查带来的延迟。
+    仅尝试加载，失败时静默忽略（后续请求仍会走懒加载逻辑）。
+    """
+    _get_tokenizer()
+
+
 def count_tokens(text: str | None) -> int | None:
     """
     计算文本的 token 数。

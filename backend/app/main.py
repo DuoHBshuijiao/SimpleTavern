@@ -15,7 +15,7 @@ FastAPI应用入口模块
     - 提供健康检查端点
 
 主要函数：
-    - _startup: 应用启动时的初始化函数
+    - lifespan: 应用生命周期（启动时初始化、关闭时可清理）
     - health: 健康检查端点
 
 文件关系：
@@ -26,6 +26,8 @@ FastAPI应用入口模块
 """
 
 from __future__ import annotations
+
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -42,9 +44,21 @@ from app.routes.assistant import router as assistant_router
 from app.routes.tokenizer import router as tokenizer_router
 from app.routes.update import router as update_router
 from app.storage import ensure_data_initialized
+from app.tokenizer_service import warmup_tokenizer
 
 
-app = FastAPI(title="SimpleTavern", version="v0.230")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    应用生命周期：启动时初始化数据目录并预加载 tokenizer；
+    关闭时无额外清理（yield 之后可添加 shutdown 逻辑）。
+    """
+    ensure_data_initialized()
+    warmup_tokenizer()
+    yield
+
+
+app = FastAPI(title="SimpleTavern", version="v0.230", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -53,16 +67,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@app.on_event("startup")
-def _startup() -> None:
-    """
-    应用启动时的初始化函数
-    
-    确保数据目录和默认文件已创建。
-    """
-    ensure_data_initialized()
 
 
 @app.get("/api/health")
