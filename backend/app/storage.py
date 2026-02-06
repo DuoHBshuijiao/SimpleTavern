@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -852,9 +853,16 @@ def save_chat_memory(character_id: str, chat_id: str, content: str) -> None:
     write_json(path, {"longTermMemory": content})
 
 
+def _lock_file_path(target: Path) -> Path:
+    """返回与目标文件对应的锁文件路径（与 _lock_for 中一致）。"""
+    return Path(str(target) + ".lock")
+
+
 def delete_chat_memory(character_id: str, chat_id: str) -> None:
     """
     删除聊天长期记忆
+    
+    删除 chat_memory.json 及其锁文件 chat_memory.json.lock。
     
     Args:
         character_id: 角色ID
@@ -864,13 +872,16 @@ def delete_chat_memory(character_id: str, chat_id: str) -> None:
     if path.exists():
         with _lock_for(path):
             path.unlink(missing_ok=True)
+    lock_path = _lock_file_path(path)
+    lock_path.unlink(missing_ok=True)
 
 
 def delete_chat(chat_id: str) -> None:
     """
     删除聊天会话
     
-    删除聊天记录文件和长期记忆文件，并尝试删除空的会话文件夹。
+    删除聊天记录文件、长期记忆文件及其锁文件（如 chat.json.lock），
+    并删除磁盘上的会话目录（data/chats/{character_id}/{chat_id}/）。
     
     Args:
         chat_id: 聊天会话ID
@@ -881,11 +892,12 @@ def delete_chat(chat_id: str) -> None:
     p, character_id = found
     with _lock_for(p):
         p.unlink(missing_ok=True)
+    _lock_file_path(p).unlink(missing_ok=True)
     delete_chat_memory(character_id, chat_id)
     chat_dir_path = chat_folder(character_id, chat_id)
     if chat_dir_path.exists():
         try:
-            chat_dir_path.rmdir()
+            shutil.rmtree(chat_dir_path)
         except OSError:
             pass
 

@@ -22,7 +22,7 @@ from app.storage import get_repo_root, get_update_dir
 
 router = APIRouter(tags=["update"])
 
-CURRENT_VERSION = "v0.229"
+CURRENT_VERSION = "v0.230"
 GITHUB_REPO = "DuoHBshuijiao/SimpleTavern"
 GITHUB_API_LATEST = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
@@ -96,7 +96,7 @@ def download_update(body: dict) -> dict:
     update_dir.mkdir(parents=True, exist_ok=True)
     zip_path = update_dir / "update.zip"
     try:
-        with httpx.stream("GET", zip_url, timeout=60.0) as resp:
+        with httpx.stream("GET", zip_url, timeout=60.0, follow_redirects=True) as resp:
             resp.raise_for_status()
             with open(zip_path, "wb") as f:
                 for chunk in resp.iter_bytes(chunk_size=65536):
