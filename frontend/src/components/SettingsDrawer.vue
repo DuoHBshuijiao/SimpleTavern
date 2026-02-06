@@ -43,6 +43,9 @@ import { X, Eye, EyeOff, Check, Loader2 } from 'lucide-vue-next'
 
 const { applyFont } = useAppFont()
 
+/** 当前应用版本，与云端 release 一致 */
+const APP_VERSION = 'v0.228'
+
 const props = defineProps<{
   show: boolean
   chat: Chat | null
@@ -78,6 +81,10 @@ const editingPresetId = ref<string | null>(null)
 const editingPresetShowApiKey = ref(false)
 const presetModelsLoading = ref(false)
 const importInputRef = ref<HTMLInputElement | null>(null)
+
+// 检查更新
+const checkUpdateLoading = ref(false)
+const checkUpdateMessage = ref('')
 const fontList = ref<string[]>([])
 const fontInputRef = ref<HTMLInputElement | null>(null)
 
@@ -606,6 +613,49 @@ async function handleImportChange(e: Event) {
   alert(`导入完成：${(result.imported || []).join(', ') || '无'}${result.warnings?.length ? '\n警告：' + result.warnings.join('; ') : ''}`)
   input.value = ''
 }
+
+/**
+ * 检查更新：请求后端对比云端 release，若有新版本则确认后保存设置、下载、触发更新脚本。
+ */
+async function checkUpdate() {
+  if (checkUpdateLoading.value) return
+  checkUpdateLoading.value = true
+  checkUpdateMessage.value = '正在检查更新...'
+  try {
+    const res = await apiGet<{
+      currentVersion: string
+      latestVersion: string | null
+      hasUpdate: boolean
+      tagName: string | null
+      zipUrl: string | null
+    }>('/api/update/check')
+    if (!res.hasUpdate || !res.tagName) {
+      checkUpdateMessage.value = '当前已是最新版本'
+      return
+    }
+    const ok = confirm(`发现新版本 ${res.latestVersion}，是否下载并安装？`)
+    if (!ok) {
+      checkUpdateMessage.value = ''
+      return
+    }
+    checkUpdateMessage.value = '正在保存设置并下载...'
+    if (globalDraft.value) {
+      const draft = { ...globalDraft.value, generationDefaults: { ...globalDraft.value.generationDefaults } }
+      draft.generationDefaults.context_size = normalizeContextSize(draft.generationDefaults.context_size)
+      await settingsStore.save(draft)
+    }
+    await apiPost('/api/update/download', { tagName: res.tagName })
+    checkUpdateMessage.value = '正在启动更新...'
+    await apiPost('/api/update/run', {})
+    checkUpdateMessage.value = '更新已启动，请等待脚本执行完毕'
+    setTimeout(() => close(), 1500)
+  } catch (e) {
+    checkUpdateMessage.value = ''
+    alert('检查更新失败: ' + String(e))
+  } finally {
+    checkUpdateLoading.value = false
+  }
+}
 </script>
 
 <template>
@@ -922,6 +972,20 @@ async function handleImportChange(e: Event) {
                   保存全局设置
                 </button>
               </div>
+
+              <div class="h-px bg-white/5 my-4"></div>
+              <div class="flex justify-end gap-2 items-center">
+                <button
+                  type="button"
+                  class="px-4 py-2 bg-white/5 hover:bg-white/10 text-gray-200 rounded-lg text-sm transition-colors whitespace-nowrap"
+                  :disabled="checkUpdateLoading"
+                  @click="checkUpdate"
+                >
+                  检查更新
+                </button>
+                <span v-if="checkUpdateMessage" class="text-xs text-gray-400">{{ checkUpdateMessage }}</span>
+              </div>
+              <div class="text-xs text-gray-500 text-right">{{ APP_VERSION }}</div>
             </div>
           </div>
 
@@ -1047,6 +1111,9 @@ async function handleImportChange(e: Event) {
                   保存所有配置
                 </button>
               </div>
+
+              <div class="h-px bg-white/5 my-4"></div>
+              <div class="text-xs text-gray-500 text-right">{{ APP_VERSION }}</div>
           </div>
 
           <!-- Chat Specific Settings -->
@@ -1162,6 +1229,9 @@ async function handleImportChange(e: Event) {
                   保存设置
                 </button>
               </div>
+
+              <div class="h-px bg-white/5 my-4"></div>
+              <div class="text-xs text-gray-500 text-right">{{ APP_VERSION }}</div>
             </div>
           </div>
         </div>

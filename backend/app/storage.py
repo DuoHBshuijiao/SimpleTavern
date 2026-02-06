@@ -120,6 +120,16 @@ def _fonts_dir() -> Path:
     return _data_dir() / "fonts"
 
 
+def get_repo_root() -> Path:
+    """返回仓库根目录，供更新等模块使用。"""
+    return _repo_root()
+
+
+def get_update_dir() -> Path:
+    """返回 data/update 目录，用于存放更新包。"""
+    return _data_dir() / "update"
+
+
 def _settings_path() -> Path:
     """
     获取设置文件路径

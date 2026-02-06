@@ -38,13 +38,13 @@
    **Windows (PowerShell):**
    ```powershell
    # 假设下载到 D:\Downloads，解压后进入目录
-   cd D:\Downloads\SimpleTavern-0.15
+   cd D:\Downloads\SimpleTavern-v0.228
    ```
 
    **Linux/macOS (Bash):**
    ```bash
    # 假设下载到 ~/Downloads，解压后进入目录
-   cd ~/Downloads/SimpleTavern-0.15
+   cd ~/Downloads/SimpleTavern-v0.228
    ```
 
 3. **运行一键部署脚本**
