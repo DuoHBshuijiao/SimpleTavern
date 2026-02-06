@@ -44,7 +44,7 @@ from app.routes.update import router as update_router
 from app.storage import ensure_data_initialized
 
 
-app = FastAPI(title="SimpleTavern", version="v0.228")
+app = FastAPI(title="SimpleTavern", version="v0.229")
 
 app.add_middleware(
     CORSMiddleware,

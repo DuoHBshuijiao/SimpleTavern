@@ -22,7 +22,7 @@ from app.storage import get_repo_root, get_update_dir
 
 router = APIRouter(tags=["update"])
 
-CURRENT_VERSION = "v0.228"
+CURRENT_VERSION = "v0.229"
 GITHUB_REPO = "DuoHBshuijiao/SimpleTavern"
 GITHUB_API_LATEST = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
@@ -39,6 +39,15 @@ def _is_newer(latest_tag: str, current: str) -> bool:
     a = _parse_version(latest_tag)
     b = _parse_version(current)
     return a > b
+
+
+@router.get("/update/version")
+def get_version() -> dict:
+    """
+    返回当前应用版本号，供前端展示用。
+    仅返回版本字符串，不请求 GitHub。
+    """
+    return {"version": CURRENT_VERSION}
 
 
 @router.get("/update/check")

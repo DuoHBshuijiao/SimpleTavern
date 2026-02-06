@@ -43,8 +43,8 @@ import { X, Eye, EyeOff, Check, Loader2 } from 'lucide-vue-next'
 
 const { applyFont } = useAppFont()
 
-/** 当前应用版本，与云端 release 一致 */
-const APP_VERSION = 'v0.228'
+/** 当前应用版本，从后端 /api/update/version 获取 */
+const appVersion = ref<string>('')
 
 const props = defineProps<{
   show: boolean
@@ -72,6 +72,19 @@ watch(() => props.initialTab, (newTab) => {
 watch(tab, (t) => {
   if (t === 'chat') chatTabEverOpened.value = true
 })
+
+// 打开设置抽屉时从后端获取版本号（仅请求一次）
+watch(
+  () => props.show,
+  (visible) => {
+    if (visible && !appVersion.value) {
+      apiGet<{ version: string }>('/api/update/version')
+        .then((res) => { appVersion.value = res.version })
+        .catch(() => { appVersion.value = '' })
+    }
+  },
+  { immediate: true }
+)
 
 const globalDraft = ref<Settings | null>(null)
 const chatDraft = ref<ChatOverrides | null>(null)
@@ -974,7 +987,7 @@ async function checkUpdate() {
               </div>
 
               <div class="h-px bg-white/5 my-4"></div>
-              <div class="flex justify-end gap-2 items-center">
+              <div class="flex justify-start gap-2 items-center">
                 <button
                   type="button"
                   class="px-4 py-2 bg-white/5 hover:bg-white/10 text-gray-200 rounded-lg text-sm transition-colors whitespace-nowrap"
@@ -985,7 +998,12 @@ async function checkUpdate() {
                 </button>
                 <span v-if="checkUpdateMessage" class="text-xs text-gray-400">{{ checkUpdateMessage }}</span>
               </div>
-              <div class="text-xs text-gray-500 text-right">{{ APP_VERSION }}</div>
+              <a
+                href="https://github.com/DuoHBshuijiao/SimpleTavern/releases"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="text-xs text-gray-500 text-center block cursor-pointer hover:text-gray-300 hover:underline transition-colors"
+              >{{ appVersion || '…' }}</a>
             </div>
           </div>
 
@@ -1113,7 +1131,12 @@ async function checkUpdate() {
               </div>
 
               <div class="h-px bg-white/5 my-4"></div>
-              <div class="text-xs text-gray-500 text-right">{{ APP_VERSION }}</div>
+              <a
+                href="https://github.com/DuoHBshuijiao/SimpleTavern/releases"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="text-xs text-gray-500 text-center block cursor-pointer hover:text-gray-300 hover:underline transition-colors"
+              >{{ appVersion || '…' }}</a>
           </div>
 
           <!-- Chat Specific Settings -->
@@ -1231,7 +1254,12 @@ async function checkUpdate() {
               </div>
 
               <div class="h-px bg-white/5 my-4"></div>
-              <div class="text-xs text-gray-500 text-right">{{ APP_VERSION }}</div>
+              <a
+                href="https://github.com/DuoHBshuijiao/SimpleTavern/releases"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="text-xs text-gray-500 text-center block cursor-pointer hover:text-gray-300 hover:underline transition-colors"
+              >{{ appVersion || '…' }}</a>
             </div>
           </div>
         </div>
