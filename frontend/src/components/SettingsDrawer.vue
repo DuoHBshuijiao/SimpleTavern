@@ -231,9 +231,9 @@ watch(
     chatTokenEstimate.value = null
     messagesSinceLastMemoryUpdate.value = null
     tokensSinceLastMemoryUpdate.value = null
-    if (tab.value === 'chat' && props.chat) {
+    if (tab.value === 'chat') {
       fetchMemoryTokenCount()
-      fetchChatTokenCount()
+      if (props.chat?.id) fetchChatTokenCount()
     }
   },
 )
@@ -252,7 +252,10 @@ watch(
 watch(
   () => [props.chat?.id, tab.value] as const,
   ([chatId, t]) => {
-    if (props.show && t === 'chat' && chatId) fetchChatTokenCount()
+    if (props.show && t === 'chat') {
+      fetchMemoryTokenCount()
+      if (chatId) fetchChatTokenCount()
+    }
   },
 )
 
