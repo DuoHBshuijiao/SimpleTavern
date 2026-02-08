@@ -60,10 +60,12 @@ export interface AssistantSettings {
 
 export interface UseAssistantOptions {
   chatId: ComputedRef<string | null>
+  /** 是否启用流式传输，与全局设置一致；未传时默认 true（流式） */
+  streamEnabled?: ComputedRef<boolean>
 }
 
 export function useAssistant(options: UseAssistantOptions) {
-  const { chatId } = options
+  const { chatId, streamEnabled } = options
 
   // Chat scope 状态
   const assistantMessages = ref<AssistantMessage[]>([])
@@ -486,50 +488,85 @@ export function useAssistant(options: UseAssistantOptions) {
     assistantAborters[scope]?.abort()
     assistantAborters[scope] = new AbortController()
 
+    const useStream = streamEnabled?.value !== false
+    const body = {
+      userMessage: text,
+      model: assistantSettings.value.model,
+      temperature: assistantSettings.value.temperature,
+      appendUserMessage: shouldAppend,
+      chatId: scope === 'chat' ? chatId.value : null,
+      allowWriteMemory: scope === 'chat' ? allowMemoryWrite(text) : false,
+      scope,
+    }
+
     let aborted = false
     try {
-      await postAndConsumeSse(
-        '/api/assistant/stream',
-        {
-          userMessage: text,
-          model: assistantSettings.value.model,
-          temperature: assistantSettings.value.temperature,
-          appendUserMessage: shouldAppend,
-          chatId: scope === 'chat' ? chatId.value : null,
-          allowWriteMemory: scope === 'chat' ? allowMemoryWrite(text) : false,
-          scope,
-        },
-        (evt) => {
-          if (evt.event === 'delta') {
-            const data = evt.data as { text?: string } | undefined
-            const t = data?.text
-            if (typeof t === 'string') {
-              assistantMsg.content += t
+      if (useStream) {
+        await postAndConsumeSse(
+          '/api/assistant/stream',
+          body,
+          (evt) => {
+            if (evt.event === 'delta') {
+              const data = evt.data as { text?: string } | undefined
+              const t = data?.text
+              if (typeof t === 'string') {
+                assistantMsg.content += t
+              }
+            } else if (evt.event === 'tool_trace') {
+              const data = evt.data as { content?: string; messageId?: string } | undefined
+              const content = data?.content
+              if (typeof content === 'string' && content.trim()) {
+                state.messages.value.push({
+                  id: data?.messageId || `assistant_tool_${Date.now()}`,
+                  role: 'system',
+                  content,
+                  ts: new Date().toISOString(),
+                })
+              }
+            } else if (evt.event === 'card') {
+              const data = evt.data as { card?: unknown } | undefined
+              const card = data?.card
+              if (card && onCardReceived) {
+                onCardReceived(card)
+              }
+            } else if (evt.event === 'error') {
+              const data = evt.data as { message?: string } | undefined
+              state.streamError.value = String(data?.message ?? 'unknown error')
             }
-          } else if (evt.event === 'tool_trace') {
-            const data = evt.data as { content?: string; messageId?: string } | undefined
-            const content = data?.content
-            if (typeof content === 'string' && content.trim()) {
+          },
+          assistantAborters[scope]?.signal,
+        )
+      } else {
+        const res = await apiPost<{
+          ok: boolean
+          stream?: boolean
+          content?: string
+          messageId?: string
+          toolTraces?: Array<{ content: string; messageId: string }>
+          card?: unknown
+          error?: string
+        }>('/api/assistant/stream', body)
+        if (res?.ok && res.stream === false) {
+          if (Array.isArray(res.toolTraces)) {
+            for (const tt of res.toolTraces) {
               state.messages.value.push({
-                id: data?.messageId || `assistant_tool_${Date.now()}`,
+                id: tt.messageId || `assistant_tool_${Date.now()}`,
                 role: 'system',
-                content,
+                content: tt.content || '',
                 ts: new Date().toISOString(),
               })
             }
-          } else if (evt.event === 'card') {
-            const data = evt.data as { card?: unknown } | undefined
-            const card = data?.card
-            if (card && onCardReceived) {
-              onCardReceived(card)
-            }
-          } else if (evt.event === 'error') {
-            const data = evt.data as { message?: string } | undefined
-            state.streamError.value = String(data?.message ?? 'unknown error')
           }
-        },
-        assistantAborters[scope]?.signal,
-      )
+          if (typeof res.content === 'string') {
+            assistantMsg.content = res.content
+          }
+          if (res.card != null && onCardReceived) {
+            onCardReceived(res.card)
+          }
+        } else if (!res?.ok && typeof res?.error === 'string') {
+          state.streamError.value = res.error
+        }
+      }
     } catch (e: unknown) {
       if (e instanceof Error && e.name === 'AbortError') {
         aborted = true

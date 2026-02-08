@@ -38,7 +38,7 @@ from pathlib import Path
 from typing import Any, AsyncIterator
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.llm.openai_compat import chat_completions_message
@@ -1127,6 +1127,84 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
         allow_write_memory = False
     tools = _build_tools(chat_id, bool(allow_write_memory))
     extra_body = {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
+
+    # 非流式：与全局设置 streamEnabled 一致，返回 JSON
+    if not getattr(settings, "streamEnabled", True):
+        current_messages = list(llm_msgs)
+        max_turns = 8
+        tool_traces: list[dict[str, Any]] = []
+        last_card: Any = None
+        try:
+            for _ in range(max_turns):
+                resp = await chat_completions_message(
+                    base_url=base_url,
+                    api_key=api_key,
+                    model=model,
+                    messages=current_messages,
+                    temperature=temperature,
+                    tools=tools,
+                    extra_body=extra_body,
+                )
+                llm_assistant_msg: dict[str, Any] = {
+                    "role": resp.role or "assistant",
+                    "content": resp.content or "",
+                }
+                if resp.reasoning_content:
+                    llm_assistant_msg["reasoning_content"] = resp.reasoning_content
+                if resp.tool_calls is not None:
+                    llm_assistant_msg["tool_calls"] = resp.tool_calls
+                current_messages.append(llm_assistant_msg)
+
+                if not resp.tool_calls:
+                    final_content = resp.content or ""
+                    final_reasoning_content = resp.reasoning_content
+                    assistant_msg_obj = ChatMessage(
+                        role=resp.role or "assistant",
+                        content=final_content,
+                    )
+                    if final_reasoning_content:
+                        assistant_msg_obj.model_config["extra"] = {"reasoning_content": final_reasoning_content}
+                    chat_to_save = _resolve_assistant_chat_by_scope(scope, chat_id)
+                    chat_to_save.messages.append(assistant_msg_obj)
+                    _save_assistant_chat_by_scope(scope, chat_id, chat_to_save)
+                    return JSONResponse({
+                        "ok": True,
+                        "stream": False,
+                        "content": final_content,
+                        "messageId": assistant_msg_obj.id,
+                        "toolTraces": tool_traces,
+                        "card": last_card,
+                    })
+
+                for tool_call in resp.tool_calls or []:
+                    fn = (tool_call.get("function") or {}).get("name")
+                    raw_args = (tool_call.get("function") or {}).get("arguments") or "{}"
+                    try:
+                        args = json.loads(raw_args)
+                    except Exception:
+                        args = {}
+                    tool_name = str(fn)
+                    result, card = _run_tool(tool_name, args, chat_id, bool(allow_write_memory))
+                    if card:
+                        last_card = card
+                    trace_content = f"工具调用：{tool_name}"
+                    if args:
+                        trace_content += f"\n参数：{json.dumps(args, ensure_ascii=False)}"
+                    trace_msg = ChatMessage(role="system", content=trace_content, toolTrace=True)
+                    trace_chat = _resolve_assistant_chat_by_scope(scope, chat_id)
+                    trace_chat.messages.append(trace_msg)
+                    _save_assistant_chat_by_scope(scope, chat_id, trace_chat)
+                    tool_traces.append({"content": trace_content, "messageId": trace_msg.id})
+                    tool_result_msg = {
+                        "role": "tool",
+                        "tool_call_id": tool_call.get("id"),
+                        "content": json.dumps(result, ensure_ascii=False),
+                    }
+                    current_messages.append(tool_result_msg)
+
+            return JSONResponse({"ok": False, "error": "tool call loop limit exceeded"}, status_code=500)
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
     async def event_iter() -> AsyncIterator[str]:
         """

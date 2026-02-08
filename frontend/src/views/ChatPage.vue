@@ -176,9 +176,13 @@ const group = useGroupChat({
   settings: settings as any,
 })
 
+/** 是否启用流式传输（与全局设置一致），供助手与生成共用 */
+const isStreamEnabled = computed(() => settings.settings?.streamEnabled !== false)
+
 // 聊天助手
 const assistant = useAssistant({
   chatId: assistantChatId,
+  streamEnabled: isStreamEnabled,
 })
 
 /**
@@ -402,13 +406,6 @@ const groupMembers = computed(() => {
     .map(id => characters.list.find(c => c.id === id))
     .filter((c): c is CharacterCard => c !== null)
 })
-
-/**
- * 计算是否启用流式传输
- *
- * 检查全局设置中是否启用了流式传输（默认为true）。
- */
-const isStreamEnabled = computed(() => settings.settings?.streamEnabled !== false)
 
 /**
  * 计算是否正在流式传输
