@@ -655,9 +655,17 @@ def _run_tool(
             return _tool_read_whole_chat_json(chat_id), None
         elif name == "read_chat_memory" and chat_id:
             return _tool_read_chat_memory(chat_id), None
-        elif name == "append_chat_memory" and chat_id and allow_write_memory:
+        elif name == "append_chat_memory":
+            if not chat_id:
+                return {"ok": False, "error": "记忆写入需要当前在聊天会话中（需提供 chatId），工作区模式下无法写入记忆。"}, None
+            if not allow_write_memory:
+                return {"ok": False, "error": "本回合未允许写入长期记忆。用户需在本条消息中明确表达写入/更新/保存/记录记忆的意图（例如：「保存到记忆」「写入长期记忆」）后，记忆工具才会可用。"}, None
             return _tool_append_chat_memory(chat_id, args), None
-        elif name == "overwrite_chat_memory" and chat_id and allow_write_memory:
+        elif name == "overwrite_chat_memory":
+            if not chat_id:
+                return {"ok": False, "error": "记忆覆盖需要当前在聊天会话中（需提供 chatId），工作区模式下无法写入记忆。"}, None
+            if not allow_write_memory:
+                return {"ok": False, "error": "本回合未允许写入长期记忆。用户需在本条消息中明确表达写入/更新/保存/记录记忆的意图后，记忆工具才会可用。"}, None
             return _tool_overwrite_chat_memory(chat_id, args), None
         elif name == "read_character_card" and chat_id:
             return _tool_read_character_card(chat_id, args), None
