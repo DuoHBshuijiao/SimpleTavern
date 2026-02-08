@@ -105,6 +105,10 @@ const editingTitle = ref('')
 const aborter = ref<AbortController | null>(null)
 const stopRequested = ref(false)
 const stopStreamingHold = ref(false)
+/** 主聊天当前展示思考链的消息 ID（仅前端临时，刷新后消失） */
+const chatReasoningMessageId = ref<string | null>(null)
+/** 主聊天思考链内容 */
+const chatReasoningContent = ref('')
 
 /**
  * 计算选中的角色
@@ -572,6 +576,8 @@ async function runGroupGeneration(
     if (!activeChat.value) break
     
     const localAssistantId = `local_assistant_${Date.now()}_${i}`
+    chatReasoningMessageId.value = localAssistantId
+    chatReasoningContent.value = ''
     const localMsg = { 
       version: 1, 
       id: localAssistantId, 
@@ -597,6 +603,18 @@ async function runGroupGeneration(
               if (typeof t === 'string') {
                 stream.appendDeltaBuffered(localAssistantId, t)
               }
+            } else if (evt.event === 'reasoning') {
+              const data = evt.data as { text?: string } | undefined
+              const t = data?.text
+              if (typeof t === 'string') {
+                chatReasoningContent.value += t
+              }
+            } else if (evt.event === 'done') {
+              const data = evt.data as { assistantMessageId?: string } | undefined
+              const serverId = data?.assistantMessageId
+              if (serverId && chatReasoningContent.value) {
+                chatReasoningMessageId.value = serverId
+              }
             } else if (evt.event === 'error') {
               const data = evt.data as { message?: string } | undefined
               streamError.value = String(data?.message ?? 'unknown error')
@@ -615,10 +633,14 @@ async function runGroupGeneration(
         assistantMessageId: string | null
         characterId: string
         content: string
+        reasoningContent?: string
         error?: string
       }>('/api/generate/group', { chatId, characterId })
       
       if (res.ok) {
+        if (typeof res.reasoningContent === 'string') {
+          chatReasoningContent.value = res.reasoningContent
+        }
         chats.appendLocalMessageContent(localAssistantId, res.content || '')
         scrollToBottom()
       } else {
@@ -748,6 +770,9 @@ async function sendUserMessage() {
       const localUserId = `local_user_${Date.now()}`
       const localAssistantId = `local_assistant_${Date.now()}`
 
+      chatReasoningMessageId.value = localAssistantId
+      chatReasoningContent.value = ''
+
       chats.addLocalMessage({
         version: 1,
         id: localUserId,
@@ -782,6 +807,18 @@ async function sendUserMessage() {
                 if (typeof t === 'string') {
                   stream.appendDeltaBuffered(localAssistantId, t)
                 }
+              } else if (evt.event === 'reasoning') {
+                const data = evt.data as { text?: string } | undefined
+                const t = data?.text
+                if (typeof t === 'string') {
+                  chatReasoningContent.value += t
+                }
+              } else if (evt.event === 'done') {
+                const data = evt.data as { assistantMessageId?: string } | undefined
+                const serverId = data?.assistantMessageId
+                if (serverId && chatReasoningContent.value) {
+                  chatReasoningMessageId.value = serverId
+                }
               } else if (evt.event === 'error') {
                 const data = evt.data as { message?: string } | undefined
                 streamError.value = String(data?.message ?? 'unknown error')
@@ -799,6 +836,7 @@ async function sendUserMessage() {
           chatId: string
           assistantMessageId: string | null
           content: string
+          reasoningContent?: string
           error?: string
         }>('/api/generate/stream', {
           chatId,
@@ -810,6 +848,9 @@ async function sendUserMessage() {
         })
         
         if (res.ok) {
+          if (typeof res.reasoningContent === 'string') {
+            chatReasoningContent.value = res.reasoningContent
+          }
           chats.appendLocalMessageContent(localAssistantId, res.content || '')
           scrollToBottom()
         } else {
@@ -959,6 +1000,8 @@ async function triggerInterject(characterId: string) {
   const useStream = settings.settings?.streamEnabled !== false
   
   const localAssistantId = `local_interject_${Date.now()}`
+  chatReasoningMessageId.value = localAssistantId
+  chatReasoningContent.value = ''
   const localMsg = { 
     version: 1, 
     id: localAssistantId, 
@@ -985,6 +1028,18 @@ async function triggerInterject(characterId: string) {
               if (typeof t === 'string') {
                 stream.appendDeltaBuffered(localAssistantId, t)
               }
+            } else if (evt.event === 'reasoning') {
+              const data = evt.data as { text?: string } | undefined
+              const t = data?.text
+              if (typeof t === 'string') {
+                chatReasoningContent.value += t
+              }
+            } else if (evt.event === 'done') {
+              const data = evt.data as { assistantMessageId?: string } | undefined
+              const serverId = data?.assistantMessageId
+              if (serverId && chatReasoningContent.value) {
+                chatReasoningMessageId.value = serverId
+              }
             } else if (evt.event === 'error') {
               const data = evt.data as { message?: string } | undefined
               streamError.value = String(data?.message ?? 'unknown error')
@@ -1003,10 +1058,14 @@ async function triggerInterject(characterId: string) {
         assistantMessageId: string | null
         characterId: string
         content: string
+        reasoningContent?: string
         error?: string
       }>('/api/generate/interject', { chatId, characterId })
       
       if (res.ok) {
+        if (typeof res.reasoningContent === 'string') {
+          chatReasoningContent.value = res.reasoningContent
+        }
         chats.appendLocalMessageContent(localAssistantId, res.content || '')
         scrollToBottom()
       } else {
@@ -1178,6 +1237,8 @@ async function handleRewriteMessage(m: ChatMessage) {
 
   try {
     const localAssistantId = `local_rewrite_${Date.now()}`
+    chatReasoningMessageId.value = localAssistantId
+    chatReasoningContent.value = ''
     const localMsg = {
       version: 1,
       id: localAssistantId,
@@ -1204,6 +1265,18 @@ async function handleRewriteMessage(m: ChatMessage) {
                 if (typeof t === 'string') {
                   stream.appendDeltaBuffered(localAssistantId, t)
                 }
+              } else if (evt.event === 'reasoning') {
+                const data = evt.data as { text?: string } | undefined
+                const t = data?.text
+                if (typeof t === 'string') {
+                  chatReasoningContent.value += t
+                }
+              } else if (evt.event === 'done') {
+                const data = evt.data as { assistantMessageId?: string } | undefined
+                const serverId = data?.assistantMessageId
+                if (serverId && chatReasoningContent.value) {
+                  chatReasoningMessageId.value = serverId
+                }
               } else if (evt.event === 'error') {
                 const data = evt.data as { message?: string } | undefined
                 streamError.value = String(data?.message ?? 'unknown error')
@@ -1219,10 +1292,14 @@ async function handleRewriteMessage(m: ChatMessage) {
         const res = await apiPost<{
           ok: boolean
           content: string
+          reasoningContent?: string
           error?: string
         }>('/api/generate/group', { chatId, characterId })
         
         if (res.ok) {
+          if (typeof res.reasoningContent === 'string') {
+            chatReasoningContent.value = res.reasoningContent
+          }
           chats.appendLocalMessageContent(localAssistantId, res.content || '')
           scrollToBottom()
         } else {
@@ -1252,6 +1329,18 @@ async function handleRewriteMessage(m: ChatMessage) {
                 if (typeof t === 'string') {
                   stream.appendDeltaBuffered(localAssistantId, t)
                 }
+              } else if (evt.event === 'reasoning') {
+                const data = evt.data as { text?: string } | undefined
+                const t = data?.text
+                if (typeof t === 'string') {
+                  chatReasoningContent.value += t
+                }
+              } else if (evt.event === 'done') {
+                const data = evt.data as { assistantMessageId?: string } | undefined
+                const serverId = data?.assistantMessageId
+                if (serverId && chatReasoningContent.value) {
+                  chatReasoningMessageId.value = serverId
+                }
               } else if (evt.event === 'error') {
                 const data = evt.data as { message?: string } | undefined
                 streamError.value = String(data?.message ?? 'unknown error')
@@ -1267,6 +1356,7 @@ async function handleRewriteMessage(m: ChatMessage) {
         const res = await apiPost<{
           ok: boolean
           content: string
+          reasoningContent?: string
           error?: string
         }>('/api/generate/stream', {
           chatId,
@@ -1276,6 +1366,9 @@ async function handleRewriteMessage(m: ChatMessage) {
         })
         
         if (res.ok) {
+          if (typeof res.reasoningContent === 'string') {
+            chatReasoningContent.value = res.reasoningContent
+          }
           chats.appendLocalMessageContent(localAssistantId, res.content || '')
           scrollToBottom()
         } else {
@@ -1681,6 +1774,8 @@ async function handleSaveAndSend() {
       group.showInterject()
     } else {
       const localAssistantId = `local_assistant_${Date.now()}`
+      chatReasoningMessageId.value = localAssistantId
+      chatReasoningContent.value = ''
       chats.addLocalMessage({ version: 1, id: localAssistantId, role: 'assistant', content: '', ts: now })
       scrollToBottom()
 
@@ -1703,6 +1798,18 @@ async function handleSaveAndSend() {
                 if (typeof t === 'string') {
                   stream.appendDeltaBuffered(localAssistantId, t)
                 }
+              } else if (evt.event === 'reasoning') {
+                const data = evt.data as { text?: string } | undefined
+                const t = data?.text
+                if (typeof t === 'string') {
+                  chatReasoningContent.value += t
+                }
+              } else if (evt.event === 'done') {
+                const data = evt.data as { assistantMessageId?: string } | undefined
+                const serverId = data?.assistantMessageId
+                if (serverId && chatReasoningContent.value) {
+                  chatReasoningMessageId.value = serverId
+                }
               } else if (evt.event === 'error') {
                 const data = evt.data as { message?: string } | undefined
                 streamError.value = String(data?.message ?? 'unknown error')
@@ -1715,7 +1822,7 @@ async function handleSaveAndSend() {
           stopRequested.value = false
         }
       } else {
-        const res = await apiPost<{ ok: boolean; content: string; error?: string }>('/api/generate/stream', {
+        const res = await apiPost<{ ok: boolean; content: string; reasoningContent?: string; error?: string }>('/api/generate/stream', {
           chatId,
           userMessage: editedContent,
           appendUserMessage: false,
@@ -1723,6 +1830,9 @@ async function handleSaveAndSend() {
         })
 
         if (res.ok) {
+          if (typeof res.reasoningContent === 'string') {
+            chatReasoningContent.value = res.reasoningContent
+          }
           chats.appendLocalMessageContent(localAssistantId, res.content || '')
           scrollToBottom()
         } else {
@@ -1896,6 +2006,8 @@ const editingPersonaAvatarUrl = computed(() => {
             :user-avatar-url="userAvatarUrl"
             :character-avatar-url="characterAvatarUrl"
             :is-generating="isGenerating"
+            :reasoning-message-id="chatReasoningMessageId"
+            :reasoning-content="chatReasoningContent"
             :get-display-content="versions.getDisplayContent"
             :has-multiple-versions="versions.hasMultipleVersions"
             :get-current-version-index="versions.getCurrentVersionIndex"
@@ -1963,6 +2075,8 @@ const editingPersonaAvatarUrl = computed(() => {
       :draft="assistant.assistantDraft.value"
       :is-generating="assistant.isAssistantGenerating.value"
       :stream-error="assistant.assistantStreamError.value"
+      :reasoning-message-id="assistant.assistantReasoningMessageId.value"
+      :reasoning-content="assistant.assistantReasoningContent.value"
       :current-model="assistantCurrentModel"
       :model-options="chatModelOptions"
       @update:is-open="assistant.isAssistantPanelOpen.value = $event"

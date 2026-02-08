@@ -29,7 +29,7 @@ from typing import AsyncIterator
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from app.llm.openai_compat import chat_completions, stream_chat_completions
+from app.llm.openai_compat import chat_completions, chat_completions_message, stream_chat_completions
 from app.schemas import ChatMessage, GenerateStreamRequest, GroupGenerateRequest, SingleInterjectRequest
 from app.storage import load_character, load_chat, load_settings, save_chat, save_settings
 from app.tokenizer_service import trim_messages_to_context
@@ -251,17 +251,13 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
 
     thinking_enabled = bool(getattr(settings, "thinkingMode", False))
     extra_body = {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
+    if model == "deepseek-reasoner" or thinking_enabled:
+        temperature = None
 
     async def event_iter() -> AsyncIterator[str]:
-        """
-        流式事件迭代器
-        
-        Yields:
-            str: SSE格式的事件字符串
-        """
         full_text: list[str] = []
         try:
-            async for delta in stream_chat_completions(
+            async for chunk in stream_chat_completions(
                 base_url=base_url,
                 api_key=api_key,
                 model=model,
@@ -271,8 +267,11 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
                 max_tokens=max_tokens,
                 extra_body=extra_body,
             ):
-                full_text.append(delta.text)
-                yield _sse("delta", {"text": delta.text})
+                if chunk.kind == "reasoning":
+                    yield _sse("reasoning", {"text": chunk.text})
+                else:
+                    full_text.append(chunk.text)
+                    yield _sse("delta", {"text": chunk.text})
 
             assistant_content = "".join(full_text).strip()
             if assistant_content:
@@ -280,17 +279,12 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
                 chat.messages.append(assistant_msg)
                 chat.updatedAt = _now_iso()
                 save_chat(chat)
-                
                 if model and model not in settings.llm.usedModels:
                     settings.llm.usedModels.insert(0, model)
                     settings.llm.usedModels = settings.llm.usedModels[:20]
                     settings.updatedAt = _now_iso()
                     save_settings(settings)
-                
-                yield _sse(
-                    "done",
-                    {"ok": True, "chatId": chat.id, "assistantMessageId": assistant_msg.id},
-                )
+                yield _sse("done", {"ok": True, "chatId": chat.id, "assistantMessageId": assistant_msg.id})
             else:
                 yield _sse("done", {"ok": True, "chatId": chat.id})
         except Exception as e:
@@ -298,37 +292,53 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
 
     if not settings.streamEnabled:
         try:
-            result = await chat_completions(
-                base_url=base_url,
-                api_key=api_key,
-                model=model,
-                messages=messages,
-                temperature=temperature,
-                top_p=top_p,
-                max_tokens=max_tokens,
-                extra_body=extra_body,
-            )
-            assistant_content = result.text.strip()
+            if thinking_enabled:
+                resp = await chat_completions_message(
+                    base_url=base_url,
+                    api_key=api_key,
+                    model=model,
+                    messages=messages,
+                    temperature=temperature,
+                    top_p=top_p,
+                    max_tokens=max_tokens,
+                    extra_body=extra_body,
+                )
+                assistant_content = (resp.content or "").strip()
+                reasoning_content = resp.reasoning_content or None
+            else:
+                result = await chat_completions(
+                    base_url=base_url,
+                    api_key=api_key,
+                    model=model,
+                    messages=messages,
+                    temperature=temperature,
+                    top_p=top_p,
+                    max_tokens=max_tokens,
+                    extra_body=extra_body,
+                )
+                assistant_content = result.text.strip()
+                reasoning_content = None
             assistant_msg = None
             if assistant_content:
                 assistant_msg = ChatMessage(role="assistant", content=assistant_content)
                 chat.messages.append(assistant_msg)
                 chat.updatedAt = _now_iso()
                 save_chat(chat)
-                
                 if model and model not in settings.llm.usedModels:
                     settings.llm.usedModels.insert(0, model)
                     settings.llm.usedModels = settings.llm.usedModels[:20]
                     settings.updatedAt = _now_iso()
                     save_settings(settings)
-            
-            return JSONResponse({
+            payload = {
                 "ok": True,
                 "chatId": chat.id,
                 "assistantMessageId": assistant_msg.id if assistant_msg else None,
                 "content": assistant_content,
                 "stream": False,
-            })
+            }
+            if reasoning_content is not None:
+                payload["reasoningContent"] = reasoning_content
+            return JSONResponse(payload)
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
@@ -512,17 +522,13 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
 
     thinking_enabled = bool(getattr(settings, "thinkingMode", False))
     extra_body = {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
+    if model == "deepseek-reasoner" or thinking_enabled:
+        temperature = None
 
     async def event_iter():
-        """
-        流式事件迭代器
-        
-        Yields:
-            str: SSE格式的事件字符串
-        """
         full_text: list[str] = []
         try:
-            async for delta in stream_chat_completions(
+            async for chunk in stream_chat_completions(
                 base_url=base_url,
                 api_key=api_key,
                 model=model,
@@ -532,24 +538,23 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
                 max_tokens=max_tokens,
                 extra_body=extra_body,
             ):
-                full_text.append(delta.text)
-                yield _sse("delta", {"text": delta.text})
+                if chunk.kind == "reasoning":
+                    yield _sse("reasoning", {"text": chunk.text})
+                else:
+                    full_text.append(chunk.text)
+                    yield _sse("delta", {"text": chunk.text})
 
             assistant_content = "".join(full_text).strip()
             if assistant_content:
                 assistant_msg = ChatMessage(
-                    role="assistant", 
+                    role="assistant",
                     content=assistant_content,
                     characterId=req.characterId
                 )
                 chat.messages.append(assistant_msg)
                 chat.updatedAt = _now_iso()
                 save_chat(chat)
-                
-                yield _sse(
-                    "done",
-                    {"ok": True, "chatId": chat.id, "assistantMessageId": assistant_msg.id, "characterId": req.characterId},
-                )
+                yield _sse("done", {"ok": True, "chatId": chat.id, "assistantMessageId": assistant_msg.id, "characterId": req.characterId})
             else:
                 yield _sse("done", {"ok": True, "chatId": chat.id, "characterId": req.characterId})
         except Exception as e:
@@ -557,36 +562,53 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
 
     if not settings.streamEnabled:
         try:
-            result = await chat_completions(
-                base_url=base_url,
-                api_key=api_key,
-                model=model,
-                messages=messages,
-                temperature=temperature,
-                top_p=top_p,
-                max_tokens=max_tokens,
-                extra_body=extra_body,
-            )
-            assistant_content = result.text.strip()
+            if thinking_enabled:
+                resp = await chat_completions_message(
+                    base_url=base_url,
+                    api_key=api_key,
+                    model=model,
+                    messages=messages,
+                    temperature=temperature,
+                    top_p=top_p,
+                    max_tokens=max_tokens,
+                    extra_body=extra_body,
+                )
+                assistant_content = (resp.content or "").strip()
+                reasoning_content = resp.reasoning_content or None
+            else:
+                result = await chat_completions(
+                    base_url=base_url,
+                    api_key=api_key,
+                    model=model,
+                    messages=messages,
+                    temperature=temperature,
+                    top_p=top_p,
+                    max_tokens=max_tokens,
+                    extra_body=extra_body,
+                )
+                assistant_content = result.text.strip()
+                reasoning_content = None
             assistant_msg = None
             if assistant_content:
                 assistant_msg = ChatMessage(
-                    role="assistant", 
+                    role="assistant",
                     content=assistant_content,
                     characterId=req.characterId
                 )
                 chat.messages.append(assistant_msg)
                 chat.updatedAt = _now_iso()
                 save_chat(chat)
-            
-            return JSONResponse({
+            payload = {
                 "ok": True,
                 "chatId": chat.id,
                 "assistantMessageId": assistant_msg.id if assistant_msg else None,
                 "characterId": req.characterId,
                 "content": assistant_content,
                 "stream": False,
-            })
+            }
+            if reasoning_content is not None:
+                payload["reasoningContent"] = reasoning_content
+            return JSONResponse(payload)
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
@@ -763,17 +785,13 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
 
     thinking_enabled = bool(getattr(settings, "thinkingMode", False))
     extra_body = {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
+    if model == "deepseek-reasoner" or thinking_enabled:
+        temperature = None
 
     async def event_iter():
-        """
-        流式事件迭代器
-        
-        Yields:
-            str: SSE格式的事件字符串
-        """
         full_text: list[str] = []
         try:
-            async for delta in stream_chat_completions(
+            async for chunk in stream_chat_completions(
                 base_url=base_url,
                 api_key=api_key,
                 model=model,
@@ -783,24 +801,23 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
                 max_tokens=max_tokens,
                 extra_body=extra_body,
             ):
-                full_text.append(delta.text)
-                yield _sse("delta", {"text": delta.text})
+                if chunk.kind == "reasoning":
+                    yield _sse("reasoning", {"text": chunk.text})
+                else:
+                    full_text.append(chunk.text)
+                    yield _sse("delta", {"text": chunk.text})
 
             assistant_content = "".join(full_text).strip()
             if assistant_content:
                 assistant_msg = ChatMessage(
-                    role="assistant", 
+                    role="assistant",
                     content=assistant_content,
                     characterId=req.characterId
                 )
                 chat.messages.append(assistant_msg)
                 chat.updatedAt = _now_iso()
                 save_chat(chat)
-                
-                yield _sse(
-                    "done",
-                    {"ok": True, "chatId": chat.id, "assistantMessageId": assistant_msg.id, "characterId": req.characterId, "isInterject": True},
-                )
+                yield _sse("done", {"ok": True, "chatId": chat.id, "assistantMessageId": assistant_msg.id, "characterId": req.characterId, "isInterject": True})
             else:
                 yield _sse("done", {"ok": True, "chatId": chat.id, "characterId": req.characterId, "isInterject": True})
         except Exception as e:
@@ -808,29 +825,43 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
 
     if not settings.streamEnabled:
         try:
-            result = await chat_completions(
-                base_url=base_url,
-                api_key=api_key,
-                model=model,
-                messages=messages,
-                temperature=temperature,
-                top_p=top_p,
-                max_tokens=max_tokens,
-                extra_body=extra_body,
-            )
-            assistant_content = result.text.strip()
+            if thinking_enabled:
+                resp = await chat_completions_message(
+                    base_url=base_url,
+                    api_key=api_key,
+                    model=model,
+                    messages=messages,
+                    temperature=temperature,
+                    top_p=top_p,
+                    max_tokens=max_tokens,
+                    extra_body=extra_body,
+                )
+                assistant_content = (resp.content or "").strip()
+                reasoning_content = resp.reasoning_content or None
+            else:
+                result = await chat_completions(
+                    base_url=base_url,
+                    api_key=api_key,
+                    model=model,
+                    messages=messages,
+                    temperature=temperature,
+                    top_p=top_p,
+                    max_tokens=max_tokens,
+                    extra_body=extra_body,
+                )
+                assistant_content = result.text.strip()
+                reasoning_content = None
             assistant_msg = None
             if assistant_content:
                 assistant_msg = ChatMessage(
-                    role="assistant", 
+                    role="assistant",
                     content=assistant_content,
                     characterId=req.characterId
                 )
                 chat.messages.append(assistant_msg)
                 chat.updatedAt = _now_iso()
                 save_chat(chat)
-            
-            return JSONResponse({
+            payload = {
                 "ok": True,
                 "chatId": chat.id,
                 "assistantMessageId": assistant_msg.id if assistant_msg else None,
@@ -838,7 +869,10 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
                 "content": assistant_content,
                 "stream": False,
                 "isInterject": True,
-            })
+            }
+            if reasoning_content is not None:
+                payload["reasoningContent"] = reasoning_content
+            return JSONResponse(payload)
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 

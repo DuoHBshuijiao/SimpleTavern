@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Literal
 
 import httpx
 
@@ -139,6 +139,18 @@ class ChatCompletionDelta:
     主要属性：
         text: 增量文本内容
     """
+    text: str
+
+
+@dataclass(frozen=True)
+class StreamChunk:
+    """
+    流式响应块（内容或思考链）
+    
+    当 API 在 delta 中返回 content 或 reasoning_content 时，
+    分别以 kind='content' 或 kind='reasoning' 逐块 yield，以保持打字机效果。
+    """
+    kind: Literal["content", "reasoning"]
     text: str
 
 
@@ -360,29 +372,15 @@ async def stream_chat_completions(
     max_tokens: int | None = None,
     tools: list[dict[str, Any]] | None = None,
     extra_body: dict[str, Any] | None = None,
-) -> AsyncIterator[ChatCompletionDelta]:
+) -> AsyncIterator[StreamChunk]:
     """
     OpenAI兼容的流式聊天完成调用
     
-    调用/v1/chat/completions端点，启用流式输出，解析Server-Sent Events (SSE)格式的响应。
-    兼容常见的data: {...}行格式和data: [DONE]结束标记。
-    
-    Args:
-        base_url: API基础URL
-        api_key: API密钥
-        model: 模型名称
-        messages: 消息列表
-        temperature: 温度参数
-        top_p: 核采样参数
-        max_tokens: 最大生成token数
-        tools: 工具定义列表
-        extra_body: 额外的请求体字段
+    解析 SSE 流中的 delta.content 与 delta.reasoning_content（若有），
+    分别以 StreamChunk(kind='content'|'reasoning', text=...) 逐块 yield，保持打字机效果。
     
     Yields:
-        ChatCompletionDelta: 流式响应中的文本增量
-    
-    Raises:
-        httpx.HTTPStatusError: HTTP请求失败时抛出
+        StreamChunk: 流式响应块（content 或 reasoning）
     """
     url = _normalize_base_url(base_url) + "/chat/completions"
     headers = {
@@ -422,6 +420,9 @@ async def stream_chat_completions(
                 if not choices:
                     continue
                 delta = (choices[0] or {}).get("delta") or {}
-                text = delta.get("content")
-                if isinstance(text, str) and text:
-                    yield ChatCompletionDelta(text=text)
+                reasoning_text = delta.get("reasoning_content")
+                if isinstance(reasoning_text, str) and reasoning_text:
+                    yield StreamChunk(kind="reasoning", text=reasoning_text)
+                content_text = delta.get("content")
+                if isinstance(content_text, str) and content_text:
+                    yield StreamChunk(kind="content", text=content_text)

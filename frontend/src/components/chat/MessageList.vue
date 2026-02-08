@@ -73,6 +73,10 @@ const props = defineProps<{
   characterAvatarUrl: string | null
   // 状态
   isGenerating: boolean
+  /** 当前展示思考链的消息 ID（仅前端临时，刷新后消失） */
+  reasoningMessageId?: string | null
+  /** 思考链内容 */
+  reasoningContent?: string
   // 版本相关
   getDisplayContent: (m: ChatMessage) => string
   hasMultipleVersions: (m: ChatMessage) => boolean
@@ -97,6 +101,23 @@ const deleteConfirm = ref<{
   message: ChatMessage
   target: HTMLElement
 } | null>(null)
+
+// 思考气泡：仅点击气泡体展开，仅点击图标收起
+const expandedReasoningMessageId = ref<string | null>(null)
+
+function isReasoningExpanded(messageId: string) {
+  return expandedReasoningMessageId.value === messageId
+}
+
+function expandReasoning(messageId: string, e: MouseEvent) {
+  if ((e.target as HTMLElement).closest('.reasoning-toggle-icon')) return
+  expandedReasoningMessageId.value = messageId
+}
+
+function collapseReasoning(e: MouseEvent) {
+  e.stopPropagation()
+  expandedReasoningMessageId.value = null
+}
 
 // Markdown 渲染器
 const md = new MarkdownIt({
@@ -268,6 +289,27 @@ defineExpose({ scrollToBottom, scrollRef })
               {{ getMessageLabel(m) }}
             </span>
             <span v-if="m.role === 'system'" class="text-[10px] bg-yellow-500/10 text-yellow-500 px-1.5 py-0.5 rounded">SYSTEM</span>
+          </div>
+
+          <!-- 思考链气泡：在角色名下方、正文上方，小圆角，默认折叠 80px，仅点击气泡展开、仅点击图标收起 -->
+          <div
+            v-if="m.role === 'assistant' && m.id === reasoningMessageId && reasoningContent"
+            class="w-full max-w-full rounded-lg border border-blue-500 bg-blue-800/25 text-gray-300 text-xs leading-relaxed relative transition-[max-height] duration-300 mb-2"
+            :class="isReasoningExpanded(m.id) ? 'max-h-[80vh] overflow-y-auto' : 'max-h-[80px] overflow-hidden cursor-pointer'"
+            @click="expandReasoning(m.id, $event)"
+          >
+            <div class="pr-8 py-2.5 pl-3 whitespace-pre-wrap break-words">{{ reasoningContent }}</div>
+            <button
+              type="button"
+              class="reasoning-toggle-icon absolute top-2 right-2 w-6 h-6 flex items-center justify-center rounded hover:bg-white/10 transition-transform duration-200"
+              :class="isReasoningExpanded(m.id) ? 'rotate-90' : ''"
+              aria-label="收起思考"
+              @click="collapseReasoning"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="15 18 9 12 15 6" />
+              </svg>
+            </button>
           </div>
 
           <!-- 气泡 -->

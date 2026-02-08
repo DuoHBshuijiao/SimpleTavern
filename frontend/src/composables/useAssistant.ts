@@ -72,12 +72,18 @@ export function useAssistant(options: UseAssistantOptions) {
   const assistantDraft = ref('')
   const isAssistantGenerating = ref(false)
   const assistantStreamError = ref<string | null>(null)
+  /** 当前正在展示思考链的消息 ID（仅前端临时展示，刷新后消失） */
+  const assistantReasoningMessageId = ref<string | null>(null)
+  /** 思考链内容（流式追加） */
+  const assistantReasoningContent = ref('')
 
   // Workspace scope 状态
   const workspaceAssistantMessages = ref<AssistantMessage[]>([])
   const workspaceAssistantDraft = ref('')
   const isWorkspaceAssistantGenerating = ref(false)
   const workspaceAssistantStreamError = ref<string | null>(null)
+  const workspaceReasoningMessageId = ref<string | null>(null)
+  const workspaceReasoningContent = ref('')
 
   // 公共状态
   const showAssistantSettings = ref(false)
@@ -117,6 +123,8 @@ export function useAssistant(options: UseAssistantOptions) {
         draft: workspaceAssistantDraft,
         streamError: workspaceAssistantStreamError,
         isGenerating: isWorkspaceAssistantGenerating,
+        reasoningMessageId: workspaceReasoningMessageId,
+        reasoningContent: workspaceReasoningContent,
       }
     }
     return {
@@ -124,6 +132,8 @@ export function useAssistant(options: UseAssistantOptions) {
       draft: assistantDraft,
       streamError: assistantStreamError,
       isGenerating: isAssistantGenerating,
+      reasoningMessageId: assistantReasoningMessageId,
+      reasoningContent: assistantReasoningContent,
     }
   }
 
@@ -483,7 +493,9 @@ export function useAssistant(options: UseAssistantOptions) {
       ts: now,
     }
     state.messages.value.push(assistantMsg)
-    
+    state.reasoningMessageId.value = assistantMsgId
+    state.reasoningContent.value = ''
+
     state.isGenerating.value = true
     assistantAborters[scope]?.abort()
     assistantAborters[scope] = new AbortController()
@@ -511,6 +523,18 @@ export function useAssistant(options: UseAssistantOptions) {
               const t = data?.text
               if (typeof t === 'string') {
                 assistantMsg.content += t
+              }
+            } else if (evt.event === 'reasoning') {
+              const data = evt.data as { text?: string } | undefined
+              const t = data?.text
+              if (typeof t === 'string') {
+                state.reasoningContent.value += t
+              }
+            } else if (evt.event === 'done') {
+              const data = evt.data as { messageId?: string } | undefined
+              const serverId = data?.messageId
+              if (serverId && state.reasoningContent.value) {
+                state.reasoningMessageId.value = serverId
               }
             } else if (evt.event === 'tool_trace') {
               const data = evt.data as { content?: string; messageId?: string } | undefined
@@ -612,12 +636,16 @@ export function useAssistant(options: UseAssistantOptions) {
     assistantDraft,
     isAssistantGenerating,
     assistantStreamError,
+    assistantReasoningMessageId,
+    assistantReasoningContent,
 
     // Workspace scope 状态
     workspaceAssistantMessages,
     workspaceAssistantDraft,
     isWorkspaceAssistantGenerating,
     workspaceAssistantStreamError,
+    workspaceReasoningMessageId,
+    workspaceReasoningContent,
 
     // 公共状态
     showAssistantSettings,

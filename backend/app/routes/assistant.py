@@ -1260,6 +1260,8 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
                 chat_to_save.messages.append(assistant_msg_obj)
                 _save_assistant_chat_by_scope(scope, chat_id, chat_to_save)
                 
+                if final_reasoning_content:
+                    yield _sse("reasoning", {"text": final_reasoning_content})
                 if final_content:
                     yield _sse("delta", {"text": final_content})
                 yield _sse("done", {"ok": True, "messageId": assistant_msg_obj.id})
