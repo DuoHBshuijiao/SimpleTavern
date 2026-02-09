@@ -123,6 +123,15 @@ function pushCurrentReasoningToBlocks(finalMessageId?: string | null) {
   chatReasoningMessageId.value = null
 }
 
+/** 根据消息 ID 获取当前关联的思考内容（流式当前条或 blocks 中已保存的） */
+function getReasoningForMessageId(messageId: string): string {
+  if (messageId === chatReasoningMessageId.value && chatReasoningContent.value) {
+    return chatReasoningContent.value
+  }
+  const block = chatReasoningBlocks.value.find((b) => b.messageId === messageId)
+  return block?.content?.trim() ?? ''
+}
+
 /**
  * 计算选中的角色
  *
@@ -1246,7 +1255,8 @@ async function handleRewriteMessage(m: ChatMessage) {
 
   const originalMessageId = versions.getOriginalMessageId(m.id)
   const displayContent = versions.getDisplayContent(m)
-  versions.saveVersion(originalMessageId, displayContent)
+  const currentReasoning = getReasoningForMessageId(m.id)
+  versions.saveVersion(originalMessageId, displayContent, currentReasoning)
 
   const messagesToDelete = activeChat.value.messages.slice(messageIndex)
   for (const msgToDelete of messagesToDelete) {
@@ -1428,13 +1438,14 @@ async function handleRewriteMessage(m: ChatMessage) {
     }
     await settings.load()
     
-    // 添加新版本（使用原始消息ID以累积同一链条上的多版本）
+    // 添加新版本（使用原始消息ID以累积同一链条上的多版本），并绑定该版本的思考内容
     if (!skippedReload && activeChat.value) {
       const newMsg = activeChat.value.messages.find(msg => 
         msg.role === 'assistant' && msg.ts > m.ts
       )
       if (newMsg) {
-        versions.addNewVersion(originalMessageId, newMsg.id, newMsg.content)
+        const newReasoning = getReasoningForMessageId(newMsg.id)
+        versions.addNewVersion(originalMessageId, newMsg.id, newMsg.content, newReasoning)
       }
     }
   }
@@ -2049,6 +2060,7 @@ const editingPersonaAvatarUrl = computed(() => {
             :reasoning-content="chatReasoningContent"
             :reasoning-blocks="chatReasoningBlocks"
             :get-display-content="versions.getDisplayContent"
+            :get-display-reasoning="versions.getDisplayReasoning"
             :has-multiple-versions="versions.hasMultipleVersions"
             :get-current-version-index="versions.getCurrentVersionIndex"
             :get-version-count="versions.getVersionCount"

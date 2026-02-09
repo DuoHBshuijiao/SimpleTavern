@@ -41,6 +41,8 @@ import type { ChatMessage } from '../types/models'
 export function useMessageVersions() {
   // 存储每个消息的多个版本：messageId -> versions[]
   const messageVersions = ref<Map<string, string[]>>(new Map())
+  // 存储每个消息各版本对应的思考内容：messageId -> reasoning[]（与 content 版本一一对应）
+  const messageReasoningVersions = ref<Map<string, string[]>>(new Map())
   // 存储每个消息当前显示的版本索引：messageId -> currentVersionIndex
   const messageVersionIndex = ref<Map<string, number>>(new Map())
   // 存储消息ID映射：originalMessageId -> currentMessageId（用于重写后关联）
@@ -81,6 +83,23 @@ export function useMessageVersions() {
     }
     const currentIndex = messageVersionIndex.value.get(messageId) ?? 0
     return versions[currentIndex] ?? message.content
+  }
+
+  /**
+   * 获取消息当前显示版本对应的思考内容
+   *
+   * 切换消息版本时，思考内容随版本一起切换。
+   *
+   * @param {ChatMessage} message - 消息对象
+   * @returns {string | undefined} 当前版本的思考内容，无则返回 undefined
+   */
+  function getDisplayReasoning(message: ChatMessage): string | undefined {
+    const messageId = getOriginalMessageId(message.id)
+    const reasonings = messageReasoningVersions.value.get(messageId)
+    if (!reasonings || reasonings.length === 0) return undefined
+    const currentIndex = messageVersionIndex.value.get(messageId) ?? 0
+    const content = reasonings[currentIndex]?.trim()
+    return content || undefined
   }
 
   /**
@@ -127,35 +146,46 @@ export function useMessageVersions() {
   /**
    * 保存消息内容到版本历史
    *
-   * 将消息内容添加到版本数组中（如果不存在）。
+   * 将消息内容添加到版本数组中（如果不存在），并保存该版本对应的思考内容。
    * 将当前版本索引设置为最新版本。
    *
    * @param {string} messageId - 消息ID
    * @param {string} content - 消息内容
+   * @param {string} [reasoning] - 该版本对应的思考内容（可选）
    */
-  function saveVersion(messageId: string, content: string) {
+  function saveVersion(messageId: string, content: string, reasoning?: string) {
     const versions = messageVersions.value.get(messageId) || []
-    if (!versions.includes(content)) {
+    let reasonings = messageReasoningVersions.value.get(messageId) || []
+    const idx = versions.indexOf(content)
+    if (idx === -1) {
       versions.push(content)
+      reasonings.push(reasoning?.trim() ?? '')
+    } else {
+      while (reasonings.length <= idx) reasonings.push('')
+      reasonings[idx] = reasoning?.trim() ?? ''
     }
     messageVersions.value.set(messageId, versions)
+    messageReasoningVersions.value.set(messageId, reasonings)
     messageVersionIndex.value.set(messageId, versions.length - 1)
   }
 
   /**
    * 添加新版本并设置ID映射
    *
-   * 当消息被重写后，添加新版本内容，并建立原始ID到新ID的映射关系。
+   * 当消息被重写后，添加新版本内容及对应思考内容，并建立原始ID到新ID的映射关系。
    * 如果新消息ID与原始ID不同且不是本地消息，则创建映射。
    *
    * @param {string} originalMessageId - 原始消息ID
    * @param {string} newMessageId - 新消息ID
    * @param {string} newContent - 新版本内容
+   * @param {string} [newReasoning] - 新版本对应的思考内容（可选）
    */
-  function addNewVersion(originalMessageId: string, newMessageId: string, newContent: string) {
+  function addNewVersion(originalMessageId: string, newMessageId: string, newContent: string, newReasoning?: string) {
     const versions = messageVersions.value.get(originalMessageId) || []
+    const reasonings = messageReasoningVersions.value.get(originalMessageId) || []
     if (newContent && !versions.includes(newContent)) {
       versions.push(newContent)
+      reasonings.push(newReasoning?.trim() ?? '')
     }
     
     // 如果新消息ID不同，创建映射关系
@@ -164,6 +194,7 @@ export function useMessageVersions() {
     }
     
     messageVersions.value.set(originalMessageId, versions)
+    messageReasoningVersions.value.set(originalMessageId, reasonings)
     messageVersionIndex.value.set(originalMessageId, versions.length - 1)
   }
 
@@ -210,7 +241,7 @@ export function useMessageVersions() {
   /**
    * 清理消息的其他版本，只保留当前显示的版本
    *
-   * 将版本数组缩减为只包含当前显示的版本，版本索引重置为0。
+   * 将版本数组缩减为只包含当前显示的版本，版本索引重置为0；思考内容数组同步裁剪。
    * 用于发送新消息前清理版本历史。
    *
    * @param {ChatMessage} message - 消息对象（来自types/models.ts）
@@ -220,10 +251,13 @@ export function useMessageVersions() {
     const messageId = getOriginalMessageId(message.id)
     const currentIndex = messageVersionIndex.value.get(messageId) ?? 0
     const versions = messageVersions.value.get(messageId)
+    const reasonings = messageReasoningVersions.value.get(messageId)
     
     if (versions && versions.length > 1) {
       const currentContent = versions[currentIndex] ?? message.content
       messageVersions.value.set(messageId, [currentContent])
+      const currentReasoning = reasonings && reasonings[currentIndex] !== undefined ? [reasonings[currentIndex]] : []
+      messageReasoningVersions.value.set(messageId, currentReasoning)
       messageVersionIndex.value.set(messageId, 0)
       return currentContent
     }
@@ -259,6 +293,7 @@ export function useMessageVersions() {
   function clearVersions(messageId: string) {
     const originalId = getOriginalMessageId(messageId)
     messageVersions.value.delete(originalId)
+    messageReasoningVersions.value.delete(originalId)
     messageVersionIndex.value.delete(originalId)
     
     // 清理映射
@@ -277,6 +312,7 @@ export function useMessageVersions() {
    */
   function clearAll() {
     messageVersions.value.clear()
+    messageReasoningVersions.value.clear()
     messageVersionIndex.value.clear()
     messageIdMap.value.clear()
   }
@@ -284,12 +320,14 @@ export function useMessageVersions() {
   return {
     // 状态
     messageVersions,
+    messageReasoningVersions,
     messageVersionIndex,
     messageIdMap,
     
     // 方法
     getOriginalMessageId,
     getDisplayContent,
+    getDisplayReasoning,
     hasMultipleVersions,
     getCurrentVersionIndex,
     getVersionCount,

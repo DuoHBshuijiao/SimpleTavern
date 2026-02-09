@@ -81,6 +81,8 @@ const props = defineProps<{
   reasoningBlocks?: Array<{ messageId: string; content: string }>
   // 版本相关
   getDisplayContent: (m: ChatMessage) => string
+  /** 获取当前显示版本对应的思考内容（多版本时随版本切换） */
+  getDisplayReasoning?: (m: ChatMessage) => string | undefined
   hasMultipleVersions: (m: ChatMessage) => boolean
   getCurrentVersionIndex: (m: ChatMessage) => number
   getVersionCount: (m: ChatMessage) => number
@@ -121,9 +123,14 @@ function collapseReasoning(e: MouseEvent) {
   expandedReasoningMessageId.value = null
 }
 
-/** 获取某条助手消息对应的思考链内容：优先当前流式内容，否则从 reasoningBlocks 按 messageId 取 */
+/** 获取某条助手消息对应的思考链内容：优先版本绑定的思考，再当前流式内容，否则从 reasoningBlocks 按 messageId 取 */
 function getReasoningForMessage(m: ChatMessage): string | undefined {
   if (m.role !== 'assistant') return undefined
+  // 多版本时优先使用当前版本绑定的思考内容
+  if (props.getDisplayReasoning) {
+    const versioned = props.getDisplayReasoning(m)
+    if (versioned) return versioned
+  }
   if (m.id === props.reasoningMessageId && props.reasoningContent) {
     return props.reasoningContent
   }
