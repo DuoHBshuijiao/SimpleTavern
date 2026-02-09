@@ -70,10 +70,8 @@ const props = defineProps<{
   streamError: string | null
   currentModel: string
   modelOptions: ModelOptions
-  /** 当前展示思考链的消息 ID（仅前端临时，刷新后消失） */
-  reasoningMessageId?: string | null
-  /** 思考链内容 */
-  reasoningContent?: string
+  /** 思考链块列表：每项为 { messageId, content }，展示在对应消息之前 */
+  reasoningBlocks?: Array<{ messageId: string; content: string }>
 }>()
 
 const emit = defineEmits<{
@@ -201,6 +199,14 @@ function collapseReasoning(e: MouseEvent) {
   e.stopPropagation()
   expandedReasoningMessageId.value = null
 }
+
+/** 获取某条消息对应的思考链内容（用于显示在该消息上方） */
+function getReasoningContentForMessage(messageId: string): string | undefined {
+  const blocks = props.reasoningBlocks
+  if (!Array.isArray(blocks)) return undefined
+  const block = blocks.find((b) => b.messageId === messageId)
+  return block?.content?.trim() || undefined
+}
 </script>
 
 <template>
@@ -239,14 +245,14 @@ function collapseReasoning(e: MouseEvent) {
         class="flex flex-col gap-1 group"
         :class="m.role === 'user' ? 'items-end' : (m.role === 'system' ? 'items-center' : 'items-start')"
       >
-        <!-- 助手消息：思考链气泡（在正文上方），小圆角，默认折叠 100px，仅点击气泡展开、仅点击图标收起 -->
+        <!-- 思考链气泡：在对应消息（助手或工具）上方，小圆角，默认折叠 100px，仅点击气泡展开、仅点击图标收起 -->
         <div
-          v-if="m.role === 'assistant' && m.id === reasoningMessageId && reasoningContent"
+          v-if="getReasoningContentForMessage(m.id)"
           class="w-full max-w-[90%] rounded-lg border border-blue-500 bg-blue-800/25 text-gray-300 text-xs leading-relaxed relative transition-[max-height] duration-300"
           :class="isReasoningExpanded(m.id) ? 'max-h-[80vh] overflow-y-auto' : 'max-h-[100px] overflow-hidden cursor-pointer'"
           @click="expandReasoning(m.id, $event)"
         >
-          <div class="pr-8 py-2.5 pl-3 whitespace-pre-wrap break-words">{{ reasoningContent }}</div>
+          <div class="pr-8 py-2.5 pl-3 whitespace-pre-wrap break-words">{{ getReasoningContentForMessage(m.id) }}</div>
           <button
             type="button"
             class="reasoning-toggle-icon absolute top-2 right-2 w-6 h-6 flex items-center justify-center rounded hover:bg-white/10 transition-transform duration-200"

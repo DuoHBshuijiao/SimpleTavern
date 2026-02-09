@@ -107,8 +107,21 @@ const stopRequested = ref(false)
 const stopStreamingHold = ref(false)
 /** 主聊天当前展示思考链的消息 ID（仅前端临时，刷新后消失） */
 const chatReasoningMessageId = ref<string | null>(null)
-/** 主聊天思考链内容 */
+/** 主聊天思考链内容（当前正在流式接收的一条） */
 const chatReasoningContent = ref('')
+/** 主聊天多轮思考链块：每项为 { messageId, content }，仅前端临时展示，不写进上下文 */
+const chatReasoningBlocks = ref<Array<{ messageId: string; content: string }>>([])
+
+/** 将当前思考内容写入 blocks 并清空当前（在 stream done 或非流响应后调用，便于多轮保留） */
+function pushCurrentReasoningToBlocks(finalMessageId?: string | null) {
+  const id = finalMessageId ?? chatReasoningMessageId.value
+  const content = chatReasoningContent.value.trim()
+  if (id && content) {
+    chatReasoningBlocks.value = [...chatReasoningBlocks.value, { messageId: id, content }]
+  }
+  chatReasoningContent.value = ''
+  chatReasoningMessageId.value = null
+}
 
 /**
  * 计算选中的角色
@@ -500,6 +513,18 @@ watch(
   },
 )
 
+/** 切换聊天时清空主聊天的思考链（仅前端临时，不持久化） */
+watch(
+  () => activeChat.value?.id,
+  (next, prev) => {
+    if (prev != null && next !== prev) {
+      chatReasoningBlocks.value = []
+      chatReasoningContent.value = ''
+      chatReasoningMessageId.value = null
+    }
+  },
+)
+
 /**
  * 监听角色编辑弹窗状态
  *
@@ -615,6 +640,7 @@ async function runGroupGeneration(
               if (serverId && chatReasoningContent.value) {
                 chatReasoningMessageId.value = serverId
               }
+              pushCurrentReasoningToBlocks(serverId ?? undefined)
             } else if (evt.event === 'error') {
               const data = evt.data as { message?: string } | undefined
               streamError.value = String(data?.message ?? 'unknown error')
@@ -641,6 +667,7 @@ async function runGroupGeneration(
         if (typeof res.reasoningContent === 'string') {
           chatReasoningContent.value = res.reasoningContent
         }
+        pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined)
         chats.appendLocalMessageContent(localAssistantId, res.content || '')
         scrollToBottom()
       } else {
@@ -819,6 +846,7 @@ async function sendUserMessage() {
                 if (serverId && chatReasoningContent.value) {
                   chatReasoningMessageId.value = serverId
                 }
+                pushCurrentReasoningToBlocks(serverId ?? undefined)
               } else if (evt.event === 'error') {
                 const data = evt.data as { message?: string } | undefined
                 streamError.value = String(data?.message ?? 'unknown error')
@@ -851,6 +879,7 @@ async function sendUserMessage() {
           if (typeof res.reasoningContent === 'string') {
             chatReasoningContent.value = res.reasoningContent
           }
+          pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined)
           chats.appendLocalMessageContent(localAssistantId, res.content || '')
           scrollToBottom()
         } else {
@@ -1040,6 +1069,7 @@ async function triggerInterject(characterId: string) {
               if (serverId && chatReasoningContent.value) {
                 chatReasoningMessageId.value = serverId
               }
+              pushCurrentReasoningToBlocks(serverId ?? undefined)
             } else if (evt.event === 'error') {
               const data = evt.data as { message?: string } | undefined
               streamError.value = String(data?.message ?? 'unknown error')
@@ -1066,6 +1096,7 @@ async function triggerInterject(characterId: string) {
         if (typeof res.reasoningContent === 'string') {
           chatReasoningContent.value = res.reasoningContent
         }
+        pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined)
         chats.appendLocalMessageContent(localAssistantId, res.content || '')
         scrollToBottom()
       } else {
@@ -1277,6 +1308,7 @@ async function handleRewriteMessage(m: ChatMessage) {
                 if (serverId && chatReasoningContent.value) {
                   chatReasoningMessageId.value = serverId
                 }
+                pushCurrentReasoningToBlocks(serverId ?? undefined)
               } else if (evt.event === 'error') {
                 const data = evt.data as { message?: string } | undefined
                 streamError.value = String(data?.message ?? 'unknown error')
@@ -1292,6 +1324,7 @@ async function handleRewriteMessage(m: ChatMessage) {
         const res = await apiPost<{
           ok: boolean
           content: string
+          assistantMessageId?: string | null
           reasoningContent?: string
           error?: string
         }>('/api/generate/group', { chatId, characterId })
@@ -1300,6 +1333,7 @@ async function handleRewriteMessage(m: ChatMessage) {
           if (typeof res.reasoningContent === 'string') {
             chatReasoningContent.value = res.reasoningContent
           }
+          pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined)
           chats.appendLocalMessageContent(localAssistantId, res.content || '')
           scrollToBottom()
         } else {
@@ -1341,6 +1375,7 @@ async function handleRewriteMessage(m: ChatMessage) {
                 if (serverId && chatReasoningContent.value) {
                   chatReasoningMessageId.value = serverId
                 }
+                pushCurrentReasoningToBlocks(serverId ?? undefined)
               } else if (evt.event === 'error') {
                 const data = evt.data as { message?: string } | undefined
                 streamError.value = String(data?.message ?? 'unknown error')
@@ -1356,6 +1391,7 @@ async function handleRewriteMessage(m: ChatMessage) {
         const res = await apiPost<{
           ok: boolean
           content: string
+          assistantMessageId?: string | null
           reasoningContent?: string
           error?: string
         }>('/api/generate/stream', {
@@ -1369,6 +1405,7 @@ async function handleRewriteMessage(m: ChatMessage) {
           if (typeof res.reasoningContent === 'string') {
             chatReasoningContent.value = res.reasoningContent
           }
+          pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined)
           chats.appendLocalMessageContent(localAssistantId, res.content || '')
           scrollToBottom()
         } else {
@@ -1810,6 +1847,7 @@ async function handleSaveAndSend() {
                 if (serverId && chatReasoningContent.value) {
                   chatReasoningMessageId.value = serverId
                 }
+                pushCurrentReasoningToBlocks(serverId ?? undefined)
               } else if (evt.event === 'error') {
                 const data = evt.data as { message?: string } | undefined
                 streamError.value = String(data?.message ?? 'unknown error')
@@ -1822,7 +1860,7 @@ async function handleSaveAndSend() {
           stopRequested.value = false
         }
       } else {
-        const res = await apiPost<{ ok: boolean; content: string; reasoningContent?: string; error?: string }>('/api/generate/stream', {
+        const res = await apiPost<{ ok: boolean; content: string; reasoningContent?: string; assistantMessageId?: string | null; error?: string }>('/api/generate/stream', {
           chatId,
           userMessage: editedContent,
           appendUserMessage: false,
@@ -1833,6 +1871,7 @@ async function handleSaveAndSend() {
           if (typeof res.reasoningContent === 'string') {
             chatReasoningContent.value = res.reasoningContent
           }
+          pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined)
           chats.appendLocalMessageContent(localAssistantId, res.content || '')
           scrollToBottom()
         } else {
@@ -2008,6 +2047,7 @@ const editingPersonaAvatarUrl = computed(() => {
             :is-generating="isGenerating"
             :reasoning-message-id="chatReasoningMessageId"
             :reasoning-content="chatReasoningContent"
+            :reasoning-blocks="chatReasoningBlocks"
             :get-display-content="versions.getDisplayContent"
             :has-multiple-versions="versions.hasMultipleVersions"
             :get-current-version-index="versions.getCurrentVersionIndex"
@@ -2075,8 +2115,7 @@ const editingPersonaAvatarUrl = computed(() => {
       :draft="assistant.assistantDraft.value"
       :is-generating="assistant.isAssistantGenerating.value"
       :stream-error="assistant.assistantStreamError.value"
-      :reasoning-message-id="assistant.assistantReasoningMessageId.value"
-      :reasoning-content="assistant.assistantReasoningContent.value"
+      :reasoning-blocks="assistant.assistantReasoningBlocks.value"
       :current-model="assistantCurrentModel"
       :model-options="chatModelOptions"
       @update:is-open="assistant.isAssistantPanelOpen.value = $event"

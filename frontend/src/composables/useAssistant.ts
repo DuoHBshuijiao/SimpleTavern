@@ -72,18 +72,15 @@ export function useAssistant(options: UseAssistantOptions) {
   const assistantDraft = ref('')
   const isAssistantGenerating = ref(false)
   const assistantStreamError = ref<string | null>(null)
-  /** 当前正在展示思考链的消息 ID（仅前端临时展示，刷新后消失） */
-  const assistantReasoningMessageId = ref<string | null>(null)
-  /** 思考链内容（流式追加） */
-  const assistantReasoningContent = ref('')
+  /** 思考链块列表：每项为 { messageId, content }，展示在对应消息之前（仅前端临时，刷新后消失） */
+  const assistantReasoningBlocks = ref<Array<{ messageId: string; content: string }>>([])
 
   // Workspace scope 状态
   const workspaceAssistantMessages = ref<AssistantMessage[]>([])
   const workspaceAssistantDraft = ref('')
   const isWorkspaceAssistantGenerating = ref(false)
   const workspaceAssistantStreamError = ref<string | null>(null)
-  const workspaceReasoningMessageId = ref<string | null>(null)
-  const workspaceReasoningContent = ref('')
+  const workspaceReasoningBlocks = ref<Array<{ messageId: string; content: string }>>([])
 
   // 公共状态
   const showAssistantSettings = ref(false)
@@ -123,8 +120,7 @@ export function useAssistant(options: UseAssistantOptions) {
         draft: workspaceAssistantDraft,
         streamError: workspaceAssistantStreamError,
         isGenerating: isWorkspaceAssistantGenerating,
-        reasoningMessageId: workspaceReasoningMessageId,
-        reasoningContent: workspaceReasoningContent,
+        reasoningBlocks: workspaceReasoningBlocks,
       }
     }
     return {
@@ -132,8 +128,7 @@ export function useAssistant(options: UseAssistantOptions) {
       draft: assistantDraft,
       streamError: assistantStreamError,
       isGenerating: isAssistantGenerating,
-      reasoningMessageId: assistantReasoningMessageId,
-      reasoningContent: assistantReasoningContent,
+      reasoningBlocks: assistantReasoningBlocks,
     }
   }
 
@@ -308,6 +303,7 @@ export function useAssistant(options: UseAssistantOptions) {
     assistantMessages.value = []
     assistantDraft.value = ''
     assistantStreamError.value = null
+    assistantReasoningBlocks.value = []
   }
 
   /**
@@ -323,6 +319,7 @@ export function useAssistant(options: UseAssistantOptions) {
     workspaceAssistantMessages.value = []
     workspaceAssistantDraft.value = ''
     workspaceAssistantStreamError.value = null
+    workspaceReasoningBlocks.value = []
   }
 
   /**
@@ -493,8 +490,7 @@ export function useAssistant(options: UseAssistantOptions) {
       ts: now,
     }
     state.messages.value.push(assistantMsg)
-    state.reasoningMessageId.value = assistantMsgId
-    state.reasoningContent.value = ''
+    // 不再清空 reasoningBlocks，保留多轮回复的思考内容（仅前端临时展示）
 
     state.isGenerating.value = true
     assistantAborters[scope]?.abort()
@@ -512,6 +508,7 @@ export function useAssistant(options: UseAssistantOptions) {
     }
 
     let aborted = false
+    let reasoningBuffer = ''
     try {
       if (useStream) {
         await postAndConsumeSse(
@@ -528,20 +525,28 @@ export function useAssistant(options: UseAssistantOptions) {
               const data = evt.data as { text?: string } | undefined
               const t = data?.text
               if (typeof t === 'string') {
-                state.reasoningContent.value += t
+                reasoningBuffer += t
               }
             } else if (evt.event === 'done') {
-              const data = evt.data as { messageId?: string } | undefined
-              const serverId = data?.messageId
-              if (serverId && state.reasoningContent.value) {
-                state.reasoningMessageId.value = serverId
+              if (reasoningBuffer.trim()) {
+                const data = evt.data as { messageId?: string } | undefined
+                const serverMessageId = data?.messageId
+                // 使用服务端 messageId，以便 loadChat 后消息列表中的助手消息 id 与块一致，思考内容能正确显示
+                const blockMessageId = typeof serverMessageId === 'string' && serverMessageId ? serverMessageId : assistantMsgId
+                state.reasoningBlocks.value = [...state.reasoningBlocks.value, { messageId: blockMessageId, content: reasoningBuffer }]
+                reasoningBuffer = ''
               }
             } else if (evt.event === 'tool_trace') {
               const data = evt.data as { content?: string; messageId?: string } | undefined
               const content = data?.content
+              const toolMessageId = data?.messageId || `assistant_tool_${Date.now()}`
+              if (reasoningBuffer.trim()) {
+                state.reasoningBlocks.value = [...state.reasoningBlocks.value, { messageId: toolMessageId, content: reasoningBuffer }]
+                reasoningBuffer = ''
+              }
               if (typeof content === 'string' && content.trim()) {
                 state.messages.value.push({
-                  id: data?.messageId || `assistant_tool_${Date.now()}`,
+                  id: toolMessageId,
                   role: 'system',
                   content,
                   ts: new Date().toISOString(),
@@ -636,16 +641,14 @@ export function useAssistant(options: UseAssistantOptions) {
     assistantDraft,
     isAssistantGenerating,
     assistantStreamError,
-    assistantReasoningMessageId,
-    assistantReasoningContent,
+    assistantReasoningBlocks,
 
     // Workspace scope 状态
     workspaceAssistantMessages,
     workspaceAssistantDraft,
     isWorkspaceAssistantGenerating,
     workspaceAssistantStreamError,
-    workspaceReasoningMessageId,
-    workspaceReasoningContent,
+    workspaceReasoningBlocks,
 
     // 公共状态
     showAssistantSettings,

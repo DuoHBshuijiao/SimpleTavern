@@ -75,8 +75,10 @@ const props = defineProps<{
   isGenerating: boolean
   /** 当前展示思考链的消息 ID（仅前端临时，刷新后消失） */
   reasoningMessageId?: string | null
-  /** 思考链内容 */
+  /** 思考链内容（当前正在流式接收的一条） */
   reasoningContent?: string
+  /** 多轮思考链块：每项为 { messageId, content }，仅前端临时展示 */
+  reasoningBlocks?: Array<{ messageId: string; content: string }>
   // 版本相关
   getDisplayContent: (m: ChatMessage) => string
   hasMultipleVersions: (m: ChatMessage) => boolean
@@ -117,6 +119,21 @@ function expandReasoning(messageId: string, e: MouseEvent) {
 function collapseReasoning(e: MouseEvent) {
   e.stopPropagation()
   expandedReasoningMessageId.value = null
+}
+
+/** 获取某条助手消息对应的思考链内容：优先当前流式内容，否则从 reasoningBlocks 按 messageId 取 */
+function getReasoningForMessage(m: ChatMessage): string | undefined {
+  if (m.role !== 'assistant') return undefined
+  if (m.id === props.reasoningMessageId && props.reasoningContent) {
+    return props.reasoningContent
+  }
+  const blocks = props.reasoningBlocks
+  if (Array.isArray(blocks)) {
+    const block = blocks.find((b) => b.messageId === m.id)
+    const content = block?.content?.trim()
+    return content || undefined
+  }
+  return undefined
 }
 
 // Markdown 渲染器
@@ -291,14 +308,14 @@ defineExpose({ scrollToBottom, scrollRef })
             <span v-if="m.role === 'system'" class="text-[10px] bg-yellow-500/10 text-yellow-500 px-1.5 py-0.5 rounded">SYSTEM</span>
           </div>
 
-          <!-- 思考链气泡：在角色名下方、正文上方，小圆角，默认折叠 80px，仅点击气泡展开、仅点击图标收起 -->
+          <!-- 思考链气泡：在角色名下方、正文上方，小圆角，默认折叠 80px，仅点击气泡展开、仅点击图标收起；多轮回复按 messageId 显示对应思考内容 -->
           <div
-            v-if="m.role === 'assistant' && m.id === reasoningMessageId && reasoningContent"
+            v-if="m.role === 'assistant' && getReasoningForMessage(m)"
             class="w-full max-w-full rounded-lg border border-blue-500 bg-blue-800/25 text-gray-300 text-xs leading-relaxed relative transition-[max-height] duration-300 mb-2"
             :class="isReasoningExpanded(m.id) ? 'max-h-[80vh] overflow-y-auto' : 'max-h-[80px] overflow-hidden cursor-pointer'"
             @click="expandReasoning(m.id, $event)"
           >
-            <div class="pr-8 py-2.5 pl-3 whitespace-pre-wrap break-words">{{ reasoningContent }}</div>
+            <div class="pr-8 py-2.5 pl-3 whitespace-pre-wrap break-words">{{ getReasoningForMessage(m) }}</div>
             <button
               type="button"
               class="reasoning-toggle-icon absolute top-2 right-2 w-6 h-6 flex items-center justify-center rounded hover:bg-white/10 transition-transform duration-200"
