@@ -142,16 +142,23 @@ class ChatCompletionDelta:
     text: str
 
 
+# 上游可能一次返回大块 reasoning/content，按此大小拆成小段逐段 yield，保证前端流式逐字/逐段显示
+STREAM_TEXT_CHUNK_SIZE = 1
+
+
 @dataclass(frozen=True)
 class StreamChunk:
     """
-    流式响应块（内容或思考链）
+    流式响应块（内容、思考链或结束标记）
     
     当 API 在 delta 中返回 content 或 reasoning_content 时，
     分别以 kind='content' 或 kind='reasoning' 逐块 yield，以保持打字机效果。
+    大块文本会按 STREAM_TEXT_CHUNK_SIZE 拆成小段逐段 yield，避免整块输出。
+    流结束时 yield kind='finish'，并携带可选的 tool_calls（用于 assistant 多轮工具调用）。
     """
-    kind: Literal["content", "reasoning"]
-    text: str
+    kind: Literal["content", "reasoning", "finish"]
+    text: str = ""
+    tool_calls: list[dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True)
@@ -400,6 +407,9 @@ async def stream_chat_completions(
         extra_body=extra_body,
     )
 
+    # 流式响应中 tool_calls 按 index 分片到达，按 index 合并为完整列表
+    tool_calls_by_index: dict[int, dict[str, Any]] = {}
+
     async with httpx.AsyncClient(timeout=None) as client:
         async with client.stream("POST", url, headers=headers, json=payload) as r:
             r.raise_for_status()
@@ -422,7 +432,28 @@ async def stream_chat_completions(
                 delta = (choices[0] or {}).get("delta") or {}
                 reasoning_text = delta.get("reasoning_content")
                 if isinstance(reasoning_text, str) and reasoning_text:
-                    yield StreamChunk(kind="reasoning", text=reasoning_text)
+                    for i in range(0, len(reasoning_text), STREAM_TEXT_CHUNK_SIZE):
+                        yield StreamChunk(kind="reasoning", text=reasoning_text[i : i + STREAM_TEXT_CHUNK_SIZE])
                 content_text = delta.get("content")
                 if isinstance(content_text, str) and content_text:
-                    yield StreamChunk(kind="content", text=content_text)
+                    for i in range(0, len(content_text), STREAM_TEXT_CHUNK_SIZE):
+                        yield StreamChunk(kind="content", text=content_text[i : i + STREAM_TEXT_CHUNK_SIZE])
+                # 收集流式 tool_calls（OpenAI 格式：delta.tool_calls 为按 index 的增量）
+                for tc in delta.get("tool_calls") or []:
+                    idx = tc.get("index")
+                    if idx is None:
+                        continue
+                    if idx not in tool_calls_by_index:
+                        tool_calls_by_index[idx] = {"id": "", "type": "function", "function": {"name": "", "arguments": ""}}
+                    cur = tool_calls_by_index[idx]
+                    if tc.get("id") is not None:
+                        cur["id"] = (cur.get("id") or "") + tc["id"]
+                    fn = tc.get("function")
+                    if isinstance(fn, dict):
+                        if fn.get("name") is not None:
+                            cur["function"]["name"] = (cur["function"].get("name") or "") + fn["name"]
+                        if fn.get("arguments") is not None:
+                            cur["function"]["arguments"] = (cur["function"].get("arguments") or "") + fn["arguments"]
+            # 流结束：产出 finish，便于调用方判断是否有 tool_calls 并继续多轮
+            sorted_tool_calls = [tool_calls_by_index[i] for i in sorted(tool_calls_by_index.keys())] if tool_calls_by_index else None
+            yield StreamChunk(kind="finish", tool_calls=sorted_tool_calls)

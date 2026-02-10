@@ -58,14 +58,19 @@ export interface AssistantSettings {
   context_size: number | null
 }
 
+/** 主聊天会话类型（与 stores/chats 中当前会话一致），用于记忆更新回调 */
+export type ChatPayload = import('../types/models').Chat
+
 export interface UseAssistantOptions {
   chatId: ComputedRef<string | null>
   /** 是否启用流式传输，与全局设置一致；未传时默认 true（流式） */
   streamEnabled?: ComputedRef<boolean>
+  /** 助手在聊天作用域写入长期记忆后，SSE 会推送 chat_memory_updated；若传入此回调则用其更新当前会话状态，使设置抽屉与消息列表立即刷新 */
+  onChatMemoryUpdated?: (chat: ChatPayload) => void
 }
 
 export function useAssistant(options: UseAssistantOptions) {
-  const { chatId, streamEnabled } = options
+  const { chatId, streamEnabled, onChatMemoryUpdated } = options
 
   // Chat scope 状态
   const assistantMessages = ref<AssistantMessage[]>([])
@@ -74,6 +79,10 @@ export function useAssistant(options: UseAssistantOptions) {
   const assistantStreamError = ref<string | null>(null)
   /** 思考链块列表：每项为 { messageId, content }，展示在对应消息之前（仅前端临时，刷新后消失） */
   const assistantReasoningBlocks = ref<Array<{ messageId: string; content: string }>>([])
+  /** 当前正在流式接收的正文（仅 chat 作用域），用于实时打字机效果 */
+  const assistantStreamingContent = ref('')
+  /** 当前正在流式接收的思考内容（仅 chat 作用域），用于实时显示 */
+  const assistantStreamingReasoning = ref('')
 
   // Workspace scope 状态
   const workspaceAssistantMessages = ref<AssistantMessage[]>([])
@@ -81,6 +90,8 @@ export function useAssistant(options: UseAssistantOptions) {
   const isWorkspaceAssistantGenerating = ref(false)
   const workspaceAssistantStreamError = ref<string | null>(null)
   const workspaceReasoningBlocks = ref<Array<{ messageId: string; content: string }>>([])
+  const workspaceStreamingContent = ref('')
+  const workspaceStreamingReasoning = ref('')
 
   // 公共状态
   const showAssistantSettings = ref(false)
@@ -121,6 +132,8 @@ export function useAssistant(options: UseAssistantOptions) {
         streamError: workspaceAssistantStreamError,
         isGenerating: isWorkspaceAssistantGenerating,
         reasoningBlocks: workspaceReasoningBlocks,
+        streamingContent: workspaceStreamingContent,
+        streamingReasoning: workspaceStreamingReasoning,
       }
     }
     return {
@@ -129,6 +142,8 @@ export function useAssistant(options: UseAssistantOptions) {
       streamError: assistantStreamError,
       isGenerating: isAssistantGenerating,
       reasoningBlocks: assistantReasoningBlocks,
+      streamingContent: assistantStreamingContent,
+      streamingReasoning: assistantStreamingReasoning,
     }
   }
 
@@ -390,6 +405,48 @@ export function useAssistant(options: UseAssistantOptions) {
   }
 
   /**
+   * 保存编辑的消息并发送（清除该条之后的消息并重新生成）
+   *
+   * 与主聊天「保存并发送」行为一致：保存编辑后的用户消息，删除该消息之后的所有消息，
+   * 然后以该条内容重新请求助手流式回复。
+   * 仅对用户消息生效；若正在生成则直接返回。
+   *
+   * @returns {Promise<void>} 完成时返回
+   */
+  async function saveEditedMessageAndSend() {
+    if (!editingAssistantMessage.value) return
+    if (!editingAssistantMessageScope.value) return
+    if (editingAssistantMessage.value.role !== 'user') return
+    const scope = editingAssistantMessageScope.value
+    const state = getState(scope)
+    if (state.isGenerating.value) return
+
+    const m = editingAssistantMessage.value
+    const content = editingAssistantMessageContent.value.trim()
+    try {
+      await apiPut(buildPath(`/api/assistant/chat/messages/${m.id}`, scope), {
+        role: m.role,
+        content,
+      })
+      const messages = state.messages.value
+      const idx = messages.findIndex(msg => msg.id === m.id)
+      if (idx >= 0) {
+        const toDelete = messages.slice(idx + 1)
+        for (const msg of toDelete) {
+          await apiDelete(buildPath(`/api/assistant/chat/messages/${msg.id}`, scope))
+        }
+      }
+      await loadChat(scope)
+      closeEditMessage()
+      state.draft.value = content
+      await sendMessage(scope, false)
+    } catch (e: unknown) {
+      const error = e instanceof Error ? e.message : String(e)
+      state.streamError.value = error
+    }
+  }
+
+  /**
    * 删除消息
    *
    * 删除指定的助手消息。
@@ -490,8 +547,8 @@ export function useAssistant(options: UseAssistantOptions) {
       ts: now,
     }
     state.messages.value.push(assistantMsg)
-    // 不再清空 reasoningBlocks，保留多轮回复的思考内容（仅前端临时展示）
-
+    state.streamingContent.value = ''
+    state.streamingReasoning.value = ''
     state.isGenerating.value = true
     assistantAborters[scope]?.abort()
     assistantAborters[scope] = new AbortController()
@@ -520,18 +577,21 @@ export function useAssistant(options: UseAssistantOptions) {
               const t = data?.text
               if (typeof t === 'string') {
                 assistantMsg.content += t
+                state.streamingContent.value += t
               }
             } else if (evt.event === 'reasoning') {
               const data = evt.data as { text?: string } | undefined
               const t = data?.text
               if (typeof t === 'string') {
                 reasoningBuffer += t
+                state.streamingReasoning.value += t
               }
             } else if (evt.event === 'done') {
+              state.streamingContent.value = ''
+              state.streamingReasoning.value = ''
               if (reasoningBuffer.trim()) {
                 const data = evt.data as { messageId?: string } | undefined
                 const serverMessageId = data?.messageId
-                // 使用服务端 messageId，以便 loadChat 后消息列表中的助手消息 id 与块一致，思考内容能正确显示
                 const blockMessageId = typeof serverMessageId === 'string' && serverMessageId ? serverMessageId : assistantMsgId
                 state.reasoningBlocks.value = [...state.reasoningBlocks.value, { messageId: blockMessageId, content: reasoningBuffer }]
                 reasoningBuffer = ''
@@ -540,6 +600,7 @@ export function useAssistant(options: UseAssistantOptions) {
               const data = evt.data as { content?: string; messageId?: string } | undefined
               const content = data?.content
               const toolMessageId = data?.messageId || `assistant_tool_${Date.now()}`
+              state.streamingReasoning.value = ''
               if (reasoningBuffer.trim()) {
                 state.reasoningBlocks.value = [...state.reasoningBlocks.value, { messageId: toolMessageId, content: reasoningBuffer }]
                 reasoningBuffer = ''
@@ -557,6 +618,12 @@ export function useAssistant(options: UseAssistantOptions) {
               const card = data?.card
               if (card && onCardReceived) {
                 onCardReceived(card)
+              }
+            } else if (evt.event === 'chat_memory_updated') {
+              const data = evt.data as { chat?: ChatPayload } | undefined
+              const chatPayload = data?.chat
+              if (scope === 'chat' && chatPayload?.id && chatId.value === chatPayload.id && onChatMemoryUpdated) {
+                onChatMemoryUpdated(chatPayload)
               }
             } else if (evt.event === 'error') {
               const data = evt.data as { message?: string } | undefined
@@ -605,6 +672,8 @@ export function useAssistant(options: UseAssistantOptions) {
         state.streamError.value = String(e)
       }
     } finally {
+      state.streamingContent.value = ''
+      state.streamingReasoning.value = ''
       state.isGenerating.value = false
       if (aborted && assistantMsg.content.trim()) {
         try {
@@ -642,6 +711,8 @@ export function useAssistant(options: UseAssistantOptions) {
     isAssistantGenerating,
     assistantStreamError,
     assistantReasoningBlocks,
+    assistantStreamingContent,
+    assistantStreamingReasoning,
 
     // Workspace scope 状态
     workspaceAssistantMessages,
@@ -649,6 +720,8 @@ export function useAssistant(options: UseAssistantOptions) {
     isWorkspaceAssistantGenerating,
     workspaceAssistantStreamError,
     workspaceReasoningBlocks,
+    workspaceStreamingContent,
+    workspaceStreamingReasoning,
 
     // 公共状态
     showAssistantSettings,
@@ -674,6 +747,7 @@ export function useAssistant(options: UseAssistantOptions) {
     openEditMessage,
     closeEditMessage,
     saveEditedMessage,
+    saveEditedMessageAndSend,
     deleteMessage,
     rewriteMessage,
     sendMessage,

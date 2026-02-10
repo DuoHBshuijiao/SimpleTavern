@@ -279,6 +279,16 @@ watch(
   },
 )
 
+// 当当前会话的长期记忆被外部更新（如助手通过记忆工具写入）时，同步到草稿，使设置抽屉内「长期记忆」框无需关闭重开即可显示最新内容
+watch(
+  () => props.chat?.overrides?.longTermMemory,
+  (newVal) => {
+    if (tab.value === 'chat' && chatDraft.value != null && newVal !== undefined) {
+      chatDraft.value.longTermMemory = newVal ?? null
+    }
+  },
+)
+
 /**
  * 计算当前编辑的预设
  *

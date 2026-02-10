@@ -201,6 +201,17 @@ export const useChatsStore = defineStore('chats', {
       }
     },
     /**
+     * 用服务端下发的聊天数据就地更新当前会话（不发起请求）。
+     * 用于助手在写入长期记忆后通过 SSE 推送的 chat_memory_updated，使前端立即刷新「当前会话」长期记忆与消息的「已保存」标记。
+     *
+     * @param {Chat} chat - 完整的聊天会话数据（如 /api/chats/{id} 或 SSE chat_memory_updated 的 chat）
+     */
+    applyChatPayload(chat: Chat) {
+      if (this.activeChatId === chat.id) {
+        this.activeChat = chat
+      }
+    },
+    /**
      * 更新聊天覆盖设置
      *
      * 更新聊天会话的覆盖设置（如提示词、长期记忆、生成参数等）。

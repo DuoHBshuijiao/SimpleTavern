@@ -41,7 +41,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from app.llm.openai_compat import chat_completions_message
+from app.llm.openai_compat import chat_completions_message, stream_chat_completions
 from app.schemas import (
     AssistantChat,
     AssistantSettings,
@@ -1210,6 +1210,7 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
         """
         流式事件迭代器
         
+        使用 stream_chat_completions 逐块推送 reasoning 与 content，实现打字机效果。
         支持多轮工具调用，最多8轮。如果检测到character_card.json，会发送card事件。
         
         Yields:
@@ -1217,12 +1218,18 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
         """
         current_messages = list(llm_msgs)
         max_turns = 8
-        final_content = ""
-        final_reasoning_content: str | None = None
-        
+
         for _ in range(max_turns):
+            final_content = ""
+            final_reasoning_content = ""
+            llm_assistant_msg: dict[str, Any] = {
+                "role": "assistant",
+                "content": "",
+            }
+            tool_calls_from_stream: list[dict[str, Any]] | None = None
+
             try:
-                resp = await chat_completions_message(
+                async for chunk in stream_chat_completions(
                     base_url=base_url,
                     api_key=api_key,
                     model=model,
@@ -1230,51 +1237,46 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
                     temperature=temperature,
                     tools=tools,
                     extra_body=extra_body,
-                )
+                ):
+                    if chunk.kind == "reasoning":
+                        final_reasoning_content += chunk.text
+                        yield _sse("reasoning", {"text": chunk.text})
+                    elif chunk.kind == "content":
+                        final_content += chunk.text
+                        yield _sse("delta", {"text": chunk.text})
+                    elif chunk.kind == "finish":
+                        tool_calls_from_stream = chunk.tool_calls
             except Exception as exc:
                 yield _sse("error", {"message": str(exc)})
                 return
 
-            llm_assistant_msg: dict[str, Any] = {
-                "role": resp.role or "assistant",
-                "content": resp.content or "",
-            }
-            if resp.reasoning_content:
-                llm_assistant_msg["reasoning_content"] = resp.reasoning_content
-            if resp.tool_calls is not None:
-                llm_assistant_msg["tool_calls"] = resp.tool_calls
+            if final_reasoning_content:
+                llm_assistant_msg["reasoning_content"] = final_reasoning_content
+            llm_assistant_msg["content"] = final_content
+            if tool_calls_from_stream:
+                llm_assistant_msg["tool_calls"] = tool_calls_from_stream
             current_messages.append(llm_assistant_msg)
 
-            if not resp.tool_calls:
-                final_content = resp.content or ""
-                final_reasoning_content = resp.reasoning_content
-                
+            if not tool_calls_from_stream:
                 assistant_msg_obj = ChatMessage(
-                    role=resp.role or "assistant",
+                    role="assistant",
                     content=final_content,
                 )
                 if final_reasoning_content:
                     assistant_msg_obj.model_config["extra"] = {"reasoning_content": final_reasoning_content}
-                
                 chat_to_save = _resolve_assistant_chat_by_scope(scope, chat_id)
                 chat_to_save.messages.append(assistant_msg_obj)
                 _save_assistant_chat_by_scope(scope, chat_id, chat_to_save)
-                
-                if final_reasoning_content:
-                    yield _sse("reasoning", {"text": final_reasoning_content})
-                if final_content:
-                    yield _sse("delta", {"text": final_content})
                 yield _sse("done", {"ok": True, "messageId": assistant_msg_obj.id})
                 return
 
-            for tool_call in resp.tool_calls or []:
+            for tool_call in tool_calls_from_stream or []:
                 fn = (tool_call.get("function") or {}).get("name")
                 raw_args = (tool_call.get("function") or {}).get("arguments") or "{}"
                 try:
                     args = json.loads(raw_args)
                 except Exception:
                     args = {}
-                
                 tool_name = str(fn)
                 result, card = _run_tool(tool_name, args, chat_id, bool(allow_write_memory))
                 trace_content = f"工具调用：{tool_name}"
@@ -1287,7 +1289,13 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
                 yield _sse("tool_trace", {"content": trace_content, "messageId": trace_msg.id})
                 if card:
                     yield _sse("card", {"card": card})
-                
+                # 记忆写入工具执行成功后，推送当前会话的更新，以便前端立即刷新长期记忆与「已保存」标记
+                if tool_name in ("append_chat_memory", "overwrite_chat_memory") and result.get("ok") and chat_id:
+                    try:
+                        updated_chat = load_chat(chat_id)
+                        yield _sse("chat_memory_updated", {"chat": updated_chat.model_dump(mode="json")})
+                    except Exception:
+                        pass
                 tool_result_msg = {
                     "role": "tool",
                     "tool_call_id": tool_call.get("id"),

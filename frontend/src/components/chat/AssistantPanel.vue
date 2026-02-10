@@ -72,6 +72,10 @@ const props = defineProps<{
   modelOptions: ModelOptions
   /** 思考链块列表：每项为 { messageId, content }，展示在对应消息之前 */
   reasoningBlocks?: Array<{ messageId: string; content: string }>
+  /** 当前正在流式接收的正文（用于打字机效果） */
+  streamingContent?: string
+  /** 当前正在流式接收的思考内容 */
+  streamingReasoning?: string
 }>()
 
 const emit = defineEmits<{
@@ -200,12 +204,23 @@ function collapseReasoning(e: MouseEvent) {
   expandedReasoningMessageId.value = null
 }
 
-/** 获取某条消息对应的思考链内容（用于显示在该消息上方） */
-function getReasoningContentForMessage(messageId: string): string | undefined {
+/** 获取某条消息对应的思考链内容：已保存的块 或 当前正在流式接收的思考（仅对最后一条助手消息） */
+function getReasoningContentForMessage(messageId: string, isLastAssistant: boolean): string | undefined {
+  if (isLastAssistant && props.isGenerating && (props.streamingReasoning ?? '').trim()) {
+    return props.streamingReasoning!.trim()
+  }
   const blocks = props.reasoningBlocks
   if (!Array.isArray(blocks)) return undefined
   const block = blocks.find((b) => b.messageId === messageId)
   return block?.content?.trim() || undefined
+}
+
+/** 获取某条助手消息的展示正文：生成中且为最后一条时用流式内容，否则用消息内容 */
+function getDisplayContent(m: AssistantMessage, isLastAssistant: boolean): string {
+  if (isLastAssistant && props.isGenerating && (props.streamingContent ?? '')) {
+    return (m.content || '') + props.streamingContent
+  }
+  return m.content ?? ''
 }
 </script>
 
@@ -240,19 +255,19 @@ function getReasoningContentForMessage(messageId: string): string | undefined {
         开始和助手对话以获得帮助
       </div>
       <div
-        v-for="m in messages"
+        v-for="(m, idx) in messages"
         :key="m.id"
         class="flex flex-col gap-1 group"
         :class="m.role === 'user' ? 'items-end' : (m.role === 'system' ? 'items-center' : 'items-start')"
       >
         <!-- 思考链气泡：在对应消息（助手或工具）上方，小圆角，默认折叠 100px，仅点击气泡展开、仅点击图标收起 -->
         <div
-          v-if="getReasoningContentForMessage(m.id)"
+          v-if="getReasoningContentForMessage(m.id, m.role === 'assistant' && idx === messages.length - 1)"
           class="w-full max-w-[90%] rounded-lg border border-blue-500 bg-blue-800/25 text-gray-300 text-xs leading-relaxed relative transition-[max-height] duration-300"
           :class="isReasoningExpanded(m.id) ? 'max-h-[80vh] overflow-y-auto' : 'max-h-[100px] overflow-hidden cursor-pointer'"
           @click="expandReasoning(m.id, $event)"
         >
-          <div class="pr-8 py-2.5 pl-3 whitespace-pre-wrap break-words">{{ getReasoningContentForMessage(m.id) }}</div>
+          <div class="pr-8 py-2.5 pl-3 whitespace-pre-wrap break-words">{{ getReasoningContentForMessage(m.id, m.role === 'assistant' && idx === messages.length - 1) }}</div>
           <button
             type="button"
             class="reasoning-toggle-icon absolute top-2 right-2 w-6 h-6 flex items-center justify-center rounded hover:bg-white/10 transition-transform duration-200"
@@ -273,7 +288,7 @@ function getReasoningContentForMessage(messageId: string): string | undefined {
               ? 'bg-yellow-500/10 border-yellow-500/20 text-gray-300 rounded-lg text-xs'
               : 'bg-white/5 backdrop-blur-md border-white/10 text-gray-200 rounded-tl-sm')"
         >
-          <div class="prose prose-invert prose-sm max-w-none" v-html="renderMarkdown(m.content)"></div>
+          <div class="prose prose-invert prose-sm max-w-none" v-html="renderMarkdown(getDisplayContent(m, m.role === 'assistant' && idx === messages.length - 1))"></div>
         </div>
         <!-- 消息操作 -->
         <div v-if="m.role !== 'system'" class="flex items-center gap-3 px-1 opacity-0 group-hover:opacity-100 transition-opacity">

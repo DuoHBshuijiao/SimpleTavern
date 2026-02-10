@@ -205,10 +205,11 @@ const group = useGroupChat({
 /** 是否启用流式传输（与全局设置一致），供助手与生成共用 */
 const isStreamEnabled = computed(() => settings.settings?.streamEnabled !== false)
 
-// 聊天助手
+// 聊天助手（助手写入长期记忆后通过 SSE 推送 chat_memory_updated，此处回调使当前会话状态立即刷新，无需切换窗口即可看到「当前会话」长期记忆与「已保存」标记）
 const assistant = useAssistant({
   chatId: assistantChatId,
   streamEnabled: isStreamEnabled,
+  onChatMemoryUpdated: (chat) => chats.applyChatPayload(chat),
 })
 
 /**
@@ -2128,6 +2129,8 @@ const editingPersonaAvatarUrl = computed(() => {
       :is-generating="assistant.isAssistantGenerating.value"
       :stream-error="assistant.assistantStreamError.value"
       :reasoning-blocks="assistant.assistantReasoningBlocks.value"
+      :streaming-content="assistant.assistantStreamingContent.value"
+      :streaming-reasoning="assistant.assistantStreamingReasoning.value"
       :current-model="assistantCurrentModel"
       :model-options="chatModelOptions"
       @update:is-open="assistant.isAssistantPanelOpen.value = $event"
@@ -2171,7 +2174,7 @@ const editingPersonaAvatarUrl = computed(() => {
       @update:message-role="(r) => { if (assistant.editingAssistantMessage.value) assistant.editingAssistantMessage.value.role = r }"
       @update:message-content="assistant.editingAssistantMessageContent.value = $event"
       @save="assistant.saveEditedMessage"
-      @save-and-send="assistant.saveEditedMessage" 
+      @save-and-send="assistant.saveEditedMessageAndSend" 
     />
 
     <!-- 设置抽屉 -->
