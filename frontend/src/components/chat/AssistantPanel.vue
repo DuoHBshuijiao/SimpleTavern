@@ -178,7 +178,7 @@ function confirmReset(event: Event) {
     show: true,
     target: event.currentTarget as HTMLElement,
     title: '清空对话',
-    message: '确定清空与助理的所有上下文？',
+    message: '确定清空与助手的所有上下文？',
     confirmText: '清空',
     onConfirm: () => {
       emit('reset')

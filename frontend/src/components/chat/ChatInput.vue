@@ -314,13 +314,13 @@ function handleKeydown(e: KeyboardEvent) {
       Markdown 支持 · Ctrl + Enter 发送
     </div>
     
-    <!-- 助理按钮 -->
+    <!-- 助手按钮 -->
     <button
       class="assistant-button w-12 h-12 rounded-xl bg-assistant text-white font-bold shadow-lg shadow-assistant/30 hover:bg-assistant/80 transition-all border border-white/10 hover:scale-105 active:scale-95 flex items-center justify-center backdrop-blur-sm z-50"
       title="聊天助手"
       @click="emit('toggle-assistant')"
     >
-      助理
+      助手
     </button>
   </div>
 </template>

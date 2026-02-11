@@ -1965,7 +1965,7 @@ const editingPersonaAvatarUrl = computed(() => {
       @delete-chat="deleteChat"
     />
 
-    <!-- 右侧主区域 + 助理面板 -->
+    <!-- 右侧主区域 + 助手面板 -->
     <div class="flex-1 flex min-w-0 relative">
       <main class="flex-1 flex flex-col relative min-w-0 bg-transparent transition-all duration-300">
       
@@ -2121,7 +2121,7 @@ const editingPersonaAvatarUrl = computed(() => {
         </div>
       </main>
 
-    <!-- 聊天助理面板 -->
+    <!-- 聊天助手面板 -->
     <AssistantPanel
       :is-open="assistant.isAssistantPanelOpen.value"
       :messages="assistant.assistantMessages.value"
