@@ -47,7 +47,7 @@ import type { AssistantMessage } from '../../composables/useAssistant'
 import ModernSelect from '../ModernSelect.vue'
 import ConfirmPopover from '../../components/ConfirmPopover.vue'
 import { Sparkles, Loader2, MoreHorizontal, X } from 'lucide-vue-next'
-import { ref } from 'vue'
+import { ref, watch, nextTick } from 'vue'
 
 interface ModelOption {
   label: string
@@ -222,6 +222,40 @@ function getDisplayContent(m: AssistantMessage, isLastAssistant: boolean): strin
   }
   return m.content ?? ''
 }
+
+// 消息列表滚动容器：打开面板时自动滚到底部
+const messagesListEl = ref<HTMLElement | null>(null)
+
+const PANEL_OPEN_DURATION_MS = 320
+
+function scrollToBottom() {
+  const run = () => {
+    const el = messagesListEl.value
+    if (el) el.scrollTop = el.scrollHeight
+  }
+  nextTick(() => {
+    run()
+    // 首次打开时面板尚未完成展开/布局，延迟再滚一次确保到底
+    setTimeout(run, PANEL_OPEN_DURATION_MS)
+  })
+}
+
+// 打开面板时滚到底部（含刷新后第一次打开）
+watch(
+  () => props.isOpen,
+  (open) => {
+    if (open) scrollToBottom()
+  }
+)
+
+// 切换聊天后 messages 变化，若面板已打开则滚到底部，避免停在上一会话的滚动位置
+watch(
+  () => [props.messages.length, props.messages[props.messages.length - 1]?.id] as const,
+  () => {
+    if (props.isOpen) scrollToBottom()
+  },
+  { deep: false }
+)
 </script>
 
 <template>
@@ -247,7 +281,7 @@ function getDisplayContent(m: AssistantMessage, isLastAssistant: boolean): strin
     </div>
 
     <!-- 消息列表 -->
-    <div class="flex-1 overflow-y-auto custom-scrollbar space-y-4 px-4 py-3">
+    <div ref="messagesListEl" class="flex-1 overflow-y-auto custom-scrollbar space-y-4 px-4 py-3">
       <div v-if="messages.length === 0" class="text-xs text-gray-600 text-center py-12 flex flex-col items-center gap-3">
         <div class="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center text-xl">
             <Sparkles class="w-6 h-6 text-yellow-400" />
