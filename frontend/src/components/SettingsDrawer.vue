@@ -334,6 +334,7 @@ function createPreset() {
  *
  * 弹出确认对话框，确认后删除指定的API预设。
  * 如果删除的是当前编辑的预设，则选择第一个预设。
+ * 同时从「最近使用」中移除仅存在于被删预设中的模型，避免聊天界面仍显示已删除的模型。
  *
  * @param {string} id - 预设ID
  */
@@ -344,6 +345,12 @@ function deletePreset(id: string) {
   if (editingPresetId.value === id) {
     editingPresetId.value = globalDraft.value.apiPresets[0]?.id || null
   }
+  // 从「最近使用」中移除已不在任何预设（或全局候选）中的模型
+  const presets = globalDraft.value.apiPresets
+  const available = presets.length > 0
+    ? new Set(presets.flatMap(p => p.models || []))
+    : new Set(globalDraft.value.llm.modelCandidates || [])
+  globalDraft.value.llm.usedModels = (globalDraft.value.llm.usedModels || []).filter(m => available.has(m))
 }
 
 /**

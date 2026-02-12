@@ -319,16 +319,29 @@ interface ModelOptionGroup {
 }
 
 /**
+ * 计算当前可用的模型集合（来自所有预设或全局候选），用于过滤「最近使用」中已删除的模型。
+ */
+const availableModelSet = computed(() => {
+  if (!settings.settings) return new Set<string>()
+  const presets = settings.settings.apiPresets
+  if (presets && presets.length > 0) {
+    return new Set(presets.flatMap(p => p.models || []))
+  }
+  return new Set(settings.settings.llm.modelCandidates || [])
+})
+
+/**
  * 计算聊天模型选项
  *
  * 根据设置生成聊天模型选项列表，包括"最近使用"、各API预设的模型、全局配置的模型候选。
+ * 「最近使用」仅显示当前仍存在于某预设或全局候选中的模型，避免显示已删除预设/模型。
  * 按预设分组，每个选项包含label、value和presetId。
  */
 const chatModelOptions = computed(() => {
   const options: ModelOptionGroup[] = []
   if (!settings.settings) return []
 
-  const recentModels = settings.settings.llm.usedModels || []
+  const recentModels = (settings.settings.llm.usedModels || []).filter(m => availableModelSet.value.has(m))
   if (recentModels.length > 0) {
     options.push({
       label: '最近使用',
