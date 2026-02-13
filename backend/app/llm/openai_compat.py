@@ -43,18 +43,19 @@ import httpx
 
 def _normalize_base_url(base_url: str) -> str:
     """
-    规范化API基础URL
+    规范化API基础URL（用于拼接 /models、/chat/completions 等路径）。
     
-    处理用户输入的各种URL格式，统一为包含/v1的完整URL。
+    处理用户输入的各种URL格式：补全协议、统一末尾斜杠、补全 /v1。
     支持以下格式：
-    - 完整URL（带/v1或不带）
-    - 仅域名（自动添加https://和/v1）
+    - 完整URL（带 /v1 或不带）
+    - 末尾有无 "/" 均可（如 api/v1 或 api/v1/）
+    - 仅域名（自动添加 https:// 和 /v1）
     
     Args:
         base_url: 原始基础URL
     
     Returns:
-        str: 规范化后的URL，确保以/v1结尾
+        str: 规范化后的 base，确保以 /v1 结尾且无末尾斜杠
     """
     base = base_url.strip()
     if base and not (base.startswith("http://") or base.startswith("https://")):
@@ -63,6 +64,41 @@ def _normalize_base_url(base_url: str) -> str:
     if base.endswith("/v1"):
         return base
     return base + "/v1"
+
+
+_CHAT_COMPLETIONS_SUFFIX = "/chat/completions"
+
+
+def _chat_completions_url(base_url: str) -> str:
+    """
+    返回用于请求的 chat completions 完整 URL。
+    若用户填入的 base_url 已包含 /chat/completions，则直接使用（仅做末尾斜杠规范化），
+    否则在规范化 base 后拼接 /chat/completions。
+    """
+    raw = base_url.strip()
+    if raw and not (raw.startswith("http://") or raw.startswith("https://")):
+        raw = "https://" + raw
+    raw = raw.rstrip("/")
+    if _CHAT_COMPLETIONS_SUFFIX in raw.lower():
+        return raw
+    return _normalize_base_url(base_url) + _CHAT_COMPLETIONS_SUFFIX
+
+
+def _models_url(base_url: str) -> str:
+    """
+    返回用于请求的 models 列表完整 URL。
+    若用户填入的 base_url 已包含 /chat/completions，则先去掉该部分得到 base，再拼接 /models。
+    """
+    raw = base_url.strip()
+    if raw and not (raw.startswith("http://") or raw.startswith("https://")):
+        raw = "https://" + raw
+    raw = raw.rstrip("/")
+    lower = raw.lower()
+    if _CHAT_COMPLETIONS_SUFFIX in lower:
+        idx = lower.rfind(_CHAT_COMPLETIONS_SUFFIX)
+        base_for_models = raw[:idx].rstrip("/")
+        return _normalize_base_url(base_for_models) + "/models"
+    return _normalize_base_url(base_url) + "/models"
 
 
 # OpenRouter 等平台用于展示来源的请求头（可选，便于在 openrouter.ai 等站点被识别）
@@ -110,7 +146,7 @@ async def list_models_openai_compat(base_url: str, api_key: str) -> list[str]:
     Returns:
         list[str]: 模型ID列表，按字母顺序排序并去重。如果请求失败返回空列表
     """
-    url = _normalize_base_url(base_url) + "/models"
+    url = _models_url(base_url)
     headers = {"Accept": "application/json", **_common_headers(api_key)}
     try:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -272,7 +308,7 @@ async def chat_completions(
     Raises:
         httpx.HTTPStatusError: HTTP请求失败时抛出
     """
-    url = _normalize_base_url(base_url) + "/chat/completions"
+    url = _chat_completions_url(base_url)
     headers = {
         "Accept": "application/json",
         "Content-Type": "application/json",
@@ -336,7 +372,7 @@ async def chat_completions_message(
     Raises:
         httpx.HTTPStatusError: HTTP请求失败时抛出
     """
-    url = _normalize_base_url(base_url) + "/chat/completions"
+    url = _chat_completions_url(base_url)
     headers = {
         "Accept": "application/json",
         "Content-Type": "application/json",
@@ -389,7 +425,7 @@ async def stream_chat_completions(
     Yields:
         StreamChunk: 流式响应块（content 或 reasoning）
     """
-    url = _normalize_base_url(base_url) + "/chat/completions"
+    url = _chat_completions_url(base_url)
     headers = {
         "Accept": "text/event-stream",
         "Content-Type": "application/json",

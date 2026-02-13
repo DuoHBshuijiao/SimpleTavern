@@ -805,9 +805,10 @@ async function checkUpdate() {
                 <input 
                   v-model="globalDraft.llm.baseUrl" 
                   type="text" 
-                  placeholder="https://api.openai.com"
+                  placeholder="https://api.openai.com 或 …/v1/chat/completions"
                   class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-brand/50 focus:ring-1 focus:ring-brand/50 outline-none transition-colors"
                 />
+                <p class="text-xs text-gray-500">支持 Base（如 https://api.openai.com 或 …/v1）或完整 chat/completions 地址；末尾有无 / 均可。</p>
               </div>
 
               <!-- API Key -->
@@ -1068,9 +1069,10 @@ async function checkUpdate() {
                               <input 
                                   v-model="editingPreset.baseUrl" 
                                   type="text" 
-                                  placeholder="https://api.openai.com"
+                                  placeholder="https://api.openai.com 或 …/v1/chat/completions"
                                   class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-gray-200 focus:border-brand/50 outline-none"
                               />
+                              <p class="text-xs text-gray-500">支持 Base（如 …/v1 或 …/v1/）或完整 chat/completions 地址；末尾有无 / 均可。</p>
                           </div>
 
                           <div class="space-y-1.5">
