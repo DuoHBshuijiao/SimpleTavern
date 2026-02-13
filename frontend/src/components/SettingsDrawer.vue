@@ -911,7 +911,7 @@ async function checkUpdate() {
                       class="w-full min-w-0"
                     />
                   </div>
-                  <div class="flex items-center gap-1 bg-white/5 border border-white/10 rounded-lg px-1 py-0.5">
+                  <div class="flex items-center gap-1 h-9 bg-white/5 border border-white/10 rounded-lg px-1 py-0.5">
                     <button
                       type="button"
                       class="p-1.5 text-gray-400 hover:text-gray-200 hover:bg-white/10 rounded transition-colors"
