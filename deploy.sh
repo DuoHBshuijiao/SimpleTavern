@@ -144,6 +144,12 @@ else
     echo ""
     
     # 创建/使用虚拟环境
+    # 若 venv 目录存在但 Python 可执行文件不存在（如下载的源码含空/损坏的 venv），则删除并重建
+    if [ -d "$VENV_DIR" ] && [ ! -f "$VENV_PYTHON" ]; then
+        print_warning "检测到无效的虚拟环境（Python 不存在），将删除并重新创建: $VENV_DIR"
+        rm -rf "$VENV_DIR"
+    fi
+    
     if [ "$VENV_EXISTS" != "✓" ]; then
         print_info "创建虚拟环境: $VENV_DIR"
         $PYTHON_CMD -m venv "$VENV_DIR"

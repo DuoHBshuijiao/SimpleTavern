@@ -142,6 +142,17 @@ def get_venv_python(venv_dir):
 
 def setup_venv(python_cmd, venv_dir):
     """创建或使用虚拟环境"""
+    venv_python = get_venv_python(venv_dir)
+    
+    # 若 venv 目录存在但 Python 可执行文件不存在（如下载的源码含空/损坏的 venv），则删除并重建
+    if venv_dir.exists() and not venv_python.exists():
+        print_warning(f"检测到无效的虚拟环境（Python 不存在），将删除并重新创建: {venv_dir}")
+        try:
+            shutil.rmtree(venv_dir)
+        except Exception as e:
+            print_error(f"删除无效虚拟环境失败: {e}")
+            return None
+    
     if venv_dir.exists():
         print_info(f"使用已存在的虚拟环境: {venv_dir}")
     else:
@@ -153,7 +164,6 @@ def setup_venv(python_cmd, venv_dir):
             return None
     
     venv_python = get_venv_python(venv_dir)
-    
     if not venv_python.exists():
         print_error(f"虚拟环境 Python 不存在: {venv_python}")
         return None
