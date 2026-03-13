@@ -128,8 +128,17 @@ cd E:\SimpleTavern
 # 创建虚拟环境
 python -m venv venv
 
-# 激活虚拟环境
+# 激活虚拟环境（任选其一，根据当前终端类型）
 .\venv\Scripts\Activate.ps1
+# 若 PowerShell 报错「无法加载，因为在此系统上禁止运行脚本」，可先执行：
+# Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+
+# 若使用 CMD 而非 PowerShell，则用：
+# venv\Scripts\activate.bat
+
+# 若当前在 backend 子目录，则用：
+# ..\venv\Scripts\Activate.ps1   (PowerShell)
+# ..\venv\Scripts\activate.bat   (CMD)
 
 # 进入后端目录并安装依赖
 cd backend
@@ -166,8 +175,8 @@ cd backend
 # 确保激活虚拟环境
 ..\venv\Scripts\Activate.ps1
 
-# 启动后端（在新终端窗口）
-.\.venv\Scripts\uvicorn app.main:app --reload --port 8000
+# 启动后端（虚拟环境已激活，直接运行）
+python -m uvicorn app.main:app --reload --port 8000
 ```
 
 #### 5) 启动前端服务
@@ -195,8 +204,11 @@ cd ~/SimpleTavern
 # 创建虚拟环境
 python3 -m venv venv
 
-# 激活虚拟环境
+# 激活虚拟环境（Bash/Zsh 通用）
 source venv/bin/activate
+
+# 若当前在 backend 子目录，则用：
+# source ../venv/bin/activate
 
 # 进入后端目录并安装依赖
 cd backend
