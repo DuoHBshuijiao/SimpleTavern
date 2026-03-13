@@ -140,6 +140,8 @@ export interface ApiPreset {
  */
 export interface Settings {
   version: number
+  /** 主题ID，空值时前端兜底为 dark */
+  themeId?: 'dark' | 'light' | null
   llm: {
     baseUrl: string
     apiKey: string

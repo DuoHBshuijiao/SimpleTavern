@@ -91,13 +91,13 @@
 
   /* ========== 颜色变体 ========== */
   .btn-primary {
-    background-color: var(--color-brand);
-    color: white;
+    background-color: var(--color-primary);
+    color: var(--color-on-brand);
     box-shadow: var(--shadow-brand);
   }
 
   .btn-primary:hover:not(:disabled) {
-    background-color: var(--color-brand-hover);
+    background-color: var(--color-primary-hover);
   }
 
   .btn-secondary {
@@ -115,7 +115,7 @@
   }
 
   .btn-ghost:hover:not(:disabled) {
-    background-color: rgba(255, 255, 255, 0.05);
+    background-color: var(--color-surface-muted);
   }
 
   .btn-danger {
@@ -148,7 +148,7 @@
     border-radius: 0.6rem;
     font-size: var(--text-sm);
     font-weight: 600;
-    color: #f8fafc;
+    color: var(--color-text);
     border: 1px solid transparent;
     transition: 
       background-color var(--transition-normal),
@@ -165,54 +165,54 @@
   }
 
   .chat-action-button--primary {
-    background-color: var(--color-brand);
-    color: white;
+    background-color: var(--color-primary);
+    color: var(--color-on-brand);
     box-shadow: var(--shadow-brand);
     border-color: rgba(147, 197, 253, 0.2); /* brand-light/20 */
   }
 
   .chat-action-button--primary:hover:not(:disabled) {
-    background-color: var(--color-brand-hover);
+    background-color: var(--color-primary-hover);
     border-color: rgba(147, 197, 253, 0.3); /* brand-light/30 */
   }
 
   .chat-action-button--continue {
-    background-color: rgba(22, 163, 74, 0.8); /* green-600/80 */
-    color: white;
+    background-color: var(--color-success-bg);
+    color: var(--color-success-text);
     border-color: rgba(74, 222, 128, 0.2); /* green-400/20 */
     box-shadow: var(--shadow-success);
-    backdrop-filter: blur(4px);
+    backdrop-filter: blur(var(--blur-light));
   }
 
   .chat-action-button--continue:hover:not(:disabled) {
-    background-color: rgb(22, 163, 74); /* green-600 */
-    border-color: rgba(74, 222, 128, 0.3);
+    background-color: var(--color-success);
+    border-color: var(--color-success-text);
   }
 
   .chat-action-button--next {
-    background-color: rgba(147, 51, 234, 0.8); /* purple-600/80 */
-    color: white;
+    background-color: var(--color-purple-bg);
+    color: var(--color-purple-text);
     border-color: rgba(192, 132, 252, 0.2); /* purple-400/20 */
     box-shadow: var(--shadow-purple);
-    backdrop-filter: blur(4px);
+    backdrop-filter: blur(var(--blur-light));
   }
 
   .chat-action-button--next:hover:not(:disabled) {
-    background-color: rgb(147, 51, 234); /* purple-600 */
-    border-color: rgba(192, 132, 252, 0.3);
+    background-color: var(--color-purple);
+    border-color: var(--color-purple-text);
   }
 
   .chat-action-button--stop {
-    background-color: rgba(239, 68, 68, 0.8); /* red-500/80 */
-    color: white;
+    background-color: var(--color-error-bg);
+    color: var(--color-error-text);
     border-color: rgba(248, 113, 113, 0.2); /* red-400/20 */
     box-shadow: var(--shadow-error);
-    backdrop-filter: blur(4px);
+    backdrop-filter: blur(var(--blur-light));
   }
 
   .chat-action-button--stop:hover:not(:disabled) {
-    background-color: rgb(239, 68, 68); /* red-500 */
-    border-color: rgba(248, 113, 113, 0.3);
+    background-color: var(--color-error);
+    border-color: var(--color-error-text);
   }
 
   /* ========== 图标按钮 ========== */

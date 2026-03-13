@@ -188,6 +188,7 @@ class Settings(BaseModel):
     generationDefaults: GenerationParams = Field(default_factory=GenerationParams)
     prompts: SettingsPrompts = Field(default_factory=SettingsPrompts)
     streamEnabled: bool = True
+    themeId: str | None = None
     pureAiMode: bool = False
     thinkingMode: bool = False  # 思考模式：True 时 extra_body 传 {"thinking": {"type": "enabled"}}，否则传 disabled
     userPersonas: list[UserPersona] = Field(default_factory=list)

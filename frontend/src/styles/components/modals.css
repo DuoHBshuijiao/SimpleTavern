@@ -78,10 +78,10 @@
   .modal-backdrop {
     position: absolute;
     inset: 0;
-    background-color: rgb(0 0 0 / 0.2); /* bg-black/20 */
-    backdrop-filter: blur(2px); /* backdrop-blur-sm */
+    background-color: var(--color-overlay);
+    backdrop-filter: blur(var(--blur-light));
     opacity: 0.6;
-    color: rgba(229, 231, 235, 0.61);
+    color: transparent;
   }
 
   .modal-content {
@@ -89,12 +89,12 @@
     max-height: calc(100vh - 2rem);
     
     /* Liquid Glass Style */
-    background-color: rgba(65, 99, 155, 0.15);
+    background-color: var(--color-surface-overlay);
     background-image: none;
-    backdrop-filter: blur(6px);
-    -webkit-backdrop-filter: blur(6px);
-    border: 1px solid rgb(255 255 255 / 0.1); /* border-white/10 */
-    box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25); /* shadow-2xl */
+    backdrop-filter: blur(var(--blur-light));
+    -webkit-backdrop-filter: blur(var(--blur-light));
+    border: 1px solid var(--color-border);
+    box-shadow: var(--shadow-heavy);
     
     border-radius: 1rem; /* rounded-2xl */
     
@@ -113,13 +113,13 @@
     align-items: center;
     justify-content: space-between;
     padding: var(--spacing-md) var(--spacing-lg);
-    border-bottom: 1px solid rgb(255 255 255 / 0.1); /* border-white/10 */
+    border-bottom: 1px solid var(--color-border);
   }
 
   .modal-title {
     font-size: var(--text-lg);
     font-weight: 600;
-    color: #f8fafc; /* text-slate-50 (text-primary) */
+    color: var(--color-text);
   }
 
   .modal-close {
@@ -132,8 +132,8 @@
   }
 
   .modal-close:hover {
-    background-color: rgba(255, 255, 255, 0.1);
-    color: var(--color-text-primary);
+    background-color: var(--color-surface-hover);
+    color: var(--color-text);
   }
 
   .modal-body {
@@ -148,7 +148,7 @@
     justify-content: flex-end;
     gap: var(--spacing-sm);
     padding: var(--spacing-md) var(--spacing-lg);
-    border-top: 1px solid rgb(255 255 255 / 0.1); /* border-white/10 */
+    border-top: 1px solid var(--color-border);
   }
 
   /* ========== Vue Transition Animations ========== */

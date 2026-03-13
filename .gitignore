@@ -7,7 +7,7 @@ __pycache__/
 
 node_modules/
 dist/
-
+backend/PYDANTIC_V2_AUDIT.md
 data/
 
 temp_commit_msg.txt

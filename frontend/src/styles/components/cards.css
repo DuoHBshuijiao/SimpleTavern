@@ -145,8 +145,8 @@
   }
 
   .message-bubble--system {
-    background-color: rgba(245, 158, 11, 0.05);
-    border: 1px solid rgba(245, 158, 11, 0.1);
+    background-color: var(--color-warning-bg);
+    border: 1px solid color-mix(in srgb, var(--color-warning) 18%, transparent);
     color: var(--color-text-secondary);
   }
 
@@ -162,7 +162,7 @@
   }
 
   .avatar-card:hover {
-    background-color: rgba(255, 255, 255, 0.05);
+    background-color: var(--color-surface-muted);
   }
 
   .avatar-card-selected {
@@ -176,7 +176,7 @@
     align-items: center;
     justify-content: space-between;
     padding: var(--spacing-md);
-    background-color: rgba(255, 255, 255, 0.02);
+    background-color: var(--color-surface-overlay);
     border: 1px solid var(--color-border-subtle);
     border-radius: var(--radius-xl);
   }

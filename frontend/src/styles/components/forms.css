@@ -37,6 +37,12 @@
  */
 
 @layer components {
+  /* ========== 下拉选择框（主题适配，使用与 .input 相同的变量） ========== */
+  select.input option {
+    background-color: var(--app-color-surface);
+    color: var(--app-color-text);
+  }
+
   /* ========== 基础输入框 ========== */
   .input {
     width: 100%;
@@ -64,7 +70,7 @@
   .input:focus {
     outline: none;
     border-color: var(--color-brand);
-    box-shadow: 0 0 0 3px rgba(162, 48, 237, 0.15);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
   }
 
   .input:disabled {

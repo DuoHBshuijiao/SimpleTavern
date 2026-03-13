@@ -210,7 +210,7 @@ function handleKeydown(e: KeyboardEvent) {
       - Uses border-white/10 for subtle border
       - Removed hardcoded hex colors
     -->
-    <div class="relative bg-slate-900/70 backdrop-blur-xl border border-white/10 rounded-2xl shadow-xl p-3 flex flex-col gap-2 transition-all focus-within:border-brand/40 focus-within:ring-1 focus-within:ring-brand/20 focus-within:bg-slate-900/80" style="opacity: 1;">
+    <div class="relative bg-surface-overlay backdrop-blur-xl border border-[var(--color-border)] rounded-2xl shadow-xl p-3 flex flex-col gap-2 transition-all focus-within:border-brand/40 focus-within:ring-1 focus-within:ring-brand/20 focus-within:bg-surface-overlay" style="opacity: 1;">
       <textarea
         :value="modelValue"
         @input="emit('update:modelValue', ($event.target as HTMLTextAreaElement).value)"
@@ -221,15 +221,15 @@ function handleKeydown(e: KeyboardEvent) {
         @keydown="handleKeydown"
       ></textarea>
       
-      <div class="flex items-center justify-between pt-2 border-t border-white/5">
+      <div class="flex items-center justify-between pt-2 border-t border-[var(--color-border-subtle)]">
         <div class="flex-1 min-w-0">
           <!-- 群聊发言状态指示器 -->
-          <div v-if="isGroup && isGenerating && currentSpeakerIndex >= 0" class="flex items-center gap-2 text-xs text-purple-400">
+          <div v-if="isGroup && isGenerating && currentSpeakerIndex >= 0" class="flex items-center gap-2 text-xs text-[var(--color-purple)]">
             <span class="animate-pulse">●</span>
             <span>{{ groupMembers[currentSpeakerIndex]?.name || '角色' }} 正在发言...</span>
-            <span class="text-gray-500">({{ currentSpeakerIndex + 1 }}/{{ groupMembers.length }})</span>
+            <span class="text-[var(--color-text-muted)]">({{ currentSpeakerIndex + 1 }}/{{ groupMembers.length }})</span>
             <button 
-              class="ml-2 px-2 py-0.5 text-xs bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-400 rounded transition-colors border border-yellow-500/20"
+              class="ml-2 px-2 py-0.5 text-xs bg-[var(--color-warning-bg)] hover:opacity-90 text-[var(--color-warning)] rounded transition-colors border border-[var(--color-warning)]/20"
               @click="emit('pause-group')"
             >
               暂停
@@ -249,7 +249,7 @@ function handleKeydown(e: KeyboardEvent) {
           
           <!-- 插话面板 -->
           <div v-else-if="canInterject && isGroup && !isInterjecting" class="flex items-center gap-2 text-xs">
-            <span class="text-purple-400 flex items-center gap-1"><MessageSquare class="w-3 h-3" /> 点击角色插话：</span>
+            <span class="text-[var(--color-purple)] flex items-center gap-1"><MessageSquare class="w-3 h-3" /> 点击角色插话：</span>
             <div class="flex items-center gap-1">
               <div 
                 v-for="member in groupMembers"
@@ -269,7 +269,7 @@ function handleKeydown(e: KeyboardEvent) {
               </div>
             </div>
             <button 
-              class="ml-2 px-2 py-0.5 text-xs bg-white/5 hover:bg-white/10 text-gray-400 rounded transition-colors border border-white/5"
+              class="ml-2 px-2 py-0.5 text-xs bg-surface-muted hover:bg-surface-hover text-[var(--color-text-muted)] rounded transition-colors border border-[var(--color-border-subtle)]"
               @click="emit('hide-interject')"
             >
               关闭
@@ -277,13 +277,11 @@ function handleKeydown(e: KeyboardEvent) {
           </div>
           
           <!-- 插话中状态 -->
-          <div v-else-if="isInterjecting" class="flex items-center gap-2 text-xs text-purple-400">
+          <div v-else-if="isInterjecting" class="flex items-center gap-2 text-xs text-[var(--color-purple)]">
             <span class="animate-pulse">●</span>
             <span>正在插话...</span>
           </div>
           
-          <!-- 错误信息 -->
-          <div v-else-if="streamError" class="text-xs text-red-400 truncate">{{ streamError }}</div>
         </div>
         
         <div class="flex items-center gap-3">
@@ -310,13 +308,13 @@ function handleKeydown(e: KeyboardEvent) {
       </div>
     </div>
     
-    <div class="text-center mt-2 text-xs text-gray-500">
+    <div class="text-center mt-2 text-xs text-[var(--color-text-muted)]">
       Markdown 支持 · Ctrl + Enter 发送
     </div>
     
     <!-- 助手按钮 -->
     <button
-      class="assistant-button w-12 h-12 rounded-xl bg-assistant text-white font-bold shadow-lg shadow-assistant/30 hover:bg-assistant/80 transition-all border border-white/10 hover:scale-105 active:scale-95 flex items-center justify-center backdrop-blur-sm z-50"
+      class="assistant-button w-12 h-12 rounded-xl bg-assistant text-on-brand font-bold shadow-lg shadow-assistant/30 hover:bg-assistant/80 transition-all border border-[var(--color-border)] hover:scale-105 active:scale-95 flex items-center justify-center backdrop-blur-sm z-50"
       title="聊天助手"
       @click="emit('toggle-assistant')"
     >

@@ -273,18 +273,18 @@ function confirmDelete() {
 
 <template>
   <aside 
-    class="flex flex-col bg-gradient-to-br from-slate-800/70 to-slate-700/50 backdrop-blur-xl backdrop-saturate-[1.8] border border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.3)] rounded-2xl transition-all duration-300 relative flex-shrink-0 my-4 h-[calc(100vh-2rem)]"
+    class="flex flex-col theme-panel-bg backdrop-blur-xl backdrop-saturate-[1.8] border border-[var(--color-border)] shadow-[0_8px_32px_rgba(0,0,0,0.3)] rounded-2xl transition-all duration-300 relative flex-shrink-0 my-4 h-[calc(100vh-2rem)]"
     :class="collapsed ? '-ml-[21rem] w-80 opacity-0 pointer-events-none' : 'ml-4 w-80 opacity-100'"
     style="contain: content; will-change: margin-left, opacity;"
   >
     <div class="flex flex-col h-full overflow-hidden rounded-2xl">
       
       <!-- 用户身份区域 (头部) -->
-      <div class="p-4 bg-black/10 border-b border-white/5 shrink-0">
+      <div class="p-4 bg-surface-overlay border-b border-[var(--color-border-subtle)] shrink-0">
         <div class="flex items-center justify-between mb-3">
-          <span class="text-xs font-bold text-gray-400 uppercase tracking-wider">我的身份</span>
+          <span class="text-xs font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">我的身份</span>
           <button 
-            class="text-xs text-brand hover:text-brand-hover transition-colors px-2 py-0.5 rounded hover:bg-white/5" 
+            class="text-xs text-brand hover:text-brand-hover transition-colors px-2 py-0.5 rounded hover:bg-surface-muted" 
             @click="emit('create-persona')"
           >
             + 新建
@@ -296,25 +296,25 @@ function confirmDelete() {
             v-for="p in personas"
             :key="p.id"
             class="group flex items-center gap-3 p-2 rounded-xl transition-all duration-200 border-y border-r border-transparent border-l-2"
-            :class="selectedPersonaId === p.id ? 'bg-brand/10 border-l-brand' : 'border-l-transparent hover:bg-white/5'"
-            style="border: 1px solid rgba(255, 255, 255, 0.1);"
+            :class="selectedPersonaId === p.id ? 'bg-brand/10 border-l-brand' : 'border-l-transparent hover:bg-surface-muted'"
+            style="border: 1px solid var(--color-border);"
             @click="emit('select-persona', p.id)"
           >
             <ModernAvatar :src="p.avatar ? `/api/avatars/${p.avatar}` : null" :name="p.name" :size="36" aspect="1" />
             <div class="flex-1 min-w-0">
-              <div class="font-medium text-sm truncate" :class="selectedPersonaId === p.id ? 'text-brand' : 'text-gray-300'">{{ p.name }}</div>
+              <div class="font-medium text-sm truncate" :class="selectedPersonaId === p.id ? 'text-brand' : 'text-[var(--color-text-secondary)]'">{{ p.name }}</div>
             </div>
-            <div class="opacity-0 group-hover:opacity-100 flex gap-1 transition-opacity ml-auto bg-black/40 rounded-lg backdrop-blur-sm p-0.5">
-              <button class="p-1 hover:text-white text-gray-400 transition-colors" @click.stop="emit('edit-persona', p)">
+            <div class="opacity-0 group-hover:opacity-100 flex gap-1 transition-opacity ml-auto bg-surface-overlay rounded-lg backdrop-blur-sm p-0.5">
+              <button class="p-1 hover:text-[var(--color-text)] text-[var(--color-text-muted)] transition-colors" @click.stop="emit('edit-persona', p)">
                 <Pencil class="w-3.5 h-3.5" />
               </button>
-              <button class="p-1 hover:text-red-400 text-gray-400 transition-colors" @click.stop="confirmDeletePersona(p, $event)">
+              <button class="p-1 hover:text-error text-[var(--color-text-muted)] transition-colors" @click.stop="confirmDeletePersona(p, $event)">
                 <Trash2 class="w-3.5 h-3.5" />
               </button>
             </div>
           </div>
           
-          <div v-if="!personas.length" class="text-xs text-gray-500 text-center py-2">
+          <div v-if="!personas.length" class="text-xs text-[var(--color-text-muted)] text-center py-2">
             点击上方新建创建你的第一个身份
           </div>
         </div>
@@ -323,9 +323,9 @@ function confirmDelete() {
       <!-- 角色列表区域 (中间，弹性伸缩) -->
       <div class="flex-1 overflow-y-auto min-h-0 custom-scrollbar p-3">
         <div class="flex items-center justify-between mb-2 px-1">
-          <span class="text-xs font-bold text-gray-400 uppercase tracking-wider">角色列表</span>
+          <span class="text-xs font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">角色列表</span>
           <button 
-            class="text-xs text-brand hover:text-brand-hover transition-colors px-2 py-0.5 rounded hover:bg-white/5" 
+            class="text-xs text-brand hover:text-brand-hover transition-colors px-2 py-0.5 rounded hover:bg-surface-muted" 
             @click="emit('create-character')"
           >
             + 新建
@@ -337,8 +337,8 @@ function confirmDelete() {
             v-for="c in characters"
             :key="c.id"
             class="group relative flex items-start gap-3 p-3 rounded-2xl transition-all duration-200 border-y border-r border-transparent border-l-2"
-            :class="selectedCharacterId === c.id ? 'bg-white/5 border-l-brand shadow-sm' : 'border-l-transparent hover:bg-white/5'"
-            style="border: 1px solid rgba(255, 255, 255, 0.1);"
+            :class="selectedCharacterId === c.id ? 'bg-surface-muted border-l-brand shadow-sm' : 'border-l-transparent hover:bg-surface-muted'"
+            style="border: 1px solid var(--color-border);"
             @click="emit('update:selectedCharacterId', c.id)"
           >
             <ModernAvatar 
@@ -353,16 +353,16 @@ function confirmDelete() {
             
             <div class="flex-1 min-w-0 flex flex-col h-[74px]">
               <div class="flex justify-between items-start">
-                <div class="font-bold text-sm truncate" :class="selectedCharacterId === c.id ? 'text-brand-300' : 'text-gray-200'">{{ c.name }}</div>
+                <div class="font-bold text-sm truncate" :class="selectedCharacterId === c.id ? 'text-brand' : 'text-[var(--color-text)]'">{{ c.name }}</div>
               </div>
-              <div class="text-xs text-gray-500 line-clamp-3 mt-1 leading-relaxed">{{ c.description || '暂无简介' }}</div>
+              <div class="text-xs text-[var(--color-text-muted)] line-clamp-3 mt-1 leading-relaxed">{{ c.description || '暂无简介' }}</div>
             </div>
 
-            <div class="absolute top-3 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-black/40 rounded-lg backdrop-blur-sm p-0.5 flex gap-1">
-              <button class="p-1.5 hover:text-white text-gray-400 transition-colors" @click.stop="emit('edit-character', c)">
+            <div class="absolute top-3 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-surface-overlay rounded-lg backdrop-blur-sm p-0.5 flex gap-1">
+              <button class="p-1.5 hover:text-[var(--color-text)] text-[var(--color-text-muted)] transition-colors" @click.stop="emit('edit-character', c)">
                 <Pencil class="w-4 h-4" />
               </button>
-              <button class="p-1.5 hover:text-red-400 text-gray-400 transition-colors" @click.stop="confirmDeleteCharacter(c, $event)">
+              <button class="p-1.5 hover:text-error text-[var(--color-text-muted)] transition-colors" @click.stop="confirmDeleteCharacter(c, $event)">
                 <Trash2 class="w-4 h-4" />
               </button>
             </div>
@@ -371,12 +371,12 @@ function confirmDelete() {
       </div>
 
       <!-- 会话列表区域 (底部) -->
-      <div class="h-1/3 min-h-[150px] border-t border-white/5 bg-black/10 flex flex-col">
+      <div class="h-1/3 min-h-[150px] border-t border-[var(--color-border-subtle)] bg-surface-overlay flex flex-col">
         <div class="p-3 pb-1 shrink-0 flex items-center justify-between">
-          <span class="text-xs font-bold text-gray-400 uppercase tracking-wider">历史会话</span>
+          <span class="text-xs font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">历史会话</span>
           <div class="flex gap-2">
             <button 
-              class="text-xs bg-purple-500/20 hover:bg-purple-500/30 text-purple-400 px-2 py-1 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed" 
+              class="text-xs bg-[var(--color-purple-bg)] hover:opacity-90 text-[var(--color-purple)] px-2 py-1 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed" 
               :disabled="characters.length < 2" 
               @click="emit('create-group')"
             >
@@ -394,22 +394,22 @@ function confirmDelete() {
         <div class="flex-1 overflow-y-auto p-2 custom-scrollbar">
           <!-- 群聊列表 -->
           <div v-if="groupList.length > 0" class="mb-3">
-            <div class="text-[10px] text-purple-400 uppercase tracking-wider px-2 mb-1 flex items-center gap-1">
+            <div class="text-[10px] text-[var(--color-purple)] uppercase tracking-wider px-2 mb-1 flex items-center gap-1">
               <Users class="w-3 h-3" /> 群聊
             </div>
             <div 
               v-for="c in groupList"
               :key="c.id"
               class="group flex items-center justify-between p-2 rounded-lg cursor-pointer text-sm mb-1 transition-colors border-l-2"
-              :class="activeChatId === c.id ? 'bg-purple-500/10 text-purple-400 border-l-purple-400' : 'text-gray-400 border-l-transparent hover:bg-white/5 hover:text-gray-200'"
+              :class="activeChatId === c.id ? 'bg-[var(--color-purple-bg)] text-[var(--color-purple)] border-l-[var(--color-purple)]' : 'text-[var(--color-text-muted)] border-l-transparent hover:bg-surface-muted hover:text-[var(--color-text)]'"
               @click="emit('select-group', c)"
             >
               <div class="flex items-center gap-2 flex-1 min-w-0 pr-2 max-w-[calc(100%-60px)]">
                 <div class="flex -space-x-1.5 overflow-hidden shrink-0">
                   <template v-for="(avatar, i) in getChatAvatars(c).slice(0, 3)" :key="i">
-                    <ModernAvatar :src="avatar.src" :name="avatar.name" :size="20" aspect="1" rounded="rounded-full" class="ring-1 ring-[#141418] bg-[#141418]" />
+                    <ModernAvatar :src="avatar.src" :name="avatar.name" :size="20" aspect="1" rounded="rounded-full" class="ring-1 ring-[var(--color-surface-overlay)] bg-[var(--color-surface-overlay)]" />
                   </template>
-                  <div v-if="getChatAvatars(c).length > 3" class="w-5 h-5 rounded-full bg-white/10 flex items-center justify-center text-[8px] ring-1 ring-[#141418]">
+                  <div v-if="getChatAvatars(c).length > 3" class="w-5 h-5 rounded-full bg-surface-hover flex items-center justify-center text-[8px] ring-1 ring-[var(--color-surface-overlay)]">
                     +{{ getChatAvatars(c).length - 3 }}
                   </div>
                 </div>
@@ -417,27 +417,27 @@ function confirmDelete() {
                   <input 
                     :value="editingTitle"
                     @input="emit('update:editingTitle', ($event.target as HTMLInputElement).value)"
-                    class="bg-black/20 border border-purple-500/50 rounded px-1 py-0.5 text-xs w-full text-white outline-none focus:border-purple-500"
+                    class="input input-sm bg-surface-overlay border border-[var(--color-purple)]/50 rounded px-1 py-0.5 text-xs w-full outline-none focus:border-[var(--color-purple)]"
                     @keyup.enter="emit('save-title')"
                     @keyup.escape="emit('cancel-edit-title')"
                     autofocus
                   />
-                  <button class="text-purple-400 hover:text-white" @click="emit('save-title')">
+                  <button class="text-[var(--color-purple)] hover:text-[var(--color-text)]" @click="emit('save-title')">
                     <Check class="w-3 h-3" />
                   </button>
-                  <button class="text-gray-500 hover:text-white" @click="emit('cancel-edit-title')">
+                  <button class="text-[var(--color-text-muted)] hover:text-[var(--color-text)]" @click="emit('cancel-edit-title')">
                     <X class="w-3 h-3" />
                   </button>
                 </div>
                 <div v-else class="truncate flex-1">{{ c.title }}</div>
-                <span class="text-[10px] text-gray-600 shrink-0">({{ c.memberIds.length }}人)</span>
+                <span class="text-[10px] text-[var(--color-text-muted)] shrink-0">({{ c.memberIds.length }}人)</span>
               </div>
               
-              <div v-if="editingChatId !== c.id" class="flex gap-1 shrink-0 ml-auto bg-black/40 rounded-md backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity">
-                <button class="p-1 hover:text-white text-gray-300 transition-colors" @click.stop="emit('start-edit-title', c.id, c.title)">
+              <div v-if="editingChatId !== c.id" class="flex gap-1 shrink-0 ml-auto bg-surface-overlay rounded-md backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity">
+                <button class="p-1 hover:text-[var(--color-text)] text-[var(--color-text-secondary)] transition-colors" @click.stop="emit('start-edit-title', c.id, c.title)">
                   <Pencil class="w-3.5 h-3.5" />
                 </button>
-                <button class="p-1 hover:text-red-400 text-gray-300 transition-colors" @click.stop="confirmDeleteChat(c, $event)">
+                <button class="p-1 hover:text-error text-[var(--color-text-secondary)] transition-colors" @click.stop="confirmDeleteChat(c, $event)">
                   <Trash2 class="w-3.5 h-3.5" />
                 </button>
               </div>
@@ -446,20 +446,20 @@ function confirmDelete() {
 
           <!-- 单聊列表 -->
           <div v-if="chatList.filter(c => !c.isGroup).length > 0">
-            <div v-if="groupList.length > 0" class="text-[10px] text-gray-500 uppercase tracking-wider px-2 mb-1">
+            <div v-if="groupList.length > 0" class="text-[10px] text-[var(--color-text-muted)] uppercase tracking-wider px-2 mb-1">
               单聊
             </div>
             <div 
               v-for="c in chatList.filter(chat => !chat.isGroup)"
               :key="c.id"
               class="group flex items-center justify-between p-2 rounded-lg cursor-pointer text-sm mb-1 transition-colors border-l-2"
-              :class="activeChatId === c.id ? 'bg-brand/10 text-brand border-l-brand' : 'text-gray-400 border-l-transparent hover:bg-white/5 hover:text-gray-200'"
+              :class="activeChatId === c.id ? 'bg-brand/10 text-brand border-l-brand' : 'text-[var(--color-text-muted)] border-l-transparent hover:bg-surface-muted hover:text-[var(--color-text)]'"
               @click="emit('select-chat', c)"
             >
               <div class="flex items-center gap-2 flex-1 min-w-0 pr-2 max-w-[calc(100%-60px)]">
                 <div class="flex -space-x-1.5 overflow-hidden shrink-0">
                   <template v-for="(avatar, i) in getChatAvatars(c).slice(0, 2)" :key="i">
-                    <ModernAvatar :src="avatar.src" :name="avatar.name" :size="20" aspect="1" rounded="rounded-full" class="ring-1 ring-[#141418] bg-[#141418]" />
+                    <ModernAvatar :src="avatar.src" :name="avatar.name" :size="20" aspect="1" rounded="rounded-full" class="ring-1 ring-[var(--color-surface-overlay)] bg-[var(--color-surface-overlay)]" />
                   </template>
                 </div>
                 <div class="flex-1 min-w-0">
@@ -467,15 +467,15 @@ function confirmDelete() {
                     <input 
                       :value="editingTitle"
                       @input="emit('update:editingTitle', ($event.target as HTMLInputElement).value)"
-                      class="bg-black/20 border border-brand/50 rounded px-1 py-0.5 text-xs w-full text-white outline-none focus:border-brand"
+                      class="input input-sm bg-surface-overlay border border-brand/50 rounded px-1 py-0.5 text-xs w-full outline-none focus:border-brand"
                       @keyup.enter="emit('save-title')"
                       @keyup.escape="emit('cancel-edit-title')"
                       autofocus
                     />
-                    <button class="text-brand hover:text-white" @click="emit('save-title')">
+                    <button class="text-brand hover:text-[var(--color-text)]" @click="emit('save-title')">
                       <Check class="w-3 h-3" />
                     </button>
-                    <button class="text-gray-500 hover:text-white" @click="emit('cancel-edit-title')">
+                    <button class="text-[var(--color-text-muted)] hover:text-[var(--color-text)]" @click="emit('cancel-edit-title')">
                       <X class="w-3 h-3" />
                     </button>
                   </div>
@@ -483,17 +483,17 @@ function confirmDelete() {
                 </div>
               </div>
               
-              <div v-if="editingChatId !== c.id" class="flex gap-1 shrink-0 ml-auto bg-black/40 rounded-md backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity">
-                <button class="p-1 hover:text-white text-gray-300 transition-colors" @click.stop="emit('start-edit-title', c.id, c.title)">
+              <div v-if="editingChatId !== c.id" class="flex gap-1 shrink-0 ml-auto bg-surface-overlay rounded-md backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity">
+                <button class="p-1 hover:text-[var(--color-text)] text-[var(--color-text-secondary)] transition-colors" @click.stop="emit('start-edit-title', c.id, c.title)">
                   <Pencil class="w-3.5 h-3.5" />
                 </button>
-                <button class="p-1 hover:text-red-400 text-gray-300 transition-colors" @click.stop="confirmDeleteChat(c, $event)">
+                <button class="p-1 hover:text-error text-[var(--color-text-secondary)] transition-colors" @click.stop="confirmDeleteChat(c, $event)">
                   <Trash2 class="w-3.5 h-3.5" />
                 </button>
               </div>
             </div>
           </div>
-          <div v-if="!chatList.length && !groupList.length" class="text-center text-xs text-gray-600 py-4">
+          <div v-if="!chatList.length && !groupList.length" class="text-center text-xs text-[var(--color-text-muted)] py-4">
             无历史会话
           </div>
         </div>
@@ -520,7 +520,7 @@ function confirmDelete() {
     @click="toggleCollapsed"
     title="切换侧边栏"
   >
-    <component :is="collapsed ? ChevronRight : ChevronLeft" class="w-3 h-3 text-white" />
+    <component :is="collapsed ? ChevronRight : ChevronLeft" class="w-3 h-3 text-on-brand" />
   </div>
 </template>
 

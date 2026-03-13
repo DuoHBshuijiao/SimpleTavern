@@ -94,7 +94,7 @@
   .text-primary { color: var(--color-text-primary); }
   .text-secondary { color: var(--color-text-secondary); }
   .text-muted { color: var(--color-text-muted); }
-  .text-brand { color: var(--color-brand); }
+  .text-brand { color: var(--color-primary); }
   .text-success { color: var(--color-success); }
   .text-warning { color: var(--color-warning); }
   .text-error { color: var(--color-error); }
@@ -103,6 +103,26 @@
   .bg-surface { background-color: var(--color-dark-surface); }
   .bg-elevated { background-color: var(--color-dark-elevated); }
   .bg-lighter { background-color: var(--color-dark-lighter); }
+
+  /* ========== 主题背景（随 data-theme 切换） ========== */
+  .theme-page-bg {
+    background: linear-gradient(to bottom right, var(--app-bg-from), var(--app-bg-to));
+    color: var(--color-text);
+  }
+  .theme-panel-bg {
+    background: linear-gradient(to bottom right, var(--app-panel-from), var(--app-panel-to));
+  }
+  .theme-header-bg {
+    background: linear-gradient(to bottom, var(--app-header-from), var(--app-header-via), transparent);
+  }
+
+  /* ========== 主题表面色（叠加/悬停） ========== */
+  .bg-surface-muted { background-color: var(--color-surface-muted); }
+  .bg-surface-overlay { background-color: var(--color-surface-overlay); }
+  .bg-surface-hover { background-color: var(--color-surface-hover); }
+  .text-on-brand { color: var(--color-on-brand); }
+  .bg-overlay { background-color: var(--color-overlay); }
+  .bg-overlay-heavy { background-color: var(--color-overlay-heavy); }
 
   /* ========== Flex 工具类 ========== */
   .flex { display: flex; }
@@ -202,7 +222,7 @@
   .border { border: 1px solid var(--color-border-default); }
   .border-subtle { border: 1px solid var(--color-border-subtle); }
   .border-strong { border: 1px solid var(--color-border-strong); }
-  .border-brand { border: 1px solid var(--color-brand); }
+  .border-brand { border: 1px solid var(--color-primary); }
   .border-t { border-top: 1px solid var(--color-border-default); }
   .border-b { border-bottom: 1px solid var(--color-border-default); }
   .border-l { border-left: 1px solid var(--color-border-default); }
@@ -216,9 +236,9 @@
   .rounded-full { border-radius: var(--radius-full); }
 
   /* ========== 阴影 ========== */
-  .shadow { box-shadow: var(--shadow-md); }
-  .shadow-lg { box-shadow: var(--shadow-lg); }
-  .shadow-xl { box-shadow: var(--shadow-xl); }
+  .shadow { box-shadow: var(--shadow-light); }
+  .shadow-lg { box-shadow: var(--shadow-heavy); }
+  .shadow-xl { box-shadow: var(--shadow-heavy); }
 
   /* ========== Z-Index ========== */
   .z-10 { z-index: 10; }

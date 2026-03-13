@@ -298,17 +298,17 @@ onUnmounted(() => {
     <!-- Trigger -->
     <div
       ref="triggerRef"
-      class="flex items-center justify-between w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 transition-all cursor-pointer shadow-sm"
+      class="flex items-center justify-between w-full bg-surface-muted border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm text-[var(--color-text)] transition-all cursor-pointer shadow-sm"
       :class="[
-        disabled ? 'opacity-50 cursor-not-allowed' : 'hover:bg-white/10 hover:border-brand/30',
+        disabled ? 'opacity-50 cursor-not-allowed' : 'hover:bg-surface-hover hover:border-brand/30',
         isOpen ? '!border-brand/50 ring-1 ring-brand/20' : ''
       ]"
       @click="toggle"
     >
-      <div class="truncate select-none" :class="!modelValue ? 'text-gray-500' : ''">
+      <div class="truncate select-none" :class="!modelValue ? 'text-[var(--color-text-muted)]' : ''">
         {{ selectedLabel || placeholder }}
       </div>
-      <div class="flex items-center gap-2 ml-2 text-gray-500">
+        <div class="flex items-center gap-2 ml-2 text-[var(--color-text-muted)]">
          <Loader2 v-if="loading" class="animate-spin text-brand w-3 h-3" />
          <ChevronDown v-else class="w-3 h-3 transition-transform duration-200" :class="isOpen ? 'rotate-180' : ''" />
       </div>
@@ -323,12 +323,12 @@ onUnmounted(() => {
         :style="dropdownStyle"
       >
       <!-- Search Input -->
-      <div v-if="searchable || allowCreate" class="p-2 border-b border-white/5">
+      <div v-if="searchable || allowCreate" class="p-2 border-b border-[var(--color-border-subtle)]">
         <input 
           ref="inputRef"
           v-model="searchQuery"
           type="text"
-          class="w-full bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-gray-200 focus:border-brand/50 focus:outline-none placeholder-gray-500 focus:bg-white/10 transition-colors"
+          class="input input-sm w-full"
           :placeholder="allowCreate ? '搜索或输入新值...' : '搜索...'"
           @keydown.enter.prevent="handleInputEnter"
         />
@@ -339,12 +339,12 @@ onUnmounted(() => {
         <template v-for="(item, idx) in filteredOptions" :key="idx">
            <!-- Group Header -->
            <div v-if="'options' in item" class="px-2 py-1">
-              <div class="text-[10px] font-bold text-gray-500 uppercase tracking-wider px-1 mb-1">{{ item.label }}</div>
+              <div class="text-[10px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider px-1 mb-1">{{ item.label }}</div>
               <div 
                 v-for="opt in item.options" 
                 :key="opt.value"
                 class="px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors flex items-center justify-between group/item pl-4"
-                :class="modelValue === opt.value ? 'bg-brand/20 text-brand' : 'text-gray-300 hover:bg-white/5'"
+                :class="modelValue === opt.value ? 'bg-brand/20 text-brand' : 'text-[var(--color-text-secondary)] hover:bg-surface-muted'"
                 @click="select(opt)"
               >
                 <span class="truncate">{{ opt.label }}</span>
@@ -356,7 +356,7 @@ onUnmounted(() => {
             <div 
               v-else 
               class="px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors flex items-center justify-between group/item"
-              :class="modelValue === (item as Option).value ? 'bg-brand/20 text-brand' : 'text-gray-300 hover:bg-white/5'"
+              :class="modelValue === (item as Option).value ? 'bg-brand/20 text-brand' : 'text-[var(--color-text-secondary)] hover:bg-surface-muted'"
               @click="select(item as Option)"
             >
               <span class="truncate">{{ (item as Option).label }}</span>
@@ -364,7 +364,7 @@ onUnmounted(() => {
             </div>
         </template>
 
-        <div v-if="filteredOptions.length === 0" class="px-3 py-4 text-center text-xs text-gray-500">
+        <div v-if="filteredOptions.length === 0" class="px-3 py-4 text-center text-xs text-[var(--color-text-muted)]">
            <span v-if="allowCreate && searchQuery">按回车使用 "{{ searchQuery }}"</span>
            <span v-else>无匹配项</span>
         </div>
@@ -382,10 +382,10 @@ onUnmounted(() => {
   background: transparent;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--color-border);
   border-radius: 2px;
 }
 .custom-scrollbar:hover::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--color-border-strong);
 }
 </style>

@@ -260,7 +260,7 @@ watch(
 
 <template>
   <aside
-    class="fixed right-4 top-4 bottom-4 bg-gradient-to-br from-slate-800/70 to-slate-700/50 backdrop-blur-xl backdrop-saturate-[1.8] border border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.3)] rounded-2xl transition-all duration-300 overflow-hidden flex flex-col z-20"
+    class="fixed right-4 top-4 bottom-4 theme-panel-bg backdrop-blur-xl backdrop-saturate-[1.8] border border-[var(--color-border)] shadow-[0_8px_32px_rgba(0,0,0,0.3)] rounded-2xl transition-all duration-300 overflow-hidden flex flex-col z-20"
     :class="isOpen ? 'translate-x-0 w-[360px] opacity-100' : 'translate-x-[calc(100%+20px)] w-[360px] opacity-0 pointer-events-none'"
     style="contain: content; will-change: transform, opacity;"
   >
@@ -387,9 +387,6 @@ watch(
             发送
           </button>
         </div>
-      </div>
-      <div v-if="streamError" class="text-xs text-red-400 mt-2 bg-red-400/10 p-2 rounded-lg border border-red-400/20 truncate">
-        {{ streamError }}
       </div>
     </div>
 

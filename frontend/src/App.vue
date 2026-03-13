@@ -27,12 +27,18 @@
  */
 
 import { RouterView } from 'vue-router'
+import { computed } from 'vue'
 import { useAppFont } from './composables/useAppFont'
+import { useSettingsStore } from './stores'
 
 useAppFont()
+const settingsStore = useSettingsStore()
+const appThemeId = computed(() => settingsStore.settings?.themeId ?? 'dark')
 </script>
 
 <template>
-  <!-- 路由视图容器：根据路由配置渲染对应的页面组件 -->
-  <RouterView />
+  <div :data-theme="appThemeId">
+    <!-- 路由视图容器：根据路由配置渲染对应的页面组件 -->
+    <RouterView />
+  </div>
 </template>

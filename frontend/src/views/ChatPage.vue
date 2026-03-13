@@ -60,7 +60,7 @@
  *    - 依赖：依赖vue、stores、composables、components、api
  *    - 位置：视图层，作为聊天页面的主组件
  */
-import { computed, onMounted, ref, watch, nextTick } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue'
 import { useCharactersStore, useChatsStore, useSettingsStore } from '../stores'
 import type { CharacterCard, ChatMessage, GroupMemberSettings, Chat } from '../types/models'
 
@@ -76,6 +76,7 @@ import {
 // 子组件
 import { ChatSidebar, MessageList, ChatInput, AssistantPanel } from '../components/chat'
 import { GroupCreatorModal, MessageEditorModal, MemberSettingsModal, GroupSettingsModal } from '../components/modals'
+import ErrorModal from '../components/modals/ErrorModal.vue'
 import SettingsDrawer from '../components/SettingsDrawer.vue'
 import AvatarCropper from '../components/AvatarCropper.vue'
 import ModernAvatar from '../components/ModernAvatar.vue'
@@ -85,6 +86,7 @@ import { Users, Settings, Sparkles, Loader2, X, MoreHorizontal } from 'lucide-vu
 // API
 import { postAndConsumeSse } from '../api/sse'
 import { apiPost, apiGet } from '../api/http'
+import { useErrorStack } from '../composables/useErrorStack'
 
 // ========== Stores ==========
 const settings = useSettingsStore()
@@ -210,6 +212,27 @@ const assistant = useAssistant({
   chatId: assistantChatId,
   streamEnabled: isStreamEnabled,
   onChatMemoryUpdated: (chat) => chats.applyChatPayload(chat),
+})
+
+const errorStack = useErrorStack(6000)
+
+watch(streamError, (value) => {
+  if (!value) return
+  errorStack.pushError({ message: value, source: 'main', title: '主聊天错误' })
+  streamError.value = null
+})
+
+watch(
+  () => assistant.assistantStreamError.value,
+  (value) => {
+    if (!value) return
+    errorStack.pushError({ message: value, source: 'assistant', title: '助手错误' })
+    assistant.assistantStreamError.value = null
+  }
+)
+
+onBeforeUnmount(() => {
+  errorStack.clearAll()
 })
 
 /**
@@ -1943,7 +1966,7 @@ const editingPersonaAvatarUrl = computed(() => {
 </script>
 
 <template>
-  <div class="flex h-screen w-full bg-gradient-to-br from-[#0f172a] to-[#1e293b] text-gray-200 overflow-hidden font-sans">
+  <div class="flex h-screen w-full theme-page-bg overflow-hidden font-sans">
     
     <!-- 左侧侧边栏 -->
     <ChatSidebar
@@ -1986,17 +2009,17 @@ const editingPersonaAvatarUrl = computed(() => {
         <div v-if="(selectedCharacter || activeChat?.isGroup) && activeChat" class="flex flex-col h-full relative">
           <!-- 顶部标题栏 -->
           <header 
-            class="absolute top-0 left-0 right-0 z-10 flex flex-col bg-gradient-to-b from-[#0f172a] via-[#0f172a]/90 to-transparent pointer-events-none"
+            class="absolute top-0 left-0 right-0 z-10 flex flex-col theme-header-bg pointer-events-none"
             style="transform: translateZ(0);"
           >
             <div class="h-14 flex items-center justify-between px-6">
               <div class="pointer-events-auto flex items-center gap-3">
                 <template v-if="activeChat.isGroup">
-                  <span class="text-purple-400"><Users class="w-4 h-4" /></span>
-                  <h2 class="text-lg font-bold text-purple-300 shadow-sm">{{ activeChat.title }}</h2>
-                  <span class="text-xs text-gray-500">({{ activeChat.memberIds.length }}个角色)</span>
+                  <span class="text-[var(--color-purple)]"><Users class="w-4 h-4" /></span>
+                  <h2 class="text-lg font-bold text-[var(--color-purple-text)] shadow-sm">{{ activeChat.title }}</h2>
+                  <span class="text-xs text-[var(--color-text-muted)]">({{ activeChat.memberIds.length }}个角色)</span>
                   <button 
-                    class="ml-1 p-1 text-purple-400 hover:text-white transition-colors" 
+                    class="ml-1 p-1 text-[var(--color-purple)] hover:text-[var(--color-text)] transition-colors" 
                     title="群聊设置"
                     @click="showGroupSettings = true"
                   >
@@ -2004,9 +2027,9 @@ const editingPersonaAvatarUrl = computed(() => {
                   </button>
                 </template>
                 <template v-else>
-                  <h2 class="text-lg font-bold text-gray-100 shadow-sm">{{ selectedCharacter?.name }}</h2>
-                  <span class="text-gray-600">/</span>
-                  <span class="text-sm text-gray-400">{{ activeChat.title }}</span>
+                  <h2 class="text-lg font-bold text-[var(--color-text)] shadow-sm">{{ selectedCharacter?.name }}</h2>
+                  <span class="text-[var(--color-text-muted)]">/</span>
+                  <span class="text-sm text-[var(--color-text-muted)]">{{ activeChat.title }}</span>
                 </template>
               </div>
               <div class="pointer-events-auto flex items-center gap-2">
@@ -2025,15 +2048,15 @@ const editingPersonaAvatarUrl = computed(() => {
             <!-- 群成员头像行 -->
             <div v-if="activeChat.isGroup && groupMembers.length > 0" class="px-6 pb-2 pointer-events-auto">
               <div class="flex items-center gap-2 overflow-x-auto pb-1">
-                <div class="text-xs text-gray-500 shrink-0">成员:</div>
+                <div class="text-xs text-[var(--color-text-muted)] shrink-0">成员:</div>
                 <div 
                   v-for="(member, idx) in groupMembers" 
                   :key="member.id"
-                  class="flex items-center gap-1 shrink-0 bg-white/5 px-2 py-1 rounded-lg transition-colors group/member"
-                  :class="group.canInterject.value ? 'cursor-pointer hover:bg-purple-500/20' : ''"
+                  class="flex items-center gap-1 shrink-0 bg-surface-muted px-2 py-1 rounded-lg transition-colors group/member"
+                  :class="group.canInterject.value ? 'cursor-pointer hover:bg-[var(--color-purple-bg)]' : ''"
                   @click="group.canInterject.value && triggerInterject(member.id)"
                 >
-                  <span class="text-xs text-gray-500">{{ idx + 1 }}.</span>
+                  <span class="text-xs text-[var(--color-text-muted)]">{{ idx + 1 }}.</span>
                   <ModernAvatar 
                     :src="member.avatar ? `/api/avatars/${member.avatar}` : null" 
                     :name="member.name" 
@@ -2041,7 +2064,7 @@ const editingPersonaAvatarUrl = computed(() => {
                     aspect="1"
                     rounded="rounded"
                   />
-                  <span class="text-xs text-gray-300 max-w-[60px] truncate">{{ member.name }}</span>
+                  <span class="text-xs text-[var(--color-text-secondary)] max-w-[60px] truncate">{{ member.name }}</span>
                   <span 
                     v-if="group.getMemberSettings(member.id).probability < 1" 
                     class="text-[10px] text-yellow-400 ml-0.5"
@@ -2125,10 +2148,10 @@ const editingPersonaAvatarUrl = computed(() => {
               设置
             </button>
           </div>
-          <div class="w-20 h-20 rounded-2xl bg-white/5 mb-6 flex items-center justify-center text-4xl">👋</div>
-          <h3 class="text-xl font-bold text-gray-200 mb-2">欢迎来到 SimpleTavern</h3>
-          <p class="text-gray-500 mb-8 leading-relaxed px-4 max-w-[468px] w-full">请在左侧选择一个角色并开始会话，或者创建一个新的角色。</p>
-          <button class="bg-brand text-white px-6 py-2 rounded-xl hover:bg-brand-hover transition-colors" @click="openCreateCharacter">
+          <div class="w-20 h-20 rounded-2xl bg-surface-muted mb-6 flex items-center justify-center text-4xl">👋</div>
+          <h3 class="text-xl font-bold text-[var(--color-text)] mb-2">欢迎来到 SimpleTavern</h3>
+          <p class="text-[var(--color-text-muted)] mb-8 leading-relaxed px-4 max-w-[468px] w-full">请在左侧选择一个角色并开始会话，或者创建一个新的角色。</p>
+          <button class="bg-brand text-on-brand px-6 py-2 rounded-xl hover:bg-brand-hover transition-colors" @click="openCreateCharacter">
             创建新角色
           </button>
         </div>
@@ -2155,6 +2178,17 @@ const editingPersonaAvatarUrl = computed(() => {
       @edit-message="(m) => assistant.openEditMessage(m, 'chat')"
       @delete-message="(m) => assistant.deleteMessage(m, 'chat')"
       @rewrite-message="(m) => assistant.rewriteMessage(m, 'chat')"
+    />
+
+    <ErrorModal
+      v-for="(item, index) in errorStack.items.value"
+      :key="item.id"
+      :item="item"
+      :offset-y="(errorStack.items.value.length - 1 - Number(index)) * 14"
+      :z-index="1200 + Number(index)"
+      @close="errorStack.removeError"
+      @pause="errorStack.pauseTimer"
+      @resume="errorStack.resumeTimer"
     />
 
     <!-- 助手设置抽屉 -->
@@ -2233,7 +2267,7 @@ const editingPersonaAvatarUrl = computed(() => {
 <!-- 角色编辑弹窗 -->
   <div v-if="actions.showCharacterEditor.value" class="modal">
     <div class="modal-backdrop" @click="cancelCharacterEdit"></div>
-    <div class="modal-content chat-modal-width-1200-90 glass-panel bg-gradient-to-br from-slate-900/30 to-slate-800/25 backdrop-blur-2xl backdrop-saturate-[1.8] border border-white/10">
+    <div class="modal-content chat-modal-width-1200-90 glass-panel theme-panel-bg backdrop-blur-2xl backdrop-saturate-[1.8] border border-[var(--color-border)]">
       <div class="modal-header">
         <h3 class="modal-title">{{ actions.isNewCharacter.value ? '新建角色' : '编辑角色' }}</h3>
         <button class="modal-close" @click="cancelCharacterEdit">
@@ -2252,7 +2286,7 @@ const editingPersonaAvatarUrl = computed(() => {
                     aspect="auto"
                     object-fit="contain"
                     rounded="rounded-xl"
-                    class="border-2 border-brand/40 shadow-lg bg-black/20"
+                    class="border-2 border-brand/40 shadow-lg bg-surface-overlay"
                   />
                   <button class="btn btn-sm btn-secondary" @click="actions.showCharacterAvatarCropper.value = true">更换头像</button>
                 </div>
@@ -2314,34 +2348,34 @@ const editingPersonaAvatarUrl = computed(() => {
           <!-- 角色编辑助手 -->
           <div class="flex-[0.66] shrink-0 glass-panel rounded-2xl p-4 flex flex-col shadow-inner">
             <div class="flex items-center justify-between mb-4 px-1">
-              <span class="text-sm font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2">
+              <span class="text-sm font-bold text-[var(--color-text-secondary)] uppercase tracking-widest flex items-center gap-2">
                 <span class="w-2 h-2 rounded-full bg-brand animate-pulse"></span>
                 聊天助手
               </span>
-              <button class="text-gray-500 hover:text-white transition-colors" @click="assistant.showAssistantSettings.value = true">
+              <button class="text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors" @click="assistant.showAssistantSettings.value = true">
                 <MoreHorizontal class="w-4 h-4" />
               </button>
             </div>
             <div class="flex-1 overflow-y-auto custom-scrollbar space-y-4 pr-2 mb-4">
-              <div v-if="assistant.workspaceAssistantMessages.value.length === 0" class="text-xs text-gray-600 text-center py-12 flex flex-col items-center gap-3">
-                <div class="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center text-xl">
-                    <Sparkles class="w-6 h-6 text-yellow-400" />
+              <div v-if="assistant.workspaceAssistantMessages.value.length === 0" class="text-xs text-[var(--color-text-muted)] text-center py-12 flex flex-col items-center gap-3">
+                <div class="w-12 h-12 rounded-full bg-surface-muted flex items-center justify-center text-xl">
+                    <Sparkles class="w-6 h-6 text-[var(--color-warning)]" />
                 </div>
                 开始和助手对话以完善你的角色卡
               </div>
               <div v-for="m in assistant.workspaceAssistantMessages.value" :key="m.id" class="flex flex-col gap-1 group" :class="m.role === 'user' ? 'items-end' : 'items-start'">
                 <div
                   class="px-4 py-2.5 rounded-2xl text-sm leading-relaxed max-w-[90%] shadow-sm border transition-colors"
-                  :class="m.role === 'user' ? 'bg-brand/10 border-brand/20 text-gray-100 rounded-tr-sm' : 'bg-white/5 border-white/5 text-gray-200 rounded-tl-sm'"
+                  :class="m.role === 'user' ? 'bg-brand/10 border-brand/20 text-[var(--color-text)] rounded-tr-sm' : 'bg-surface-muted border-[var(--color-border-subtle)] text-[var(--color-text)] rounded-tl-sm'"
                 >
                   <div class="prose prose-invert prose-sm max-w-none">{{ m.content }}</div>
                 </div>
               </div>
             </div>
-            <div class="pt-4 border-t border-white/5">
+            <div class="pt-4 border-t border-[var(--color-border-subtle)]">
               <textarea
                 v-model="assistant.workspaceAssistantDraft.value"
-                class="input textarea h-24 !bg-black/30 !border-white/5 focus:!border-brand/40"
+                class="input textarea h-24"
                 placeholder="输入建议或要求 (Ctrl + Enter)..."
                 :disabled="assistant.isWorkspaceAssistantGenerating.value"
                 @keydown.ctrl.enter="assistant.sendMessage('workspace', true, actions.applyAssistantCard)"
@@ -2382,7 +2416,7 @@ const editingPersonaAvatarUrl = computed(() => {
   <!-- Persona 编辑弹窗 -->
   <div v-if="actions.showPersonaEditor.value" class="modal">
     <div class="modal-backdrop" @click="actions.showPersonaEditor.value = false"></div>
-    <div class="modal-content chat-modal-width-500-90 glass-panel bg-gradient-to-br from-slate-900/30 to-slate-800/25 backdrop-blur-2xl backdrop-saturate-[1.8] border border-white/10">
+    <div class="modal-content chat-modal-width-500-90 glass-panel theme-panel-bg backdrop-blur-2xl backdrop-saturate-[1.8] border border-[var(--color-border)]">
       <div class="modal-header">
         <h3 class="modal-title">{{ actions.isNewPersona.value ? '新建身份' : '编辑身份' }}</h3>
         <button class="modal-close" @click="actions.showPersonaEditor.value = false">
@@ -2436,10 +2470,10 @@ const editingPersonaAvatarUrl = computed(() => {
       </div>
       <div class="modal-body">
         <div class="space-y-4">
-          <div class="text-sm text-gray-300">
+          <div class="text-sm text-[var(--color-text-secondary)]">
             你正在尝试切换用户身份，请选择"新建会话"或"仍然继续对话"。
           </div>
-          <div class="text-xs text-gray-500">
+          <div class="text-xs text-[var(--color-text-muted)]">
             提示：继续对话时，历史消息会保持原身份显示；后续新发送的 user 消息将使用新身份。
           </div>
         </div>
@@ -2468,7 +2502,7 @@ const editingPersonaAvatarUrl = computed(() => {
             <label class="label">提示词</label>
             <textarea
               v-model="assistant.assistantSettings.value.prompt"
-              class="input textarea h-48 !bg-black/20"
+              class="input textarea h-48"
               placeholder="输入聊天助手提示词..."
             ></textarea>
           </div>
@@ -2492,7 +2526,7 @@ const editingPersonaAvatarUrl = computed(() => {
               class="input w-full"
               placeholder="未启用（不限制）"
             />
-            <p class="text-xs text-gray-500 mt-1">填 0 或留空表示未启用。实际上下文总限制长度为该 Context Size 限制加上角色卡、用户信息、自定义系统提示词。</p>
+            <p class="text-xs text-[var(--color-text-muted)] mt-1">填 0 或留空表示未启用。实际上下文总限制长度为该 Context Size 限制加上角色卡、用户信息、自定义系统提示词。</p>
           </div>
         </div>
       </div>

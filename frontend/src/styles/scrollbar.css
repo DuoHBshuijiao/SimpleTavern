@@ -40,18 +40,18 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--color-track);
     border-radius: 3px;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.2);
+    background: var(--color-track-hover);
   }
 
   /* Firefox */
   * {
     scrollbar-width: thin;
-    scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+    scrollbar-color: var(--color-track) transparent;
   }
 
   /* ========== 细滚动条（用于侧边栏等紧凑区域） ========== */
@@ -76,11 +76,11 @@
 
   /* ========== 暗色滚动条变体 ========== */
   .scrollbar-dark::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--color-surface-muted);
   }
 
   .scrollbar-dark::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--color-surface-hover);
   }
 
   /* ========== 品牌色滚动条变体 ========== */

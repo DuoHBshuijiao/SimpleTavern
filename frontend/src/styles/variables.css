@@ -26,53 +26,179 @@
  *    - 位置：样式层，提供全局CSS变量定义
  */
 
+:root,
+[data-theme="dark"] {
+  /* 核心色（默认深色主题） */
+  --app-color-primary: #3b82f6;
+  --app-color-primary-hover: #60a5fa;
+  --app-color-surface: #0f172a;
+  --app-color-surface-elevated: rgba(30, 41, 59, 0.9);
+  --app-color-surface-soft: rgba(30, 41, 59, 0.7);
+  --app-color-text: #f8fafc;
+  --app-color-text-muted: #94a3b8;
+  --app-color-border: rgba(255, 255, 255, 0.1);
+  --app-color-border-subtle: rgba(255, 255, 255, 0.05);
+  --app-color-border-strong: rgba(255, 255, 255, 0.15);
+  /* 页面与面板背景（主题切换用） */
+  --app-bg-from: #0f172a;
+  --app-bg-to: #1e293b;
+  --app-panel-from: rgba(30, 41, 59, 0.7);
+  --app-panel-to: rgba(51, 65, 85, 0.5);
+  --app-header-from: #0f172a;
+  --app-header-via: rgba(15, 23, 42, 0.9);
+  /* 表面叠加层（输入框、卡片等） */
+  --app-surface-muted: rgba(255, 255, 255, 0.05);
+  --app-surface-overlay: rgba(0, 0, 0, 0.2);
+  --app-surface-hover: rgba(255, 255, 255, 0.1);
+  --app-overlay: rgba(0, 0, 0, 0.5);
+  --app-overlay-heavy: rgba(0, 0, 0, 0.7);
+  --app-dark-lighter: rgba(51, 65, 85, 0.5);
+  --app-track: rgba(55, 65, 81, 0.9);
+  --app-track-hover: rgba(71, 85, 105, 0.95);
+  /* 主题状态色 */
+  --app-color-success: #22c55e;
+  --app-color-success-bg: rgba(34, 197, 94, 0.15);
+  --app-color-success-text: #86efac;
+  --app-color-warning: #f59e0b;
+  --app-color-warning-bg: rgba(245, 158, 11, 0.15);
+  --app-color-warning-text: #fcd34d;
+  --app-color-error: #ef4444;
+  --app-color-error-bg: rgba(239, 68, 68, 0.15);
+  --app-color-error-text: #fecaca;
+  --app-color-info: #3b82f6;
+  --app-color-info-bg: rgba(59, 130, 246, 0.15);
+  --app-color-info-text: #93c5fd;
+  --app-color-purple: #a855f7;
+  --app-color-purple-bg: rgba(168, 85, 247, 0.15);
+  --app-color-purple-text: #e9d5ff;
+  --app-color-assistant: #b76e79;
+  --app-color-assistant-bg: rgba(183, 110, 121, 0.15);
+  /* 主题阴影 */
+  --app-shadow-light: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --app-shadow-heavy: 0 8px 32px rgba(0, 0, 0, 0.3);
+  --app-shadow-brand: 0 10px 25px rgba(59, 130, 246, 0.15);
+  --app-shadow-success: 0 10px 25px rgba(34, 197, 94, 0.15);
+  --app-shadow-error: 0 10px 25px rgba(239, 68, 68, 0.15);
+  --app-shadow-purple: 0 10px 25px rgba(168, 85, 247, 0.15);
+}
+
+[data-theme="light"] {
+  --app-color-primary: #2563eb;
+  --app-color-primary-hover: #1d4ed8;
+  --app-color-surface: #eff6ff;
+  --app-color-surface-elevated: rgba(255, 255, 255, 0.96);
+  --app-color-surface-soft: rgba(239, 246, 255, 0.88);
+  --app-color-text: #10213a;
+  --app-color-text-muted: #52627a;
+  --app-color-border: rgba(96, 120, 153, 0.26);
+  --app-color-border-subtle: rgba(148, 163, 184, 0.22);
+  --app-color-border-strong: rgba(71, 85, 105, 0.34);
+  /* 页面与面板背景（浅色主题） */
+  --app-bg-from: #f8fbff;
+  --app-bg-to: #dbeafe;
+  --app-panel-from: rgba(255, 255, 255, 0.94);
+  --app-panel-to: rgba(219, 234, 254, 0.82);
+  --app-header-from: #f8fbff;
+  --app-header-via: rgba(239, 246, 255, 0.92);
+  /* 表面叠加层（浅色主题） */
+  --app-surface-muted: rgba(37, 99, 235, 0.08);
+  --app-surface-overlay: rgba(148, 163, 184, 0.16);
+  --app-surface-hover: rgba(37, 99, 235, 0.12);
+  --app-overlay: rgba(15, 23, 42, 0.2);
+  --app-overlay-heavy: rgba(15, 23, 42, 0.36);
+  --app-dark-lighter: rgba(219, 234, 254, 0.84);
+  --app-track: rgba(148, 163, 184, 0.5);
+  --app-track-hover: rgba(100, 116, 139, 0.72);
+  /* 状态色：浅色模式下使用更深的前景色和更轻的底色 */
+  --app-color-success: #15803d;
+  --app-color-success-bg: rgba(34, 197, 94, 0.12);
+  --app-color-success-text: #166534;
+  --app-color-warning: #b45309;
+  --app-color-warning-bg: rgba(245, 158, 11, 0.14);
+  --app-color-warning-text: #92400e;
+  --app-color-error: #dc2626;
+  --app-color-error-bg: rgba(239, 68, 68, 0.12);
+  --app-color-error-text: #991b1b;
+  --app-color-info: #1d4ed8;
+  --app-color-info-bg: rgba(37, 99, 235, 0.12);
+  --app-color-info-text: #1e3a8a;
+  --app-color-purple: #7c3aed;
+  --app-color-purple-bg: rgba(124, 58, 237, 0.12);
+  --app-color-purple-text: #5b21b6;
+  --app-color-assistant: #9f495a;
+  --app-color-assistant-bg: rgba(159, 73, 90, 0.12);
+  /* 阴影：浅色模式使用蓝灰阴影，减少脏灰感 */
+  --app-shadow-light: 0 1px 2px rgba(15, 23, 42, 0.06), 0 6px 16px rgba(37, 99, 235, 0.06);
+  --app-shadow-heavy: 0 16px 40px rgba(15, 23, 42, 0.1), 0 8px 24px rgba(37, 99, 235, 0.08);
+  --app-shadow-brand: 0 12px 28px rgba(37, 99, 235, 0.18);
+  --app-shadow-success: 0 12px 28px rgba(21, 128, 61, 0.14);
+  --app-shadow-error: 0 12px 28px rgba(220, 38, 38, 0.14);
+  --app-shadow-purple: 0 12px 28px rgba(124, 58, 237, 0.16);
+}
+
 @theme {
   /* ========== 品牌色 ========== */
-  --color-brand: #3b82f6; /* Blue-500 */
-  --color-brand-hover: #60a5fa; /* Blue-400 */
+  --color-primary: var(--app-color-primary);
+  --color-primary-hover: var(--app-color-primary-hover);
+  --color-brand: var(--color-primary);
+  --color-brand-hover: var(--color-primary-hover);
   --color-brand-dark: #2563eb; /* Blue-600 */
   --color-brand-light: #93c5fd; /* Blue-300 */
   
   /* ========== 背景色 (Liquid Glass Dark) ========== */
-  --color-dark-bg: #0f172a; /* Slate-950 */
-  --color-dark-surface: rgba(30, 41, 59, 0.7); /* Slate-900 / 70% */
-  --color-dark-lighter: rgba(51, 65, 85, 0.5); /* Slate-700 / 50% */
-  --color-dark-elevated: rgba(30, 41, 59, 0.9); /* Slate-900 / 90% */
+  --color-dark-bg: var(--app-color-surface);
+  --color-dark-surface: var(--app-color-surface-soft);
+  --color-dark-lighter: var(--app-dark-lighter);
+  --color-dark-elevated: var(--app-color-surface-elevated);
+  --color-surface: var(--app-color-surface);
+  --color-surface-elevated: var(--app-color-surface-elevated);
   
   /* ========== 文字色 (Slate) ========== */
-  --color-text-primary: #f8fafc; /* Slate-50 */
-  --color-text-secondary: #94a3b8; /* Slate-400 */
-  --color-text-muted: #64748b; /* Slate-500 */
+  --color-text: var(--app-color-text);
+  --color-text-primary: var(--app-color-text); /* Slate-50 */
+  --color-text-secondary: var(--app-color-text-muted); /* Slate-400 */
+  --color-text-muted: var(--app-color-text-muted); /* Slate-500 */
   
   /* ========== 边框色 (Subtle) ========== */
-  --color-border-subtle: rgba(255, 255, 255, 0.05); /* Very subtle */
-  --color-border-default: rgba(255, 255, 255, 0.1);
-  --color-border-strong: rgba(255, 255, 255, 0.15);
+  --color-border: var(--app-color-border);
+  --color-border-subtle: var(--app-color-border-subtle); /* Very subtle */
+  --color-border-default: var(--app-color-border);
+  --color-border-strong: var(--app-color-border-strong);
   
   /* ========== 状态色 ========== */
-  --color-success: #22c55e;
-  --color-success-bg: rgba(34, 197, 94, 0.15);
-  --color-success-text: #86efac;
+  --color-success: var(--app-color-success);
+  --color-success-bg: var(--app-color-success-bg);
+  --color-success-text: var(--app-color-success-text);
   
-  --color-warning: #f59e0b;
-  --color-warning-bg: rgba(245, 158, 11, 0.15);
-  --color-warning-text: #fcd34d;
+  --color-warning: var(--app-color-warning);
+  --color-warning-bg: var(--app-color-warning-bg);
+  --color-warning-text: var(--app-color-warning-text);
   
-  --color-error: #ef4444;
-  --color-error-bg: rgba(239, 68, 68, 0.15);
-  --color-error-text: #fecaca;
+  --color-error: var(--app-color-error);
+  --color-error-bg: var(--app-color-error-bg);
+  --color-error-text: var(--app-color-error-text);
   
-  --color-info: #3b82f6;
-  --color-info-bg: rgba(59, 130, 246, 0.15);
-  --color-info-text: #93c5fd;
+  --color-info: var(--app-color-info);
+  --color-info-bg: var(--app-color-info-bg);
+  --color-info-text: var(--app-color-info-text);
   
   /* ========== 特殊色（群聊/角色相关） ========== */
-  --color-purple: #a855f7;
-  --color-purple-bg: rgba(168, 85, 247, 0.15);
-  --color-purple-text: #e9d5ff;
+  --color-purple: var(--app-color-purple);
+  --color-purple-bg: var(--app-color-purple-bg);
+  --color-purple-text: var(--app-color-purple-text);
   
-  --color-assistant: #b76e79;
-  --color-assistant-bg: rgba(183, 110, 121, 0.15);
+  --color-assistant: var(--app-color-assistant);
+  --color-assistant-bg: var(--app-color-assistant-bg);
+
+  /* ========== 通用表面色（主题适配） ========== */
+  --color-surface-muted: var(--app-surface-muted);
+  --color-surface-overlay: var(--app-surface-overlay);
+  --color-surface-hover: var(--app-surface-hover);
+  --color-overlay: var(--app-overlay);
+  --color-overlay-heavy: var(--app-overlay-heavy);
+  --color-on-brand: #ffffff;
+  --color-track: var(--app-track);
+  --color-track-hover: var(--app-track-hover);
   
   /* ========== 圆角 (Large Radius) ========== */
   --radius-sm: 0.375rem;
@@ -92,14 +218,20 @@
   --spacing-2xl: 3rem;
   
   /* ========== 阴影 ========== */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.3);
-  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.3);
-  --shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.3);
-  --shadow-brand: 0 10px 25px rgba(59, 130, 246, 0.15); /* Updated for blue brand */
-  --shadow-success: 0 10px 25px rgba(34, 197, 94, 0.15);
-  --shadow-error: 0 10px 25px rgba(239, 68, 68, 0.15);
-  --shadow-purple: 0 10px 25px rgba(168, 85, 247, 0.15);
+  --shadow-light: var(--app-shadow-light);
+  --shadow-heavy: var(--app-shadow-heavy);
+  --shadow-sm: var(--shadow-light);
+  --shadow-md: var(--shadow-light);
+  --shadow-lg: var(--shadow-heavy);
+  --shadow-xl: var(--shadow-heavy);
+  --shadow-brand: var(--app-shadow-brand);
+  --shadow-success: var(--app-shadow-success);
+  --shadow-error: var(--app-shadow-error);
+  --shadow-purple: var(--app-shadow-purple);
+
+  /* ========== 模糊 ========== */
+  --blur-light: 4px;
+  --blur-heavy: 16px;
   
   /* ========== 过渡 ========== */
   --transition-fast: 0.15s ease;
