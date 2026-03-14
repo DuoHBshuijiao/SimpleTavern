@@ -72,6 +72,8 @@ export interface GenerationParams {
 export interface ChatOverrides {
   prompt?: string | null
   longTermMemory?: string | null
+  /** 上下文起点消息ID：设置后仅从该消息开始参与发送上下文 */
+  contextStartMessageId?: string | null
   presetId?: string | null
   pureAiMode?: boolean | null
   params: GenerationParams
@@ -223,6 +225,7 @@ export interface ChatMessage {
   id: string
   role: ChatRole
   content: string
+  images?: ChatImageAttachment[]
   characterId?: string | null
   senderPersonaId?: string | null
   senderName?: string | null
@@ -230,6 +233,16 @@ export interface ChatMessage {
   ts: string
   /** 长期记忆在上一条保存后、本条消息之后被更新；仅最新一条带此标记的消息存在 */
   memoryUpdatedAfterThis?: boolean
+}
+
+export interface ChatImageAttachment {
+  id: string
+  filename: string
+  mimeType: string
+  size?: number | null
+  width?: number | null
+  height?: number | null
+  originalName?: string | null
 }
 
 /**

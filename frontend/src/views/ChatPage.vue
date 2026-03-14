@@ -62,7 +62,7 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue'
 import { useCharactersStore, useChatsStore, useSettingsStore } from '../stores'
-import type { CharacterCard, ChatMessage, GroupMemberSettings, Chat } from '../types/models'
+import type { CharacterCard, ChatImageAttachment, ChatMessage, GroupMemberSettings, Chat } from '../types/models'
 
 // Composables
 import { 
@@ -96,6 +96,13 @@ const chats = useChatsStore()
 // ========== 页面级状态 ==========
 const selectedCharacterId = ref<string | null>(null)
 const draftMessage = ref('')
+interface DraftImageItem {
+  id: string
+  file: File
+  name: string
+  previewUrl: string
+}
+const draftImages = ref<DraftImageItem[]>([])
 const showSettings = ref(false)
 const showGroupSettings = ref(false)
 const settingsTab = ref<'global' | 'presets' | 'chat'>('global')
@@ -215,6 +222,15 @@ const assistant = useAssistant({
 })
 
 const errorStack = useErrorStack(6000)
+const imageFallbackDialog = ref<{
+  visible: boolean
+  error: string
+  retryAction: null | (() => Promise<void>)
+}>({
+  visible: false,
+  error: '',
+  retryAction: null,
+})
 
 watch(streamError, (value) => {
   if (!value) return
@@ -232,6 +248,7 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  clearDraftImages()
   errorStack.clearAll()
 })
 
@@ -246,6 +263,43 @@ onBeforeUnmount(() => {
 function getPersonaById(id: string | null | undefined) {
   if (!id || !settings.settings?.userPersonas) return null
   return settings.settings.userPersonas.find(p => p.id === id) ?? null
+}
+
+function replaceInputPlaceholders(raw: string): string {
+  const user = userName.value || '用户'
+  const char = selectedCharacter.value?.name || '角色'
+  return raw.replace(/\{\{user\}\}/g, user).replace(/\{\{char\}\}/g, char)
+}
+
+async function fileToDataUrl(file: File): Promise<string> {
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = () => reject(reader.error || new Error('read file failed'))
+    reader.readAsDataURL(file)
+  })
+}
+
+async function uploadDraftImages(chatId: string, images: DraftImageItem[]): Promise<ChatImageAttachment[]> {
+  if (!images.length) return []
+  const payloadImages = await Promise.all(images.map(async (img) => ({
+    imageData: await fileToDataUrl(img.file),
+    mimeType: img.file.type || 'image/png',
+    originalName: img.name,
+  })))
+  const res = await apiPost<{ images: ChatImageAttachment[] }>(`/api/chats/${chatId}/images`, { images: payloadImages })
+  return res.images || []
+}
+
+function clearDraftImages() {
+  for (const img of draftImages.value) {
+    URL.revokeObjectURL(img.previewUrl)
+  }
+  draftImages.value = []
+}
+
+function openImageFallback(error: string, retryAction: () => Promise<void>) {
+  imageFallbackDialog.value = { visible: true, error, retryAction }
 }
 
 /**
@@ -626,7 +680,8 @@ async function runGroupGeneration(
   memberIds: string[], 
   useStream: boolean, 
   groupDelay: number,
-  startIndex: number
+  startIndex: number,
+  imageFallbackMode = false
 ) {
   for (let i = startIndex; i < memberIds.length; i++) {
     const characterId = memberIds[i]
@@ -662,10 +717,11 @@ async function runGroupGeneration(
     
     if (useStream) {
       stream.registerStreamMessage(localAssistantId)
+      let sseError: string | null = null
       try {
         await postAndConsumeSse(
           '/api/generate/group',
-          { chatId, characterId },
+          { chatId, characterId, imageFallbackMode },
           (evt) => {
             if (stopRequested.value) return
             if (evt.event === 'delta') {
@@ -689,11 +745,14 @@ async function runGroupGeneration(
               pushCurrentReasoningToBlocks(serverId ?? undefined)
             } else if (evt.event === 'error') {
               const data = evt.data as { message?: string } | undefined
-              streamError.value = String(data?.message ?? 'unknown error')
+              sseError = String(data?.message ?? 'unknown error')
             }
           },
           aborter.value?.signal,
         )
+        if (sseError) {
+          throw new Error(sseError)
+        }
       } finally {
         stream.flushForMessage(localAssistantId)
         stopRequested.value = false
@@ -707,7 +766,7 @@ async function runGroupGeneration(
         content: string
         reasoningContent?: string
         error?: string
-      }>('/api/generate/group', { chatId, characterId })
+      }>('/api/generate/group', { chatId, characterId, imageFallbackMode })
       
       if (res.ok) {
         if (typeof res.reasoningContent === 'string') {
@@ -717,7 +776,7 @@ async function runGroupGeneration(
         chats.appendLocalMessageContent(localAssistantId, res.content || '')
         scrollToBottom()
       } else {
-        streamError.value = res.error || 'unknown error'
+        throw new Error(res.error || 'unknown error')
       }
     }
     
@@ -729,6 +788,26 @@ async function runGroupGeneration(
   
   group.pendingMembers.value = []
   group.showContinueButton.value = false
+}
+
+function handleSelectImages(files: File[]) {
+  const accepted = files.filter((f) => f.type.startsWith('image/'))
+  for (const file of accepted) {
+    const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    draftImages.value.push({
+      id,
+      file,
+      name: file.name,
+      previewUrl: URL.createObjectURL(file),
+    })
+  }
+}
+
+function handleRemoveDraftImage(imageId: string) {
+  const idx = draftImages.value.findIndex((x) => x.id === imageId)
+  if (idx < 0) return
+  URL.revokeObjectURL(draftImages.value[idx]!.previewUrl)
+  draftImages.value.splice(idx, 1)
 }
 
 /**
@@ -743,17 +822,21 @@ async function runGroupGeneration(
  * @returns {Promise<void>} 完成时返回
  */
 async function sendUserMessage() {
-  const text = draftMessage.value.trim()
-  if (!text) return
+  const rawText = draftMessage.value.trim()
+  const pendingDraftImages = [...draftImages.value]
+  const text = replaceInputPlaceholders(rawText)
+  if (!text && pendingDraftImages.length === 0) return
   if (!activeChat.value) return
   if (isGenerating.value) return
   draftMessage.value = ''
+  clearDraftImages()
   streamError.value = null
   
   const chatId = activeChat.value.id
   const isGroup = activeChat.value.isGroup
   const now = new Date().toISOString()
   const userRole = group.effectivePureAiMode.value ? ('system' as const) : ('user' as const)
+  let uploadedImages: ChatImageAttachment[] = []
 
   // 处理暂停状态下的插话
   if (isGroup && group.showContinueButton.value) {
@@ -763,6 +846,7 @@ async function sendUserMessage() {
       id: localUserId,
       role: userRole,
       content: text,
+      images: uploadedImages,
       senderPersonaId: userRole === 'user' ? (selectedPersona.value?.id ?? null) : null,
       senderName: userRole === 'user' ? (selectedPersona.value?.name ?? userName.value) : null,
       senderAvatar: userRole === 'user' ? (selectedPersona.value?.avatar ?? null) : null,
@@ -774,6 +858,7 @@ async function sendUserMessage() {
       await apiPost(`/api/chats/${chatId}/messages`, {
         role: userRole,
         content: text,
+        images: uploadedImages,
         senderPersonaId: userRole === 'user' ? (selectedPersona.value?.id ?? null) : null,
         senderName: userRole === 'user' ? (selectedPersona.value?.name ?? userName.value) : null,
         senderAvatar: userRole === 'user' ? (selectedPersona.value?.avatar ?? null) : null,
@@ -805,6 +890,7 @@ async function sendUserMessage() {
   const useStream = settings.settings?.streamEnabled !== false
 
   try {
+    uploadedImages = await uploadDraftImages(chatId, pendingDraftImages)
     if (isGroup) {
       const allMemberIds = [...activeChat.value.memberIds]
       const groupDelay = activeChat.value.groupDelay || 1500
@@ -817,6 +903,7 @@ async function sendUserMessage() {
         id: localUserId,
         role: userRole,
         content: text,
+        images: uploadedImages,
         senderPersonaId: userRole === 'user' ? (selectedPersona.value?.id ?? null) : null,
         senderName: userRole === 'user' ? (selectedPersona.value?.name ?? userName.value) : null,
         senderAvatar: userRole === 'user' ? (selectedPersona.value?.avatar ?? null) : null,
@@ -827,12 +914,13 @@ async function sendUserMessage() {
       await apiPost(`/api/chats/${chatId}/messages`, {
         role: userRole,
         content: text,
+        images: uploadedImages,
         senderPersonaId: userRole === 'user' ? (selectedPersona.value?.id ?? null) : null,
         senderName: userRole === 'user' ? (selectedPersona.value?.name ?? userName.value) : null,
         senderAvatar: userRole === 'user' ? (selectedPersona.value?.avatar ?? null) : null,
       })
       
-      await runGroupGeneration(chatId, memberIds, useStream, groupDelay, 0)
+      await runGroupGeneration(chatId, memberIds, useStream, groupDelay, 0, false)
       
       if (group.isPaused.value) return
       
@@ -851,6 +939,7 @@ async function sendUserMessage() {
         id: localUserId,
         role: userRole,
         content: text,
+        images: uploadedImages,
         senderPersonaId: userRole === 'user' ? (selectedPersona.value?.id ?? null) : null,
         senderName: userRole === 'user' ? (selectedPersona.value?.name ?? userName.value) : null,
         senderAvatar: userRole === 'user' ? (selectedPersona.value?.avatar ?? null) : null,
@@ -861,12 +950,14 @@ async function sendUserMessage() {
 
       if (useStream) {
         stream.registerStreamMessage(localAssistantId)
+        let sseError: string | null = null
         try {
           await postAndConsumeSse(
             '/api/generate/stream',
             {
               chatId,
               userMessage: text,
+              userImages: uploadedImages,
               senderPersonaId: selectedPersona.value?.id ?? null,
               senderName: selectedPersona.value?.name ?? userName.value,
               senderAvatar: selectedPersona.value?.avatar ?? null,
@@ -895,11 +986,14 @@ async function sendUserMessage() {
                 pushCurrentReasoningToBlocks(serverId ?? undefined)
               } else if (evt.event === 'error') {
                 const data = evt.data as { message?: string } | undefined
-                streamError.value = String(data?.message ?? 'unknown error')
+                sseError = String(data?.message ?? 'unknown error')
               }
             },
             aborter.value?.signal,
           )
+          if (sseError) {
+            throw new Error(sseError)
+          }
         } finally {
           stream.flushForMessage(localAssistantId)
           stopRequested.value = false
@@ -915,6 +1009,7 @@ async function sendUserMessage() {
         }>('/api/generate/stream', {
           chatId,
           userMessage: text,
+          userImages: uploadedImages,
           senderPersonaId: selectedPersona.value?.id ?? null,
           senderName: selectedPersona.value?.name ?? userName.value,
           senderAvatar: selectedPersona.value?.avatar ?? null,
@@ -929,13 +1024,64 @@ async function sendUserMessage() {
           chats.appendLocalMessageContent(localAssistantId, res.content || '')
           scrollToBottom()
         } else {
-          streamError.value = res.error || 'unknown error'
+          throw new Error(res.error || 'unknown error')
         }
       }
     }
   } catch (e: any) {
     if (!isAbortError(e)) {
-      streamError.value = e?.message ?? String(e)
+      const errMsg = e?.message ?? String(e)
+      if (uploadedImages.length > 0) {
+        openImageFallback(errMsg, async () => {
+          imageFallbackDialog.value.visible = false
+          if (isGroup) {
+            const allMemberIds = [...(activeChat.value?.memberIds || [])]
+            const memberIds = group.filterMembersByProbability(allMemberIds)
+            const groupDelay = activeChat.value?.groupDelay || 1500
+            await runGroupGeneration(chatId, memberIds, useStream, groupDelay, 0, true)
+            await chats.load(chatId)
+          } else {
+            const localAssistantId = `local_assistant_retry_${Date.now()}`
+            chats.addLocalMessage({ version: 1, id: localAssistantId, role: 'assistant', content: '', ts: new Date().toISOString() })
+            if (useStream) {
+              stream.registerStreamMessage(localAssistantId)
+              let retryErr: string | null = null
+              try {
+                await postAndConsumeSse('/api/generate/stream', {
+                  chatId,
+                  userMessage: text,
+                  appendUserMessage: false,
+                  imageFallbackMode: true,
+                  userPersona: selectedPersona.value ?? null,
+                }, (evt) => {
+                  if (evt.event === 'delta') {
+                    const data = evt.data as { text?: string } | undefined
+                    if (typeof data?.text === 'string') stream.appendDeltaBuffered(localAssistantId, data.text)
+                  } else if (evt.event === 'error') {
+                    retryErr = String((evt.data as { message?: string } | undefined)?.message ?? 'unknown error')
+                  }
+                }, aborter.value?.signal)
+                if (retryErr) throw new Error(retryErr)
+              } finally {
+                stream.flushForMessage(localAssistantId)
+              }
+            } else {
+              const retryRes = await apiPost<{ ok: boolean; content: string; error?: string }>('/api/generate/stream', {
+                chatId,
+                userMessage: text,
+                appendUserMessage: false,
+                imageFallbackMode: true,
+                userPersona: selectedPersona.value ?? null,
+              })
+              if (!retryRes.ok) throw new Error(retryRes.error || 'unknown error')
+              chats.appendLocalMessageContent(localAssistantId, retryRes.content || '')
+            }
+            await chats.load(chatId)
+          }
+        })
+      } else {
+        streamError.value = errMsg
+      }
     }
   } finally {
     isGenerating.value = false
@@ -1821,7 +1967,7 @@ async function handleSaveAndSend() {
   if (messageIndex === -1) return
 
   const editedRole = actions.editingMessageRole.value
-  const editedContent = actions.editingMessageContent.value
+  const editedContent = replaceInputPlaceholders(actions.editingMessageContent.value)
   const originalMessage = activeChat.value.messages[messageIndex]
   if (!originalMessage) return
 
@@ -2084,6 +2230,7 @@ const editingPersonaAvatarUrl = computed(() => {
           <!-- 消息列表 -->
           <MessageList
             ref="messageListRef"
+            :chat-id="activeChat.id"
             :messages="activeChat.messages"
             :is-group="activeChat.isGroup"
             :selected-character="selectedCharacter"
@@ -2114,6 +2261,7 @@ const editingPersonaAvatarUrl = computed(() => {
             v-model="draftMessage"
             :is-generating="isGenerating"
             :stream-error="streamError"
+            :draft-images="draftImages"
             :is-group="activeChat.isGroup"
             :group-members="groupMembers"
             :current-speaker-index="group.currentSpeakerIndex.value"
@@ -2138,6 +2286,8 @@ const editingPersonaAvatarUrl = computed(() => {
             @hide-interject="group.hideInterject"
             @select-model="handleModelSelect"
             @toggle-assistant="assistant.isAssistantPanelOpen.value = !assistant.isAssistantPanelOpen.value"
+            @select-images="handleSelectImages"
+            @remove-image="handleRemoveDraftImage"
           />
         </div>
 
@@ -2190,6 +2340,23 @@ const editingPersonaAvatarUrl = computed(() => {
       @pause="errorStack.pauseTimer"
       @resume="errorStack.resumeTimer"
     />
+
+    <div v-if="imageFallbackDialog.visible" class="fixed inset-0 z-[1400] flex items-center justify-center">
+      <div class="absolute inset-0 bg-overlay-heavy backdrop-blur-sm" @click="imageFallbackDialog.visible = false"></div>
+      <div class="relative w-[min(640px,calc(100vw-2rem))] rounded-xl border border-red-500/30 bg-red-500/10 p-4">
+        <h3 class="text-sm font-bold text-red-200 mb-2">模型不支持图片或图片请求失败</h3>
+        <pre class="text-xs text-red-100 whitespace-pre-wrap break-words max-h-[260px] overflow-auto">{{ imageFallbackDialog.error }}</pre>
+        <div class="mt-4 flex justify-end gap-2">
+          <button class="btn btn-sm btn-secondary" @click="imageFallbackDialog.visible = false">返回</button>
+          <button
+            class="btn btn-sm btn-primary"
+            @click="imageFallbackDialog.retryAction && imageFallbackDialog.retryAction()"
+          >
+            清除图片重试
+          </button>
+        </div>
+      </div>
+    </div>
 
     <!-- 助手设置抽屉 -->
           <!-- 消息编辑弹窗 -->

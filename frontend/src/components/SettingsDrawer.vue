@@ -150,6 +150,7 @@ function ensureOverrides(v?: Partial<ChatOverrides> | null): ChatOverrides {
   return {
     prompt: v?.prompt ?? null,
     longTermMemory: v?.longTermMemory ?? null,
+    contextStartMessageId: v?.contextStartMessageId ?? null,
     presetId: v?.presetId ?? null,
     params: {
       model: v?.params?.model ?? null,
@@ -159,6 +160,32 @@ function ensureOverrides(v?: Partial<ChatOverrides> | null): ChatOverrides {
       context_size: v?.params?.context_size ?? null,
     },
   }
+}
+
+function findLatestMemorySavedMessageId(chat: Chat | null): string | null {
+  if (!chat?.messages?.length) return null
+  for (let i = chat.messages.length - 1; i >= 0; i--) {
+    const m = chat.messages[i]
+    if (m?.memoryUpdatedAfterThis) return m.id
+  }
+  return null
+}
+
+async function hideSavedFloors() {
+  if (!props.chat?.id || !chatDraft.value) return
+  const anchorId = findLatestMemorySavedMessageId(props.chat)
+  if (!anchorId) {
+    alert('当前会话尚未找到“已保存记忆”标记消息，无法执行 hide。')
+    return
+  }
+  chatDraft.value.contextStartMessageId = anchorId
+  await saveChatOverrides()
+}
+
+async function resetHiddenFloors() {
+  if (!props.chat?.id || !chatDraft.value) return
+  chatDraft.value.contextStartMessageId = null
+  await saveChatOverrides()
 }
 
 async function fetchMemoryTokenCount() {
@@ -1203,6 +1230,13 @@ async function checkUpdate() {
                       距离上次保存记忆已过去了：~{{ messagesSinceLastMemoryUpdate }} 条消息，约 {{ tokensSinceLastMemoryUpdate }} tokens
                     </div>
                   </div>
+                </div>
+                <div class="flex items-center gap-2 pb-1">
+                  <button class="btn btn-xs btn-secondary" @click="hideSavedFloors">hide（隐藏已保存楼层）</button>
+                  <button class="btn btn-xs btn-secondary" @click="resetHiddenFloors">恢复全部隐藏楼层</button>
+                  <span v-if="chatDraft.contextStartMessageId" class="text-xs text-[var(--color-text-muted)]">
+                    当前已设置上下文起点
+                  </span>
                 </div>
                 <textarea 
                   v-model="chatDraft.longTermMemory"
