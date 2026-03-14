@@ -22,13 +22,13 @@ from app.storage import get_repo_root, get_update_dir
 
 router = APIRouter(tags=["update"])
 
-CURRENT_VERSION = "v0.235"
+CURRENT_VERSION = "v0.240"
 GITHUB_REPO = "DuoHBshuijiao/SimpleTavern"
 GITHUB_API_LATEST = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
 
 def _parse_version(tag: str) -> tuple[int, ...]:
-    """将 v0.228 解析为 (0, 228)，用于比较。"""
+    """举例：将 v0.228 解析为 (0, 228)，用于比较。"""
     tag = (tag or "").strip().lstrip("v")
     parts = re.findall(r"\d+", tag)
     return tuple(int(p) for p in parts) if parts else (0,)
