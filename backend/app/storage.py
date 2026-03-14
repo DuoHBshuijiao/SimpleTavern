@@ -38,15 +38,17 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import mimetypes
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
+from uuid import uuid4
 
 import portalocker
 
 from datetime import datetime
 
-from app.schemas import AssistantChat, AssistantSettings, Chat, ChatMessage, CharacterCard, Settings
+from app.schemas import AssistantChat, AssistantSettings, Chat, ChatImageAttachment, ChatMessage, CharacterCard, Settings
 
 
 def _repo_root() -> Path:
@@ -610,6 +612,76 @@ def chat_memory_path(character_id: str, chat_id: str) -> Path:
         Path: 长期记忆文件路径（data/chats/{character_id}/{chat_id}/chat_memory.json）
     """
     return chat_folder(character_id, chat_id) / CHAT_MEMORY_FILENAME
+
+
+def chat_images_dir(character_id: str, chat_id: str) -> Path:
+    """返回会话图片目录（data/chats/{character_id}/{chat_id}/images）。"""
+    return chat_folder(character_id, chat_id) / "images"
+
+
+def _safe_image_ext_from_mime(mime_type: str | None) -> str:
+    if not mime_type:
+        return ".png"
+    guessed = mimetypes.guess_extension(mime_type.split(";")[0].strip().lower())
+    if guessed:
+        return guessed
+    return ".png"
+
+
+def save_chat_image(
+    *,
+    chat: Chat,
+    data: bytes,
+    mime_type: str,
+    original_name: str | None = None,
+    width: int | None = None,
+    height: int | None = None,
+) -> ChatImageAttachment:
+    """保存聊天图片并返回附件元数据。"""
+    image_id = uuid4().hex
+    ext = _safe_image_ext_from_mime(mime_type)
+    filename = f"{image_id}{ext}"
+    target = chat_images_dir(chat.characterId, chat.id) / filename
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(data)
+    return ChatImageAttachment(
+        id=image_id,
+        filename=filename,
+        mimeType=mime_type,
+        size=len(data),
+        width=width,
+        height=height,
+        originalName=original_name,
+    )
+
+
+def chat_image_path(character_id: str, chat_id: str, image_filename: str) -> Path:
+    """返回聊天图片完整路径。"""
+    return chat_images_dir(character_id, chat_id) / image_filename
+
+
+def load_chat_image_bytes(chat: Chat, image: ChatImageAttachment) -> bytes:
+    """读取聊天图片二进制。"""
+    path = chat_image_path(chat.characterId, chat.id, image.filename)
+    if not path.exists():
+        raise FileNotFoundError(str(path))
+    return path.read_bytes()
+
+
+def delete_chat_image(chat: Chat, image: ChatImageAttachment) -> None:
+    """删除聊天图片文件（若存在）。"""
+    path = chat_image_path(chat.characterId, chat.id, image.filename)
+    if path.exists():
+        path.unlink(missing_ok=True)
+
+
+def delete_message_images(chat: Chat, message: ChatMessage) -> None:
+    """删除单条消息关联图片。"""
+    for image in getattr(message, "images", []) or []:
+        try:
+            delete_chat_image(chat, image)
+        except Exception:
+            continue
 
 
 def legacy_chat_path(character_id: str, chat_id: str) -> Path:

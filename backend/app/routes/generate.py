@@ -22,16 +22,18 @@
 
 from __future__ import annotations
 
+import base64
 import json
 from datetime import datetime
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.llm.openai_compat import chat_completions, chat_completions_message, stream_chat_completions
+from app.placeholders import replace_placeholders_in_text
 from app.schemas import ChatMessage, GenerateStreamRequest, GroupGenerateRequest, SingleInterjectRequest
-from app.storage import load_character, load_chat, load_settings, save_chat, save_settings
+from app.storage import load_character, load_chat, load_chat_image_bytes, load_settings, save_chat, save_settings
 from app.tokenizer_service import trim_messages_to_context
 
 
@@ -105,6 +107,103 @@ def _sse(event: str, data_obj: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data_obj, ensure_ascii=False)}\n\n"
 
 
+def _resolve_user_name_for_message(msg: ChatMessage, fallback_user_name: str) -> str:
+    return getattr(msg, "senderName", None) or fallback_user_name or "用户"
+
+
+def _build_data_url(image_bytes: bytes, mime_type: str) -> str:
+    return f"data:{mime_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
+
+
+def _message_to_openai_content(
+    chat,
+    msg: ChatMessage,
+    *,
+    image_fallback_mode: bool,
+) -> str | list[dict[str, Any]]:
+    text = msg.content or ""
+    images = getattr(msg, "images", []) or []
+    if not images:
+        return text
+    if image_fallback_mode:
+        suffix = "\n".join("[image]" for _ in images)
+        return f"{text}\n{suffix}".strip()
+    parts: list[dict[str, Any]] = []
+    if text.strip():
+        parts.append({"type": "text", "text": text})
+    for img in images:
+        try:
+            b = load_chat_image_bytes(chat, img)
+            parts.append({
+                "type": "image_url",
+                "image_url": {"url": _build_data_url(b, img.mimeType or "image/png")},
+            })
+        except FileNotFoundError:
+            parts.append({"type": "text", "text": "[image]"})
+    if not parts:
+        return ""
+    return parts
+
+
+def _resolve_char_name_for_history_message(
+    msg: ChatMessage,
+    *,
+    default_char_name: str,
+    character_name_cache: dict[str, str],
+) -> str:
+    char_id = getattr(msg, "characterId", None)
+    if not char_id:
+        return default_char_name
+    if char_id in character_name_cache:
+        return character_name_cache[char_id]
+    try:
+        c = load_character(char_id)
+        character_name_cache[char_id] = c.name or "角色"
+    except FileNotFoundError:
+        character_name_cache[char_id] = default_char_name
+    return character_name_cache[char_id]
+
+
+def _apply_placeholder_rewrite_to_history(
+    chat,
+    *,
+    default_char_name: str,
+    fallback_user_name: str,
+) -> bool:
+    changed = False
+    char_cache: dict[str, str] = {}
+    for msg in chat.messages:
+        user_name = _resolve_user_name_for_message(msg, fallback_user_name)
+        char_name = _resolve_char_name_for_history_message(
+            msg,
+            default_char_name=default_char_name,
+            character_name_cache=char_cache,
+        )
+        replaced = replace_placeholders_in_text(
+            msg.content or "",
+            char_name=char_name,
+            user_name=user_name,
+        )
+        if replaced != msg.content:
+            msg.content = replaced
+            changed = True
+    if changed:
+        chat.updatedAt = _now_iso()
+        save_chat(chat)
+    return changed
+
+
+def _slice_conversation_with_anchor(conversation: list[dict], context_start_message_id: str | None) -> list[dict]:
+    if not context_start_message_id:
+        return conversation
+    start_idx = 0
+    for i, m in enumerate(conversation):
+        if m.get("_message_id") == context_start_message_id:
+            start_idx = i
+            break
+    return conversation[start_idx:]
+
+
 @router.post("/generate/stream")
 async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
     """
@@ -139,9 +238,17 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
 
     if getattr(req, "appendUserMessage", True):
         user_role = "system" if pure_ai_mode else "user"
+        user_display_name = getattr(req, "senderName", None) or (getattr(req, "userPersona", None).name if getattr(req, "userPersona", None) else "用户")
+        char_name_for_user_input = character.name or "角色"
+        replaced_user_message = replace_placeholders_in_text(
+            req.userMessage,
+            char_name=char_name_for_user_input,
+            user_name=user_display_name or "用户",
+        )
         chat.messages.append(ChatMessage(
             role=user_role,
-            content=req.userMessage,
+            content=replaced_user_message,
+            images=getattr(req, "userImages", []) or [],
             senderPersonaId=None if pure_ai_mode else getattr(req, "senderPersonaId", None),
             senderName=None if pure_ai_mode else getattr(req, "senderName", None),
             senderAvatar=None if pure_ai_mode else getattr(req, "senderAvatar", None),
@@ -164,22 +271,70 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
             persona_for_prompt = _resolve_selected_persona(settings, chat, pure_ai_mode)
     if persona_for_prompt:
         user_persona_parts: list[str] = []
+        runtime_user_name = (persona_for_prompt.name or "").strip() or "用户"
         if persona_for_prompt.name and persona_for_prompt.name.strip():
-            user_persona_parts.append(f"user姓名：{persona_for_prompt.name.strip()}")
+            user_persona_parts.append(
+                f"user姓名：{replace_placeholders_in_text(persona_for_prompt.name.strip(), char_name=character.name or '角色', user_name=runtime_user_name)}"
+            )
         if persona_for_prompt.description and persona_for_prompt.description.strip():
-            user_persona_parts.append(f"User简介：\n{persona_for_prompt.description.strip()}")
+            user_persona_parts.append(
+                "User简介：\n"
+                + replace_placeholders_in_text(
+                    persona_for_prompt.description.strip(),
+                    char_name=character.name or "角色",
+                    user_name=runtime_user_name,
+                )
+            )
         if user_persona_parts:
             prompt_parts.append("\n".join(user_persona_parts))
     
     character_parts: list[str] = []
     if character.name and character.name.strip():
         character_parts.append(f"char姓名：{character.name.strip()}")
+    if character.description and character.description.strip():
+        character_parts.append(
+            "Description：\n"
+            + replace_placeholders_in_text(
+                character.description.strip(),
+                char_name=character.name or "角色",
+                user_name=(persona_for_prompt.name.strip() if persona_for_prompt and persona_for_prompt.name else "用户"),
+            )
+        )
     if character.personality and character.personality.strip():
-        character_parts.append(f"Personality：\n{character.personality.strip()}")
+        character_parts.append(
+            "Personality：\n"
+            + replace_placeholders_in_text(
+                character.personality.strip(),
+                char_name=character.name or "角色",
+                user_name=(persona_for_prompt.name.strip() if persona_for_prompt and persona_for_prompt.name else "用户"),
+            )
+        )
     if character.scenario and character.scenario.strip():
-        character_parts.append(f"Scenario：\n{character.scenario.strip()}")
+        character_parts.append(
+            "Scenario：\n"
+            + replace_placeholders_in_text(
+                character.scenario.strip(),
+                char_name=character.name or "角色",
+                user_name=(persona_for_prompt.name.strip() if persona_for_prompt and persona_for_prompt.name else "用户"),
+            )
+        )
+    if character.exampleDialogue and character.exampleDialogue.strip():
+        character_parts.append(
+            "ExampleDialogue：\n"
+            + replace_placeholders_in_text(
+                character.exampleDialogue.strip(),
+                char_name=character.name or "角色",
+                user_name=(persona_for_prompt.name.strip() if persona_for_prompt and persona_for_prompt.name else "用户"),
+            )
+        )
     if character.systemPrompt and character.systemPrompt.strip():
-        character_parts.append(character.systemPrompt.strip())
+        character_parts.append(
+            replace_placeholders_in_text(
+                character.systemPrompt.strip(),
+                char_name=character.name or "角色",
+                user_name=(persona_for_prompt.name.strip() if persona_for_prompt and persona_for_prompt.name else "用户"),
+            )
+        )
     
     if character_parts:
         prompt_parts.append("\n\n".join(character_parts))
@@ -234,12 +389,26 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
             base_url = found_preset.baseUrl
             api_key = found_preset.apiKey
 
+    _apply_placeholder_rewrite_to_history(
+        chat,
+        default_char_name=character.name or "角色",
+        fallback_user_name=(persona_for_prompt.name.strip() if persona_for_prompt and persona_for_prompt.name else "用户"),
+    )
+
     conversation: list[dict] = []
+    image_fallback_mode = bool(getattr(req, "imageFallbackMode", False))
     for m in chat.messages:
-        if pure_ai_mode and m.role == "user":
-            conversation.append({"role": "system", "content": m.content})
-        else:
-            conversation.append({"role": m.role, "content": m.content})
+        role = "system" if pure_ai_mode and m.role == "user" else m.role
+        conversation.append({
+            "role": role,
+            "content": _message_to_openai_content(chat, m, image_fallback_mode=image_fallback_mode),
+            "_message_id": m.id,
+        })
+
+    conversation = _slice_conversation_with_anchor(
+        conversation,
+        getattr(chat.overrides, "contextStartMessageId", None),
+    )
     if context_size and context_size >= 1:
         long_term_memory = getattr(chat.overrides, "longTermMemory", None) or ""
         conversation = trim_messages_to_context(conversation, context_size, long_term_memory or None)
@@ -247,7 +416,10 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
     messages: list[dict] = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
-    messages.extend(conversation)
+    for c in conversation:
+        c = dict(c)
+        c.pop("_message_id", None)
+        messages.append(c)
 
     thinking_enabled = bool(getattr(settings, "thinkingMode", False))
     extra_body = {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
@@ -395,12 +567,22 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
         prompt_parts.append(settings.prompts.globalSystem)
     
     selected_persona = _resolve_selected_persona(settings, chat, pure_ai_mode)
+    runtime_user_name = selected_persona.name.strip() if selected_persona and selected_persona.name else "用户"
     if selected_persona:
         user_persona_parts: list[str] = []
         if selected_persona.name and selected_persona.name.strip():
-            user_persona_parts.append(f"user姓名：{selected_persona.name.strip()}")
+            user_persona_parts.append(
+                f"user姓名：{replace_placeholders_in_text(selected_persona.name.strip(), char_name=character.name or '角色', user_name=runtime_user_name)}"
+            )
         if selected_persona.description and selected_persona.description.strip():
-            user_persona_parts.append(f"User简介：\n{selected_persona.description.strip()}")
+            user_persona_parts.append(
+                "User简介：\n"
+                + replace_placeholders_in_text(
+                    selected_persona.description.strip(),
+                    char_name=character.name or "角色",
+                    user_name=runtime_user_name,
+                )
+            )
         if user_persona_parts:
             prompt_parts.append("\n".join(user_persona_parts))
 
@@ -423,12 +605,41 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
 
     character_parts: list[str] = []
     character_parts.append(f"你现在扮演的角色是：{character.name}")
+    if character.description and character.description.strip():
+        character_parts.append(
+            "Description：\n"
+            + replace_placeholders_in_text(
+                character.description.strip(),
+                char_name=character.name or "角色",
+                user_name=runtime_user_name,
+            )
+        )
     if include_personality and character.personality and character.personality.strip():
-        character_parts.append(f"Personality：\n{character.personality.strip()}")
+        character_parts.append(
+            "Personality：\n"
+            + replace_placeholders_in_text(
+                character.personality.strip(),
+                char_name=character.name or "角色",
+                user_name=runtime_user_name,
+            )
+        )
     if include_scenario and character.scenario and character.scenario.strip():
-        character_parts.append(f"Scenario：\n{character.scenario.strip()}")
+        character_parts.append(
+            "Scenario：\n"
+            + replace_placeholders_in_text(
+                character.scenario.strip(),
+                char_name=character.name or "角色",
+                user_name=runtime_user_name,
+            )
+        )
     if character.systemPrompt and character.systemPrompt.strip():
-        character_parts.append(character.systemPrompt.strip())
+        character_parts.append(
+            replace_placeholders_in_text(
+                character.systemPrompt.strip(),
+                char_name=character.name or "角色",
+                user_name=runtime_user_name,
+            )
+        )
     
     if character_parts:
         prompt_parts.append("\n\n".join(character_parts))
@@ -492,25 +703,41 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
             base_url = found_preset.baseUrl
             api_key = found_preset.apiKey
 
+    _apply_placeholder_rewrite_to_history(
+        chat,
+        default_char_name=character.name or "角色",
+        fallback_user_name=runtime_user_name,
+    )
+    image_fallback_mode = bool(getattr(req, "imageFallbackMode", False))
     conversation: list[dict] = []
+    char_name_cache: dict[str, str] = {}
     for m in chat.messages:
+        char_name_for_message = _resolve_char_name_for_history_message(
+            m,
+            default_char_name=character.name or "角色",
+            character_name_cache=char_name_cache,
+        )
+        raw_content = _message_to_openai_content(chat, m, image_fallback_mode=image_fallback_mode)
         if m.role == "user":
             if pure_ai_mode:
-                conversation.append({"role": "system", "content": f"[用户]: {m.content}"})
+                prefix = f"[{_resolve_user_name_for_message(m, runtime_user_name)}]: "
+                content = f"{prefix}{raw_content}" if isinstance(raw_content, str) else [{"type": "text", "text": prefix}, *raw_content]
+                conversation.append({"role": "system", "content": content, "_message_id": m.id})
             else:
-                user_name = getattr(m, "senderName", None) or (selected_persona.name if selected_persona else "用户")
-                conversation.append({"role": "user", "content": f"[{user_name}]: {m.content}"})
+                user_name = _resolve_user_name_for_message(m, runtime_user_name)
+                prefix = f"[{user_name}]: "
+                content = f"{prefix}{raw_content}" if isinstance(raw_content, str) else [{"type": "text", "text": prefix}, *raw_content]
+                conversation.append({"role": "user", "content": content, "_message_id": m.id})
         elif m.role == "assistant":
-            if m.characterId:
-                try:
-                    msg_char = load_character(m.characterId)
-                    conversation.append({"role": "assistant", "content": f"[{msg_char.name}]: {m.content}"})
-                except FileNotFoundError:
-                    conversation.append({"role": "assistant", "content": m.content})
-            else:
-                conversation.append({"role": "assistant", "content": m.content})
+            prefix = f"[{char_name_for_message}]: "
+            content = f"{prefix}{raw_content}" if isinstance(raw_content, str) else [{"type": "text", "text": prefix}, *raw_content]
+            conversation.append({"role": "assistant", "content": content, "_message_id": m.id})
         else:
-            conversation.append({"role": m.role, "content": m.content})
+            conversation.append({"role": m.role, "content": raw_content, "_message_id": m.id})
+    conversation = _slice_conversation_with_anchor(
+        conversation,
+        getattr(chat.overrides, "contextStartMessageId", None),
+    )
     if context_size and context_size >= 1:
         long_term_memory = getattr(chat.overrides, "longTermMemory", None) or ""
         conversation = trim_messages_to_context(conversation, context_size, long_term_memory or None)
@@ -518,7 +745,10 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
     messages: list[dict] = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
-    messages.extend(conversation)
+    for c in conversation:
+        c = dict(c)
+        c.pop("_message_id", None)
+        messages.append(c)
 
     thinking_enabled = bool(getattr(settings, "thinkingMode", False))
     extra_body = {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
@@ -663,12 +893,22 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
         prompt_parts.append(settings.prompts.globalSystem)
     
     selected_persona = _resolve_selected_persona(settings, chat, pure_ai_mode)
+    runtime_user_name = selected_persona.name.strip() if selected_persona and selected_persona.name else "用户"
     if selected_persona:
         user_persona_parts: list[str] = []
         if selected_persona.name and selected_persona.name.strip():
-            user_persona_parts.append(f"user姓名：{selected_persona.name.strip()}")
+            user_persona_parts.append(
+                f"user姓名：{replace_placeholders_in_text(selected_persona.name.strip(), char_name=character.name or '角色', user_name=runtime_user_name)}"
+            )
         if selected_persona.description and selected_persona.description.strip():
-            user_persona_parts.append(f"User简介：\n{selected_persona.description.strip()}")
+            user_persona_parts.append(
+                "User简介：\n"
+                + replace_placeholders_in_text(
+                    selected_persona.description.strip(),
+                    char_name=character.name or "角色",
+                    user_name=runtime_user_name,
+                )
+            )
         if user_persona_parts:
             prompt_parts.append("\n".join(user_persona_parts))
 
@@ -692,12 +932,41 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
     character_parts: list[str] = []
     character_parts.append(f"你现在扮演的角色是：{character.name}")
     character_parts.append("请根据当前对话内容进行回复（这是一次额外的插话机会）。")
+    if character.description and character.description.strip():
+        character_parts.append(
+            "Description：\n"
+            + replace_placeholders_in_text(
+                character.description.strip(),
+                char_name=character.name or "角色",
+                user_name=runtime_user_name,
+            )
+        )
     if include_personality and character.personality and character.personality.strip():
-        character_parts.append(f"Personality：\n{character.personality.strip()}")
+        character_parts.append(
+            "Personality：\n"
+            + replace_placeholders_in_text(
+                character.personality.strip(),
+                char_name=character.name or "角色",
+                user_name=runtime_user_name,
+            )
+        )
     if include_scenario and character.scenario and character.scenario.strip():
-        character_parts.append(f"Scenario：\n{character.scenario.strip()}")
+        character_parts.append(
+            "Scenario：\n"
+            + replace_placeholders_in_text(
+                character.scenario.strip(),
+                char_name=character.name or "角色",
+                user_name=runtime_user_name,
+            )
+        )
     if character.systemPrompt and character.systemPrompt.strip():
-        character_parts.append(character.systemPrompt.strip())
+        character_parts.append(
+            replace_placeholders_in_text(
+                character.systemPrompt.strip(),
+                char_name=character.name or "角色",
+                user_name=runtime_user_name,
+            )
+        )
     
     if character_parts:
         prompt_parts.append("\n\n".join(character_parts))
@@ -755,25 +1024,41 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
             base_url = found_preset.baseUrl
             api_key = found_preset.apiKey
 
+    _apply_placeholder_rewrite_to_history(
+        chat,
+        default_char_name=character.name or "角色",
+        fallback_user_name=runtime_user_name,
+    )
+    image_fallback_mode = bool(getattr(req, "imageFallbackMode", False))
     conversation: list[dict] = []
+    char_name_cache: dict[str, str] = {}
     for m in chat.messages:
+        char_name_for_message = _resolve_char_name_for_history_message(
+            m,
+            default_char_name=character.name or "角色",
+            character_name_cache=char_name_cache,
+        )
+        raw_content = _message_to_openai_content(chat, m, image_fallback_mode=image_fallback_mode)
         if m.role == "user":
             if pure_ai_mode:
-                conversation.append({"role": "system", "content": f"[用户]: {m.content}"})
+                prefix = f"[{_resolve_user_name_for_message(m, runtime_user_name)}]: "
+                content = f"{prefix}{raw_content}" if isinstance(raw_content, str) else [{"type": "text", "text": prefix}, *raw_content]
+                conversation.append({"role": "system", "content": content, "_message_id": m.id})
             else:
-                user_name = getattr(m, "senderName", None) or (selected_persona.name if selected_persona else "用户")
-                conversation.append({"role": "user", "content": f"[{user_name}]: {m.content}"})
+                user_name = _resolve_user_name_for_message(m, runtime_user_name)
+                prefix = f"[{user_name}]: "
+                content = f"{prefix}{raw_content}" if isinstance(raw_content, str) else [{"type": "text", "text": prefix}, *raw_content]
+                conversation.append({"role": "user", "content": content, "_message_id": m.id})
         elif m.role == "assistant":
-            if m.characterId:
-                try:
-                    msg_char = load_character(m.characterId)
-                    conversation.append({"role": "assistant", "content": f"[{msg_char.name}]: {m.content}"})
-                except FileNotFoundError:
-                    conversation.append({"role": "assistant", "content": m.content})
-            else:
-                conversation.append({"role": "assistant", "content": m.content})
+            prefix = f"[{char_name_for_message}]: "
+            content = f"{prefix}{raw_content}" if isinstance(raw_content, str) else [{"type": "text", "text": prefix}, *raw_content]
+            conversation.append({"role": "assistant", "content": content, "_message_id": m.id})
         else:
-            conversation.append({"role": m.role, "content": m.content})
+            conversation.append({"role": m.role, "content": raw_content, "_message_id": m.id})
+    conversation = _slice_conversation_with_anchor(
+        conversation,
+        getattr(chat.overrides, "contextStartMessageId", None),
+    )
     if context_size and context_size >= 1:
         long_term_memory = getattr(chat.overrides, "longTermMemory", None) or ""
         conversation = trim_messages_to_context(conversation, context_size, long_term_memory or None)
@@ -781,7 +1066,10 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
     messages: list[dict] = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
-    messages.extend(conversation)
+    for c in conversation:
+        c = dict(c)
+        c.pop("_message_id", None)
+        messages.append(c)
 
     thinking_enabled = bool(getattr(settings, "thinkingMode", False))
     extra_body = {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}

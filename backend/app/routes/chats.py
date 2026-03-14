@@ -38,12 +38,29 @@
 
 from __future__ import annotations
 
+import base64
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
 
-from app.schemas import AppendMessageRequest, Chat, ChatMessage, CreateChatRequest, UpdateChatRequest, UpdateMessageRequest
-from app.storage import delete_chat, list_chats, list_group_chats, load_character, load_chat, load_settings, mark_last_message_memory_updated, save_chat
+from app.placeholders import replace_placeholders_in_text
+from app.schemas import AppendMessageRequest, Chat, ChatImageAttachment, ChatMessage, CreateChatRequest, UpdateChatRequest, UpdateMessageRequest
+from app.storage import (
+    chat_image_path,
+    delete_chat,
+    delete_chat_image,
+    delete_message_images,
+    list_chats,
+    list_group_chats,
+    load_character,
+    load_chat,
+    load_settings,
+    mark_last_message_memory_updated,
+    save_chat,
+    save_chat_image,
+)
 
 router = APIRouter(tags=["chats"])
 
@@ -76,6 +93,8 @@ def _merge_overrides(existing: Chat, incoming: UpdateChatRequest) -> None:
         existing.overrides.prompt = ov.prompt
     if getattr(ov, "longTermMemory", None) is not None:
         existing.overrides.longTermMemory = ov.longTermMemory
+    if hasattr(ov, "contextStartMessageId"):
+        existing.overrides.contextStartMessageId = ov.contextStartMessageId
     if getattr(ov, "pureAiMode", None) is not None:
         existing.overrides.pureAiMode = ov.pureAiMode
     if hasattr(ov, "presetId"):
@@ -86,6 +105,22 @@ def _merge_overrides(existing: Chat, incoming: UpdateChatRequest) -> None:
         # context_size 允许显式设为 None 表示“未启用”；其他参数仅在有值时覆盖
         if key == "context_size" or val is not None:
             setattr(existing.overrides.params, key, val)
+
+
+class UploadChatImageItem(BaseModel):
+    imageData: str
+    mimeType: str = "image/png"
+    originalName: str | None = None
+    width: int | None = None
+    height: int | None = None
+
+
+class UploadChatImagesRequest(BaseModel):
+    images: list[UploadChatImageItem] = Field(default_factory=list)
+
+
+class UploadChatImagesResponse(BaseModel):
+    images: list[ChatImageAttachment] = Field(default_factory=list)
 
 
 @router.get("/chats", response_model=list[Chat])
@@ -111,22 +146,6 @@ def get_group_chats() -> list[Chat]:
         list[Chat]: 群聊会话列表，按更新时间倒序
     """
     return list_group_chats()
-
-
-def _replace_user_placeholder(text: str, user_name: str) -> str:
-    """
-    替换文本中的{{user}}占位符为用户名
-    
-    Args:
-        text: 原始文本
-        user_name: 用户名
-    
-    Returns:
-        str: 替换后的文本
-    """
-    if not user_name:
-        return text
-    return text.replace("{{user}}", user_name)
 
 
 @router.post("/chats", response_model=Chat)
@@ -201,8 +220,11 @@ def create_chat(req: CreateChatRequest) -> Chat:
             character = load_character(req.characterId)
             if character.firstMessage and character.firstMessage.strip():
                 first_msg = character.firstMessage.strip()
-                if user_name:
-                    first_msg = _replace_user_placeholder(first_msg, user_name)
+                first_msg = replace_placeholders_in_text(
+                    first_msg,
+                    char_name=(character.name or "角色"),
+                    user_name=user_name or "用户",
+                )
                 chat.messages.append(ChatMessage(
                     role="assistant",
                     content=first_msg
@@ -217,8 +239,11 @@ def create_chat(req: CreateChatRequest) -> Chat:
                 first_char = load_character(req.firstMessageCharacterId)
                 if first_char.firstMessage and first_char.firstMessage.strip():
                     first_msg = first_char.firstMessage.strip()
-                    if user_name:
-                        first_msg = _replace_user_placeholder(first_msg, user_name)
+                    first_msg = replace_placeholders_in_text(
+                        first_msg,
+                        char_name=(first_char.name or "角色"),
+                        user_name=user_name or "用户",
+                    )
                     chat.messages.append(ChatMessage(
                         role="assistant",
                         content=first_msg,
@@ -325,6 +350,7 @@ def append_message(chat_id: str, req: AppendMessageRequest) -> Chat:
     chat.messages.append(ChatMessage(
         role=req.role,
         content=req.content,
+        images=getattr(req, "images", []) or [],
         characterId=req.characterId,
         senderPersonaId=getattr(req, "senderPersonaId", None),
         senderName=getattr(req, "senderName", None),
@@ -360,8 +386,16 @@ def update_message(chat_id: str, message_id: str, req: UpdateMessageRequest) -> 
 
     for m in chat.messages:
         if m.id == message_id:
+            old_images = list(getattr(m, "images", []) or [])
             m.role = req.role
             m.content = req.content
+            if getattr(req, "images", None) is not None:
+                m.images = req.images or []
+                old_ids = {img.id for img in old_images}
+                new_ids = {img.id for img in (m.images or [])}
+                for old_img in old_images:
+                    if old_img.id not in new_ids:
+                        delete_chat_image(chat, old_img)
             # 仅当客户端显式传入 characterId 时更新，避免群聊中编辑仅改内容时覆盖发言人
             if req.characterId is not None:
                 m.characterId = req.characterId
@@ -398,7 +432,13 @@ def delete_message(chat_id: str, message_id: str) -> Chat:
         raise HTTPException(status_code=404, detail="chat not found")
 
     before = len(chat.messages)
-    chat.messages = [m for m in chat.messages if m.id != message_id]
+    kept_messages: list[ChatMessage] = []
+    for msg in chat.messages:
+        if msg.id == message_id:
+            delete_message_images(chat, msg)
+            continue
+        kept_messages.append(msg)
+    chat.messages = kept_messages
     if len(chat.messages) == before:
         raise HTTPException(status_code=404, detail="message not found")
 
@@ -419,6 +459,59 @@ def remove_chat(chat_id: str) -> dict:
     """
     delete_chat(chat_id)
     return {"ok": True}
+
+
+@router.post("/chats/{chat_id}/images", response_model=UploadChatImagesResponse)
+def upload_chat_images(chat_id: str, req: UploadChatImagesRequest) -> UploadChatImagesResponse:
+    """上传会话图片，返回附件元数据。"""
+    try:
+        chat = load_chat(chat_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="chat not found")
+    if not req.images:
+        return UploadChatImagesResponse(images=[])
+    saved: list[ChatImageAttachment] = []
+    for item in req.images:
+        try:
+            raw = item.imageData
+            if "," in raw:
+                raw = raw.split(",", 1)[1]
+            data = base64.b64decode(raw)
+        except Exception:
+            raise HTTPException(status_code=400, detail="invalid imageData")
+        attachment = save_chat_image(
+            chat=chat,
+            data=data,
+            mime_type=item.mimeType,
+            original_name=item.originalName,
+            width=item.width,
+            height=item.height,
+        )
+        saved.append(attachment)
+    return UploadChatImagesResponse(images=saved)
+
+
+@router.get("/chats/{chat_id}/images/{image_id}")
+def get_chat_image(chat_id: str, image_id: str) -> FileResponse:
+    """读取会话图片文件。"""
+    try:
+        chat = load_chat(chat_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="chat not found")
+    image: ChatImageAttachment | None = None
+    for msg in chat.messages:
+        for img in getattr(msg, "images", []) or []:
+            if img.id == image_id:
+                image = img
+                break
+        if image:
+            break
+    if image is None:
+        raise HTTPException(status_code=404, detail="image not found")
+    path = chat_image_path(chat.characterId, chat.id, image.filename)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="image file not found")
+    return FileResponse(path, media_type=image.mimeType or "application/octet-stream")
 
 
 @router.post("/chats/{chat_id}/members/{member_id}", response_model=Chat)

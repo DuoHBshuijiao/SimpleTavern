@@ -53,11 +53,11 @@
  *    - 依赖：依赖vue
  *    - 位置：组件层，提供聊天输入功能
  */
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { CharacterCard, GroupMemberSettings } from '../../types/models'
 import ModernAvatar from '../ModernAvatar.vue'
 import ModernSelect from '../ModernSelect.vue'
-import { MessageSquare } from 'lucide-vue-next'
+import { ImagePlus, MessageSquare, X } from 'lucide-vue-next'
 
 interface ModelOption {
   label: string
@@ -70,11 +70,18 @@ interface ModelOptionGroup {
   options: ModelOption[]
 }
 
+interface DraftImagePreview {
+  id: string
+  name: string
+  previewUrl: string
+}
+
 const props = defineProps<{
   // 输入状态
   modelValue: string
   isGenerating: boolean
   streamError: string | null
+  draftImages: DraftImagePreview[]
   
   // 群聊相关
   isGroup: boolean
@@ -111,14 +118,18 @@ const emit = defineEmits<{
   'hide-interject': []
   'select-model': [option: any]
   'toggle-assistant': []
+  'select-images': [files: File[]]
+  'remove-image': [imageId: string]
 }>()
+
+const imageInputRef = ref<HTMLInputElement | null>(null)
 
 /**
  * 计算是否有草稿消息
  *
  * 检查输入框是否有非空内容。
  */
-const hasDraftMessage = computed(() => !!props.modelValue.trim())
+const hasDraftMessage = computed(() => !!props.modelValue.trim() || props.draftImages.length > 0)
 
 /**
  * 计算主要操作按钮标签
@@ -200,6 +211,19 @@ function handleKeydown(e: KeyboardEvent) {
     emit('send')
   }
 }
+
+function openImagePicker() {
+  imageInputRef.value?.click()
+}
+
+function handleImageInputChange(e: Event) {
+  const input = e.target as HTMLInputElement
+  const files = Array.from(input.files || [])
+  if (files.length) {
+    emit('select-images', files)
+  }
+  input.value = ''
+}
 </script>
 
 <template>
@@ -220,6 +244,22 @@ function handleKeydown(e: KeyboardEvent) {
         :class="inputDisabled ? 'opacity-50' : ''"
         @keydown="handleKeydown"
       ></textarea>
+
+      <div v-if="draftImages.length" class="flex flex-wrap gap-2 px-1">
+        <div
+          v-for="img in draftImages"
+          :key="img.id"
+          class="relative w-20 h-20 rounded-lg overflow-hidden border border-[var(--color-border)] bg-surface-muted"
+        >
+          <img :src="img.previewUrl" :alt="img.name" class="w-full h-full object-cover" />
+          <button
+            class="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 text-white flex items-center justify-center"
+            @click="emit('remove-image', img.id)"
+          >
+            <X class="w-3 h-3" />
+          </button>
+        </div>
+      </div>
       
       <div class="flex items-center justify-between pt-2 border-t border-[var(--color-border-subtle)]">
         <div class="flex-1 min-w-0">
@@ -285,6 +325,22 @@ function handleKeydown(e: KeyboardEvent) {
         </div>
         
         <div class="flex items-center gap-3">
+          <button
+            class="chat-action-button chat-action-button--secondary shadow-lg transition-all active:scale-95"
+            :disabled="isGenerating && !showContinueButton"
+            @click="openImagePicker"
+            title="选择图片"
+          >
+            <ImagePlus class="w-4 h-4" />
+          </button>
+          <input
+            ref="imageInputRef"
+            type="file"
+            accept="image/*"
+            multiple
+            class="hidden"
+            @change="handleImageInputChange"
+          />
           <ModernSelect
             :model-value="currentModel"
             :options="modelOptions"

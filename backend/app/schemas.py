@@ -304,11 +304,25 @@ class ChatMessage(BaseModel):
     id: str = Field(default_factory=lambda: uuid4().hex)
     role: ChatRole
     content: str
+    images: list["ChatImageAttachment"] = Field(default_factory=list)
     characterId: str | None = None
     senderPersonaId: str | None = None
     senderName: str | None = None
     senderAvatar: str | None = None
     ts: str = Field(default_factory=_now_iso)
+
+
+class ChatImageAttachment(BaseModel):
+    """聊天消息中的图片附件元数据。"""
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    filename: str
+    mimeType: str
+    size: int | None = None
+    width: int | None = None
+    height: int | None = None
+    originalName: str | None = None
 
 
 class ChatOverrides(BaseModel):
@@ -328,6 +342,7 @@ class ChatOverrides(BaseModel):
 
     prompt: str | None = None
     longTermMemory: str | None = None
+    contextStartMessageId: str | None = None
     presetId: str | None = None
     pureAiMode: bool | None = None
     params: GenerationParams = Field(default_factory=GenerationParams)
@@ -439,6 +454,7 @@ class AppendMessageRequest(BaseModel):
     """
     role: ChatRole
     content: str
+    images: list[ChatImageAttachment] = Field(default_factory=list)
     characterId: str | None = None
     senderPersonaId: str | None = None
     senderName: str | None = None
@@ -461,6 +477,7 @@ class UpdateMessageRequest(BaseModel):
     """
     role: ChatRole
     content: str
+    images: list[ChatImageAttachment] | None = None
     characterId: str | None = None
     senderPersonaId: str | None = None
     senderName: str | None = None
@@ -507,6 +524,8 @@ class GenerateStreamRequest(BaseModel):
     """
     chatId: str
     userMessage: str
+    userImages: list[ChatImageAttachment] = Field(default_factory=list)
+    imageFallbackMode: bool = False
     appendUserMessage: bool | None = True
     senderPersonaId: str | None = None
     senderName: str | None = None
@@ -528,6 +547,7 @@ class GroupGenerateRequest(BaseModel):
     """
     chatId: str
     characterId: str
+    imageFallbackMode: bool = False
     runtimeOverrides: ChatOverrides | None = None
 
 
@@ -543,3 +563,4 @@ class SingleInterjectRequest(BaseModel):
     """
     chatId: str
     characterId: str
+    imageFallbackMode: bool = False
