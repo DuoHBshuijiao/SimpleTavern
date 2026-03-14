@@ -396,10 +396,12 @@ async def chat_completions_message(
         if not choices:
             return ChatCompletionMessage(role=None, content=None, reasoning_content=None, tool_calls=None)
         message = choices[0].get("message") or {}
+        # 支持 reasoning_content（OpenAI）与 reasoning（如 Gemini/OpenRouter）两种字段名
+        reasoning_content = message.get("reasoning_content") or message.get("reasoning")
         return ChatCompletionMessage(
             role=message.get("role"),
             content=message.get("content"),
-            reasoning_content=message.get("reasoning_content"),
+            reasoning_content=reasoning_content,
             tool_calls=message.get("tool_calls"),
         )
 
@@ -466,7 +468,8 @@ async def stream_chat_completions(
                 if not choices:
                     continue
                 delta = (choices[0] or {}).get("delta") or {}
-                reasoning_text = delta.get("reasoning_content")
+                # 支持 reasoning_content（OpenAI）与 reasoning（如 Gemini/OpenRouter）两种字段名
+                reasoning_text = delta.get("reasoning_content") or delta.get("reasoning")
                 if isinstance(reasoning_text, str) and reasoning_text:
                     for i in range(0, len(reasoning_text), STREAM_TEXT_CHUNK_SIZE):
                         yield StreamChunk(kind="reasoning", text=reasoning_text[i : i + STREAM_TEXT_CHUNK_SIZE])
