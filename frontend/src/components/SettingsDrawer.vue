@@ -1250,6 +1250,7 @@ async function checkUpdate() {
                 <label class="block text-sm font-medium text-[var(--color-text-secondary)]">模型覆盖</label>
                 <ModernSelect
                   v-model="chatDraft.params.model"
+                  :selected-preset-id="chatDraft?.presetId ?? null"
                   :options="chatModelOptions"
                   searchable
                   allow-create

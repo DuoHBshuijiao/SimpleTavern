@@ -138,6 +138,7 @@ function save() {
             <label class="label">绑定模型</label>
             <ModernSelect
               :model-value="settings.model"
+              :selected-preset-id="settings.presetId ?? null"
               :options="modelOptions"
               placement="bottom"
               placeholder="使用全局模型..."

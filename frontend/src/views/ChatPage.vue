@@ -2276,6 +2276,7 @@ const editingPersonaAvatarUrl = computed(() => {
             :user-avatar-url="userAvatarUrl"
             :user-name="userName"
             :current-model="currentModel"
+            :current-preset-id="activeChat?.overrides?.presetId ?? null"
             :model-options="chatModelOptions"
             :get-member-settings="group.getMemberSettings"
             @send="sendUserMessage"
@@ -2318,6 +2319,7 @@ const editingPersonaAvatarUrl = computed(() => {
       :streaming-content="assistant.assistantStreamingContent.value"
       :streaming-reasoning="assistant.assistantStreamingReasoning.value"
       :current-model="assistantCurrentModel"
+      :current-preset-id="assistant.assistantSettings.value.presetId ?? null"
       :model-options="chatModelOptions"
       @update:is-open="assistant.isAssistantPanelOpen.value = $event"
       @update:draft="assistant.assistantDraft.value = $event"
@@ -2550,6 +2552,7 @@ const editingPersonaAvatarUrl = computed(() => {
               <div class="flex items-center justify-between mt-3 gap-3">
                 <ModernSelect
                   :model-value="assistantCurrentModel"
+                  :selected-preset-id="assistant.assistantSettings.value.presetId ?? null"
                   :options="chatModelOptions"
                   placement="top"
                   placeholder="模型..."

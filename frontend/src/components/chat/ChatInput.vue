@@ -102,6 +102,7 @@ const props = defineProps<{
   
   // 模型选择
   currentModel: string
+  currentPresetId?: string | null
   modelOptions: (ModelOption | ModelOptionGroup | string)[]
   
   // 辅助函数
@@ -343,6 +344,7 @@ function handleImageInputChange(e: Event) {
           />
           <ModernSelect
             :model-value="currentModel"
+            :selected-preset-id="currentPresetId ?? null"
             :options="modelOptions"
             placement="top"
             placeholder="选择模型 (自动关联预设)..."

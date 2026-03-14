@@ -53,6 +53,7 @@ interface OptionGroup {
 
 const props = withDefaults(defineProps<{
   modelValue?: string | null
+  selectedPresetId?: string | null
   options: (Option | OptionGroup | string)[]
   placeholder?: string
   searchable?: boolean
@@ -63,6 +64,7 @@ const props = withDefaults(defineProps<{
   dropdownWidth?: string | number
 }>(), {
   modelValue: '',
+  selectedPresetId: null,
   options: () => [],
   placeholder: '请选择...',
   searchable: false,
@@ -140,6 +142,16 @@ const filteredOptions = computed(() => {
   return result
 })
 
+function optionPresetId(opt: Option): string {
+  return opt.presetId == null ? '' : String(opt.presetId)
+}
+
+function isOptionSelected(opt: Option): boolean {
+  if (props.modelValue !== opt.value) return false
+  if (props.selectedPresetId == null || props.selectedPresetId === '') return true
+  return optionPresetId(opt) === String(props.selectedPresetId)
+}
+
 /**
  * 计算选中项的标签
  *
@@ -148,16 +160,29 @@ const filteredOptions = computed(() => {
  */
 const selectedLabel = computed(() => {
   if (!props.modelValue) return ''
+  const exactMatches: Option[] = []
+  const valueMatches: Option[] = []
   
   for (const opt of normalizedOptions.value) {
      if ('options' in opt) {
-        const found = opt.options.find((sub: Option) => sub.value === props.modelValue)
-        if (found) return found.label
+        for (const sub of opt.options) {
+          if (sub.value !== props.modelValue) continue
+          valueMatches.push(sub)
+          if (isOptionSelected(sub)) {
+            exactMatches.push(sub)
+          }
+        }
      } else {
-        if (opt.value === props.modelValue) return opt.label
+        if (opt.value === props.modelValue) {
+          valueMatches.push(opt)
+          if (isOptionSelected(opt)) {
+            exactMatches.push(opt)
+          }
+        }
      }
   }
-  
+  if (exactMatches.length > 0) return exactMatches[0]?.label ?? props.modelValue
+  if (valueMatches.length > 0) return valueMatches[0]?.label ?? props.modelValue
   return props.modelValue
 })
 
@@ -336,31 +361,32 @@ onUnmounted(() => {
 
       <!-- Options List -->
       <div class="overflow-y-auto custom-scrollbar p-1">
-        <template v-for="(item, idx) in filteredOptions" :key="idx">
+        <template v-for="(item, idx) in filteredOptions">
            <!-- Group Header -->
-           <div v-if="'options' in item" class="px-2 py-1">
+           <div v-if="'options' in item" :key="`group-${idx}`" class="px-2 py-1">
               <div class="text-[10px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider px-1 mb-1">{{ item.label }}</div>
               <div 
                 v-for="opt in item.options" 
                 :key="opt.value"
                 class="px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors flex items-center justify-between group/item pl-4"
-                :class="modelValue === opt.value ? 'bg-brand/20 text-brand' : 'text-[var(--color-text-secondary)] hover:bg-surface-muted'"
+                :class="isOptionSelected(opt) ? 'bg-brand/20 text-brand' : 'text-[var(--color-text-secondary)] hover:bg-surface-muted'"
                 @click="select(opt)"
               >
                 <span class="truncate">{{ opt.label }}</span>
-                <Check v-if="modelValue === opt.value" class="text-brand w-3 h-3" />
+                <Check v-if="isOptionSelected(opt)" class="text-brand w-3 h-3" />
               </div>
            </div>
            
            <!-- Single Option -->
             <div 
               v-else 
+              :key="`single-${idx}`"
               class="px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors flex items-center justify-between group/item"
-              :class="modelValue === (item as Option).value ? 'bg-brand/20 text-brand' : 'text-[var(--color-text-secondary)] hover:bg-surface-muted'"
-              @click="select(item as Option)"
+              :class="isOptionSelected(item) ? 'bg-brand/20 text-brand' : 'text-[var(--color-text-secondary)] hover:bg-surface-muted'"
+              @click="select(item)"
             >
-              <span class="truncate">{{ (item as Option).label }}</span>
-              <Check v-if="modelValue === (item as Option).value" class="text-brand w-3 h-3" />
+              <span class="truncate">{{ item.label }}</span>
+              <Check v-if="isOptionSelected(item)" class="text-brand w-3 h-3" />
             </div>
         </template>
 

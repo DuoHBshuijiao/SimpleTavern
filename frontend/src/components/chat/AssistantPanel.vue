@@ -69,6 +69,7 @@ const props = defineProps<{
   isGenerating: boolean
   streamError: string | null
   currentModel: string
+  currentPresetId?: string | null
   modelOptions: ModelOptions
   /** 思考链块列表：每项为 { messageId, content }，展示在对应消息之前 */
   reasoningBlocks?: Array<{ messageId: string; content: string }>
@@ -367,6 +368,7 @@ watch(
       <div class="flex items-center justify-between mt-3 gap-3">
         <ModernSelect
           :model-value="currentModel"
+          :selected-preset-id="currentPresetId ?? null"
           :options="modelOptions"
           placement="top"
           placeholder="模型..."
