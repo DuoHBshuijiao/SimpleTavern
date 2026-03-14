@@ -45,13 +45,13 @@
  *    - 依赖：依赖vue、markdown-it
  *    - 位置：组件层，提供消息列表显示功能
  */
-import { ref, nextTick, computed } from 'vue'
+import { ref, nextTick, computed, onBeforeUnmount } from 'vue'
 import type { ChatMessage, CharacterCard, UserPersona } from '../../types/models'
 import { useSettingsStore } from '../../stores'
 import ModernAvatar from '../ModernAvatar.vue'
 import ConfirmPopover from '../ConfirmPopover.vue'
 import MarkdownIt from 'markdown-it'
-import { Settings, ChevronLeft, ChevronRight } from 'lucide-vue-next'
+import { Settings, ChevronLeft, ChevronRight, X } from 'lucide-vue-next'
 
 const settingsStore = useSettingsStore()
 /** 仅作用于消息气泡内文字的字号（来自全局设置） */
@@ -113,6 +113,22 @@ const deleteConfirm = ref<{
 
 // 思考气泡：仅点击气泡体展开，仅点击图标收起
 const expandedReasoningMessageId = ref<string | null>(null)
+type ImagePreviewWindow = {
+  id: number
+  src: string
+  alt: string
+  scale: number
+  position: { x: number; y: number }
+  dragStart: { x: number; y: number }
+  positionAtDragStart: { x: number; y: number }
+  isDragging: boolean
+  zIndex: number
+}
+
+const imagePreviews = ref<ImagePreviewWindow[]>([])
+const activeDraggingPreviewId = ref<number | null>(null)
+let previewWindowIdSeed = 0
+let previewWindowZSeed = 1200
 
 function isReasoningExpanded(messageId: string) {
   return expandedReasoningMessageId.value === messageId
@@ -127,6 +143,129 @@ function collapseReasoning(e: MouseEvent) {
   e.stopPropagation()
   expandedReasoningMessageId.value = null
 }
+
+function openImagePreview(src: string, alt: string) {
+  previewWindowIdSeed += 1
+  previewWindowZSeed += 1
+  const offset = ((previewWindowIdSeed - 1) % 6) * 24
+  imagePreviews.value.push({
+    id: previewWindowIdSeed,
+    src,
+    alt,
+    scale: 1,
+    position: { x: offset, y: offset },
+    dragStart: { x: 0, y: 0 },
+    positionAtDragStart: { x: 0, y: 0 },
+    isDragging: false,
+    zIndex: previewWindowZSeed,
+  })
+}
+
+function removePreviewDragListeners() {
+  window.removeEventListener('mousemove', onPreviewDragMove)
+  window.removeEventListener('mouseup', stopPreviewDrag)
+}
+
+function getPreviewById(id: number) {
+  return imagePreviews.value.find((preview) => preview.id === id)
+}
+
+function bringPreviewToFront(id: number) {
+  const preview = getPreviewById(id)
+  if (!preview) return
+  previewWindowZSeed += 1
+  preview.zIndex = previewWindowZSeed
+}
+
+function closeImagePreview(id: number) {
+  const target = getPreviewById(id)
+  if (target?.isDragging) {
+    target.isDragging = false
+    activeDraggingPreviewId.value = null
+    removePreviewDragListeners()
+  }
+  imagePreviews.value = imagePreviews.value.filter((preview) => preview.id !== id)
+}
+
+function getPreviewDialogStyle(preview: ImagePreviewWindow) {
+  return {
+    zIndex: preview.zIndex,
+    transform: `translate(-50%, -50%) translate(${preview.position.x}px, ${preview.position.y}px) scale(${preview.scale})`,
+  }
+}
+
+function handlePreviewWheel(id: number, event: WheelEvent) {
+  event.preventDefault()
+  const preview = getPreviewById(id)
+  if (!preview) return
+
+  bringPreviewToFront(id)
+  const oldScale = preview.scale
+  const delta = event.deltaY < 0 ? 0.1 : -0.1
+  const nextScale = Math.min(5, Math.max(0.3, Number((oldScale + delta).toFixed(3))))
+  if (nextScale === oldScale) return
+
+  const viewportCenterX = window.innerWidth / 2
+  const viewportCenterY = window.innerHeight / 2
+  const pointerFromCenterX = event.clientX - viewportCenterX
+  const pointerFromCenterY = event.clientY - viewportCenterY
+  const ratio = nextScale / oldScale
+
+  preview.position = {
+    x: ratio * preview.position.x + (1 - ratio) * pointerFromCenterX,
+    y: ratio * preview.position.y + (1 - ratio) * pointerFromCenterY,
+  }
+  preview.scale = nextScale
+}
+
+function startPreviewDrag(id: number, event: MouseEvent) {
+  if (event.button !== 0) return
+  const preview = getPreviewById(id)
+  if (!preview) return
+  event.preventDefault()
+  activeDraggingPreviewId.value = id
+  preview.isDragging = true
+  preview.dragStart = { x: event.clientX, y: event.clientY }
+  preview.positionAtDragStart = { ...preview.position }
+  bringPreviewToFront(id)
+  window.addEventListener('mousemove', onPreviewDragMove)
+  window.addEventListener('mouseup', stopPreviewDrag)
+}
+
+function onPreviewDragMove(event: MouseEvent) {
+  if (activeDraggingPreviewId.value == null) return
+  const preview = getPreviewById(activeDraggingPreviewId.value)
+  if (!preview || !preview.isDragging) return
+  const offsetX = event.clientX - preview.dragStart.x
+  const offsetY = event.clientY - preview.dragStart.y
+  preview.position = {
+    x: preview.positionAtDragStart.x + offsetX,
+    y: preview.positionAtDragStart.y + offsetY,
+  }
+}
+
+function stopPreviewDrag() {
+  if (activeDraggingPreviewId.value != null) {
+    const preview = getPreviewById(activeDraggingPreviewId.value)
+    if (preview) preview.isDragging = false
+  }
+  activeDraggingPreviewId.value = null
+  removePreviewDragListeners()
+}
+
+function setContentRef(messageId: string, el: Element | null) {
+  emit('set-content-ref', messageId, el as HTMLElement | null)
+}
+
+function openAvatarPreview(m: ChatMessage) {
+  const avatarUrl = getMessageAvatar(m)
+  if (!avatarUrl) return
+  openImagePreview(avatarUrl, `${getMessageLabel(m)}-avatar`)
+}
+
+onBeforeUnmount(() => {
+  removePreviewDragListeners()
+})
 
 /** 获取某条助手消息对应的思考链内容：优先版本绑定的思考，再当前流式内容，否则从 reasoningBlocks 按 messageId 取 */
 function getReasoningForMessage(m: ChatMessage): string | undefined {
@@ -299,16 +438,24 @@ defineExpose({ scrollToBottom, scrollRef })
           <div v-if="m.role === 'system'" class="w-10 h-10 rounded-full bg-yellow-500/20 flex items-center justify-center text-yellow-500">
             <Settings class="w-6 h-6" />
           </div>
-          <ModernAvatar 
+          <button
             v-else
-            :src="getMessageAvatar(m)"
-            :name="getMessageLabel(m)"
-            :size="40"
-            aspect="1"
-            object-fit="contain"
-            rounded="rounded-xl"
-            class="shadow-sm bg-black/20"
-          />
+            type="button"
+            class="rounded-xl transition-transform hover:scale-[1.03] active:scale-100"
+            :class="getMessageAvatar(m) ? 'cursor-zoom-in' : 'cursor-default'"
+            :disabled="!getMessageAvatar(m)"
+            @click="openAvatarPreview(m)"
+          >
+            <ModernAvatar 
+              :src="getMessageAvatar(m)"
+              :name="getMessageLabel(m)"
+              :size="40"
+              aspect="1"
+              object-fit="contain"
+              rounded="rounded-xl"
+              class="shadow-sm bg-black/20"
+            />
+          </button>
         </div>
 
         <!-- 消息体 -->
@@ -355,26 +502,26 @@ defineExpose({ scrollToBottom, scrollRef })
             <div
               class="md prose prose-invert prose-sm max-w-none prose-p:my-1 prose-headings:my-2 prose-pre:bg-black/30 prose-pre:border prose-pre:border-white/5"
               :style="messageContentFontSizeStyle"
-              :ref="(el) => emit('set-content-ref', m.id, el as HTMLElement | null)"
+              :ref="(el) => setContentRef(m.id, el)"
             >
               <div class="stream-markdown" v-html="renderMarkdown(getDisplayContent(m))"></div>
             </div>
             <div v-if="m.images?.length" class="mt-3 grid grid-cols-2 md:grid-cols-3 gap-2">
-              <a
+              <button
                 v-for="img in m.images"
                 :key="img.id"
-                :href="getChatImageUrl(img.id)"
-                target="_blank"
-                rel="noopener noreferrer"
+                type="button"
                 class="block rounded-lg overflow-hidden border border-[var(--color-border)] bg-black/20"
+                @click="openImagePreview(getChatImageUrl(img.id), img.originalName || 'chat-image')"
               >
                 <img
                   :src="getChatImageUrl(img.id)"
                   :alt="img.originalName || 'chat-image'"
                   class="w-full h-24 object-cover"
                   loading="lazy"
+                  draggable="false"
                 />
-              </a>
+              </button>
             </div>
             <!-- 长期记忆已保存标记：不受消息字体大小设置影响 -->
             <div
@@ -447,6 +594,38 @@ defineExpose({ scrollToBottom, scrollRef })
       @cancel="cancelDelete"
       @update:show="(val) => !val && cancelDelete()"
     />
+
+    <Teleport to="body">
+      <div class="image-preview-layer">
+        <TransitionGroup name="image-preview-fade">
+          <div
+            v-for="preview in imagePreviews"
+            :key="preview.id"
+            class="image-preview-modal"
+            :class="preview.isDragging ? 'cursor-grabbing' : 'cursor-grab'"
+            :style="getPreviewDialogStyle(preview)"
+            @wheel.prevent="(event) => handlePreviewWheel(preview.id, event)"
+            @mousedown="(event) => startPreviewDrag(preview.id, event)"
+          >
+            <button
+              type="button"
+              class="image-preview-close"
+              aria-label="关闭图片预览"
+              @click.stop="closeImagePreview(preview.id)"
+              @mousedown.stop
+            >
+              <X class="w-4 h-4" />
+            </button>
+            <img
+              :src="preview.src"
+              :alt="preview.alt"
+              class="image-preview-img"
+              draggable="false"
+            />
+          </div>
+        </TransitionGroup>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -513,5 +692,65 @@ defineExpose({ scrollToBottom, scrollRef })
 }
 .message-bubble .md :deep(code) {
   word-break: break-word;
+}
+
+.image-preview-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+.image-preview-modal {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  pointer-events: auto;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 12px;
+  background: rgba(15, 15, 18, 0.75);
+  box-shadow: 0 18px 56px rgba(0, 0, 0, 0.45);
+  padding: 12px;
+  transform-origin: center center;
+  user-select: none;
+}
+
+.image-preview-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  border-radius: 9999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  color: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  transition: background-color 0.2s ease;
+}
+
+.image-preview-close:hover {
+  background: rgba(0, 0, 0, 0.78);
+}
+
+.image-preview-img {
+  display: block;
+  height: 50vh;
+  width: auto;
+  max-width: min(85vw, 1200px);
+  object-fit: contain;
+  border-radius: 8px;
+  pointer-events: none;
+}
+
+.image-preview-fade-enter-active,
+.image-preview-fade-leave-active {
+  transition: opacity 0.18s ease;
+}
+
+.image-preview-fade-enter-from,
+.image-preview-fade-leave-to {
+  opacity: 0;
 }
 </style>
