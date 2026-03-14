@@ -61,6 +61,7 @@ const messageContentFontSizeStyle = computed(() => {
 })
 
 const props = defineProps<{
+  chatId: string
   messages: ChatMessage[]
   isGroup: boolean
   // 角色相关
@@ -87,6 +88,10 @@ const props = defineProps<{
   getCurrentVersionIndex: (m: ChatMessage) => number
   getVersionCount: (m: ChatMessage) => number
 }>()
+
+function getChatImageUrl(imageId: string): string {
+  return `/api/chats/${encodeURIComponent(props.chatId)}/images/${encodeURIComponent(imageId)}`
+}
 
 const emit = defineEmits<{
   'edit-message': [m: ChatMessage]
@@ -353,6 +358,23 @@ defineExpose({ scrollToBottom, scrollRef })
               :ref="(el) => emit('set-content-ref', m.id, el as HTMLElement | null)"
             >
               <div class="stream-markdown" v-html="renderMarkdown(getDisplayContent(m))"></div>
+            </div>
+            <div v-if="m.images?.length" class="mt-3 grid grid-cols-2 md:grid-cols-3 gap-2">
+              <a
+                v-for="img in m.images"
+                :key="img.id"
+                :href="getChatImageUrl(img.id)"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="block rounded-lg overflow-hidden border border-[var(--color-border)] bg-black/20"
+              >
+                <img
+                  :src="getChatImageUrl(img.id)"
+                  :alt="img.originalName || 'chat-image'"
+                  class="w-full h-24 object-cover"
+                  loading="lazy"
+                />
+              </a>
             </div>
             <!-- 长期记忆已保存标记：不受消息字体大小设置影响 -->
             <div
