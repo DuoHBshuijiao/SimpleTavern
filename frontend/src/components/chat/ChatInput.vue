@@ -57,7 +57,7 @@ import { computed, ref } from 'vue'
 import type { CharacterCard, GroupMemberSettings } from '../../types/models'
 import ModernAvatar from '../ModernAvatar.vue'
 import ModernSelect from '../ModernSelect.vue'
-import { ImagePlus, MessageSquare, X } from 'lucide-vue-next'
+import { ImagePlus, MessageSquare, PenSquare, RefreshCw, X } from 'lucide-vue-next'
 
 interface ModelOption {
   label: string
@@ -82,6 +82,7 @@ const props = defineProps<{
   isGenerating: boolean
   streamError: string | null
   draftImages: DraftImagePreview[]
+  draftHelperStatus: 'reasoning' | 'writing' | 'done' | null
   
   // 群聊相关
   isGroup: boolean
@@ -121,9 +122,14 @@ const emit = defineEmits<{
   'toggle-assistant': []
   'select-images': [files: File[]]
   'remove-image': [imageId: string]
+  'open-draft-helper': [mode: 'write' | 'enhance']
+  'draft-helper-keep': []
+  'draft-helper-rewrite': []
+  'draft-helper-discard': []
 }>()
 
 const imageInputRef = ref<HTMLInputElement | null>(null)
+const showDraftHelperMenu = ref(false)
 
 /**
  * 计算是否有草稿消息
@@ -225,6 +231,27 @@ function handleImageInputChange(e: Event) {
   }
   input.value = ''
 }
+
+function handleInput(e: Event) {
+  const target = e.target as HTMLTextAreaElement | null
+  emit('update:modelValue', target?.value ?? '')
+}
+
+function toggleDraftHelperMenu() {
+  showDraftHelperMenu.value = !showDraftHelperMenu.value
+}
+
+function triggerDraftHelper(mode: 'write' | 'enhance') {
+  showDraftHelperMenu.value = false
+  emit('open-draft-helper', mode)
+}
+
+const draftHelperStatusText = computed(() => {
+  if (props.draftHelperStatus === 'reasoning') return '思考中'
+  if (props.draftHelperStatus === 'writing') return '写作中'
+  if (props.draftHelperStatus === 'done') return '已完成'
+  return ''
+})
 </script>
 
 <template>
@@ -236,9 +263,20 @@ function handleImageInputChange(e: Event) {
       - Removed hardcoded hex colors
     -->
     <div class="relative bg-surface-overlay backdrop-blur-xl border border-[var(--color-border)] rounded-2xl shadow-xl p-3 flex flex-col gap-2 transition-all focus-within:border-brand/40 focus-within:ring-1 focus-within:ring-brand/20 focus-within:bg-surface-overlay" style="opacity: 1;">
+      <div v-if="draftHelperStatus" class="flex items-center justify-between px-3 py-2 rounded-lg bg-[var(--color-border-subtle)] border border-[var(--color-border)]">
+        <div class="text-xs text-[var(--color-text-secondary)]">{{ draftHelperStatusText }}</div>
+        <div v-if="draftHelperStatus === 'done'" class="flex items-center gap-2">
+          <button class="btn btn-xs btn-secondary" @click="emit('draft-helper-keep')">保留</button>
+          <button class="btn btn-xs btn-secondary" @click="emit('draft-helper-rewrite')">
+            <RefreshCw class="w-3 h-3" />
+            重写
+          </button>
+          <button class="btn btn-xs btn-secondary" @click="emit('draft-helper-discard')">放弃</button>
+        </div>
+      </div>
       <textarea
         :value="modelValue"
-        @input="emit('update:modelValue', ($event.target as HTMLTextAreaElement).value)"
+        @input="handleInput"
         :placeholder="inputPlaceholder"
         :disabled="inputDisabled"
         class="input textarea !bg-transparent !border-0 text-base resize-none min-h-[80px] text-primary placeholder-gray-500"
@@ -326,6 +364,27 @@ function handleImageInputChange(e: Event) {
         </div>
         
         <div class="flex items-center gap-3">
+          <div class="relative">
+            <button
+              class="chat-action-button chat-action-button--secondary shadow-lg transition-all active:scale-95"
+              :disabled="isGenerating && !showContinueButton"
+              @click="toggleDraftHelperMenu"
+              title="写作辅助"
+            >
+              <PenSquare class="w-4 h-4" />
+            </button>
+            <div
+              v-if="showDraftHelperMenu"
+              class="absolute right-0 bottom-full mb-2 w-56 rounded-lg border border-[var(--color-border)] bg-surface-overlay p-2 shadow-xl z-30"
+            >
+              <button class="w-full text-left px-2 py-1.5 text-sm rounded hover:bg-surface-muted" @click="triggerDraftHelper('write')">
+                帮我写点什么
+              </button>
+              <button class="w-full text-left px-2 py-1.5 text-sm rounded hover:bg-surface-muted" @click="triggerDraftHelper('enhance')">
+                润色并扩写我的草稿
+              </button>
+            </div>
+          </div>
           <button
             class="chat-action-button chat-action-button--secondary shadow-lg transition-all active:scale-95"
             :disabled="isGenerating && !showContinueButton"

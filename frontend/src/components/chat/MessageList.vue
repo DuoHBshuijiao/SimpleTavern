@@ -45,7 +45,7 @@
  *    - 依赖：依赖vue、markdown-it
  *    - 位置：组件层，提供消息列表显示功能
  */
-import { ref, nextTick, computed, onBeforeUnmount } from 'vue'
+import { ref, nextTick, computed, onBeforeUnmount, onMounted } from 'vue'
 import type { ChatMessage, CharacterCard, UserPersona } from '../../types/models'
 import { useSettingsStore } from '../../stores'
 import ModernAvatar from '../ModernAvatar.vue'
@@ -104,6 +104,11 @@ const emit = defineEmits<{
 
 // 滚动容器引用
 const scrollRef = ref<HTMLElement | null>(null)
+const scrollTop = ref(0)
+const viewportHeight = ref(0)
+const measuredHeights = ref<Record<number, number>>({})
+const DEFAULT_ROW_HEIGHT = 220
+const BUFFER_ITEMS = 26
 
 // 删除确认状态
 const deleteConfirm = ref<{
@@ -253,8 +258,15 @@ function stopPreviewDrag() {
   removePreviewDragListeners()
 }
 
-function setContentRef(messageId: string, el: Element | null) {
-  emit('set-content-ref', messageId, el as HTMLElement | null)
+function normalizeElement(el: unknown): HTMLElement | null {
+  if (!el) return null
+  if (el instanceof HTMLElement) return el
+  const maybe = (el as { $el?: unknown }).$el
+  return maybe instanceof HTMLElement ? maybe : null
+}
+
+function setContentRef(messageId: string, el: unknown) {
+  emit('set-content-ref', messageId, normalizeElement(el))
 }
 
 function openAvatarPreview(m: ChatMessage) {
@@ -265,6 +277,7 @@ function openAvatarPreview(m: ChatMessage) {
 
 onBeforeUnmount(() => {
   removePreviewDragListeners()
+  window.removeEventListener('resize', updateViewport)
 })
 
 /** 获取某条助手消息对应的思考链内容：优先版本绑定的思考，再当前流式内容，否则从 reasoningBlocks 按 messageId 取 */
@@ -410,13 +423,94 @@ function cancelDelete() {
 function scrollToBottom() {
   nextTick(() => {
     if (scrollRef.value) {
-      scrollRef.value.scrollTop = scrollRef.value.scrollHeight
+      scrollRef.value.scrollTop = totalHeight.value
+      scrollTop.value = scrollRef.value.scrollTop
     }
   })
 }
 
+function handleScroll() {
+  if (!scrollRef.value) return
+  scrollTop.value = scrollRef.value.scrollTop
+  viewportHeight.value = scrollRef.value.clientHeight
+}
+
+function updateViewport() {
+  if (!scrollRef.value) return
+  viewportHeight.value = scrollRef.value.clientHeight
+}
+
+const totalCount = computed(() => props.messages.length)
+const prefixHeights = computed(() => {
+  const out = new Array(totalCount.value + 1).fill(0)
+  for (let i = 0; i < totalCount.value; i++) {
+    const h = measuredHeights.value[i] ?? DEFAULT_ROW_HEIGHT
+    out[i + 1] = out[i] + h
+  }
+  return out
+})
+const totalHeight = computed(() => prefixHeights.value[totalCount.value] ?? 0)
+
+function findIndexByOffset(offset: number): number {
+  if (totalCount.value <= 0) return 0
+  const prefix = prefixHeights.value
+  let l = 0
+  let r = totalCount.value - 1
+  while (l <= r) {
+    const mid = (l + r) >> 1
+    if (prefix[mid + 1] <= offset) l = mid + 1
+    else r = mid - 1
+  }
+  return Math.max(0, Math.min(totalCount.value - 1, l))
+}
+
+const startIndex = computed(() => findIndexByOffset(scrollTop.value))
+const visibleCount = computed(() => Math.max(1, Math.ceil((viewportHeight.value || 1) / DEFAULT_ROW_HEIGHT) + 1))
+const windowStart = computed(() => Math.max(0, startIndex.value - BUFFER_ITEMS))
+const windowEnd = computed(() => Math.max(0, Math.min(totalCount.value - 1, startIndex.value + visibleCount.value + BUFFER_ITEMS)))
+const topSpacerHeight = computed(() => prefixHeights.value[windowStart.value] ?? 0)
+const bottomSpacerHeight = computed(() => {
+  if (totalCount.value <= 0) return 0
+  return Math.max(0, totalHeight.value - (prefixHeights.value[windowEnd.value + 1] ?? 0))
+})
+const messageIndexMap = computed(() => {
+  const map: Record<string, number> = {}
+  props.messages.forEach((m, idx) => {
+    map[m.id] = idx
+  })
+  return map
+})
+const visibleMessages = computed(() => {
+  if (totalCount.value <= 0) return [] as ChatMessage[]
+  return props.messages.slice(windowStart.value, windowEnd.value + 1)
+})
+
+function setMessageRowRefById(messageId: string, el: unknown) {
+  const domEl = normalizeElement(el)
+  if (!domEl) return
+  const index = messageIndexMap.value[messageId]
+  if (index == null) return
+  const h = domEl.offsetHeight || DEFAULT_ROW_HEIGHT
+  if ((measuredHeights.value[index] ?? 0) !== h) {
+    measuredHeights.value = { ...measuredHeights.value, [index]: h }
+  }
+}
+
+function scrollToMessage(messageIndex: number) {
+  if (!scrollRef.value || totalCount.value <= 0) return
+  const idx = Math.max(0, Math.min(totalCount.value - 1, messageIndex))
+  const y = prefixHeights.value[idx] ?? 0
+  scrollRef.value.scrollTop = y
+  scrollTop.value = y
+}
+
 // 暴露滚动方法
-defineExpose({ scrollToBottom, scrollRef })
+defineExpose({ scrollToBottom, scrollToMessage, scrollRef })
+
+onMounted(() => {
+  updateViewport()
+  window.addEventListener('resize', updateViewport)
+})
 </script>
 
 <template>
@@ -425,11 +519,14 @@ defineExpose({ scrollToBottom, scrollRef })
     class="flex-1 overflow-y-auto p-4 pb-4 scroll-smooth custom-scrollbar" 
     :class="isGroup ? 'pt-32' : 'pt-24'"
     style="contain: content; transform: translateZ(0);"
+    @scroll="handleScroll"
   >
     <div class="max-w-4xl mx-auto space-y-8" style="padding-top: 98px;">
+      <div v-if="topSpacerHeight > 0" :style="{ height: `${topSpacerHeight}px` }"></div>
       <div 
-        v-for="m in messages" 
+        v-for="m in visibleMessages" 
         :key="m.id" 
+        :ref="(el) => setMessageRowRefById(m.id, el)"
         class="flex gap-4 group" 
         :class="m.role === 'user' ? 'flex-row-reverse' : 'flex-row'"
       >
@@ -582,6 +679,7 @@ defineExpose({ scrollToBottom, scrollRef })
           </div>
         </div>
       </div>
+      <div v-if="bottomSpacerHeight > 0" :style="{ height: `${bottomSpacerHeight}px` }"></div>
     </div>
     
     <!-- 删除确认弹窗 -->

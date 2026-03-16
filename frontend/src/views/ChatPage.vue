@@ -232,6 +232,25 @@ const imageFallbackDialog = ref<{
   retryAction: null,
 })
 
+const draftHelper = ref<{
+  mode: 'write' | 'enhance' | null
+  status: 'reasoning' | 'writing' | 'done' | null
+  sourceDraft: string
+  lastGenerated: string
+}>({
+  mode: null,
+  status: null,
+  sourceDraft: '',
+  lastGenerated: '',
+})
+
+const showChatSearch = ref(false)
+const chatSearchQuery = ref('')
+const chatSearchLoading = ref(false)
+const chatSearchResults = ref<Array<{ messageId: string; messageIndex: number; snippet: string }>>([])
+const chatSearchCursor = ref(0)
+const chatSearchInputRef = ref<HTMLInputElement | null>(null)
+
 watch(streamError, (value) => {
   if (!value) return
   errorStack.pushError({ message: value, source: 'main', title: '主聊天错误' })
@@ -250,6 +269,8 @@ watch(
 onBeforeUnmount(() => {
   clearDraftImages()
   errorStack.clearAll()
+  window.removeEventListener('keydown', handleGlobalKeydown)
+  if (chatSearchTimer) clearTimeout(chatSearchTimer)
 })
 
 /**
@@ -300,6 +321,106 @@ function clearDraftImages() {
 
 function openImageFallback(error: string, retryAction: () => Promise<void>) {
   imageFallbackDialog.value = { visible: true, error, retryAction }
+}
+
+async function runDraftHelper(mode: 'write' | 'enhance', sourceDraft: string) {
+  if (!activeChat.value) return
+  if (isGenerating.value) return
+  draftHelper.value.mode = mode
+  draftHelper.value.status = 'reasoning'
+  draftHelper.value.sourceDraft = sourceDraft
+  draftHelper.value.lastGenerated = ''
+  draftMessage.value = ''
+
+  const useStream = settings.settings?.streamEnabled !== false
+  if (useStream) {
+    let gotDelta = false
+    let sseError: string | null = null
+    await postAndConsumeSse('/api/generate/draft-help', {
+      chatId: activeChat.value.id,
+      mode,
+      draft: mode === 'enhance' ? sourceDraft : null,
+    }, (evt) => {
+      if (evt.event === 'reasoning') {
+        draftHelper.value.status = 'reasoning'
+      } else if (evt.event === 'delta') {
+        const data = evt.data as { text?: string } | undefined
+        const t = data?.text
+        if (typeof t === 'string') {
+          if (!gotDelta) {
+            draftHelper.value.status = 'writing'
+            gotDelta = true
+          }
+          draftMessage.value += t
+          draftHelper.value.lastGenerated = draftMessage.value
+        }
+      } else if (evt.event === 'done') {
+        draftHelper.value.status = 'done'
+      } else if (evt.event === 'error') {
+        const data = evt.data as { message?: string } | undefined
+        sseError = String(data?.message ?? 'unknown error')
+      }
+    })
+    if (sseError) {
+      draftHelper.value.status = null
+      throw new Error(sseError)
+    }
+    return
+  }
+
+  const res = await apiPost<{ ok: boolean; content: string; reasoningContent?: string; error?: string }>('/api/generate/draft-help', {
+    chatId: activeChat.value.id,
+    mode,
+    draft: mode === 'enhance' ? sourceDraft : null,
+  })
+  if (!res.ok) {
+    draftHelper.value.status = null
+    throw new Error(res.error || 'unknown error')
+  }
+  if (typeof res.reasoningContent === 'string' && res.reasoningContent.trim()) {
+    draftHelper.value.status = 'reasoning'
+  }
+  draftMessage.value = res.content || ''
+  draftHelper.value.lastGenerated = draftMessage.value
+  draftHelper.value.status = 'done'
+}
+
+async function handleOpenDraftHelper(mode: 'write' | 'enhance') {
+  try {
+    const sourceDraft = draftMessage.value
+    await runDraftHelper(mode, sourceDraft)
+  } catch (e: any) {
+    if (mode === 'enhance') {
+      // 润色失败时恢复原草稿，避免用户内容意外丢失
+      draftMessage.value = draftHelper.value.sourceDraft
+    }
+    streamError.value = e?.message ?? String(e)
+  }
+}
+
+async function handleDraftHelperRewrite() {
+  if (!draftHelper.value.mode) return
+  try {
+    await runDraftHelper(draftHelper.value.mode, draftHelper.value.sourceDraft)
+  } catch (e: any) {
+    streamError.value = e?.message ?? String(e)
+  }
+}
+
+function handleDraftHelperKeep() {
+  draftHelper.value.status = null
+}
+
+function handleDraftHelperDiscard() {
+  if (draftHelper.value.mode === 'enhance') {
+    draftMessage.value = draftHelper.value.sourceDraft
+  } else {
+    draftMessage.value = ''
+  }
+  draftHelper.value.status = null
+  draftHelper.value.mode = null
+  draftHelper.value.sourceDraft = ''
+  draftHelper.value.lastGenerated = ''
 }
 
 /**
@@ -512,6 +633,80 @@ function scrollToBottom() {
   })
 }
 
+function jumpToMessageIndex(index: number) {
+  nextTick(() => {
+    messageListRef.value?.scrollToMessage(index)
+  })
+}
+
+async function runChatSearch() {
+  const chat = activeChat.value
+  const q = chatSearchQuery.value.trim()
+  if (!chat || !q) {
+    chatSearchResults.value = []
+    chatSearchCursor.value = 0
+    return
+  }
+  chatSearchLoading.value = true
+  try {
+    const res = await apiGet<{ query: string; total: number; hits: Array<{ messageId: string; messageIndex: number; snippet: string }> }>(
+      `/api/chats/${encodeURIComponent(chat.id)}/search?q=${encodeURIComponent(q)}`
+    )
+    chatSearchResults.value = Array.isArray(res?.hits) ? res.hits : []
+    chatSearchCursor.value = 0
+    if (chatSearchResults.value.length > 0) {
+      jumpToMessageIndex(chatSearchResults.value[0]!.messageIndex)
+    }
+  } finally {
+    chatSearchLoading.value = false
+  }
+}
+
+let chatSearchTimer: ReturnType<typeof setTimeout> | null = null
+
+function goToNextSearchResult() {
+  const total = chatSearchResults.value.length
+  if (!total) return
+  chatSearchCursor.value = (chatSearchCursor.value + 1) % total
+  jumpToMessageIndex(chatSearchResults.value[chatSearchCursor.value]!.messageIndex)
+}
+
+function goToPrevSearchResult() {
+  const total = chatSearchResults.value.length
+  if (!total) return
+  chatSearchCursor.value = (chatSearchCursor.value - 1 + total) % total
+  jumpToMessageIndex(chatSearchResults.value[chatSearchCursor.value]!.messageIndex)
+}
+
+function jumpToSearchResult(idx: number) {
+  const hit = chatSearchResults.value[idx]
+  if (!hit) return
+  chatSearchCursor.value = idx
+  jumpToMessageIndex(hit.messageIndex)
+}
+
+function openChatSearchBar() {
+  showChatSearch.value = true
+  nextTick(() => {
+    chatSearchInputRef.value?.focus()
+    chatSearchInputRef.value?.select()
+  })
+}
+
+function closeChatSearchBar() {
+  showChatSearch.value = false
+}
+
+function handleGlobalKeydown(e: KeyboardEvent) {
+  if (!(e.ctrlKey && (e.key === 'f' || e.key === 'F'))) return
+  if (!activeChat.value) return
+  const target = e.target as HTMLElement | null
+  const tag = (target?.tagName || '').toLowerCase()
+  if (tag === 'input' || tag === 'textarea' || target?.isContentEditable) return
+  e.preventDefault()
+  openChatSearchBar()
+}
+
 /**
  * 计算群聊成员列表
  *
@@ -560,6 +755,7 @@ onMounted(async () => {
   if (!settings.settings) await settings.load()
   await characters.loadAll()
   await chats.loadGroupList()
+  window.addEventListener('keydown', handleGlobalKeydown)
 
   if (!selectedCharacterId.value) {
     const first = characters.list[0]
@@ -622,8 +818,18 @@ watch(
       chatReasoningContent.value = ''
       chatReasoningMessageId.value = null
     }
+    chatSearchResults.value = []
+    chatSearchCursor.value = 0
   },
 )
+
+watch(chatSearchQuery, () => {
+  if (!showChatSearch.value) return
+  if (chatSearchTimer) clearTimeout(chatSearchTimer)
+  chatSearchTimer = setTimeout(() => {
+    void runChatSearch()
+  }, 180)
+})
 
 /**
  * 监听角色编辑弹窗状态
@@ -2178,6 +2384,24 @@ const editingPersonaAvatarUrl = computed(() => {
                   <span class="text-sm text-[var(--color-text-muted)]">{{ activeChat.title }}</span>
                 </template>
               </div>
+              <div class="pointer-events-auto flex-1 px-4 max-w-xl">
+                <div v-if="showChatSearch" class="flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-surface-overlay px-2 py-1">
+                  <input
+                    ref="chatSearchInputRef"
+                    v-model="chatSearchQuery"
+                    class="flex-1 bg-transparent outline-none text-sm"
+                    placeholder="搜索当前会话（Ctrl+F）"
+                    @keydown.enter.prevent="runChatSearch"
+                    @keydown.esc.prevent="closeChatSearchBar"
+                  />
+                  <span class="text-xs text-[var(--color-text-muted)]">
+                    {{ chatSearchResults.length ? `${chatSearchCursor + 1}/${chatSearchResults.length}` : (chatSearchLoading ? '搜索中...' : '0') }}
+                  </span>
+                  <button class="btn btn-xs btn-secondary" @click="goToPrevSearchResult">上一个</button>
+                  <button class="btn btn-xs btn-secondary" @click="goToNextSearchResult">下一个</button>
+                  <button class="btn btn-xs btn-secondary" @click="closeChatSearchBar">关闭</button>
+                </div>
+              </div>
               <div class="pointer-events-auto flex items-center gap-2">
                 <button class="btn btn-sm btn-secondary" @click="actions.exportChat('txt')">
                   导出TXT
@@ -2225,6 +2449,22 @@ const editingPersonaAvatarUrl = computed(() => {
                 </div>
               </div>
             </div>
+            <div
+              v-if="showChatSearch && chatSearchResults.length > 0"
+              class="px-6 pb-2 pointer-events-auto"
+            >
+              <div class="max-w-xl rounded-lg border border-[var(--color-border)] bg-surface-overlay shadow-lg max-h-48 overflow-auto">
+                <button
+                  v-for="(hit, idx) in chatSearchResults"
+                  :key="`${hit.messageId}_${idx}`"
+                  class="w-full text-left px-3 py-2 text-xs border-b border-[var(--color-border-subtle)] last:border-b-0 hover:bg-surface-muted"
+                  :class="idx === chatSearchCursor ? 'bg-surface-muted' : ''"
+                  @click="jumpToSearchResult(idx)"
+                >
+                  {{ hit.snippet }}
+                </button>
+              </div>
+            </div>
           </header>
 
           <!-- 消息列表 -->
@@ -2262,6 +2502,7 @@ const editingPersonaAvatarUrl = computed(() => {
             :is-generating="isGenerating"
             :stream-error="streamError"
             :draft-images="draftImages"
+            :draft-helper-status="draftHelper.status"
             :is-group="activeChat.isGroup"
             :group-members="groupMembers"
             :current-speaker-index="group.currentSpeakerIndex.value"
@@ -2289,6 +2530,10 @@ const editingPersonaAvatarUrl = computed(() => {
             @toggle-assistant="assistant.isAssistantPanelOpen.value = !assistant.isAssistantPanelOpen.value"
             @select-images="handleSelectImages"
             @remove-image="handleRemoveDraftImage"
+            @open-draft-helper="handleOpenDraftHelper"
+            @draft-helper-keep="handleDraftHelperKeep"
+            @draft-helper-rewrite="handleDraftHelperRewrite"
+            @draft-helper-discard="handleDraftHelperDiscard"
           />
         </div>
 
