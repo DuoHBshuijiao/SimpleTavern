@@ -123,6 +123,18 @@ class UploadChatImagesResponse(BaseModel):
     images: list[ChatImageAttachment] = Field(default_factory=list)
 
 
+class ChatSearchHit(BaseModel):
+    messageId: str
+    messageIndex: int
+    snippet: str
+
+
+class ChatSearchResponse(BaseModel):
+    query: str
+    total: int
+    hits: list[ChatSearchHit] = Field(default_factory=list)
+
+
 @router.get("/chats", response_model=list[Chat])
 def get_chats(characterId: str = Query(...)) -> list[Chat]:
     """
@@ -273,6 +285,42 @@ def get_chat(chat_id: str) -> Chat:
         return load_chat(chat_id)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="chat not found")
+
+
+@router.get("/chats/{chat_id}/search", response_model=ChatSearchResponse)
+def search_chat(chat_id: str, q: str = Query(..., min_length=1)) -> ChatSearchResponse:
+    """在当前会话正文中全文检索。"""
+    try:
+        chat = load_chat(chat_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="chat not found")
+    query = q.strip()
+    if not query:
+        return ChatSearchResponse(query=q, total=0, hits=[])
+    query_lower = query.lower()
+    hits: list[ChatSearchHit] = []
+    for idx, msg in enumerate(chat.messages):
+        content = (msg.content or "").strip()
+        if not content:
+            continue
+        pos = content.lower().find(query_lower)
+        if pos < 0:
+            continue
+        start = max(0, pos - 32)
+        end = min(len(content), pos + len(query) + 64)
+        snippet = content[start:end]
+        if start > 0:
+            snippet = "..." + snippet
+        if end < len(content):
+            snippet = snippet + "..."
+        hits.append(ChatSearchHit(
+            messageId=msg.id,
+            messageIndex=idx,
+            snippet=snippet,
+        ))
+        if len(hits) >= 300:
+            break
+    return ChatSearchResponse(query=query, total=len(hits), hits=hits)
 
 
 @router.put("/chats/{chat_id}", response_model=Chat)

@@ -32,7 +32,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.llm.openai_compat import chat_completions, chat_completions_message, stream_chat_completions
 from app.placeholders import replace_placeholders_in_text
-from app.schemas import ChatMessage, GenerateStreamRequest, GroupGenerateRequest, SingleInterjectRequest
+from app.schemas import ChatMessage, DraftHelpRequest, GenerateStreamRequest, GroupGenerateRequest, SingleInterjectRequest
 from app.storage import load_character, load_chat, load_chat_image_bytes, load_settings, save_chat, save_settings
 from app.tokenizer_service import trim_messages_to_context
 
@@ -202,6 +202,101 @@ def _slice_conversation_with_anchor(conversation: list[dict], context_start_mess
             start_idx = i
             break
     return conversation[start_idx:]
+
+
+def _resolve_char_name_for_draft_help(chat) -> str:
+    if not getattr(chat, "isGroup", False):
+        try:
+            c = load_character(chat.characterId)
+            return c.name or "角色"
+        except FileNotFoundError:
+            return "角色"
+    for msg in reversed(chat.messages):
+        if msg.role == "assistant" and getattr(msg, "characterId", None):
+            try:
+                c = load_character(msg.characterId)
+                return c.name or "角色"
+            except FileNotFoundError:
+                continue
+    try:
+        c = load_character(chat.characterId)
+        return c.name or "角色"
+    except FileNotFoundError:
+        return "角色"
+
+
+def _build_recent_dialog_text(
+    chat,
+    *,
+    fallback_user_name: str,
+    default_char_name: str,
+    pure_ai_mode: bool = False,
+    limit: int | None = None,
+) -> str:
+    if limit is None or limit < 1:
+        recent = chat.messages
+    else:
+        recent = chat.messages[-limit:] if len(chat.messages) > limit else chat.messages
+    lines: list[str] = []
+    char_cache: dict[str, str] = {}
+    for m in recent:
+        user_name = _resolve_user_name_for_message(m, fallback_user_name)
+        char_name = _resolve_char_name_for_history_message(
+            m,
+            default_char_name=default_char_name,
+            character_name_cache=char_cache,
+        )
+        rendered_content = replace_placeholders_in_text(
+            m.content or "",
+            char_name=char_name,
+            user_name=user_name,
+        )
+        # 将单条消息压成一个逻辑块，避免消息内部空行被误判成新的对话轮次。
+        rendered_content = " ".join(line.strip() for line in rendered_content.splitlines() if line.strip())
+        if not rendered_content:
+            continue
+        if m.role == "user" or (pure_ai_mode and m.role == "system"):
+            lines.append(f"[{user_name}]: {rendered_content}")
+        elif m.role == "assistant":
+            lines.append(f"[{char_name}]: {rendered_content}")
+        else:
+            lines.append(f"[system]: {rendered_content}")
+    # 每条对话之间空一行，降低模型误判说话人的概率。
+    return "\n\n".join(lines).strip()
+
+
+def _build_draft_help_prompt(*, mode: str, user_name: str, char_name: str, persona_text: str, draft: str | None) -> str:
+    if mode == "write":
+        template = (
+            "#写点什么\n"
+            "根据当前对话，写出{{user}}接下来要发送给{{char}}的消息。\n\n"
+            "请仔细观察最近的几条消息。刚才发生了什么？存在何种紧张感或发展势头？写一个能够：\n\n"
+            "直接回应或延续{{char}}刚说的内容/行为\n"
+            "通过新的行动、提问、揭露或情感节点推动场景发展\n"
+            "符合{{user}}的语气风格，避免通用表达\n"
+            "目标长度为4-8句话，形成扎实的中等篇幅回复\n"
+            "自然运用Markdown格式（用斜体表示动作/内心活动）\n"
+            "为{{char}}提供值得回应的内容\n\n"
+            "{{user}}的Persona信息：\n（此处自动添加用户当前Persona内容）\n\n"
+            "仅输出纯消息文本。不要添加引号、标签、旁白说明、元评论或“以下是”等引导语。"
+        )
+        template = template.replace("（此处自动添加用户当前Persona内容）", persona_text or "（无）")
+        return replace_placeholders_in_text(template, char_name=char_name, user_name=user_name)
+    template = (
+        "#增强消息\n"
+        "根据{{user}}的以下草稿进行改写：（此处自动添加用户输入文本框内的文字。）\n\n"
+        "目标：\n\n"
+        "强化语言表现力，使其生动且贴合场景\n"
+        "保持{{user}}真实的语气和习惯用词\n"
+        "对{{char}}刚才的言行作出反应，不要回避\n"
+        "推动互动进展，为{{char}}提供可回应内容\n"
+        "自然运用Markdown格式（用斜体表示动作/思绪）\n"
+        "若原稿较短，扩展至4-8句话；否则保持相近篇幅\n\n"
+        "{{user}}的Persona信息：\n（此处自动添加用户Persona内容）"
+    )
+    template = template.replace("（此处自动添加用户Persona内容）", persona_text or "（无）")
+    template = template.replace("（此处自动添加用户输入文本框内的文字。）", draft or "")
+    return replace_placeholders_in_text(template, char_name=char_name, user_name=user_name)
 
 
 @router.post("/generate/stream")
@@ -511,6 +606,119 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
             if reasoning_content is not None:
                 payload["reasoningContent"] = reasoning_content
             return JSONResponse(payload)
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+    return StreamingResponse(
+        event_iter(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post("/generate/draft-help")
+async def generate_draft_help(req: DraftHelpRequest) -> StreamingResponse:
+    """写作辅助：根据当前会话上下文生成或润色用户草稿。"""
+    try:
+        chat = load_chat(req.chatId)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="chat not found")
+    settings = load_settings()
+    pure_ai_mode = _resolve_pure_ai_mode(settings, chat, None)
+    selected_persona = _resolve_selected_persona(settings, chat, pure_ai_mode)
+    user_name = (selected_persona.name if selected_persona and selected_persona.name else "用户")
+    persona_text = (selected_persona.description if selected_persona and selected_persona.description else "")
+    char_name = _resolve_char_name_for_draft_help(chat)
+    if req.mode == "enhance" and (req.draft is None or not req.draft.strip()):
+        raise HTTPException(status_code=400, detail="draft required for enhance mode")
+
+    instruction = _build_draft_help_prompt(
+        mode=req.mode,
+        user_name=user_name,
+        char_name=char_name,
+        persona_text=persona_text,
+        draft=req.draft,
+    )
+    recent_dialog = _build_recent_dialog_text(
+        chat,
+        fallback_user_name=user_name,
+        default_char_name=char_name,
+        pure_ai_mode=pure_ai_mode,
+        limit=None,
+    )
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": instruction},
+        {"role": "user", "content": f"最近对话如下：\n{recent_dialog}"},
+    ]
+
+    def pick_param(name: str):
+        val = getattr(chat.overrides.params, name, None)
+        if val is None:
+            val = getattr(settings.generationDefaults, name, None)
+        return val
+
+    model = pick_param("model") or settings.llm.defaultModel
+    temperature = pick_param("temperature")
+    top_p = pick_param("top_p")
+    max_tokens = pick_param("max_tokens")
+    preset_id = chat.overrides.presetId
+    base_url = settings.llm.baseUrl
+    api_key = settings.llm.apiKey
+    if preset_id:
+        found = next((p for p in settings.apiPresets if p.id == preset_id), None)
+        if found:
+            base_url = found.baseUrl
+            api_key = found.apiKey
+
+    thinking_enabled = bool(getattr(settings, "thinkingMode", False))
+    extra_body = {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
+    if model == "deepseek-reasoner" or thinking_enabled:
+        temperature = None
+
+    async def event_iter() -> AsyncIterator[str]:
+        full_text: list[str] = []
+        try:
+            async for chunk in stream_chat_completions(
+                base_url=base_url,
+                api_key=api_key,
+                model=model,
+                messages=messages,
+                temperature=temperature,
+                top_p=top_p,
+                max_tokens=max_tokens,
+                extra_body=extra_body,
+            ):
+                if chunk.kind == "reasoning":
+                    yield _sse("reasoning", {"text": chunk.text})
+                elif chunk.kind == "content":
+                    full_text.append(chunk.text)
+                    yield _sse("delta", {"text": chunk.text})
+            yield _sse("done", {"ok": True, "content": "".join(full_text)})
+        except Exception as e:
+            yield _sse("error", {"message": str(e)})
+
+    if not settings.streamEnabled:
+        try:
+            resp = await chat_completions_message(
+                base_url=base_url,
+                api_key=api_key,
+                model=model,
+                messages=messages,
+                temperature=temperature,
+                top_p=top_p,
+                max_tokens=max_tokens,
+                extra_body=extra_body,
+            )
+            return JSONResponse({
+                "ok": True,
+                "content": (resp.content or "").strip(),
+                "reasoningContent": resp.reasoning_content or None,
+                "stream": False,
+            })
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 

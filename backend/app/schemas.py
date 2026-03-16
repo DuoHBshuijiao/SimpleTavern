@@ -534,6 +534,19 @@ class GenerateStreamRequest(BaseModel):
     runtimeOverrides: ChatOverrides | None = None
 
 
+class DraftHelpRequest(BaseModel):
+    """
+    写作辅助请求模型
+
+    mode:
+        - write: 根据当前对话续写一段用户消息
+        - enhance: 根据草稿润色并扩写
+    """
+    chatId: str
+    mode: Literal["write", "enhance"]
+    draft: str | None = None
+
+
 class GroupGenerateRequest(BaseModel):
     """
     群聊生成请求模型
