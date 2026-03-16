@@ -7,6 +7,7 @@ Tokenizer 目录：backend/tokenizer/deepseek_v3_tokenizer（与 app 目录同�
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 # 从 app 目录定位到 backend/tokenizer/deepseek_v3_tokenizer
 _APP_DIR = Path(__file__).resolve().parent
@@ -22,13 +23,13 @@ def _get_tokenizer():
     if _tokenizer_instance is not None:
         return _tokenizer_instance
     try:
-        from transformers import AutoTokenizer
+        from tokenizers import Tokenizer
         if not _TOKENIZER_DIR.exists():
             return None
-        _tokenizer_instance = AutoTokenizer.from_pretrained(
-            str(_TOKENIZER_DIR),
-            trust_remote_code=True,
-        )
+        tokenizer_json = _TOKENIZER_DIR / "tokenizer.json"
+        if not tokenizer_json.exists():
+            return None
+        _tokenizer_instance = Tokenizer.from_file(str(tokenizer_json))
         return _tokenizer_instance
     except Exception:
         return None
@@ -58,7 +59,11 @@ def count_tokens(text: str | None) -> int | None:
     if tok is None:
         return None
     try:
-        return len(tok.encode(text, add_special_tokens=False))
+        encoded: Any = tok.encode(text)
+        ids = getattr(encoded, "ids", None)
+        if ids is None:
+            return None
+        return len(ids)
     except Exception:
         return None
 
