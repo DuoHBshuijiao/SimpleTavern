@@ -845,6 +845,9 @@ watch(
       chatReasoningContent.value = ''
       chatReasoningMessageId.value = null
     }
+    // 切换会话时自动关闭搜索面板并重置搜索状态
+    showChatSearch.value = false
+    chatSearchQuery.value = ''
     chatSearchResults.value = []
     chatSearchCursor.value = 0
   },
@@ -2411,7 +2414,7 @@ const editingPersonaAvatarUrl = computed(() => {
                   <span class="text-sm text-[var(--color-text-muted)]">{{ activeChat.title }}</span>
                 </template>
               </div>
-              <div class="pointer-events-auto flex-1 px-4 max-w-xl">
+              <div class="pointer-events-auto flex-1 px-4 min-w-[190px] max-w-xl">
                 <div v-if="showChatSearch" class="flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-surface-overlay px-2 py-1">
                   <input
                     ref="chatSearchInputRef"
@@ -2429,7 +2432,7 @@ const editingPersonaAvatarUrl = computed(() => {
                   <button class="btn btn-xs btn-secondary" @click="closeChatSearchBar">关闭</button>
                 </div>
               </div>
-              <div class="pointer-events-auto flex items-center gap-2">
+              <div class="pointer-events-auto flex items-center gap-2 shrink-0 min-w-[180px] max-w-[260px] justify-end">
                 <button class="btn btn-sm btn-secondary" @click="actions.exportChat('txt')">
                   导出TXT
                 </button>
@@ -2480,11 +2483,13 @@ const editingPersonaAvatarUrl = computed(() => {
               v-if="showChatSearch && chatSearchResults.length > 0"
               class="px-6 pb-2 pointer-events-auto"
             >
-              <div class="max-w-xl rounded-lg border border-[var(--color-border)] bg-surface-overlay shadow-lg max-h-48 overflow-auto">
+              <div
+                class="flex gap-2 items-stretch rounded-lg border border-[var(--color-border)] bg-surface-overlay shadow-lg max-h-48 overflow-x-auto overflow-y-hidden px-2 py-1"
+              >
                 <button
                   v-for="(hit, idx) in chatSearchResults"
                   :key="`${hit.messageId}_${idx}`"
-                  class="w-full text-left px-3 py-2 text-xs border-b border-[var(--color-border-subtle)] last:border-b-0 hover:bg-surface-muted"
+                  class="shrink-0 inline-flex items-start text-left px-3 py-2 text-xs border border-[var(--color-border-subtle)] rounded-md hover:bg-surface-muted transition-colors w-[200px]"
                   :class="idx === chatSearchCursor ? 'bg-surface-muted' : ''"
                   @click="jumpToSearchResult(idx)"
                 >
