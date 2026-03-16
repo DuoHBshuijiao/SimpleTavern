@@ -1,12 +1,11 @@
-# pip3 install transformers
+# pip3 install tokenizers
 # python3 deepseek_tokenizer.py
-import transformers
+from pathlib import Path
 
-chat_tokenizer_dir = "./"
+from tokenizers import Tokenizer
 
-tokenizer = transformers.AutoTokenizer.from_pretrained( 
-        chat_tokenizer_dir, trust_remote_code=True
-        )
+chat_tokenizer_dir = Path(__file__).resolve().parent
+tokenizer = Tokenizer.from_file(str(chat_tokenizer_dir / "tokenizer.json"))
 
 result = tokenizer.encode("Hello!")
-print(result)
+print(result.ids)
