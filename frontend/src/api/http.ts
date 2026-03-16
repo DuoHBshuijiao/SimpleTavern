@@ -49,11 +49,12 @@ export async function apiGet<T>(path: string): Promise<T> {
  * @returns {Promise<T>} 解析后的JSON响应数据
  * @throws {Error} 请求失败时抛出错误，错误信息为响应文本
  */
-export async function apiPut<T>(path: string, body: unknown): Promise<T> {
+export async function apiPut<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
   const r = await fetch(path, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+    signal,
   })
   if (!r.ok) throw new Error(await r.text())
   return (await r.json()) as T
@@ -70,11 +71,12 @@ export async function apiPut<T>(path: string, body: unknown): Promise<T> {
  * @returns {Promise<T>} 解析后的JSON响应数据
  * @throws {Error} 请求失败时抛出错误，错误信息为响应文本
  */
-export async function apiPost<T>(path: string, body: unknown): Promise<T> {
+export async function apiPost<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
   const r = await fetch(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+    signal,
   })
   if (!r.ok) throw new Error(await r.text())
   return (await r.json()) as T

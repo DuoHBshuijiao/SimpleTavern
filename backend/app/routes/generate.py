@@ -265,7 +265,74 @@ def _build_recent_dialog_text(
     return "\n\n".join(lines).strip()
 
 
-def _build_draft_help_prompt(*, mode: str, user_name: str, char_name: str, persona_text: str, draft: str | None) -> str:
+def _build_draft_help_history_messages(
+    chat,
+    *,
+    fallback_user_name: str,
+    default_char_name: str,
+    pure_ai_mode: bool = False,
+) -> list[dict[str, Any]]:
+    history: list[dict[str, Any]] = []
+    char_cache: dict[str, str] = {}
+    for m in chat.messages:
+        user_name = _resolve_user_name_for_message(m, fallback_user_name)
+        char_name = _resolve_char_name_for_history_message(
+            m,
+            default_char_name=default_char_name,
+            character_name_cache=char_cache,
+        )
+        rendered_content = replace_placeholders_in_text(
+            m.content or "",
+            char_name=char_name,
+            user_name=user_name,
+        )
+        rendered_content = " ".join(line.strip() for line in rendered_content.splitlines() if line.strip())
+        if not rendered_content:
+            continue
+        if m.role == "user" or (pure_ai_mode and m.role == "system"):
+            history.append({"role": "user", "content": f"[{user_name}]: {rendered_content}", "_message_id": m.id})
+        elif m.role == "assistant":
+            history.append({"role": "assistant", "content": f"[{char_name}]: {rendered_content}", "_message_id": m.id})
+        else:
+            history.append({"role": "system", "content": f"[system]: {rendered_content}", "_message_id": m.id})
+    return history
+
+
+def _limit_conversation_by_message_count(conversation: list[dict[str, Any]], limit: int | None) -> list[dict[str, Any]]:
+    if limit is None or limit < 1:
+        return list(conversation)
+    if len(conversation) <= limit:
+        return list(conversation)
+    return list(conversation[-limit:])
+
+
+def _render_draft_help_history_text(conversation: list[dict[str, Any]]) -> str:
+    return "\n\n".join(
+        str(item.get("content", "")).strip()
+        for item in conversation
+        if str(item.get("content", "")).strip()
+    ).strip()
+
+
+def _resolve_draft_help_context_limit(settings, chat) -> int | None:
+    chat_limit = getattr(getattr(chat.overrides, "draftHelp", None), "context_message_limit", None)
+    if chat_limit is not None and chat_limit >= 1:
+        return int(chat_limit)
+    global_limit = getattr(getattr(settings, "draftHelpDefaults", None), "context_message_limit", None)
+    if global_limit is not None and global_limit >= 1:
+        return int(global_limit)
+    return None
+
+
+def _build_draft_help_prompt(
+    *,
+    mode: str,
+    user_name: str,
+    char_name: str,
+    persona_text: str,
+    draft: str | None,
+    long_term_memory: str | None = None,
+) -> str:
     if mode == "write":
         template = (
             "#写点什么\n"
@@ -281,7 +348,10 @@ def _build_draft_help_prompt(*, mode: str, user_name: str, char_name: str, perso
             "仅输出纯消息文本。不要添加引号、标签、旁白说明、元评论或“以下是”等引导语。"
         )
         template = template.replace("（此处自动添加用户当前Persona内容）", persona_text or "（无）")
-        return replace_placeholders_in_text(template, char_name=char_name, user_name=user_name)
+        prompt = replace_placeholders_in_text(template, char_name=char_name, user_name=user_name)
+        if long_term_memory and long_term_memory.strip():
+            prompt = f"{prompt}\n\nLongTermMemory：\n{long_term_memory.strip()}"
+        return prompt
     template = (
         "#增强消息\n"
         "根据{{user}}的以下草稿进行改写：（此处自动添加用户输入文本框内的文字。）\n\n"
@@ -296,7 +366,10 @@ def _build_draft_help_prompt(*, mode: str, user_name: str, char_name: str, perso
     )
     template = template.replace("（此处自动添加用户Persona内容）", persona_text or "（无）")
     template = template.replace("（此处自动添加用户输入文本框内的文字。）", draft or "")
-    return replace_placeholders_in_text(template, char_name=char_name, user_name=user_name)
+    prompt = replace_placeholders_in_text(template, char_name=char_name, user_name=user_name)
+    if long_term_memory and long_term_memory.strip():
+        prompt = f"{prompt}\n\nLongTermMemory：\n{long_term_memory.strip()}"
+    return prompt
 
 
 @router.post("/generate/stream")
@@ -633,6 +706,7 @@ async def generate_draft_help(req: DraftHelpRequest) -> StreamingResponse:
     user_name = (selected_persona.name if selected_persona and selected_persona.name else "用户")
     persona_text = (selected_persona.description if selected_persona and selected_persona.description else "")
     char_name = _resolve_char_name_for_draft_help(chat)
+    long_term_memory = getattr(chat.overrides, "longTermMemory", None)
     if req.mode == "enhance" and (req.draft is None or not req.draft.strip()):
         raise HTTPException(status_code=400, detail="draft required for enhance mode")
 
@@ -642,17 +716,24 @@ async def generate_draft_help(req: DraftHelpRequest) -> StreamingResponse:
         char_name=char_name,
         persona_text=persona_text,
         draft=req.draft,
+        long_term_memory=long_term_memory,
     )
-    recent_dialog = _build_recent_dialog_text(
+    recent_dialog_messages = _build_draft_help_history_messages(
         chat,
         fallback_user_name=user_name,
         default_char_name=char_name,
         pure_ai_mode=pure_ai_mode,
-        limit=None,
+    )
+    recent_dialog_messages = _slice_conversation_with_anchor(
+        recent_dialog_messages,
+        getattr(chat.overrides, "contextStartMessageId", None),
+    )
+    recent_dialog_messages = _limit_conversation_by_message_count(
+        recent_dialog_messages,
+        _resolve_draft_help_context_limit(settings, chat),
     )
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": instruction},
-        {"role": "user", "content": f"最近对话如下：\n{recent_dialog}"},
     ]
 
     def pick_param(name: str):
@@ -665,6 +746,11 @@ async def generate_draft_help(req: DraftHelpRequest) -> StreamingResponse:
     temperature = pick_param("temperature")
     top_p = pick_param("top_p")
     max_tokens = pick_param("max_tokens")
+    context_size = pick_param("context_size")
+    if context_size and context_size >= 1:
+        recent_dialog_messages = trim_messages_to_context(recent_dialog_messages, context_size, long_term_memory or None)
+    recent_dialog = _render_draft_help_history_text(recent_dialog_messages) or "（暂无可用对话上下文）"
+    messages.append({"role": "user", "content": f"最近对话如下：\n{recent_dialog}"})
     preset_id = chat.overrides.presetId
     base_url = settings.llm.baseUrl
     api_key = settings.llm.apiKey

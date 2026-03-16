@@ -56,6 +56,11 @@ export interface GenerationParams {
   context_size?: number | null
 }
 
+export interface DraftHelpSettings {
+  /** 草稿助手读取的最近上下文消息条数；空值表示不单独限制，回退到现有上下文逻辑 */
+  context_message_limit?: number | null
+}
+
 /**
  * 聊天覆盖设置接口
  *
@@ -77,6 +82,7 @@ export interface ChatOverrides {
   presetId?: string | null
   pureAiMode?: boolean | null
   params: GenerationParams
+  draftHelp?: DraftHelpSettings
   memberSettings?: Record<string, GroupMemberSettings>
 }
 
@@ -153,6 +159,7 @@ export interface Settings {
   }
   apiPresets: ApiPreset[]
   generationDefaults: GenerationParams
+  draftHelpDefaults?: DraftHelpSettings
   prompts: {
     globalSystem: string
   }

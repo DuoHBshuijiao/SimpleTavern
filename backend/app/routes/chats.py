@@ -99,6 +99,11 @@ def _merge_overrides(existing: Chat, incoming: UpdateChatRequest) -> None:
         existing.overrides.pureAiMode = ov.pureAiMode
     if hasattr(ov, "presetId"):
         existing.overrides.presetId = ov.presetId
+    if hasattr(ov, "draftHelp"):
+        if existing.overrides.draftHelp is None:
+            existing.overrides.draftHelp = ov.draftHelp
+        elif hasattr(ov.draftHelp, "context_message_limit"):
+            existing.overrides.draftHelp.context_message_limit = ov.draftHelp.context_message_limit
 
     for key in ("model", "temperature", "top_p", "max_tokens", "context_size"):
         val = getattr(ov.params, key, None)

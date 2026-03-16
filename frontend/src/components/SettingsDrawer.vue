@@ -159,6 +159,15 @@ function ensureOverrides(v?: Partial<ChatOverrides> | null): ChatOverrides {
       max_tokens: v?.params?.max_tokens ?? null,
       context_size: v?.params?.context_size ?? null,
     },
+    draftHelp: {
+      context_message_limit: v?.draftHelp?.context_message_limit ?? null,
+    },
+  }
+}
+
+function ensureDraftHelpDefaults(target?: { context_message_limit?: number | null } | null) {
+  return {
+    context_message_limit: target?.context_message_limit ?? null,
   }
 }
 
@@ -257,11 +266,12 @@ watch(
     if ((s as Settings).thinkingMode === undefined) (s as Settings).thinkingMode = false
     if ((s as Settings).themeId === undefined || (s as Settings).themeId === null) (s as Settings).themeId = 'dark'
     if (!s.apiPresets) s.apiPresets = []
+    if (!(s as Settings).draftHelpDefaults) (s as Settings).draftHelpDefaults = ensureDraftHelpDefaults()
     if (s.selectedFont === undefined) (s as Settings).selectedFont = null
     if ((s as Settings).messageFontSize === undefined) (s as Settings).messageFontSize = null
 
     globalDraft.value = s
-    chatDraft.value = props.chat ? clone(props.chat.overrides) : ensureOverrides()
+    chatDraft.value = ensureOverrides(props.chat ? clone(props.chat.overrides) : undefined)
 
     if (fontList.value.length === 0) {
       try {
@@ -544,10 +554,16 @@ function handleChatModelSelect(option: any) {
  */
 async function saveGlobal() {
   if (!globalDraft.value) return
-  const draft = { ...globalDraft.value, generationDefaults: { ...globalDraft.value.generationDefaults } }
+  const draft = {
+    ...globalDraft.value,
+    generationDefaults: { ...globalDraft.value.generationDefaults },
+    draftHelpDefaults: { ...ensureDraftHelpDefaults(globalDraft.value.draftHelpDefaults) },
+  }
   draft.generationDefaults.context_size = normalizeContextSize(draft.generationDefaults.context_size)
+  draft.draftHelpDefaults.context_message_limit = normalizePositiveInteger(draft.draftHelpDefaults.context_message_limit)
   await settingsStore.save(draft)
   globalDraft.value.generationDefaults.context_size = draft.generationDefaults.context_size
+  globalDraft.value.draftHelpDefaults = draft.draftHelpDefaults
   close()
 }
 
@@ -565,12 +581,47 @@ function normalizeContextSize(v: number | null | undefined): number | null {
   return v
 }
 
+function normalizePositiveInteger(v: number | null | undefined): number | null {
+  if (v == null || Number.isNaN(v) || v < 1) return null
+  return Math.floor(v)
+}
+
+function updateDigitsOnlyField(rawValue: string, onValue: (value: number | null) => void, input: HTMLInputElement | null) {
+  const digits = rawValue.replace(/\D/g, '')
+  if (input && input.value !== digits) input.value = digits
+  onValue(digits ? Number(digits) : null)
+}
+
+function handleGlobalDraftHelpLimitInput(e: Event) {
+  const input = e.target as HTMLInputElement | null
+  if (!globalDraft.value) return
+  updateDigitsOnlyField(input?.value ?? '', (value) => {
+    globalDraft.value!.draftHelpDefaults = ensureDraftHelpDefaults(globalDraft.value!.draftHelpDefaults)
+    globalDraft.value!.draftHelpDefaults.context_message_limit = value
+  }, input)
+}
+
+function handleChatDraftHelpLimitInput(e: Event) {
+  const input = e.target as HTMLInputElement | null
+  if (!chatDraft.value) return
+  updateDigitsOnlyField(input?.value ?? '', (value) => {
+    chatDraft.value!.draftHelp = ensureDraftHelpDefaults(chatDraft.value!.draftHelp)
+    chatDraft.value!.draftHelp.context_message_limit = value
+  }, input)
+}
+
 async function saveChatOverrides() {
   if (!props.chat || !chatDraft.value) return
-  const draft = { ...chatDraft.value, params: { ...chatDraft.value.params } }
+  const draft = {
+    ...chatDraft.value,
+    params: { ...chatDraft.value.params },
+    draftHelp: { ...ensureDraftHelpDefaults(chatDraft.value.draftHelp) },
+  }
   draft.params.context_size = normalizeContextSize(draft.params.context_size)
+  draft.draftHelp.context_message_limit = normalizePositiveInteger(draft.draftHelp.context_message_limit)
   await chatsStore.updateOverrides(props.chat.id, draft)
   chatDraft.value.params.context_size = draft.params.context_size
+  chatDraft.value.draftHelp = draft.draftHelp
   close()
 }
 
@@ -927,6 +978,10 @@ async function checkUpdate() {
                     class="input w-full"
                   />
                 </div>
+              </div>
+              <div class="space-y-2 pt-2">
+                <div class="text-sm font-medium text-[var(--color-text-secondary)]">上下文</div>
+                <div class="grid grid-cols-2 gap-4">
                 <div class="space-y-1.5">
                   <label class="block text-sm font-medium text-[var(--color-text-secondary)]">Context Size</label>
                   <input 
@@ -937,8 +992,21 @@ async function checkUpdate() {
                     class="input w-full"
                   />
                 </div>
+                  <div class="space-y-1.5">
+                    <label class="block text-sm font-medium text-[var(--color-text-secondary)]">草稿助手上下文条数限制</label>
+                    <input
+                      :value="globalDraft.draftHelpDefaults?.context_message_limit ?? ''"
+                      type="text"
+                      inputmode="numeric"
+                      pattern="[0-9]*"
+                      placeholder="未启用（跟随当前逻辑）"
+                      class="input w-full"
+                      @input="handleGlobalDraftHelpLimitInput"
+                    />
+                  </div>
+                </div>
               </div>
-              <p class="text-xs text-[var(--color-text-muted)] mt-2">实际上下文总限制长度为该 Context Size 限制加上角色卡、用户信息、自定义系统提示词。</p>
+              <p class="text-xs text-[var(--color-text-muted)] mt-2">实际上下文总限制长度为该 Context Size 限制加上角色卡、用户信息、自定义系统提示词。草稿助手条数限制只统计最近消息条数，留空则回退到现有上下文逻辑。</p>
 
               <div class="h-px bg-[var(--color-border-subtle)] my-4"></div>
 
@@ -1294,6 +1362,10 @@ async function checkUpdate() {
                     class="input w-full"
                   />
                 </div>
+              </div>
+              <div class="space-y-2">
+                <div class="text-sm font-medium text-[var(--color-text-secondary)]">上下文</div>
+                <div class="grid grid-cols-2 gap-4">
                 <div class="space-y-1.5">
                   <label class="block text-sm font-medium text-[var(--color-text-secondary)]">Context Size</label>
                   <input 
@@ -1304,8 +1376,21 @@ async function checkUpdate() {
                     class="input w-full"
                   />
                 </div>
+                  <div class="space-y-1.5">
+                    <label class="block text-sm font-medium text-[var(--color-text-secondary)]">草稿助手上下文条数限制</label>
+                    <input
+                      :value="chatDraft.draftHelp?.context_message_limit ?? ''"
+                      type="text"
+                      inputmode="numeric"
+                      pattern="[0-9]*"
+                      placeholder="使用全局；留空则继续回退"
+                      class="input w-full"
+                      @input="handleChatDraftHelpLimitInput"
+                    />
+                  </div>
+                </div>
               </div>
-              <p class="text-xs text-[var(--color-text-muted)] mt-2">实际上下文总限制长度为该 Context Size 限制加上角色卡、用户信息、自定义系统提示词。</p>
+              <p class="text-xs text-[var(--color-text-muted)] mt-2">实际上下文总限制长度为该 Context Size 限制加上角色卡、用户信息、自定义系统提示词。草稿助手优先使用当前会话的条数限制，其次全局，最后回退到现有上下文逻辑。</p>
 
               <!-- Group Member Settings (Removed, moved to independent GroupSettingsModal) -->
 

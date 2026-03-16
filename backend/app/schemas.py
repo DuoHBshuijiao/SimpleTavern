@@ -79,6 +79,17 @@ class GenerationParams(BaseModel):
     context_size: int | None = Field(default=None, ge=0, description="上下文总长度限制(token)，0或空表示未启用；长期记忆+最近消息<=此值")
 
 
+class DraftHelpSettings(BaseModel):
+    """草稿助手专用设置。"""
+    model_config = ConfigDict(extra="allow")
+
+    context_message_limit: int | None = Field(
+        default=None,
+        ge=0,
+        description="草稿助手读取的最近上下文消息条数；0或空表示不单独限制，回退到现有上下文逻辑",
+    )
+
+
 class SettingsPrompts(BaseModel):
     """
     提示词设置模型
@@ -186,6 +197,7 @@ class Settings(BaseModel):
     llm: SettingsLLM = Field(default_factory=SettingsLLM)
     apiPresets: list[ApiPreset] = Field(default_factory=list)
     generationDefaults: GenerationParams = Field(default_factory=GenerationParams)
+    draftHelpDefaults: DraftHelpSettings = Field(default_factory=DraftHelpSettings)
     prompts: SettingsPrompts = Field(default_factory=SettingsPrompts)
     streamEnabled: bool = True
     themeId: str | None = None
@@ -346,6 +358,7 @@ class ChatOverrides(BaseModel):
     presetId: str | None = None
     pureAiMode: bool | None = None
     params: GenerationParams = Field(default_factory=GenerationParams)
+    draftHelp: DraftHelpSettings = Field(default_factory=DraftHelpSettings)
 
 
 class GroupMemberSettings(BaseModel):

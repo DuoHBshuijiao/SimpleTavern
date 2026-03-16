@@ -243,6 +243,8 @@ const draftHelper = ref<{
   sourceDraft: '',
   lastGenerated: '',
 })
+const draftHelperAborter = ref<AbortController | null>(null)
+const draftHelperStopRequested = ref(false)
 
 const showChatSearch = ref(false)
 const chatSearchQuery = ref('')
@@ -267,6 +269,7 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  draftHelperAborter.value?.abort()
   clearDraftImages()
   errorStack.clearAll()
   window.removeEventListener('keydown', handleGlobalKeydown)
@@ -326,6 +329,10 @@ function openImageFallback(error: string, retryAction: () => Promise<void>) {
 async function runDraftHelper(mode: 'write' | 'enhance', sourceDraft: string) {
   if (!activeChat.value) return
   if (isGenerating.value) return
+  draftHelperAborter.value?.abort()
+  const controller = new AbortController()
+  draftHelperAborter.value = controller
+  draftHelperStopRequested.value = false
   draftHelper.value.mode = mode
   draftHelper.value.status = 'reasoning'
   draftHelper.value.sourceDraft = sourceDraft
@@ -333,56 +340,70 @@ async function runDraftHelper(mode: 'write' | 'enhance', sourceDraft: string) {
   draftMessage.value = ''
 
   const useStream = settings.settings?.streamEnabled !== false
-  if (useStream) {
-    let gotDelta = false
-    let sseError: string | null = null
-    await postAndConsumeSse('/api/generate/draft-help', {
+  try {
+    if (useStream) {
+      let gotDelta = false
+      let sseError: string | null = null
+      await postAndConsumeSse('/api/generate/draft-help', {
+        chatId: activeChat.value.id,
+        mode,
+        draft: mode === 'enhance' ? sourceDraft : null,
+      }, (evt) => {
+        if (evt.event === 'reasoning') {
+          draftHelper.value.status = 'reasoning'
+        } else if (evt.event === 'delta') {
+          const data = evt.data as { text?: string } | undefined
+          const t = data?.text
+          if (typeof t === 'string') {
+            if (!gotDelta) {
+              draftHelper.value.status = 'writing'
+              gotDelta = true
+            }
+            draftMessage.value += t
+            draftHelper.value.lastGenerated = draftMessage.value
+          }
+        } else if (evt.event === 'done') {
+          draftHelper.value.status = 'done'
+        } else if (evt.event === 'error') {
+          const data = evt.data as { message?: string } | undefined
+          sseError = String(data?.message ?? 'unknown error')
+        }
+      }, controller.signal)
+      if (sseError) {
+        draftHelper.value.status = null
+        throw new Error(sseError)
+      }
+      return
+    }
+
+    const res = await apiPost<{ ok: boolean; content: string; reasoningContent?: string; error?: string }>('/api/generate/draft-help', {
       chatId: activeChat.value.id,
       mode,
       draft: mode === 'enhance' ? sourceDraft : null,
-    }, (evt) => {
-      if (evt.event === 'reasoning') {
-        draftHelper.value.status = 'reasoning'
-      } else if (evt.event === 'delta') {
-        const data = evt.data as { text?: string } | undefined
-        const t = data?.text
-        if (typeof t === 'string') {
-          if (!gotDelta) {
-            draftHelper.value.status = 'writing'
-            gotDelta = true
-          }
-          draftMessage.value += t
-          draftHelper.value.lastGenerated = draftMessage.value
-        }
-      } else if (evt.event === 'done') {
-        draftHelper.value.status = 'done'
-      } else if (evt.event === 'error') {
-        const data = evt.data as { message?: string } | undefined
-        sseError = String(data?.message ?? 'unknown error')
-      }
-    })
-    if (sseError) {
+    }, controller.signal)
+    if (!res.ok) {
       draftHelper.value.status = null
-      throw new Error(sseError)
+      throw new Error(res.error || 'unknown error')
     }
-    return
+    if (typeof res.reasoningContent === 'string' && res.reasoningContent.trim()) {
+      draftHelper.value.status = 'reasoning'
+    }
+    draftMessage.value = res.content || ''
+    draftHelper.value.lastGenerated = draftMessage.value
+    draftHelper.value.status = 'done'
+  } catch (e) {
+    if (isAbortError(e) && draftHelperStopRequested.value) {
+      draftHelper.value.status = null
+      draftHelper.value.lastGenerated = draftMessage.value
+      return
+    }
+    throw e
+  } finally {
+    if (draftHelperAborter.value === controller) {
+      draftHelperAborter.value = null
+    }
+    draftHelperStopRequested.value = false
   }
-
-  const res = await apiPost<{ ok: boolean; content: string; reasoningContent?: string; error?: string }>('/api/generate/draft-help', {
-    chatId: activeChat.value.id,
-    mode,
-    draft: mode === 'enhance' ? sourceDraft : null,
-  })
-  if (!res.ok) {
-    draftHelper.value.status = null
-    throw new Error(res.error || 'unknown error')
-  }
-  if (typeof res.reasoningContent === 'string' && res.reasoningContent.trim()) {
-    draftHelper.value.status = 'reasoning'
-  }
-  draftMessage.value = res.content || ''
-  draftHelper.value.lastGenerated = draftMessage.value
-  draftHelper.value.status = 'done'
 }
 
 async function handleOpenDraftHelper(mode: 'write' | 'enhance') {
@@ -409,6 +430,12 @@ async function handleDraftHelperRewrite() {
 
 function handleDraftHelperKeep() {
   draftHelper.value.status = null
+}
+
+function handleDraftHelperStop() {
+  if (!draftHelperAborter.value) return
+  draftHelperStopRequested.value = true
+  draftHelperAborter.value.abort()
 }
 
 function handleDraftHelperDiscard() {
@@ -2534,6 +2561,7 @@ const editingPersonaAvatarUrl = computed(() => {
             @draft-helper-keep="handleDraftHelperKeep"
             @draft-helper-rewrite="handleDraftHelperRewrite"
             @draft-helper-discard="handleDraftHelperDiscard"
+            @draft-helper-stop="handleDraftHelperStop"
           />
         </div>
 
