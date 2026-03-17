@@ -654,9 +654,9 @@ async function handleModelSelect(option: any) {
  */
 const messageListRef = ref<InstanceType<typeof MessageList> | null>(null)
 
-function scrollToBottom() {
+function scrollToBottom(instant = false) {
   nextTick(() => {
-    messageListRef.value?.scrollToBottom()
+    messageListRef.value?.scrollToBottom(instant)
   })
 }
 
@@ -813,7 +813,6 @@ watch(
     const first = chats.list[0]
     if (first) {
       await chats.load(first.id)
-      scrollToBottom()
     } else {
       chats.activeChatId = null
       chats.activeChat = null
@@ -840,6 +839,9 @@ watch(
 watch(
   () => activeChat.value?.id,
   (next, prev) => {
+    if (next && next !== prev) {
+      scrollToBottom(true)
+    }
     if (prev != null && next !== prev) {
       chatReasoningBlocks.value = []
       chatReasoningContent.value = ''
@@ -1919,7 +1921,6 @@ function cancelEditTitle() {
 async function createChat() {
   if (!selectedCharacterId.value) return
   await chats.create(selectedCharacterId.value)
-  scrollToBottom()
 }
 
 /**
@@ -1946,7 +1947,6 @@ async function deleteChat(chatId: string) {
  */
 async function selectChat(chat: Chat) {
   await chats.load(chat.id)
-  scrollToBottom()
 }
 
 /**
@@ -2000,7 +2000,6 @@ async function handleCreateGroup(data: {
     memberSettings,
     personaId ?? null,
   )
-  scrollToBottom()
 }
 
 /**
@@ -2133,7 +2132,6 @@ async function confirmSwitchPersonaNewSession() {
   } else {
     await chats.create(activeChat.value.characterId, title, pure, personaId)
   }
-  scrollToBottom()
 }
 
 /**

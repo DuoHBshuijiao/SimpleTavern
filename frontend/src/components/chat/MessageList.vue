@@ -45,13 +45,13 @@
  *    - 依赖：依赖vue、markdown-it
  *    - 位置：组件层，提供消息列表显示功能
  */
-import { ref, nextTick, computed, onBeforeUnmount, onMounted } from 'vue'
+import { ref, nextTick, computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import type { ChatMessage, CharacterCard, UserPersona } from '../../types/models'
 import { useSettingsStore } from '../../stores'
 import ModernAvatar from '../ModernAvatar.vue'
 import ConfirmPopover from '../ConfirmPopover.vue'
 import MarkdownIt from 'markdown-it'
-import { Settings, ChevronLeft, ChevronRight, X } from 'lucide-vue-next'
+import { Settings, ChevronLeft, ChevronRight, ChevronDown, X } from 'lucide-vue-next'
 
 const settingsStore = useSettingsStore()
 /** 仅作用于消息气泡内文字的字号（来自全局设置） */
@@ -109,6 +109,8 @@ const viewportHeight = ref(0)
 const measuredHeights = ref<Record<number, number>>({})
 const DEFAULT_ROW_HEIGHT = 220
 const BUFFER_ITEMS = 26
+const SCROLL_BOTTOM_SHOW_THRESHOLD = 200
+const SCROLL_BOTTOM_NEAR_THRESHOLD = 24
 
 // 删除确认状态
 const deleteConfirm = ref<{
@@ -420,12 +422,20 @@ function cancelDelete() {
  * 滚动消息列表容器到底部，显示最新消息。
  * 使用nextTick确保DOM更新后再滚动。
  */
-function scrollToBottom() {
+function scrollToBottom(instant = false) {
   nextTick(() => {
-    if (scrollRef.value) {
-      scrollRef.value.scrollTop = totalHeight.value
-      scrollTop.value = scrollRef.value.scrollTop
+    const el = scrollRef.value
+    if (!el) return
+    if (!instant) {
+      el.scrollTop = totalHeight.value
+      scrollTop.value = el.scrollTop
+      return
     }
+    const previousBehavior = el.style.scrollBehavior
+    el.style.scrollBehavior = 'auto'
+    el.scrollTop = totalHeight.value
+    scrollTop.value = el.scrollTop
+    el.style.scrollBehavior = previousBehavior
   })
 }
 
@@ -450,6 +460,9 @@ const prefixHeights = computed(() => {
   return out
 })
 const totalHeight = computed(() => prefixHeights.value[totalCount.value] ?? 0)
+const distanceFromBottom = computed(() => Math.max(0, totalHeight.value - viewportHeight.value - scrollTop.value))
+const isNearBottom = computed(() => distanceFromBottom.value <= SCROLL_BOTTOM_NEAR_THRESHOLD)
+const showScrollToBottom = computed(() => distanceFromBottom.value > SCROLL_BOTTOM_SHOW_THRESHOLD)
 
 function findIndexByOffset(offset: number): number {
   if (totalCount.value <= 0) return 0
@@ -504,6 +517,18 @@ function scrollToMessage(messageIndex: number) {
   scrollTop.value = y
 }
 
+watch(
+  () => props.chatId,
+  () => {
+    measuredHeights.value = {}
+    nextTick(() => {
+      updateViewport()
+      if (!scrollRef.value) return
+      scrollTop.value = scrollRef.value.scrollTop
+    })
+  },
+)
+
 // 暴露滚动方法
 defineExpose({ scrollToBottom, scrollToMessage, scrollRef })
 
@@ -514,14 +539,15 @@ onMounted(() => {
 </script>
 
 <template>
-  <div 
-    ref="scrollRef" 
-    class="flex-1 overflow-y-auto p-4 pb-4 scroll-smooth custom-scrollbar" 
-    :class="isGroup ? 'pt-32' : 'pt-24'"
-    style="contain: content; transform: translateZ(0);"
-    @scroll="handleScroll"
-  >
-    <div class="max-w-4xl mx-auto space-y-8" style="padding-top: 98px;">
+  <div class="relative flex-1 min-h-0">
+    <div
+      ref="scrollRef"
+      class="h-full overflow-y-auto p-4 pb-4 scroll-smooth custom-scrollbar"
+      :class="isGroup ? 'pt-32' : 'pt-24'"
+      style="contain: content; transform: translateZ(0);"
+      @scroll="handleScroll"
+    >
+      <div class="max-w-4xl mx-auto space-y-8" style="padding-top: 98px;">
       <div v-if="topSpacerHeight > 0" :style="{ height: `${topSpacerHeight}px` }"></div>
       <div 
         v-for="m in visibleMessages" 
@@ -679,9 +705,20 @@ onMounted(() => {
           </div>
         </div>
       </div>
-      <div v-if="bottomSpacerHeight > 0" :style="{ height: `${bottomSpacerHeight}px` }"></div>
+        <div v-if="bottomSpacerHeight > 0" :style="{ height: `${bottomSpacerHeight}px` }"></div>
+      </div>
     </div>
-    
+
+    <button
+      v-if="showScrollToBottom && !isNearBottom"
+      type="button"
+      class="scroll-to-bottom-btn glass-panel"
+      aria-label="回到底部"
+      @click="scrollToBottom()"
+    >
+      <ChevronDown class="w-4 h-4" />
+    </button>
+
     <!-- 删除确认弹窗 -->
     <ConfirmPopover
       :show="!!deleteConfirm"
@@ -740,6 +777,27 @@ onMounted(() => {
 }
 .custom-scrollbar:hover::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.2);
+}
+
+.scroll-to-bottom-btn {
+  position: absolute;
+  right: 16px;
+  bottom: 20px;
+  width: 36px;
+  height: 36px;
+  border-radius: 9999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+  z-index: 20;
+  transition: color var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast);
+}
+
+.scroll-to-bottom-btn:hover {
+  color: var(--color-text);
+  border-color: var(--color-border-default);
+  transform: translateY(-1px);
 }
 
 /* Markdown 内容样式 */

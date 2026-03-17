@@ -266,15 +266,17 @@ function extractImageFilesFromHtml(html: string): File[] {
   const dataUrlRe = /<img[^>]+src\s*=\s*["'](data:image\/(\w+);base64,([^"']+))["']/gi
   let m: RegExpExecArray | null
   while ((m = dataUrlRe.exec(html)) !== null) {
-    const mimeSubtype = m[2].toLowerCase()
+    const mimeSubtype = m[2]
     const base64 = m[3]
-    const mime = `image/${mimeSubtype}` as string
+    if (mimeSubtype === undefined || base64 === undefined) continue
+    const sub = mimeSubtype.toLowerCase()
+    const mime = `image/${sub}`
     try {
       const bin = atob(base64)
       const bytes = new Uint8Array(bin.length)
       for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
       const blob = new Blob([bytes], { type: mime })
-      const ext = mimeSubtype === 'png' ? 'png' : mimeSubtype === 'jpeg' || mimeSubtype === 'jpg' ? 'jpg' : mimeSubtype
+      const ext = sub === 'png' ? 'png' : sub === 'jpeg' || sub === 'jpg' ? 'jpg' : sub
       files.push(new File([blob], `pasted.${ext}`, { type: mime }))
     } catch {
       // 忽略单张解析失败
