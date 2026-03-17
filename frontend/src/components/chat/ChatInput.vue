@@ -257,34 +257,80 @@ function insertTextAtCursor(text: string) {
 }
 
 /**
- * 处理粘贴：支持从剪贴板粘贴图片，以及图片+文字混排一次性粘贴
+ * 从 HTML 字符串中提取 data URL 图片，转为 File 对象（富文本复制时图片常内嵌在 HTML 里）。
+ * 注意：部分应用（如 QQ）会写入 file:// 链接，浏览器无法读取本地路径，此类图片无法提取。
+ */
+function extractImageFilesFromHtml(html: string): File[] {
+  const files: File[] = []
+  const dataUrlRe = /<img[^>]+src\s*=\s*["'](data:image\/(\w+);base64,([^"']+))["']/gi
+  let m: RegExpExecArray | null
+  while ((m = dataUrlRe.exec(html)) !== null) {
+    const mimeSubtype = m[2].toLowerCase()
+    const base64 = m[3]
+    const mime = `image/${mimeSubtype}` as string
+    try {
+      const bin = atob(base64)
+      const bytes = new Uint8Array(bin.length)
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+      const blob = new Blob([bytes], { type: mime })
+      const ext = mimeSubtype === 'png' ? 'png' : mimeSubtype === 'jpeg' || mimeSubtype === 'jpg' ? 'jpg' : mimeSubtype
+      files.push(new File([blob], `pasted.${ext}`, { type: mime }))
+    } catch {
+      // 忽略单张解析失败
+    }
+  }
+  return files
+}
+
+/** 从 HTML 中提取纯文本（用作无 text/plain 时的后备） */
+function stripHtmlToText(html: string): string {
+  const doc = new DOMParser().parseFromString(html, 'text/html')
+  return (doc.body?.textContent ?? '').trim()
+}
+
+/**
+ * 处理粘贴：支持从剪贴板粘贴图片，以及图片+文字混排一次性粘贴。
+ * 纯图片来自 clipboardData.files；图文混排时图片可能只在 text/html 里以 data URL 形式存在。
  */
 function handlePaste(e: ClipboardEvent) {
   const dt = e.clipboardData
   if (!dt) return
 
   const imageFiles: File[] = []
-  let textItem: DataTransferItem | null = null
+  let hasHtml = false
 
   for (const item of Array.from(dt.items)) {
     if (item.kind === 'file' && item.type.startsWith('image/')) {
       const file = item.getAsFile()
       if (file) imageFiles.push(file)
     }
-    if (item.kind === 'string' && item.type === 'text/plain') {
-      textItem = item
+    if (item.kind === 'string' && item.type === 'text/html') {
+      hasHtml = true
     }
   }
 
-  if (imageFiles.length === 0) return // 无图片，交给浏览器默认粘贴
+  const plainText = dt.getData('text/plain')
+  const htmlText = dt.getData('text/html')
 
-  e.preventDefault()
-  emit('select-images', imageFiles)
+  const finishPaste = (extraImages: File[], text: string) => {
+    const allImages = [...imageFiles, ...extraImages]
+    if (allImages.length > 0) emit('select-images', allImages)
+    if (text) insertTextAtCursor(text)
+  }
 
-  if (textItem) {
-    textItem.getAsString((str) => {
-      if (str) insertTextAtCursor(str)
-    })
+  if (imageFiles.length > 0) {
+    // 已有文件类图片：阻止默认，发图片，并插入文本
+    e.preventDefault()
+    finishPaste([], plainText)
+    return
+  }
+
+  if (hasHtml) {
+    // 无文件类图片但可能是富文本（图文混排）：同步读取文本与 HTML，避免异步回调丢失桌面程序写入的文本
+    e.preventDefault()
+    const fromHtml = htmlText ? extractImageFilesFromHtml(htmlText) : []
+    const finalText = plainText || (htmlText ? stripHtmlToText(htmlText) : '')
+    finishPaste(fromHtml, finalText)
   }
 }
 
