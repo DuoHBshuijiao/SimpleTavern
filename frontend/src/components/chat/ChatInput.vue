@@ -54,6 +54,7 @@
  *    - 位置：组件层，提供聊天输入功能
  */
 import { computed, ref } from 'vue'
+import { apiPost } from '../../api/http'
 import type { CharacterCard, GroupMemberSettings } from '../../types/models'
 import ModernAvatar from '../ModernAvatar.vue'
 import ModernSelect from '../ModernSelect.vue'
@@ -288,11 +289,19 @@ function stripHtmlToText(html: string): string {
   return (doc.body?.textContent ?? '').trim()
 }
 
+/** 将后端返回的 base64 图片转为 File，供 select-images 使用 */
+function base64ToFile(b64: string, mimeType: string, name: string): File {
+  const bin = atob(b64)
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  return new File([bytes], name || 'pasted.png', { type: mimeType })
+}
+
 /**
  * 处理粘贴：支持从剪贴板粘贴图片，以及图片+文字混排一次性粘贴。
- * 纯图片来自 clipboardData.files；图文混排时图片可能只在 text/html 里以 data URL 形式存在。
+ * 纯图片来自 clipboardData.files；data URL 从 HTML 解析；file:// 由后端 /api/clipboard/resolve-rich-paste 解析。
  */
-function handlePaste(e: ClipboardEvent) {
+async function handlePaste(e: ClipboardEvent) {
   const dt = e.clipboardData
   if (!dt) return
 
@@ -319,15 +328,27 @@ function handlePaste(e: ClipboardEvent) {
   }
 
   if (imageFiles.length > 0) {
-    // 已有文件类图片：阻止默认，发图片，并插入文本
     e.preventDefault()
     finishPaste([], plainText)
     return
   }
 
   if (hasHtml) {
-    // 无文件类图片但可能是富文本（图文混排）：同步读取文本与 HTML，避免异步回调丢失桌面程序写入的文本
     e.preventDefault()
+    const hasFileUrls = /file:\/\//i.test(htmlText || '')
+    if (hasFileUrls) {
+      try {
+        const res = await apiPost<{ text: string; images: { base64: string; mimeType: string; name: string }[] }>(
+          '/api/clipboard/resolve-rich-paste',
+          { text: plainText, html: htmlText }
+        )
+        const files = (res.images || []).map((img) => base64ToFile(img.base64, img.mimeType, img.name))
+        finishPaste(files, res.text || plainText || stripHtmlToText(htmlText || ''))
+        return
+      } catch {
+        // 接口失败时回退为仅解析 data URL + 文本
+      }
+    }
     const fromHtml = htmlText ? extractImageFilesFromHtml(htmlText) : []
     const finalText = plainText || (htmlText ? stripHtmlToText(htmlText) : '')
     finishPaste(fromHtml, finalText)
