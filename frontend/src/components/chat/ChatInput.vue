@@ -130,6 +130,7 @@ const emit = defineEmits<{
 }>()
 
 const imageInputRef = ref<HTMLInputElement | null>(null)
+const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const showDraftHelperMenu = ref(false)
 
 /**
@@ -233,6 +234,60 @@ function handleImageInputChange(e: Event) {
   input.value = ''
 }
 
+/**
+ * 在光标处插入文本（用于粘贴图文混排时的文字部分）
+ */
+function insertTextAtCursor(text: string) {
+  const el = textareaRef.value
+  if (!el) {
+    emit('update:modelValue', props.modelValue + text)
+    return
+  }
+  const start = el.selectionStart
+  const end = el.selectionEnd
+  const current = props.modelValue
+  const newValue = current.slice(0, start) + text + current.slice(end)
+  emit('update:modelValue', newValue)
+  // 恢复光标到插入内容之后
+  setTimeout(() => {
+    const pos = start + text.length
+    el.setSelectionRange(pos, pos)
+    el.focus()
+  }, 0)
+}
+
+/**
+ * 处理粘贴：支持从剪贴板粘贴图片，以及图片+文字混排一次性粘贴
+ */
+function handlePaste(e: ClipboardEvent) {
+  const dt = e.clipboardData
+  if (!dt) return
+
+  const imageFiles: File[] = []
+  let textItem: DataTransferItem | null = null
+
+  for (const item of Array.from(dt.items)) {
+    if (item.kind === 'file' && item.type.startsWith('image/')) {
+      const file = item.getAsFile()
+      if (file) imageFiles.push(file)
+    }
+    if (item.kind === 'string' && item.type === 'text/plain') {
+      textItem = item
+    }
+  }
+
+  if (imageFiles.length === 0) return // 无图片，交给浏览器默认粘贴
+
+  e.preventDefault()
+  emit('select-images', imageFiles)
+
+  if (textItem) {
+    textItem.getAsString((str) => {
+      if (str) insertTextAtCursor(str)
+    })
+  }
+}
+
 function handleInput(e: Event) {
   const target = e.target as HTMLTextAreaElement | null
   emit('update:modelValue', target?.value ?? '')
@@ -287,8 +342,10 @@ const isDraftHelperRunning = computed(() => {
         </div>
       </div>
       <textarea
+        ref="textareaRef"
         :value="modelValue"
         @input="handleInput"
+        @paste="handlePaste"
         :placeholder="inputPlaceholder"
         :disabled="inputDisabled"
         class="input textarea !bg-transparent !border-0 text-base resize-none min-h-[80px] text-primary placeholder-gray-500"
