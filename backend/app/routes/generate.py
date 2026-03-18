@@ -32,7 +32,14 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.llm.openai_compat import chat_completions, chat_completions_message, stream_chat_completions
 from app.placeholders import replace_placeholders_in_text
-from app.schemas import ChatMessage, DraftHelpRequest, GenerateStreamRequest, GroupGenerateRequest, SingleInterjectRequest
+from app.schemas import (
+    ChatMessage,
+    DraftHelpConversationMessage,
+    DraftHelpRequest,
+    GenerateStreamRequest,
+    GroupGenerateRequest,
+    SingleInterjectRequest,
+)
 from app.storage import load_character, load_chat, load_chat_image_bytes, load_settings, save_chat, save_settings
 from app.tokenizer_service import trim_messages_to_context
 
@@ -266,7 +273,7 @@ def _build_recent_dialog_text(
 
 
 def _build_draft_help_history_messages(
-    chat,
+    source_messages: list[ChatMessage | DraftHelpConversationMessage],
     *,
     fallback_user_name: str,
     default_char_name: str,
@@ -274,7 +281,7 @@ def _build_draft_help_history_messages(
 ) -> list[dict[str, Any]]:
     history: list[dict[str, Any]] = []
     char_cache: dict[str, str] = {}
-    for m in chat.messages:
+    for m in source_messages:
         user_name = _resolve_user_name_for_message(m, fallback_user_name)
         char_name = _resolve_char_name_for_history_message(
             m,
@@ -718,8 +725,9 @@ async def generate_draft_help(req: DraftHelpRequest) -> StreamingResponse:
         draft=req.draft,
         long_term_memory=long_term_memory,
     )
+    source_messages = req.conversation if req.conversation is not None else chat.messages
     recent_dialog_messages = _build_draft_help_history_messages(
-        chat,
+        source_messages,
         fallback_user_name=user_name,
         default_char_name=char_name,
         pure_ai_mode=pure_ai_mode,
