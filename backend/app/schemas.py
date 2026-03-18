@@ -558,6 +558,18 @@ class DraftHelpRequest(BaseModel):
     chatId: str
     mode: Literal["write", "enhance"]
     draft: str | None = None
+    conversation: list["DraftHelpConversationMessage"] | None = None
+
+
+class DraftHelpConversationMessage(BaseModel):
+    """写作辅助临时上下文消息。仅用于本次请求，不写入会话。"""
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    role: ChatRole
+    content: str
+    characterId: str | None = None
+    senderName: str | None = None
 
 
 class GroupGenerateRequest(BaseModel):
