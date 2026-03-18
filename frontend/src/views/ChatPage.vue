@@ -246,6 +246,20 @@ const draftHelper = ref<{
 const draftHelperAborter = ref<AbortController | null>(null)
 const draftHelperStopRequested = ref(false)
 
+type DraftHelpConversationMessage = Pick<ChatMessage, 'id' | 'role' | 'content' | 'characterId' | 'senderName'>
+
+function buildDraftHelperConversation(): DraftHelpConversationMessage[] {
+  const chat = activeChat.value
+  if (!chat) return []
+  return chat.messages.map((msg) => ({
+    id: msg.id,
+    role: msg.role,
+    content: msg.role === 'assistant' ? versions.getDisplayContent(msg) : msg.content,
+    characterId: msg.characterId ?? null,
+    senderName: msg.senderName ?? null,
+  }))
+}
+
 const showChatSearch = ref(false)
 const chatSearchQuery = ref('')
 const chatSearchLoading = ref(false)
@@ -338,6 +352,7 @@ async function runDraftHelper(mode: 'write' | 'enhance', sourceDraft: string) {
   draftHelper.value.sourceDraft = sourceDraft
   draftHelper.value.lastGenerated = ''
   draftMessage.value = ''
+  const conversation = buildDraftHelperConversation()
 
   const useStream = settings.settings?.streamEnabled !== false
   try {
@@ -348,6 +363,7 @@ async function runDraftHelper(mode: 'write' | 'enhance', sourceDraft: string) {
         chatId: activeChat.value.id,
         mode,
         draft: mode === 'enhance' ? sourceDraft : null,
+        conversation,
       }, (evt) => {
         if (evt.event === 'reasoning') {
           draftHelper.value.status = 'reasoning'
@@ -380,6 +396,7 @@ async function runDraftHelper(mode: 'write' | 'enhance', sourceDraft: string) {
       chatId: activeChat.value.id,
       mode,
       draft: mode === 'enhance' ? sourceDraft : null,
+      conversation,
     }, controller.signal)
     if (!res.ok) {
       draftHelper.value.status = null
