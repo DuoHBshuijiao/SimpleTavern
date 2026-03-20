@@ -157,7 +157,7 @@ function save() {
               type="number"
               :value="settings.temperature ?? ''"
               @input="updateField('temperature', ($event.target as HTMLInputElement).value ? parseFloat(($event.target as HTMLInputElement).value) : null)"
-              class="input bg-black/20 border-white/10 focus:border-brand/50"
+              class="input bg-black/20 border-white/10 focus:border-brand-a50"
               placeholder="使用全局设置"
               min="0"
               max="2"
@@ -172,7 +172,7 @@ function save() {
               type="number"
               :value="settings.top_p ?? ''"
               @input="updateField('top_p', ($event.target as HTMLInputElement).value ? parseFloat(($event.target as HTMLInputElement).value) : null)"
-              class="input bg-black/20 border-white/10 focus:border-brand/50"
+              class="input bg-black/20 border-white/10 focus:border-brand-a50"
               placeholder="使用全局设置"
               min="0"
               max="1"
@@ -188,7 +188,7 @@ function save() {
                 type="number"
                 :value="settings.probability"
                 @input="updateField('probability', parseFloat(($event.target as HTMLInputElement).value) || 1)"
-                class="input w-24 bg-black/20 border-white/10 focus:border-brand/50"
+                class="input w-24 bg-black/20 border-white/10 focus:border-brand-a50"
                 min="0"
                 max="1"
                 step="0.1"
@@ -236,7 +236,7 @@ function save() {
         </div>
         <div class="modal-footer">
           <button class="btn btn-secondary bg-white/5 hover:bg-white/10 text-gray-300 border border-white/5" @click="close">取消</button>
-          <button class="btn btn-primary bg-brand hover:bg-brand-hover text-white shadow-lg shadow-brand/20" @click="save">保存</button>
+          <button class="btn btn-primary" @click="save">保存</button>
         </div>
       </div>
     </div>
