@@ -391,7 +391,7 @@ const isDraftHelperRunning = computed(() => {
       - Uses border-white/10 for subtle border
       - Removed hardcoded hex colors
     -->
-    <div class="relative bg-surface-overlay backdrop-blur-xl border border-[var(--color-border)] rounded-2xl shadow-xl p-3 flex flex-col gap-2 transition-all focus-within:border-brand/40 focus-within:ring-1 focus-within:ring-brand/20 focus-within:bg-surface-overlay" style="opacity: 1;">
+    <div class="relative bg-surface-overlay backdrop-blur-xl border border-[var(--color-border)] rounded-2xl shadow-xl p-3 flex flex-col gap-2 transition-all focus-within:border-brand-a40 focus-within:ring-1 focus-within:ring-brand-a20 focus-within:bg-surface-overlay" style="opacity: 1;">
       <div v-if="draftHelperStatus" class="flex items-center justify-between gap-3 px-3 py-2 rounded-lg bg-[var(--color-border-subtle)] border border-[var(--color-border)]">
         <div class="text-xs text-[var(--color-text-secondary)] min-w-0">{{ draftHelperStatusText }}</div>
         <button
