@@ -146,10 +146,37 @@ export interface ApiPreset {
  *    - createdAt: 创建时间（ISO格式）
  *    - updatedAt: 更新时间（ISO格式）
  */
+/** 界面色系：统一保持暗色玻璃底，仅替换柔和强调色 */
+export const THEME_IDS = ['blue', 'green', 'teal', 'violet', 'amber', 'rose'] as const
+export type ThemeId = (typeof THEME_IDS)[number]
+
+export const THEME_OPTIONS: Array<{ label: string; value: ThemeId }> = [
+  { label: '蓝色（默认）', value: 'blue' },
+  { label: '绿色（鼠尾草）', value: 'green' },
+  { label: '青碧色', value: 'teal' },
+  { label: '雾紫色', value: 'violet' },
+  { label: '琥珀色', value: 'amber' },
+  { label: '雾玫瑰', value: 'rose' },
+]
+
+const LEGACY_THEME_IDS: Record<string, ThemeId> = {
+  dark: 'blue',
+  light: 'green',
+}
+
+/** 将旧版 dark/light 与非法值归一为受支持的主题 ID */
+export function normalizeThemeId(raw: string | null | undefined): ThemeId {
+  if (raw != null && (THEME_IDS as readonly string[]).includes(raw)) return raw as ThemeId
+  if (raw != null && raw !== '' && raw in LEGACY_THEME_IDS) {
+    return LEGACY_THEME_IDS[raw]!
+  }
+  return 'blue'
+}
+
 export interface Settings {
   version: number
-  /** 主题ID，空值时前端兜底为 dark */
-  themeId?: 'dark' | 'light' | null
+  /** 主题色系，空值或非法值时前端兜底为 blue */
+  themeId?: ThemeId | string | null
   llm: {
     baseUrl: string
     apiKey: string
