@@ -584,7 +584,7 @@ onMounted(() => {
         <!-- 消息体 -->
         <div class="flex flex-col max-w-[85%] min-w-0" :class="m.role === 'user' ? 'items-end' : 'items-start'">
           <div class="flex items-center gap-2 mb-1 px-1">
-            <span class="text-xs font-bold" :class="m.role === 'user' ? 'text-brand-300' : 'text-gray-400'">
+            <span class="text-xs font-bold" :class="m.role === 'user' ? 'text-brand-fg-soft' : 'text-[var(--color-text-muted)]'">
               {{ getMessageLabel(m) }}
             </span>
             <span v-if="m.role === 'system'" class="text-[10px] bg-yellow-500/10 text-yellow-500 px-1.5 py-0.5 rounded">SYSTEM</span>
@@ -616,7 +616,7 @@ onMounted(() => {
             class="message-bubble relative px-5 py-3.5 rounded-2xl text-[15px] leading-7 shadow-sm transition-all duration-200 border max-w-full min-w-0"
             :class="[
               m.role === 'user' 
-                ? 'bg-brand/20 backdrop-blur-sm border-brand/20 text-gray-100 rounded-tr-sm hover:border-brand/30' 
+                ? 'bg-brand-a20 backdrop-blur-sm border-brand-a20 text-gray-100 rounded-tr-sm hover:border-brand-a30' 
                 : m.role === 'assistant'
                   ? 'bg-white/5 backdrop-blur-md border-white/10 text-gray-200 rounded-tl-sm hover:bg-white/10'
                   : 'bg-yellow-500/10 border-yellow-500/20 text-gray-300',
