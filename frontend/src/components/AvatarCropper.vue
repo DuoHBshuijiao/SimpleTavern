@@ -198,7 +198,7 @@ onUnmounted(() => {
         <div class="modal-footer">
           <button class="btn btn-secondary bg-white/5 hover:bg-white/10 text-gray-300 border border-white/5" @click="handleCancel">取消</button>
           <button v-if="imageSrc" class="btn btn-secondary bg-white/5 hover:bg-white/10 text-gray-300 border border-white/5" @click="resetSelection">重新选择</button>
-          <button class="btn btn-primary bg-brand hover:bg-brand-hover text-white shadow-lg shadow-brand/20" :disabled="!imageSrc" @click="handleSave">
+          <button class="btn btn-primary" :disabled="!imageSrc" @click="handleSave">
             保存头像
           </button>
         </div>
