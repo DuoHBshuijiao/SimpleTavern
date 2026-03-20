@@ -273,7 +273,7 @@ function confirmDelete() {
 
 <template>
   <aside 
-    class="flex flex-col theme-panel-bg backdrop-blur-xl backdrop-saturate-[1.8] border border-[var(--color-border)] shadow-[0_8px_32px_rgba(0,0,0,0.3)] rounded-2xl transition-all duration-300 relative flex-shrink-0 my-4 h-[calc(100vh-2rem)]"
+    class="flex flex-col theme-panel-bg backdrop-blur-xl backdrop-saturate-[1.8] border border-[var(--color-border)] shadow-glass-panel rounded-2xl transition-all duration-300 relative flex-shrink-0 my-4 h-[calc(100vh-2rem)]"
     :class="collapsed ? '-ml-[21rem] w-80 opacity-0 pointer-events-none' : 'ml-4 w-80 opacity-100'"
     style="contain: content; will-change: margin-left, opacity;"
   >
@@ -284,7 +284,7 @@ function confirmDelete() {
         <div class="flex items-center justify-between mb-3">
           <span class="text-xs font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">我的身份</span>
           <button 
-            class="text-xs text-brand hover:text-brand-hover transition-colors px-2 py-0.5 rounded hover:bg-surface-muted" 
+            class="text-xs text-brand hover:text-brand-hover transition-colors px-2 py-0.5 rounded hover:bg-brand-a10" 
             @click="emit('create-persona')"
           >
             + 新建
@@ -296,7 +296,7 @@ function confirmDelete() {
             v-for="p in personas"
             :key="p.id"
             class="group flex items-center gap-3 p-2 rounded-xl transition-all duration-200 border-y border-r border-transparent border-l-2"
-            :class="selectedPersonaId === p.id ? 'bg-brand/10 border-l-brand' : 'border-l-transparent hover:bg-surface-muted'"
+            :class="selectedPersonaId === p.id ? 'bg-brand-a10 border-l-brand' : 'border-l-transparent hover:bg-surface-muted'"
             style="border: 1px solid var(--color-border);"
             @click="emit('select-persona', p.id)"
           >
@@ -325,7 +325,7 @@ function confirmDelete() {
         <div class="flex items-center justify-between mb-2 px-1">
           <span class="text-xs font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">角色列表</span>
           <button 
-            class="text-xs text-brand hover:text-brand-hover transition-colors px-2 py-0.5 rounded hover:bg-surface-muted" 
+            class="text-xs text-brand hover:text-brand-hover transition-colors px-2 py-0.5 rounded hover:bg-brand-a10" 
             @click="emit('create-character')"
           >
             + 新建
@@ -337,7 +337,7 @@ function confirmDelete() {
             v-for="c in characters"
             :key="c.id"
             class="group relative flex items-start gap-3 p-3 rounded-2xl transition-all duration-200 border-y border-r border-transparent border-l-2"
-            :class="selectedCharacterId === c.id ? 'bg-surface-muted border-l-brand shadow-sm' : 'border-l-transparent hover:bg-surface-muted'"
+            :class="selectedCharacterId === c.id ? 'bg-brand-a10 border-l-brand shadow-sm' : 'border-l-transparent hover:bg-surface-muted'"
             style="border: 1px solid var(--color-border);"
             @click="emit('update:selectedCharacterId', c.id)"
           >
@@ -383,7 +383,7 @@ function confirmDelete() {
               + 群聊
             </button>
             <button 
-              class="text-xs bg-brand/20 hover:bg-brand/30 text-brand px-2 py-1 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed" 
+              class="text-xs bg-brand-a20 hover:bg-brand-a30 text-brand px-2 py-1 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               :disabled="!selectedCharacterId" 
               @click="emit('create-chat')"
             >
@@ -453,7 +453,7 @@ function confirmDelete() {
               v-for="c in chatList.filter(chat => !chat.isGroup)"
               :key="c.id"
               class="group flex items-center justify-between p-2 rounded-lg cursor-pointer text-sm mb-1 transition-colors border-l-2"
-              :class="activeChatId === c.id ? 'bg-brand/10 text-brand border-l-brand' : 'text-[var(--color-text-muted)] border-l-transparent hover:bg-surface-muted hover:text-[var(--color-text)]'"
+              :class="activeChatId === c.id ? 'bg-brand-a10 text-brand border-l-brand' : 'text-[var(--color-text-muted)] border-l-transparent hover:bg-surface-muted hover:text-[var(--color-text)]'"
               @click="emit('select-chat', c)"
             >
               <div class="flex items-center gap-2 flex-1 min-w-0 pr-2 max-w-[calc(100%-60px)]">
@@ -467,7 +467,7 @@ function confirmDelete() {
                     <input 
                       :value="editingTitle"
                       @input="emit('update:editingTitle', ($event.target as HTMLInputElement).value)"
-                      class="input input-sm bg-surface-overlay border border-brand/50 rounded px-1 py-0.5 text-xs w-full outline-none focus:border-brand"
+                      class="input input-sm bg-surface-overlay border border-brand-a50 rounded px-1 py-0.5 text-xs w-full outline-none focus:border-brand"
                       @keyup.enter="emit('save-title')"
                       @keyup.escape="emit('cancel-edit-title')"
                       autofocus
@@ -515,7 +515,7 @@ function confirmDelete() {
 
   <!-- 侧边栏开关 -->
   <div 
-    class="fixed top-1/2 -translate-y-1/2 z-50 cursor-pointer p-2 bg-brand/30 hover:bg-brand/50 rounded-r-lg backdrop-blur-sm transition-all duration-300 border border-l-0 border-brand/40 shadow-lg"
+    class="fixed top-1/2 -translate-y-1/2 z-50 cursor-pointer p-2 bg-brand-a30 hover:bg-brand-a50 rounded-r-lg backdrop-blur-sm transition-all duration-300 border border-l-0 border-brand-a40 shadow-heavy"
     :class="collapsed ? 'left-0' : 'left-[21rem]'"
     @click="toggleCollapsed"
     title="切换侧边栏"
