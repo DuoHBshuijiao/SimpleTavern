@@ -261,7 +261,7 @@ watch(
 
 <template>
   <aside
-    class="fixed right-4 top-4 bottom-4 theme-panel-bg backdrop-blur-xl backdrop-saturate-[1.8] border border-[var(--color-border)] shadow-[0_8px_32px_rgba(0,0,0,0.3)] rounded-2xl transition-all duration-300 overflow-hidden flex flex-col z-20"
+    class="fixed right-4 top-4 bottom-4 theme-panel-bg backdrop-blur-xl backdrop-saturate-[1.8] border border-[var(--color-border)] shadow-glass-panel rounded-2xl transition-all duration-300 overflow-hidden flex flex-col z-20"
     :class="isOpen ? 'translate-x-0 w-[360px] opacity-100' : 'translate-x-[calc(100%+20px)] w-[360px] opacity-0 pointer-events-none'"
     style="contain: content; will-change: transform, opacity;"
   >
@@ -318,7 +318,7 @@ watch(
         <div
           class="px-4 py-2.5 rounded-2xl text-sm leading-relaxed max-w-[90%] shadow-sm border transition-colors"
           :class="m.role === 'user'
-            ? 'bg-brand/20 backdrop-blur-sm border-brand/20 text-gray-100 rounded-tr-sm'
+            ? 'bg-brand-a20 backdrop-blur-sm border-brand-a20 text-gray-100 rounded-tr-sm'
             : (m.role === 'system'
               ? 'bg-yellow-500/10 border-yellow-500/20 text-gray-300 rounded-lg text-xs'
               : 'bg-white/5 backdrop-blur-md border-white/10 text-gray-200 rounded-tl-sm')"
@@ -359,7 +359,7 @@ watch(
         <textarea
           :value="draft"
           @input="emit('update:draft', ($event.target as HTMLTextAreaElement).value)"
-          class="input textarea h-24 !bg-white/5 !border-white/10 focus:!border-brand/40 focus:!bg-white/10 backdrop-blur-md"
+          class="input textarea h-24 !bg-white/5 !border-white/10 focus:!border-brand-a40 focus:!bg-white/10 backdrop-blur-md"
           placeholder="输入建议或要求 (Ctrl + Enter)..."
           :disabled="isGenerating"
           @keydown="handleKeydown"
