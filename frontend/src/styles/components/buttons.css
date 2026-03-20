@@ -168,12 +168,12 @@
     background-color: var(--color-primary);
     color: var(--color-on-brand);
     box-shadow: var(--shadow-brand);
-    border-color: rgba(147, 197, 253, 0.2); /* brand-light/20 */
+    border-color: color-mix(in srgb, var(--color-brand-light) 20%, transparent);
   }
 
   .chat-action-button--primary:hover:not(:disabled) {
     background-color: var(--color-primary-hover);
-    border-color: rgba(147, 197, 253, 0.3); /* brand-light/30 */
+    border-color: color-mix(in srgb, var(--color-brand-light) 30%, transparent);
   }
 
   .chat-action-button--continue {
