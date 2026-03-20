@@ -121,7 +121,7 @@ const initials = computed(() => {
  */
 const bgColor = computed(() => {
   const colors = [
-    'bg-brand/20 text-brand',
+    'bg-brand-a20 text-brand',
     'bg-blue-500/20 text-blue-400',
     'bg-emerald-500/20 text-emerald-400',
     'bg-orange-500/20 text-orange-400',
