@@ -27,8 +27,8 @@
  */
 
 :root,
-[data-theme="dark"] {
-  /* 核心色（默认深色主题） */
+[data-theme="blue"] {
+  /* 蓝色系：暗底 + 浅色字 + 半透明叠层（与下述绿色系结构一致，仅色相不同） */
   --app-color-primary: #3b82f6;
   --app-color-primary-hover: #60a5fa;
   --app-color-surface: #0f172a;
@@ -80,60 +80,274 @@
   --app-shadow-success: 0 10px 25px rgba(34, 197, 94, 0.15);
   --app-shadow-error: 0 10px 25px rgba(239, 68, 68, 0.15);
   --app-shadow-purple: 0 10px 25px rgba(168, 85, 247, 0.15);
+  /* 与 Tailwind text-brand-dark / text-brand-light 对齐 */
+  --app-color-brand-dark: #2563eb;
+  --app-color-brand-light: #93c5fd;
 }
 
-[data-theme="light"] {
-  --app-color-primary: #2563eb;
-  --app-color-primary-hover: #1d4ed8;
-  --app-color-surface: #eff6ff;
-  --app-color-surface-elevated: rgba(255, 255, 255, 0.96);
-  --app-color-surface-soft: rgba(239, 246, 255, 0.88);
-  --app-color-text: #10213a;
-  --app-color-text-muted: #52627a;
-  --app-color-border: rgba(96, 120, 153, 0.26);
-  --app-color-border-subtle: rgba(148, 163, 184, 0.22);
-  --app-color-border-strong: rgba(71, 85, 105, 0.34);
-  /* 页面与面板背景（浅色主题） */
-  --app-bg-from: #f8fbff;
-  --app-bg-to: #dbeafe;
-  --app-panel-from: rgba(255, 255, 255, 0.94);
-  --app-panel-to: rgba(219, 234, 254, 0.82);
-  --app-header-from: #f8fbff;
-  --app-header-via: rgba(239, 246, 255, 0.92);
-  /* 表面叠加层（浅色主题） */
-  --app-surface-muted: rgba(37, 99, 235, 0.08);
-  --app-surface-overlay: rgba(148, 163, 184, 0.16);
-  --app-surface-hover: rgba(37, 99, 235, 0.12);
-  --app-overlay: rgba(15, 23, 42, 0.2);
-  --app-overlay-heavy: rgba(15, 23, 42, 0.36);
-  --app-dark-lighter: rgba(219, 234, 254, 0.84);
-  --app-track: rgba(148, 163, 184, 0.5);
-  --app-track-hover: rgba(100, 116, 139, 0.72);
-  /* 状态色：浅色模式下使用更深的前景色和更轻的底色 */
-  --app-color-success: #15803d;
-  --app-color-success-bg: rgba(34, 197, 94, 0.12);
-  --app-color-success-text: #166534;
-  --app-color-warning: #b45309;
-  --app-color-warning-bg: rgba(245, 158, 11, 0.14);
-  --app-color-warning-text: #92400e;
-  --app-color-error: #dc2626;
-  --app-color-error-bg: rgba(239, 68, 68, 0.12);
-  --app-color-error-text: #991b1b;
-  --app-color-info: #1d4ed8;
-  --app-color-info-bg: rgba(37, 99, 235, 0.12);
-  --app-color-info-text: #1e3a8a;
-  --app-color-purple: #7c3aed;
-  --app-color-purple-bg: rgba(124, 58, 237, 0.12);
-  --app-color-purple-text: #5b21b6;
-  --app-color-assistant: #9f495a;
-  --app-color-assistant-bg: rgba(159, 73, 90, 0.12);
-  /* 阴影：浅色模式使用蓝灰阴影，减少脏灰感 */
-  --app-shadow-light: 0 1px 2px rgba(15, 23, 42, 0.06), 0 6px 16px rgba(37, 99, 235, 0.06);
-  --app-shadow-heavy: 0 16px 40px rgba(15, 23, 42, 0.1), 0 8px 24px rgba(37, 99, 235, 0.08);
-  --app-shadow-brand: 0 12px 28px rgba(37, 99, 235, 0.18);
-  --app-shadow-success: 0 12px 28px rgba(21, 128, 61, 0.14);
-  --app-shadow-error: 0 12px 28px rgba(220, 38, 38, 0.14);
-  --app-shadow-purple: 0 12px 28px rgba(124, 58, 237, 0.16);
+[data-theme="green"] {
+  /* 鼠尾草绿：比默认蓝更柔和，保留轻盈的暗色玻璃层次 */
+  --app-color-primary: #63c89c;
+  --app-color-primary-hover: #84d8b2;
+  --app-color-surface: #0e1616;
+  --app-color-surface-elevated: rgba(24, 38, 38, 0.9);
+  --app-color-surface-soft: rgba(24, 38, 38, 0.72);
+  --app-color-text: #f4fbf8;
+  --app-color-text-muted: #9ab1ab;
+  --app-color-border: rgba(255, 255, 255, 0.1);
+  --app-color-border-subtle: rgba(255, 255, 255, 0.05);
+  --app-color-border-strong: rgba(255, 255, 255, 0.15);
+  --app-bg-from: #0e1616;
+  --app-bg-to: #182524;
+  --app-panel-from: rgba(24, 38, 38, 0.72);
+  --app-panel-to: rgba(43, 65, 61, 0.5);
+  --app-header-from: #0e1616;
+  --app-header-via: rgba(14, 22, 22, 0.9);
+  --app-surface-muted: rgba(99, 200, 156, 0.08);
+  --app-surface-overlay: rgba(5, 10, 10, 0.2);
+  --app-surface-hover: rgba(99, 200, 156, 0.14);
+  --app-overlay: rgba(0, 0, 0, 0.5);
+  --app-overlay-heavy: rgba(0, 0, 0, 0.68);
+  --app-dark-lighter: rgba(43, 65, 61, 0.5);
+  --app-track: rgba(33, 48, 47, 0.92);
+  --app-track-hover: rgba(47, 67, 66, 0.96);
+  --app-color-success: #22c55e;
+  --app-color-success-bg: rgba(34, 197, 94, 0.15);
+  --app-color-success-text: #86efac;
+  --app-color-warning: #f59e0b;
+  --app-color-warning-bg: rgba(245, 158, 11, 0.15);
+  --app-color-warning-text: #fcd34d;
+  --app-color-error: #ef4444;
+  --app-color-error-bg: rgba(239, 68, 68, 0.15);
+  --app-color-error-text: #fecaca;
+  --app-color-info: #63c89c;
+  --app-color-info-bg: rgba(99, 200, 156, 0.15);
+  --app-color-info-text: #c6efd9;
+  --app-color-purple: #a855f7;
+  --app-color-purple-bg: rgba(168, 85, 247, 0.15);
+  --app-color-purple-text: #e9d5ff;
+  --app-color-assistant: #b76e79;
+  --app-color-assistant-bg: rgba(183, 110, 121, 0.15);
+  --app-shadow-light: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --app-shadow-heavy: 0 8px 32px rgba(0, 0, 0, 0.28);
+  --app-shadow-brand: 0 10px 25px rgba(99, 200, 156, 0.18);
+  --app-shadow-success: 0 10px 25px rgba(34, 197, 94, 0.15);
+  --app-shadow-error: 0 10px 25px rgba(239, 68, 68, 0.15);
+  --app-shadow-purple: 0 10px 25px rgba(168, 85, 247, 0.15);
+  --app-color-brand-dark: #4bb481;
+  --app-color-brand-light: #c6efd9;
+}
+
+[data-theme="teal"] {
+  /* 青碧：偏清透冷色，保持与默认蓝接近的清爽阅读感 */
+  --app-color-primary: #58c4d8;
+  --app-color-primary-hover: #7bd5e5;
+  --app-color-surface: #0d1518;
+  --app-color-surface-elevated: rgba(22, 36, 42, 0.9);
+  --app-color-surface-soft: rgba(22, 36, 42, 0.72);
+  --app-color-text: #f5fbfd;
+  --app-color-text-muted: #98acb6;
+  --app-color-border: rgba(255, 255, 255, 0.1);
+  --app-color-border-subtle: rgba(255, 255, 255, 0.05);
+  --app-color-border-strong: rgba(255, 255, 255, 0.15);
+  --app-bg-from: #0d1518;
+  --app-bg-to: #17232a;
+  --app-panel-from: rgba(22, 36, 42, 0.72);
+  --app-panel-to: rgba(36, 60, 70, 0.48);
+  --app-header-from: #0d1518;
+  --app-header-via: rgba(13, 21, 24, 0.9);
+  --app-surface-muted: rgba(88, 196, 216, 0.08);
+  --app-surface-overlay: rgba(5, 9, 12, 0.2);
+  --app-surface-hover: rgba(88, 196, 216, 0.14);
+  --app-overlay: rgba(0, 0, 0, 0.5);
+  --app-overlay-heavy: rgba(0, 0, 0, 0.68);
+  --app-dark-lighter: rgba(36, 60, 70, 0.48);
+  --app-track: rgba(31, 47, 54, 0.92);
+  --app-track-hover: rgba(46, 66, 76, 0.96);
+  --app-color-success: #22c55e;
+  --app-color-success-bg: rgba(34, 197, 94, 0.15);
+  --app-color-success-text: #86efac;
+  --app-color-warning: #f59e0b;
+  --app-color-warning-bg: rgba(245, 158, 11, 0.15);
+  --app-color-warning-text: #fcd34d;
+  --app-color-error: #ef4444;
+  --app-color-error-bg: rgba(239, 68, 68, 0.15);
+  --app-color-error-text: #fecaca;
+  --app-color-info: #58c4d8;
+  --app-color-info-bg: rgba(88, 196, 216, 0.15);
+  --app-color-info-text: #bfeaf2;
+  --app-color-purple: #a855f7;
+  --app-color-purple-bg: rgba(168, 85, 247, 0.15);
+  --app-color-purple-text: #e9d5ff;
+  --app-color-assistant: #b76e79;
+  --app-color-assistant-bg: rgba(183, 110, 121, 0.15);
+  --app-shadow-light: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --app-shadow-heavy: 0 8px 32px rgba(0, 0, 0, 0.28);
+  --app-shadow-brand: 0 10px 25px rgba(88, 196, 216, 0.18);
+  --app-shadow-success: 0 10px 25px rgba(34, 197, 94, 0.15);
+  --app-shadow-error: 0 10px 25px rgba(239, 68, 68, 0.15);
+  --app-shadow-purple: 0 10px 25px rgba(168, 85, 247, 0.15);
+  --app-color-brand-dark: #37aec5;
+  --app-color-brand-light: #bfeaf2;
+}
+
+[data-theme="violet"] {
+  /* 雾紫：采用偏灰紫的点缀色，避免传统紫色过重或刺眼 */
+  --app-color-primary: #8f8ce8;
+  --app-color-primary-hover: #a9a6f5;
+  --app-color-surface: #10131b;
+  --app-color-surface-elevated: rgba(28, 34, 50, 0.9);
+  --app-color-surface-soft: rgba(28, 34, 50, 0.72);
+  --app-color-text: #f7f8fe;
+  --app-color-text-muted: #a3a8c2;
+  --app-color-border: rgba(255, 255, 255, 0.1);
+  --app-color-border-subtle: rgba(255, 255, 255, 0.05);
+  --app-color-border-strong: rgba(255, 255, 255, 0.15);
+  --app-bg-from: #10131b;
+  --app-bg-to: #1a2133;
+  --app-panel-from: rgba(28, 34, 50, 0.72);
+  --app-panel-to: rgba(48, 58, 84, 0.48);
+  --app-header-from: #10131b;
+  --app-header-via: rgba(16, 19, 27, 0.9);
+  --app-surface-muted: rgba(143, 140, 232, 0.08);
+  --app-surface-overlay: rgba(8, 9, 13, 0.2);
+  --app-surface-hover: rgba(143, 140, 232, 0.14);
+  --app-overlay: rgba(0, 0, 0, 0.5);
+  --app-overlay-heavy: rgba(0, 0, 0, 0.68);
+  --app-dark-lighter: rgba(48, 58, 84, 0.48);
+  --app-track: rgba(37, 42, 61, 0.92);
+  --app-track-hover: rgba(54, 61, 87, 0.96);
+  --app-color-success: #22c55e;
+  --app-color-success-bg: rgba(34, 197, 94, 0.15);
+  --app-color-success-text: #86efac;
+  --app-color-warning: #f59e0b;
+  --app-color-warning-bg: rgba(245, 158, 11, 0.15);
+  --app-color-warning-text: #fcd34d;
+  --app-color-error: #ef4444;
+  --app-color-error-bg: rgba(239, 68, 68, 0.15);
+  --app-color-error-text: #fecaca;
+  --app-color-info: #8f8ce8;
+  --app-color-info-bg: rgba(143, 140, 232, 0.15);
+  --app-color-info-text: #dad8fb;
+  --app-color-purple: #a855f7;
+  --app-color-purple-bg: rgba(168, 85, 247, 0.15);
+  --app-color-purple-text: #e9d5ff;
+  --app-color-assistant: #b76e79;
+  --app-color-assistant-bg: rgba(183, 110, 121, 0.15);
+  --app-shadow-light: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --app-shadow-heavy: 0 8px 32px rgba(0, 0, 0, 0.28);
+  --app-shadow-brand: 0 10px 25px rgba(143, 140, 232, 0.18);
+  --app-shadow-success: 0 10px 25px rgba(34, 197, 94, 0.15);
+  --app-shadow-error: 0 10px 25px rgba(239, 68, 68, 0.15);
+  --app-shadow-purple: 0 10px 25px rgba(168, 85, 247, 0.15);
+  --app-color-brand-dark: #7671d8;
+  --app-color-brand-light: #dad8fb;
+}
+
+[data-theme="amber"] {
+  /* 琥珀：降低暖色饱和度，保持温润而不压迫的暗色阅读体验 */
+  --app-color-primary: #d2b46c;
+  --app-color-primary-hover: #e0c78d;
+  --app-color-surface: #15130e;
+  --app-color-surface-elevated: rgba(38, 33, 24, 0.9);
+  --app-color-surface-soft: rgba(38, 33, 24, 0.72);
+  --app-color-text: #fcfaf4;
+  --app-color-text-muted: #b4ab97;
+  --app-color-border: rgba(255, 255, 255, 0.1);
+  --app-color-border-subtle: rgba(255, 255, 255, 0.05);
+  --app-color-border-strong: rgba(255, 255, 255, 0.15);
+  --app-bg-from: #15130e;
+  --app-bg-to: #262116;
+  --app-panel-from: rgba(38, 33, 24, 0.72);
+  --app-panel-to: rgba(66, 56, 39, 0.48);
+  --app-header-from: #15130e;
+  --app-header-via: rgba(21, 19, 14, 0.9);
+  --app-surface-muted: rgba(210, 180, 108, 0.08);
+  --app-surface-overlay: rgba(10, 8, 5, 0.2);
+  --app-surface-hover: rgba(210, 180, 108, 0.14);
+  --app-overlay: rgba(0, 0, 0, 0.5);
+  --app-overlay-heavy: rgba(0, 0, 0, 0.68);
+  --app-dark-lighter: rgba(66, 56, 39, 0.48);
+  --app-track: rgba(53, 45, 31, 0.92);
+  --app-track-hover: rgba(75, 64, 45, 0.96);
+  --app-color-success: #22c55e;
+  --app-color-success-bg: rgba(34, 197, 94, 0.15);
+  --app-color-success-text: #86efac;
+  --app-color-warning: #f59e0b;
+  --app-color-warning-bg: rgba(245, 158, 11, 0.15);
+  --app-color-warning-text: #fcd34d;
+  --app-color-error: #ef4444;
+  --app-color-error-bg: rgba(239, 68, 68, 0.15);
+  --app-color-error-text: #fecaca;
+  --app-color-info: #d2b46c;
+  --app-color-info-bg: rgba(210, 180, 108, 0.15);
+  --app-color-info-text: #f1deb2;
+  --app-color-purple: #a855f7;
+  --app-color-purple-bg: rgba(168, 85, 247, 0.15);
+  --app-color-purple-text: #e9d5ff;
+  --app-color-assistant: #b76e79;
+  --app-color-assistant-bg: rgba(183, 110, 121, 0.15);
+  --app-shadow-light: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --app-shadow-heavy: 0 8px 32px rgba(0, 0, 0, 0.28);
+  --app-shadow-brand: 0 10px 25px rgba(210, 180, 108, 0.18);
+  --app-shadow-success: 0 10px 25px rgba(34, 197, 94, 0.15);
+  --app-shadow-error: 0 10px 25px rgba(239, 68, 68, 0.15);
+  --app-shadow-purple: 0 10px 25px rgba(168, 85, 247, 0.15);
+  --app-color-brand-dark: #be9d52;
+  --app-color-brand-light: #f1deb2;
+}
+
+[data-theme="rose"] {
+  /* 雾玫瑰：使用灰粉点缀，维持轻柔、安静的深色氛围 */
+  --app-color-primary: #c58aa2;
+  --app-color-primary-hover: #d8a3b8;
+  --app-color-surface: #151217;
+  --app-color-surface-elevated: rgba(39, 31, 42, 0.9);
+  --app-color-surface-soft: rgba(39, 31, 42, 0.72);
+  --app-color-text: #fcf7fa;
+  --app-color-text-muted: #b5a4af;
+  --app-color-border: rgba(255, 255, 255, 0.1);
+  --app-color-border-subtle: rgba(255, 255, 255, 0.05);
+  --app-color-border-strong: rgba(255, 255, 255, 0.15);
+  --app-bg-from: #151217;
+  --app-bg-to: #251b26;
+  --app-panel-from: rgba(39, 31, 42, 0.72);
+  --app-panel-to: rgba(66, 49, 69, 0.48);
+  --app-header-from: #151217;
+  --app-header-via: rgba(21, 18, 23, 0.9);
+  --app-surface-muted: rgba(197, 138, 162, 0.08);
+  --app-surface-overlay: rgba(10, 7, 10, 0.2);
+  --app-surface-hover: rgba(197, 138, 162, 0.14);
+  --app-overlay: rgba(0, 0, 0, 0.5);
+  --app-overlay-heavy: rgba(0, 0, 0, 0.68);
+  --app-dark-lighter: rgba(66, 49, 69, 0.48);
+  --app-track: rgba(52, 40, 55, 0.92);
+  --app-track-hover: rgba(73, 57, 78, 0.96);
+  --app-color-success: #22c55e;
+  --app-color-success-bg: rgba(34, 197, 94, 0.15);
+  --app-color-success-text: #86efac;
+  --app-color-warning: #f59e0b;
+  --app-color-warning-bg: rgba(245, 158, 11, 0.15);
+  --app-color-warning-text: #fcd34d;
+  --app-color-error: #ef4444;
+  --app-color-error-bg: rgba(239, 68, 68, 0.15);
+  --app-color-error-text: #fecaca;
+  --app-color-info: #c58aa2;
+  --app-color-info-bg: rgba(197, 138, 162, 0.15);
+  --app-color-info-text: #efc9d8;
+  --app-color-purple: #a855f7;
+  --app-color-purple-bg: rgba(168, 85, 247, 0.15);
+  --app-color-purple-text: #e9d5ff;
+  --app-color-assistant: #b76e79;
+  --app-color-assistant-bg: rgba(183, 110, 121, 0.15);
+  --app-shadow-light: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --app-shadow-heavy: 0 8px 32px rgba(0, 0, 0, 0.28);
+  --app-shadow-brand: 0 10px 25px rgba(197, 138, 162, 0.18);
+  --app-shadow-success: 0 10px 25px rgba(34, 197, 94, 0.15);
+  --app-shadow-error: 0 10px 25px rgba(239, 68, 68, 0.15);
+  --app-shadow-purple: 0 10px 25px rgba(168, 85, 247, 0.15);
+  --app-color-brand-dark: #ae7089;
+  --app-color-brand-light: #efc9d8;
 }
 
 @theme {
@@ -142,9 +356,22 @@
   --color-primary-hover: var(--app-color-primary-hover);
   --color-brand: var(--color-primary);
   --color-brand-hover: var(--color-primary-hover);
-  --color-brand-dark: #2563eb; /* Blue-600 */
-  --color-brand-light: #93c5fd; /* Blue-300 */
-  
+  --color-brand-dark: var(--app-color-brand-dark);
+  --color-brand-light: var(--app-color-brand-light);
+  /* 主色半透明层（随主题切换，替代 bg|border|ring-brand/xx 硬编码） */
+  --color-brand-a10: color-mix(in srgb, var(--color-primary) 10%, transparent);
+  --color-brand-a15: color-mix(in srgb, var(--color-primary) 15%, transparent);
+  --color-brand-a20: color-mix(in srgb, var(--color-primary) 20%, transparent);
+  --color-brand-a30: color-mix(in srgb, var(--color-primary) 30%, transparent);
+  --color-brand-a40: color-mix(in srgb, var(--color-primary) 40%, transparent);
+  --color-brand-a50: color-mix(in srgb, var(--color-primary) 50%, transparent);
+  --color-brand-a60: color-mix(in srgb, var(--color-primary) 60%, transparent);
+  /* 替代误用的 brand-100 / brand-300 色阶（原为固定蓝色） */
+  --color-brand-fg-soft: color-mix(in srgb, var(--color-brand-light) 72%, var(--color-text-muted));
+  --color-brand-fg-dim: color-mix(in srgb, var(--color-brand-light) 40%, var(--color-text-muted));
+  /* 玻璃侧栏/面板的统一浮起阴影（直接引用 app 令牌，避免 @theme 内前向引用） */
+  --shadow-glass-panel: var(--app-shadow-heavy);
+
   /* ========== 背景色 (Liquid Glass Dark) ========== */
   --color-dark-bg: var(--app-color-surface);
   --color-dark-surface: var(--app-color-surface-soft);
@@ -256,4 +483,85 @@
   --z-modal: 300;
   --z-popover: 400;
   --z-tooltip: 500;
+}
+
+/* 运行时主题映射：
+ * @theme 主要用于让 Tailwind 生成类名，但其变量会落在 :root/:host。
+ * 真正需要随 data-theme 切换的语义色，必须再次绑定到主题容器本身，
+ * 否则像 .btn-primary 这类使用 --color-primary 的自定义样式会停留在默认蓝色。
+ */
+:root,
+[data-theme="blue"],
+[data-theme="green"],
+[data-theme="teal"],
+[data-theme="violet"],
+[data-theme="amber"],
+[data-theme="rose"] {
+  --color-primary: var(--app-color-primary);
+  --color-primary-hover: var(--app-color-primary-hover);
+  --color-brand: var(--app-color-primary);
+  --color-brand-hover: var(--app-color-primary-hover);
+  --color-brand-dark: var(--app-color-brand-dark);
+  --color-brand-light: var(--app-color-brand-light);
+  --color-brand-a10: color-mix(in srgb, var(--app-color-primary) 10%, transparent);
+  --color-brand-a15: color-mix(in srgb, var(--app-color-primary) 15%, transparent);
+  --color-brand-a20: color-mix(in srgb, var(--app-color-primary) 20%, transparent);
+  --color-brand-a30: color-mix(in srgb, var(--app-color-primary) 30%, transparent);
+  --color-brand-a40: color-mix(in srgb, var(--app-color-primary) 40%, transparent);
+  --color-brand-a50: color-mix(in srgb, var(--app-color-primary) 50%, transparent);
+  --color-brand-a60: color-mix(in srgb, var(--app-color-primary) 60%, transparent);
+  --color-brand-fg-soft: color-mix(in srgb, var(--app-color-brand-light) 72%, var(--app-color-text-muted));
+  --color-brand-fg-dim: color-mix(in srgb, var(--app-color-brand-light) 40%, var(--app-color-text-muted));
+
+  --color-dark-bg: var(--app-color-surface);
+  --color-dark-surface: var(--app-color-surface-soft);
+  --color-dark-lighter: var(--app-dark-lighter);
+  --color-dark-elevated: var(--app-color-surface-elevated);
+  --color-surface: var(--app-color-surface);
+  --color-surface-elevated: var(--app-color-surface-elevated);
+
+  --color-text: var(--app-color-text);
+  --color-text-primary: var(--app-color-text);
+  --color-text-secondary: var(--app-color-text-muted);
+  --color-text-muted: var(--app-color-text-muted);
+
+  --color-border: var(--app-color-border);
+  --color-border-subtle: var(--app-color-border-subtle);
+  --color-border-default: var(--app-color-border);
+  --color-border-strong: var(--app-color-border-strong);
+
+  --color-success: var(--app-color-success);
+  --color-success-bg: var(--app-color-success-bg);
+  --color-success-text: var(--app-color-success-text);
+  --color-warning: var(--app-color-warning);
+  --color-warning-bg: var(--app-color-warning-bg);
+  --color-warning-text: var(--app-color-warning-text);
+  --color-error: var(--app-color-error);
+  --color-error-bg: var(--app-color-error-bg);
+  --color-error-text: var(--app-color-error-text);
+  --color-info: var(--app-color-info);
+  --color-info-bg: var(--app-color-info-bg);
+  --color-info-text: var(--app-color-info-text);
+  --color-purple: var(--app-color-purple);
+  --color-purple-bg: var(--app-color-purple-bg);
+  --color-purple-text: var(--app-color-purple-text);
+  --color-assistant: var(--app-color-assistant);
+  --color-assistant-bg: var(--app-color-assistant-bg);
+
+  --color-surface-muted: var(--app-surface-muted);
+  --color-surface-overlay: var(--app-surface-overlay);
+  --color-surface-hover: var(--app-surface-hover);
+  --color-overlay: var(--app-overlay);
+  --color-overlay-heavy: var(--app-overlay-heavy);
+  --color-on-brand: #ffffff;
+  --color-track: var(--app-track);
+  --color-track-hover: var(--app-track-hover);
+
+  --shadow-light: var(--app-shadow-light);
+  --shadow-heavy: var(--app-shadow-heavy);
+  --shadow-brand: var(--app-shadow-brand);
+  --shadow-success: var(--app-shadow-success);
+  --shadow-error: var(--app-shadow-error);
+  --shadow-purple: var(--app-shadow-purple);
+  --shadow-glass-panel: var(--app-shadow-heavy);
 }
