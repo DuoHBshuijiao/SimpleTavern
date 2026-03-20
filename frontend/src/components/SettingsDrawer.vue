@@ -35,7 +35,7 @@
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { useCharactersStore, useChatsStore, useSettingsStore } from '../stores'
-import type { Chat, ChatOverrides, Settings, ApiPreset } from '../types/models'
+import { normalizeThemeId, THEME_OPTIONS, type ApiPreset, type Chat, type ChatOverrides, type Settings } from '../types/models'
 import ModernSelect from './ModernSelect.vue'
 import { apiGet, apiPost } from '../api/http'
 import { useAppFont } from '../composables/useAppFont'
@@ -264,7 +264,11 @@ watch(
     if (s.streamEnabled === undefined) s.streamEnabled = true
     if ((s as Settings).pureAiMode === undefined) (s as Settings).pureAiMode = false
     if ((s as Settings).thinkingMode === undefined) (s as Settings).thinkingMode = false
-    if ((s as Settings).themeId === undefined || (s as Settings).themeId === null) (s as Settings).themeId = 'dark'
+    if ((s as Settings).themeId === undefined || (s as Settings).themeId === null) {
+      (s as Settings).themeId = 'blue'
+    } else {
+      ;(s as Settings).themeId = normalizeThemeId((s as Settings).themeId as string)
+    }
     if (!s.apiPresets) s.apiPresets = []
     if (!(s as Settings).draftHelpDefaults) (s as Settings).draftHelpDefaults = ensureDraftHelpDefaults()
     if (s.selectedFont === undefined) (s as Settings).selectedFont = null
@@ -795,7 +799,7 @@ async function checkUpdate() {
             v-for="t in ['global', 'presets', 'chat']"
             :key="t"
             class="flex-1 py-3 text-sm font-medium transition-colors relative"
-            :class="tab === t ? 'text-brand' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'"
+            :class="tab === t ? 'text-brand bg-brand-a10 rounded-lg' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-surface-muted rounded-lg'"
             :style="tab === t ? 'opacity: 1; margin-top: 6px; margin-bottom: 6px;' : 'opacity: 1; margin-top: 6px; margin-bottom: 6px;'"
             @click="tab = t as any"
           >
@@ -879,19 +883,16 @@ async function checkUpdate() {
                 </button>
               </div>
 
-              <!-- 主题 -->
+              <!-- 界面色系 -->
               <div class="space-y-1.5">
-                <label class="block text-sm font-medium text-[var(--color-text-secondary)]">主题</label>
+                <label class="block text-sm font-medium text-[var(--color-text-secondary)]">界面色系</label>
                 <ModernSelect
                   v-model="globalDraft.themeId"
-                  :options="[
-                    { label: '深色', value: 'dark' },
-                    { label: '浅色', value: 'light' }
-                  ]"
-                  placeholder="选择主题..."
+                  :options="[...THEME_OPTIONS]"
+                  placeholder="选择色系..."
                   class="w-full"
                 />
-                <p class="text-xs text-[var(--color-text-muted)]">未设置时默认深色主题。</p>
+                <p class="text-xs text-[var(--color-text-muted)]">均为暗色玻璃底 + 柔和强调色，整体保持接近默认蓝色的轻盈阅读体验；未设置时默认蓝色系。</p>
               </div>
 
               <!-- Base URL -->
@@ -1109,7 +1110,7 @@ async function checkUpdate() {
 
                <div class="pt-4 flex justify-end">
                 <button 
-                  class="px-6 py-2 bg-brand hover:bg-brand-hover text-on-brand rounded-lg font-medium shadow-lg shadow-brand/20 transition-all whitespace-nowrap"
+                  class="px-6 py-2 bg-brand hover:bg-brand-hover text-on-brand rounded-lg font-medium shadow-brand transition-all whitespace-nowrap"
                   @click="saveGlobal"
                 >
                   保存全局设置
@@ -1145,14 +1146,14 @@ async function checkUpdate() {
                   <div class="w-1/3 flex flex-col border-r border-[var(--color-border-subtle)] pr-4">
                       <div class="flex justify-between items-center mb-3">
                           <span class="text-sm font-bold text-[var(--color-text-secondary)]">预设列表</span>
-                          <button class="text-xs bg-brand/20 text-brand px-2 py-1 rounded hover:bg-brand/30 transition-colors" @click="createPreset">+ 新建</button>
+                          <button class="text-xs bg-brand-a20 text-brand px-2 py-1 rounded hover:bg-brand-a30 transition-colors" @click="createPreset">+ 新建</button>
                       </div>
                       <div class="flex-1 overflow-y-auto space-y-1 custom-scrollbar">
                           <div 
                               v-for="p in globalDraft.apiPresets" 
                               :key="p.id"
                               class="px-3 py-2 rounded-lg cursor-pointer text-sm transition-colors flex justify-between items-center group"
-                              :class="editingPresetId === p.id ? 'bg-brand/10 text-brand' : 'text-[var(--color-text-secondary)] hover:bg-surface-muted'"
+                              :class="editingPresetId === p.id ? 'bg-brand-a10 text-brand' : 'text-[var(--color-text-secondary)] hover:bg-surface-muted'"
                               @click="editingPresetId = p.id"
                           >
                               <span class="truncate">{{ p.name }}</span>
@@ -1254,7 +1255,7 @@ async function checkUpdate() {
               
                <div class="pt-2 flex justify-end">
                 <button 
-                  class="px-6 py-2 bg-brand hover:bg-brand-hover text-on-brand rounded-lg font-medium shadow-lg shadow-brand/20 transition-all whitespace-nowrap"
+                  class="px-6 py-2 bg-brand hover:bg-brand-hover text-on-brand rounded-lg font-medium shadow-brand transition-all whitespace-nowrap"
                   @click="saveGlobal"
                 >
                   保存所有配置
@@ -1402,7 +1403,7 @@ async function checkUpdate() {
                   取消
                 </button>
                 <button 
-                  class="px-6 py-2 bg-brand hover:bg-brand-hover text-on-brand rounded-lg font-medium shadow-lg shadow-brand/20 transition-all whitespace-nowrap"
+                  class="px-6 py-2 bg-brand hover:bg-brand-hover text-on-brand rounded-lg font-medium shadow-brand transition-all whitespace-nowrap"
                   @click="saveChatOverrides(); saveGlobal()"
                 >
                   保存设置
@@ -1472,7 +1473,7 @@ async function checkUpdate() {
         <div class="text-xs text-[var(--color-text-muted)]">已选 {{ selectedCandidateModels.size }} 个模型</div>
         <div class="flex gap-2">
           <button class="px-4 py-2 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors" @click="showModelSelector = false">取消</button>
-          <button class="px-4 py-2 text-sm bg-brand hover:bg-brand-hover text-on-brand rounded-lg shadow-lg shadow-brand/20 transition-all" @click="saveModelSelection">确认</button>
+          <button class="px-4 py-2 text-sm bg-brand hover:bg-brand-hover text-on-brand rounded-lg shadow-brand transition-all" @click="saveModelSelection">确认</button>
         </div>
       </div>
     </div>
