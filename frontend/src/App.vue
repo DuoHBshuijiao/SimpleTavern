@@ -27,13 +27,28 @@
  */
 
 import { RouterView } from 'vue-router'
-import { computed } from 'vue'
+import { computed, onUnmounted, watch } from 'vue'
 import { useAppFont } from './composables/useAppFont'
 import { useSettingsStore } from './stores'
+import { normalizeThemeId } from './types/models'
 
 useAppFont()
 const settingsStore = useSettingsStore()
-const appThemeId = computed(() => settingsStore.settings?.themeId ?? 'dark')
+const appThemeId = computed(() => normalizeThemeId(settingsStore.settings?.themeId))
+
+watch(
+  appThemeId,
+  (themeId) => {
+    document.documentElement.setAttribute('data-theme', themeId)
+    document.body.setAttribute('data-theme', themeId)
+  },
+  { immediate: true },
+)
+
+onUnmounted(() => {
+  document.documentElement.removeAttribute('data-theme')
+  document.body.removeAttribute('data-theme')
+})
 </script>
 
 <template>
