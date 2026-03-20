@@ -26,7 +26,14 @@
 import { defineStore } from 'pinia'
 
 import type { Settings } from '../types/models'
+import { normalizeThemeId } from '../types/models'
 import { apiGet, apiPut } from '../api/http'
+
+function withNormalizedTheme(s: Settings): Settings {
+  const themeId = normalizeThemeId(s.themeId)
+  if (s.themeId === themeId) return s
+  return { ...s, themeId }
+}
 
 /**
  * 设置Store
@@ -52,7 +59,7 @@ export const useSettingsStore = defineStore('settings', {
       this.loading = true
       this.error = null
       try {
-        this.settings = await apiGet<Settings>('/api/settings')
+        this.settings = withNormalizedTheme(await apiGet<Settings>('/api/settings'))
       } catch (e: unknown) {
         const error = e instanceof Error ? e.message : String(e)
         this.error = error
@@ -74,7 +81,8 @@ export const useSettingsStore = defineStore('settings', {
       this.loading = true
       this.error = null
       try {
-        this.settings = await apiPut<Settings>('/api/settings', next)
+        const payload = withNormalizedTheme(next)
+        this.settings = withNormalizedTheme(await apiPut<Settings>('/api/settings', payload))
       } catch (e: unknown) {
         const error = e instanceof Error ? e.message : String(e)
         this.error = error
