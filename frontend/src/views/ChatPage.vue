@@ -2487,10 +2487,10 @@ const editingPersonaAvatarUrl = computed(() => {
                     {{ Math.round(group.getMemberSettings(member.id).probability * 100) }}%
                   </span>
                 </div>
-                <div v-if="!group.effectivePureAiMode.value" class="flex items-center gap-1 shrink-0 bg-brand/10 px-2 py-1 rounded-lg border border-brand/20">
+                <div v-if="!group.effectivePureAiMode.value" class="flex items-center gap-1 shrink-0 bg-brand-a10 px-2 py-1 rounded-lg border border-brand-a20">
                   <ModernAvatar :src="userAvatarUrl" :name="userName" :size="20" aspect="1" rounded="rounded" />
                   <span class="text-xs text-brand max-w-[60px] truncate">{{ userName }}</span>
-                  <span class="text-[10px] text-brand/60">(你)</span>
+                  <span class="text-[10px] text-brand-a60">(你)</span>
                 </div>
               </div>
             </div>
@@ -2748,7 +2748,7 @@ const editingPersonaAvatarUrl = computed(() => {
                     aspect="auto"
                     object-fit="contain"
                     rounded="rounded-xl"
-                    class="border-2 border-brand/40 shadow-lg bg-surface-overlay"
+                    class="border-2 border-brand-a40 shadow-heavy bg-surface-overlay"
                   />
                   <button class="btn btn-sm btn-secondary" @click="actions.showCharacterAvatarCropper.value = true">更换头像</button>
                 </div>
@@ -2828,7 +2828,7 @@ const editingPersonaAvatarUrl = computed(() => {
               <div v-for="m in assistant.workspaceAssistantMessages.value" :key="m.id" class="flex flex-col gap-1 group" :class="m.role === 'user' ? 'items-end' : 'items-start'">
                 <div
                   class="px-4 py-2.5 rounded-2xl text-sm leading-relaxed max-w-[90%] shadow-sm border transition-colors"
-                  :class="m.role === 'user' ? 'bg-brand/10 border-brand/20 text-[var(--color-text)] rounded-tr-sm' : 'bg-surface-muted border-[var(--color-border-subtle)] text-[var(--color-text)] rounded-tl-sm'"
+                  :class="m.role === 'user' ? 'bg-brand-a10 border-brand-a20 text-[var(--color-text)] rounded-tr-sm' : 'bg-surface-muted border-[var(--color-border-subtle)] text-[var(--color-text)] rounded-tl-sm'"
                 >
                   <div class="prose prose-invert prose-sm max-w-none">{{ m.content }}</div>
                 </div>
@@ -2894,7 +2894,7 @@ const editingPersonaAvatarUrl = computed(() => {
               :size="80"
               aspect="1"
               rounded="rounded-xl"
-              class="border-2 border-brand/40"
+              class="border-2 border-brand-a40"
             />
             <button class="btn btn-sm btn-secondary" @click="actions.showPersonaAvatarCropper.value = true">更换头像</button>
           </div>
