@@ -157,7 +157,7 @@ function save() {
             <input 
               v-model.number="groupDelayDraft"
               type="number"
-              class="input bg-white/5 border-white/10 focus:border-brand/50"
+              class="input bg-white/5 border-white/10 focus:border-brand-a50"
               step="100"
               min="0"
             />
@@ -174,7 +174,7 @@ function save() {
                 v-for="(id, idx) in memberIdsDraft" 
                 :key="id"
                 class="flex items-center gap-3 p-3 rounded-xl border transition-all group/item"
-                :class="draggingIdx === idx ? 'bg-brand/10 border-brand/50 opacity-40 scale-95' : 'bg-white/5 border-white/5 hover:bg-white/10 hover:border-white/20'"
+                :class="draggingIdx === idx ? 'bg-brand-a10 border-brand-a50 opacity-40 scale-95' : 'bg-white/5 border-white/5 hover:bg-white/10 hover:border-white/20'"
                 draggable="true"
                 @dragstart="handleDragStart(idx)"
                 @dragover="handleDragOver($event, idx)"
@@ -221,7 +221,7 @@ function save() {
 
         <div class="modal-footer">
           <button class="btn btn-secondary bg-white/5 hover:bg-white/10 text-gray-300 border border-white/5" @click="close">取消</button>
-          <button class="btn btn-primary bg-brand hover:bg-brand-hover text-white shadow-lg shadow-brand/20" @click="save">保存并应用</button>
+          <button class="btn btn-primary" @click="save">保存并应用</button>
         </div>
       </div>
     </div>
