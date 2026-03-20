@@ -325,8 +325,8 @@ onUnmounted(() => {
       ref="triggerRef"
       class="flex items-center justify-between w-full bg-surface-muted border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm text-[var(--color-text)] transition-all cursor-pointer shadow-sm"
       :class="[
-        disabled ? 'opacity-50 cursor-not-allowed' : 'hover:bg-surface-hover hover:border-brand/30',
-        isOpen ? '!border-brand/50 ring-1 ring-brand/20' : ''
+        disabled ? 'opacity-50 cursor-not-allowed' : 'hover:bg-surface-hover hover:border-brand-a30',
+        isOpen ? '!border-brand-a50 ring-1 ring-brand-a20' : ''
       ]"
       @click="toggle"
     >
@@ -344,7 +344,7 @@ onUnmounted(() => {
       <div
         v-if="isOpen"
         ref="dropdownRef"
-        class="z-dropdown glass-panel rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[320px] animate-in fade-in zoom-in-95 duration-200"
+        class="z-dropdown select-dropdown theme-panel-bg rounded-xl shadow-glass-panel overflow-hidden flex flex-col max-h-[320px] animate-in fade-in zoom-in-95 duration-200 border border-[var(--color-border)] backdrop-blur-xl backdrop-saturate-[1.8]"
         :style="dropdownStyle"
       >
       <!-- Search Input -->
@@ -360,7 +360,7 @@ onUnmounted(() => {
       </div>
 
       <!-- Options List -->
-      <div class="overflow-y-auto custom-scrollbar p-1">
+      <div class="select-dropdown-options overflow-y-auto custom-scrollbar p-1">
         <template v-for="(item, idx) in filteredOptions">
            <!-- Group Header -->
            <div v-if="'options' in item" :key="`group-${idx}`" class="px-2 py-1">
@@ -369,7 +369,7 @@ onUnmounted(() => {
                 v-for="opt in item.options" 
                 :key="opt.value"
                 class="px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors flex items-center justify-between group/item pl-4"
-                :class="isOptionSelected(opt) ? 'bg-brand/20 text-brand' : 'text-[var(--color-text-secondary)] hover:bg-surface-muted'"
+                :class="isOptionSelected(opt) ? 'bg-brand-a20 text-brand' : 'text-[var(--color-text-secondary)] hover:bg-surface-muted'"
                 @click="select(opt)"
               >
                 <span class="truncate">{{ opt.label }}</span>
@@ -382,7 +382,7 @@ onUnmounted(() => {
               v-else 
               :key="`single-${idx}`"
               class="px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors flex items-center justify-between group/item"
-              :class="isOptionSelected(item) ? 'bg-brand/20 text-brand' : 'text-[var(--color-text-secondary)] hover:bg-surface-muted'"
+              :class="isOptionSelected(item) ? 'bg-brand-a20 text-brand' : 'text-[var(--color-text-secondary)] hover:bg-surface-muted'"
               @click="select(item)"
             >
               <span class="truncate">{{ item.label }}</span>
@@ -401,6 +401,26 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.select-dropdown {
+  background:
+    linear-gradient(
+      to bottom right,
+      color-mix(in srgb, var(--color-brand-a20) 55%, var(--app-panel-from)),
+      color-mix(in srgb, var(--color-brand-a10) 45%, var(--app-panel-to))
+    );
+}
+
+.select-dropdown-options {
+  background:
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--color-brand-a10) 55%, transparent),
+      transparent 18%,
+      transparent 82%,
+      color-mix(in srgb, var(--color-brand-a10) 35%, transparent)
+    );
+}
+
 .custom-scrollbar::-webkit-scrollbar {
   width: 4px;
 }
