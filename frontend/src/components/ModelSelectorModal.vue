@@ -139,7 +139,7 @@ function confirm() {
                 v-model="searchQuery"
                 type="text"
                 placeholder="搜索模型..."
-                class="input bg-black/20 border-white/10 focus:border-brand/50"
+                class="input bg-black/20 border-white/10 focus:border-brand-a50"
               />
             </div>
 
@@ -167,7 +167,7 @@ function confirm() {
                 >
                   <div 
                     class="w-4 h-4 rounded border flex items-center justify-center transition-colors"
-                    :class="selectedModels.has(m) ? 'bg-brand border-brand' : 'border-gray-600'"
+                    :class="selectedModels.has(m) ? 'bg-brand border-brand' : 'border-[var(--color-border-strong)]'"
                   >
                     <Check v-if="selectedModels.has(m)" class="text-white w-2.5 h-2.5" />
                   </div>
@@ -181,7 +181,7 @@ function confirm() {
         <div class="modal-footer">
           <span class="text-xs text-gray-400 mr-auto">已选中 {{ selectedModels.size }} 个</span>
           <button class="btn btn-secondary bg-white/5 hover:bg-white/10 text-gray-300 border border-white/5" @click="close">取消</button>
-          <button class="btn btn-primary bg-brand hover:bg-brand-hover text-white shadow-lg shadow-brand/20" @click="confirm">添加选中项</button>
+          <button class="btn btn-primary" @click="confirm">添加选中项</button>
         </div>
       </div>
     </div>
