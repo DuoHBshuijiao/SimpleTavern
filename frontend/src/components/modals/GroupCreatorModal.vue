@@ -151,7 +151,7 @@ function handleCreate() {
               <label class="label">群聊名称</label>
               <input 
                 v-model="groupTitle" 
-                class="input bg-black/20 border-white/10 focus:border-brand/50" 
+                class="input bg-black/20 border-white/10 focus:border-brand-a50" 
                 placeholder="新群聊" 
               />
             </div>
@@ -204,7 +204,7 @@ function handleCreate() {
                   v-for="c in characters"
                   :key="c.id"
                   class="flex items-start gap-3 p-3 rounded-xl cursor-pointer transition-all border-2"
-                  :class="selectedMemberIds.includes(c.id) ? 'bg-brand/10 border-brand/20' : 'bg-white/5 border-transparent hover:bg-white/10'"
+                  :class="selectedMemberIds.includes(c.id) ? 'bg-brand-a10 border-brand-a20' : 'bg-white/5 border-transparent hover:bg-white/10'"
                   @click="toggleMemberSelection(c.id)"
                 >
                   <div class="relative shrink-0">
@@ -261,7 +261,7 @@ function handleCreate() {
             <span v-if="selectedMemberIds.length < 2" class="text-yellow-500">(至少需要2个)</span>
           </div>
           <button class="btn btn-secondary bg-white/5 hover:bg-white/10 text-gray-300 border border-white/5" @click="emit('update:show', false)">取消</button>
-          <button class="btn btn-primary bg-brand hover:bg-brand-hover text-white shadow-lg shadow-brand/20" :disabled="selectedMemberIds.length < 2" @click="handleCreate">
+          <button class="btn btn-primary" :disabled="selectedMemberIds.length < 2" @click="handleCreate">
             创建群聊
           </button>
         </div>
