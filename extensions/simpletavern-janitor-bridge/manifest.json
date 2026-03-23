@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "SimpleTavern Janitor Bridge",
+  "version": "0.1.3",
+  "description": "Capture JanitorAI chat payload and send to local SimpleTavern import endpoint.",
+  "permissions": [
+    "storage",
+    "tabs"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "host_permissions": [
+    "https://janitorai.com/*",
+    "https://*.janitorai.com/*",
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.janitorai.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "injected.js"
+      ],
+      "matches": [
+        "*://*.janitorai.com/*"
+      ]
+    }
+  ]
+}
