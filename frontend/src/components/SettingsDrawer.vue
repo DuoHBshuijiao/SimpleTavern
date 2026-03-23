@@ -34,11 +34,12 @@
  *    - 位置：组件层，提供设置管理功能
  */
 import { computed, onMounted, ref, watch } from 'vue'
-import { useCharactersStore, useChatsStore, useSettingsStore } from '../stores'
+import { useChatsStore, useSettingsStore } from '../stores'
 import { normalizeThemeId, THEME_OPTIONS, type ApiPreset, type Chat, type ChatOverrides, type Settings } from '../types/models'
 import ModernSelect from './ModernSelect.vue'
 import { apiGet, apiPost } from '../api/http'
 import { useAppFont } from '../composables/useAppFont'
+import { useSettingsImport } from '../composables/useSettingsImport'
 import { X, Eye, EyeOff, Check, Loader2 } from 'lucide-vue-next'
 
 const { applyFont } = useAppFont()
@@ -59,7 +60,11 @@ const emit = defineEmits<{
 
 const settingsStore = useSettingsStore()
 const chatsStore = useChatsStore()
-const charactersStore = useCharactersStore()
+const {
+  importSettingsFile,
+  refreshDataAfterImport,
+  formatImportResultMessage,
+} = useSettingsImport()
 
 const tab = ref<'global' | 'presets' | 'chat'>('global')
 const preloaded = ref(false)
@@ -710,20 +715,13 @@ async function handleImportChange(e: Event) {
   const input = e.target as HTMLInputElement
   const file = input.files?.[0]
   if (!file) return
-  const fd = new FormData()
-  fd.append('file', file)
-  const r = await fetch('/api/import', { method: 'POST', body: fd })
-  if (!r.ok) {
-    alert(await r.text())
-    input.value = ''
-    return
+  try {
+    const result = await importSettingsFile(file)
+    await refreshDataAfterImport()
+    alert(formatImportResultMessage(result))
+  } catch (err) {
+    alert(err instanceof Error ? err.message : String(err))
   }
-  const result = await r.json()
-  await settingsStore.load()
-  await charactersStore.loadAll()
-  await chatsStore.loadGroupList()
-  if (chatsStore.characterId) await chatsStore.loadList(chatsStore.characterId)
-  alert(`导入完成：${(result.imported || []).join(', ') || '无'}${result.warnings?.length ? '\n警告：' + result.warnings.join('; ') : ''}`)
   input.value = ''
 }
 

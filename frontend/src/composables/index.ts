@@ -38,3 +38,5 @@ export { useChatActions } from './useChatActions'
 export type { UseChatActions, ChatActionsDeps } from './useChatActions'
 
 export { useAppFont, applyFont } from './useAppFont'
+export { useSettingsImport } from './useSettingsImport'
+export type { SettingsImportResult } from './useSettingsImport'
