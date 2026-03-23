@@ -61,6 +61,7 @@
  *    - 位置：视图层，作为聊天页面的主组件
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useCharactersStore, useChatsStore, useSettingsStore } from '../stores'
 import type { CharacterCard, ChatImageAttachment, ChatMessage, GroupMemberSettings, Chat } from '../types/models'
 
@@ -75,7 +76,14 @@ import {
 
 // 子组件
 import { ChatSidebar, MessageList, ChatInput, AssistantPanel } from '../components/chat'
-import { GroupCreatorModal, MessageEditorModal, MemberSettingsModal, GroupSettingsModal } from '../components/modals'
+import {
+  GroupCreatorModal,
+  MessageEditorModal,
+  MemberSettingsModal,
+  GroupSettingsModal,
+  ChatExportModal,
+  ChatImportModal,
+} from '../components/modals'
 import ErrorModal from '../components/modals/ErrorModal.vue'
 import SettingsDrawer from '../components/SettingsDrawer.vue'
 import AvatarCropper from '../components/AvatarCropper.vue'
@@ -92,6 +100,8 @@ import { useErrorStack } from '../composables/useErrorStack'
 const settings = useSettingsStore()
 const characters = useCharactersStore()
 const chats = useChatsStore()
+const route = useRoute()
+const router = useRouter()
 
 // ========== 页面级状态 ==========
 const selectedCharacterId = ref<string | null>(null)
@@ -105,6 +115,9 @@ interface DraftImageItem {
 const draftImages = ref<DraftImageItem[]>([])
 const showSettings = ref(false)
 const showGroupSettings = ref(false)
+const showExportModal = ref(false)
+const showImportModal = ref(false)
+const janitorPendingId = ref<string | null>(null)
 const settingsTab = ref<'global' | 'presets' | 'chat'>('global')
 const isGenerating = ref(false)
 const streamError = ref<string | null>(null)
@@ -822,6 +835,19 @@ watch(assistant.isAssistantPanelOpen, (next) => {
  * 当选中角色变化时，加载该角色的聊天列表，并自动选择第一个聊天。
  * 使用immediate选项，在组件挂载时立即执行一次。
  */
+watch(
+  () => route.query.janitorPending,
+  (pending) => {
+    if (typeof pending !== 'string' || !pending.trim()) return
+    janitorPendingId.value = pending.trim()
+    showImportModal.value = true
+    const query = { ...route.query }
+    delete query.janitorPending
+    void router.replace({ query })
+  },
+  { immediate: true },
+)
+
 watch(
   () => selectedCharacterId.value,
   async (cid) => {
@@ -1966,6 +1992,16 @@ async function selectChat(chat: Chat) {
   await chats.load(chat.id)
 }
 
+async function handleJanitorImported(payload: { chatId: string; characterId: string | null; openAfterImport: boolean }) {
+  janitorPendingId.value = null
+  if (!payload.openAfterImport) return
+  if (payload.characterId) {
+    selectedCharacterId.value = payload.characterId
+    await chats.loadList(payload.characterId)
+  }
+  await chats.load(payload.chatId)
+}
+
 /**
  * 处理群聊创建
  *
@@ -2447,12 +2483,12 @@ const editingPersonaAvatarUrl = computed(() => {
                   <button class="btn btn-xs btn-secondary" @click="closeChatSearchBar">关闭</button>
                 </div>
               </div>
-              <div class="pointer-events-auto flex items-center gap-2 shrink-0 min-w-[180px] max-w-[260px] justify-end">
-                <button class="btn btn-sm btn-secondary" @click="actions.exportChat('txt')">
-                  导出TXT
+              <div class="pointer-events-auto flex items-center gap-2 shrink-0 min-w-[200px] max-w-[300px] justify-end">
+                <button class="btn btn-sm btn-secondary" :disabled="!activeChat" @click="showExportModal = true">
+                  导出
                 </button>
-                <button class="btn btn-sm btn-secondary" @click="actions.exportChat('json')">
-                  导出JSON
+                <button class="btn btn-sm btn-secondary" @click="showImportModal = true">
+                  导入
                 </button>
                 <button class="btn btn-sm btn-primary" @click="settingsTab = 'global'; showSettings = true">
                   设置
@@ -2587,7 +2623,13 @@ const editingPersonaAvatarUrl = computed(() => {
 
         <!-- 空状态 -->
         <div v-else class="flex flex-col items-center justify-center h-full text-center p-8 opacity-60">
-          <div class="absolute top-4 right-4 pointer-events-auto opacity-100">
+          <div class="absolute top-4 right-4 pointer-events-auto opacity-100 flex items-center gap-2">
+            <button class="btn btn-sm btn-secondary" disabled>
+              导出
+            </button>
+            <button class="btn btn-sm btn-secondary" @click="showImportModal = true">
+              导入
+            </button>
             <button class="btn btn-sm btn-secondary" @click="settingsTab = 'global'; showSettings = true">
               设置
             </button>
@@ -2692,6 +2734,20 @@ const editingPersonaAvatarUrl = computed(() => {
       :chat="activeChat" 
       :initial-tab="settingsTab" 
       @open-member-settings="actions.openMemberSettingsEditor"
+    />
+
+    <ChatExportModal
+      v-model:show="showExportModal"
+      :disabled="!activeChat"
+      @export="(format) => { actions.exportChat(format); showExportModal = false }"
+    />
+
+    <ChatImportModal
+      v-model:show="showImportModal"
+      :characters="characters.list"
+      :personas="settings.settings?.userPersonas || []"
+      :pending-id="janitorPendingId"
+      @janitor-imported="handleJanitorImported"
     />
 
     <!-- 群聊创建弹窗 -->

@@ -483,6 +483,18 @@
   --z-modal: 300;
   --z-popover: 400;
   --z-tooltip: 500;
+
+  /* ========== 导入/导出弹窗 UI 约束 ==========
+   * ChatExportModal、ChatImportModal 及子区块须使用本文件已声明变量，禁止裸十六进制/rgb/hsl（除已有令牌外）。
+   * 文字：var(--color-text)、var(--color-text-secondary)、var(--color-text-muted)
+   * 边框/背景：var(--color-border)、var(--color-border-subtle)、var(--color-surface-muted)、var(--color-surface-overlay)、var(--color-surface-hover)
+   * 遮罩：var(--color-overlay)、var(--color-overlay-heavy)
+   * 主色/品牌：var(--color-primary)、var(--color-brand-a10)～var(--color-brand-a50)
+   * 圆角：var(--radius-sm|md|lg|xl|2xl)；间距：var(--spacing-xs|sm|md|lg|xl|2xl)；阴影：var(--shadow-light|heavy|brand|…)
+   * 字号/字体：var(--text-xs|sm|…)、var(--font-sans)
+   * 层级：继承 .modal（var(--z-modal)）；弹内下拉须满足 var(--z-dropdown)
+   * Tailwind arbitrary：text-[var(--color-text-muted)] 等，不得写死颜色字面量。
+   */
 }
 
 /* 运行时主题映射：
