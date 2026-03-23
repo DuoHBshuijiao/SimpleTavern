@@ -1,319 +1,143 @@
-# SimpleTavern（本地单用户 AI 角色扮演）
+<div align="center">
 
-前端：Vue 3（Vite + TS）  
-后端：FastAPI（SSE 流式）  
-存储：本地 `data/` 下按文件拆分的 JSON（无数据库）
+<img src="frontend/public/image1.jpeg" alt="SimpleTavern" />
 
-## 特色功能
+<small>AI 生成，仅作参考</small>
 
-1. **聊天助手**  
-   内置可调用工具的 AI Agent 系统：支持聊剧情、总结长期记忆、生成角色卡等，与角色扮演流程深度结合。
+**SimpleTavern**
 
-2. **群聊模式自定义**  
-   群聊下可为不同角色分别绑定 AI 模型、提示词、温度等参数，避免千人一面，实现更细粒度的表现控制。
+本地单用户 AI 角色扮演应用。前端为 Vue 3 + Vite + TypeScript，后端为 FastAPI（SSE 流式输出），数据以 `data/` 目录下的 JSON 文件持久化，不依赖传统数据库。
+
+</div>
 
 ---
 
-## UI 与主题定制
+<p align="center">
+  <img src="frontend/public/image2.jpeg" alt="应用界面" />
+  <br />
+  <small>AI 生成，多彩主题</small>
+</p>
 
-界面采用现代玻璃拟态风格（半透明、磨砂、细边框）。  
-主题定制：在 `frontend/src/styles/variables.css` 中修改 `:root` 下的 CSS 变量（如 `--color-brand`、`--color-dark-bg`、`--glass-bg` 等）即可调整品牌色、背景与玻璃效果。
+---
+
+## 技术栈概览
+
+| 层级 | 主要技术 | 说明 |
+| --- | --- | --- |
+| 前端 UI | Vue 3、Pinia、Vue Router | 组件化 SPA |
+| 前端构建 | Vite 7、TypeScript、`vue-tsc` | 开发热更新；生产构建前做类型检查 |
+| 样式 | Tailwind CSS 4（`@tailwindcss/vite`）、PostCSS | 与工具类、自定义 `variables.css` 等协同 |
+| 后端 | FastAPI、Uvicorn | REST + SSE；路由统一挂在 `/api` 下（开发时 Vite 将 `/api` 代理到 `http://127.0.0.1:8000`） |
+| 持久化 | 本地 JSON 文件 | 设置、角色、会话等位于 `data/`，见后端 `storage` 模块 |
+
+后端 Python 依赖版本下限见 `backend/requirements.txt`（如 `fastapi>=0.110`、`pydantic>=2.6`、`portalocker` 等）。前端依赖见 `frontend/package.json`。
+
+---
+
+## 功能要点
+
+**聊天助手**：内置可调用工具的 Agent 流程，可与剧情对话、长期记忆摘要、角色卡生成等结合。
+
+**群聊定制**：群聊模式下可为不同角色分别配置模型、系统提示、温度等，减少「千人一面」。
+
+**主题与界面**：玻璃拟态风格（半透明、磨砂、细边框）。品牌色与全局变量可在 `frontend/src/styles/variables.css` 的 `:root` 中调整（如 `--color-brand`、`--glass-bg` 等）。
+
+---
+
+## 后端 API 与数据（摘要）
+
+| 类别 | 路径前缀或示例 | 说明 |
+| --- | --- | --- |
+| 健康检查 | `GET /api/health` | 服务存活探测 |
+| 设置 | `/api/settings` | 读写应用设置（含 OpenAI 兼容端点与密钥等） |
+| 角色与会话 | `/api/characters`、`/api/chats` | CRUD、消息、图片、群聊成员等 |
+| 生成 | `/api/generate/*` | 流式生成、群聊、插话等 |
+| 助手 | `/api/assistant/*` | 助手会话与流式接口 |
+| 其他 | `/api/llm`、`/api/avatars`、`/api/fonts`、`/api/import_export`、`/api/tokenizer`、`/api/update` 等 | 模型列表、头像、字体、导入导出、分词、更新检查等 |
+| 剪贴板 | `POST /api/clipboard/resolve-rich-paste` | 富文本粘贴解析（服务端对本地文件访问有安全边界，见下文「已知限制」） |
+
+数据目录默认包含 `settings`、`characters`、`chats` 等 JSON 结构；无 SQLite 或其它数据库引擎。
+
+---
 
 ## 环境要求
 
-- **Python 3.7+** 和 pip
-- **Node.js 16+** 和 npm
-- **Git**（用于克隆仓库，或直接从 releases 下载）
+| 项目 | 版本或说明 |
+| --- | --- |
+| Python | 3.7+ 与 pip（建议使用当前仍受支持的 3.x 版本） |
+| Node.js | 16+ 与 npm |
+| Git | 克隆仓库时使用；也可从 Releases 下载源码包 |
 
-## 快速开始
+---
 
-### 方法一：从 GitHub Releases 下载（推荐）
+## 获取与运行
 
-1. **访问 Releases 页面**
-   - 打开 [https://github.com/DuoHBshuijiao/SimpleTavern/releases](https://github.com/DuoHBshuijiao/SimpleTavern/releases)
-   - 下载最新版本的源码压缩包（Source code (zip) 或 Source code (tar.gz)）
+### 自 Releases 安装（推荐）
 
-2. **解压并进入项目目录**
+在 [GitHub Releases](https://github.com/DuoHBshuijiao/SimpleTavern/releases) 下载源码压缩包，解压进入目录后执行：
 
-   **Windows (PowerShell):**
-   ```powershell
-   # 假设下载到 D:\Downloads，解压后进入目录
-   cd D:\Downloads\SimpleTavern-v0.228
-   ```
+| 系统 | 命令 |
+| --- | --- |
+| Windows | `python deploy.py` |
+| Linux / macOS | `python3 deploy.py` 或 `chmod +x deploy.sh` 后 `./deploy.sh` |
 
-   **Linux/macOS (Bash):**
-   ```bash
-   # 假设下载到 ~/Downloads，解压后进入目录
-   cd ~/Downloads/SimpleTavern-v0.228
-   ```
+脚本将检查环境、创建 `venv/`、安装前后端依赖、构建前端，并启动后端（默认 **8000**）与前端预览（默认 **4173**），通常会尝试打开浏览器。停止服务：`Ctrl+C`。
 
-3. **运行一键部署脚本**
+根目录还提供 `deploy.sh`、`deploy.bat`；手动分步说明见下文。
 
-   **Windows:**
-   ```cmd
-   python deploy.py
-   ```
+### 安卓 Termux
 
-   **Linux/macOS:**
-   ```bash
-   python3 deploy.py
-   ```
-   或使用 shell 脚本：
-   ```bash
-   chmod +x deploy.sh
-   ./deploy.sh
-   ```
+勿将项目放在 **`/sdcard` 共享存储** 下运行：权限与挂载限制易导致 `python -m venv` 失败。请把仓库放在 Termux 私有目录（如 `$HOME`），用 `pkg` 安装 `python`、`nodejs`、`git` 等后再执行 `python deploy.py`。若使用 zip 包，同样在 `$HOME` 下解压。
 
-### 方法二：安卓 Termux 命令行安装部署教程（请忽略，除非具备自行编译 Python 的能力）
+### 本地开发（前后端分离调试）
 
-> 重要：**请不要把项目放在 `/sdcard`（共享存储）里运行**。Termux 在共享存储下经常会遇到权限/挂载限制，导致 `python -m venv` 创建虚拟环境失败。  
-> 推荐做法：用 `git clone` 把源码直接放到 Termux 的私有目录（`$HOME`）中。
+| 步骤 | 目录 | 命令 |
+| --- | --- | --- |
+| 后端 | `backend` | 激活虚拟环境后：`python -m uvicorn app.main:app --reload --port 8000`（局域网可访问可加 `--host 0.0.0.0`） |
+| 前端 | `frontend` | `npm install` 后：`npm run dev`（通过 Vite 代理访问 `/api`） |
 
-1. **安装依赖（Termux）**
+生产形态可先 `npm run build`，再用 `npm run preview -- --port 4173 --host` 提供静态资源，行为与一键部署脚本中的前端启动方式一致。
 
-```bash
-pkg update -y
-pkg install -y python nodejs git unzip wget
-```
+### 手动部署（简要）
 
-2. **在 Termux 私有目录中克隆源码（推荐）**
+在仓库根目录创建并激活 `venv`，于 `backend` 执行 `pip install -r requirements.txt`；于 `frontend` 执行 `npm install` 与 `npm run build`。启动顺序：先后端再前端预览。若 PowerShell 禁止脚本，可对当前用户执行 `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser`，或使用 `venv\Scripts\activate.bat`。
 
-```bash
-cd ~
-git clone https://github.com/DuoHBshuijiao/SimpleTavern.git
-cd SimpleTavern
-```
+---
 
-> 可选：若需使用 Releases 的 zip 包，请**在 `$HOME` 下解压**（不要在 `/sdcard` 下解压/运行）。
+## 模型与凭据（OpenAI 兼容）
 
-3. **运行一键部署脚本**
+在应用内「设置」中配置 **Base URL**、**API Key**、**Model** 等。密钥与连接信息会写入 `data/settings.json`（**明文存储**），请仅在可信本机环境使用并做好文件权限与备份策略。
 
-```bash
-python deploy.py
-```
+---
 
-## 一键部署脚本说明
+## 已知限制与实现说明
 
-项目提供了跨平台的一键部署脚本，支持 Windows 和 Linux/macOS。
+以下条目摘自源码注释或模块文档字符串，供排障与二次开发对照。
 
-脚本会自动完成以下操作：
-1. 检查 Python 和 Node.js 环境
-2. **创建 Python 虚拟环境**（`venv/` 目录）
-3. 在虚拟环境中安装后端依赖（pip install）
-4. 安装前端依赖（npm install）
-5. 构建前端项目（npm run build）
-6. 启动后端服务（端口 8000）
-7. 启动前端服务（端口 4173）
-8. 自动打开浏览器访问应用
+| 主题 | 说明 | 出处（仓库内） |
+| --- | --- | --- |
+| Tailwind v4 与 `group-hover` | `group-hover:opacity-*` 位于 CSS Layer；若在非 Layer 的自定义 CSS 中重复定义 `opacity-*`，会覆盖上述变体，导致悬停透明度不生效。请勿在 `frontend/src/styles/utilities.css` 等处重复定义与 Tailwind 冲突的 `opacity-*`。 | `utilities.css` 注释 |
+| 玻璃拟态与构建 | 部分旧类名（如 `.glass-panel-floating`、`.stained-glass`）已弃用，宜改用 Tailwind `backdrop-*`。注释中说明：esbuild 压缩 CSS 时可能改变 `backdrop-filter` 内空格，导致 `saturate` 等失效，故推荐工具类路径。 | `glass.css` |
+| 剪贴板与本地路径 | 自 QQ 等应用粘贴的 HTML 可能带 `file://` 图片链接；浏览器无法直接读取任意本地路径，此类图片在纯前端提取流程中不可用。后端剪贴板接口仅允许解析**系统临时目录**下的路径，以降低任意文件读取风险。 | `ChatInput.vue`、`clipboard.py` |
+| SSE 与界面响应 | 前端 SSE 处理约每 20 个事件让出主线程一次，减轻大量缓冲时界面「憋到最后才刷新」的卡顿感。 | `frontend/src/api/sse.ts` |
+| 存储并发与查找 | 单用户场景仍可能因前端并发请求产生短暂并发写，对关键写路径使用文件锁避免撕裂。按 `chatId` 定位会话需在无 DB 设计下扫描角色目录，数据量大时存在额外 I/O。 | `backend/app/storage.py` |
+| CORS | 后端默认 `allow_origins=["*"]`，便于本地开发；若将服务暴露于不可信网络，需自行收紧策略。 | `backend/app/main.py` |
+| 部署脚本（Windows） | 脚本内对 Windows 命令行、引号等有特殊处理，避免嵌套 `cmd` 引号问题。 | `deploy.py` |
 
-按 `Ctrl+C` 可停止所有服务。
+**运维常见问题**（非代码缺陷）：8000 / 4173 端口占用时可改 `uvicorn` 与 `vite preview` 的端口参数；系统找不到 `python` / `npm` 时请安装或改用 `py`、`python3` 等。
 
-### 部署脚本文件
+---
 
-- `deploy.py`：跨平台一键部署脚本（Python，**推荐使用**）
-- `deploy.sh`：Linux/macOS 一键部署脚本
+## 其它仓库资源
 
-## 手动部署（分步操作）
+从 Janitor AI（JAI）迁移聊天记录到本地时，必须在 Chromium 系浏览器中 **手动安装** 本仓库内 `extensions/simpletavern-janitor-bridge/` 目录对应的未打包扩展（例如在 Chrome 或 Edge 中打开「扩展程序」，开启「开发者模式」，选择「加载已解压的扩展程序」并指向该目录）。`deploy.py`、pip 与 npm **不会**自动安装该扩展；若未加载扩展，则无法在 Janitor 站点与本地 SimpleTavern 之间完成聊天数据桥接（后端 `/api/import/janitor/*` 与前端导入流程依赖扩展在页面侧抓取并上报数据）。
 
-如果一键部署脚本遇到问题，可以按照以下步骤手动部署：
+| 路径 | 说明 |
+| --- | --- |
+| `extensions/simpletavern-janitor-bridge/` | Janitor AI 页面桥接：使用 `chrome.*` API，将聊天内容提交至本地 API；需按上段说明自行加载；与主应用分离部署。 |
 
-### Windows (PowerShell)
-
-#### 1) 创建虚拟环境并安装后端依赖
-
-```powershell
-# 进入项目根目录
-cd E:\SimpleTavern
-
-# 创建虚拟环境
-python -m venv venv
-
-# 激活虚拟环境（任选其一，根据当前终端类型）
-.\venv\Scripts\Activate.ps1
-# 若 PowerShell 报错「无法加载，因为在此系统上禁止运行脚本」，可先执行：
-# Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-
-# 若使用 CMD 而非 PowerShell，则用：
-# venv\Scripts\activate.bat
-
-# 若当前在 backend 子目录，则用：
-# ..\venv\Scripts\Activate.ps1   (PowerShell)
-# ..\venv\Scripts\activate.bat   (CMD)
-
-# 进入后端目录并安装依赖
-cd backend
-pip install -r requirements.txt
-```
-
-#### 2) 安装前端依赖
-
-```powershell
-# 返回项目根目录
-cd ..
-
-# 进入前端目录并安装依赖
-cd frontend
-npm install
-```
-
-#### 3) 构建前端
-
-```powershell
-# 仍在 frontend 目录
-npm run build
-```
-
-#### 4) 启动后端服务
-
-```powershell
-# 返回项目根目录
-cd ..
-
-# 进入后端目录
-cd backend
-
-# 确保激活虚拟环境
-..\venv\Scripts\Activate.ps1
-
-# 启动后端（虚拟环境已激活，直接运行）
-python -m uvicorn app.main:app --reload --port 8000
-```
-
-#### 5) 启动前端服务
-
-```powershell
-# 打开新终端，进入前端目录
-cd E:\SimpleTavern\frontend
-
-# 启动预览服务器
-npm run preview -- --port 4173 --host
-```
-
-#### 6) 访问应用
-
-打开浏览器访问：`http://localhost:4173`
-
-### Linux/macOS (Bash)
-
-#### 1) 创建虚拟环境并安装后端依赖
-
-```bash
-# 进入项目根目录
-cd ~/SimpleTavern
-
-# 创建虚拟环境
-python3 -m venv venv
-
-# 激活虚拟环境（Bash/Zsh 通用）
-source venv/bin/activate
-
-# 若当前在 backend 子目录，则用：
-# source ../venv/bin/activate
-
-# 进入后端目录并安装依赖
-cd backend
-pip install -r requirements.txt
-```
-
-#### 2) 安装前端依赖
-
-```bash
-# 返回项目根目录
-cd ..
-
-# 进入前端目录并安装依赖
-cd frontend
-npm install
-```
-
-#### 3) 构建前端
-
-```bash
-# 仍在 frontend 目录
-npm run build
-```
-
-#### 4) 启动后端服务
-
-```bash
-# 返回项目根目录
-cd ..
-
-# 进入后端目录
-cd backend
-
-# 确保激活虚拟环境
-source ../venv/bin/activate
-
-# 启动后端（在后台运行或新终端）
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 &
-```
-
-#### 5) 启动前端服务
-
-```bash
-# 进入前端目录（新终端或后台）
-cd ~/SimpleTavern/frontend
-
-# 启动预览服务器
-npm run preview -- --port 4173 --host &
-```
-
-#### 6) 访问应用
-
-打开浏览器访问：`http://localhost:4173`
-
-## 项目目录结构
-
-- `frontend/`：Vue3 前端
-- `backend/`：FastAPI 后端
-- `data/`：本地 JSON 数据（settings/characters/chats）
-- `venv/`：Python 虚拟环境（由部署脚本自动创建）
-- `deploy.py`：跨平台一键部署脚本（Python）
-- `deploy.sh`：Linux/macOS 一键部署脚本
-
-## 配置模型（OpenAI 兼容）
-
-在应用内「设置」里配置：
-- **Base URL**：例如 `https://api.openai.com` 或自建/第三方兼容网关地址
-- **API Key**：明文存储到 `data/settings.json`
-- **Model**：例如 `gpt-4o-mini`（视所用服务端支持情况而定）
-
-## 常见问题
-
-### 端口被占用
-
-如果 8000 或 4173 端口被占用，可以：
-
-1. **修改后端端口**：在启动命令中修改 `--port` 参数
-2. **修改前端端口**：在 `npm run preview` 命令中修改 `--port` 参数
-3. **关闭占用端口的程序**
-
-### Python 命令不存在
-
-- Windows：尝试使用 `py` 或 `python3`
-- Linux/macOS：确保已安装 Python 3，使用 `python3` 命令
-
-### npm 命令不存在
-
-确保已安装 Node.js，可以从 [nodejs.org](https://nodejs.org/) 下载安装。
-
-### 虚拟环境激活问题
-
-- Windows PowerShell：如果提示脚本执行策略问题，以管理员身份运行：
-  ```powershell
-  Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-  ```
-- Windows CMD：使用 `venv\Scripts\activate.bat` 代替
+---
 
 ## 许可证
 
-本项目采用 MIT 许可证。
-
-## 已知问题提示
-
-### Tailwind v4 的 `group-hover` 不生效
-
-如果出现按钮“悬停不显示”（例如侧边栏操作区、消息列表底部按钮等），请检查是否在 `frontend/src/styles/utilities.css` 中 **重复定义了 `opacity-*` 类**。  
-在 Tailwind v4 中，`group-hover:opacity-*` 生成的样式处于 CSS Layer，而 **无 Layer 的普通 CSS 会覆盖它**。  
-避免在非 Layer 的自定义 CSS 中覆盖 `opacity-*`，否则会导致 hover 透明度类失效。
+MIT License。
