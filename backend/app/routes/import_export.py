@@ -7,6 +7,10 @@
     - GET /chats/{chat_id}/export: 导出聊天会话（支持txt和json格式）
     - GET /settings/backup: 备份设置（支持basic/with_characters/with_chats三种范围）
     - POST /import: 导入数据（支持zip/json/txt格式）
+    - POST /import/janitor/pending: 暂存Janitor捕获的聊天数据
+    - GET /import/janitor/pending/{pending_id}: 获取Janitor待导入预览
+    - POST /import/janitor/confirm: 确认导入Janitor聊天到本地会话
+    - POST /import/janitor/character-html: 从JAI角色页HTML导入角色卡
 
 主要函数：
     - export_chat: 导出聊天会话
@@ -26,12 +30,15 @@ import io
 import json
 import re
 import zipfile
-from datetime import datetime
-from urllib.parse import quote
+from datetime import datetime, timedelta
+from urllib.parse import quote, urlparse
 from typing import Any
+from uuid import uuid4
+from urllib.request import Request, urlopen
 
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Body, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
+from pydantic import BaseModel
 
 from app.schemas import Chat, ChatMessage, CharacterCard, Settings
 from app.storage import (
@@ -42,6 +49,7 @@ from app.storage import (
     load_character,
     load_chat,
     load_settings,
+    save_avatar,
     save_character,
     save_chat,
     save_chat_memory,
@@ -49,6 +57,14 @@ from app.storage import (
 )
 
 router = APIRouter(tags=["import_export"])
+JANITOR_PENDING_TTL_SECONDS = 10 * 60
+_janitor_pending_store: dict[str, tuple[datetime, dict[str, Any]]] = {}
+
+
+class JanitorConfirmRequest(BaseModel):
+    pendingId: str
+    characterId: str
+    userPersonaId: str | None = None
 
 
 def _sanitize_filename(name: str, fallback: str) -> str:
@@ -66,6 +82,209 @@ def _sanitize_filename(name: str, fallback: str) -> str:
         return fallback
     safe = re.sub(r"[\\/:*?\"<>|]+", "_", name).strip()
     return safe or fallback
+
+
+def _cleanup_expired_janitor_pending() -> None:
+    now = datetime.now().astimezone()
+    expired = [pid for pid, (expire_at, _) in _janitor_pending_store.items() if expire_at <= now]
+    for pid in expired:
+        _janitor_pending_store.pop(pid, None)
+
+
+def _validate_janitor_payload(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail="janitor payload must be a json object")
+    messages = raw.get("chatMessages")
+    if not isinstance(messages, list):
+        raise HTTPException(status_code=400, detail="janitor payload missing chatMessages list")
+    if not messages:
+        raise HTTPException(status_code=400, detail="janitor chatMessages is empty")
+    return raw
+
+
+def _coalesce_janitor_character_name(raw: dict[str, Any]) -> str:
+    character = raw.get("character")
+    if not isinstance(character, dict):
+        return "Bot"
+    for key in ("chat_name", "name", "character_name", "displayName"):
+        value = character.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return "Bot"
+
+
+def _extract_message_text(raw_msg: dict[str, Any]) -> str:
+    message = raw_msg.get("message")
+    if isinstance(message, str):
+        return message.strip()
+    if isinstance(message, list):
+        for item in reversed(message):
+            if isinstance(item, str) and item.strip():
+                return item.strip()
+    content = raw_msg.get("content")
+    if isinstance(content, str):
+        return content.strip()
+    text = raw_msg.get("text")
+    if isinstance(text, str):
+        return text.strip()
+    return ""
+
+
+def _sorted_janitor_messages(raw: dict[str, Any]) -> list[dict[str, Any]]:
+    messages = [m for m in raw.get("chatMessages", []) if isinstance(m, dict)]
+    return sorted(messages, key=lambda m: str(m.get("created_at") or ""))
+
+
+def _janitor_preview_from_payload(raw: dict[str, Any]) -> dict[str, Any]:
+    sorted_messages = _sorted_janitor_messages(raw)
+    sample: list[dict[str, Any]] = []
+    for message in sorted_messages[:5]:
+        sample.append({
+            "role": "assistant" if bool(message.get("is_bot")) else "user",
+            "content": _extract_message_text(message),
+            "ts": message.get("created_at"),
+        })
+    return {
+        "botName": _coalesce_janitor_character_name(raw),
+        "messageCount": len(sorted_messages),
+        "sampleMessages": sample,
+    }
+
+
+def _resolve_persona_snapshot(settings: Settings, persona_id: str | None) -> tuple[str | None, str | None]:
+    if not persona_id:
+        return None, None
+    persona = next((p for p in settings.userPersonas if p.id == persona_id), None)
+    if not persona:
+        return None, None
+    return (persona.name or "用户"), (persona.avatar or None)
+
+
+def _janitor_title(raw: dict[str, Any]) -> str:
+    bot_name = _coalesce_janitor_character_name(raw)
+    return f"导入 - {bot_name}"
+
+
+def _janitor_messages_to_chat_messages(raw: dict[str, Any], character_id: str, persona_id: str | None, settings: Settings) -> list[ChatMessage]:
+    persona_name, persona_avatar = _resolve_persona_snapshot(settings, persona_id)
+    mapped: list[ChatMessage] = []
+    for raw_msg in _sorted_janitor_messages(raw):
+        content = _extract_message_text(raw_msg)
+        role = "assistant" if bool(raw_msg.get("is_bot")) else "user"
+        msg = ChatMessage(
+            role=role,  # type: ignore[arg-type]
+            content=content,
+            ts=str(raw_msg.get("created_at") or datetime.now().astimezone().isoformat()),
+            characterId=character_id if role == "assistant" else None,
+        )
+        if role == "user":
+            msg.senderPersonaId = persona_id
+            msg.senderName = persona_name
+            msg.senderAvatar = persona_avatar
+        mapped.append(msg)
+    return mapped
+
+
+def _strip_html(html: str) -> str:
+    cleaned = re.sub(r"<script[\s\S]*?</script>", "\n", html, flags=re.I)
+    cleaned = re.sub(r"<style[\s\S]*?</style>", "\n", cleaned, flags=re.I)
+    cleaned = re.sub(r"<br\s*/?>", "\n", cleaned, flags=re.I)
+    cleaned = re.sub(r"</(p|div|h1|h2|h3|h4|li|section|article)>", "\n", cleaned, flags=re.I)
+    cleaned = re.sub(r"<[^>]+>", "", cleaned)
+    cleaned = cleaned.replace("&nbsp;", " ").replace("&amp;", "&")
+    cleaned = re.sub(r"\r\n?", "\n", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
+def _extract_meta_content(html: str, keys: list[str]) -> str:
+    for key in keys:
+        pattern = rf'<meta[^>]+(?:property|name)=["\']{re.escape(key)}["\'][^>]+content=["\']([^"\']+)["\']'
+        match = re.search(pattern, html, flags=re.I)
+        if match and match.group(1).strip():
+            return match.group(1).strip()
+    return ""
+
+
+def _extract_labeled_block(text: str, labels: list[str], stop_labels: list[str]) -> str:
+    for label in labels:
+        stop = "|".join(re.escape(item) for item in stop_labels if item != label)
+        pattern = rf"{re.escape(label)}\s*[:：]?\s*(.+?)(?=\n(?:{stop})\s*[:：]?|\Z)"
+        match = re.search(pattern, text, flags=re.I | re.S)
+        if match and match.group(1).strip():
+            return match.group(1).strip()
+    return ""
+
+
+def _guess_image_ext(url: str, content_type: str | None) -> str:
+    suffix = urlparse(url).path.lower()
+    for ext in (".png", ".jpg", ".jpeg", ".gif", ".webp"):
+        if suffix.endswith(ext):
+            return ext.lstrip(".")
+    if content_type:
+        c = content_type.lower()
+        if "png" in c:
+            return "png"
+        if "gif" in c:
+            return "gif"
+        if "webp" in c:
+            return "webp"
+    return "jpg"
+
+
+def _download_avatar_from_url(image_url: str) -> str:
+    req = Request(image_url, headers={"User-Agent": "SimpleTavern/1.0"})
+    with urlopen(req, timeout=10) as resp:
+        payload = resp.read()
+        ext = _guess_image_ext(image_url, resp.headers.get("Content-Type"))
+    filename = f"{uuid4().hex}.{ext}"
+    save_avatar(filename, payload)
+    return filename
+
+
+def _parse_character_from_html(html: str) -> tuple[CharacterCard, list[str]]:
+    warnings: list[str] = []
+    text = _strip_html(html)
+    all_labels = ["Character Name", "Character Bio", "Bio", "Personality", "Scenario", "First Message", "First message"]
+
+    name = _extract_meta_content(html, ["og:title"]) or ""
+    if not name:
+        title_match = re.search(r"<title[^>]*>(.*?)</title>", html, flags=re.I | re.S)
+        if title_match:
+            name = re.sub(r"\s+", " ", title_match.group(1)).strip()
+    if not name:
+        name = _extract_labeled_block(text, ["Character Name", "Name", "角色名称"], all_labels)
+    if not name:
+        name = "新角色"
+        warnings.append("未识别到角色名称，已使用默认名称")
+
+    description = _extract_labeled_block(text, ["Character Bio", "Bio", "简介"], all_labels)
+    personality = _extract_labeled_block(text, ["Personality"], all_labels)
+    scenario = _extract_labeled_block(text, ["Scenario"], all_labels)
+    first_message = _extract_labeled_block(text, ["First Message", "First message", "首句"], all_labels)
+
+    avatar_url = _extract_meta_content(html, ["og:image", "twitter:image"])
+    if not avatar_url:
+        img_match = re.search(r'<img[^>]+src=["\'](https?://[^"\']+)["\']', html, flags=re.I)
+        if img_match:
+            avatar_url = img_match.group(1)
+
+    card = CharacterCard(
+        name=name,
+        description=description,
+        personality=personality,
+        scenario=scenario,
+        firstMessage=first_message,
+    )
+
+    if avatar_url:
+        try:
+            card.avatar = _download_avatar_from_url(avatar_url)
+        except Exception:
+            warnings.append("角色图片下载失败，已跳过头像")
+    else:
+        warnings.append("未识别到角色图片链接")
+    return card, warnings
 
 
 def _content_disposition(filename: str) -> str:
@@ -725,6 +944,82 @@ def _import_from_zip(payload: bytes) -> dict[str, Any]:
             except Exception:
                 continue
     return {"imported": imported, "warnings": warnings}
+
+
+@router.post("/import/janitor/pending")
+def import_janitor_pending(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    _cleanup_expired_janitor_pending()
+    raw = _validate_janitor_payload(payload)
+    pending_id = uuid4().hex
+    expires_at = datetime.now().astimezone() + timedelta(seconds=JANITOR_PENDING_TTL_SECONDS)
+    expires_at = expires_at.replace(microsecond=0)
+    _janitor_pending_store[pending_id] = (expires_at, raw)
+    return {
+        "ok": True,
+        "pendingId": pending_id,
+        "expiresAt": expires_at.isoformat(),
+    }
+
+
+@router.get("/import/janitor/pending/{pending_id}")
+def get_janitor_pending_preview(pending_id: str) -> dict[str, Any]:
+    _cleanup_expired_janitor_pending()
+    item = _janitor_pending_store.get(pending_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="janitor pending not found or expired")
+    _, raw = item
+    return {"ok": True, "preview": _janitor_preview_from_payload(raw)}
+
+
+@router.post("/import/janitor/confirm")
+def confirm_janitor_import(req: JanitorConfirmRequest) -> dict[str, Any]:
+    _cleanup_expired_janitor_pending()
+    item = _janitor_pending_store.get(req.pendingId)
+    if not item:
+        raise HTTPException(status_code=404, detail="janitor pending not found or expired")
+    _, raw = item
+    if not req.characterId.strip():
+        raise HTTPException(status_code=400, detail="characterId is required")
+    settings = load_settings()
+    chat = Chat(
+        characterId=req.characterId,
+        title=_janitor_title(raw),
+        userPersonaId=req.userPersonaId,
+        messages=_janitor_messages_to_chat_messages(raw, req.characterId, req.userPersonaId, settings),
+    )
+    saved = save_chat(chat)
+    _janitor_pending_store.pop(req.pendingId, None)
+    return {
+        "ok": True,
+        "imported": ["chat"],
+        "warnings": [],
+        "chat": saved.model_dump(mode="json"),
+    }
+
+
+@router.post("/import/janitor/character-html")
+async def import_janitor_character_html(file: UploadFile = File(...)) -> dict[str, Any]:
+    payload = await file.read()
+    if not payload:
+        raise HTTPException(status_code=400, detail="empty file")
+    try:
+        html = payload.decode("utf-8")
+    except Exception:
+        html = payload.decode("utf-8", errors="ignore")
+    try:
+        card, warnings = _parse_character_from_html(html)
+        saved = save_character(card)
+        return {
+            "ok": True,
+            "imported": ["character"],
+            "warnings": warnings,
+            "characterId": saved.id,
+            "characterName": saved.name,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.post("/import")
