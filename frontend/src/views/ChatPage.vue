@@ -72,6 +72,7 @@ import {
   useGroupChat, 
   useAssistant,
   useChatActions,
+  useSettingsImport,
 } from '../composables'
 
 // 子组件
@@ -102,6 +103,7 @@ const characters = useCharactersStore()
 const chats = useChatsStore()
 const route = useRoute()
 const router = useRouter()
+const { refreshDataAfterImport } = useSettingsImport()
 
 // ========== 页面级状态 ==========
 const selectedCharacterId = ref<string | null>(null)
@@ -117,7 +119,10 @@ const showSettings = ref(false)
 const showGroupSettings = ref(false)
 const showExportModal = ref(false)
 const showImportModal = ref(false)
+/** 与 sessionStorage 同步，避免扩展跳转或仅带 janitorCharImport 的 URL 时丢失聊天暂存 id */
+const JANITOR_CHAT_PENDING_STORAGE_KEY = 'simpletavern:janitorChatPendingId'
 const janitorPendingId = ref<string | null>(null)
+const janitorPendingReloadNonce = ref(0)
 const settingsTab = ref<'global' | 'presets' | 'chat'>('global')
 const isGenerating = ref(false)
 const streamError = ref<string | null>(null)
@@ -809,6 +814,10 @@ function isAbortError(e: any) {
  * 如果没有选中角色，则自动选中第一个角色。
  */
 onMounted(async () => {
+  if (!janitorPendingId.value) {
+    const stored = sessionStorage.getItem(JANITOR_CHAT_PENDING_STORAGE_KEY)
+    if (stored?.trim()) janitorPendingId.value = stored.trim()
+  }
   if (!settings.settings) await settings.load()
   await characters.loadAll()
   await chats.loadGroupList()
@@ -839,11 +848,59 @@ watch(
   () => route.query.janitorPending,
   (pending) => {
     if (typeof pending !== 'string' || !pending.trim()) return
-    janitorPendingId.value = pending.trim()
+    const id = pending.trim()
+    janitorPendingId.value = id
+    try {
+      sessionStorage.setItem(JANITOR_CHAT_PENDING_STORAGE_KEY, id)
+    } catch {
+      // ignore quota / private mode
+    }
     showImportModal.value = true
     const query = { ...route.query }
     delete query.janitorPending
     void router.replace({ query })
+  },
+  { immediate: true },
+)
+
+watch(
+  () => route.query.janitorCharImport,
+  async (flag) => {
+    if (flag !== '1' && flag !== 'ok') return
+    if (!janitorPendingId.value) {
+      try {
+        const stored = sessionStorage.getItem(JANITOR_CHAT_PENDING_STORAGE_KEY)
+        if (stored?.trim()) janitorPendingId.value = stored.trim()
+      } catch {
+        // ignore
+      }
+    }
+    const cname = route.query.janitorCharName
+    const wraw = route.query.janitorCharWarnings
+    showImportModal.value = true
+    const query = { ...route.query }
+    delete query.janitorCharImport
+    delete query.janitorCharId
+    delete query.janitorCharName
+    delete query.janitorCharWarnings
+    void router.replace({ query })
+    await refreshDataAfterImport()
+    if (janitorPendingId.value) {
+      janitorPendingReloadNonce.value++
+    }
+    let warnSuffix = ''
+    if (typeof wraw === 'string' && wraw.trim()) {
+      try {
+        const arr = JSON.parse(wraw) as unknown
+        if (Array.isArray(arr) && arr.length) {
+          warnSuffix = '\n警告：' + arr.map((x) => String(x)).join('; ')
+        }
+      } catch {
+        warnSuffix = '\n警告：' + wraw
+      }
+    }
+    const name = typeof cname === 'string' && cname.trim() ? cname.trim() : '已创建角色'
+    alert(`角色导入完成：${name}${warnSuffix}`)
   },
   { immediate: true },
 )
@@ -1994,6 +2051,11 @@ async function selectChat(chat: Chat) {
 
 async function handleJanitorImported(payload: { chatId: string; characterId: string | null; openAfterImport: boolean }) {
   janitorPendingId.value = null
+  try {
+    sessionStorage.removeItem(JANITOR_CHAT_PENDING_STORAGE_KEY)
+  } catch {
+    // ignore
+  }
   if (!payload.openAfterImport) return
   if (payload.characterId) {
     selectedCharacterId.value = payload.characterId
@@ -2747,6 +2809,8 @@ const editingPersonaAvatarUrl = computed(() => {
       :characters="characters.list"
       :personas="settings.settings?.userPersonas || []"
       :pending-id="janitorPendingId"
+      :pending-reload-nonce="janitorPendingReloadNonce"
+      :push-error="(p) => errorStack.pushError(p)"
       @janitor-imported="handleJanitorImported"
     />
 

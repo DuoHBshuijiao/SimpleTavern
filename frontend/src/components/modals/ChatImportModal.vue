@@ -5,6 +5,50 @@ import { useSettingsImport } from '../../composables/useSettingsImport'
 import type { CharacterCard, Chat, UserPersona } from '../../types/models'
 import ModernSelect from '../ModernSelect.vue'
 
+declare global {
+  interface Window {
+    __ST_JANITOR_BRIDGE_INSTALLED__?: boolean
+  }
+}
+
+/** 由仓库内 Janitor Bridge 扩展在应用页注入，用于判断是否已安装并启用该扩展。 */
+function isJanitorBridgeInstalled(): boolean {
+  return typeof window !== 'undefined' && window.__ST_JANITOR_BRIDGE_INSTALLED__ === true
+}
+
+const JANITOR_BRIDGE_EXT_REL_PATH = 'extensions/simpletavern-janitor-bridge'
+
+function getExtensionsManageUrlHint(): string {
+  const ua = navigator.userAgent
+  if (/\bEdg\//.test(ua) || /\bEdgA\//.test(ua) || /\bEdgiOS\//.test(ua)) return 'edge://extensions'
+  return 'chrome://extensions'
+}
+
+function buildJanitorBridgeMissingMessage(): string {
+  const addr = getExtensionsManageUrlHint()
+  return [
+    '未检测到「SimpleTavern Janitor Bridge」浏览器扩展，无法从 Janitor 页面抓取数据。',
+    '',
+    '请在本地仓库中「加载已解压的扩展」，目录为（相对仓库根）：',
+    JANITOR_BRIDGE_EXT_REL_PATH,
+    '',
+    '在浏览器地址栏输入并打开以下地址以进入扩展管理页：',
+    addr,
+  ].join('\n')
+}
+
+/** 未检测到扩展时走与主聊天一致的错误栈（ErrorModal），无回调时退回 alert。 */
+function notifyJanitorBridgeMissingIfNeeded(): void {
+  if (isJanitorBridgeInstalled()) return
+  const message = buildJanitorBridgeMissingMessage()
+  const title = '未安装 Janitor Bridge 扩展'
+  if (props.pushError) {
+    props.pushError({ message, source: 'main', title })
+  } else {
+    alert(`${title}\n\n${message}`)
+  }
+}
+
 interface JanitorPendingPreviewMessage {
   role: 'assistant' | 'user'
   content: string
@@ -28,6 +72,10 @@ const props = defineProps<{
   characters: CharacterCard[]
   personas: UserPersona[]
   pendingId?: string | null
+  /** 父级在「仅角色导入完成」等场景递增，用于在不丢失 pendingId 时刷新聊天预览 */
+  pendingReloadNonce?: number
+  /** 与 ChatPage 的 errorStack.pushError 一致，用于未安装扩展时的右下角错误提示 */
+  pushError?: (payload: { message: unknown; source: 'main' | 'assistant'; title?: string }) => void
 }>()
 
 const emit = defineEmits<{
@@ -38,7 +86,6 @@ const emit = defineEmits<{
 const { importSettingsFile, refreshDataAfterImport, formatImportResultMessage } = useSettingsImport()
 
 const importInputRef = ref<HTMLInputElement | null>(null)
-const htmlInputRef = ref<HTMLInputElement | null>(null)
 
 const janitorLink = ref('')
 const openAfterImport = ref(true)
@@ -48,7 +95,7 @@ const pendingPreview = ref<JanitorPendingPreview | null>(null)
 const selectedCharacterId = ref('')
 const selectedPersonaId = ref('')
 const janitorConfirming = ref(false)
-const htmlImporting = ref(false)
+const jaiCharacterUrl = ref('')
 
 const personaOptions = computed(() => [
   { label: '（不指定 Persona）', value: '' },
@@ -58,6 +105,8 @@ const personaOptions = computed(() => [
 const characterOptions = computed(() =>
   props.characters.map((c) => ({ label: c.name || c.id, value: c.id })),
 )
+
+const characterListKey = computed(() => props.characters.map((c) => c.id).join(','))
 
 watch(
   () => props.show,
@@ -83,16 +132,22 @@ watch(
   },
 )
 
+watch(
+  () => props.pendingReloadNonce,
+  (n, prev) => {
+    if (n == null || n === prev) return
+    if (props.show && props.pendingId) {
+      void loadPendingPreview(props.pendingId)
+    }
+  },
+)
+
 function close() {
   emit('update:show', false)
 }
 
 function triggerImport() {
   importInputRef.value?.click()
-}
-
-function triggerHtmlImport() {
-  htmlInputRef.value?.click()
 }
 
 async function handleImportChange(e: Event) {
@@ -130,6 +185,31 @@ async function openJanitorLinkAndTryCapture() {
   parsed.searchParams.set('_st_import', '1')
   parsed.searchParams.set('_st_ts', String(Date.now()))
   parsed.searchParams.set('_st_app_base', window.location.origin)
+  notifyJanitorBridgeMissingIfNeeded()
+  window.open(parsed.toString(), '_blank')
+}
+
+async function openJaiCharacterUrlAndCapture() {
+  const raw = jaiCharacterUrl.value.trim()
+  if (!raw) {
+    alert('请先填写 JanitorAI 角色页链接。')
+    return
+  }
+  let parsed: URL
+  try {
+    parsed = new URL(raw)
+  } catch {
+    alert('链接格式无效。')
+    return
+  }
+  if (!/(\.|^)janitorai\.com$/i.test(parsed.hostname)) {
+    alert('仅支持 JanitorAI 链接。')
+    return
+  }
+  parsed.searchParams.set('_st_char_html', '1')
+  parsed.searchParams.set('_st_ts', String(Date.now()))
+  parsed.searchParams.set('_st_app_base', window.location.origin)
+  notifyJanitorBridgeMissingIfNeeded()
   window.open(parsed.toString(), '_blank')
 }
 
@@ -185,39 +265,13 @@ async function confirmJanitorImport() {
     janitorConfirming.value = false
   }
 }
-
-async function handleCharacterHtmlChange(e: Event) {
-  const input = e.target as HTMLInputElement
-  const file = input.files?.[0]
-  if (!file) return
-  htmlImporting.value = true
-  try {
-    const fd = new FormData()
-    fd.append('file', file)
-    const r = await fetch('/api/import/janitor/character-html', {
-      method: 'POST',
-      body: fd,
-    })
-    if (!r.ok) {
-      throw new Error(await r.text())
-    }
-    const result = (await r.json()) as { characterName?: string; warnings?: string[] }
-    await refreshDataAfterImport()
-    alert(`角色导入完成：${result.characterName || '已创建角色'}${result.warnings?.length ? '\n警告：' + result.warnings.join('; ') : ''}`)
-  } catch (err) {
-    alert(err instanceof Error ? err.message : String(err))
-  } finally {
-    htmlImporting.value = false
-    input.value = ''
-  }
-}
 </script>
 
 <template>
   <Transition name="modal">
     <div v-if="show" class="modal">
       <div class="modal-backdrop" @click="close"></div>
-      <div class="modal-content chat-modal-width-900-90 glass-panel theme-panel-bg backdrop-blur-2xl backdrop-saturate-[1.8] border border-[var(--color-border)]">
+      <div class="modal-content chat-modal-width-568-90 min-w-0 glass-panel theme-panel-bg backdrop-blur-2xl backdrop-saturate-[1.8] border border-[var(--color-border)]">
         <div class="modal-header border-b border-[var(--color-border-subtle)]">
           <h3 class="modal-title text-[var(--color-text)]">导入</h3>
           <button class="modal-close text-[var(--color-text-muted)] hover:text-[var(--color-text)]" @click="close">×</button>
@@ -255,15 +309,19 @@ async function handleCharacterHtmlChange(e: Event) {
                 <div v-if="pendingPreview" class="mt-2 space-y-2 text-xs text-[var(--color-text-muted)]">
                   <div>角色名：<span class="text-[var(--color-text)]">{{ pendingPreview.botName || '未知' }}</span></div>
                   <div>消息数：<span class="text-[var(--color-text)]">{{ pendingPreview.messageCount }}</span></div>
-                  <div v-if="pendingPreview.sampleMessages?.length" class="space-y-1">
+                  <div v-if="pendingPreview.sampleMessages?.length" class="mt-1">
                     <div class="text-[var(--color-text-secondary)]">预览：</div>
                     <div
-                      v-for="(item, idx) in pendingPreview.sampleMessages"
-                      :key="`${item.role}_${idx}`"
-                      class="rounded-md border border-[var(--color-border-subtle)] bg-[var(--color-surface-muted)] px-2 py-1"
+                      class="mt-1 flex gap-2 items-stretch rounded-lg border border-[var(--color-border)] bg-surface-overlay shadow-lg max-h-48 overflow-x-auto overflow-y-hidden px-2 py-1"
                     >
-                      <span class="text-[var(--color-text-secondary)]">{{ item.role === 'assistant' ? '角色' : '用户' }}：</span>
-                      <span>{{ item.content }}</span>
+                      <div
+                        v-for="(item, idx) in pendingPreview.sampleMessages"
+                        :key="`${item.role}_${idx}`"
+                        class="shrink-0 flex flex-col w-[200px] h-[140px] min-h-0 min-w-0 px-3 py-2 text-xs border border-[var(--color-border-subtle)] rounded-md bg-[var(--color-surface-muted)] text-left"
+                      >
+                        <span class="text-[var(--color-text-secondary)] shrink-0 mb-1">{{ item.role === 'assistant' ? '角色' : '用户' }}</span>
+                        <div class="text-[var(--color-text-muted)] min-h-0 flex-1 overflow-hidden line-clamp-6 break-words">{{ item.content }}</div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -273,6 +331,7 @@ async function handleCharacterHtmlChange(e: Event) {
                 <div>
                   <div class="mb-1 text-xs text-[var(--color-text-muted)]">目标角色</div>
                   <ModernSelect
+                    :key="characterListKey"
                     :model-value="selectedCharacterId"
                     :options="characterOptions"
                     placeholder="选择角色"
@@ -305,15 +364,17 @@ async function handleCharacterHtmlChange(e: Event) {
             </section>
 
             <section class="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface-muted)] p-4">
-              <h4 class="text-sm font-medium text-[var(--color-text-secondary)]">导入 JAI 角色 HTML</h4>
+              <h4 class="text-sm font-medium text-[var(--color-text-secondary)]">导入 JAI 角色（链接）</h4>
               <p class="mt-2 text-xs text-[var(--color-text-muted)]">
-                上传完整角色页 HTML，自动提取名称、简介、Personality、Scenario、首句与角色图片。
+                填写 JanitorAI 公开角色页链接后在新标签页打开；已安装的「SimpleTavern Janitor Bridge」扩展会抓取页面 HTML 并提交到本地，自动提取名称、简介、Personality、Scenario、首句与角色图片。
               </p>
-              <div class="mt-3">
-                <button class="btn btn-sm btn-secondary" :disabled="htmlImporting" @click="triggerHtmlImport">
-                  {{ htmlImporting ? '导入中...' : '选择 HTML 文件' }}
-                </button>
-                <input ref="htmlInputRef" type="file" class="hidden" accept=".html,.htm,text/html" @change="handleCharacterHtmlChange" />
+              <div class="mt-3 flex gap-2">
+                <input
+                  v-model="jaiCharacterUrl"
+                  class="input flex-1"
+                  placeholder="https://janitorai.com/characters/..."
+                />
+                <button class="btn btn-sm btn-secondary" @click="openJaiCharacterUrlAndCapture">打开并抓取</button>
               </div>
             </section>
           </div>

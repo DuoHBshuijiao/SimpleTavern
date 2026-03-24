@@ -64,6 +64,12 @@
     width: min(500px, 90vw);
   }
 
+  /* 导入弹窗：与常见会话区侧栏宽度接近，避免预览长消息时整窗被横向撑开 */
+  .chat-modal-width-568-90 {
+    width: min(568px, 90vw);
+    max-width: 90vw;
+  }
+
   /* ========== 基础弹窗样式 ========== */
   .modal {
     position: fixed;
