@@ -7,10 +7,10 @@
     - GET /chats/{chat_id}/export: 导出聊天会话（支持txt和json格式）
     - GET /settings/backup: 备份设置（支持basic/with_characters/with_chats三种范围）
     - POST /import: 导入数据（支持zip/json/txt格式）
-    - POST /import/janitor/pending: 暂存Janitor捕获的聊天数据
+    - POST /import/janitor/pending: 暂存Janitor捕获的聊天数据（独立字典，与角色 HTML 导入无关）
     - GET /import/janitor/pending/{pending_id}: 获取Janitor待导入预览
     - POST /import/janitor/confirm: 确认导入Janitor聊天到本地会话
-    - POST /import/janitor/character-html: 从JAI角色页HTML导入角色卡
+    - POST /import/janitor/character-html: 从JAI角色页HTML导入角色卡（multipart 文件或 JSON 体 {"html": "..."}）
 
 主要函数：
     - export_chat: 导出聊天会话
@@ -36,7 +36,7 @@ from typing import Any
 from uuid import uuid4
 from urllib.request import Request, urlopen
 
-from fastapi import APIRouter, Body, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Body, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
 
@@ -57,8 +57,9 @@ from app.storage import (
 )
 
 router = APIRouter(tags=["import_export"])
-JANITOR_PENDING_TTL_SECONDS = 10 * 60
-_janitor_pending_store: dict[str, tuple[datetime, dict[str, Any]]] = {}
+JANITOR_CHAT_PENDING_TTL_SECONDS = 10 * 60
+# 仅暂存 Janitor「聊天」捕获；角色 HTML 导入走独立接口，不写入此字典。
+_janitor_chat_pending_store: dict[str, tuple[datetime, dict[str, Any]]] = {}
 
 
 class JanitorConfirmRequest(BaseModel):
@@ -84,11 +85,11 @@ def _sanitize_filename(name: str, fallback: str) -> str:
     return safe or fallback
 
 
-def _cleanup_expired_janitor_pending() -> None:
+def _cleanup_expired_janitor_chat_pending() -> None:
     now = datetime.now().astimezone()
-    expired = [pid for pid, (expire_at, _) in _janitor_pending_store.items() if expire_at <= now]
+    expired = [pid for pid, (expire_at, _) in _janitor_chat_pending_store.items() if expire_at <= now]
     for pid in expired:
-        _janitor_pending_store.pop(pid, None)
+        _janitor_chat_pending_store.pop(pid, None)
 
 
 def _validate_janitor_payload(raw: Any) -> dict[str, Any]:
@@ -948,12 +949,12 @@ def _import_from_zip(payload: bytes) -> dict[str, Any]:
 
 @router.post("/import/janitor/pending")
 def import_janitor_pending(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
-    _cleanup_expired_janitor_pending()
+    _cleanup_expired_janitor_chat_pending()
     raw = _validate_janitor_payload(payload)
     pending_id = uuid4().hex
-    expires_at = datetime.now().astimezone() + timedelta(seconds=JANITOR_PENDING_TTL_SECONDS)
+    expires_at = datetime.now().astimezone() + timedelta(seconds=JANITOR_CHAT_PENDING_TTL_SECONDS)
     expires_at = expires_at.replace(microsecond=0)
-    _janitor_pending_store[pending_id] = (expires_at, raw)
+    _janitor_chat_pending_store[pending_id] = (expires_at, raw)
     return {
         "ok": True,
         "pendingId": pending_id,
@@ -963,8 +964,8 @@ def import_janitor_pending(payload: dict[str, Any] = Body(...)) -> dict[str, Any
 
 @router.get("/import/janitor/pending/{pending_id}")
 def get_janitor_pending_preview(pending_id: str) -> dict[str, Any]:
-    _cleanup_expired_janitor_pending()
-    item = _janitor_pending_store.get(pending_id)
+    _cleanup_expired_janitor_chat_pending()
+    item = _janitor_chat_pending_store.get(pending_id)
     if not item:
         raise HTTPException(status_code=404, detail="janitor pending not found or expired")
     _, raw = item
@@ -973,8 +974,8 @@ def get_janitor_pending_preview(pending_id: str) -> dict[str, Any]:
 
 @router.post("/import/janitor/confirm")
 def confirm_janitor_import(req: JanitorConfirmRequest) -> dict[str, Any]:
-    _cleanup_expired_janitor_pending()
-    item = _janitor_pending_store.get(req.pendingId)
+    _cleanup_expired_janitor_chat_pending()
+    item = _janitor_chat_pending_store.get(req.pendingId)
     if not item:
         raise HTTPException(status_code=404, detail="janitor pending not found or expired")
     _, raw = item
@@ -988,7 +989,7 @@ def confirm_janitor_import(req: JanitorConfirmRequest) -> dict[str, Any]:
         messages=_janitor_messages_to_chat_messages(raw, req.characterId, req.userPersonaId, settings),
     )
     saved = save_chat(chat)
-    _janitor_pending_store.pop(req.pendingId, None)
+    _janitor_chat_pending_store.pop(req.pendingId, None)
     return {
         "ok": True,
         "imported": ["chat"],
@@ -997,25 +998,49 @@ def confirm_janitor_import(req: JanitorConfirmRequest) -> dict[str, Any]:
     }
 
 
-@router.post("/import/janitor/character-html")
-async def import_janitor_character_html(file: UploadFile = File(...)) -> dict[str, Any]:
-    payload = await file.read()
+def _decode_character_html_bytes(payload: bytes) -> str:
     if not payload:
-        raise HTTPException(status_code=400, detail="empty file")
+        raise HTTPException(status_code=400, detail="empty html")
     try:
-        html = payload.decode("utf-8")
+        return payload.decode("utf-8")
     except Exception:
-        html = payload.decode("utf-8", errors="ignore")
+        return payload.decode("utf-8", errors="ignore")
+
+
+def _import_character_from_html_string(html: str) -> dict[str, Any]:
+    card, warnings = _parse_character_from_html(html)
+    saved = save_character(card)
+    return {
+        "ok": True,
+        "imported": ["character"],
+        "warnings": warnings,
+        "characterId": saved.id,
+        "characterName": saved.name,
+    }
+
+
+@router.post("/import/janitor/character-html")
+async def import_janitor_character_html(request: Request, file: UploadFile | None = File(None)) -> dict[str, Any]:
+    ct = (request.headers.get("content-type") or "").lower()
+    html: str
+    if "application/json" in ct:
+        try:
+            body = await request.json()
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"invalid json: {e}") from e
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail="json body must be an object")
+        raw_html = body.get("html")
+        if not isinstance(raw_html, str) or not raw_html.strip():
+            raise HTTPException(status_code=400, detail="html is required")
+        html = raw_html
+    else:
+        if file is None:
+            raise HTTPException(status_code=400, detail="file is required for multipart upload")
+        payload = await file.read()
+        html = _decode_character_html_bytes(payload)
     try:
-        card, warnings = _parse_character_from_html(html)
-        saved = save_character(card)
-        return {
-            "ok": True,
-            "imported": ["character"],
-            "warnings": warnings,
-            "characterId": saved.id,
-            "characterName": saved.name,
-        }
+        return _import_character_from_html_string(html)
     except HTTPException:
         raise
     except Exception as e:
