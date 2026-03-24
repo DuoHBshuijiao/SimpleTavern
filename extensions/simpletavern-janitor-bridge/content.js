@@ -5,11 +5,13 @@
   const APP_BASE_PARAM = '_st_app_base';
   const DEFAULT_API_BASE = 'http://127.0.0.1:8000';
   const DEFAULT_APP_BASE = 'http://127.0.0.1:5173';
+  const CHAR_HTML_PARAM = '_st_char_html';
   const state = {
     sent: false,
     sending: false,
     lastSignature: '',
-    activated: false,
+    chatActivated: false,
+    charHtmlActivated: false,
     appBaseHint: '',
   };
 
@@ -64,26 +66,32 @@
   function resolveActivation() {
     try {
       const u = new URL(window.location.href);
-      state.activated = u.searchParams.get(ACTIVATE_PARAM) === '1';
+      state.charHtmlActivated = u.searchParams.get(CHAR_HTML_PARAM) === '1';
+      state.chatActivated = !state.charHtmlActivated && u.searchParams.get(ACTIVATE_PARAM) === '1';
       state.appBaseHint = (u.searchParams.get(APP_BASE_PARAM) || '').replace(/\/+$/, '');
-      if (state.activated) {
-        // 清理 URL 标记，避免用户刷新后重复触发
+      if (state.charHtmlActivated || state.chatActivated) {
+        u.searchParams.delete(CHAR_HTML_PARAM);
         u.searchParams.delete(ACTIVATE_PARAM);
         u.searchParams.delete('_st_ts');
         u.searchParams.delete(APP_BASE_PARAM);
         history.replaceState(null, '', u.toString());
-        logInfo('capture armed for this page', state.appBaseHint ? `(appBase=${state.appBaseHint})` : '');
+        if (state.charHtmlActivated) {
+          logInfo('character HTML capture armed', state.appBaseHint ? `(appBase=${state.appBaseHint})` : '');
+        } else {
+          logInfo('chat capture armed for this page', state.appBaseHint ? `(appBase=${state.appBaseHint})` : '');
+        }
       } else {
-        logInfo('capture idle (no _st_import=1)');
+        logInfo('capture idle (no _st_import / _st_char_html)');
       }
     } catch (err) {
-      state.activated = false;
+      state.chatActivated = false;
+      state.charHtmlActivated = false;
       logWarn('failed to resolve activation', err);
     }
   }
 
   async function sendPending(payload) {
-    if (!state.activated) return;
+    if (!state.chatActivated) return;
     if (state.sent || state.sending) return;
     state.sending = true;
     try {
@@ -104,7 +112,7 @@
         throw new Error('pendingId missing');
       }
       state.sent = true;
-      state.activated = false;
+      state.chatActivated = false;
       const targetUrl = `${openBase}/chat?janitorPending=${encodeURIComponent(pendingId)}`;
       chrome.runtime.sendMessage({ type: 'open-simpletavern', url: targetUrl }, () => {
         if (chrome.runtime.lastError) {
@@ -122,8 +130,74 @@
     }
   }
 
+  async function sendCharacterHtml() {
+    if (!state.charHtmlActivated) return;
+    if (state.sent || state.sending) return;
+    state.sending = true;
+    try {
+      const { apiBaseUrl, appBaseUrl } = await getConfig();
+      const openBase = (state.appBaseHint || appBaseUrl || DEFAULT_APP_BASE).replace(/\/+$/, '');
+      const html = document.documentElement.outerHTML;
+      if (!html || html.length < 200) {
+        throw new Error('页面 HTML 过短，可能尚未加载完成，请稍后重试');
+      }
+      logInfo('posting character page HTML to', `${apiBaseUrl}/api/import/janitor/character-html`);
+      const resp = await fetch(`${apiBaseUrl}/api/import/janitor/character-html`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ html }),
+      });
+      if (!resp.ok) {
+        throw new Error(await resp.text());
+      }
+      const result = await resp.json();
+      const characterId = result?.characterId;
+      const characterName = result?.characterName || '';
+      const warnings = Array.isArray(result?.warnings) ? result.warnings : [];
+      state.sent = true;
+      state.charHtmlActivated = false;
+      const q = new URLSearchParams();
+      q.set('janitorCharImport', '1');
+      if (characterId) q.set('janitorCharId', String(characterId));
+      if (characterName) q.set('janitorCharName', characterName);
+      if (warnings.length) {
+        try {
+          q.set('janitorCharWarnings', JSON.stringify(warnings));
+        } catch (_) {
+          // ignore oversized / invalid
+        }
+      }
+      const targetUrl = `${openBase}/chat?${q.toString()}`;
+      chrome.runtime.sendMessage({ type: 'open-simpletavern', url: targetUrl }, () => {
+        if (chrome.runtime.lastError) {
+          logWarn('open-simpletavern message failed', chrome.runtime.lastError.message);
+          return;
+        }
+        logInfo('character imported, requested app open');
+      });
+    } catch (err) {
+      state.sent = false;
+      logWarn('send character html failed', err);
+    } finally {
+      state.sending = false;
+    }
+  }
+
+  function scheduleCharacterHtmlCapture() {
+    if (!state.charHtmlActivated) return;
+    const delayMs = 2500;
+    const run = () => {
+      void sendCharacterHtml();
+    };
+    if (document.readyState === 'complete') {
+      window.setTimeout(run, delayMs);
+    } else {
+      window.addEventListener('load', () => window.setTimeout(run, delayMs), { once: true });
+    }
+  }
+
   window.addEventListener('message', (event) => {
-    if (!state.activated) return;
+    if (!state.chatActivated) return;
     const data = event.data;
     if (!data || data.source !== CHANNEL) return;
     const payload = parseCandidate(data.data);
@@ -136,5 +210,10 @@
   });
 
   resolveActivation();
-  injectScript();
+  if (state.chatActivated) {
+    injectScript();
+  }
+  if (state.charHtmlActivated) {
+    scheduleCharacterHtmlCapture();
+  }
 })();
