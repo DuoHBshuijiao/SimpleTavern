@@ -41,10 +41,49 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Literal, TypedDict
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh"]
+
+
+class ReasoningRequestConfig(TypedDict):
+    effort: ReasoningEffort
+    thinking_enabled: bool
+    extra_body: dict[str, Any]
+
+
+def normalize_reasoning_effort(raw: Any) -> ReasoningEffort:
+    """
+    归一化 reasoning effort 字段，兼容历史/别名值。
+    """
+    if isinstance(raw, str):
+        normalized = raw.strip().lower().replace(" ", "_")
+        if normalized == "extra_high":
+            return "xhigh"
+        if normalized in {"none", "minimal", "low", "medium", "high", "xhigh"}:
+            return normalized  # type: ignore[return-value]
+    return "none"
+
+
+def build_reasoning_request_config(settings: "Settings") -> ReasoningRequestConfig:
+    """
+    从设置构建统一的推理请求配置（开关 + extra_body）。
+    """
+    effort = normalize_reasoning_effort(getattr(settings, "reasoningEffort", "none"))
+    thinking_enabled = effort != "none"
+    return {
+        "effort": effort,
+        "thinking_enabled": thinking_enabled,
+        "extra_body": {
+            "thinking": {"type": "enabled" if thinking_enabled else "disabled"},
+            "reasoning": {"effort": effort},
+            "reasoning_effort": effort,
+        },
+    }
 
 
 def _now_iso() -> str:
@@ -202,13 +241,30 @@ class Settings(BaseModel):
     streamEnabled: bool = True
     themeId: str | None = None
     pureAiMode: bool = False
-    thinkingMode: bool = False  # 思考模式：True 时 extra_body 传 {"thinking": {"type": "enabled"}}，否则传 disabled
+    reasoningEffort: ReasoningEffort = "none"  # 统一思考档位，none 时关闭，其余档位开启
     userPersonas: list[UserPersona] = Field(default_factory=list)
     selectedPersonaId: str | None = None
     selectedFont: str | None = None  # 当前选中的自定义字体文件名，存于 data/fonts，不随备份导出
     messageFontSize: int | None = None  # 聊天窗口内消息文字字号（仅作用于消息气泡内容）
     createdAt: str = Field(default_factory=_now_iso)
     updatedAt: str = Field(default_factory=_now_iso)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_thinking_mode(cls, data: Any) -> Any:
+        """
+        兼容旧版 thinkingMode 布尔配置，统一迁移到 reasoningEffort。
+        """
+        if not isinstance(data, dict):
+            return data
+        incoming = dict(data)
+        if incoming.get("reasoningEffort") is None:
+            legacy = bool(incoming.pop("thinkingMode", False))
+            incoming["reasoningEffort"] = "medium" if legacy else "none"
+        else:
+            incoming["reasoningEffort"] = normalize_reasoning_effort(incoming.get("reasoningEffort"))
+            incoming.pop("thinkingMode", None)
+        return incoming
 
 
 class AssistantSettings(BaseModel):
