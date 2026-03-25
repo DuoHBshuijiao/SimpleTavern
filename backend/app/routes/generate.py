@@ -33,6 +33,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from app.llm.openai_compat import chat_completions, chat_completions_message, stream_chat_completions
 from app.placeholders import replace_placeholders_in_text
 from app.schemas import (
+    build_reasoning_request_config,
     ChatMessage,
     DraftHelpConversationMessage,
     DraftHelpRequest,
@@ -596,8 +597,9 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
         c.pop("_message_id", None)
         messages.append(c)
 
-    thinking_enabled = bool(getattr(settings, "thinkingMode", False))
-    extra_body = {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
+    reasoning_cfg = build_reasoning_request_config(settings)
+    thinking_enabled = reasoning_cfg["thinking_enabled"]
+    extra_body = reasoning_cfg["extra_body"]
     if model == "deepseek-reasoner" or thinking_enabled:
         temperature = None
 
@@ -768,8 +770,9 @@ async def generate_draft_help(req: DraftHelpRequest) -> StreamingResponse:
             base_url = found.baseUrl
             api_key = found.apiKey
 
-    thinking_enabled = bool(getattr(settings, "thinkingMode", False))
-    extra_body = {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
+    reasoning_cfg = build_reasoning_request_config(settings)
+    thinking_enabled = reasoning_cfg["thinking_enabled"]
+    extra_body = reasoning_cfg["extra_body"]
     if model == "deepseek-reasoner" or thinking_enabled:
         temperature = None
 
@@ -1052,8 +1055,9 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
         c.pop("_message_id", None)
         messages.append(c)
 
-    thinking_enabled = bool(getattr(settings, "thinkingMode", False))
-    extra_body = {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
+    reasoning_cfg = build_reasoning_request_config(settings)
+    thinking_enabled = reasoning_cfg["thinking_enabled"]
+    extra_body = reasoning_cfg["extra_body"]
     if model == "deepseek-reasoner" or thinking_enabled:
         temperature = None
 
@@ -1373,8 +1377,9 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
         c.pop("_message_id", None)
         messages.append(c)
 
-    thinking_enabled = bool(getattr(settings, "thinkingMode", False))
-    extra_body = {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
+    reasoning_cfg = build_reasoning_request_config(settings)
+    thinking_enabled = reasoning_cfg["thinking_enabled"]
+    extra_body = reasoning_cfg["extra_body"]
     if model == "deepseek-reasoner" or thinking_enabled:
         temperature = None
 

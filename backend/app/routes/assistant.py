@@ -43,6 +43,7 @@ from pydantic import BaseModel, Field
 
 from app.llm.openai_compat import chat_completions_message, stream_chat_completions
 from app.schemas import (
+    build_reasoning_request_config,
     AssistantChat,
     AssistantSettings,
     Chat,
@@ -1059,7 +1060,8 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
     chat = _resolve_assistant_chat_by_scope(scope, chat_id)
 
     model = req.model or assistant_settings.model or settings.llm.defaultModel
-    thinking_enabled = bool(getattr(settings, "thinkingMode", False))
+    reasoning_cfg = build_reasoning_request_config(settings)
+    thinking_enabled = reasoning_cfg["thinking_enabled"]
     temperature = req.temperature if req.temperature is not None else assistant_settings.temperature
     if model == "deepseek-reasoner" or thinking_enabled:
         temperature = None
@@ -1126,7 +1128,7 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
     if scope == "workspace":
         allow_write_memory = False
     tools = _build_tools(chat_id, bool(allow_write_memory))
-    extra_body = {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
+    extra_body = reasoning_cfg["extra_body"]
 
     # 非流式：与全局设置 streamEnabled 一致，返回 JSON
     if not getattr(settings, "streamEnabled", True):
