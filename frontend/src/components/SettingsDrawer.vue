@@ -35,7 +35,16 @@
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { useChatsStore, useSettingsStore } from '../stores'
-import { normalizeThemeId, THEME_OPTIONS, type ApiPreset, type Chat, type ChatOverrides, type Settings } from '../types/models'
+import {
+  normalizeReasoningEffort,
+  normalizeThemeId,
+  REASONING_EFFORT_OPTIONS,
+  THEME_OPTIONS,
+  type ApiPreset,
+  type Chat,
+  type ChatOverrides,
+  type Settings,
+} from '../types/models'
 import ModernSelect from './ModernSelect.vue'
 import { apiGet, apiPost } from '../api/http'
 import { useAppFont } from '../composables/useAppFont'
@@ -268,7 +277,10 @@ watch(
     const s = clone(settingsStore.settings!)
     if (s.streamEnabled === undefined) s.streamEnabled = true
     if ((s as Settings).pureAiMode === undefined) (s as Settings).pureAiMode = false
-    if ((s as Settings).thinkingMode === undefined) (s as Settings).thinkingMode = false
+    ;(s as Settings).reasoningEffort = normalizeReasoningEffort(
+      (s as Settings).reasoningEffort,
+      (s as Settings).thinkingMode,
+    )
     if ((s as Settings).themeId === undefined || (s as Settings).themeId === null) {
       (s as Settings).themeId = 'blue'
     } else {
@@ -859,26 +871,16 @@ async function checkUpdate() {
                 </button>
               </div>
 
-              <!-- Thinking Mode Toggle -->
-              <div class="space-y-2">
+              <!-- Reasoning Effort -->
+              <div class="space-y-1.5">
                 <label class="block text-sm font-medium text-[var(--color-text-secondary)]">思考模式</label>
-                <button
-                  class="flex items-center gap-3 group cursor-pointer w-full text-left"
-                  @click="globalDraft.thinkingMode = !globalDraft.thinkingMode"
-                >
-                  <div
-                    class="w-10 h-5 rounded-full relative transition-colors duration-200"
-                    :class="globalDraft.thinkingMode ? 'bg-brand' : 'bg-[var(--color-track)]'"
-                  >
-                    <div
-                      class="absolute top-1 w-3 h-3 rounded-full bg-[var(--color-on-brand)] transition-transform duration-200"
-                      :class="globalDraft.thinkingMode ? 'left-6' : 'left-1'"
-                    ></div>
-                  </div>
-                  <span class="text-xs text-[var(--color-text-secondary)]">
-                    {{ globalDraft.thinkingMode ? '已开启：API 请求启用思考能力' : '已关闭：API 请求禁用思考能力（默认）' }}
-                  </span>
-                </button>
+                <ModernSelect
+                  v-model="globalDraft.reasoningEffort"
+                  :options="[...REASONING_EFFORT_OPTIONS]"
+                  placeholder="选择思考深度..."
+                  class="w-full"
+                />
+                <p class="text-xs text-[var(--color-text-muted)]">none 为关闭思考；其他档位会开启思考并请求更高推理深度。</p>
               </div>
 
               <!-- 界面色系 -->

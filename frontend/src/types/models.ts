@@ -164,6 +164,18 @@ const LEGACY_THEME_IDS: Record<string, ThemeId> = {
   light: 'green',
 }
 
+export const REASONING_EFFORT_VALUES = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const
+export type ReasoningEffort = (typeof REASONING_EFFORT_VALUES)[number]
+
+export const REASONING_EFFORT_OPTIONS: Array<{ label: string; value: ReasoningEffort }> = [
+  { label: 'none（关闭）', value: 'none' },
+  { label: 'minimal（极低）', value: 'minimal' },
+  { label: 'low（低）', value: 'low' },
+  { label: 'medium（中）', value: 'medium' },
+  { label: 'high（高）', value: 'high' },
+  { label: 'extra high（极高）', value: 'xhigh' },
+]
+
 /** 将旧版 dark/light 与非法值归一为受支持的主题 ID */
 export function normalizeThemeId(raw: string | null | undefined): ThemeId {
   if (raw != null && (THEME_IDS as readonly string[]).includes(raw)) return raw as ThemeId
@@ -171,6 +183,21 @@ export function normalizeThemeId(raw: string | null | undefined): ThemeId {
     return LEGACY_THEME_IDS[raw]!
   }
   return 'blue'
+}
+
+/** 将 reasoning effort 归一化为受支持值；兼容历史 extra_high 与布尔开关 */
+export function normalizeReasoningEffort(
+  raw: unknown,
+  legacyThinkingMode?: boolean | null | undefined,
+): ReasoningEffort {
+  if (typeof raw === 'string') {
+    const normalized = raw.trim().toLowerCase().replace(/ /g, '_')
+    if (normalized === 'extra_high') return 'xhigh'
+    if ((REASONING_EFFORT_VALUES as readonly string[]).includes(normalized)) {
+      return normalized as ReasoningEffort
+    }
+  }
+  return legacyThinkingMode ? 'medium' : 'none'
 }
 
 export interface Settings {
@@ -192,7 +219,9 @@ export interface Settings {
   }
   streamEnabled: boolean
   pureAiMode: boolean
-  /** 思考模式：开启时 API 请求带 thinking.type=enabled，关闭时带 disabled（默认） */
+  /** 推理深度档位：none 表示关闭推理，其他档位表示开启推理并设定深度 */
+  reasoningEffort?: ReasoningEffort | string | null
+  /** 旧版布尔开关，仅用于前端归一化迁移 */
   thinkingMode?: boolean
   userPersonas: UserPersona[]
   selectedPersonaId: string | null
