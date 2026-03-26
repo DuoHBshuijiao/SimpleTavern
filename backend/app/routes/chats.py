@@ -99,6 +99,8 @@ def _merge_overrides(existing: Chat, incoming: UpdateChatRequest) -> None:
         existing.overrides.pureAiMode = ov.pureAiMode
     if hasattr(ov, "presetId"):
         existing.overrides.presetId = ov.presetId
+    if hasattr(ov, "worldBookIds"):
+        existing.overrides.worldBookIds = list(dict.fromkeys(getattr(ov, "worldBookIds", []) or []))
     if hasattr(ov, "draftHelp"):
         if existing.overrides.draftHelp is None:
             existing.overrides.draftHelp = ov.draftHelp
