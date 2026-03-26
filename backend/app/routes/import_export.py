@@ -40,7 +40,7 @@ from fastapi import APIRouter, Body, File, HTTPException, Query, Request, Upload
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from app.schemas import Chat, ChatMessage, CharacterCard, Settings
+from app.schemas import Chat, ChatMessage, CharacterCard, Settings, WorldBook
 from app.storage import (
     avatar_path,
     avatars_dir,
@@ -54,6 +54,9 @@ from app.storage import (
     save_chat,
     save_chat_memory,
     save_settings,
+    load_worldbook,
+    save_worldbook,
+    worldbooks_dir,
 )
 
 router = APIRouter(tags=["import_export"])
@@ -301,6 +304,12 @@ def _content_disposition(filename: str) -> str:
     ascii_fallback = re.sub(r"[^\x20-\x7E]+", "_", filename).strip() or "download"
     encoded = quote(filename)
     return f'attachment; filename="{ascii_fallback}"; filename*=UTF-8\'\'{encoded}'
+
+
+def _strip_character_worldbook_fields(card: CharacterCard) -> dict[str, Any]:
+    payload = card.model_dump(mode="json")
+    payload.pop("attachedWorldBookIds", None)
+    return payload
 
 
 def _resolve_pure_ai_mode(settings: Settings, chat: Chat) -> bool:
@@ -648,6 +657,59 @@ def export_chat(chat_id: str, format: str = Query("txt")) -> Response:
     )
 
 
+@router.get("/characters/{character_id}/export")
+def export_character(
+    character_id: str,
+    include_world_books: bool = Query(False),
+) -> Response:
+    try:
+        card = load_character(character_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="character not found")
+
+    safe_name = _sanitize_filename(card.name or "character", "character")
+    if not include_world_books:
+        content = json.dumps(_strip_character_worldbook_fields(card), ensure_ascii=False, indent=2)
+        return Response(
+            content=content,
+            media_type="application/json",
+            headers={"Content-Disposition": _content_disposition(f"{safe_name}.json")},
+        )
+
+    buffer = io.BytesIO()
+    attached_ids = list(dict.fromkeys(getattr(card, "attachedWorldBookIds", []) or []))
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(f"characters/{card.id}.json", json.dumps(card.model_dump(mode="json"), ensure_ascii=False, indent=2))
+        for worldbook_id in attached_ids:
+            try:
+                book = load_worldbook(worldbook_id)
+            except FileNotFoundError:
+                continue
+            # 角色便携包只包含会话激活世界书，不包含仅全局激活书
+            if bool(getattr(book, "globalActive", False)):
+                continue
+            zf.writestr(f"worldbooks/{book.id}.json", json.dumps(book.model_dump(mode="json"), ensure_ascii=False, indent=2))
+        zf.writestr(
+            "manifest.json",
+            json.dumps(
+                {
+                    "type": "character_export_with_worldbooks",
+                    "version": 1,
+                    "characterId": card.id,
+                    "exportedAt": datetime.now().astimezone().isoformat(),
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+        )
+    buffer.seek(0)
+    return Response(
+        content=buffer.read(),
+        media_type="application/zip",
+        headers={"Content-Disposition": _content_disposition(f"{safe_name}.zip")},
+    )
+
+
 @router.get("/settings/backup")
 def backup_settings(scope: str = Query("basic")) -> Response:
     """
@@ -691,6 +753,8 @@ def backup_settings(scope: str = Query("basic")) -> Response:
                     avatar_file = avatar_path(card.avatar)
                     if avatar_file.exists():
                         zf.write(avatar_file, arcname=f"avatars/{avatar_file.name}")
+            for p in worldbooks_dir().glob("*.json"):
+                zf.write(p, arcname=f"worldbooks/{p.name}")
         if scope == "with_chats":
             for p in chats_dir().rglob("*.json"):
                 rel = p.relative_to(chats_dir())
@@ -843,6 +907,12 @@ def _import_from_json(raw: Any) -> dict[str, Any]:
     if isinstance(raw, dict) and raw.get("type") == "chat_export":
         raw = raw.get("chat")
 
+    if isinstance(raw, dict) and ("name" in raw and ("personality" in raw or "systemPrompt" in raw)):
+        card = CharacterCard.model_validate(raw)
+        save_character(card)
+        imported.append("character")
+        return {"imported": imported, "warnings": warnings}
+
     if isinstance(raw, dict) and ("llm" in raw or "prompts" in raw or "apiPresets" in raw):
         settings = Settings.model_validate(raw)
         save_settings(settings)
@@ -855,12 +925,6 @@ def _import_from_json(raw: Any) -> dict[str, Any]:
         chat = Chat.model_validate(raw)
         save_chat(chat)
         imported.append("chat")
-        return {"imported": imported, "warnings": warnings}
-
-    if isinstance(raw, dict) and ("name" in raw and ("personality" in raw or "systemPrompt" in raw)):
-        card = CharacterCard.model_validate(raw)
-        save_character(card)
-        imported.append("character")
         return {"imported": imported, "warnings": warnings}
 
     raise HTTPException(status_code=400, detail="unrecognized json format")
@@ -880,14 +944,14 @@ def _import_from_zip(payload: bytes) -> dict[str, Any]:
     """
     imported: list[str] = []
     warnings: list[str] = []
+    worldbook_id_map: dict[str, str] = {}
+    existing_worldbook_ids = {p.stem for p in worldbooks_dir().glob("*.json")}
     with zipfile.ZipFile(io.BytesIO(payload)) as zf:
         if "settings.json" in zf.namelist():
             raw_settings = json.loads(zf.read("settings.json").decode("utf-8"))
             settings = Settings.model_validate(raw_settings)
             save_settings(settings)
             imported.append("settings")
-        else:
-            warnings.append("settings.json not found in zip")
 
         for name in zf.namelist():
             if not name.startswith("avatars/"):
@@ -899,8 +963,29 @@ def _import_from_zip(payload: bytes) -> dict[str, Any]:
             avatars_dir().mkdir(parents=True, exist_ok=True)
             avatar_path(filename).write_bytes(data)
         for name in zf.namelist():
+            if name.startswith("worldbooks/") and name.endswith(".json"):
+                raw = json.loads(zf.read(name).decode("utf-8"))
+                original_id = str(raw.get("id") or "").strip()
+                if not original_id:
+                    original_id = name.split("/")[-1].replace(".json", "")
+                    raw["id"] = original_id
+                target_id = original_id
+                if target_id in existing_worldbook_ids:
+                    target_id = uuid4().hex
+                    raw["id"] = target_id
+                    worldbook_id_map[original_id] = target_id
+                else:
+                    worldbook_id_map[original_id] = original_id
+                parsed_book = save_worldbook(WorldBook.model_validate(raw))
+                existing_worldbook_ids.add(parsed_book.id)
+                if "worldbook" not in imported:
+                    imported.append("worldbook")
+        for name in zf.namelist():
             if name.startswith("characters/") and name.endswith(".json"):
                 raw = json.loads(zf.read(name).decode("utf-8"))
+                attached = list(raw.get("attachedWorldBookIds") or [])
+                if attached:
+                    raw["attachedWorldBookIds"] = [worldbook_id_map.get(wid, wid) for wid in attached]
                 card = CharacterCard.model_validate(raw)
                 save_character(card)
                 if "character" not in imported:
