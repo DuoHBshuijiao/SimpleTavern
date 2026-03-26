@@ -48,7 +48,7 @@ import portalocker
 
 from datetime import datetime
 
-from app.schemas import AssistantChat, AssistantSettings, Chat, ChatImageAttachment, ChatMessage, CharacterCard, Settings
+from app.schemas import AssistantChat, AssistantSettings, Chat, ChatImageAttachment, ChatMessage, CharacterCard, Settings, WorldBook
 
 
 def _repo_root() -> Path:
@@ -121,6 +121,16 @@ def _fonts_dir() -> Path:
         Path: data/fonts目录的Path对象
     """
     return _data_dir() / "fonts"
+
+
+def _worldbooks_dir() -> Path:
+    """
+    获取世界书目录路径
+
+    Returns:
+        Path: data/worldbooks目录的Path对象
+    """
+    return _data_dir() / "worldbooks"
 
 
 def get_repo_root() -> Path:
@@ -238,6 +248,7 @@ def ensure_data_initialized() -> None:
     _avatars_dir().mkdir(parents=True, exist_ok=True)
     _fonts_dir().mkdir(parents=True, exist_ok=True)
     _ai_workspace_dir().mkdir(parents=True, exist_ok=True)
+    _worldbooks_dir().mkdir(parents=True, exist_ok=True)
 
     if not _settings_path().exists():
         settings = Settings()
@@ -368,7 +379,10 @@ def load_settings() -> Settings:
         Settings: 设置对象
     """
     raw = read_json(_settings_path())
-    return Settings.model_validate(raw)
+    settings = Settings.model_validate(raw)
+    if isinstance(raw, dict) and "worldBookEntryScanDepthDefault" not in raw:
+        save_settings(settings)
+    return settings
 
 
 def save_settings(settings: Settings) -> Settings:
@@ -384,6 +398,8 @@ def save_settings(settings: Settings) -> Settings:
         Settings: 保存后的设置对象
     """
     settings.updatedAt = datetime.now().astimezone().isoformat()
+    if getattr(settings, "worldBookEntryScanDepthDefault", None) is None:
+        settings.worldBookEntryScanDepthDefault = 2
     write_json(_settings_path(), settings.model_dump(mode="json"))
     return settings
 
@@ -468,6 +484,29 @@ def chats_dir() -> Path:
     return _chats_dir()
 
 
+def worldbooks_dir() -> Path:
+    """
+    获取世界书目录路径（公开接口）
+
+    Returns:
+        Path: worldbooks目录路径
+    """
+    return _worldbooks_dir()
+
+
+def worldbook_path(worldbook_id: str) -> Path:
+    """
+    获取世界书文件路径
+
+    Args:
+        worldbook_id: 世界书ID
+
+    Returns:
+        Path: 世界书JSON文件路径
+    """
+    return _worldbooks_dir() / f"{worldbook_id}.json"
+
+
 def ai_workspace_dir() -> Path:
     """
     获取AI工作空间目录路径（公开接口）
@@ -538,6 +577,56 @@ def save_character(card: CharacterCard) -> CharacterCard:
     """
     write_json(character_path(card.id), card.model_dump(mode="json"))
     return card
+
+
+def list_worldbooks() -> list[WorldBook]:
+    """
+    列出所有世界书
+
+    Returns:
+        list[WorldBook]: 世界书列表，按更新时间倒序
+    """
+    out: list[WorldBook] = []
+    for p in list_json_files(_worldbooks_dir()):
+        try:
+            out.append(WorldBook.model_validate(read_json(p)))
+        except Exception:
+            continue
+    out.sort(key=lambda w: w.updatedAt, reverse=True)
+    return out
+
+
+def load_worldbook(worldbook_id: str) -> WorldBook:
+    """
+    加载指定世界书
+    """
+    return WorldBook.model_validate(read_json(worldbook_path(worldbook_id)))
+
+
+def save_worldbook(book: WorldBook) -> WorldBook:
+    """
+    保存世界书并维护互斥字段约束
+    """
+    now = datetime.now().astimezone().isoformat()
+    if not getattr(book, "createdAt", None):
+        book.createdAt = now
+    book.updatedAt = now
+    if bool(book.globalActive):
+        book.sessionChatIds = []
+    else:
+        book.sessionChatIds = list(dict.fromkeys([cid for cid in (book.sessionChatIds or []) if cid]))
+    write_json(worldbook_path(book.id), book.model_dump(mode="json"))
+    return book
+
+
+def delete_worldbook(worldbook_id: str) -> None:
+    """
+    删除世界书文件
+    """
+    p = worldbook_path(worldbook_id)
+    if p.exists():
+        with _lock_for(p):
+            p.unlink(missing_ok=True)
 
 
 def delete_character(character_id: str, delete_related_chats: bool = True) -> None:
