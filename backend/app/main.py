@@ -44,6 +44,7 @@ from app.routes.llm import router as llm_router
 from app.routes.assistant import router as assistant_router
 from app.routes.tokenizer import router as tokenizer_router
 from app.routes.update import router as update_router
+from app.routes.worldbooks import router as worldbooks_router
 from app.storage import ensure_data_initialized
 from app.tokenizer_service import warmup_tokenizer
 
@@ -95,3 +96,4 @@ app.include_router(import_export_router, prefix="/api")
 app.include_router(assistant_router, prefix="/api")
 app.include_router(tokenizer_router, prefix="/api")
 app.include_router(update_router, prefix="/api")
+app.include_router(worldbooks_router, prefix="/api")
