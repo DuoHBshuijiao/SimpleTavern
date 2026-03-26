@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 from datetime import datetime
 from typing import Any, AsyncIterator
 
@@ -42,7 +43,8 @@ from app.schemas import (
     SingleInterjectRequest,
 )
 from app.storage import load_character, load_chat, load_chat_image_bytes, load_settings, save_chat, save_settings
-from app.tokenizer_service import trim_messages_to_context
+from app.storage import list_worldbooks
+from app.tokenizer_service import count_tokens, count_tokens_for_messages, trim_messages_to_context
 
 
 router = APIRouter(tags=["generate"])
@@ -210,6 +212,98 @@ def _slice_conversation_with_anchor(conversation: list[dict], context_start_mess
             start_idx = i
             break
     return conversation[start_idx:]
+
+
+def _extract_text_content(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") == "text":
+                text = item.get("text")
+                if isinstance(text, str) and text.strip():
+                    parts.append(text.strip())
+        return "\n".join(parts)
+    return str(content or "")
+
+
+def collect_active_worldbooks(chat_id: str, ordered_ids: list[str] | None = None):
+    all_books = list_worldbooks()
+    active = [b for b in all_books if bool(getattr(b, "globalActive", False)) or chat_id in (getattr(b, "sessionChatIds", []) or [])]
+    if not ordered_ids:
+        return active
+    by_id = {b.id: b for b in active}
+    ordered: list[Any] = []
+    for worldbook_id in ordered_ids:
+        book = by_id.pop(worldbook_id, None)
+        if book is not None:
+            ordered.append(book)
+    ordered.extend(by_id.values())
+    return ordered
+
+
+def match_worldbook_entries(book, conversation: list[dict]) -> list[Any]:
+    entries = sorted(list(getattr(book, "entries", []) or []), key=lambda e: (int(getattr(e, "insertDepth", 5)), int(getattr(e, "orderIndex", 0))))
+    matched: list[Any] = []
+    for entry in entries:
+        if not bool(getattr(entry, "enabled", True)):
+            continue
+        depth = getattr(entry, "scanDepth", None)
+        if depth is None or int(depth) == 0:
+            matched.append(entry)
+            continue
+        n = int(depth)
+        if n < 0:
+            continue
+        scope = conversation[-n:] if n > 0 else []
+        scan_text = "\n".join(_extract_text_content(m.get("content")) for m in scope)
+        pattern = (getattr(entry, "regex", "") or "").strip()
+        if not pattern:
+            continue
+        try:
+            if re.search(pattern, scan_text, re.MULTILINE):
+                matched.append(entry)
+        except re.error:
+            continue
+    return matched
+
+
+def build_worldbook_injections(book, entries: list[Any], conversation_len: int) -> list[dict[str, Any]]:
+    grouped: dict[int, list[Any]] = {}
+    for entry in entries:
+        insert_depth = int(getattr(entry, "insertDepth", 5))
+        grouped.setdefault(insert_depth, []).append(entry)
+    injections: list[dict[str, Any]] = []
+    for insert_depth in sorted(grouped.keys()):
+        chunk_parts: list[str] = []
+        for entry in sorted(grouped[insert_depth], key=lambda e: int(getattr(e, "orderIndex", 0))):
+            content = str(getattr(entry, "content", "") or "").strip()
+            if content:
+                chunk_parts.append(content)
+        if not chunk_parts:
+            continue
+        insert_index = max(0, conversation_len - insert_depth)
+        injections.append({
+            "insert_index": insert_index,
+            "message": {"role": "system", "content": "\n\n".join(chunk_parts)},
+        })
+    return injections
+
+
+def insert_injections_into_conversation(conversation: list[dict], injections: list[dict[str, Any]]) -> list[dict]:
+    output = [dict(item) for item in conversation]
+    if not injections:
+        return output
+    indexed = list(enumerate(injections))
+    indexed.sort(key=lambda pair: (int(pair[1]["insert_index"]), pair[0]), reverse=True)
+    for _, injection in indexed:
+        idx = int(injection["insert_index"])
+        idx = max(0, min(idx, len(output)))
+        output.insert(idx, dict(injection["message"]))
+    return output
 
 
 def _resolve_char_name_for_draft_help(chat) -> str:
@@ -585,9 +679,50 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
         conversation,
         getattr(chat.overrides, "contextStartMessageId", None),
     )
+    system_tokens = count_tokens(system_prompt) or 0
+    pretrim_budget = max(int(context_size) - system_tokens, 0) if context_size and context_size >= 1 else None
+    base_conversation = trim_messages_to_context(conversation, pretrim_budget, None) if pretrim_budget is not None else list(conversation)
+
+    worldbook_order = list(getattr(chat.overrides, "worldBookIds", []) or [])
+    active_books = collect_active_worldbooks(chat.id, worldbook_order)
+    selected_books = list(active_books)
+    selected_book_ids = {book.id for book in selected_books}
+    worldbook_meta: dict[str, dict[str, Any]] = {}
+    worldbook_token_known = True
+    worldbook_tokens_total = 0
+    for book in selected_books:
+        entries = match_worldbook_entries(book, base_conversation)
+        injections = build_worldbook_injections(book, entries, len(base_conversation))
+        token_count = count_tokens_for_messages([item["message"] for item in injections]) if injections else 0
+        if token_count is None:
+            worldbook_token_known = False
+            token_count = 0
+        worldbook_meta[book.id] = {"entries": entries, "injections": injections, "tokens": token_count}
+        worldbook_tokens_total += token_count
+
+    if context_size and context_size >= 1 and worldbook_token_known:
+        budget = int(context_size)
+        while selected_books and (system_tokens + worldbook_tokens_total) > budget:
+            removed = selected_books.pop()
+            selected_book_ids.discard(removed.id)
+            worldbook_tokens_total -= int(worldbook_meta.get(removed.id, {}).get("tokens", 0))
+
     if context_size and context_size >= 1:
-        long_term_memory = getattr(chat.overrides, "longTermMemory", None) or ""
-        conversation = trim_messages_to_context(conversation, context_size, long_term_memory or None)
+        history_budget = int(context_size) - system_tokens
+        if worldbook_token_known:
+            history_budget -= max(worldbook_tokens_total, 0)
+        history_budget = max(history_budget, 0)
+        conversation = trim_messages_to_context(base_conversation, history_budget, None)
+    else:
+        conversation = list(base_conversation)
+
+    final_injections: list[dict[str, Any]] = []
+    for book in active_books:
+        if book.id not in selected_book_ids:
+            continue
+        entries = match_worldbook_entries(book, conversation)
+        final_injections.extend(build_worldbook_injections(book, entries, len(conversation)))
+    conversation = insert_injections_into_conversation(conversation, final_injections)
 
     messages: list[dict] = []
     if system_prompt:
@@ -1043,9 +1178,50 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
         conversation,
         getattr(chat.overrides, "contextStartMessageId", None),
     )
+    system_tokens = count_tokens(system_prompt) or 0
+    pretrim_budget = max(int(context_size) - system_tokens, 0) if context_size and context_size >= 1 else None
+    base_conversation = trim_messages_to_context(conversation, pretrim_budget, None) if pretrim_budget is not None else list(conversation)
+
+    worldbook_order = list(getattr(chat.overrides, "worldBookIds", []) or [])
+    active_books = collect_active_worldbooks(chat.id, worldbook_order)
+    selected_books = list(active_books)
+    selected_book_ids = {book.id for book in selected_books}
+    worldbook_meta: dict[str, dict[str, Any]] = {}
+    worldbook_token_known = True
+    worldbook_tokens_total = 0
+    for book in selected_books:
+        entries = match_worldbook_entries(book, base_conversation)
+        injections = build_worldbook_injections(book, entries, len(base_conversation))
+        token_count = count_tokens_for_messages([item["message"] for item in injections]) if injections else 0
+        if token_count is None:
+            worldbook_token_known = False
+            token_count = 0
+        worldbook_meta[book.id] = {"entries": entries, "injections": injections, "tokens": token_count}
+        worldbook_tokens_total += token_count
+
+    if context_size and context_size >= 1 and worldbook_token_known:
+        budget = int(context_size)
+        while selected_books and (system_tokens + worldbook_tokens_total) > budget:
+            removed = selected_books.pop()
+            selected_book_ids.discard(removed.id)
+            worldbook_tokens_total -= int(worldbook_meta.get(removed.id, {}).get("tokens", 0))
+
     if context_size and context_size >= 1:
-        long_term_memory = getattr(chat.overrides, "longTermMemory", None) or ""
-        conversation = trim_messages_to_context(conversation, context_size, long_term_memory or None)
+        history_budget = int(context_size) - system_tokens
+        if worldbook_token_known:
+            history_budget -= max(worldbook_tokens_total, 0)
+        history_budget = max(history_budget, 0)
+        conversation = trim_messages_to_context(base_conversation, history_budget, None)
+    else:
+        conversation = list(base_conversation)
+
+    final_injections: list[dict[str, Any]] = []
+    for book in active_books:
+        if book.id not in selected_book_ids:
+            continue
+        entries = match_worldbook_entries(book, conversation)
+        final_injections.extend(build_worldbook_injections(book, entries, len(conversation)))
+    conversation = insert_injections_into_conversation(conversation, final_injections)
 
     messages: list[dict] = []
     if system_prompt:
@@ -1365,9 +1541,50 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
         conversation,
         getattr(chat.overrides, "contextStartMessageId", None),
     )
+    system_tokens = count_tokens(system_prompt) or 0
+    pretrim_budget = max(int(context_size) - system_tokens, 0) if context_size and context_size >= 1 else None
+    base_conversation = trim_messages_to_context(conversation, pretrim_budget, None) if pretrim_budget is not None else list(conversation)
+
+    worldbook_order = list(getattr(chat.overrides, "worldBookIds", []) or [])
+    active_books = collect_active_worldbooks(chat.id, worldbook_order)
+    selected_books = list(active_books)
+    selected_book_ids = {book.id for book in selected_books}
+    worldbook_meta: dict[str, dict[str, Any]] = {}
+    worldbook_token_known = True
+    worldbook_tokens_total = 0
+    for book in selected_books:
+        entries = match_worldbook_entries(book, base_conversation)
+        injections = build_worldbook_injections(book, entries, len(base_conversation))
+        token_count = count_tokens_for_messages([item["message"] for item in injections]) if injections else 0
+        if token_count is None:
+            worldbook_token_known = False
+            token_count = 0
+        worldbook_meta[book.id] = {"entries": entries, "injections": injections, "tokens": token_count}
+        worldbook_tokens_total += token_count
+
+    if context_size and context_size >= 1 and worldbook_token_known:
+        budget = int(context_size)
+        while selected_books and (system_tokens + worldbook_tokens_total) > budget:
+            removed = selected_books.pop()
+            selected_book_ids.discard(removed.id)
+            worldbook_tokens_total -= int(worldbook_meta.get(removed.id, {}).get("tokens", 0))
+
     if context_size and context_size >= 1:
-        long_term_memory = getattr(chat.overrides, "longTermMemory", None) or ""
-        conversation = trim_messages_to_context(conversation, context_size, long_term_memory or None)
+        history_budget = int(context_size) - system_tokens
+        if worldbook_token_known:
+            history_budget -= max(worldbook_tokens_total, 0)
+        history_budget = max(history_budget, 0)
+        conversation = trim_messages_to_context(base_conversation, history_budget, None)
+    else:
+        conversation = list(base_conversation)
+
+    final_injections: list[dict[str, Any]] = []
+    for book in active_books:
+        if book.id not in selected_book_ids:
+            continue
+        entries = match_worldbook_entries(book, conversation)
+        final_injections.extend(build_worldbook_injections(book, entries, len(conversation)))
+    conversation = insert_injections_into_conversation(conversation, final_injections)
 
     messages: list[dict] = []
     if system_prompt:
