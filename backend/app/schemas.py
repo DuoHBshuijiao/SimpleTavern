@@ -41,6 +41,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import re
 from typing import Any, Literal, TypedDict
 from uuid import uuid4
 
@@ -246,6 +247,7 @@ class Settings(BaseModel):
     selectedPersonaId: str | None = None
     selectedFont: str | None = None  # 当前选中的自定义字体文件名，存于 data/fonts，不随备份导出
     messageFontSize: int | None = None  # 聊天窗口内消息文字字号（仅作用于消息气泡内容）
+    worldBookEntryScanDepthDefault: int = 2
     createdAt: str = Field(default_factory=_now_iso)
     updatedAt: str = Field(default_factory=_now_iso)
 
@@ -334,6 +336,48 @@ class CharacterCard(BaseModel):
     exampleDialogue: str = ""
     systemPrompt: str = ""
     avatar: str = ""
+    attachedWorldBookIds: list[str] = Field(default_factory=list)
+    createdAt: str = Field(default_factory=_now_iso)
+    updatedAt: str = Field(default_factory=_now_iso)
+
+
+class WorldBookEntry(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: str = Field(default_factory=lambda: uuid4().hex)
+    title: str = ""
+    regex: str = ""
+    content: str = ""
+    insertDepth: int = Field(default=5, ge=1)
+    scanDepth: int | None = Field(default=None, ge=0)
+    enabled: bool = True
+    orderIndex: int = 0
+
+    @model_validator(mode="after")
+    def _validate_regex_if_needed(self):
+        if not self.enabled:
+            return self
+        depth = 0 if self.scanDepth is None else int(self.scanDepth)
+        if depth <= 0:
+            return self
+        pattern = (self.regex or "").strip()
+        if not pattern:
+            raise ValueError("regex is required when scanDepth >= 1")
+        try:
+            re.compile(pattern)
+        except re.error as e:
+            raise ValueError(f"invalid regex: {e}") from e
+        return self
+
+
+class WorldBook(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: str = Field(default_factory=lambda: uuid4().hex)
+    name: str
+    entries: list[WorldBookEntry] = Field(default_factory=list)
+    globalActive: bool = False
+    sessionChatIds: list[str] = Field(default_factory=list)
     createdAt: str = Field(default_factory=_now_iso)
     updatedAt: str = Field(default_factory=_now_iso)
 
@@ -413,6 +457,7 @@ class ChatOverrides(BaseModel):
     contextStartMessageId: str | None = None
     presetId: str | None = None
     pureAiMode: bool | None = None
+    worldBookIds: list[str] = Field(default_factory=list)
     params: GenerationParams = Field(default_factory=GenerationParams)
     draftHelp: DraftHelpSettings = Field(default_factory=DraftHelpSettings)
 
