@@ -2801,7 +2801,12 @@ const editingPersonaAvatarUrl = computed(() => {
     <ChatExportModal
       v-model:show="showExportModal"
       :disabled="!activeChat"
-      @export="(format) => { actions.exportChat(format); showExportModal = false }"
+      @export="(format) => {
+        if (format === 'character') actions.exportCharacter(false)
+        else if (format === 'character_with_worldbooks') actions.exportCharacter(true)
+        else actions.exportChat(format)
+        showExportModal = false
+      }"
     />
 
     <ChatImportModal
@@ -2989,7 +2994,7 @@ const editingPersonaAvatarUrl = computed(() => {
         </div>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-secondary" @click="actions.exportCharacterCard" :disabled="!actions.editingCharacter.value">导出为文本</button>
+        <button class="btn btn-secondary" @click="actions.exportCharacterCard" :disabled="!actions.editingCharacter.value">导出角色 JSON</button>
         <button class="btn btn-secondary" @click="cancelCharacterEdit">取消</button>
         <button class="btn btn-primary" @click="saveCharacter">保存</button>
       </div>

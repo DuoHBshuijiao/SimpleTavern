@@ -6,14 +6,14 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'update:show', value: boolean): void
-  (e: 'export', format: 'txt' | 'json'): void
+  (e: 'export', format: 'txt' | 'json' | 'character' | 'character_with_worldbooks'): void
 }>()
 
 function close() {
   emit('update:show', false)
 }
 
-function handleExport(format: 'txt' | 'json') {
+function handleExport(format: 'txt' | 'json' | 'character' | 'character_with_worldbooks') {
   if (props.disabled) return
   emit('export', format)
 }
@@ -44,6 +44,18 @@ function handleExport(format: 'txt' | 'json') {
               @click="handleExport('json')"
             >
               导出 JSON
+            </button>
+            <button
+              class="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-overlay)] px-4 py-3 text-left text-[var(--color-text)] transition-colors hover:bg-[var(--color-surface-hover)]"
+              @click="handleExport('character')"
+            >
+              导出角色（JSON）
+            </button>
+            <button
+              class="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-overlay)] px-4 py-3 text-left text-[var(--color-text)] transition-colors hover:bg-[var(--color-surface-hover)]"
+              @click="handleExport('character_with_worldbooks')"
+            >
+              导出角色+世界书（ZIP）
             </button>
           </div>
           <p v-if="disabled" class="mt-3 text-xs text-[var(--color-text-muted)]">请先选择或创建会话。</p>

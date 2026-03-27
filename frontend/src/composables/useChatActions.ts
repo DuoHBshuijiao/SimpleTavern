@@ -591,78 +591,28 @@ export function useChatActions(deps: ChatActionsDeps) {
     URL.revokeObjectURL(url)
   }
 
-  /**
-   * 导出角色卡片
-   *
-   * 将当前编辑的角色卡片导出为TXT格式的文本文件。
-   * 包含角色的所有信息（名称、简介、性格、场景等）。
-   *
-   * @returns {void}
-   */
-  function exportCharacterCard() {
-    if (!editingCharacter.value) return
-    
-    const card = editingCharacter.value
-    const lines: string[] = []
-    
-    lines.push('='.repeat(60))
-    lines.push(`角色名称: ${card.name}`)
-    lines.push('='.repeat(60))
-    lines.push('')
-    
-    if (card.description) {
-      lines.push('【简介】')
-      lines.push(card.description)
-      lines.push('')
+  async function exportCharacter(includeWorldBooks: boolean) {
+    const characterId = activeChat.value?.characterId || editingCharacter.value?.id
+    if (!characterId) return
+    const r = await fetch(`/api/characters/${characterId}/export?include_world_books=${includeWorldBooks ? 'true' : 'false'}`)
+    if (!r.ok) {
+      alert(await r.text())
+      return
     }
-    
-    if (card.personality) {
-      lines.push('【Personality（性格/外貌）】')
-      lines.push(card.personality)
-      lines.push('')
-    }
-    
-    if (card.scenario) {
-      lines.push('【Scenario（情景/世界观）】')
-      lines.push(card.scenario)
-      lines.push('')
-    }
-    
-    if (card.systemPrompt) {
-      lines.push('【系统提示词】')
-      lines.push(card.systemPrompt)
-      lines.push('')
-    }
-    
-    if (card.firstMessage) {
-      lines.push('【首句】')
-      lines.push(card.firstMessage)
-      lines.push('')
-    }
-    
-    if (card.exampleDialogue) {
-      lines.push('【示例对话】')
-      lines.push(card.exampleDialogue)
-      lines.push('')
-    }
-    
-    lines.push('='.repeat(60))
-    lines.push(`创建时间: ${card.createdAt ? new Date(card.createdAt).toLocaleString('zh-CN') : '未知'}`)
-    if (card.updatedAt && card.updatedAt !== card.createdAt) {
-      lines.push(`更新时间: ${new Date(card.updatedAt).toLocaleString('zh-CN')}`)
-    }
-    lines.push('='.repeat(60))
-    
-    const content = lines.join('\n')
-    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
+    const blob = await r.blob()
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `${card.name || '角色卡'}.txt`
+    const fallback = includeWorldBooks ? 'character-with-worldbooks.zip' : 'character.json'
+    link.download = getDownloadFilename(r.headers.get('Content-Disposition'), fallback)
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
     URL.revokeObjectURL(url)
+  }
+
+  async function exportCharacterCard() {
+    await exportCharacter(false)
   }
 
   // ========== 成员设置编辑 ==========
@@ -770,6 +720,7 @@ export function useChatActions(deps: ChatActionsDeps) {
 
     // 导出
     exportChat,
+    exportCharacter,
     exportCharacterCard,
 
     // 成员设置
