@@ -81,9 +81,31 @@ export interface ChatOverrides {
   contextStartMessageId?: string | null
   presetId?: string | null
   pureAiMode?: boolean | null
+  worldBookIds?: string[]
   params: GenerationParams
   draftHelp?: DraftHelpSettings
   memberSettings?: Record<string, GroupMemberSettings>
+}
+
+export interface WorldBookEntry {
+  id: string
+  title: string
+  regex: string
+  content: string
+  insertDepth: number
+  scanDepth?: number | null
+  enabled: boolean
+  orderIndex: number
+}
+
+export interface WorldBook {
+  id: string
+  name: string
+  entries: WorldBookEntry[]
+  globalActive: boolean
+  sessionChatIds: string[]
+  createdAt: string
+  updatedAt: string
 }
 
 /**
@@ -229,6 +251,7 @@ export interface Settings {
   selectedFont?: string | null
   /** 聊天窗口内消息文字字号（仅作用于消息气泡内容），不指定则不覆盖 */
   messageFontSize?: number | null
+  worldBookEntryScanDepthDefault?: number
   createdAt: string
   updatedAt: string
 }
@@ -263,6 +286,7 @@ export interface CharacterCard {
   exampleDialogue: string
   systemPrompt: string
   avatar: string
+  attachedWorldBookIds?: string[]
   createdAt: string
   updatedAt: string
 }
