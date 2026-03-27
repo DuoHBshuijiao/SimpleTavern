@@ -44,9 +44,10 @@ import {
   type Chat,
   type ChatOverrides,
   type Settings,
+  type WorldBook,
 } from '../types/models'
 import ModernSelect from './ModernSelect.vue'
-import { apiGet, apiPost } from '../api/http'
+import { apiDelete, apiGet, apiPost, apiPut } from '../api/http'
 import { useAppFont } from '../composables/useAppFont'
 import { useSettingsImport } from '../composables/useSettingsImport'
 import { X, Eye, EyeOff, Check, Loader2 } from 'lucide-vue-next'
@@ -108,6 +109,8 @@ const editingPresetId = ref<string | null>(null)
 const editingPresetShowApiKey = ref(false)
 const presetModelsLoading = ref(false)
 const importInputRef = ref<HTMLInputElement | null>(null)
+const worldbooks = ref<WorldBook[]>([])
+const addWorldBookId = ref('')
 
 // 检查更新
 const checkUpdateLoading = ref(false)
@@ -166,6 +169,7 @@ function ensureOverrides(v?: Partial<ChatOverrides> | null): ChatOverrides {
     longTermMemory: v?.longTermMemory ?? null,
     contextStartMessageId: v?.contextStartMessageId ?? null,
     presetId: v?.presetId ?? null,
+    worldBookIds: [...(v?.worldBookIds || [])],
     params: {
       model: v?.params?.model ?? null,
       temperature: v?.params?.temperature ?? null,
@@ -269,6 +273,38 @@ onMounted(() => {
   }, 150)
 })
 
+async function loadWorldBooks() {
+  try {
+    worldbooks.value = await apiGet<WorldBook[]>('/api/worldbooks')
+  } catch {
+    worldbooks.value = []
+  }
+}
+
+async function createWorldBookQuick() {
+  const name = prompt('请输入世界书名称')
+  if (!name || !name.trim()) return
+  const now = new Date().toISOString()
+  const payload: WorldBook = {
+    id: crypto.randomUUID().replace(/-/g, ''),
+    name: name.trim(),
+    entries: [],
+    globalActive: false,
+    sessionChatIds: [],
+    createdAt: now,
+    updatedAt: now,
+  }
+  await apiPost<WorldBook>('/api/worldbooks', payload)
+  await loadWorldBooks()
+}
+
+async function deleteWorldBookQuick(worldbookId: string) {
+  if (!confirm('确认删除该世界书？')) return
+  await apiDelete(`/api/worldbooks/${worldbookId}`)
+  await loadWorldBooks()
+  removeWorldBookFromOrder(worldbookId)
+}
+
 watch(
   () => props.show,
   async (open) => {
@@ -301,6 +337,7 @@ watch(
         fontList.value = []
       }
     }
+    await loadWorldBooks()
 
     if (s.apiPresets.length > 0 && !editingPresetId.value) {
         editingPresetId.value = s.apiPresets[0]?.id ?? null
@@ -316,6 +353,93 @@ watch(
     }
   },
 )
+
+const worldBookAddOptions = computed(() => {
+  return worldbooks.value.map((b) => ({ label: b.name || b.id, value: b.id }))
+})
+
+const currentChatWorldbooks = computed(() => {
+  const chatId = props.chat?.id
+  if (!chatId) return []
+  return worldbooks.value.filter((book) => {
+    if (book.globalActive) return true
+    return (book.sessionChatIds || []).includes(chatId)
+  })
+})
+
+function ensureWorldBookOrder() {
+  if (!chatDraft.value) return
+  if (!Array.isArray(chatDraft.value.worldBookIds)) chatDraft.value.worldBookIds = []
+}
+
+function addWorldBookToOrder() {
+  if (!chatDraft.value || !addWorldBookId.value) return
+  ensureWorldBookOrder()
+  const ids = chatDraft.value.worldBookIds as string[]
+  if (!ids.includes(addWorldBookId.value)) ids.push(addWorldBookId.value)
+  addWorldBookId.value = ''
+}
+
+function removeWorldBookFromOrder(worldbookId: string) {
+  if (!chatDraft.value) return
+  ensureWorldBookOrder()
+  chatDraft.value.worldBookIds = (chatDraft.value.worldBookIds || []).filter((id) => id !== worldbookId)
+}
+
+function moveWorldBookOrder(worldbookId: string, direction: -1 | 1) {
+  if (!chatDraft.value) return
+  ensureWorldBookOrder()
+  const ids = [...(chatDraft.value.worldBookIds || [])]
+  const idx = ids.indexOf(worldbookId)
+  if (idx < 0) return
+  const next = idx + direction
+  if (next < 0 || next >= ids.length) return
+  const current = ids[idx]
+  const target = ids[next]
+  if (current == null || target == null) return
+  ids[idx] = target
+  ids[next] = current
+  chatDraft.value.worldBookIds = ids
+}
+
+function worldBookName(worldbookId: string): string {
+  return worldbooks.value.find((b) => b.id === worldbookId)?.name || worldbookId
+}
+
+async function setWorldBookGlobalActive(book: WorldBook, active: boolean) {
+  const payload: WorldBook = {
+    ...book,
+    globalActive: active,
+    sessionChatIds: active ? [] : [...(book.sessionChatIds || [])],
+  }
+  await apiPut<WorldBook>(`/api/worldbooks/${book.id}`, payload)
+  await loadWorldBooks()
+}
+
+async function attachWorldBookToCurrentChat(book: WorldBook) {
+  if (!props.chat?.id) return
+  const chatId = props.chat.id
+  const payload: WorldBook = {
+    ...book,
+    globalActive: false,
+    sessionChatIds: Array.from(new Set([...(book.sessionChatIds || []), chatId])),
+  }
+  await apiPut<WorldBook>(`/api/worldbooks/${book.id}`, payload)
+  await loadWorldBooks()
+}
+
+async function detachWorldBookFromCurrentChat(book: WorldBook) {
+  if (!props.chat?.id) return
+  const chatId = props.chat.id
+  const payload: WorldBook = {
+    ...book,
+    globalActive: false,
+    sessionChatIds: (book.sessionChatIds || []).filter((id) => id !== chatId),
+  }
+  await apiPut<WorldBook>(`/api/worldbooks/${book.id}`, payload)
+  await loadWorldBooks()
+  removeWorldBookFromOrder(book.id)
+}
 
 watch(
   () => chatDraft.value?.longTermMemory,
@@ -1071,7 +1195,7 @@ async function checkUpdate() {
               <div class="space-y-3">
                 <div class="text-sm font-medium text-[var(--color-text-secondary)]">数据备份与导入</div>
                 <div class="text-xs text-[var(--color-text-muted)]">
-                  备份会导出全部系统设置（含用户 Persona 头像），导入支持 txt/json/zip 自动识别。
+                  备份会导出全部系统设置（含用户 Persona 头像）；“包含角色卡/包含全部聊天记录”同时包含世界书数据。
                 </div>
                 <div class="flex gap-2">
                   <button 
@@ -1084,13 +1208,13 @@ async function checkUpdate() {
                     class="px-4 py-2 bg-surface-muted hover:bg-surface-hover text-[var(--color-text)] rounded-lg text-sm transition-colors whitespace-nowrap"
                     @click="downloadSettingsBackup('with_characters')"
                   >
-                    包含角色卡
+                    包含角色卡（含世界书）
                   </button>
                   <button 
                     class="px-4 py-2 bg-surface-muted hover:bg-surface-hover text-[var(--color-text)] rounded-lg text-sm transition-colors whitespace-nowrap"
                     @click="downloadSettingsBackup('with_chats')"
                   >
-                    包含全部聊天记录
+                    包含全部聊天记录（含世界书）
                   </button>
                   <button 
                     class="px-4 py-2 bg-surface-muted hover:bg-surface-hover text-[var(--color-text)] rounded-lg text-sm transition-colors whitespace-nowrap"
@@ -1392,6 +1516,61 @@ async function checkUpdate() {
                 </div>
               </div>
               <p class="text-xs text-[var(--color-text-muted)] mt-2">实际上下文总限制长度为该 Context Size 限制加上角色卡、用户信息、自定义系统提示词。草稿助手优先使用当前会话的条数限制，其次全局，最后回退到现有上下文逻辑。</p>
+
+              <div class="space-y-2">
+                <div class="flex items-center justify-between gap-2">
+                  <div class="text-sm font-medium text-[var(--color-text-secondary)]">世界书</div>
+                  <button class="btn btn-xs btn-secondary" @click="createWorldBookQuick">新建世界书</button>
+                </div>
+                <div class="rounded-lg border border-[var(--color-border-subtle)] bg-surface-muted p-3 text-xs text-[var(--color-text-muted)]">
+                  全局激活的世界书会自动对当前会话生效；你也可以把世界书仅绑定到当前会话。会话内顺序用于预算淘汰优先级（靠后更先被丢弃）。
+                </div>
+                <div class="flex items-center gap-2">
+                  <ModernSelect
+                    v-model="addWorldBookId"
+                    :options="worldBookAddOptions"
+                    placeholder="选择世界书加入会话顺序..."
+                    class="flex-1"
+                  />
+                  <button class="btn btn-sm btn-secondary" @click="addWorldBookToOrder">加入顺序</button>
+                </div>
+                <div class="max-h-[180px] space-y-2 overflow-y-auto rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay p-2">
+                  <div
+                    v-for="book in currentChatWorldbooks"
+                    :key="book.id"
+                    class="rounded-lg border border-[var(--color-border-subtle)] bg-surface-muted p-2"
+                  >
+                    <div class="flex items-center justify-between gap-2">
+                      <div class="text-sm text-[var(--color-text)]">
+                        {{ book.name }}
+                        <span v-if="book.globalActive" class="ml-1 text-xs text-brand">（全局）</span>
+                      </div>
+                      <div class="flex items-center gap-1">
+                        <button class="btn btn-xs btn-secondary" @click="setWorldBookGlobalActive(book, !book.globalActive)">
+                          {{ book.globalActive ? '改为会话' : '设为全局' }}
+                        </button>
+                        <button class="btn btn-xs btn-secondary" @click="attachWorldBookToCurrentChat(book)">会话启用</button>
+                        <button class="btn btn-xs btn-secondary" @click="detachWorldBookFromCurrentChat(book)">移除会话</button>
+                        <button class="btn btn-xs btn-secondary" @click="deleteWorldBookQuick(book.id)">删除书</button>
+                      </div>
+                    </div>
+                  </div>
+                  <div v-if="currentChatWorldbooks.length === 0" class="text-xs text-[var(--color-text-muted)]">
+                    当前会话暂无已激活世界书。
+                  </div>
+                </div>
+                <div class="space-y-1 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay p-2">
+                  <div class="text-xs text-[var(--color-text-muted)]">会话世界书顺序</div>
+                  <div v-for="(worldbookId, idx) in (chatDraft.worldBookIds || [])" :key="worldbookId" class="flex items-center justify-between gap-2 rounded-md border border-[var(--color-border-subtle)] bg-surface-muted px-2 py-1">
+                    <span class="text-xs text-[var(--color-text)]">{{ idx + 1 }}. {{ worldBookName(worldbookId) }}</span>
+                    <div class="flex items-center gap-1">
+                      <button class="btn btn-xs btn-secondary" @click="moveWorldBookOrder(worldbookId, -1)">上移</button>
+                      <button class="btn btn-xs btn-secondary" @click="moveWorldBookOrder(worldbookId, 1)">下移</button>
+                      <button class="btn btn-xs btn-secondary" @click="removeWorldBookFromOrder(worldbookId)">删除</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
 
               <!-- Group Member Settings (Removed, moved to independent GroupSettingsModal) -->
 
