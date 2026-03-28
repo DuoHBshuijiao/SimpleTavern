@@ -615,7 +615,12 @@ def save_worldbook(book: WorldBook) -> WorldBook:
         book.sessionChatIds = []
     else:
         book.sessionChatIds = list(dict.fromkeys([cid for cid in (book.sessionChatIds or []) if cid]))
-    write_json(worldbook_path(book.id), book.model_dump(mode="json"))
+    data = book.model_dump(mode="json")
+    for e in data.get("entries") or []:
+        if isinstance(e, dict):
+            e.pop("insertDepth", None)
+            e.pop("scanDepth", None)
+    write_json(worldbook_path(book.id), data)
     return book
 
 
