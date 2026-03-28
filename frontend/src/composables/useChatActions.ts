@@ -197,6 +197,7 @@ export function useChatActions(deps: ChatActionsDeps) {
       exampleDialogue: '',
       systemPrompt: '',
       avatar: '',
+      attachedWorldBookIds: [],
       createdAt: now,
       updatedAt: now,
     }
@@ -222,7 +223,9 @@ export function useChatActions(deps: ChatActionsDeps) {
    */
   function openEditCharacter(card: CharacterCard) {
     isNewCharacter.value = false
-    editingCharacter.value = JSON.parse(JSON.stringify(card)) as CharacterCard
+    const copy = JSON.parse(JSON.stringify(card)) as CharacterCard
+    if (!Array.isArray(copy.attachedWorldBookIds)) copy.attachedWorldBookIds = []
+    editingCharacter.value = copy
     showCharacterEditor.value = true
   }
 
@@ -320,6 +323,7 @@ export function useChatActions(deps: ChatActionsDeps) {
       exampleDialogue: (typeof cardObj.exampleDialogue === 'string' ? cardObj.exampleDialogue : undefined) ?? current.exampleDialogue,
       systemPrompt: (typeof cardObj.systemPrompt === 'string' ? cardObj.systemPrompt : undefined) ?? current.systemPrompt,
       avatar: (typeof cardObj.avatar === 'string' ? cardObj.avatar : undefined) ?? current.avatar,
+      attachedWorldBookIds: Array.isArray(current.attachedWorldBookIds) ? [...current.attachedWorldBookIds] : [],
     }
   }
 

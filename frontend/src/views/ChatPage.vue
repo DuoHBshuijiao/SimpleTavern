@@ -63,7 +63,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useCharactersStore, useChatsStore, useSettingsStore } from '../stores'
-import type { CharacterCard, ChatImageAttachment, ChatMessage, GroupMemberSettings, Chat } from '../types/models'
+import type { CharacterCard, ChatImageAttachment, ChatMessage, GroupMemberSettings, Chat, WorldBook } from '../types/models'
 
 // Composables
 import { 
@@ -90,7 +90,7 @@ import SettingsDrawer from '../components/SettingsDrawer.vue'
 import AvatarCropper from '../components/AvatarCropper.vue'
 import ModernAvatar from '../components/ModernAvatar.vue'
 import ModernSelect from '../components/ModernSelect.vue'
-import { Users, Settings, Sparkles, Loader2, X, MoreHorizontal } from 'lucide-vue-next'
+import { Users, Settings, Sparkles, Loader2, X, MoreHorizontal, GripVertical } from 'lucide-vue-next'
 
 // API
 import { postAndConsumeSse } from '../api/sse'
@@ -537,6 +537,92 @@ const actions = useChatActions({
   charactersStore: characters as any,
 })
 
+/** 角色编辑弹窗：绑定世界书（attachedWorldBookIds），供「角色+世界书」ZIP 等使用 */
+const characterEditorWorldbooks = ref<WorldBook[]>([])
+const addCharacterEditorWbId = ref('')
+const characterEditorWbDraggingIdx = ref<number | null>(null)
+
+async function loadCharacterEditorWorldbooks() {
+  try {
+    characterEditorWorldbooks.value = await apiGet<WorldBook[]>('/api/worldbooks')
+  } catch {
+    characterEditorWorldbooks.value = []
+  }
+}
+
+function ensureCharacterAttachedWbIds() {
+  const c = actions.editingCharacter.value
+  if (!c) return
+  if (!Array.isArray(c.attachedWorldBookIds)) c.attachedWorldBookIds = []
+}
+
+function characterEditorWorldBookName(id: string) {
+  return characterEditorWorldbooks.value.find((b) => b.id === id)?.name || id
+}
+
+const characterEditorWorldBookSelectOptions = computed(() => {
+  const c = actions.editingCharacter.value
+  if (!c) return []
+  const taken = new Set(c.attachedWorldBookIds || [])
+  return characterEditorWorldbooks.value
+    .filter((b) => !taken.has(b.id))
+    .map((b) => ({ label: b.name || b.id, value: b.id }))
+})
+
+function addCharacterEditorWorldBook() {
+  if (!actions.editingCharacter.value || !addCharacterEditorWbId.value) return
+  ensureCharacterAttachedWbIds()
+  const ids = actions.editingCharacter.value.attachedWorldBookIds!
+  if (!ids.includes(addCharacterEditorWbId.value)) ids.push(addCharacterEditorWbId.value)
+  addCharacterEditorWbId.value = ''
+}
+
+function removeCharacterEditorWorldBook(worldbookId: string) {
+  if (!actions.editingCharacter.value?.attachedWorldBookIds) return
+  actions.editingCharacter.value.attachedWorldBookIds = actions.editingCharacter.value.attachedWorldBookIds.filter(
+    (id) => id !== worldbookId,
+  )
+}
+
+function moveCharacterEditorWorldBook(worldbookId: string, direction: -1 | 1) {
+  const c = actions.editingCharacter.value
+  if (!c?.attachedWorldBookIds) return
+  const ids = [...c.attachedWorldBookIds]
+  const idx = ids.indexOf(worldbookId)
+  if (idx < 0) return
+  const next = idx + direction
+  if (next < 0 || next >= ids.length) return
+  const a = ids[idx]
+  const b = ids[next]
+  if (a == null || b == null) return
+  ids[idx] = b
+  ids[next] = a
+  c.attachedWorldBookIds = ids
+}
+
+function handleCharacterEditorWbDragStart(idx: number) {
+  characterEditorWbDraggingIdx.value = idx
+}
+
+function handleCharacterEditorWbDragOver(e: DragEvent, idx: number) {
+  e.preventDefault()
+  const c = actions.editingCharacter.value
+  if (!c?.attachedWorldBookIds) return
+  const from = characterEditorWbDraggingIdx.value
+  if (from === null || from === idx) return
+  const ids = [...c.attachedWorldBookIds]
+  const item = ids.splice(from, 1)[0]
+  if (item) {
+    ids.splice(idx, 0, item)
+    c.attachedWorldBookIds = ids
+    characterEditorWbDraggingIdx.value = idx
+  }
+}
+
+function handleCharacterEditorWbDragEnd() {
+  characterEditorWbDraggingIdx.value = null
+}
+
 /**
  * 处理成员ID更新
  *
@@ -974,8 +1060,20 @@ watch(actions.showCharacterEditor, (next, prev) => {
     if (assistant.isAssistantPanelOpen.value) void assistant.loadState('chat')
     actions.editingCharacter.value = null
     actions.isNewCharacter.value = false
+    characterEditorWbDraggingIdx.value = null
+    addCharacterEditorWbId.value = ''
   }
 })
+
+watch(
+  () => actions.showCharacterEditor.value,
+  (open) => {
+    if (open && actions.editingCharacter.value) {
+      ensureCharacterAttachedWbIds()
+      void loadCharacterEditorWorldbooks()
+    }
+  },
+)
 
 /**
  * 根据当前聊天窗口动态更新页面标题
@@ -2928,6 +3026,52 @@ const editingPersonaAvatarUrl = computed(() => {
               <div class="form-group">
                 <label class="label">示例对话</label>
                 <textarea v-model="actions.editingCharacter.value.exampleDialogue" class="input textarea h-48" placeholder="示例对话..."></textarea>
+              </div>
+
+              <div class="form-group rounded-xl border border-[var(--color-border-subtle)] bg-surface-overlay/80 p-4">
+                <label class="label">
+                  <span>绑定世界书</span>
+                  <span class="opacity-60 text-xs ml-2 text-brand">随角色保存；「角色+世界书」ZIP 导出用此顺序</span>
+                </label>
+                <p class="text-xs text-[var(--color-text-muted)] mb-3 leading-relaxed">
+                  与「设置 → 当前会话」中的会话世界书顺序独立；保存后写入角色卡上的绑定列表，供含世界书 ZIP 等使用。
+                </p>
+                <div class="flex flex-wrap items-center gap-2 mb-3">
+                  <ModernSelect
+                    v-model="addCharacterEditorWbId"
+                    :options="characterEditorWorldBookSelectOptions"
+                    placeholder="选择世界书加入列表..."
+                    class="flex-1 min-w-[200px]"
+                  />
+                  <button type="button" class="btn btn-sm btn-secondary shrink-0" @click="addCharacterEditorWorldBook">加入</button>
+                </div>
+                <div class="space-y-1.5 max-h-[200px] overflow-y-auto custom-scrollbar pr-1">
+                  <div
+                    v-for="(wbId, idx) in (actions.editingCharacter.value.attachedWorldBookIds || [])"
+                    :key="`${wbId}-${idx}`"
+                    class="flex items-center justify-between gap-2 rounded-lg border border-[var(--color-border-subtle)] bg-surface-muted px-2 py-1.5 transition-all"
+                    :class="characterEditorWbDraggingIdx === idx ? 'opacity-50 border-brand-a50' : ''"
+                    draggable="true"
+                    @dragstart="handleCharacterEditorWbDragStart(idx)"
+                    @dragover="handleCharacterEditorWbDragOver($event, idx)"
+                    @dragend="handleCharacterEditorWbDragEnd"
+                  >
+                    <div class="flex min-w-0 flex-1 items-center gap-1.5">
+                      <span class="shrink-0 cursor-grab text-[var(--color-text-muted)] active:cursor-grabbing" title="拖动排序" aria-hidden="true">
+                        <GripVertical class="w-4 h-4" />
+                      </span>
+                      <span class="truncate text-xs text-[var(--color-text)]">{{ idx + 1 }}. {{ characterEditorWorldBookName(wbId) }}</span>
+                    </div>
+                    <div class="flex shrink-0 items-center gap-1">
+                      <button type="button" class="btn btn-xs btn-secondary" @click.stop="moveCharacterEditorWorldBook(wbId, -1)">上移</button>
+                      <button type="button" class="btn btn-xs btn-secondary" @click.stop="moveCharacterEditorWorldBook(wbId, 1)">下移</button>
+                      <button type="button" class="btn btn-xs btn-secondary" @click.stop="removeCharacterEditorWorldBook(wbId)">移除</button>
+                    </div>
+                  </div>
+                  <div v-if="!(actions.editingCharacter.value.attachedWorldBookIds || []).length" class="text-xs text-[var(--color-text-muted)] py-2 text-center border border-dashed border-[var(--color-border-subtle)] rounded-lg">
+                    未绑定世界书
+                  </div>
+                </div>
               </div>
             </div>
           </div>
