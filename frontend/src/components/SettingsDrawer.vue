@@ -34,7 +34,7 @@
  *    - 位置：组件层，提供设置管理功能
  */
 import { computed, onMounted, ref, watch } from 'vue'
-import { useChatsStore, useSettingsStore } from '../stores'
+import { useChatsStore, useCharactersStore, useSettingsStore } from '../stores'
 import {
   normalizeReasoningEffort,
   normalizeThemeId,
@@ -45,12 +45,16 @@ import {
   type ChatOverrides,
   type Settings,
   type WorldBook,
+  type WorldBookAttachment,
 } from '../types/models'
 import ModernSelect from './ModernSelect.vue'
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/http'
 import { useAppFont } from '../composables/useAppFont'
 import { useSettingsImport } from '../composables/useSettingsImport'
-import { X, Eye, EyeOff, Check, Loader2 } from 'lucide-vue-next'
+import { X, Eye, EyeOff, Check, Loader2, GripVertical } from 'lucide-vue-next'
+import WorldBookEditorModal from './modals/WorldBookEditorModal.vue'
+import WorldBookSessionAttachModal from './modals/WorldBookSessionAttachModal.vue'
+import { concatEnabledWorldBookContents, countTokensForText } from '../utils/tokenEstimate'
 
 const { applyFont } = useAppFont()
 
@@ -70,6 +74,7 @@ const emit = defineEmits<{
 
 const settingsStore = useSettingsStore()
 const chatsStore = useChatsStore()
+const charactersStore = useCharactersStore()
 const {
   importSettingsFile,
   refreshDataAfterImport,
@@ -88,6 +93,9 @@ watch(tab, (t) => {
   if (t === 'chat') chatTabEverOpened.value = true
 })
 
+const worldBookCreateExpanded = ref(false)
+const worldBookNewNameDraft = ref('')
+
 // 打开设置抽屉时从后端获取版本号（仅请求一次）
 watch(
   () => props.show,
@@ -96,6 +104,10 @@ watch(
       apiGet<{ version: string }>('/api/update/version')
         .then((res) => { appVersion.value = res.version })
         .catch(() => { appVersion.value = '' })
+    }
+    if (!visible) {
+      worldBookCreateExpanded.value = false
+      worldBookNewNameDraft.value = ''
     }
   },
   { immediate: true }
@@ -110,7 +122,17 @@ const editingPresetShowApiKey = ref(false)
 const presetModelsLoading = ref(false)
 const importInputRef = ref<HTMLInputElement | null>(null)
 const worldbooks = ref<WorldBook[]>([])
+/** 全部世界书列表：按书 ID 缓存启用条目正文的 token 估测 */
+const worldbookTokenTotals = ref<Record<string, number | null>>({})
+const worldbookTokensLoading = ref(false)
 const addWorldBookId = ref('')
+const showWorldBookEditor = ref(false)
+const worldBookEditorId = ref<string | null>(null)
+
+const allWorldBooksSectionOpen = ref(false)
+const allWorldBooksListExpanded = ref(false)
+const sessionAttachModalShow = ref(false)
+const sessionAttachIdx = ref<number | null>(null)
 
 // 检查更新
 const checkUpdateLoading = ref(false)
@@ -164,12 +186,25 @@ function clone<T>(v: T): T {
  * @returns {ChatOverrides} 完整的覆盖设置对象（来自types/models.ts）
  */
 function ensureOverrides(v?: Partial<ChatOverrides> | null): ChatOverrides {
+  let attachments: WorldBookAttachment[] = [...(v?.worldBookAttachments || [])]
+  const ids = v?.worldBookIds || []
+  if (attachments.length === 0 && ids.length > 0) {
+    attachments = ids.map((id) => ({
+      worldBookId: id,
+      scanDepth: null,
+      insertDepth: 5,
+    }))
+  }
+  const worldBookIds = attachments.map((a) => a.worldBookId)
   return {
     prompt: v?.prompt ?? null,
     longTermMemory: v?.longTermMemory ?? null,
     contextStartMessageId: v?.contextStartMessageId ?? null,
     presetId: v?.presetId ?? null,
-    worldBookIds: [...(v?.worldBookIds || [])],
+    pureAiMode: v?.pureAiMode ?? null,
+    worldBookIds,
+    worldBookAttachments: attachments,
+    worldBookGlobalExclusions: [...(v?.worldBookGlobalExclusions || [])],
     params: {
       model: v?.params?.model ?? null,
       temperature: v?.params?.temperature ?? null,
@@ -180,6 +215,7 @@ function ensureOverrides(v?: Partial<ChatOverrides> | null): ChatOverrides {
     draftHelp: {
       context_message_limit: v?.draftHelp?.context_message_limit ?? null,
     },
+    memberSettings: v?.memberSettings ? { ...v.memberSettings } : undefined,
   }
 }
 
@@ -273,29 +309,87 @@ onMounted(() => {
   }, 150)
 })
 
+async function refreshWorldbookTokenTotals() {
+  worldbookTokenTotals.value = {}
+  const list = worldbooks.value
+  if (list.length === 0) return
+  worldbookTokensLoading.value = true
+  try {
+    const results = await Promise.all(
+      list.map(async (b) => {
+        const text = concatEnabledWorldBookContents(b)
+        const n = await countTokensForText(text)
+        return [b.id, n] as const
+      }),
+    )
+    const map: Record<string, number | null> = {}
+    for (const [id, n] of results) map[id] = n
+    worldbookTokenTotals.value = map
+  } finally {
+    worldbookTokensLoading.value = false
+  }
+}
+
 async function loadWorldBooks() {
   try {
     worldbooks.value = await apiGet<WorldBook[]>('/api/worldbooks')
   } catch {
     worldbooks.value = []
   }
+  await refreshWorldbookTokenTotals()
 }
 
-async function createWorldBookQuick() {
-  const name = prompt('请输入世界书名称')
-  if (!name || !name.trim()) return
+function worldbookTokenHint(bookId: string): string {
+  if (worldbookTokensLoading.value) return '约 …'
+  const v = worldbookTokenTotals.value[bookId]
+  if (v === undefined) return ''
+  if (v === null) return '无法估算'
+  return `约 ${v} tokens`
+}
+
+function openWorldBookEditor(worldbookId: string) {
+  worldBookEditorId.value = worldbookId
+  showWorldBookEditor.value = true
+}
+
+async function confirmCreateWorldBook() {
+  const name = worldBookNewNameDraft.value.trim()
+  if (!name) {
+    alert('请输入世界书名称')
+    return
+  }
   const now = new Date().toISOString()
   const payload: WorldBook = {
     id: crypto.randomUUID().replace(/-/g, ''),
-    name: name.trim(),
+    name,
     entries: [],
     globalActive: false,
     sessionChatIds: [],
     createdAt: now,
     updatedAt: now,
   }
-  await apiPost<WorldBook>('/api/worldbooks', payload)
+  try {
+    const created = await apiPost<WorldBook>('/api/worldbooks', payload)
+    await loadWorldBooks()
+    worldBookCreateExpanded.value = false
+    worldBookNewNameDraft.value = ''
+    openWorldBookEditor(created.id)
+  } catch (e) {
+    alert('创建世界书失败: ' + String(e))
+  }
+}
+
+async function onWorldBookEditorDeleted(worldbookId: string) {
   await loadWorldBooks()
+  removeWorldBookFromOrder(worldbookId)
+  if (chatDraft.value?.worldBookGlobalExclusions?.includes(worldbookId)) {
+    chatDraft.value.worldBookGlobalExclusions = chatDraft.value.worldBookGlobalExclusions.filter((id) => id !== worldbookId)
+  }
+}
+
+function cancelWorldBookCreate() {
+  worldBookCreateExpanded.value = false
+  worldBookNewNameDraft.value = ''
 }
 
 async function deleteWorldBookQuick(worldbookId: string) {
@@ -303,6 +397,9 @@ async function deleteWorldBookQuick(worldbookId: string) {
   await apiDelete(`/api/worldbooks/${worldbookId}`)
   await loadWorldBooks()
   removeWorldBookFromOrder(worldbookId)
+  if (chatDraft.value?.worldBookGlobalExclusions?.includes(worldbookId)) {
+    chatDraft.value.worldBookGlobalExclusions = chatDraft.value.worldBookGlobalExclusions.filter((id) => id !== worldbookId)
+  }
 }
 
 watch(
@@ -338,6 +435,9 @@ watch(
       }
     }
     await loadWorldBooks()
+    if (props.chat && chatDraft.value) {
+      mergeGlobalWorldBooksIntoDraft()
+    }
 
     if (s.apiPresets.length > 0 && !editingPresetId.value) {
         editingPresetId.value = s.apiPresets[0]?.id ?? null
@@ -354,56 +454,221 @@ watch(
   },
 )
 
+watch(
+  () => [props.show, tab.value, props.chat?.id] as const,
+  async ([open, t, chatId]) => {
+    if (!open || t !== 'chat' || !chatId) return
+    await loadWorldBooks()
+    if (chatDraft.value) mergeGlobalWorldBooksIntoDraft()
+  },
+)
+
 const worldBookAddOptions = computed(() => {
   return worldbooks.value.map((b) => ({ label: b.name || b.id, value: b.id }))
 })
 
+/** 与当前会话相关的世界书：服务端已绑定（全局 / sessionChatIds）或已写入本会话顺序草稿（加入顺序） */
 const currentChatWorldbooks = computed(() => {
   const chatId = props.chat?.id
   if (!chatId) return []
-  return worldbooks.value.filter((book) => {
+  const fromServer = worldbooks.value.filter((book) => {
     if (book.globalActive) return true
     return (book.sessionChatIds || []).includes(chatId)
   })
+  const seen = new Set(fromServer.map((b) => b.id))
+  const merged = [...fromServer]
+  for (const att of chatDraft.value?.worldBookAttachments || []) {
+    if (seen.has(att.worldBookId)) continue
+    const b = worldbooks.value.find((x) => x.id === att.worldBookId)
+    if (b) {
+      seen.add(b.id)
+      merged.push(b)
+    }
+  }
+  return merged
 })
 
-function ensureWorldBookOrder() {
+/** 将未在排除列表中的全局世界书追加到会话顺序末尾（打开设置或切换会话时调用） */
+function mergeGlobalWorldBooksIntoDraft() {
   if (!chatDraft.value) return
-  if (!Array.isArray(chatDraft.value.worldBookIds)) chatDraft.value.worldBookIds = []
+  ensureWorldBookAttachments()
+  const excl = new Set(chatDraft.value.worldBookGlobalExclusions || [])
+  const att = chatDraft.value.worldBookAttachments!
+  const have = new Set(att.map((a) => a.worldBookId))
+  for (const book of worldbooks.value) {
+    if (!book.globalActive) continue
+    if (excl.has(book.id)) continue
+    if (have.has(book.id)) continue
+    att.push({
+      worldBookId: book.id,
+      scanDepth: null,
+      insertDepth: 5,
+    })
+    have.add(book.id)
+  }
+  syncWorldBookIdsFromAttachments()
+}
+
+function syncWorldBookIdsFromAttachments() {
+  if (!chatDraft.value?.worldBookAttachments) return
+  chatDraft.value.worldBookIds = chatDraft.value.worldBookAttachments.map((a) => a.worldBookId)
+}
+
+function ensureWorldBookAttachments() {
+  if (!chatDraft.value) return
+  if (!Array.isArray(chatDraft.value.worldBookAttachments)) chatDraft.value.worldBookAttachments = []
+  const ids = chatDraft.value.worldBookIds || []
+  if (chatDraft.value.worldBookAttachments.length === 0 && ids.length > 0) {
+    chatDraft.value.worldBookAttachments = ids.map((id) => ({
+      worldBookId: id,
+      scanDepth: null,
+      insertDepth: 5,
+    }))
+  }
+  syncWorldBookIdsFromAttachments()
 }
 
 function addWorldBookToOrder() {
   if (!chatDraft.value || !addWorldBookId.value) return
-  ensureWorldBookOrder()
-  const ids = chatDraft.value.worldBookIds as string[]
-  if (!ids.includes(addWorldBookId.value)) ids.push(addWorldBookId.value)
+  ensureWorldBookAttachments()
+  const id = addWorldBookId.value
+  chatDraft.value.worldBookGlobalExclusions = (chatDraft.value.worldBookGlobalExclusions || []).filter(
+    (x) => x !== id,
+  )
+  const att = chatDraft.value.worldBookAttachments!
+  if (!att.some((a) => a.worldBookId === id)) {
+    att.push({
+      worldBookId: id,
+      scanDepth: null,
+      insertDepth: 5,
+    })
+  }
+  syncWorldBookIdsFromAttachments()
   addWorldBookId.value = ''
 }
 
 function removeWorldBookFromOrder(worldbookId: string) {
   if (!chatDraft.value) return
-  ensureWorldBookOrder()
-  chatDraft.value.worldBookIds = (chatDraft.value.worldBookIds || []).filter((id) => id !== worldbookId)
+  ensureWorldBookAttachments()
+  chatDraft.value.worldBookAttachments = (chatDraft.value.worldBookAttachments || []).filter(
+    (a) => a.worldBookId !== worldbookId,
+  )
+  syncWorldBookIdsFromAttachments()
+  const wb = worldbooks.value.find((b) => b.id === worldbookId)
+  if (wb?.globalActive) {
+    const ex = chatDraft.value.worldBookGlobalExclusions || []
+    if (!ex.includes(worldbookId)) {
+      chatDraft.value.worldBookGlobalExclusions = [...ex, worldbookId]
+    }
+  }
 }
 
 function moveWorldBookOrder(worldbookId: string, direction: -1 | 1) {
   if (!chatDraft.value) return
-  ensureWorldBookOrder()
-  const ids = [...(chatDraft.value.worldBookIds || [])]
-  const idx = ids.indexOf(worldbookId)
+  ensureWorldBookAttachments()
+  const att = [...(chatDraft.value.worldBookAttachments || [])]
+  const idx = att.findIndex((a) => a.worldBookId === worldbookId)
   if (idx < 0) return
   const next = idx + direction
-  if (next < 0 || next >= ids.length) return
-  const current = ids[idx]
-  const target = ids[next]
+  if (next < 0 || next >= att.length) return
+  const current = att[idx]
+  const target = att[next]
   if (current == null || target == null) return
-  ids[idx] = target
-  ids[next] = current
-  chatDraft.value.worldBookIds = ids
+  att[idx] = target
+  att[next] = current
+  chatDraft.value.worldBookAttachments = att
+  syncWorldBookIdsFromAttachments()
+}
+
+const worldBookOrderDraggingIdx = ref<number | null>(null)
+
+function handleWorldBookOrderDragStart(idx: number) {
+  worldBookOrderDraggingIdx.value = idx
+}
+
+function handleWorldBookOrderDragOver(e: DragEvent, idx: number) {
+  e.preventDefault()
+  if (!chatDraft.value) return
+  ensureWorldBookAttachments()
+  const from = worldBookOrderDraggingIdx.value
+  if (from === null || from === idx) return
+  const att = [...(chatDraft.value.worldBookAttachments || [])]
+  const item = att.splice(from, 1)[0]
+  if (item) {
+    att.splice(idx, 0, item)
+    chatDraft.value.worldBookAttachments = att
+    worldBookOrderDraggingIdx.value = idx
+    syncWorldBookIdsFromAttachments()
+  }
+}
+
+function handleWorldBookOrderDragEnd() {
+  worldBookOrderDraggingIdx.value = null
 }
 
 function worldBookName(worldbookId: string): string {
   return worldbooks.value.find((b) => b.id === worldbookId)?.name || worldbookId
+}
+
+function scanDepthDisplay(scanDepth: number | null | undefined): string {
+  if (scanDepth != null && scanDepth >= 1) return String(scanDepth)
+  const d = globalDraft.value?.worldBookEntryScanDepthDefault
+  if (d != null && d >= 0) return `默认(${d})`
+  return '默认'
+}
+
+function openSessionAttachEdit(idx: number) {
+  if (!chatDraft.value) return
+  ensureWorldBookAttachments()
+  const a = chatDraft.value.worldBookAttachments![idx]
+  if (!a) return
+  sessionAttachIdx.value = idx
+  sessionAttachModalShow.value = true
+}
+
+function onSessionAttachSave(payload: { scanDepth: number | null; insertDepth: number }) {
+  if (!chatDraft.value || sessionAttachIdx.value == null) return
+  ensureWorldBookAttachments()
+  const i = sessionAttachIdx.value
+  const list = chatDraft.value.worldBookAttachments!
+  if (!list[i]) return
+  list[i] = {
+    ...list[i]!,
+    scanDepth: payload.scanDepth,
+    insertDepth: payload.insertDepth,
+  }
+  sessionAttachModalShow.value = false
+  sessionAttachIdx.value = null
+}
+
+const sessionAttachModalBookName = computed(() => {
+  if (sessionAttachIdx.value == null || !chatDraft.value?.worldBookAttachments) return ''
+  const a = chatDraft.value.worldBookAttachments[sessionAttachIdx.value]
+  return a ? worldBookName(a.worldBookId) : ''
+})
+
+const sessionAttachModalScan = computed(() => {
+  if (sessionAttachIdx.value == null || !chatDraft.value?.worldBookAttachments) return null
+  const a = chatDraft.value.worldBookAttachments[sessionAttachIdx.value]
+  return a?.scanDepth ?? null
+})
+
+const sessionAttachModalInsert = computed(() => {
+  if (sessionAttachIdx.value == null || !chatDraft.value?.worldBookAttachments) return 5
+  const a = chatDraft.value.worldBookAttachments[sessionAttachIdx.value]
+  return a?.insertDepth != null && a.insertDepth >= 1 ? a.insertDepth : 5
+})
+
+const worldBooksListVisible = computed(() => {
+  const list = worldbooks.value
+  if (!allWorldBooksSectionOpen.value) return []
+  if (allWorldBooksListExpanded.value || list.length <= 5) return list
+  return list.slice(0, 5)
+})
+
+function toggleAllWorldBooksSection() {
+  allWorldBooksSectionOpen.value = !allWorldBooksSectionOpen.value
+  if (!allWorldBooksSectionOpen.value) allWorldBooksListExpanded.value = false
 }
 
 async function setWorldBookGlobalActive(book: WorldBook, active: boolean) {
@@ -414,18 +679,17 @@ async function setWorldBookGlobalActive(book: WorldBook, active: boolean) {
   }
   await apiPut<WorldBook>(`/api/worldbooks/${book.id}`, payload)
   await loadWorldBooks()
-}
-
-async function attachWorldBookToCurrentChat(book: WorldBook) {
-  if (!props.chat?.id) return
-  const chatId = props.chat.id
-  const payload: WorldBook = {
-    ...book,
-    globalActive: false,
-    sessionChatIds: Array.from(new Set([...(book.sessionChatIds || []), chatId])),
+  if (!chatDraft.value) return
+  if (active) {
+    chatDraft.value.worldBookGlobalExclusions = (chatDraft.value.worldBookGlobalExclusions || []).filter(
+      (id) => id !== book.id,
+    )
+    mergeGlobalWorldBooksIntoDraft()
+  } else {
+    chatDraft.value.worldBookGlobalExclusions = (chatDraft.value.worldBookGlobalExclusions || []).filter(
+      (id) => id !== book.id,
+    )
   }
-  await apiPut<WorldBook>(`/api/worldbooks/${book.id}`, payload)
-  await loadWorldBooks()
 }
 
 async function detachWorldBookFromCurrentChat(book: WorldBook) {
@@ -756,7 +1020,8 @@ function handleChatDraftHelpLimitInput(e: Event) {
 }
 
 async function saveChatOverrides() {
-  if (!props.chat || !chatDraft.value) return
+  const chat = props.chat
+  if (!chat || !chatDraft.value) return
   const draft = {
     ...chatDraft.value,
     params: { ...chatDraft.value.params },
@@ -764,9 +1029,43 @@ async function saveChatOverrides() {
   }
   draft.params.context_size = normalizeContextSize(draft.params.context_size)
   draft.draftHelp.context_message_limit = normalizePositiveInteger(draft.draftHelp.context_message_limit)
-  await chatsStore.updateOverrides(props.chat.id, draft)
+  await chatsStore.updateOverrides(chat.id, draft)
   chatDraft.value.params.context_size = draft.params.context_size
   chatDraft.value.draftHelp = draft.draftHelp
+
+  // 单聊：将当前会话的世界书顺序同步到角色卡 attachedWorldBookIds，便于「含世界书」ZIP 导出一致
+  if (!chat.isGroup && chat.characterId) {
+    const ordered: string[] = []
+    const seen = new Set<string>()
+    const wbOrder = (draft.worldBookAttachments || []).map((a) => a.worldBookId)
+    for (const id of wbOrder) {
+      if (id && !seen.has(id)) {
+        seen.add(id)
+        ordered.push(id)
+      }
+    }
+    const characterId = chat.characterId
+    let char = charactersStore.list.find((c) => c.id === characterId)
+    if (!char) {
+      try {
+        char = await charactersStore.get(characterId)
+      } catch {
+        char = undefined
+      }
+    }
+    if (char) {
+      const prev = char.attachedWorldBookIds || []
+      const same =
+        prev.length === ordered.length && prev.every((x, i) => x === ordered[i])
+      if (!same) {
+        await charactersStore.update(characterId, {
+          ...char,
+          attachedWorldBookIds: ordered,
+        })
+      }
+    }
+  }
+
   close()
 }
 
@@ -906,6 +1205,7 @@ async function checkUpdate() {
 </script>
 
 <template>
+  <div>
   <div class="drawer-wrapper fixed inset-0 z-50 flex justify-end" :class="{ 'is-open': show }">
     <!-- Backdrop -->
     <div
@@ -1518,9 +1818,24 @@ async function checkUpdate() {
               <p class="text-xs text-[var(--color-text-muted)] mt-2">实际上下文总限制长度为该 Context Size 限制加上角色卡、用户信息、自定义系统提示词。草稿助手优先使用当前会话的条数限制，其次全局，最后回退到现有上下文逻辑。</p>
 
               <div class="space-y-2">
-                <div class="flex items-center justify-between gap-2">
+                <div class="flex flex-wrap items-center justify-between gap-2">
                   <div class="text-sm font-medium text-[var(--color-text-secondary)]">世界书</div>
-                  <button class="btn btn-xs btn-secondary" @click="createWorldBookQuick">新建世界书</button>
+                  <template v-if="!worldBookCreateExpanded">
+                    <button type="button" class="btn btn-xs btn-secondary" @click="worldBookCreateExpanded = true">
+                      新建世界书
+                    </button>
+                  </template>
+                  <div v-else class="flex flex-wrap items-center gap-2 justify-end flex-1 min-w-0">
+                    <input
+                      v-model="worldBookNewNameDraft"
+                      type="text"
+                      class="input input-sm flex-1 min-w-[140px] max-w-[240px]"
+                      placeholder="世界书名称"
+                      @keydown.enter.prevent="confirmCreateWorldBook"
+                    />
+                    <button type="button" class="btn btn-xs btn-primary" @click="confirmCreateWorldBook">创建</button>
+                    <button type="button" class="btn btn-xs btn-secondary" @click="cancelWorldBookCreate">取消</button>
+                  </div>
                 </div>
                 <div class="rounded-lg border border-[var(--color-border-subtle)] bg-surface-muted p-3 text-xs text-[var(--color-text-muted)]">
                   全局激活的世界书会自动对当前会话生效；你也可以把世界书仅绑定到当前会话。会话内顺序用于预算淘汰优先级（靠后更先被丢弃）。
@@ -1543,14 +1858,18 @@ async function checkUpdate() {
                     <div class="flex items-center justify-between gap-2">
                       <div class="text-sm text-[var(--color-text)]">
                         {{ book.name }}
-                        <span v-if="book.globalActive" class="ml-1 text-xs text-brand">（全局）</span>
+                        <span v-if="book.globalActive" class="ml-1 text-xs text-brand">{{
+                          (chatDraft?.worldBookGlobalExclusions || []).includes(book.id)
+                            ? '（全局，该会话禁用）'
+                            : '（全局）'
+                        }}</span>
                       </div>
                       <div class="flex items-center gap-1">
                         <button class="btn btn-xs btn-secondary" @click="setWorldBookGlobalActive(book, !book.globalActive)">
                           {{ book.globalActive ? '改为会话' : '设为全局' }}
                         </button>
-                        <button class="btn btn-xs btn-secondary" @click="attachWorldBookToCurrentChat(book)">会话启用</button>
                         <button class="btn btn-xs btn-secondary" @click="detachWorldBookFromCurrentChat(book)">移除会话</button>
+                        <button class="btn btn-xs btn-secondary" @click="openWorldBookEditor(book.id)">编辑</button>
                         <button class="btn btn-xs btn-secondary" @click="deleteWorldBookQuick(book.id)">删除书</button>
                       </div>
                     </div>
@@ -1559,14 +1878,70 @@ async function checkUpdate() {
                     当前会话暂无已激活世界书。
                   </div>
                 </div>
+                <div class="rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay overflow-hidden">
+                  <button
+                    type="button"
+                    class="w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-xs font-medium text-[var(--color-text-secondary)] hover:bg-surface-muted transition-colors"
+                    @click="toggleAllWorldBooksSection"
+                  >
+                    <span>全部世界书（{{ worldbooks.length }} 本）</span>
+                    <span class="text-[var(--color-text-muted)]">{{ allWorldBooksSectionOpen ? '收起' : '展开' }}</span>
+                  </button>
+                  <div v-show="allWorldBooksSectionOpen" class="px-2 pb-2 space-y-1.5 border-t border-[var(--color-border-subtle)] pt-2">
+                    <div
+                      v-for="book in worldBooksListVisible"
+                      :key="book.id"
+                      class="flex items-center justify-between gap-2 rounded-md border border-[var(--color-border-subtle)] bg-surface-muted px-2 py-1.5"
+                    >
+                      <div class="min-w-0 flex-1">
+                        <div class="text-xs text-[var(--color-text)] truncate">{{ book.name || book.id }}</div>
+                        <div class="text-[10px] text-[var(--color-text-muted)] leading-tight mt-0.5">
+                          {{ worldbookTokenHint(book.id) }}
+                        </div>
+                      </div>
+                      <button type="button" class="btn btn-xs btn-secondary shrink-0" @click="openWorldBookEditor(book.id)">
+                        编辑
+                      </button>
+                    </div>
+                    <div v-if="worldbooks.length === 0" class="text-xs text-[var(--color-text-muted)] px-1 py-1">暂无世界书。</div>
+                    <div v-else-if="worldbooks.length > 5" class="flex justify-center pt-1">
+                      <button type="button" class="btn btn-xs btn-secondary" @click="allWorldBooksListExpanded = !allWorldBooksListExpanded">
+                        {{ allWorldBooksListExpanded ? '收起列表' : `展开全部（${worldbooks.length} 本）` }}
+                      </button>
+                    </div>
+                  </div>
+                </div>
                 <div class="space-y-1 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay p-2">
                   <div class="text-xs text-[var(--color-text-muted)]">会话世界书顺序</div>
-                  <div v-for="(worldbookId, idx) in (chatDraft.worldBookIds || [])" :key="worldbookId" class="flex items-center justify-between gap-2 rounded-md border border-[var(--color-border-subtle)] bg-surface-muted px-2 py-1">
-                    <span class="text-xs text-[var(--color-text)]">{{ idx + 1 }}. {{ worldBookName(worldbookId) }}</span>
-                    <div class="flex items-center gap-1">
-                      <button class="btn btn-xs btn-secondary" @click="moveWorldBookOrder(worldbookId, -1)">上移</button>
-                      <button class="btn btn-xs btn-secondary" @click="moveWorldBookOrder(worldbookId, 1)">下移</button>
-                      <button class="btn btn-xs btn-secondary" @click="removeWorldBookFromOrder(worldbookId)">删除</button>
+                  <p class="text-[10px] text-[var(--color-text-muted)] mb-1 leading-snug">
+                    拖动条目或用上移/下移调整顺序（预算淘汰时靠后的书先被丢弃）。扫描深度与插入深度在「编辑」中设置（按会话）。
+                  </p>
+                  <div
+                    v-for="(att, idx) in (chatDraft.worldBookAttachments || [])"
+                    :key="`${att.worldBookId}-${idx}`"
+                    class="flex items-center justify-between gap-2 rounded-md border border-[var(--color-border-subtle)] bg-surface-muted px-2 py-1 transition-all"
+                    :class="worldBookOrderDraggingIdx === idx ? 'opacity-50 border-brand-a50' : ''"
+                    draggable="true"
+                    @dragstart="handleWorldBookOrderDragStart(idx)"
+                    @dragover="handleWorldBookOrderDragOver($event, idx)"
+                    @dragend="handleWorldBookOrderDragEnd"
+                  >
+                    <div class="flex min-w-0 flex-1 flex-col gap-0.5">
+                      <div class="flex items-center gap-1.5">
+                        <span class="shrink-0 cursor-grab text-[var(--color-text-muted)] active:cursor-grabbing" title="拖动排序" aria-hidden="true">
+                          <GripVertical class="w-4 h-4" />
+                        </span>
+                        <span class="truncate text-xs text-[var(--color-text)]">{{ idx + 1 }}. {{ worldBookName(att.worldBookId) }}</span>
+                      </div>
+                      <div class="text-[10px] text-[var(--color-text-muted)] pl-6">
+                        扫描：{{ scanDepthDisplay(att.scanDepth) }}　深度：{{ att.insertDepth ?? 5 }}
+                      </div>
+                    </div>
+                    <div class="flex shrink-0 flex-wrap items-center gap-1 justify-end">
+                      <button type="button" class="btn btn-xs btn-secondary" @click.stop="openSessionAttachEdit(idx)">编辑</button>
+                      <button type="button" class="btn btn-xs btn-secondary" @click.stop="moveWorldBookOrder(att.worldBookId, -1)">上移</button>
+                      <button type="button" class="btn btn-xs btn-secondary" @click.stop="moveWorldBookOrder(att.worldBookId, 1)">下移</button>
+                      <button type="button" class="btn btn-xs btn-secondary" @click.stop="removeWorldBookFromOrder(att.worldBookId)">删除</button>
                     </div>
                   </div>
                 </div>
@@ -1658,6 +2033,25 @@ async function checkUpdate() {
     </div>
   </div>
   </Teleport>
+
+  <WorldBookEditorModal
+    :show="showWorldBookEditor"
+    :world-book-id="worldBookEditorId"
+    @update:show="(v) => (showWorldBookEditor = v)"
+    @saved="loadWorldBooks"
+    @deleted="onWorldBookEditorDeleted"
+  />
+
+  <WorldBookSessionAttachModal
+    :show="sessionAttachModalShow"
+    :book-name="sessionAttachModalBookName"
+    :scan-depth="sessionAttachModalScan ?? null"
+    :insert-depth="sessionAttachModalInsert"
+    :scan-depth-default="globalDraft?.worldBookEntryScanDepthDefault ?? null"
+    @update:show="(v) => (sessionAttachModalShow = v)"
+    @save="onSessionAttachSave"
+  />
+  </div>
 </template>
 
 <style scoped>
