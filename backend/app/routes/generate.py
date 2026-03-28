@@ -230,9 +230,21 @@ def _extract_text_content(content: Any) -> str:
     return str(content or "")
 
 
-def collect_active_worldbooks(chat_id: str, ordered_ids: list[str] | None = None):
+def collect_active_worldbooks(
+    chat_id: str,
+    ordered_ids: list[str] | None = None,
+    global_exclusions: set[str] | None = None,
+):
+    global_exclusions = global_exclusions or set()
     all_books = list_worldbooks()
-    active = [b for b in all_books if bool(getattr(b, "globalActive", False)) or chat_id in (getattr(b, "sessionChatIds", []) or [])]
+    active: list[Any] = []
+    for b in all_books:
+        if bool(getattr(b, "globalActive", False)):
+            if b.id in global_exclusions:
+                continue
+            active.append(b)
+        elif chat_id in (getattr(b, "sessionChatIds", []) or []):
+            active.append(b)
     if not ordered_ids:
         return active
     by_id = {b.id: b for b in active}
@@ -245,17 +257,43 @@ def collect_active_worldbooks(chat_id: str, ordered_ids: list[str] | None = None
     return ordered
 
 
-def match_worldbook_entries(book, conversation: list[dict]) -> list[Any]:
-    entries = sorted(list(getattr(book, "entries", []) or []), key=lambda e: (int(getattr(e, "insertDepth", 5)), int(getattr(e, "orderIndex", 0))))
+def _resolve_effective_scan_depth(raw: int | None, settings: Any) -> int:
+    if raw is not None and int(raw) >= 1:
+        return int(raw)
+    g = getattr(settings, "worldBookEntryScanDepthDefault", None)
+    if g is None:
+        g = 2
+    return max(0, int(g))
+
+
+def _book_worldbook_runtime_settings(chat: Any, settings: Any) -> dict[str, tuple[int, int]]:
+    m: dict[str, tuple[int, int]] = {}
+    for a in getattr(chat.overrides, "worldBookAttachments", None) or []:
+        wid = getattr(a, "worldBookId", None)
+        if not wid:
+            continue
+        sd = getattr(a, "scanDepth", None)
+        ins = int(getattr(a, "insertDepth", 5) or 5)
+        m[wid] = (_resolve_effective_scan_depth(sd, settings), max(1, ins))
+    return m
+
+
+def _runtime_scan_insert_for_book(book_id: str, chat: Any, settings: Any) -> tuple[int, int]:
+    m = _book_worldbook_runtime_settings(chat, settings)
+    default_scan = _resolve_effective_scan_depth(None, settings)
+    return m.get(book_id, (default_scan, 5))
+
+
+def match_worldbook_entries(book, conversation: list[dict], effective_scan: int) -> list[Any]:
+    entries = sorted(list(getattr(book, "entries", []) or []), key=lambda e: int(getattr(e, "orderIndex", 0)))
     matched: list[Any] = []
     for entry in entries:
         if not bool(getattr(entry, "enabled", True)):
             continue
-        depth = getattr(entry, "scanDepth", None)
-        if depth is None or int(depth) == 0:
+        if effective_scan <= 0:
             matched.append(entry)
             continue
-        n = int(depth)
+        n = int(effective_scan)
         if n < 0:
             continue
         scope = conversation[-n:] if n > 0 else []
@@ -271,26 +309,20 @@ def match_worldbook_entries(book, conversation: list[dict]) -> list[Any]:
     return matched
 
 
-def build_worldbook_injections(book, entries: list[Any], conversation_len: int) -> list[dict[str, Any]]:
-    grouped: dict[int, list[Any]] = {}
-    for entry in entries:
-        insert_depth = int(getattr(entry, "insertDepth", 5))
-        grouped.setdefault(insert_depth, []).append(entry)
-    injections: list[dict[str, Any]] = []
-    for insert_depth in sorted(grouped.keys()):
-        chunk_parts: list[str] = []
-        for entry in sorted(grouped[insert_depth], key=lambda e: int(getattr(e, "orderIndex", 0))):
-            content = str(getattr(entry, "content", "") or "").strip()
-            if content:
-                chunk_parts.append(content)
-        if not chunk_parts:
-            continue
-        insert_index = max(0, conversation_len - insert_depth)
-        injections.append({
-            "insert_index": insert_index,
-            "message": {"role": "system", "content": "\n\n".join(chunk_parts)},
-        })
-    return injections
+def build_worldbook_injections(book, entries: list[Any], conversation_len: int, insert_depth: int) -> list[dict[str, Any]]:
+    insert_depth = int(insert_depth)
+    chunk_parts: list[str] = []
+    for entry in sorted(entries, key=lambda e: int(getattr(e, "orderIndex", 0))):
+        content = str(getattr(entry, "content", "") or "").strip()
+        if content:
+            chunk_parts.append(content)
+    if not chunk_parts:
+        return []
+    insert_index = max(0, conversation_len - insert_depth)
+    return [{
+        "insert_index": insert_index,
+        "message": {"role": "system", "content": "\n\n".join(chunk_parts)},
+    }]
 
 
 def insert_injections_into_conversation(conversation: list[dict], injections: list[dict[str, Any]]) -> list[dict]:
@@ -684,15 +716,17 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
     base_conversation = trim_messages_to_context(conversation, pretrim_budget, None) if pretrim_budget is not None else list(conversation)
 
     worldbook_order = list(getattr(chat.overrides, "worldBookIds", []) or [])
-    active_books = collect_active_worldbooks(chat.id, worldbook_order)
+    wb_global_excl = set(getattr(chat.overrides, "worldBookGlobalExclusions", []) or [])
+    active_books = collect_active_worldbooks(chat.id, worldbook_order, wb_global_excl)
     selected_books = list(active_books)
     selected_book_ids = {book.id for book in selected_books}
     worldbook_meta: dict[str, dict[str, Any]] = {}
     worldbook_token_known = True
     worldbook_tokens_total = 0
     for book in selected_books:
-        entries = match_worldbook_entries(book, base_conversation)
-        injections = build_worldbook_injections(book, entries, len(base_conversation))
+        eff_scan, ins_dep = _runtime_scan_insert_for_book(book.id, chat, settings)
+        entries = match_worldbook_entries(book, base_conversation, eff_scan)
+        injections = build_worldbook_injections(book, entries, len(base_conversation), ins_dep)
         token_count = count_tokens_for_messages([item["message"] for item in injections]) if injections else 0
         if token_count is None:
             worldbook_token_known = False
@@ -720,8 +754,9 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
     for book in active_books:
         if book.id not in selected_book_ids:
             continue
-        entries = match_worldbook_entries(book, conversation)
-        final_injections.extend(build_worldbook_injections(book, entries, len(conversation)))
+        eff_scan, ins_dep = _runtime_scan_insert_for_book(book.id, chat, settings)
+        entries = match_worldbook_entries(book, conversation, eff_scan)
+        final_injections.extend(build_worldbook_injections(book, entries, len(conversation), ins_dep))
     conversation = insert_injections_into_conversation(conversation, final_injections)
 
     messages: list[dict] = []
@@ -1183,15 +1218,17 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
     base_conversation = trim_messages_to_context(conversation, pretrim_budget, None) if pretrim_budget is not None else list(conversation)
 
     worldbook_order = list(getattr(chat.overrides, "worldBookIds", []) or [])
-    active_books = collect_active_worldbooks(chat.id, worldbook_order)
+    wb_global_excl = set(getattr(chat.overrides, "worldBookGlobalExclusions", []) or [])
+    active_books = collect_active_worldbooks(chat.id, worldbook_order, wb_global_excl)
     selected_books = list(active_books)
     selected_book_ids = {book.id for book in selected_books}
     worldbook_meta: dict[str, dict[str, Any]] = {}
     worldbook_token_known = True
     worldbook_tokens_total = 0
     for book in selected_books:
-        entries = match_worldbook_entries(book, base_conversation)
-        injections = build_worldbook_injections(book, entries, len(base_conversation))
+        eff_scan, ins_dep = _runtime_scan_insert_for_book(book.id, chat, settings)
+        entries = match_worldbook_entries(book, base_conversation, eff_scan)
+        injections = build_worldbook_injections(book, entries, len(base_conversation), ins_dep)
         token_count = count_tokens_for_messages([item["message"] for item in injections]) if injections else 0
         if token_count is None:
             worldbook_token_known = False
@@ -1219,8 +1256,9 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
     for book in active_books:
         if book.id not in selected_book_ids:
             continue
-        entries = match_worldbook_entries(book, conversation)
-        final_injections.extend(build_worldbook_injections(book, entries, len(conversation)))
+        eff_scan, ins_dep = _runtime_scan_insert_for_book(book.id, chat, settings)
+        entries = match_worldbook_entries(book, conversation, eff_scan)
+        final_injections.extend(build_worldbook_injections(book, entries, len(conversation), ins_dep))
     conversation = insert_injections_into_conversation(conversation, final_injections)
 
     messages: list[dict] = []
@@ -1546,15 +1584,17 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
     base_conversation = trim_messages_to_context(conversation, pretrim_budget, None) if pretrim_budget is not None else list(conversation)
 
     worldbook_order = list(getattr(chat.overrides, "worldBookIds", []) or [])
-    active_books = collect_active_worldbooks(chat.id, worldbook_order)
+    wb_global_excl = set(getattr(chat.overrides, "worldBookGlobalExclusions", []) or [])
+    active_books = collect_active_worldbooks(chat.id, worldbook_order, wb_global_excl)
     selected_books = list(active_books)
     selected_book_ids = {book.id for book in selected_books}
     worldbook_meta: dict[str, dict[str, Any]] = {}
     worldbook_token_known = True
     worldbook_tokens_total = 0
     for book in selected_books:
-        entries = match_worldbook_entries(book, base_conversation)
-        injections = build_worldbook_injections(book, entries, len(base_conversation))
+        eff_scan, ins_dep = _runtime_scan_insert_for_book(book.id, chat, settings)
+        entries = match_worldbook_entries(book, base_conversation, eff_scan)
+        injections = build_worldbook_injections(book, entries, len(base_conversation), ins_dep)
         token_count = count_tokens_for_messages([item["message"] for item in injections]) if injections else 0
         if token_count is None:
             worldbook_token_known = False
@@ -1582,8 +1622,9 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
     for book in active_books:
         if book.id not in selected_book_ids:
             continue
-        entries = match_worldbook_entries(book, conversation)
-        final_injections.extend(build_worldbook_injections(book, entries, len(conversation)))
+        eff_scan, ins_dep = _runtime_scan_insert_for_book(book.id, chat, settings)
+        entries = match_worldbook_entries(book, conversation, eff_scan)
+        final_injections.extend(build_worldbook_injections(book, entries, len(conversation), ins_dep))
     conversation = insert_injections_into_conversation(conversation, final_injections)
 
     messages: list[dict] = []
