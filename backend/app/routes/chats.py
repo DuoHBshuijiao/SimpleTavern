@@ -46,7 +46,16 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from app.placeholders import replace_placeholders_in_text
-from app.schemas import AppendMessageRequest, Chat, ChatImageAttachment, ChatMessage, CreateChatRequest, UpdateChatRequest, UpdateMessageRequest
+from app.schemas import (
+    AppendMessageRequest,
+    Chat,
+    ChatImageAttachment,
+    ChatMessage,
+    CreateChatRequest,
+    UpdateChatRequest,
+    UpdateMessageRequest,
+    WorldBookAttachment,
+)
 from app.storage import (
     chat_image_path,
     delete_chat,
@@ -99,8 +108,20 @@ def _merge_overrides(existing: Chat, incoming: UpdateChatRequest) -> None:
         existing.overrides.pureAiMode = ov.pureAiMode
     if hasattr(ov, "presetId"):
         existing.overrides.presetId = ov.presetId
-    if hasattr(ov, "worldBookIds"):
-        existing.overrides.worldBookIds = list(dict.fromkeys(getattr(ov, "worldBookIds", []) or []))
+    if "worldBookAttachments" in ov.model_fields_set:
+        existing.overrides.worldBookAttachments = list(ov.worldBookAttachments)
+        existing.overrides.worldBookIds = [a.worldBookId for a in ov.worldBookAttachments]
+    elif "worldBookIds" in ov.model_fields_set:
+        wids = list(dict.fromkeys(getattr(ov, "worldBookIds", []) or []))
+        existing.overrides.worldBookIds = wids
+        existing.overrides.worldBookAttachments = [
+            WorldBookAttachment(worldBookId=wid, scanDepth=None, insertDepth=5)
+            for wid in wids
+        ]
+    if "worldBookGlobalExclusions" in ov.model_fields_set:
+        existing.overrides.worldBookGlobalExclusions = list(
+            dict.fromkeys(getattr(ov, "worldBookGlobalExclusions", []) or []),
+        )
     if hasattr(ov, "draftHelp"):
         if existing.overrides.draftHelp is None:
             existing.overrides.draftHelp = ov.draftHelp
