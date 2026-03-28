@@ -74,6 +74,14 @@ export interface DraftHelpSettings {
  *    - params: LLM生成参数
  *    - memberSettings: 群聊成员设置（仅群聊使用）
  */
+/** 会话内绑定的一本世界书及其扫描/插入深度 */
+export interface WorldBookAttachment {
+  worldBookId: string
+  /** 留空或 0 表示使用全局默认扫描深度 */
+  scanDepth?: number | null
+  insertDepth: number
+}
+
 export interface ChatOverrides {
   prompt?: string | null
   longTermMemory?: string | null
@@ -81,7 +89,11 @@ export interface ChatOverrides {
   contextStartMessageId?: string | null
   presetId?: string | null
   pureAiMode?: boolean | null
+  /** 与 worldBookAttachments 顺序一致，兼容旧数据 */
   worldBookIds?: string[]
+  worldBookAttachments?: WorldBookAttachment[]
+  /** 从顺序中移除的全局世界书 ID；该会话生成时不再注入这些书 */
+  worldBookGlobalExclusions?: string[]
   params: GenerationParams
   draftHelp?: DraftHelpSettings
   memberSettings?: Record<string, GroupMemberSettings>
@@ -92,8 +104,6 @@ export interface WorldBookEntry {
   title: string
   regex: string
   content: string
-  insertDepth: number
-  scanDepth?: number | null
   enabled: boolean
   orderIndex: number
 }
