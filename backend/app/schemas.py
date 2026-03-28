@@ -342,14 +342,14 @@ class CharacterCard(BaseModel):
 
 
 class WorldBookEntry(BaseModel):
+    """条目不再包含扫描/插入深度；深度由会话 ChatOverrides.worldBookAttachments 提供。"""
+
     model_config = ConfigDict(extra="allow")
 
     id: str = Field(default_factory=lambda: uuid4().hex)
     title: str = ""
     regex: str = ""
     content: str = ""
-    insertDepth: int = Field(default=5, ge=1)
-    scanDepth: int | None = Field(default=None, ge=0)
     enabled: bool = True
     orderIndex: int = 0
 
@@ -357,12 +357,9 @@ class WorldBookEntry(BaseModel):
     def _validate_regex_if_needed(self):
         if not self.enabled:
             return self
-        depth = 0 if self.scanDepth is None else int(self.scanDepth)
-        if depth <= 0:
-            return self
         pattern = (self.regex or "").strip()
         if not pattern:
-            raise ValueError("regex is required when scanDepth >= 1")
+            return self
         try:
             re.compile(pattern)
         except re.error as e:
@@ -437,6 +434,16 @@ class ChatImageAttachment(BaseModel):
     originalName: str | None = None
 
 
+class WorldBookAttachment(BaseModel):
+    """会话内绑定的一本世界书及其扫描/插入深度（与条目内字段解耦）。"""
+
+    model_config = ConfigDict(extra="allow")
+
+    worldBookId: str
+    scanDepth: int | None = Field(default=None, ge=0)
+    insertDepth: int = Field(default=5, ge=1)
+
+
 class ChatOverrides(BaseModel):
     """
     聊天覆盖设置模型
@@ -458,8 +465,26 @@ class ChatOverrides(BaseModel):
     presetId: str | None = None
     pureAiMode: bool | None = None
     worldBookIds: list[str] = Field(default_factory=list)
+    worldBookAttachments: list[WorldBookAttachment] = Field(default_factory=list)
+    worldBookGlobalExclusions: list[str] = Field(
+        default_factory=list,
+        description="全局世界书从本会话顺序移除时记录其 ID，生成时不再注入该书",
+    )
     params: GenerationParams = Field(default_factory=GenerationParams)
     draftHelp: DraftHelpSettings = Field(default_factory=DraftHelpSettings)
+
+    @model_validator(mode="after")
+    def _sync_worldbook_attachments(self):
+        att = list(self.worldBookAttachments or [])
+        ids = list(self.worldBookIds or [])
+        if not att and ids:
+            self.worldBookAttachments = [
+                WorldBookAttachment(worldBookId=wid, scanDepth=None, insertDepth=5)
+                for wid in ids
+            ]
+        if self.worldBookAttachments:
+            self.worldBookIds = [a.worldBookId for a in self.worldBookAttachments]
+        return self
 
 
 class GroupMemberSettings(BaseModel):
