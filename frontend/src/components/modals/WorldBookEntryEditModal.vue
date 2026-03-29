@@ -5,6 +5,7 @@
 import { ref, watch } from 'vue'
 import { X } from 'lucide-vue-next'
 import type { WorldBookEntry } from '../../types/models'
+import { buildRegexFromInput } from '../../utils/regexCompat'
 import { validateWorldBookEntry } from '../../utils/worldBookValidation'
 
 const props = defineProps<{
@@ -47,7 +48,7 @@ function tryMatch() {
     return
   }
   try {
-    const re = new RegExp(pattern)
+    const re = buildRegexFromInput(pattern)
     const text = testText.value
     const m = text.match(re)
     testResult.value = m ? `匹配：${JSON.stringify(m[0])}` : '无匹配（试匹配为 JavaScript 正则，与 Python re 在少数边界上可能不同）'
@@ -118,7 +119,7 @@ function close() {
                 v-model="draft.regex"
                 rows="4"
                 class="input textarea w-full font-mono text-sm resize-y min-h-[96px]"
-                placeholder="例如 (?i)keyword"
+                placeholder="例如 keyword 或 /keyword/iu"
               />
             </div>
 
@@ -133,7 +134,7 @@ function close() {
             </div>
 
             <div class="space-y-2 rounded-lg border border-[var(--color-border-subtle)] bg-surface-muted p-3">
-              <div class="text-xs text-[var(--color-text-muted)]">试匹配（可选，浏览器 RegExp，与 Python re 可能有细微差异）</div>
+              <div class="text-xs text-[var(--color-text-muted)]">试匹配（可选，支持直接粘贴 /pattern/iu；浏览器 RegExp 与 Python re 仍可能有细微差异）</div>
               <textarea v-model="testText" rows="2" class="input textarea w-full text-sm" placeholder="测试文本" />
               <div class="flex items-center gap-2">
                 <button type="button" class="btn btn-sm btn-secondary" @click="tryMatch">试匹配</button>

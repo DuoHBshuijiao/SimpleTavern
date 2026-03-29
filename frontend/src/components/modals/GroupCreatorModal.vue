@@ -37,6 +37,11 @@ import ModernSelect from '../ModernSelect.vue'
 const props = defineProps<{
   show: boolean
   characters: CharacterCard[]
+  /** 非空时表示从单聊迁移：预选成员、锁定不可移除、隐藏首句块 */
+  migrateFromChatId?: string | null
+  initialMemberIds?: string[]
+  initialTitle?: string
+  lockedMemberIds?: string[]
 }>()
 
 const emit = defineEmits<{
@@ -58,16 +63,30 @@ const groupFirstMessageEnabled = ref(true)
 const groupFirstMessageCharacterId = ref<string | null>(null)
 const groupMemberInclusions = ref<Record<string, { includePersonality: boolean; includeScenario: boolean }>>({})
 
-// 重置状态
+const isMigrateMode = computed(() => !!(props.migrateFromChatId && (props.initialMemberIds?.length ?? 0) > 0))
+
+// 打开时重置或载入迁移预设
 watch(() => props.show, (newVal) => {
-  if (newVal) {
-    selectedMemberIds.value = []
-    groupTitle.value = ''
+  if (!newVal) return
+  if (isMigrateMode.value) {
+    const ids = [...(props.initialMemberIds as string[])]
+    selectedMemberIds.value = ids
+    groupTitle.value = props.initialTitle ?? ''
     groupPureAiMode.value = false
-    groupFirstMessageEnabled.value = true
-    groupFirstMessageCharacterId.value = null
+    groupFirstMessageEnabled.value = false
+    groupFirstMessageCharacterId.value = ids[0] ?? null
     groupMemberInclusions.value = {}
+    for (const id of ids) {
+      groupMemberInclusions.value[id] = { includePersonality: true, includeScenario: true }
+    }
+    return
   }
+  selectedMemberIds.value = []
+  groupTitle.value = ''
+  groupPureAiMode.value = false
+  groupFirstMessageEnabled.value = true
+  groupFirstMessageCharacterId.value = null
+  groupMemberInclusions.value = {}
 })
 
 /**
@@ -99,6 +118,10 @@ const groupFirstMessageOptions = computed(() => {
  * @param {string} characterId - 角色ID
  */
 function toggleMemberSelection(characterId: string) {
+  const locked = props.lockedMemberIds ?? []
+  if (locked.includes(characterId)) {
+    return
+  }
   const idx = selectedMemberIds.value.indexOf(characterId)
   if (idx >= 0) {
     selectedMemberIds.value.splice(idx, 1)
@@ -142,7 +165,7 @@ function handleCreate() {
       <div class="modal-backdrop" @click="emit('update:show', false)"></div>
       <div class="modal-content chat-modal-width-600-90 glass-panel">
         <div class="modal-header">
-          <h3 class="modal-title text-slate-50">创建群聊</h3>
+          <h3 class="modal-title text-slate-50">{{ isMigrateMode ? '从单聊转为群聊' : '创建群聊' }}</h3>
           <button class="modal-close" @click="emit('update:show', false)">×</button>
         </div>
         <div class="modal-body">
@@ -172,7 +195,7 @@ function handleCreate() {
               </div>
             </div>
 
-            <div class="bg-white/5 border border-white/10 rounded-xl p-3">
+            <div v-if="!isMigrateMode" class="bg-white/5 border border-white/10 rounded-xl p-3">
               <div class="text-sm text-gray-300 font-medium mb-2">群聊首句（故事背景）</div>
               <div class="flex items-center justify-between mb-2">
                 <div class="text-sm text-gray-400">启用某角色的 First Message 作为开场</div>
@@ -198,7 +221,9 @@ function handleCreate() {
             </div>
             
             <div>
-              <div class="text-sm text-gray-400 mb-3">选择群成员 (至少选择2个角色):</div>
+              <div class="text-sm text-gray-400 mb-3">
+                {{ isMigrateMode ? '当前单聊角色已固定为首位，请再选择至少一名其他角色：' : '选择群成员 (至少选择2个角色):' }}
+              </div>
               <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
                 <div 
                   v-for="c in characters"

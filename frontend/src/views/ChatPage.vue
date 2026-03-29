@@ -1349,14 +1349,8 @@ async function sendUserMessage() {
         senderName: userRole === 'user' ? (selectedPersona.value?.name ?? userName.value) : null,
         senderAvatar: userRole === 'user' ? (selectedPersona.value?.avatar ?? null) : null,
       })
-      
-      await runGroupGeneration(chatId, memberIds, useStream, groupDelay, 0, false)
-      
-      if (group.isPaused.value) return
-      
-      group.currentSpeakerIndex.value = -1
+
       group.showInterject()
-      
     } else {
       const localUserId = `local_user_${Date.now()}`
       const localAssistantId = `local_assistant_${Date.now()}`
@@ -1465,10 +1459,6 @@ async function sendUserMessage() {
         openImageFallback(errMsg, async () => {
           imageFallbackDialog.value.visible = false
           if (isGroup) {
-            const allMemberIds = [...(activeChat.value?.memberIds || [])]
-            const memberIds = group.filterMembersByProbability(allMemberIds)
-            const groupDelay = activeChat.value?.groupDelay || 1500
-            await runGroupGeneration(chatId, memberIds, useStream, groupDelay, 0, true)
             await chats.load(chatId)
           } else {
             const localAssistantId = `local_assistant_retry_${Date.now()}`

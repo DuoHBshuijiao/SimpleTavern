@@ -593,7 +593,7 @@ onMounted(() => {
           <!-- 思考链气泡：在角色名下方、正文上方，小圆角，默认折叠 80px，仅点击气泡展开、仅点击图标收起；多轮回复按 messageId 显示对应思考内容 -->
           <div
             v-if="m.role === 'assistant' && getReasoningForMessage(m)"
-            class="w-full max-w-full rounded-lg border border-blue-500 bg-blue-800/25 text-gray-300 text-xs leading-relaxed relative transition-[max-height] duration-300 mb-2"
+            class="reasoning-bubble-surface w-full max-w-full rounded-lg text-xs leading-relaxed relative transition-[max-height] duration-300 mb-2"
             :class="isReasoningExpanded(m.id) ? 'max-h-[80vh] overflow-y-auto' : 'max-h-[80px] overflow-hidden cursor-pointer'"
             @click="expandReasoning(m.id, $event)"
           >

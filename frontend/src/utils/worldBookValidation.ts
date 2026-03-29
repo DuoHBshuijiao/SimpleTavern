@@ -1,4 +1,5 @@
 import type { WorldBookEntry } from '../types/models'
+import { buildRegexFromInput } from './regexCompat'
 
 /** 与后端 WorldBookEntry._validate_regex_if_needed 一致：非空正则须可编译 */
 export function validateWorldBookEntry(d: WorldBookEntry): string | null {
@@ -6,7 +7,7 @@ export function validateWorldBookEntry(d: WorldBookEntry): string | null {
   if (!pattern) return null
   try {
     // eslint-disable-next-line no-new
-    new RegExp(pattern)
+    buildRegexFromInput(pattern)
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     return `invalid regex: ${msg}`

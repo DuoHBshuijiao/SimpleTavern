@@ -40,6 +40,7 @@
  * - save-title: 保存标题
  * - cancel-edit-title: 取消编辑标题
  * - delete-chat: 删除聊天
+ * - promote-to-group: 将单聊复制为群聊（打开群聊创建）
  *
  * 使用的Composables：
  * 无
@@ -58,7 +59,7 @@ import { computed, ref } from 'vue'
 import ModernAvatar from '../ModernAvatar.vue'
 import ConfirmPopover from '../ConfirmPopover.vue'
 
-import { Pencil, Trash2, Users, Check, X, ChevronRight, ChevronLeft } from 'lucide-vue-next'
+import { Pencil, Trash2, Users, Check, X, ChevronRight, ChevronLeft, ArrowUp } from 'lucide-vue-next'
 
 const props = defineProps<{
   collapsed: boolean
@@ -99,6 +100,7 @@ const emit = defineEmits<{
   'save-title': []
   'cancel-edit-title': []
   'delete-chat': [chatId: string]
+  'promote-to-group': [chat: Chat]
 }>()
 
 /**
@@ -484,6 +486,13 @@ function confirmDelete() {
               </div>
               
               <div v-if="editingChatId !== c.id" class="flex gap-1 shrink-0 ml-auto bg-surface-overlay rounded-md backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity">
+                <button
+                  class="p-1 hover:text-brand text-[var(--color-text-secondary)] transition-colors"
+                  title="创建副本改为群聊"
+                  @click.stop="emit('promote-to-group', c)"
+                >
+                  <ArrowUp class="w-3.5 h-3.5" />
+                </button>
                 <button class="p-1 hover:text-[var(--color-text)] text-[var(--color-text-secondary)] transition-colors" @click.stop="emit('start-edit-title', c.id, c.title)">
                   <Pencil class="w-3.5 h-3.5" />
                 </button>

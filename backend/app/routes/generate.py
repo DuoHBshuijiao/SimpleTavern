@@ -33,6 +33,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.llm.openai_compat import chat_completions, chat_completions_message, stream_chat_completions
 from app.placeholders import replace_placeholders_in_text
+from app.regex_compat import compile_user_regex
 from app.schemas import (
     build_reasoning_request_config,
     ChatMessage,
@@ -302,7 +303,7 @@ def match_worldbook_entries(book, conversation: list[dict], effective_scan: int)
         if not pattern:
             continue
         try:
-            if re.search(pattern, scan_text, re.MULTILINE):
+            if compile_user_regex(pattern, re.MULTILINE).search(scan_text):
                 matched.append(entry)
         except re.error:
             continue

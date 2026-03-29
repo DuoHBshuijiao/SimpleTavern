@@ -298,7 +298,7 @@ watch(
         <!-- 思考链气泡：在对应消息（助手或工具）上方，小圆角，默认折叠 100px，仅点击气泡展开、仅点击图标收起 -->
         <div
           v-if="getReasoningContentForMessage(m.id, m.role === 'assistant' && idx === messages.length - 1)"
-          class="w-full max-w-[90%] rounded-lg border border-blue-500 bg-blue-800/25 text-gray-300 text-xs leading-relaxed relative transition-[max-height] duration-300"
+          class="reasoning-bubble-surface w-full max-w-[90%] rounded-lg text-xs leading-relaxed relative transition-[max-height] duration-300"
           :class="isReasoningExpanded(m.id) ? 'max-h-[80vh] overflow-y-auto' : 'max-h-[100px] overflow-hidden cursor-pointer'"
           @click="expandReasoning(m.id, $event)"
         >
