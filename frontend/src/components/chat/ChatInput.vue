@@ -20,8 +20,7 @@
  * - showContinueButton: 是否显示继续按钮
  * - pendingMembersCount: 待发言成员数量
  * - canInterject: 是否可以插话
- * - showInterjectPanel: 是否显示插话面板
- * - isInterjecting: 是否正在插话
+ * - isInterjecting: 是否正在单次回应（插话）中
  * - effectivePureAiMode: 是否为纯AI模式
  * - isStreamingActive: 是否正在流式传输
  * - userAvatarUrl: 用户头像URL
@@ -36,8 +35,7 @@
  * - primary-action: 主要操作（发送/停止/继续等）
  * - pause-group: 暂停群聊
  * - continue-group: 继续群聊
- * - trigger-interject: 触发插话，传递角色ID
- * - hide-interject: 隐藏插话面板
+ * - trigger-interject: 触发单次回应（插话），传递角色ID
  * - select-model: 选择模型
  * - toggle-assistant: 切换助手面板
  *
@@ -93,7 +91,6 @@ const props = defineProps<{
   showContinueButton: boolean
   pendingMembersCount: number
   canInterject: boolean
-  showInterjectPanel: boolean
   isInterjecting: boolean
   effectivePureAiMode: boolean
   isStreamingActive: boolean
@@ -118,7 +115,6 @@ const emit = defineEmits<{
   'pause-group': []
   'continue-group': []
   'trigger-interject': [characterId: string]
-  'hide-interject': []
   'select-model': [option: any]
   'toggle-assistant': []
   'select-images': [files: File[]]
@@ -141,6 +137,15 @@ const showDraftHelperMenu = ref(false)
  */
 const hasDraftMessage = computed(() => !!props.modelValue.trim() || props.draftImages.length > 0)
 
+/** 群聊左侧：整轮发言中 / 暂停续聊 / 单次回应中 → 显示轮次状态；否则空闲时可显示点头像 */
+const groupShowsRoundStatus = computed(() => {
+  if (!props.isGroup) return false
+  if (props.isGenerating && props.currentSpeakerIndex >= 0) return true
+  if (props.showContinueButton && props.pendingMembersCount > 0) return true
+  if (props.isInterjecting) return true
+  return false
+})
+
 /**
  * 计算主要操作按钮标签
  *
@@ -149,7 +154,7 @@ const hasDraftMessage = computed(() => !!props.modelValue.trim() || props.draftI
 const primaryActionLabel = computed(() => {
   if (props.isStreamingActive) return '停止'
   if (props.showContinueButton && props.isGroup) {
-    return hasDraftMessage.value ? '插话' : '继续轮次'
+    return hasDraftMessage.value ? '发送' : '继续轮次'
   }
   if (props.isGroup && !hasDraftMessage.value) {
     return '开始下一轮'
@@ -195,7 +200,7 @@ const inputPlaceholder = computed(() => {
     return '等待角色发言完成...'
   }
   if (props.showContinueButton) {
-    return '输入消息插话，或点击继续轮次...'
+    return '输入消息或点头像单次回应，或点击继续轮次...'
   }
   return '发送消息...'
 })
@@ -438,70 +443,62 @@ const isDraftHelperRunning = computed(() => {
         </div>
       </div>
       
-      <div class="flex items-center justify-between pt-2 border-t border-[var(--color-border-subtle)]">
-        <div class="flex-1 min-w-0">
-          <!-- 群聊发言状态指示器 -->
-          <div v-if="isGroup && isGenerating && currentSpeakerIndex >= 0" class="flex items-center gap-2 text-xs text-[var(--color-purple)]">
-            <span class="animate-pulse">●</span>
-            <span>{{ groupMembers[currentSpeakerIndex]?.name || '角色' }} 正在发言...</span>
-            <span class="text-[var(--color-text-muted)]">({{ currentSpeakerIndex + 1 }}/{{ groupMembers.length }})</span>
-            <button 
-              class="ml-2 px-2 py-0.5 text-xs bg-[var(--color-warning-bg)] hover:opacity-90 text-[var(--color-warning)] rounded transition-colors border border-[var(--color-warning)]/20"
-              @click="emit('pause-group')"
-            >
-              暂停
-            </button>
-          </div>
-          
-          <!-- 继续轮次按钮 -->
-          <div v-else-if="showContinueButton && pendingMembersCount > 0" class="flex items-center gap-2 text-xs text-green-400">
-            <span>轮次已暂停，还有 {{ pendingMembersCount }} 位角色待发言</span>
-            <button 
-              class="px-3 py-1 text-xs bg-green-500/20 hover:bg-green-500/30 text-green-400 rounded transition-colors font-medium border border-green-500/20"
-              @click="emit('continue-group')"
-            >
-              继续轮次
-            </button>
-          </div>
-          
-          <!-- 插话面板 -->
-          <div v-else-if="canInterject && isGroup && !isInterjecting" class="flex items-center gap-2 text-xs">
-            <span class="text-[var(--color-purple)] flex items-center gap-1"><MessageSquare class="w-3 h-3" /> 点击角色插话：</span>
-            <div class="flex items-center gap-1">
-              <div 
-                v-for="member in groupMembers"
-                :key="member.id"
-                class="cursor-pointer hover:scale-110 transition-transform"
-                :title="`让 ${member.name} 插话`"
-                @click="emit('trigger-interject', member.id)"
-              >
-                <ModernAvatar 
-                  :src="member.avatar ? `/api/avatars/${member.avatar}` : null" 
-                  :name="member.name" 
-                  :size="24" 
-                  aspect="1"
-                  rounded="rounded-lg"
-                  class="ring-2 ring-purple-500/50 hover:ring-purple-500"
-                />
+      <div class="flex items-center justify-between gap-2 pt-2 border-t border-[var(--color-border-subtle)]">
+          <div class="flex-1 min-w-0 h-8 flex items-center gap-2 overflow-x-auto">
+            <!-- 轮次 / 输出中：状态条 -->
+            <template v-if="groupShowsRoundStatus">
+              <div v-if="isGroup && isGenerating && currentSpeakerIndex >= 0" class="flex items-center gap-2 text-xs text-[var(--color-purple)] shrink-0">
+                <span class="animate-pulse">●</span>
+                <span>{{ groupMembers[currentSpeakerIndex]?.name || '角色' }} 正在发言...</span>
+                <span class="text-[var(--color-text-muted)]">({{ currentSpeakerIndex + 1 }}/{{ groupMembers.length }})</span>
+                <button 
+                  class="ml-1 px-2 py-0.5 text-xs bg-[var(--color-warning-bg)] hover:opacity-90 text-[var(--color-warning)] rounded transition-colors border border-[var(--color-warning)]/20"
+                  @click="emit('pause-group')"
+                >
+                  暂停
+                </button>
               </div>
-            </div>
-            <button 
-              class="ml-2 px-2 py-0.5 text-xs bg-surface-muted hover:bg-surface-hover text-[var(--color-text-muted)] rounded transition-colors border border-[var(--color-border-subtle)]"
-              @click="emit('hide-interject')"
-            >
-              关闭
-            </button>
+              <div v-else-if="showContinueButton && pendingMembersCount > 0" class="flex items-center gap-2 text-xs text-green-400 shrink-0">
+                <span class="truncate">轮次已暂停，还有 {{ pendingMembersCount }} 位角色待发言</span>
+                <button 
+                  class="px-2 py-0.5 text-xs bg-green-500/20 hover:bg-green-500/30 text-green-400 rounded transition-colors font-medium border border-green-500/20 shrink-0"
+                  @click="emit('continue-group')"
+                >
+                  继续轮次
+                </button>
+              </div>
+              <div v-else-if="isGroup && isInterjecting" class="flex items-center gap-2 text-xs text-[var(--color-purple)] shrink-0">
+                <span class="animate-pulse">●</span>
+                <span>角色单次回应中...</span>
+              </div>
+            </template>
+            <!-- 空闲：点头像单次回应（与上方互斥，省一行空间） -->
+            <template v-else-if="isGroup && canInterject">
+              <span class="text-[var(--color-purple)] flex items-center gap-1 shrink-0 text-xs">
+                <MessageSquare class="w-3 h-3" /> 单次：
+              </span>
+              <div class="flex items-center gap-0.5 flex-wrap min-w-0">
+                <div
+                  v-for="member in groupMembers"
+                  :key="member.id"
+                  class="cursor-pointer hover:scale-110 transition-transform shrink-0"
+                  :title="`让 ${member.name} 单次回应一条`"
+                  @click="emit('trigger-interject', member.id)"
+                >
+                  <ModernAvatar
+                    :src="member.avatar ? `/api/avatars/${member.avatar}` : null"
+                    :name="member.name"
+                    :size="22"
+                    aspect="1"
+                    rounded="rounded-lg"
+                    class="ring-2 ring-purple-500/50 hover:ring-purple-500"
+                  />
+                </div>
+              </div>
+            </template>
           </div>
           
-          <!-- 插话中状态 -->
-          <div v-else-if="isInterjecting" class="flex items-center gap-2 text-xs text-[var(--color-purple)]">
-            <span class="animate-pulse">●</span>
-            <span>正在插话...</span>
-          </div>
-          
-        </div>
-        
-        <div class="flex items-center gap-3">
+          <div class="flex items-center gap-3 shrink-0">
           <div class="relative">
             <button
               class="chat-action-button chat-action-button--secondary shadow-lg transition-all active:scale-95"
@@ -559,7 +556,7 @@ const isDraftHelperRunning = computed(() => {
           >
             {{ primaryActionLabel }}
           </button>
-        </div>
+          </div>
       </div>
     </div>
     

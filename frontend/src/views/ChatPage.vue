@@ -1317,7 +1317,6 @@ async function sendUserMessage() {
   }
   
   group.resetGroupState()
-  group.showInterjectPanel.value = group.effectivePureAiMode.value
 
   isGenerating.value = true
   aborter.value?.abort()
@@ -1328,11 +1327,6 @@ async function sendUserMessage() {
   try {
     uploadedImages = await uploadDraftImages(chatId, pendingDraftImages)
     if (isGroup) {
-      const allMemberIds = [...activeChat.value.memberIds]
-      const groupDelay = activeChat.value.groupDelay || 1500
-      
-      const memberIds = group.filterMembersByProbability(allMemberIds)
-      
       const localUserId = `local_user_${Date.now()}`
       chats.addLocalMessage({
         version: 1,
@@ -1597,7 +1591,6 @@ async function startNextRound() {
   if (isGenerating.value) return
 
   streamError.value = null
-  group.showInterjectPanel.value = false
   group.resetGroupState()
 
   const chatId = activeChat.value.id
@@ -2454,29 +2447,28 @@ async function handleSaveAndSend() {
 
   actions.closeEditMessage()
   group.resetGroupState()
-  group.showInterjectPanel.value = group.effectivePureAiMode.value
-
-  isGenerating.value = true
-  aborter.value?.abort()
-  aborter.value = new AbortController()
 
   const useStream = settings.settings?.streamEnabled !== false
   const isGroup = activeChat.value.isGroup
   const now = new Date().toISOString()
 
+  if (isGroup) {
+    group.showInterject()
+    try {
+      await chats.load(chatId)
+    } catch {
+      /* ignore */
+    }
+    await settings.load()
+    return
+  }
+
+  isGenerating.value = true
+  aborter.value?.abort()
+  aborter.value = new AbortController()
+
   try {
-    if (isGroup) {
-      const allMemberIds = [...activeChat.value.memberIds]
-      const groupDelay = activeChat.value.groupDelay || 1500
-      const memberIds = group.filterMembersByProbability(allMemberIds)
-
-      await runGroupGeneration(chatId, memberIds, useStream, groupDelay, 0)
-      if (group.isPaused.value) return
-
-      group.currentSpeakerIndex.value = -1
-      group.showInterject()
-    } else {
-      const localAssistantId = `local_assistant_${Date.now()}`
+    const localAssistantId = `local_assistant_${Date.now()}`
       chatReasoningMessageId.value = localAssistantId
       chatReasoningContent.value = ''
       chats.addLocalMessage({ version: 1, id: localAssistantId, role: 'assistant', content: '', ts: now })
@@ -2544,7 +2536,6 @@ async function handleSaveAndSend() {
           streamError.value = res.error || 'unknown error'
         }
       }
-    }
   } catch (e: any) {
     if (!isAbortError(e)) {
       streamError.value = e?.message ?? String(e)
@@ -2613,6 +2604,7 @@ const editingPersonaAvatarUrl = computed(() => {
       @select-group="selectChat"
       @create-chat="createChat"
       @create-group="showGroupCreator = true"
+      @promote-to-group="openPromoteToGroup"
       @start-edit-title="startEditTitle"
       @save-title="saveTitle"
       @cancel-edit-title="cancelEditTitle"
@@ -2778,7 +2770,6 @@ const editingPersonaAvatarUrl = computed(() => {
             :show-continue-button="group.showContinueButton.value"
             :pending-members-count="group.pendingMembers.value.length"
             :can-interject="group.canInterject.value"
-            :show-interject-panel="group.showInterjectPanel.value"
             :is-interjecting="group.isInterjecting.value"
             :effective-pure-ai-mode="group.effectivePureAiMode.value"
             :is-streaming-active="isStreamingActive"
@@ -2793,7 +2784,6 @@ const editingPersonaAvatarUrl = computed(() => {
             @pause-group="group.pauseGroupChat"
             @continue-group="continueGroupChat"
             @trigger-interject="triggerInterject"
-            @hide-interject="group.hideInterject"
             @select-model="handleModelSelect"
             @toggle-assistant="assistant.isAssistantPanelOpen.value = !assistant.isAssistantPanelOpen.value"
             @select-images="handleSelectImages"

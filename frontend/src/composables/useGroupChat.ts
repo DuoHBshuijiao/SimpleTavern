@@ -6,7 +6,7 @@
  * 主要功能：
  *    - 暂停/继续：控制群聊的暂停和继续
  *    - 成员筛选：根据概率筛选参与本轮对话的成员
- *    - 插话管理：管理插话面板的显示和隐藏
+ *    - 插话：是否可触发单次回应（由 canInterject 计算）
  *    - 状态管理：管理当前发言者、待发言成员等状态
  *
  * 主要函数：
@@ -16,8 +16,7 @@
  *    - pauseGroupChat: 暂停群聊
  *    - resetGroupState: 重置群聊状态
  *    - setPausedState: 设置暂停状态
- *    - showInterject: 显示插话面板
- *    - hideInterject: 隐藏插话面板
+ *    - showInterject: 兼容占位（插话条常驻后无状态可切换）
  *    - getGroupDelay: 获取群聊延迟时间
  *
  * 计算属性：
@@ -55,10 +54,8 @@ export function useGroupChat(deps: GroupChatDeps) {
   // 当前正在发言的角色索引（群聊用）
   const currentSpeakerIndex = ref<number>(-1)
   
-  // 插话相关
-  const showInterjectPanel = ref(false)     // 是否显示插话面板
-  const isInterjecting = ref(false)         // 是否正在插话
-  const interjectPanelManuallyHidden = ref(false)
+  // 插话（单次回应）进行中
+  const isInterjecting = ref(false)
 
   /**
    * 计算是否为纯AI模式
@@ -74,18 +71,12 @@ export function useGroupChat(deps: GroupChatDeps) {
   })
 
   /**
-   * 计算是否可以插话
-   *
-   * 只有在群聊、未生成中、未插话中、插话面板未手动隐藏、且显示插话面板或纯AI模式时才能插话。
-   *
-   * @returns {boolean} 是否可以插话
+   * 是否可触发单次回应（点头像）：群聊且当前无整轮生成、无单次回应进行中。
    */
   const canInterject = computed(() => {
     return !!activeChat.value?.isGroup &&
       !isGenerating.value &&
-      !isInterjecting.value &&
-      !interjectPanelManuallyHidden.value &&
-      (showInterjectPanel.value || effectivePureAiMode.value)
+      !isInterjecting.value
   })
 
   /**
@@ -164,7 +155,6 @@ export function useGroupChat(deps: GroupChatDeps) {
     showContinueButton.value = false
     pendingMembers.value = []
     currentSpeakerIndex.value = -1
-    interjectPanelManuallyHidden.value = false
   }
 
   /**
@@ -181,25 +171,8 @@ export function useGroupChat(deps: GroupChatDeps) {
     currentSpeakerIndex.value = -1
   }
 
-  /**
-   * 显示插话面板
-   *
-   * 显示插话面板，允许用户在群聊中触发某个角色插话。
-   */
-  function showInterject() {
-    interjectPanelManuallyHidden.value = false
-    showInterjectPanel.value = true
-  }
-
-  /**
-   * 隐藏插话面板
-   *
-   * 隐藏插话面板，并标记为手动隐藏，防止自动显示。
-   */
-  function hideInterject() {
-    showInterjectPanel.value = false
-    interjectPanelManuallyHidden.value = true
-  }
+  /** 兼容旧调用点：插话条常驻后无需切换状态 */
+  function showInterject() {}
 
   /**
    * 获取群聊延迟时间
@@ -218,9 +191,7 @@ export function useGroupChat(deps: GroupChatDeps) {
     pendingMembers,
     showContinueButton,
     currentSpeakerIndex,
-    showInterjectPanel,
     isInterjecting,
-    interjectPanelManuallyHidden,
     
     // 计算属性
     effectivePureAiMode,
@@ -234,7 +205,6 @@ export function useGroupChat(deps: GroupChatDeps) {
     resetGroupState,
     setPausedState,
     showInterject,
-    hideInterject,
     getGroupDelay,
   }
 }
