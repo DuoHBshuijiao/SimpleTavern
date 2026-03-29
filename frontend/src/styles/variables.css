@@ -459,6 +459,11 @@
   /* ========== 模糊 ========== */
   --blur-light: 4px;
   --blur-heavy: 16px;
+
+  /* 思考链气泡：暗色表面 + 低不透明度叠层 + 文字用 app 静音色（与 data-theme 同步） */
+  --color-reasoning-bubble-bg: color-mix(in srgb, var(--app-color-surface-soft) 26%, transparent);
+  --color-reasoning-bubble-border: var(--app-color-border-subtle);
+  --color-reasoning-bubble-text: var(--app-color-text-muted);
   
   /* ========== 过渡 ========== */
   --transition-fast: 0.15s ease;
@@ -576,4 +581,17 @@
   --shadow-error: var(--app-shadow-error);
   --shadow-purple: var(--app-shadow-purple);
   --shadow-glass-panel: var(--app-shadow-heavy);
+
+  --color-reasoning-bubble-bg: color-mix(in srgb, var(--app-color-surface-soft) 26%, transparent);
+  --color-reasoning-bubble-border: var(--app-color-border-subtle);
+  --color-reasoning-bubble-text: var(--app-color-text-muted);
+}
+
+/* 思考链气泡：暗底、浅透明、backdrop 模糊（背景/边/字见 --color-reasoning-bubble-*，模糊见 --blur-light） */
+.reasoning-bubble-surface {
+  background-color: var(--color-reasoning-bubble-bg);
+  border: 1px solid var(--color-reasoning-bubble-border);
+  color: var(--color-reasoning-bubble-text);
+  backdrop-filter: blur(var(--blur-light));
+  -webkit-backdrop-filter: blur(var(--blur-light));
 }

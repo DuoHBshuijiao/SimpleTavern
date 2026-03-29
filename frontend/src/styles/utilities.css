@@ -246,6 +246,7 @@
   .z-50 { z-index: 50; }
   .z-dropdown { z-index: var(--z-dropdown); }
   .z-modal { z-index: var(--z-modal); }
+  .z-popover { z-index: var(--z-popover); }
 
   /* ========== 悬浮显示操作按钮 ========== */
   .hover-show-actions .actions {
