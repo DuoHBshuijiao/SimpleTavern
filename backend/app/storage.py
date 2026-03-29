@@ -755,6 +755,32 @@ def chat_image_path(character_id: str, chat_id: str, image_filename: str) -> Pat
     return chat_images_dir(character_id, chat_id) / image_filename
 
 
+def copy_chat_images_for_promote(
+    source_character_id: str,
+    source_chat_id: str,
+    messages: list[ChatMessage],
+    dest_character_id: str,
+    dest_chat_id: str,
+) -> None:
+    """将消息中引用的图片从源会话目录复制到目标会话目录（不删除源文件）。"""
+    seen: set[tuple[str, str]] = set()
+    for msg in messages:
+        for image in getattr(msg, "images", []) or []:
+            fn = getattr(image, "filename", None) or ""
+            if not fn:
+                continue
+            key = (source_chat_id, fn)
+            if key in seen:
+                continue
+            seen.add(key)
+            src = chat_image_path(source_character_id, source_chat_id, fn)
+            if not src.is_file():
+                continue
+            dst = chat_image_path(dest_character_id, dest_chat_id, fn)
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+
+
 def load_chat_image_bytes(chat: Chat, image: ChatImageAttachment) -> bytes:
     """读取聊天图片二进制。"""
     path = chat_image_path(chat.characterId, chat.id, image.filename)

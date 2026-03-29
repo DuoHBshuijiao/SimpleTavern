@@ -52,12 +52,14 @@ from app.schemas import (
     ChatImageAttachment,
     ChatMessage,
     CreateChatRequest,
+    PromoteToGroupRequest,
     UpdateChatRequest,
     UpdateMessageRequest,
     WorldBookAttachment,
 )
 from app.storage import (
     chat_image_path,
+    copy_chat_images_for_promote,
     delete_chat,
     delete_chat_image,
     delete_message_images,
@@ -293,6 +295,97 @@ def create_chat(req: CreateChatRequest) -> Chat:
                 raise HTTPException(status_code=404, detail="firstMessageCharacter not found")
     
     return save_chat(chat)
+
+
+@router.post("/chats/{source_chat_id}/promote-to-group", response_model=Chat)
+def promote_to_group(source_chat_id: str, req: PromoteToGroupRequest) -> Chat:
+    """
+    将单聊复制为新群聊：复制消息与图片，补全 assistant 的 characterId；不修改、不删除源单聊。
+    """
+    try:
+        source = load_chat(source_chat_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="chat not found") from None
+
+    if source.isGroup:
+        raise HTTPException(status_code=400, detail="source is not a single chat")
+
+    member_ids = list(req.memberIds)
+    if len(member_ids) < 2:
+        raise HTTPException(status_code=400, detail="memberIds must contain at least 2 members")
+    if member_ids[0] != source.characterId:
+        raise HTTPException(
+            status_code=400,
+            detail="memberIds[0] must equal the single chat's characterId",
+        )
+    if source.characterId not in member_ids:
+        raise HTTPException(status_code=400, detail="memberIds must include the original character")
+
+    for mid in member_ids:
+        try:
+            load_character(mid)
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail=f"character not found: {mid}") from None
+
+    pure_ai_mode = req.pureAiMode if req.pureAiMode is not None else False
+    try:
+        settings = load_settings()
+        if req.pureAiMode is None:
+            pure_ai_mode = bool(getattr(settings, "pureAiMode", False))
+    except Exception:
+        settings = None  # type: ignore[assignment]
+
+    title = (req.title or "").strip() or source.title or "新群聊"
+    new_chat = Chat(
+        characterId=member_ids[0],
+        title=title,
+        isGroup=True,
+        memberIds=member_ids,
+    )
+    new_chat.overrides = source.overrides.model_copy(deep=True)
+    new_chat.overrides.pureAiMode = pure_ai_mode
+
+    if req.memberSettings:
+        for member_id, s in req.memberSettings.items():
+            new_chat.memberSettings[member_id] = s
+
+    if pure_ai_mode:
+        new_chat.userPersonaId = None
+    else:
+        persona_id = req.userPersonaId
+        if persona_id is None and settings is not None:
+            persona_id = settings.selectedPersonaId
+        new_chat.userPersonaId = persona_id
+
+    new_chat.createdAt = _now_iso()
+    new_chat.updatedAt = _now_iso()
+
+    migrated: list[ChatMessage] = []
+    for m in source.messages:
+        d = m.model_dump(mode="json")
+        if m.role == "assistant":
+            d["characterId"] = m.characterId or source.characterId
+        migrated.append(ChatMessage.model_validate(d))
+
+    new_chat.messages = migrated
+
+    try:
+        save_chat(new_chat)
+        copy_chat_images_for_promote(
+            source.characterId,
+            source.id,
+            new_chat.messages,
+            new_chat.characterId,
+            new_chat.id,
+        )
+    except Exception:
+        try:
+            delete_chat(new_chat.id)
+        except Exception:
+            pass
+        raise
+
+    return new_chat
 
 
 @router.get("/chats/{chat_id}", response_model=Chat)

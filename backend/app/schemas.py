@@ -579,6 +579,16 @@ class CreateChatRequest(BaseModel):
     firstMessageCharacterId: str | None = None
 
 
+class PromoteToGroupRequest(BaseModel):
+    """将单聊复制为群聊：请求体与群聊创建类似，但不插入首句；源单聊保留。"""
+
+    title: str | None = None
+    memberIds: list[str]
+    pureAiMode: bool | None = None
+    userPersonaId: str | None = None
+    memberSettings: dict[str, GroupMemberSettings] | None = None
+
+
 class AppendMessageRequest(BaseModel):
     """
     追加消息请求模型
