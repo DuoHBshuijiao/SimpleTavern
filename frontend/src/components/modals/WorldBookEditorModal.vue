@@ -8,6 +8,7 @@ import { ChevronDown, ChevronUp, Copy, Pencil, Plus, Trash2, X } from 'lucide-vu
 import { apiDelete, apiGet, apiPut } from '../../api/http'
 import type { WorldBook, WorldBookEntry } from '../../types/models'
 import { formatApiError, validateWorldBookEntry } from '../../utils/worldBookValidation'
+import ConfirmPopover from '../ConfirmPopover.vue'
 import WorldBookEntryEditModal from './WorldBookEntryEditModal.vue'
 
 const props = defineProps<{
@@ -111,6 +112,7 @@ watch(
       entryEditShow.value = false
       editingEntry.value = null
       entryTokenCounts.value = {}
+      cancelDeletePopover()
       if (entryTokenDebounce) {
         clearTimeout(entryTokenDebounce)
         entryTokenDebounce = null
@@ -146,12 +148,6 @@ function addEntry() {
   reindexEntries()
 }
 
-function removeEntry(id: string) {
-  if (!book.value) return
-  if (!confirm('删除该条目？')) return
-  book.value.entries = book.value.entries.filter((e) => e.id !== id)
-  reindexEntries()
-}
 
 function duplicateEntry(id: string) {
   if (!book.value) return
@@ -210,9 +206,64 @@ function validateAll(): string | null {
 
 const deleting = ref(false)
 
-async function deleteWholeBook() {
+const deletePopoverTarget = ref<HTMLElement | null>(null)
+const deletePopoverKind = ref<null | 'wholeBook' | 'entry'>(null)
+const pendingEntryId = ref<string | null>(null)
+
+function cancelDeletePopover() {
+  deletePopoverKind.value = null
+  deletePopoverTarget.value = null
+  pendingEntryId.value = null
+}
+
+function openDeleteWholeBookConfirm(ev: Event) {
+  deletePopoverTarget.value = ev.currentTarget as HTMLElement
+  deletePopoverKind.value = 'wholeBook'
+  pendingEntryId.value = null
+}
+
+function openRemoveEntryConfirm(ev: Event, id: string) {
+  deletePopoverTarget.value = ev.currentTarget as HTMLElement
+  deletePopoverKind.value = 'entry'
+  pendingEntryId.value = id
+}
+
+const deletePopoverTitle = computed(() => {
+  if (deletePopoverKind.value === 'wholeBook') return '删除世界书'
+  if (deletePopoverKind.value === 'entry') return '删除条目'
+  return ''
+})
+
+const deletePopoverMessage = computed(() => {
+  if (deletePopoverKind.value === 'wholeBook') {
+    const name = bookName.value.trim() || '未命名世界书'
+    return `确定删除「${name}」？条目将一并删除，且不可恢复。`
+  }
+  if (deletePopoverKind.value === 'entry' && pendingEntryId.value && book.value) {
+    const e = book.value.entries.find((x) => x.id === pendingEntryId.value)
+    const label = e ? entrySummary(e) : '该条目'
+    return `确定删除「${label}」？此操作无法撤销。`
+  }
+  return ''
+})
+
+function applyRemoveEntry(id: string) {
+  if (!book.value) return
+  book.value.entries = book.value.entries.filter((e) => e.id !== id)
+  reindexEntries()
+}
+
+async function onDeletePopoverConfirm() {
+  if (deletePopoverKind.value === 'wholeBook') {
+    await runDeleteWholeBook()
+  } else if (deletePopoverKind.value === 'entry' && pendingEntryId.value) {
+    applyRemoveEntry(pendingEntryId.value)
+  }
+  cancelDeletePopover()
+}
+
+async function runDeleteWholeBook() {
   if (!props.worldBookId) return
-  if (!confirm('确认删除该世界书？条目将一并删除，且不可恢复。')) return
   deleting.value = true
   saveError.value = ''
   const id = props.worldBookId
@@ -260,6 +311,7 @@ async function save() {
 </script>
 
 <template>
+  <div>
   <Teleport to="body">
     <Transition name="modal">
       <div v-if="show" class="modal">
@@ -349,7 +401,7 @@ async function save() {
                         type="button"
                         class="p-1.5 rounded-lg text-[var(--color-text-muted)] hover:text-error hover:bg-surface-hover"
                         title="删除"
-                        @click="removeEntry(e.id)"
+                        @click="openRemoveEntryConfirm($event, e.id)"
                       >
                         <Trash2 class="w-4 h-4" />
                       </button>
@@ -372,7 +424,7 @@ async function save() {
               type="button"
               class="btn btn-secondary text-error"
               :disabled="saving || deleting || loading || !book"
-              @click="deleteWholeBook"
+              @click="openDeleteWholeBookConfirm($event)"
             >
               {{ deleting ? '删除中…' : '删除世界书' }}
             </button>
@@ -394,6 +446,18 @@ async function save() {
     @update:show="(v) => (entryEditShow = v)"
     @apply="onEntryApply"
   />
+
+  <ConfirmPopover
+    :show="deletePopoverKind !== null"
+    :target="deletePopoverTarget"
+    :title="deletePopoverTitle"
+    :message="deletePopoverMessage"
+    confirm-text="删除"
+    @confirm="onDeletePopoverConfirm"
+    @cancel="cancelDeletePopover"
+    @update:show="(val) => !val && cancelDeletePopover()"
+  />
+  </div>
 </template>
 
 <style scoped>
