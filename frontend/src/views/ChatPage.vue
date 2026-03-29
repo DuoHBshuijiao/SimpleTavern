@@ -2178,6 +2178,18 @@ async function handleJanitorImported(payload: { chatId: string; characterId: str
  * @returns {Promise<void>} 完成时返回
  */
 const showGroupCreator = ref(false)
+/** 从单聊「转为群聊」时非空，用于 GroupCreatorModal 预选与 promote API */
+const promoteSourceChat = ref<Chat | null>(null)
+
+function openPromoteToGroup(chat: Chat) {
+  promoteSourceChat.value = chat
+  showGroupCreator.value = true
+}
+
+function onGroupCreatorShow(v: boolean) {
+  showGroupCreator.value = v
+  if (!v) promoteSourceChat.value = null
+}
 
 async function handleCreateGroup(data: {
   title: string
@@ -2204,6 +2216,19 @@ async function handleCreateGroup(data: {
   }
 
   const personaId = data.pureAiMode ? null : effectiveSelectedPersonaId.value
+  const src = promoteSourceChat.value
+  if (src) {
+    await chats.promoteToGroup(src.id, {
+      title: data.title,
+      memberIds: data.memberIds,
+      pureAiMode: data.pureAiMode,
+      memberSettings,
+      userPersonaId: personaId ?? null,
+    })
+    promoteSourceChat.value = null
+    return
+  }
+
   await chats.createGroup(
     firstMember,
     data.memberIds,
@@ -2921,7 +2946,11 @@ const editingPersonaAvatarUrl = computed(() => {
     <GroupCreatorModal
       :show="showGroupCreator"
       :characters="characters.list"
-      @update:show="showGroupCreator = $event"
+      :migrate-from-chat-id="promoteSourceChat?.id ?? null"
+      :initial-member-ids="promoteSourceChat ? [promoteSourceChat.characterId] : []"
+      :initial-title="promoteSourceChat?.title ?? ''"
+      :locked-member-ids="promoteSourceChat ? [promoteSourceChat.characterId] : []"
+      @update:show="onGroupCreatorShow"
       @create="handleCreateGroup"
     />
 

@@ -153,6 +153,35 @@ export const useChatsStore = defineStore('chats', {
       return chat
     },
     /**
+     * 将单聊复制为新群聊（不删除原单聊）
+     */
+    async promoteToGroup(
+      sourceChatId: string,
+      opts: {
+        title?: string
+        memberIds: string[]
+        pureAiMode?: boolean
+        memberSettings?: Record<string, GroupMemberSettings> | null
+        userPersonaId?: string | null
+      },
+    ) {
+      const chat = await apiPost<Chat>(
+        `/api/chats/${encodeURIComponent(sourceChatId)}/promote-to-group`,
+        {
+          title: opts.title,
+          memberIds: opts.memberIds,
+          pureAiMode: opts.pureAiMode,
+          memberSettings: opts.memberSettings ?? null,
+          userPersonaId: opts.userPersonaId ?? null,
+        },
+      )
+      await this.loadGroupList()
+      await this.loadList(chat.characterId)
+      this.activeChatId = chat.id
+      this.activeChat = chat
+      return chat
+    },
+    /**
      * 加载群聊列表
      *
      * 加载所有群聊会话列表。
