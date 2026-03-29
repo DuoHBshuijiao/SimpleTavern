@@ -626,12 +626,13 @@ def save_worldbook(book: WorldBook) -> WorldBook:
 
 def delete_worldbook(worldbook_id: str) -> None:
     """
-    删除世界书文件
+    删除世界书文件及其锁文件（与 delete_chat 一致，避免残留 *.json.lock）
     """
     p = worldbook_path(worldbook_id)
     if p.exists():
         with _lock_for(p):
             p.unlink(missing_ok=True)
+    _lock_file_path(p).unlink(missing_ok=True)
 
 
 def delete_character(character_id: str, delete_related_chats: bool = True) -> None:
