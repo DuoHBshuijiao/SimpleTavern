@@ -47,6 +47,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.regex_compat import compile_user_regex
+
 
 ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh"]
 
@@ -361,7 +363,7 @@ class WorldBookEntry(BaseModel):
         if not pattern:
             return self
         try:
-            re.compile(pattern)
+            compile_user_regex(pattern)
         except re.error as e:
             raise ValueError(f"invalid regex: {e}") from e
         return self
