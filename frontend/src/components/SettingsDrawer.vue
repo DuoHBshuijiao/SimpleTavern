@@ -48,7 +48,7 @@ import {
   type WorldBookAttachment,
 } from '../types/models'
 import ModernSelect from './ModernSelect.vue'
-import { apiDelete, apiGet, apiPost, apiPut } from '../api/http'
+import { apiGet, apiPost, apiPut } from '../api/http'
 import { useAppFont } from '../composables/useAppFont'
 import { useSettingsImport } from '../composables/useSettingsImport'
 import { X, Eye, EyeOff, Check, Loader2, GripVertical } from 'lucide-vue-next'
@@ -392,16 +392,6 @@ function cancelWorldBookCreate() {
   worldBookNewNameDraft.value = ''
 }
 
-async function deleteWorldBookQuick(worldbookId: string) {
-  if (!confirm('确认删除该世界书？')) return
-  await apiDelete(`/api/worldbooks/${worldbookId}`)
-  await loadWorldBooks()
-  removeWorldBookFromOrder(worldbookId)
-  if (chatDraft.value?.worldBookGlobalExclusions?.includes(worldbookId)) {
-    chatDraft.value.worldBookGlobalExclusions = chatDraft.value.worldBookGlobalExclusions.filter((id) => id !== worldbookId)
-  }
-}
-
 watch(
   () => props.show,
   async (open) => {
@@ -703,6 +693,29 @@ async function detachWorldBookFromCurrentChat(book: WorldBook) {
   await apiPut<WorldBook>(`/api/worldbooks/${book.id}`, payload)
   await loadWorldBooks()
   removeWorldBookFromOrder(book.id)
+}
+
+/** 仅清除当前会话内对该世界书的激活/绑定，不物理删除世界书 */
+async function clearWorldBookSessionActivation(book: WorldBook) {
+  const chatId = props.chat?.id
+  if (book.globalActive) {
+    removeWorldBookFromOrder(book.id)
+    return
+  }
+  if (chatId && (book.sessionChatIds || []).includes(chatId)) {
+    await detachWorldBookFromCurrentChat(book)
+    return
+  }
+  removeWorldBookFromOrder(book.id)
+}
+
+async function clearWorldBookSessionActivationById(worldbookId: string) {
+  const b = worldbooks.value.find((x) => x.id === worldbookId)
+  if (!b) {
+    removeWorldBookFromOrder(worldbookId)
+    return
+  }
+  await clearWorldBookSessionActivation(b)
 }
 
 watch(
@@ -1019,6 +1032,32 @@ function handleChatDraftHelpLimitInput(e: Event) {
   }, input)
 }
 
+/**
+ * 将本会话 id 写入/移出非全局世界书的 sessionChatIds，与后端 collect_active_worldbooks 一致。
+ */
+async function syncWorldBookSessionChatIdsForChat(chatId: string, attachments: WorldBookAttachment[]) {
+  await loadWorldBooks()
+  const boundIds = new Set((attachments || []).map((a) => a.worldBookId).filter(Boolean))
+  for (const wb of worldbooks.value) {
+    if (wb.globalActive) continue
+    const ids = wb.sessionChatIds || []
+    const hasChat = ids.includes(chatId)
+    const shouldBind = boundIds.has(wb.id)
+    if (shouldBind && !hasChat) {
+      await apiPut<WorldBook>(`/api/worldbooks/${wb.id}`, {
+        ...wb,
+        sessionChatIds: [...ids, chatId],
+      })
+    } else if (!shouldBind && hasChat) {
+      await apiPut<WorldBook>(`/api/worldbooks/${wb.id}`, {
+        ...wb,
+        sessionChatIds: ids.filter((id) => id !== chatId),
+      })
+    }
+  }
+  await loadWorldBooks()
+}
+
 async function saveChatOverrides() {
   const chat = props.chat
   if (!chat || !chatDraft.value) return
@@ -1032,6 +1071,14 @@ async function saveChatOverrides() {
   await chatsStore.updateOverrides(chat.id, draft)
   chatDraft.value.params.context_size = draft.params.context_size
   chatDraft.value.draftHelp = draft.draftHelp
+
+  try {
+    await syncWorldBookSessionChatIdsForChat(chat.id, draft.worldBookAttachments || [])
+  } catch (e) {
+    alert('同步世界书会话绑定失败: ' + (e instanceof Error ? e.message : String(e)))
+    await loadWorldBooks()
+    return
+  }
 
   // 单聊：将当前会话的世界书顺序同步到角色卡 attachedWorldBookIds，便于「含世界书」ZIP 导出一致
   if (!chat.isGroup && chat.characterId) {
@@ -1870,7 +1917,6 @@ async function checkUpdate() {
                         </button>
                         <button class="btn btn-xs btn-secondary" @click="detachWorldBookFromCurrentChat(book)">移除会话</button>
                         <button class="btn btn-xs btn-secondary" @click="openWorldBookEditor(book.id)">编辑</button>
-                        <button class="btn btn-xs btn-secondary" @click="deleteWorldBookQuick(book.id)">删除书</button>
                       </div>
                     </div>
                   </div>
@@ -1941,7 +1987,7 @@ async function checkUpdate() {
                       <button type="button" class="btn btn-xs btn-secondary" @click.stop="openSessionAttachEdit(idx)">编辑</button>
                       <button type="button" class="btn btn-xs btn-secondary" @click.stop="moveWorldBookOrder(att.worldBookId, -1)">上移</button>
                       <button type="button" class="btn btn-xs btn-secondary" @click.stop="moveWorldBookOrder(att.worldBookId, 1)">下移</button>
-                      <button type="button" class="btn btn-xs btn-secondary" @click.stop="removeWorldBookFromOrder(att.worldBookId)">删除</button>
+                      <button type="button" class="btn btn-xs btn-secondary" @click.stop="clearWorldBookSessionActivationById(att.worldBookId)">删除</button>
                     </div>
                   </div>
                 </div>
