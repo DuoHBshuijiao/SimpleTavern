@@ -42,6 +42,7 @@ interface Props {
   rounded?: string // Tailwind rounded class, e.g., 'rounded-xl'
   bordered?: boolean
   objectFit?: 'cover' | 'contain' | 'fill' | 'scale-down' | 'none'
+  objectPosition?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -51,7 +52,8 @@ const props = withDefaults(defineProps<Props>(), {
   aspect: 1,
   rounded: 'rounded-xl',
   bordered: false,
-  objectFit: 'cover'
+  objectFit: 'cover',
+  objectPosition: '50% 50%',
 })
 
 const hasError = ref(false)
@@ -158,6 +160,7 @@ const bgColor = computed(() => {
         props.aspect === 'auto' ? 'h-auto' : 'h-full',
         `object-${objectFit}`
       ]"
+      :style="{ objectPosition }"
       @error="handleError"
       @load="handleLoad"
       alt=""

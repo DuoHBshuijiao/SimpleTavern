@@ -35,17 +35,35 @@ import 'cropperjs/dist/cropper.css'
 const props = defineProps<{
   show: boolean
   currentAvatar?: string
+  preserveOriginal?: boolean
+  focusAspect?: number
 }>()
 
 const emit = defineEmits<{
   (e: 'update:show', v: boolean): void
-  (e: 'save', imageData: string): void
+  (e: 'save', payload: { imageData: string; focusX?: number; focusY?: number }): void
 }>()
 
 const imageRef = ref<HTMLImageElement | null>(null)
 const imageSrc = ref<string | null>(null)
 const cropper = ref<Cropper | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
+const isDragOver = ref(false)
+
+function isImageFile(file: File): boolean {
+  if ((file.type || '').startsWith('image/')) return true
+  const name = (file.name || '').toLowerCase()
+  return /\.(png|jpe?g|gif|webp|bmp|svg)$/.test(name)
+}
+
+function loadImageFile(file: File) {
+  if (!isImageFile(file)) return
+  const reader = new FileReader()
+  reader.onload = (e) => {
+    imageSrc.value = e.target?.result as string
+  }
+  reader.readAsDataURL(file)
+}
 
 /**
  * 处理文件选择
@@ -58,12 +76,7 @@ function handleFileSelect(event: Event) {
   const target = event.target as HTMLInputElement
   const file = target.files?.[0]
   if (!file) return
-
-  const reader = new FileReader()
-  reader.onload = (e) => {
-    imageSrc.value = e.target?.result as string
-  }
-  reader.readAsDataURL(file)
+  loadImageFile(file)
 }
 
 /**
@@ -73,6 +86,34 @@ function handleFileSelect(event: Event) {
  */
 function triggerFileInput() {
   fileInputRef.value?.click()
+}
+
+function handleDragEnter(event: DragEvent) {
+  event.preventDefault()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+  isDragOver.value = true
+}
+
+function handleDragOver(event: DragEvent) {
+  event.preventDefault()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+  isDragOver.value = true
+}
+
+function handleDragLeave(event: DragEvent) {
+  event.preventDefault()
+  const current = event.currentTarget as HTMLElement | null
+  const related = event.relatedTarget as Node | null
+  if (current && related && current.contains(related)) return
+  isDragOver.value = false
+}
+
+function handleDrop(event: DragEvent) {
+  event.preventDefault()
+  isDragOver.value = false
+  const file = event.dataTransfer?.files?.[0]
+  if (!file) return
+  loadImageFile(file)
 }
 
 watch(imageSrc, async (src) => {
@@ -85,7 +126,7 @@ watch(imageSrc, async (src) => {
     setTimeout(() => {
       if (imageRef.value && imageSrc.value) {
         cropper.value = new Cropper(imageRef.value, {
-          aspectRatio: 1,
+          aspectRatio: Number.isFinite(props.focusAspect) && (props.focusAspect ?? 1) > 0 ? (props.focusAspect as number) : 1,
           viewMode: 1,
           dragMode: 'move',
           autoCropArea: 1,
@@ -100,6 +141,7 @@ watch(imageSrc, async (src) => {
 
 watch(() => props.show, (show) => {
   if (!show) {
+    isDragOver.value = false
     imageSrc.value = null
     if (cropper.value) {
       cropper.value.destroy()
@@ -119,15 +161,34 @@ watch(() => props.show, (show) => {
 function handleSave() {
   if (!cropper.value) return
 
+  const cropData = cropper.value.getData(true)
+  const imageDataInfo = cropper.value.getImageData()
+  const naturalWidth = imageDataInfo.naturalWidth || 0
+  const naturalHeight = imageDataInfo.naturalHeight || 0
+  let focusX: number | undefined
+  let focusY: number | undefined
+  if (naturalWidth > 0 && naturalHeight > 0) {
+    const centerX = (cropData.x + cropData.width / 2) / naturalWidth
+    const centerY = (cropData.y + cropData.height / 2) / naturalHeight
+    focusX = Math.max(0, Math.min(100, centerX * 100))
+    focusY = Math.max(0, Math.min(100, centerY * 100))
+  }
+
+  if (props.preserveOriginal) {
+    if (!imageSrc.value) return
+    emit('save', { imageData: imageSrc.value, focusX, focusY })
+    emit('update:show', false)
+    return
+  }
+
   const canvas = cropper.value.getCroppedCanvas({
     width: 256,
     height: 256,
     imageSmoothingEnabled: true,
     imageSmoothingQuality: 'high',
   })
-
   const imageData = canvas.toDataURL('image/png')
-  emit('save', imageData)
+  emit('save', { imageData, focusX, focusY })
   emit('update:show', false)
 }
 
@@ -168,7 +229,14 @@ onUnmounted(() => {
           <h3 class="modal-title text-slate-50">设置头像</h3>
           <button class="modal-close" @click="handleCancel">×</button>
         </div>
-        <div class="modal-body">
+        <div
+          class="modal-body transition-colors"
+          :class="isDragOver ? 'bg-brand-a10' : ''"
+          @dragenter="handleDragEnter"
+          @dragover="handleDragOver"
+          @dragleave="handleDragLeave"
+          @drop="handleDrop"
+        >
           <div class="space-y-6">
             <!-- 隐藏的文件输入 -->
             <input
@@ -186,13 +254,16 @@ onUnmounted(() => {
             >
               <div class="upload-content pointer-events-none">
                 <div class="text-lg font-bold text-brand mb-2">点击选择图片</div>
-                <div class="text-xs text-gray-500">支持 JPG、PNG、GIF、WebP 格式</div>
+                <div class="text-xs text-gray-500">支持 JPG、PNG、GIF、WebP 格式（可拖拽到此区域）</div>
               </div>
             </div>
 
             <div v-else class="cropper-container bg-black/20 rounded-xl overflow-hidden max-h-[400px]">
               <img ref="imageRef" :src="imageSrc" class="max-w-full block" />
             </div>
+            <p v-if="imageSrc && preserveOriginal" class="text-xs text-[var(--color-text-muted)]">
+              当前模式不会裁剪原图像素；此处框选仅用于会话中角色头像的展示位置。
+            </p>
           </div>
         </div>
         <div class="modal-footer">
