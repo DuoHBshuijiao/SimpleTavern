@@ -1,0 +1,1 @@
+window.__ST_JANITOR_BRIDGE_INSTALLED__ = true;

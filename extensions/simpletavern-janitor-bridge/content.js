@@ -63,6 +63,72 @@
     console.warn(LOG_PREFIX, ...args);
   }
 
+  const AVATAR_POLL_MS = 200;
+  /** 等 React 把角色卡（含头图）挂进 DOM，避免截到骨架屏壳 HTML */
+  const MAX_CHARACTER_AVATAR_WAIT_MS = 60000;
+  /** 首次轮询推迟，避免与 load 同一宏任务里读到未提交的壳 DOM */
+  const FIRST_POLL_DELAY_MS = 200;
+  /** 连续两次读到同一 bot-avatars URL 再认为稳定（间隔约 200ms） */
+  const STABLE_POLLS_REQUIRED = 2;
+
+  function hasCharacterSkeleton() {
+    return !!document.querySelector('[class*="viewCharacterSkeleton"]');
+  }
+
+  /** 仅角色卡头图（JAI 使用 ella…/bot-avatars/…），避免误用顶栏等其它 img */
+  function resolveBotAvatarUrlFromDom() {
+    const nodes = document.querySelectorAll('img.avatar-image');
+    for (let i = 0; i < nodes.length; i += 1) {
+      const el = nodes[i];
+      const raw = (el.currentSrc || el.getAttribute('src') || '').trim();
+      if (raw && /^https?:\/\//i.test(raw) && /bot-avatars/i.test(raw)) return raw;
+    }
+    return '';
+  }
+
+  /**
+   * 每 AVATAR_POLL_MS 轮询一次；首次在 FIRST_POLL_DELAY_MS 之后开始。
+   * 条件：骨架消失 + 出现 bot-avatars 头图 URL，且连续 STABLE_POLLS_REQUIRED 次相同。
+   */
+  function waitForCharacterAvatarReady(maxMs) {
+    const cap = typeof maxMs === 'number' && maxMs > 0 ? maxMs : MAX_CHARACTER_AVATAR_WAIT_MS;
+    const deadline = Date.now() + cap;
+    let lastStable = '';
+    let stableCount = 0;
+    let pollIndex = 0;
+    return new Promise((resolve) => {
+      const tick = () => {
+        pollIndex += 1;
+        const skeleton = hasCharacterSkeleton();
+        const url = resolveBotAvatarUrlFromDom();
+        const ready = !skeleton && !!url;
+        if (ready) {
+          if (url === lastStable) stableCount += 1;
+          else {
+            lastStable = url;
+            stableCount = 1;
+          }
+          if (stableCount >= STABLE_POLLS_REQUIRED) {
+            logInfo('character card ready after polls:', pollIndex, 'avatar ok');
+            resolve(url);
+            return;
+          }
+        } else {
+          lastStable = '';
+          stableCount = 0;
+        }
+        if (Date.now() >= deadline) {
+          const fallback = resolveBotAvatarUrlFromDom();
+          if (fallback) logWarn('deadline: using last bot-avatar URL without full stability check');
+          resolve(fallback || '');
+          return;
+        }
+        window.setTimeout(tick, AVATAR_POLL_MS);
+      };
+      window.setTimeout(tick, FIRST_POLL_DELAY_MS);
+    });
+  }
+
   function resolveActivation() {
     try {
       const u = new URL(window.location.href);
@@ -137,15 +203,24 @@
     try {
       const { apiBaseUrl, appBaseUrl } = await getConfig();
       const openBase = (state.appBaseHint || appBaseUrl || DEFAULT_APP_BASE).replace(/\/+$/, '');
+      logInfo('waiting for character card (img.avatar-image), up to', `${MAX_CHARACTER_AVATAR_WAIT_MS / 1000}s`);
+      const avatarUrl = await waitForCharacterAvatarReady(MAX_CHARACTER_AVATAR_WAIT_MS);
+      if (avatarUrl) {
+        logInfo('resolved avatar from img.avatar-image');
+      } else {
+        logWarn('timeout: no img.avatar-image with valid src — posting HTML anyway');
+      }
       const html = document.documentElement.outerHTML;
       if (!html || html.length < 200) {
         throw new Error('页面 HTML 过短，可能尚未加载完成，请稍后重试');
       }
+      const payload = { html };
+      if (avatarUrl) payload.avatarUrl = avatarUrl;
       logInfo('posting character page HTML to', `${apiBaseUrl}/api/import/janitor/character-html`);
       const resp = await fetch(`${apiBaseUrl}/api/import/janitor/character-html`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ html }),
+        body: JSON.stringify(payload),
       });
       if (!resp.ok) {
         throw new Error(await resp.text());
@@ -185,14 +260,16 @@
 
   function scheduleCharacterHtmlCapture() {
     if (!state.charHtmlActivated) return;
-    const delayMs = 2500;
     const run = () => {
       void sendCharacterHtml();
     };
+    const afterLoad = () => {
+      window.setTimeout(run, 0);
+    };
     if (document.readyState === 'complete') {
-      window.setTimeout(run, delayMs);
+      afterLoad();
     } else {
-      window.addEventListener('load', () => window.setTimeout(run, delayMs), { once: true });
+      window.addEventListener('load', afterLoad, { once: true });
     }
   }
 
