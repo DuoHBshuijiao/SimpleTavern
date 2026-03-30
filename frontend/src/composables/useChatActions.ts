@@ -38,6 +38,7 @@
  *    - 位置：Composables层，提供聊天操作逻辑
  */
 import { ref, computed } from 'vue'
+import { notifyMessage } from './useNotify'
 import type { Ref, ComputedRef } from 'vue'
 import type { 
   Chat, 
@@ -647,7 +648,7 @@ export function useChatActions(deps: ChatActionsDeps) {
     if (!activeChat.value) return
     const r = await fetch(`/api/chats/${activeChat.value.id}/export?format=${format}`)
     if (!r.ok) {
-      alert(await r.text())
+      await notifyMessage(await r.text())
       return
     }
     const blob = await r.blob()
@@ -667,7 +668,7 @@ export function useChatActions(deps: ChatActionsDeps) {
     if (!characterId) return
     const r = await fetch(`/api/characters/${characterId}/export?include_world_books=${includeWorldBooks ? 'true' : 'false'}`)
     if (!r.ok) {
-      alert(await r.text())
+      await notifyMessage(await r.text())
       return
     }
     const blob = await r.blob()

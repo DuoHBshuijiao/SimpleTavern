@@ -96,6 +96,7 @@ import { Users, Settings, Sparkles, Loader2, X, MoreHorizontal, GripVertical, Ch
 import { postAndConsumeSse } from '../api/sse'
 import { apiPost, apiGet, apiPut } from '../api/http'
 import { useErrorStack } from '../composables/useErrorStack'
+import { notifyMessage } from '../composables/useNotify'
 
 // ========== Stores ==========
 const settings = useSettingsStore()
@@ -1114,7 +1115,7 @@ watch(
       }
     }
     const name = typeof cname === 'string' && cname.trim() ? cname.trim() : '已创建角色'
-    alert(`角色导入完成：${name}${warnSuffix}`)
+    void notifyMessage(`角色导入完成：${name}${warnSuffix}`)
   },
   { immediate: true },
 )
