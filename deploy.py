@@ -132,6 +132,46 @@ def run_command(cmd, cwd=None, check=True, env=None):
         print_error(f"执行命令时出错: {e}")
         return False
 
+def maybe_run_npm_audit_fix(npm_cmd, frontend_dir: Path) -> None:
+    """
+    在 npm install 之后：若 npm audit 报告漏洞或提示可执行 npm audit fix，则先运行 npm audit fix。
+    audit fix 失败时仅警告，不中断部署。
+    """
+    shell = platform.system() == "Windows"
+    try:
+        result = subprocess.run(
+            [npm_cmd, "audit"],
+            cwd=frontend_dir,
+            shell=shell,
+            capture_output=True,
+            text=True,
+        )
+    except Exception as e:
+        print_warning(f"无法执行 npm audit（已跳过 audit fix）: {e}")
+        return
+
+    combined = ((result.stdout or "") + "\n" + (result.stderr or "")).lower()
+    need_fix = result.returncode != 0
+    if not need_fix:
+        # 与 npm install 末尾提示类似：To address all issues, run: npm audit fix
+        need_fix = (
+            "npm audit fix" in combined
+            and (
+                "to address" in combined
+                or "to fix" in combined
+                or "vulnerabilit" in combined
+            )
+        )
+
+    if not need_fix:
+        return
+
+    print_info("检测到依赖安全提示，正在执行 npm audit fix...")
+    if run_command([npm_cmd, "audit", "fix"], cwd=frontend_dir, check=False):
+        print_success("npm audit fix 已完成")
+    else:
+        print_warning("npm audit fix 未完全成功，将继续后续步骤")
+
 def get_venv_python(venv_dir):
     """获取虚拟环境中的 Python 路径"""
     if platform.system() == 'Windows':
@@ -285,6 +325,13 @@ def wait_for_exit():
     else:
         input("按 Enter 键退出...")
 
+def _windows_cmd_quote(path: str) -> str:
+    """Windows cmd 中带空格等字符的路径用引号包裹，避免解析错误。"""
+    p = str(path).strip()
+    if len(p) >= 2 and p[0] == '"' and p[-1] == '"':
+        return p
+    return f'"{p}"'
+
 def start_services(venv_python, npm_cmd, backend_dir, frontend_dir):
     """启动后端和前端服务"""
     backend_port = 8000
@@ -296,11 +343,16 @@ def start_services(venv_python, npm_cmd, backend_dir, frontend_dir):
     print_info("启动后端服务...")
     backend_cmd = [venv_python, "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", str(backend_port)]
     if platform.system() == 'Windows':
+        # 用 cmd /k 包装：若 uvicorn 因异常立即退出，控制台不会随进程关闭而闪退，便于查看报错（与前端窗口行为一致）。
+        backend_dir_str = str(backend_dir)
+        backend_cmd_str = (
+            f"title SimpleTavern Backend & cd /d {_windows_cmd_quote(backend_dir_str)} & "
+            f"{_windows_cmd_quote(venv_python)} -m uvicorn app.main:app --host 0.0.0.0 --port {backend_port}"
+        )
         backend_process = subprocess.Popen(
-            backend_cmd,
+            ["cmd.exe", "/k", backend_cmd_str],
             cwd=backend_dir,
-            # 单独控制台窗口，便于用户查看日志/手动关闭
-            creationflags=subprocess.CREATE_NEW_CONSOLE
+            creationflags=subprocess.CREATE_NEW_CONSOLE,
         )
     else:
         backend_process = subprocess.Popen(
@@ -319,6 +371,10 @@ def start_services(venv_python, npm_cmd, backend_dir, frontend_dir):
         print_success(f"后端服务已启动: {backend_url}")
     except Exception:
         print_warning("后端服务可能未完全启动，继续...")
+        if platform.system() == "Windows":
+            print_info(
+                "请查看标题为「SimpleTavern Backend」的窗口：若后端启动失败，错误信息会保留在该窗口中。"
+            )
     
     print()
     
@@ -393,7 +449,7 @@ def main():
     python_cmd = find_python()
     if not python_cmd:
         print_error("Python 未安装或不在 PATH 中")
-        print_error("请先安装 Python 3.7+")
+        print_error("请先安装 Python 3.10+")
         wait_for_exit()
         sys.exit(1)
     
@@ -470,7 +526,9 @@ def main():
                 print_error("前端依赖安装失败")
                 wait_for_exit()
                 sys.exit(1)
-            
+
+            maybe_run_npm_audit_fix(npm_cmd, frontend_dir)
+
             print_success("前端依赖安装完成")
             print()
         else:

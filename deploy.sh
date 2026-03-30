@@ -62,12 +62,12 @@ elif command -v python &> /dev/null; then
         PYTHON_CMD="python"
     else
         print_error "找到的 Python 不是 3.x 版本: $PYTHON_VERSION"
-        print_error "请安装 Python 3.7+"
+        print_error "请安装 Python 3.10+"
         exit 1
     fi
 else
     print_error "Python 未安装"
-    print_error "请先安装 Python 3.7+"
+    print_error "请先安装 Python 3.10+"
     exit 1
 fi
 
@@ -186,6 +186,31 @@ else
         if [ $? -ne 0 ]; then
             print_error "前端依赖安装失败"
             exit 1
+        fi
+        # 若 npm audit 报告漏洞或提示可执行 npm audit fix，则先修复再继续
+        set +e
+        AUDIT_COMBINED=$(npm audit 2>&1)
+        AUDIT_RC=$?
+        set -e
+        NEED_FIX=0
+        if [ $AUDIT_RC -ne 0 ]; then
+            NEED_FIX=1
+        else
+            if echo "$AUDIT_COMBINED" | grep -qi 'npm audit fix' && echo "$AUDIT_COMBINED" | grep -qiE 'to address|to fix|vulnerabilit'; then
+                NEED_FIX=1
+            fi
+        fi
+        if [ $NEED_FIX -eq 1 ]; then
+            print_info "检测到依赖安全提示，正在执行 npm audit fix..."
+            set +e
+            npm audit fix
+            FIX_RC=$?
+            set -e
+            if [ $FIX_RC -eq 0 ]; then
+                print_success "npm audit fix 已完成"
+            else
+                print_warning "npm audit fix 未完全成功，将继续后续步骤"
+            fi
         fi
         print_success "前端依赖安装完成"
     else
