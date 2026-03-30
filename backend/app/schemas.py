@@ -306,6 +306,15 @@ class AssistantChat(BaseModel):
     messages: list[ChatMessage] = Field(default_factory=list)
 
 
+class ExtraFirstMessageEntry(BaseModel):
+    """额外首句条目：chip 为 True 时在编辑界面显示为矩形 chip。"""
+
+    model_config = ConfigDict(extra="allow")
+
+    text: str = ""
+    chip: bool = True
+
+
 class CharacterCard(BaseModel):
     """
     角色卡片模型
@@ -338,7 +347,10 @@ class CharacterCard(BaseModel):
     exampleDialogue: str = ""
     systemPrompt: str = ""
     avatar: str = ""
+    avatarFocusX: float | None = None
+    avatarFocusY: float | None = None
     attachedWorldBookIds: list[str] = Field(default_factory=list)
+    extraFirstMessageEntries: list[ExtraFirstMessageEntry] = Field(default_factory=list)
     createdAt: str = Field(default_factory=_now_iso)
     updatedAt: str = Field(default_factory=_now_iso)
 
@@ -421,6 +433,11 @@ class ChatMessage(BaseModel):
     senderName: str | None = None
     senderAvatar: str | None = None
     ts: str = Field(default_factory=_now_iso)
+    greetingVariants: list[str] | None = None
+    greetingVariantIndex: int | None = Field(
+        default=None,
+        description="当前选中的开场变体下标（与 greetingVariants 对齐）；避免仅靠 content 反推在重复文案时错位",
+    )
 
 
 class ChatImageAttachment(BaseModel):
@@ -633,6 +650,7 @@ class UpdateMessageRequest(BaseModel):
     senderPersonaId: str | None = None
     senderName: str | None = None
     senderAvatar: str | None = None
+    greetingVariantIndex: int | None = None
 
 
 class UpdateChatRequest(BaseModel):

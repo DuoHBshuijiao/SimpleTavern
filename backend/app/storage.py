@@ -517,6 +517,31 @@ def ai_workspace_dir() -> Path:
     return _ai_workspace_dir()
 
 
+def workspace_character_card_path() -> Path:
+    """
+    工作区角色卡草稿文件路径（与 GET /assistant/workspace/character-card 一致）
+
+    Returns:
+        Path: data/ai_workspace/character_card.json
+    """
+    return _ai_workspace_dir() / "character_card.json"
+
+
+def save_workspace_character_card(card: CharacterCard) -> CharacterCard:
+    """
+    将角色卡暂存为工作区草稿（覆盖写入 character_card.json）
+
+    Args:
+        card: 角色卡片（经 Pydantic 校验）
+
+    Returns:
+        CharacterCard: 写入后的同一对象
+    """
+    path = workspace_character_card_path()
+    write_json(path, card.model_dump(mode="json"))
+    return card
+
+
 def character_path(character_id: str) -> Path:
     """
     获取角色卡片文件路径
@@ -838,6 +863,31 @@ def _attach_chat_memory(chat: Chat) -> None:
         chat.overrides.longTermMemory = None
 
 
+def _sanitize_chat_greeting_variants(chat: Chat) -> None:
+    """移除 greetingVariants 中的空串；不足两条时去掉多版本元数据；校正 greetingVariantIndex 与 content 一致。"""
+    for m in chat.messages:
+        gv = getattr(m, "greetingVariants", None)
+        if not gv:
+            continue
+        cleaned = [str(x).strip() for x in gv if x is not None and str(x).strip()]
+        if len(cleaned) >= 2:
+            m.greetingVariants = cleaned
+            cur = (m.content or "").strip()
+            idx = getattr(m, "greetingVariantIndex", None)
+            if isinstance(idx, int) and 0 <= idx < len(cleaned) and cleaned[idx] == cur:
+                continue
+            if cur in cleaned:
+                m.greetingVariantIndex = cleaned.index(cur)
+            else:
+                m.content = cleaned[0]
+                m.greetingVariantIndex = 0
+            continue
+        m.greetingVariants = None
+        m.greetingVariantIndex = None
+        if len(cleaned) == 1:
+            m.content = cleaned[0]
+
+
 def _load_chat_from_path(path: Path, character_id: str) -> Chat | None:
     """
     从指定路径加载聊天对象
@@ -858,6 +908,7 @@ def _load_chat_from_path(path: Path, character_id: str) -> Chat | None:
     if chat.characterId != character_id:
         chat.characterId = character_id
     _attach_chat_memory(chat)
+    _sanitize_chat_greeting_variants(chat)
     return chat
 
 
