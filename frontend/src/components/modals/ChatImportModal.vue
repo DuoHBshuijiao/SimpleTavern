@@ -86,6 +86,7 @@ const emit = defineEmits<{
 const { importSettingsFile, refreshDataAfterImport, formatImportResultMessage } = useSettingsImport()
 
 const importInputRef = ref<HTMLInputElement | null>(null)
+const stImportInputRef = ref<HTMLInputElement | null>(null)
 
 const janitorLink = ref('')
 const openAfterImport = ref(true)
@@ -150,6 +151,10 @@ function triggerImport() {
   importInputRef.value?.click()
 }
 
+function triggerStImport() {
+  stImportInputRef.value?.click()
+}
+
 async function handleImportChange(e: Event) {
   const input = e.target as HTMLInputElement
   const file = input.files?.[0]
@@ -160,6 +165,25 @@ async function handleImportChange(e: Event) {
     alert(formatImportResultMessage(result))
   } catch (err) {
     alert(err instanceof Error ? err.message : String(err))
+  } finally {
+    input.value = ''
+  }
+}
+
+async function handleStImportChange(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  try {
+    const result = await importSettingsFile(file)
+    await refreshDataAfterImport()
+    alert(formatImportResultMessage(result))
+  } catch (err) {
+    if (props.pushError) {
+      props.pushError({ message: err instanceof Error ? err.message : String(err), source: 'main', title: 'SillyTavern 导入失败' })
+    } else {
+      alert(err instanceof Error ? err.message : String(err))
+    }
   } finally {
     input.value = ''
   }
@@ -281,9 +305,12 @@ async function confirmJanitorImport() {
             <section class="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface-muted)] p-4">
               <h4 class="text-sm font-medium text-[var(--color-text-secondary)]">本地文件导入</h4>
               <p class="mt-2 text-xs text-[var(--color-text-muted)]">支持 txt/json/zip，逻辑与设置中的“导入数据”一致。</p>
-              <div class="mt-3">
+              <p class="mt-1 text-xs text-[var(--color-text-muted)]">SillyTavern 专用按钮仅支持 PNG/JSON 角色卡，不支持聊天记录导入。</p>
+              <div class="mt-3 flex flex-wrap gap-2">
                 <button class="btn btn-sm btn-secondary" @click="triggerImport">选择文件导入</button>
+                <button class="btn btn-sm btn-secondary" @click="triggerStImport">导入 SillyTavern 数据</button>
                 <input ref="importInputRef" type="file" class="hidden" accept=".txt,.json,.zip" @change="handleImportChange" />
+                <input ref="stImportInputRef" type="file" class="hidden" accept=".png,.json" @change="handleStImportChange" />
               </div>
             </section>
 
