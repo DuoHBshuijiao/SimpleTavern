@@ -122,6 +122,11 @@ def _resolve_user_name_for_message(msg: ChatMessage, fallback_user_name: str) ->
     return getattr(msg, "senderName", None) or fallback_user_name or "用户"
 
 
+def _build_group_identity_guardrail(char_name: str | None) -> str:
+    resolved = (char_name or "").strip() or "角色"
+    return f"[仅允许使用{resolved}的身份输出下一条回复。]"
+
+
 def _build_data_url(image_bytes: bytes, mime_type: str) -> str:
     return f"data:{mime_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
 
@@ -1269,6 +1274,7 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
         c = dict(c)
         c.pop("_message_id", None)
         messages.append(c)
+    messages.append({"role": "user", "content": _build_group_identity_guardrail(character.name)})
 
     reasoning_cfg = build_reasoning_request_config(settings)
     thinking_enabled = reasoning_cfg["thinking_enabled"]
@@ -1635,6 +1641,7 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
         c = dict(c)
         c.pop("_message_id", None)
         messages.append(c)
+    messages.append({"role": "user", "content": _build_group_identity_guardrail(character.name)})
 
     reasoning_cfg = build_reasoning_request_config(settings)
     thinking_enabled = reasoning_cfg["thinking_enabled"]
