@@ -46,6 +46,7 @@ from pydantic import BaseModel, Field
 from app.llm.openai_compat import chat_completions_message, stream_chat_completions
 from app.schemas import (
     build_reasoning_request_config,
+    filter_reasoning_extra_body_for_upstream,
     AssistantChat,
     AssistantSettings,
     Chat,
@@ -1141,7 +1142,7 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
     if scope == "workspace":
         allow_write_memory = False
     tools = _build_tools(chat_id, bool(allow_write_memory))
-    extra_body = reasoning_cfg["extra_body"]
+    extra_body = filter_reasoning_extra_body_for_upstream(model, reasoning_cfg["extra_body"])
 
     # 非流式：与全局设置 streamEnabled 一致，返回 JSON
     if not getattr(settings, "streamEnabled", True):

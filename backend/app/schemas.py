@@ -89,6 +89,27 @@ def build_reasoning_request_config(settings: "Settings") -> ReasoningRequestConf
     }
 
 
+def _model_name_contains_gemini_keyword(model: str | None) -> bool:
+    """当前所选模型 ID/名称是否含 gemini（不区分大小写）。用于与需特殊裁剪请求体的 Gemini 家族对齐。"""
+    if not model:
+        return False
+    return "gemini" in model.strip().lower()
+
+
+# 与 OpenAI/Anthropic 等兼容的思考扩展字段；名称含 gemini 的模型在 Google 托管的 OpenAI 兼容层上会整段拒绝
+_REASONING_EXTRA_BODY_KEYS_INCOMPATIBLE_WITH_GEMINI = frozenset({"thinking", "reasoning", "reasoning_effort"})
+
+
+def filter_reasoning_extra_body_for_upstream(model: str | None, extra_body: dict[str, Any]) -> dict[str, Any]:
+    """
+    按所选模型裁剪 extra_body：名称含 \"gemini\" 时不发送 thinking/reasoning/reasoning_effort，
+    否则会 400（Unknown name \"thinking\" / \"reasoning\"）。不按 baseURL 判断，避免同一网关下非 Gemini 模型被误伤。
+    """
+    if not _model_name_contains_gemini_keyword(model):
+        return extra_body
+    return {k: v for k, v in extra_body.items() if k not in _REASONING_EXTRA_BODY_KEYS_INCOMPATIBLE_WITH_GEMINI}
+
+
 def _now_iso() -> str:
     """
     获取当前时间的ISO格式字符串

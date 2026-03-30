@@ -36,6 +36,7 @@ from app.placeholders import replace_placeholders_in_text
 from app.regex_compat import compile_user_regex
 from app.schemas import (
     build_reasoning_request_config,
+    filter_reasoning_extra_body_for_upstream,
     ChatMessage,
     DraftHelpConversationMessage,
     DraftHelpRequest,
@@ -775,7 +776,7 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
 
     reasoning_cfg = build_reasoning_request_config(settings)
     thinking_enabled = reasoning_cfg["thinking_enabled"]
-    extra_body = reasoning_cfg["extra_body"]
+    extra_body = filter_reasoning_extra_body_for_upstream(model, reasoning_cfg["extra_body"])
     if model == "deepseek-reasoner" or thinking_enabled:
         temperature = None
 
@@ -948,7 +949,7 @@ async def generate_draft_help(req: DraftHelpRequest) -> StreamingResponse:
 
     reasoning_cfg = build_reasoning_request_config(settings)
     thinking_enabled = reasoning_cfg["thinking_enabled"]
-    extra_body = reasoning_cfg["extra_body"]
+    extra_body = filter_reasoning_extra_body_for_upstream(model, reasoning_cfg["extra_body"])
     if model == "deepseek-reasoner" or thinking_enabled:
         temperature = None
 
@@ -1278,7 +1279,7 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
 
     reasoning_cfg = build_reasoning_request_config(settings)
     thinking_enabled = reasoning_cfg["thinking_enabled"]
-    extra_body = reasoning_cfg["extra_body"]
+    extra_body = filter_reasoning_extra_body_for_upstream(model, reasoning_cfg["extra_body"])
     if model == "deepseek-reasoner" or thinking_enabled:
         temperature = None
 
@@ -1645,7 +1646,7 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
 
     reasoning_cfg = build_reasoning_request_config(settings)
     thinking_enabled = reasoning_cfg["thinking_enabled"]
-    extra_body = reasoning_cfg["extra_body"]
+    extra_body = filter_reasoning_extra_body_for_upstream(model, reasoning_cfg["extra_body"])
     if model == "deepseek-reasoner" or thinking_enabled:
         temperature = None
 
