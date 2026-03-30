@@ -325,12 +325,21 @@ def wait_for_exit():
     else:
         input("按 Enter 键退出...")
 
-def _windows_cmd_quote(path: str) -> str:
-    """Windows cmd 中带空格等字符的路径用引号包裹，避免解析错误。"""
-    p = str(path).strip()
-    if len(p) >= 2 and p[0] == '"' and p[-1] == '"':
-        return p
-    return f'"{p}"'
+def _windows_cmd_path_arg(path: str) -> str:
+    """
+    规范化路径供 cmd.exe 使用（含 cd /d 与可执行文件路径）。
+    - 若路径末尾为 \\，在加引号前必须去掉：否则 cmd 会写成 cd /d \"...\\" 导致 \\" 转义结束引号，
+      引发「文件名、目录名或卷标语法不正确」，后续命令也会被拆断。
+    """
+    try:
+        p = Path(path).resolve()
+    except Exception:
+        p = Path(path)
+    s = str(p).strip()
+    s = s.rstrip("/\\")
+    if len(s) >= 2 and s[0] == '"' and s[-1] == '"':
+        return s
+    return f'"{s}"'
 
 def start_services(venv_python, npm_cmd, backend_dir, frontend_dir):
     """启动后端和前端服务"""
@@ -346,8 +355,8 @@ def start_services(venv_python, npm_cmd, backend_dir, frontend_dir):
         # 用 cmd /k 包装：若 uvicorn 因异常立即退出，控制台不会随进程关闭而闪退，便于查看报错（与前端窗口行为一致）。
         backend_dir_str = str(backend_dir)
         backend_cmd_str = (
-            f"title SimpleTavern Backend & cd /d {_windows_cmd_quote(backend_dir_str)} & "
-            f"{_windows_cmd_quote(venv_python)} -m uvicorn app.main:app --host 0.0.0.0 --port {backend_port}"
+            f"title SimpleTavern Backend & cd /d {_windows_cmd_path_arg(backend_dir_str)} & "
+            f"{_windows_cmd_path_arg(venv_python)} -m uvicorn app.main:app --host 0.0.0.0 --port {backend_port}"
         )
         backend_process = subprocess.Popen(
             ["cmd.exe", "/k", backend_cmd_str],
@@ -386,7 +395,10 @@ def start_services(venv_python, npm_cmd, backend_dir, frontend_dir):
         # 注意：cmd.exe /k 往往会给整段命令再包一层外部引号；因此此处避免在命令内部再嵌套引号（尤其是带空格的 npm 路径）。
         # 这里依赖 npm 在 PATH 中可用（find_npm 已优先返回 "npm"）。
         frontend_dir_str = str(frontend_dir)
-        frontend_cmd_str = f'title SimpleTavern Frontend & cd /d {frontend_dir_str} & {npm_cmd} run preview -- --port {frontend_port} --host'
+        frontend_cmd_str = (
+            f'title SimpleTavern Frontend & cd /d {_windows_cmd_path_arg(frontend_dir_str)} & '
+            f'{npm_cmd} run preview -- --port {frontend_port} --host'
+        )
         frontend_process = subprocess.Popen(
             ["cmd.exe", "/k", frontend_cmd_str],
             cwd=frontend_dir,
