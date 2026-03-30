@@ -10,6 +10,7 @@ AI助手路由模块
     - GET /assistant/chat: 获取助手聊天记录
     - POST /assistant/reset: 重置助手聊天
     - GET /assistant/workspace/character-card: 获取工作空间角色卡
+    - PUT /assistant/workspace/character-card: 保存工作区角色卡草稿
     - PUT /assistant/chat/messages/{message_id}: 更新助手消息
     - DELETE /assistant/chat/messages/{message_id}: 删除助手消息
 
@@ -20,6 +21,7 @@ AI助手路由模块
     - get_assistant_chat: 获取助手聊天记录
     - reset_assistant: 重置助手聊天
     - get_workspace_character_card: 获取工作空间角色卡
+    - put_workspace_character_card: 保存工作空间角色卡草稿
     - update_assistant_message: 更新助手消息
     - delete_assistant_message: 删除助手消息
 
@@ -53,6 +55,7 @@ from app.schemas import (
 )
 from app.storage import (
     ai_workspace_dir,
+    save_workspace_character_card,
     clear_ai_workspace,
     clear_assistant_chat,
     clear_assistant_chat_for_chat,
@@ -882,6 +885,16 @@ def get_workspace_character_card() -> dict[str, Any]:
         return {"ok": True, "card": card.model_dump(mode="json")}
     except Exception as exc:
         return {"ok": False, "error": str(exc), "card": None}
+
+
+@router.put("/assistant/workspace/character-card", response_model=CharacterCard)
+def put_workspace_character_card(card: CharacterCard) -> CharacterCard:
+    """
+    保存工作区角色卡草稿
+
+    写入 data/ai_workspace/character_card.json，供助手工具 write_file 与前端共用同一暂存位置。
+    """
+    return save_workspace_character_card(card)
 
 
 @router.get("/assistant/settings", response_model=AssistantSettings)
