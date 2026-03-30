@@ -74,6 +74,8 @@ const props = defineProps<{
   characterAvatarUrl: string | null
   // 状态
   isGenerating: boolean
+  /** 群聊插话流式中（isGenerating 可能为 false，ResizeObserver 跟底仍应生效） */
+  isInterjecting?: boolean
   /** 当前展示思考链的消息 ID（仅前端临时，刷新后消失） */
   reasoningMessageId?: string | null
   /** 思考链内容（当前正在流式接收的一条） */
@@ -104,13 +106,19 @@ const emit = defineEmits<{
 
 // 滚动容器引用
 const scrollRef = ref<HTMLElement | null>(null)
+const contentRef = ref<HTMLElement | null>(null)
 const scrollTop = ref(0)
 const viewportHeight = ref(0)
+const realDistanceFromBottom = ref(0)
+const wasNearBottomBeforeMutation = ref(true)
 const measuredHeights = ref<Record<number, number>>({})
-const DEFAULT_ROW_HEIGHT = 220
+const MESSAGE_ROW_GAP = 32
+const DEFAULT_ROW_HEIGHT = 220 + MESSAGE_ROW_GAP
 const BUFFER_ITEMS = 26
 const SCROLL_BOTTOM_SHOW_THRESHOLD = 200
 const SCROLL_BOTTOM_NEAR_THRESHOLD = 24
+const AUTO_FOLLOW_DISTANCE_THRESHOLD = 300
+let contentResizeObserver: ResizeObserver | null = null
 
 // 删除确认状态
 const deleteConfirm = ref<{
@@ -390,6 +398,20 @@ function getMessageAvatar(m: ChatMessage): string | null {
   return null
 }
 
+function getMessageAvatarObjectPosition(m: ChatMessage): string {
+  if (m.role !== 'assistant') return '50% 50%'
+  let char: CharacterCard | null = null
+  if (m.characterId) {
+    char = getCharacterById(m.characterId)
+  } else {
+    char = props.selectedCharacter
+  }
+  if (!char) return '50% 50%'
+  const x = typeof char.avatarFocusX === 'number' ? char.avatarFocusX : 50
+  const y = typeof char.avatarFocusY === 'number' ? char.avatarFocusY : 50
+  return `${x}% ${y}%`
+}
+
 /**
  * 确认删除消息
  *
@@ -422,32 +444,67 @@ function cancelDelete() {
  * 滚动消息列表容器到底部，显示最新消息。
  * 使用nextTick确保DOM更新后再滚动。
  */
-function scrollToBottom(instant = false) {
+function getRealDistanceFromBottom(el: HTMLElement): number {
+  return Math.max(0, el.scrollHeight - el.clientHeight - el.scrollTop)
+}
+
+function syncScrollMetrics(el: HTMLElement) {
+  scrollTop.value = el.scrollTop
+  viewportHeight.value = el.clientHeight
+  realDistanceFromBottom.value = getRealDistanceFromBottom(el)
+  wasNearBottomBeforeMutation.value = realDistanceFromBottom.value <= AUTO_FOLLOW_DISTANCE_THRESHOLD
+}
+
+function shouldAutoFollowBottom(el: HTMLElement): boolean {
+  return getRealDistanceFromBottom(el) <= AUTO_FOLLOW_DISTANCE_THRESHOLD
+}
+
+function alignToBottom(el: HTMLElement, instant: boolean) {
+  const previousBehavior = el.style.scrollBehavior
+  if (instant) {
+    el.style.scrollBehavior = 'auto'
+  }
+  const target = Math.max(0, el.scrollHeight - el.clientHeight)
+  el.scrollTop = target
+  syncScrollMetrics(el)
+  if (instant) {
+    el.style.scrollBehavior = previousBehavior
+  }
+}
+
+function scrollToBottom(instant = false, force = false) {
   nextTick(() => {
     const el = scrollRef.value
     if (!el) return
-    if (!instant) {
-      el.scrollTop = totalHeight.value
-      scrollTop.value = el.scrollTop
+    const canAutoFollow = wasNearBottomBeforeMutation.value || shouldAutoFollowBottom(el)
+    if (!force && !instant && !canAutoFollow) {
+      syncScrollMetrics(el)
       return
     }
-    const previousBehavior = el.style.scrollBehavior
-    el.style.scrollBehavior = 'auto'
-    el.scrollTop = totalHeight.value
-    scrollTop.value = el.scrollTop
-    el.style.scrollBehavior = previousBehavior
+    alignToBottom(el, instant || !force)
+    // 新消息刚插入时常会在下一帧完成真实高度测量，补一次贴底可避免 100~200px 回弹
+    if (!force) {
+      requestAnimationFrame(() => {
+        const current = scrollRef.value
+        if (!current) return
+        if (wasNearBottomBeforeMutation.value || shouldAutoFollowBottom(current)) {
+          alignToBottom(current, true)
+        } else {
+          syncScrollMetrics(current)
+        }
+      })
+    }
   })
 }
 
 function handleScroll() {
   if (!scrollRef.value) return
-  scrollTop.value = scrollRef.value.scrollTop
-  viewportHeight.value = scrollRef.value.clientHeight
+  syncScrollMetrics(scrollRef.value)
 }
 
 function updateViewport() {
   if (!scrollRef.value) return
-  viewportHeight.value = scrollRef.value.clientHeight
+  syncScrollMetrics(scrollRef.value)
 }
 
 const totalCount = computed(() => props.messages.length)
@@ -460,9 +517,8 @@ const prefixHeights = computed(() => {
   return out
 })
 const totalHeight = computed(() => prefixHeights.value[totalCount.value] ?? 0)
-const distanceFromBottom = computed(() => Math.max(0, totalHeight.value - viewportHeight.value - scrollTop.value))
-const isNearBottom = computed(() => distanceFromBottom.value <= SCROLL_BOTTOM_NEAR_THRESHOLD)
-const showScrollToBottom = computed(() => distanceFromBottom.value > SCROLL_BOTTOM_SHOW_THRESHOLD)
+const isNearBottom = computed(() => realDistanceFromBottom.value <= SCROLL_BOTTOM_NEAR_THRESHOLD)
+const showScrollToBottom = computed(() => realDistanceFromBottom.value > SCROLL_BOTTOM_SHOW_THRESHOLD)
 
 function findIndexByOffset(offset: number): number {
   if (totalCount.value <= 0) return 0
@@ -504,8 +560,9 @@ function setMessageRowRefById(messageId: string, el: unknown) {
   const index = messageIndexMap.value[messageId]
   if (index == null) return
   const h = domEl.offsetHeight || DEFAULT_ROW_HEIGHT
-  if ((measuredHeights.value[index] ?? 0) !== h) {
-    measuredHeights.value = { ...measuredHeights.value, [index]: h }
+  const measured = h + MESSAGE_ROW_GAP
+  if ((measuredHeights.value[index] ?? 0) !== measured) {
+    measuredHeights.value = { ...measuredHeights.value, [index]: measured }
   }
 }
 
@@ -524,7 +581,7 @@ watch(
     nextTick(() => {
       updateViewport()
       if (!scrollRef.value) return
-      scrollTop.value = scrollRef.value.scrollTop
+      syncScrollMetrics(scrollRef.value)
     })
   },
 )
@@ -535,6 +592,31 @@ defineExpose({ scrollToBottom, scrollToMessage, scrollRef })
 onMounted(() => {
   updateViewport()
   window.addEventListener('resize', updateViewport)
+  if (typeof ResizeObserver !== 'undefined') {
+    contentResizeObserver = new ResizeObserver(() => {
+      const el = scrollRef.value
+      if (!el) return
+      const nearBottom =
+        wasNearBottomBeforeMutation.value || shouldAutoFollowBottom(el)
+      // 仅主生成或插话流式时在贴底带内跟底；非输出时布局抖动不应触发贴底
+      const outputPhase = props.isGenerating || props.isInterjecting
+      if (outputPhase && nearBottom) {
+        alignToBottom(el, true)
+      } else {
+        syncScrollMetrics(el)
+      }
+    })
+    if (contentRef.value) {
+      contentResizeObserver.observe(contentRef.value)
+    }
+  }
+})
+
+onBeforeUnmount(() => {
+  if (contentResizeObserver) {
+    contentResizeObserver.disconnect()
+    contentResizeObserver = null
+  }
 })
 </script>
 
@@ -547,13 +629,13 @@ onMounted(() => {
       style="contain: content; transform: translateZ(0);"
       @scroll="handleScroll"
     >
-      <div class="max-w-4xl mx-auto space-y-8" style="padding-top: 98px;">
+      <div ref="contentRef" class="max-w-4xl mx-auto" style="padding-top: 98px;">
       <div v-if="topSpacerHeight > 0" :style="{ height: `${topSpacerHeight}px` }"></div>
       <div 
         v-for="m in visibleMessages" 
         :key="m.id" 
         :ref="(el) => setMessageRowRefById(m.id, el)"
-        class="flex gap-4 group" 
+        class="flex gap-4 group mb-8" 
         :class="m.role === 'user' ? 'flex-row-reverse' : 'flex-row'"
       >
         <!-- 头像 -->
@@ -574,7 +656,8 @@ onMounted(() => {
               :name="getMessageLabel(m)"
               :size="40"
               aspect="1"
-              object-fit="contain"
+              object-fit="cover"
+              :object-position="getMessageAvatarObjectPosition(m)"
               rounded="rounded-xl"
               class="shadow-sm bg-black/20"
             />
@@ -714,7 +797,7 @@ onMounted(() => {
       type="button"
       class="scroll-to-bottom-btn glass-panel"
       aria-label="回到底部"
-      @click="scrollToBottom()"
+      @click="scrollToBottom(false, true)"
     >
       <ChevronDown class="w-4 h-4" />
     </button>
