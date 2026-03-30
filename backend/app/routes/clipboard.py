@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import base64
-import imghdr
 import re
 import tempfile
 from pathlib import Path
@@ -72,8 +71,8 @@ def _is_path_allowed(path: Path) -> bool:
 def _mime_from_path(path: Path) -> str:
     """根据文件头或扩展名返回 MIME。"""
     with open(path, "rb") as f:
-        raw = f.read(32)
-    kind = imghdr.what(None, h=raw)
+        raw = f.read(64)
+    kind = _detect_image_kind(raw)
     if kind == "jpeg":
         return "image/jpeg"
     if kind == "png":
@@ -86,6 +85,22 @@ def _mime_from_path(path: Path) -> str:
     if ext in (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"):
         return f"image/{ext.lstrip('.').replace('jpg', 'jpeg')}"
     return "image/png"
+
+
+def _detect_image_kind(raw: bytes) -> str | None:
+    """
+    使用文件头魔数检测常见图片类型。
+    替代 Python 3.13 移除的 imghdr，保持纯标准库实现。
+    """
+    if len(raw) >= 8 and raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if len(raw) >= 3 and raw.startswith(b"\xff\xd8\xff"):
+        return "jpeg"
+    if len(raw) >= 6 and (raw.startswith(b"GIF87a") or raw.startswith(b"GIF89a")):
+        return "gif"
+    if len(raw) >= 12 and raw[0:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        return "webp"
+    return None
 
 
 def _extract_file_urls_from_html(html: str) -> list[str]:

@@ -211,19 +211,40 @@ def setup_venv(python_cmd, venv_dir):
     print_success(f"虚拟环境 Python: {venv_python}")
     return str(venv_python)
 
-def check_backend_deps(venv_python):
-    """检查后端依赖是否已安装"""
+def _summarize_command_output(stdout: str, stderr: str, max_lines: int = 16) -> str:
+    """拼接并裁剪命令输出，便于在控制台显示关键错误。"""
+    combined = ((stderr or "").strip() + "\n" + (stdout or "").strip()).strip()
+    if not combined:
+        return "无详细输出。"
+    lines = [ln for ln in combined.splitlines() if ln.strip()]
+    if len(lines) <= max_lines:
+        return "\n".join(lines)
+    return "\n".join(lines[-max_lines:])
+
+
+def check_backend_runtime(venv_python, backend_dir):
+    """检查后端应用是否可导入（比仅检查 fastapi/uvicorn 更接近真实启动）。"""
     try:
         result = subprocess.run(
-            [venv_python, '-c', 'import uvicorn; import fastapi; print("ok")'],
+            [venv_python, '-c', 'import app.main; print("ok")'],
+            cwd=backend_dir,
             capture_output=True,
             text=True
         )
-        return result.returncode == 0 and 'ok' in result.stdout
-    except Exception:
-        return False
+        ok = result.returncode == 0 and 'ok' in result.stdout
+        if ok:
+            return True, ""
+        return False, _summarize_command_output(result.stdout, result.stderr)
+    except Exception as e:
+        return False, str(e)
 
-def check_deployment_status(venv_dir, frontend_dir):
+
+def check_backend_deps(venv_python, backend_dir):
+    """检查后端依赖与应用导入是否可用。"""
+    ok, _ = check_backend_runtime(venv_python, backend_dir)
+    return ok
+
+def check_deployment_status(venv_dir, backend_dir, frontend_dir):
     """
     检查部署状态，返回 (is_ready, status_details)
     is_ready: True 表示可以直接启动，False 表示需要安装
@@ -242,7 +263,7 @@ def check_deployment_status(venv_dir, frontend_dir):
     
     # 检查后端依赖
     if status['venv_exists']:
-        status['backend_deps_ok'] = check_backend_deps(str(venv_python))
+        status['backend_deps_ok'] = check_backend_deps(str(venv_python), backend_dir)
     
     # 检查前端 node_modules
     node_modules = frontend_dir / 'node_modules'
@@ -325,21 +346,41 @@ def wait_for_exit():
     else:
         input("按 Enter 键退出...")
 
-def _windows_cmd_path_arg(path: str) -> str:
+def _windows_cmd_k_in_dir(cmd_line: str, cwd: Path) -> subprocess.Popen:
     """
-    规范化路径供 cmd.exe 使用（含 cd /d 与可执行文件路径）。
-    - 若路径末尾为 \\，在加引号前必须去掉：否则 cmd 会写成 cd /d \"...\\" 导致 \\" 转义结束引号，
-      引发「文件名、目录名或卷标语法不正确」，后续命令也会被拆断。
+    在 cwd 下用 cmd /k 执行命令行（命令里不要写项目路径，避免空格/括号；目录由 Popen 的 cwd 指定）。
+    """
+    return subprocess.Popen(
+        ["cmd.exe", "/k", cmd_line],
+        cwd=cwd,
+        creationflags=subprocess.CREATE_NEW_CONSOLE,
+    )
+
+def _windows_npm_cmd_fragment(npm_cmd: str) -> str:
+    """供 cmd 使用的 npm 调用片段：Windows 上 npm 实为 npm.cmd，不能 CreateProcess 直接当 exe 跑。"""
+    n = npm_cmd.strip()
+    if len(n) >= 2 and n[0] == '"' and n[-1] == '"':
+        return n
+    return f'"{n}"' if " " in n else n
+
+def _windows_try_backend_cmd_k(venv_python: str, backend_dir: Path, backend_port: int) -> subprocess.Popen | None:
+    """
+    若 venv 的 python 相对 backend 目录可用相对路径表达，则用 cmd /k + 相对路径启动，
+    命令行里不含带括号/空格的用户绝对路径；末尾 || pause 便于启动失败时窗口停留。
     """
     try:
-        p = Path(path).resolve()
+        vp = Path(venv_python).resolve()
+        bd = Path(backend_dir).resolve()
+        rel = os.path.relpath(vp, bd)
     except Exception:
-        p = Path(path)
-    s = str(p).strip()
-    s = s.rstrip("/\\")
-    if len(s) >= 2 and s[0] == '"' and s[-1] == '"':
-        return s
-    return f'"{s}"'
+        return None
+    if not rel or os.path.isabs(rel):
+        return None
+    rel_norm = os.path.normpath(rel).replace("/", "\\")
+    cmd_line = (
+        f"{rel_norm} -m uvicorn app.main:app --host 0.0.0.0 --port {backend_port} || pause"
+    )
+    return _windows_cmd_k_in_dir(cmd_line, bd)
 
 def start_services(venv_python, npm_cmd, backend_dir, frontend_dir):
     """启动后端和前端服务"""
@@ -352,17 +393,17 @@ def start_services(venv_python, npm_cmd, backend_dir, frontend_dir):
     print_info("启动后端服务...")
     backend_cmd = [venv_python, "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", str(backend_port)]
     if platform.system() == 'Windows':
-        # 用 cmd /k 包装：若 uvicorn 因异常立即退出，控制台不会随进程关闭而闪退，便于查看报错（与前端窗口行为一致）。
-        backend_dir_str = str(backend_dir)
-        backend_cmd_str = (
-            f"title SimpleTavern Backend & cd /d {_windows_cmd_path_arg(backend_dir_str)} & "
-            f"{_windows_cmd_path_arg(venv_python)} -m uvicorn app.main:app --host 0.0.0.0 --port {backend_port}"
-        )
-        backend_process = subprocess.Popen(
-            ["cmd.exe", "/k", backend_cmd_str],
-            cwd=backend_dir,
-            creationflags=subprocess.CREATE_NEW_CONSOLE,
-        )
+        # 优先 cmd /k + 相对路径（如 ..\venv\Scripts\python.exe）：命令行不含带括号/空格的用户绝对路径；
+        # 失败时 || pause 保留窗口。无法写相对路径时退回 CreateProcess 直接调 python.exe。
+        w = _windows_try_backend_cmd_k(venv_python, backend_dir, backend_port)
+        if w is not None:
+            backend_process = w
+        else:
+            backend_process = subprocess.Popen(
+                backend_cmd,
+                cwd=backend_dir,
+                creationflags=subprocess.CREATE_NEW_CONSOLE,
+            )
     else:
         backend_process = subprocess.Popen(
             backend_cmd,
@@ -381,29 +422,20 @@ def start_services(venv_python, npm_cmd, backend_dir, frontend_dir):
     except Exception:
         print_warning("后端服务可能未完全启动，继续...")
         if platform.system() == "Windows":
-            print_info(
-                "请查看标题为「SimpleTavern Backend」的窗口：若后端启动失败，错误信息会保留在该窗口中。"
-            )
+            print_info("若后端启动失败，请查看弹出的后端控制台窗口中的报错信息。")
     
     print()
     
     # 启动前端
     print_info("启动前端服务...")
     if platform.system() == 'Windows':
-        # Windows 下如果直接用 npm.cmd / shell=True，terminate() 往往只会杀掉“壳进程”，node/vite 子进程会残留。
-        # 这里显式启动一个可见的 cmd 窗口，并在退出时用 taskkill /T 杀掉整棵进程树（见下方 KeyboardInterrupt 处理）。
-        # 注意：cmd.exe /k 往往会给整段命令再包一层外部引号；因此此处避免在命令内部再嵌套引号（尤其是带空格的 npm 路径）。
-        # 这里依赖 npm 在 PATH 中可用（find_npm 已优先返回 "npm"）。
-        frontend_dir_str = str(frontend_dir)
-        frontend_cmd_str = (
-            f'title SimpleTavern Frontend & cd /d {_windows_cmd_path_arg(frontend_dir_str)} & '
-            f'{npm_cmd} run preview -- --port {frontend_port} --host'
+        # npm 在 Windows 上是 npm.cmd，不能 Popen(["npm", ...]) 直接启动（会 WinError 2）。
+        # 仅把「npm run …」交给 cmd，项目路径只用 cwd=frontend_dir，避免路径含空格/括号时整行解析失败。
+        npm_part = _windows_npm_cmd_fragment(npm_cmd)
+        frontend_cmd_line = (
+            f"{npm_part} run preview -- --port {frontend_port} --host || pause"
         )
-        frontend_process = subprocess.Popen(
-            ["cmd.exe", "/k", frontend_cmd_str],
-            cwd=frontend_dir,
-            creationflags=subprocess.CREATE_NEW_CONSOLE,
-        )
+        frontend_process = _windows_cmd_k_in_dir(frontend_cmd_line, frontend_dir)
     else:
         frontend_cmd = [npm_cmd, "run", "preview", "--", "--port", str(frontend_port), "--host"]
         frontend_process = subprocess.Popen(
@@ -477,7 +509,7 @@ def main():
     
     # 检查部署状态
     print_info("检查部署状态...")
-    is_ready, status = check_deployment_status(venv_dir, frontend_dir)
+    is_ready, status = check_deployment_status(venv_dir, backend_dir, frontend_dir)
     
     print_info(f"  - 虚拟环境: {_mark(status['venv_exists'])}")
     print_info(f"  - 后端依赖: {_mark(status['backend_deps_ok'])}")
@@ -525,6 +557,17 @@ def main():
         else:
             print_info("后端依赖已安装，跳过")
             print()
+
+        print_info("校验后端应用导入...")
+        runtime_ok, runtime_err = check_backend_runtime(venv_python, backend_dir)
+        if not runtime_ok:
+            print_error("后端应用导入失败，无法启动。")
+            if runtime_err:
+                print_error(runtime_err)
+            wait_for_exit()
+            sys.exit(1)
+        print_success("后端应用导入校验通过")
+        print()
         
         # 安装前端依赖
         if not status['node_modules_exists']:
