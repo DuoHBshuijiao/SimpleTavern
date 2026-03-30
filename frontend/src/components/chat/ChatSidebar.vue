@@ -115,6 +115,12 @@ function getCharacterById(id: string): CharacterCard | null {
   return props.characters.find(c => c.id === id) ?? null
 }
 
+function avatarObjectPositionByFocus(focusX?: number | null, focusY?: number | null): string {
+  const x = typeof focusX === 'number' ? focusX : 50
+  const y = typeof focusY === 'number' ? focusY : 50
+  return `${x}% ${y}%`
+}
+
 /**
  * 获取用户身份信息
  *
@@ -137,8 +143,8 @@ function getPersonaById(id: string | null | undefined): UserPersona | null {
  * @param {Chat} chat - 聊天会话（来自types/models.ts）
  * @returns {{ src: string | null; name: string }[]} 头像列表，包含src和name
  */
-function getChatAvatars(chat: Chat): { src: string | null; name: string }[] {
-  const avatars: { src: string | null; name: string }[] = []
+function getChatAvatars(chat: Chat): { src: string | null; name: string; objectPosition?: string }[] {
+  const avatars: { src: string | null; name: string; objectPosition?: string }[] = []
   
   const chatPure = (chat.overrides?.pureAiMode ?? props.effectivePureAiMode) === true
   const chatPersona = getPersonaById(chat.userPersonaId)
@@ -154,6 +160,7 @@ function getChatAvatars(chat: Chat): { src: string | null; name: string }[] {
       avatars.push({
         src: m.senderAvatar ? `/api/avatars/${m.senderAvatar}` : null,
         name: m.senderName || '你',
+        objectPosition: '50% 50%',
       })
     }
     if (avatars.length === 0) {
@@ -161,9 +168,10 @@ function getChatAvatars(chat: Chat): { src: string | null; name: string }[] {
         avatars.push({
           src: chatPersona.avatar ? `/api/avatars/${chatPersona.avatar}` : null,
           name: chatPersona.name || '你',
+          objectPosition: '50% 50%',
         })
       } else {
-        avatars.push({ src: null, name: '你' })
+        avatars.push({ src: null, name: '你', objectPosition: '50% 50%' })
       }
     }
   }
@@ -172,11 +180,19 @@ function getChatAvatars(chat: Chat): { src: string | null; name: string }[] {
   if (chat.isGroup) {
     chat.memberIds.forEach(id => {
       const char = getCharacterById(id)
-      if (char) avatars.push({ src: char.avatar ? `/api/avatars/${char.avatar}` : null, name: char.name })
+      if (char) avatars.push({
+        src: char.avatar ? `/api/avatars/${char.avatar}` : null,
+        name: char.name,
+        objectPosition: avatarObjectPositionByFocus(char.avatarFocusX, char.avatarFocusY),
+      })
     })
   } else {
     const char = getCharacterById(chat.characterId)
-    if (char) avatars.push({ src: char.avatar ? `/api/avatars/${char.avatar}` : null, name: char.name })
+    if (char) avatars.push({
+      src: char.avatar ? `/api/avatars/${char.avatar}` : null,
+      name: char.name,
+      objectPosition: avatarObjectPositionByFocus(char.avatarFocusX, char.avatarFocusY),
+    })
   }
   return avatars
 }
@@ -348,7 +364,8 @@ function confirmDelete() {
               :name="c.name" 
               :size="56" 
               aspect="auto"
-              object-fit="contain"
+              object-fit="cover"
+              :object-position="avatarObjectPositionByFocus(c.avatarFocusX, c.avatarFocusY)"
               rounded="rounded-lg"
               class="shadow-md"
             />
@@ -409,7 +426,16 @@ function confirmDelete() {
               <div class="flex items-center gap-2 flex-1 min-w-0 pr-2 max-w-[calc(100%-60px)]">
                 <div class="flex -space-x-1.5 overflow-hidden shrink-0">
                   <template v-for="(avatar, i) in getChatAvatars(c).slice(0, 3)" :key="i">
-                    <ModernAvatar :src="avatar.src" :name="avatar.name" :size="20" aspect="1" rounded="rounded-full" class="ring-1 ring-[var(--color-surface-overlay)] bg-[var(--color-surface-overlay)]" />
+                    <ModernAvatar
+                      :src="avatar.src"
+                      :name="avatar.name"
+                      :size="20"
+                      aspect="1"
+                      object-fit="cover"
+                      :object-position="avatar.objectPosition || '50% 50%'"
+                      rounded="rounded-full"
+                      class="ring-1 ring-[var(--color-surface-overlay)] bg-[var(--color-surface-overlay)]"
+                    />
                   </template>
                   <div v-if="getChatAvatars(c).length > 3" class="w-5 h-5 rounded-full bg-surface-hover flex items-center justify-center text-[8px] ring-1 ring-[var(--color-surface-overlay)]">
                     +{{ getChatAvatars(c).length - 3 }}
@@ -461,7 +487,16 @@ function confirmDelete() {
               <div class="flex items-center gap-2 flex-1 min-w-0 pr-2 max-w-[calc(100%-60px)]">
                 <div class="flex -space-x-1.5 overflow-hidden shrink-0">
                   <template v-for="(avatar, i) in getChatAvatars(c).slice(0, 2)" :key="i">
-                    <ModernAvatar :src="avatar.src" :name="avatar.name" :size="20" aspect="1" rounded="rounded-full" class="ring-1 ring-[var(--color-surface-overlay)] bg-[var(--color-surface-overlay)]" />
+                    <ModernAvatar
+                      :src="avatar.src"
+                      :name="avatar.name"
+                      :size="20"
+                      aspect="1"
+                      object-fit="cover"
+                      :object-position="avatar.objectPosition || '50% 50%'"
+                      rounded="rounded-full"
+                      class="ring-1 ring-[var(--color-surface-overlay)] bg-[var(--color-surface-overlay)]"
+                    />
                   </template>
                 </div>
                 <div class="flex-1 min-w-0">
