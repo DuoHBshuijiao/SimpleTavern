@@ -86,6 +86,33 @@ def _now_iso() -> str:
     return datetime.now().astimezone().isoformat()
 
 
+def _single_chat_greeting_variants(character, user_name: str) -> list[str]:
+    """
+    单聊开场候选：主首句（非空）在前，其后为 extraFirstMessageEntries 中非空 text，均已替换占位符。
+    占位符替换后若为空字符串则丢弃，避免出现无法切换的空变体。
+    """
+    char_name = character.name or "角色"
+    un = user_name or "用户"
+    variants: list[str] = []
+
+    def _push_replaced(raw: str) -> None:
+        s = replace_placeholders_in_text(raw, char_name=char_name, user_name=un)
+        s = (s or "").strip()
+        if s:
+            variants.append(s)
+
+    fm = (character.firstMessage or "").strip()
+    if fm:
+        _push_replaced(fm)
+    for entry in character.extraFirstMessageEntries or []:
+        if not getattr(entry, "chip", True):
+            continue
+        raw = (entry.text or "").strip()
+        if raw:
+            _push_replaced(raw)
+    return variants
+
+
 def _merge_overrides(existing: Chat, incoming: UpdateChatRequest) -> None:
     """
     合并聊天覆盖设置
@@ -260,17 +287,23 @@ def create_chat(req: CreateChatRequest) -> Chat:
     if not is_group:
         try:
             character = load_character(req.characterId)
-            if character.firstMessage and character.firstMessage.strip():
-                first_msg = character.firstMessage.strip()
-                first_msg = replace_placeholders_in_text(
-                    first_msg,
-                    char_name=(character.name or "角色"),
-                    user_name=user_name or "用户",
+            variants = _single_chat_greeting_variants(character, user_name or "用户")
+            if len(variants) == 1:
+                chat.messages.append(
+                    ChatMessage(
+                        role="assistant",
+                        content=variants[0],
+                    ),
                 )
-                chat.messages.append(ChatMessage(
-                    role="assistant",
-                    content=first_msg
-                ))
+            elif len(variants) >= 2:
+                chat.messages.append(
+                    ChatMessage(
+                        role="assistant",
+                        content=variants[0],
+                        greetingVariants=list(variants),
+                        greetingVariantIndex=0,
+                    ),
+                )
         except FileNotFoundError:
             pass
     else:
@@ -516,6 +549,13 @@ def append_message(chat_id: str, req: AppendMessageRequest) -> Chat:
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="chat not found")
 
+    # 用户（或纯 AI 模式下首条 system）开始发言后，锁定开场白，去掉多版本元数据
+    if req.role in ("user", "system"):
+        for m in chat.messages:
+            if m.role == "assistant" and getattr(m, "greetingVariants", None):
+                m.greetingVariants = None
+                m.greetingVariantIndex = None
+
     chat.messages.append(ChatMessage(
         role=req.role,
         content=req.content,
@@ -574,6 +614,9 @@ def update_message(chat_id: str, message_id: str, req: UpdateMessageRequest) -> 
                 m.senderName = req.senderName
             if getattr(req, "senderAvatar", None) is not None:
                 m.senderAvatar = req.senderAvatar
+            req_dump = req.model_dump(exclude_unset=True)
+            if "greetingVariantIndex" in req_dump:
+                m.greetingVariantIndex = req_dump["greetingVariantIndex"]
             chat.updatedAt = _now_iso()
             return save_chat(chat)
 
