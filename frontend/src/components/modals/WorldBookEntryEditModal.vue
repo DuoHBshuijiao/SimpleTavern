@@ -104,7 +104,7 @@ function close() {
 
             <div class="flex items-center gap-3">
               <label class="flex items-center gap-2 text-sm text-[var(--color-text-secondary)] cursor-pointer">
-                <input v-model="draft.enabled" type="checkbox" class="rounded border-[var(--color-border)]" />
+                <input v-model="draft.enabled" type="checkbox" class="accent-brand" />
                 启用
               </label>
             </div>
