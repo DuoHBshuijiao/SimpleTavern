@@ -488,6 +488,8 @@
   --z-modal: 300;
   --z-popover: 400;
   --z-tooltip: 500;
+  /* 全局 useNotify 宿主：须高于 ChatPage ErrorModal(≥1200) 与 imageFallback(1400) */
+  --z-notification: 1500;
 
   /* ========== 导入/导出弹窗 UI 约束 ==========
    * ChatExportModal、ChatImportModal 及子区块须使用本文件已声明变量，禁止裸十六进制/rgb/hsl（除已有令牌外）。

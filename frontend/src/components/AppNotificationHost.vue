@@ -1,0 +1,102 @@
+<script setup lang="ts">
+/**
+ * 全局通知宿主：Teleport 到 body，与 useNotify 共用队列。
+ * 流式错误仍由 ChatPage 的 useErrorStack + ErrorModal 处理（方案 A）。
+ */
+import { computed } from 'vue'
+import { useNotifyHost } from '../composables/useNotify'
+
+const { current, dismissAlert, confirmYes, confirmNo } = useNotifyHost()
+
+const headerTitle = computed(() => {
+  const c = current.value
+  if (!c) return ''
+  if (c.kind === 'alert') return c.title || '提示'
+  return c.title || '确认'
+})
+
+function onBackdropClick() {
+  const c = current.value
+  if (!c) return
+  if (c.kind === 'alert') dismissAlert()
+  else confirmNo()
+}
+</script>
+
+<template>
+  <Teleport to="body">
+    <div
+      v-if="current"
+      class="app-notify-host fixed inset-0 z-notification flex justify-center items-start px-4 pointer-events-auto"
+    >
+      <div
+        class="app-notify-backdrop absolute inset-0"
+        aria-hidden="true"
+        @click="onBackdropClick"
+      />
+      <div
+        class="app-notify-panel relative mt-[min(15vh,6rem)] w-[min(560px,calc(100vw-2rem))] max-h-[min(70vh,520px)] flex flex-col rounded-2xl border border-[var(--color-border)] overflow-hidden"
+        role="dialog"
+        aria-modal="true"
+        @click.stop
+      >
+        <div class="px-4 pt-4 pb-2 border-b border-[var(--color-border-subtle)] shrink-0">
+          <h2 class="text-base font-semibold text-[var(--color-text)]">
+            {{ headerTitle }}
+          </h2>
+        </div>
+
+        <div class="px-4 py-3 overflow-y-auto flex-1 min-h-0">
+          <pre
+            class="text-sm leading-relaxed text-[var(--color-text)] whitespace-pre-wrap break-words font-sans"
+            >{{ current.message }}</pre
+          >
+        </div>
+
+        <div
+          v-if="current.kind === 'alert'"
+          class="px-4 py-3 flex justify-end gap-2 border-t border-[var(--color-border-subtle)] shrink-0"
+        >
+          <button type="button" class="btn btn-sm btn-primary" @click="dismissAlert">确定</button>
+        </div>
+        <div
+          v-else
+          class="px-4 py-3 flex justify-end gap-2 border-t border-[var(--color-border-subtle)] shrink-0"
+        >
+          <button type="button" class="btn btn-sm btn-secondary" @click="confirmNo">取消</button>
+          <button
+            v-if="current.variant === 'danger'"
+            type="button"
+            class="btn btn-sm btn-danger"
+            @click="confirmYes"
+          >
+            确定
+          </button>
+          <button v-else type="button" class="btn btn-sm btn-primary" @click="confirmYes">确定</button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
+</template>
+
+<style scoped>
+/*
+ * 渲染链说明（与 .modal 的差异）：
+ * - .modal：遮罩为 --color-overlay + opacity:0.6，内容区用 --color-surface-overlay（~20% 暗叠层）叠在中等灰底上，能看出玻璃层。
+ * - 本组件：遮罩为 --color-overlay-heavy（~70% 黑），若面板仍用 --color-surface-overlay，则「20% 叠层 + 重黑底」几乎合成一整块黑玻璃，主题色不可见。
+ * 因此面板改用随 data-theme 的抬升表面做半透明纯色，而非 surface-overlay。
+ */
+.app-notify-backdrop {
+  background-color: var(--color-overlay-heavy);
+  backdrop-filter: blur(var(--blur-light));
+  -webkit-backdrop-filter: blur(var(--blur-light));
+}
+
+.app-notify-panel {
+  background-color: color-mix(in srgb, var(--color-surface-elevated) 88%, transparent);
+  background-image: none;
+  backdrop-filter: blur(var(--blur-light));
+  -webkit-backdrop-filter: blur(var(--blur-light));
+  box-shadow: var(--shadow-heavy);
+}
+</style>

@@ -28,6 +28,7 @@
 
 import { RouterView } from 'vue-router'
 import { computed, onUnmounted, watch } from 'vue'
+import AppNotificationHost from './components/AppNotificationHost.vue'
 import { useAppFont } from './composables/useAppFont'
 import { useSettingsStore } from './stores'
 import { normalizeThemeId } from './types/models'
@@ -55,5 +56,6 @@ onUnmounted(() => {
   <div :data-theme="appThemeId">
     <!-- 路由视图容器：根据路由配置渲染对应的页面组件 -->
     <RouterView />
+    <AppNotificationHost />
   </div>
 </template>
