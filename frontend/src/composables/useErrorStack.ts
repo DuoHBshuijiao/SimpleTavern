@@ -1,3 +1,7 @@
+/**
+ * 主聊天 / 助手流式错误栈（右下角 ErrorModal）。
+ * 与 useNotify 分工：非阻塞业务提示、确认框走全局 AppNotificationHost，本栈保留自动消失与复制。
+ */
 import { ref } from 'vue'
 
 export interface ErrorStackItem {
