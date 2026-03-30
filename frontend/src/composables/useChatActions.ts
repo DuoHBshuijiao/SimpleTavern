@@ -43,6 +43,8 @@ import type {
   Chat, 
   ChatMessage, 
   CharacterCard,
+  ExtraFirstMessageEntry,
+  WorldBook,
   Settings, 
   UserPersona, 
   GroupMemberSettings 
@@ -55,7 +57,14 @@ export interface ChatActionsDeps {
   selectedPersona: ComputedRef<UserPersona | null>
   userName: ComputedRef<string>
   chatsStore: {
-    updateMessage: (chatId: string, messageId: string, role: string, content: string, characterId?: string | null) => Promise<void>
+    updateMessage: (
+      chatId: string,
+      messageId: string,
+      role: string,
+      content: string,
+      characterId?: string | null,
+      opts?: { greetingVariantIndex?: number | null },
+    ) => Promise<void>
     deleteMessage: (chatId: string, messageId: string) => Promise<void>
     load: (chatId: string) => Promise<void>
     updateUserPersonaId: (chatId: string, personaId: string) => Promise<void>
@@ -78,6 +87,16 @@ export interface ChatActionsDeps {
 }
 
 export function useChatActions(deps: ChatActionsDeps) {
+  interface EmbeddedCharacterCardPreview {
+    card: CharacterCard
+    worldbook?: WorldBook | null
+  }
+
+  interface UploadAvatarResponse {
+    filename: string
+    embeddedCharacterCard?: EmbeddedCharacterCardPreview | null
+  }
+
   const { 
     activeChat, 
     isGenerating, 
@@ -184,6 +203,21 @@ export function useChatActions(deps: ChatActionsDeps) {
    *
    * @returns {CharacterCard} 新角色卡片（来自types/models.ts）
    */
+  function normalizeExtraFirstMessageEntries(raw: unknown): ExtraFirstMessageEntry[] {
+    if (!Array.isArray(raw)) return []
+    const out: ExtraFirstMessageEntry[] = []
+    for (const e of raw) {
+      if (e && typeof e === 'object' && 'text' in e) {
+        const o = e as Record<string, unknown>
+        out.push({
+          text: typeof o.text === 'string' ? o.text : '',
+          chip: typeof o.chip === 'boolean' ? o.chip : true,
+        })
+      }
+    }
+    return out
+  }
+
   function newCard(): CharacterCard {
     const now = new Date().toISOString()
     return {
@@ -197,7 +231,10 @@ export function useChatActions(deps: ChatActionsDeps) {
       exampleDialogue: '',
       systemPrompt: '',
       avatar: '',
+      avatarFocusX: null,
+      avatarFocusY: null,
       attachedWorldBookIds: [],
+      extraFirstMessageEntries: [],
       createdAt: now,
       updatedAt: now,
     }
@@ -225,6 +262,7 @@ export function useChatActions(deps: ChatActionsDeps) {
     isNewCharacter.value = false
     const copy = JSON.parse(JSON.stringify(card)) as CharacterCard
     if (!Array.isArray(copy.attachedWorldBookIds)) copy.attachedWorldBookIds = []
+    copy.extraFirstMessageEntries = normalizeExtraFirstMessageEntries(copy.extraFirstMessageEntries)
     editingCharacter.value = copy
     showCharacterEditor.value = true
   }
@@ -241,7 +279,12 @@ export function useChatActions(deps: ChatActionsDeps) {
   async function saveCharacter(): Promise<string | null> {
     if (!editingCharacter.value) return null
     if (!editingCharacter.value.name.trim()) editingCharacter.value.name = '未命名角色'
-    
+    if (Array.isArray(editingCharacter.value.extraFirstMessageEntries)) {
+      editingCharacter.value.extraFirstMessageEntries = editingCharacter.value.extraFirstMessageEntries.filter(
+        (e) => (e.text ?? '').trim() !== '',
+      )
+    }
+
     const id = editingCharacter.value.id
     if (isNewCharacter.value) {
       await charactersStore.create(editingCharacter.value)
@@ -289,14 +332,22 @@ export function useChatActions(deps: ChatActionsDeps) {
    * @param {string} imageData - base64编码的图片数据
    * @returns {Promise<void>} 完成时返回
    */
-  async function handleCharacterAvatarSave(imageData: string) {
+  async function handleCharacterAvatarSave(
+    imageData: string,
+    avatarFocusX?: number | null,
+    avatarFocusY?: number | null,
+  ): Promise<EmbeddedCharacterCardPreview | null> {
     try {
-      const res = await apiPost<{ filename: string }>('/api/avatars', { imageData })
+      const res = await apiPost<UploadAvatarResponse>('/api/avatars', { imageData })
       if (editingCharacter.value) {
         editingCharacter.value.avatar = res.filename
+        editingCharacter.value.avatarFocusX = typeof avatarFocusX === 'number' ? avatarFocusX : null
+        editingCharacter.value.avatarFocusY = typeof avatarFocusY === 'number' ? avatarFocusY : null
       }
+      return res.embeddedCharacterCard ?? null
     } catch (e) {
       console.error('Failed to upload avatar:', e)
+      return null
     }
   }
 
@@ -313,6 +364,11 @@ export function useChatActions(deps: ChatActionsDeps) {
     if (!card || typeof card !== 'object') return
     const current = editingCharacter.value
     const cardObj = card as Record<string, unknown>
+    const mergedEntries =
+      Array.isArray(cardObj.extraFirstMessageEntries)
+        ? normalizeExtraFirstMessageEntries(cardObj.extraFirstMessageEntries)
+        : (current.extraFirstMessageEntries ?? [])
+
     editingCharacter.value = {
       ...current,
       name: (typeof cardObj.name === 'string' ? cardObj.name : undefined) ?? current.name,
@@ -323,7 +379,18 @@ export function useChatActions(deps: ChatActionsDeps) {
       exampleDialogue: (typeof cardObj.exampleDialogue === 'string' ? cardObj.exampleDialogue : undefined) ?? current.exampleDialogue,
       systemPrompt: (typeof cardObj.systemPrompt === 'string' ? cardObj.systemPrompt : undefined) ?? current.systemPrompt,
       avatar: (typeof cardObj.avatar === 'string' ? cardObj.avatar : undefined) ?? current.avatar,
-      attachedWorldBookIds: Array.isArray(current.attachedWorldBookIds) ? [...current.attachedWorldBookIds] : [],
+      avatarFocusX:
+        (typeof cardObj.avatarFocusX === 'number' ? cardObj.avatarFocusX : undefined)
+        ?? current.avatarFocusX
+        ?? null,
+      avatarFocusY:
+        (typeof cardObj.avatarFocusY === 'number' ? cardObj.avatarFocusY : undefined)
+        ?? current.avatarFocusY
+        ?? null,
+      attachedWorldBookIds: Array.isArray(cardObj.attachedWorldBookIds)
+        ? cardObj.attachedWorldBookIds.filter((id): id is string => typeof id === 'string')
+        : (Array.isArray(current.attachedWorldBookIds) ? [...current.attachedWorldBookIds] : []),
+      extraFirstMessageEntries: mergedEntries,
     }
   }
 

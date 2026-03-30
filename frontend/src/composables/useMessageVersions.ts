@@ -247,6 +247,48 @@ export function useMessageVersions() {
    * @param {ChatMessage} message - 消息对象（来自types/models.ts）
    * @returns {string} 当前版本的内容
    */
+  function normalizeVariantText(s: string | undefined | null): string {
+    return String(s ?? '')
+      .trim()
+      .replace(/\r\n/g, '\n')
+  }
+
+  /**
+   * 从服务端持久化的 greetingVariants 恢复多版本状态（单聊开场白）
+   * @param preferredIndex 服务端保存的下标，避免与 content 重复时 indexOf 恒为 0
+   */
+  function hydrateGreetingVariants(
+    messageId: string,
+    variants: string[],
+    currentContent: string,
+    preferredIndex?: number | null,
+  ) {
+    const cleaned = variants
+      .map((v) => (v == null ? '' : String(v)).trim())
+      .filter((v) => v !== '')
+    if (cleaned.length <= 1) return
+    const originalId = getOriginalMessageId(messageId)
+    messageVersions.value.set(originalId, [...cleaned])
+    messageReasoningVersions.value.set(
+      originalId,
+      cleaned.map(() => ''),
+    )
+    let idx: number
+    if (
+      typeof preferredIndex === 'number' &&
+      Number.isFinite(preferredIndex) &&
+      preferredIndex >= 0 &&
+      preferredIndex < cleaned.length
+    ) {
+      idx = preferredIndex
+    } else {
+      const curNorm = normalizeVariantText(currentContent)
+      const found = cleaned.findIndex((v) => normalizeVariantText(v) === curNorm)
+      idx = found < 0 ? 0 : found
+    }
+    messageVersionIndex.value.set(originalId, idx)
+  }
+
   function cleanupVersions(message: ChatMessage): string {
     const messageId = getOriginalMessageId(message.id)
     const currentIndex = messageVersionIndex.value.get(messageId) ?? 0
@@ -339,6 +381,7 @@ export function useMessageVersions() {
     clearVersions,
     clearAll,
     updateCurrentVersionContent,
+    hydrateGreetingVariants,
   }
 }
 
