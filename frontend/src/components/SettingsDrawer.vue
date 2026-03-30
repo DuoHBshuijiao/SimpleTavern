@@ -55,6 +55,7 @@ import { X, Eye, EyeOff, Check, Loader2, GripVertical } from 'lucide-vue-next'
 import WorldBookEditorModal from './modals/WorldBookEditorModal.vue'
 import WorldBookSessionAttachModal from './modals/WorldBookSessionAttachModal.vue'
 import { concatEnabledWorldBookContents, countTokensForText } from '../utils/tokenEstimate'
+import { notifyConfirm, notifyMessage } from '../composables/useNotify'
 
 const { applyFont } = useAppFont()
 
@@ -238,7 +239,7 @@ async function hideSavedFloors() {
   if (!props.chat?.id || !chatDraft.value) return
   const anchorId = findLatestMemorySavedMessageId(props.chat)
   if (!anchorId) {
-    alert('当前会话尚未找到“已保存记忆”标记消息，无法执行 hide。')
+    await notifyMessage('当前会话尚未找到“已保存记忆”标记消息，无法执行 hide。')
     return
   }
   chatDraft.value.contextStartMessageId = anchorId
@@ -355,7 +356,7 @@ function openWorldBookEditor(worldbookId: string) {
 async function confirmCreateWorldBook() {
   const name = worldBookNewNameDraft.value.trim()
   if (!name) {
-    alert('请输入世界书名称')
+    await notifyMessage('请输入世界书名称')
     return
   }
   const now = new Date().toISOString()
@@ -375,7 +376,7 @@ async function confirmCreateWorldBook() {
     worldBookNewNameDraft.value = ''
     openWorldBookEditor(created.id)
   } catch (e) {
-    alert('创建世界书失败: ' + String(e))
+    await notifyMessage('创建世界书失败: ' + String(e))
   }
 }
 
@@ -798,9 +799,10 @@ function createPreset() {
  *
  * @param {string} id - 预设ID
  */
-function deletePreset(id: string) {
+async function deletePreset(id: string) {
   if (!globalDraft.value) return
-  if (!confirm('确定删除此预设？')) return
+  const ok = await notifyConfirm({ title: '删除预设', message: '确定删除此预设？', variant: 'danger' })
+  if (!ok) return
   globalDraft.value.apiPresets = globalDraft.value.apiPresets.filter(p => p.id !== id)
   if (editingPresetId.value === id) {
     editingPresetId.value = globalDraft.value.apiPresets[0]?.id || null
@@ -835,7 +837,7 @@ async function openModelSelector(preset: ApiPreset) {
         modelSelectorQuery.value = ''
         showModelSelector.value = true
     } catch (e) {
-        alert('获取模型失败: ' + String(e))
+        await notifyMessage('获取模型失败: ' + String(e))
     } finally {
         presetModelsLoading.value = false
     }
@@ -1075,7 +1077,7 @@ async function saveChatOverrides() {
   try {
     await syncWorldBookSessionChatIdsForChat(chat.id, draft.worldBookAttachments || [])
   } catch (e) {
-    alert('同步世界书会话绑定失败: ' + (e instanceof Error ? e.message : String(e)))
+    await notifyMessage('同步世界书会话绑定失败: ' + (e instanceof Error ? e.message : String(e)))
     await loadWorldBooks()
     return
   }
@@ -1128,7 +1130,7 @@ async function saveChatOverrides() {
 async function downloadSettingsBackup(scope: 'basic' | 'with_characters' | 'with_chats') {
   const r = await fetch(`/api/settings/backup?scope=${scope}`)
   if (!r.ok) {
-    alert(await r.text())
+    await notifyMessage(await r.text())
     return
   }
   const blob = await r.blob()
@@ -1179,7 +1181,7 @@ async function handleFontImport(e: Event) {
       applyFont(filename)
     }
   } catch (err) {
-    alert('导入字体失败: ' + String(err))
+    await notifyMessage('导入字体失败: ' + String(err))
   }
 }
 
@@ -1200,9 +1202,9 @@ async function handleImportChange(e: Event) {
   try {
     const result = await importSettingsFile(file)
     await refreshDataAfterImport()
-    alert(formatImportResultMessage(result))
+    await notifyMessage(formatImportResultMessage(result))
   } catch (err) {
-    alert(err instanceof Error ? err.message : String(err))
+    await notifyMessage(err instanceof Error ? err.message : String(err))
   }
   input.value = ''
 }
@@ -1226,7 +1228,11 @@ async function checkUpdate() {
       checkUpdateMessage.value = '当前已是最新版本'
       return
     }
-    const ok = confirm(`发现新版本 ${res.latestVersion}，是否下载并安装？`)
+    const ok = await notifyConfirm({
+      title: '检查更新',
+      message: `发现新版本 ${res.latestVersion}，是否下载并安装？`,
+      variant: 'default',
+    })
     if (!ok) {
       checkUpdateMessage.value = ''
       return
@@ -1244,7 +1250,7 @@ async function checkUpdate() {
     setTimeout(() => close(), 1500)
   } catch (e) {
     checkUpdateMessage.value = ''
-    alert('检查更新失败: ' + String(e))
+    await notifyMessage('检查更新失败: ' + String(e))
   } finally {
     checkUpdateLoading.value = false
   }
