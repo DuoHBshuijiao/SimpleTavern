@@ -63,7 +63,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useCharactersStore, useChatsStore, useSettingsStore } from '../stores'
-import type { CharacterCard, ChatImageAttachment, ChatMessage, GroupMemberSettings, Chat, WorldBook } from '../types/models'
+import type { CharacterCard, ChatImageAttachment, ChatMessage, ExtraFirstMessageEntry, GroupMemberSettings, Chat, WorldBook } from '../types/models'
 
 // Composables
 import { 
@@ -90,11 +90,11 @@ import SettingsDrawer from '../components/SettingsDrawer.vue'
 import AvatarCropper from '../components/AvatarCropper.vue'
 import ModernAvatar from '../components/ModernAvatar.vue'
 import ModernSelect from '../components/ModernSelect.vue'
-import { Users, Settings, Sparkles, Loader2, X, MoreHorizontal, GripVertical } from 'lucide-vue-next'
+import { Users, Settings, Sparkles, Loader2, X, MoreHorizontal, GripVertical, Check, Plus } from 'lucide-vue-next'
 
 // API
 import { postAndConsumeSse } from '../api/sse'
-import { apiPost, apiGet } from '../api/http'
+import { apiPost, apiGet, apiPut } from '../api/http'
 import { useErrorStack } from '../composables/useErrorStack'
 
 // ========== Stores ==========
@@ -114,6 +114,15 @@ interface DraftImageItem {
   name: string
   previewUrl: string
 }
+interface EmbeddedCharacterCardPreview {
+  card: CharacterCard
+  worldbook?: WorldBook | null
+}
+interface AvatarCropSavePayload {
+  imageData: string
+  focusX?: number
+  focusY?: number
+}
 const draftImages = ref<DraftImageItem[]>([])
 const showSettings = ref(false)
 const showGroupSettings = ref(false)
@@ -132,12 +141,19 @@ const editingTitle = ref('')
 const aborter = ref<AbortController | null>(null)
 const stopRequested = ref(false)
 const stopStreamingHold = ref(false)
+const showEmbeddedCardConfirmModal = ref(false)
+const embeddedCardPreview = ref<EmbeddedCharacterCardPreview | null>(null)
+const embeddedCardImporting = ref(false)
 /** 主聊天当前展示思考链的消息 ID（仅前端临时，刷新后消失） */
 const chatReasoningMessageId = ref<string | null>(null)
 /** 主聊天思考链内容（当前正在流式接收的一条） */
 const chatReasoningContent = ref('')
 /** 主聊天多轮思考链块：每项为 { messageId, content }，仅前端临时展示，不写进上下文 */
 const chatReasoningBlocks = ref<Array<{ messageId: string; content: string }>>([])
+
+function shouldIgnoreStreamingEventWhileStopping(eventName: string): boolean {
+  return stopRequested.value && (eventName === 'delta' || eventName === 'reasoning')
+}
 
 /** 将当前思考内容写入 blocks 并清空当前（在 stream done 或非流响应后调用，便于多轮保留） */
 function pushCurrentReasoningToBlocks(finalMessageId?: string | null) {
@@ -541,6 +557,118 @@ const actions = useChatActions({
 const characterEditorWorldbooks = ref<WorldBook[]>([])
 const addCharacterEditorWbId = ref('')
 const characterEditorWbDraggingIdx = ref<number | null>(null)
+/** 角色编辑：额外首句草稿（对号/加号写入列表，底部保存才持久化） */
+const extraFirstMessageDraft = ref('')
+
+/** 全部额外首句条目（含 chip:false 与空文本），便于删除错误数据 */
+const extraFirstMessageEntriesIndexed = computed(() => {
+  const ec = actions.editingCharacter.value
+  if (!ec?.extraFirstMessageEntries?.length) return [] as Array<ExtraFirstMessageEntry & { index: number }>
+  return ec.extraFirstMessageEntries.map((e, index) => ({ ...e, index }))
+})
+
+const hasAnyExtraFirstEntries = computed(() => extraFirstMessageEntriesIndexed.value.length > 0)
+
+function displayExtraEntryLabel(entry: ExtraFirstMessageEntry): string {
+  const t = (entry.text ?? '').trim()
+  return t || '（空）'
+}
+
+function extraEntryIsEmpty(entry: ExtraFirstMessageEntry): boolean {
+  return !(entry.text ?? '').trim()
+}
+
+function appendExtraFirstMessageCheck() {
+  const ec = actions.editingCharacter.value
+  if (!ec) return
+  const t = extraFirstMessageDraft.value.trim()
+  if (!t) return
+  if (!Array.isArray(ec.extraFirstMessageEntries)) ec.extraFirstMessageEntries = []
+  ec.extraFirstMessageEntries.push({ text: t, chip: false })
+}
+
+function appendExtraFirstMessagePlus() {
+  const ec = actions.editingCharacter.value
+  if (!ec) return
+  const t = extraFirstMessageDraft.value.trim()
+  if (!t) return
+  if (!Array.isArray(ec.extraFirstMessageEntries)) ec.extraFirstMessageEntries = []
+  ec.extraFirstMessageEntries.push({ text: t, chip: true })
+  extraFirstMessageDraft.value = ''
+}
+
+function removeExtraFirstMessageAt(index: number) {
+  const ec = actions.editingCharacter.value
+  if (!ec?.extraFirstMessageEntries) return
+  ec.extraFirstMessageEntries.splice(index, 1)
+}
+
+function fillExtraFirstDraft(text: string) {
+  extraFirstMessageDraft.value = text
+}
+
+function clearEmbeddedCardPreviewState() {
+  showEmbeddedCardConfirmModal.value = false
+  embeddedCardPreview.value = null
+  embeddedCardImporting.value = false
+}
+
+function avatarObjectPositionByFocus(focusX?: number | null, focusY?: number | null): string {
+  const x = typeof focusX === 'number' ? focusX : 50
+  const y = typeof focusY === 'number' ? focusY : 50
+  return `${x}% ${y}%`
+}
+
+async function handleCharacterAvatarSave(payload: AvatarCropSavePayload) {
+  const embedded = await actions.handleCharacterAvatarSave(payload.imageData, payload.focusX ?? null, payload.focusY ?? null)
+  if (embedded?.card) {
+    embeddedCardPreview.value = embedded
+    showEmbeddedCardConfirmModal.value = true
+  }
+}
+
+async function handlePersonaAvatarSave(payload: AvatarCropSavePayload) {
+  await actions.handlePersonaAvatarSave(payload.imageData)
+}
+
+async function confirmImportEmbeddedCard() {
+  if (!actions.editingCharacter.value || !embeddedCardPreview.value?.card) {
+    clearEmbeddedCardPreviewState()
+    return
+  }
+  embeddedCardImporting.value = true
+  try {
+    const current = actions.editingCharacter.value
+    const incoming = embeddedCardPreview.value.card
+    let attachedWorldBookIds: string[] = []
+    if (embeddedCardPreview.value.worldbook) {
+      const savedBook = await apiPost<WorldBook>('/api/worldbooks', embeddedCardPreview.value.worldbook)
+      attachedWorldBookIds = [savedBook.id]
+      await loadCharacterEditorWorldbooks()
+    }
+    const mergedCard: CharacterCard = {
+      ...current,
+      name: incoming.name,
+      description: incoming.description,
+      personality: incoming.personality,
+      scenario: incoming.scenario,
+      firstMessage: incoming.firstMessage,
+      exampleDialogue: incoming.exampleDialogue,
+      systemPrompt: incoming.systemPrompt,
+      extraFirstMessageEntries: Array.isArray(incoming.extraFirstMessageEntries) ? incoming.extraFirstMessageEntries : [],
+      attachedWorldBookIds,
+      avatar: current.avatar || incoming.avatar,
+      avatarFocusX: current.avatarFocusX ?? incoming.avatarFocusX ?? null,
+      avatarFocusY: current.avatarFocusY ?? incoming.avatarFocusY ?? null,
+    }
+    await apiPut<CharacterCard>('/api/assistant/workspace/character-card', mergedCard)
+    actions.applyAssistantCard(mergedCard)
+    clearEmbeddedCardPreviewState()
+  } catch (error) {
+    errorStack.pushError({ message: error, source: 'main', title: '导入 PNG 内嵌角色数据失败' })
+    embeddedCardImporting.value = false
+  }
+}
 
 async function loadCharacterEditorWorldbooks() {
   try {
@@ -1032,12 +1160,32 @@ watch(
       chatReasoningBlocks.value = []
       chatReasoningContent.value = ''
       chatReasoningMessageId.value = null
+      versions.clearAll()
     }
     // 切换会话时自动关闭搜索面板并重置搜索状态
     showChatSearch.value = false
     chatSearchQuery.value = ''
     chatSearchResults.value = []
     chatSearchCursor.value = 0
+  },
+)
+
+watch(
+  () =>
+    [
+      activeChat.value?.id,
+      activeChat.value?.isGroup,
+      activeChat.value?.messages?.[0]?.id,
+      activeChat.value?.messages?.[0]?.greetingVariants?.length,
+    ] as const,
+  () => {
+    const chat = activeChat.value
+    if (!chat || chat.isGroup) return
+    const first = chat.messages[0]
+    if (!first || first.role !== 'assistant') return
+    const gv = first.greetingVariants
+    if (!gv || gv.length <= 1) return
+    versions.hydrateGreetingVariants(first.id, gv, first.content, first.greetingVariantIndex ?? null)
   },
 )
 
@@ -1062,6 +1210,7 @@ watch(actions.showCharacterEditor, (next, prev) => {
     actions.isNewCharacter.value = false
     characterEditorWbDraggingIdx.value = null
     addCharacterEditorWbId.value = ''
+    clearEmbeddedCardPreviewState()
   }
 })
 
@@ -1071,6 +1220,7 @@ watch(
     if (open && actions.editingCharacter.value) {
       ensureCharacterAttachedWbIds()
       void loadCharacterEditorWorldbooks()
+      extraFirstMessageDraft.value = ''
     }
   },
 )
@@ -1159,7 +1309,7 @@ async function runGroupGeneration(
           '/api/generate/group',
           { chatId, characterId, imageFallbackMode },
           (evt) => {
-            if (stopRequested.value) return
+            if (shouldIgnoreStreamingEventWhileStopping(evt.event)) return
             if (evt.event === 'delta') {
               const data = evt.data as { text?: string } | undefined
               const t = data?.text
@@ -1388,7 +1538,7 @@ async function sendUserMessage() {
               userPersona: selectedPersona.value ?? null,
             },
             (evt) => {
-              if (stopRequested.value) return
+              if (shouldIgnoreStreamingEventWhileStopping(evt.event)) return
               if (evt.event === 'delta') {
                 const data = evt.data as { text?: string } | undefined
                 const t = data?.text
@@ -1661,7 +1811,7 @@ async function triggerInterject(characterId: string) {
           '/api/generate/interject',
           { chatId, characterId },
           (evt) => {
-            if (stopRequested.value) return
+            if (shouldIgnoreStreamingEventWhileStopping(evt.event)) return
             if (evt.event === 'delta') {
               const data = evt.data as { text?: string } | undefined
               const t = data?.text
@@ -1750,16 +1900,32 @@ function stopStreaming() {
 async function persistLocalStreamingMessages(chatId: string) {
   const chat = activeChat.value
   if (!chat?.messages?.length) return
-  const localAssistantMessages = chat.messages.filter(
-    (m) => m.role === 'assistant' && m.id.startsWith('local_')
-  )
-  for (const m of localAssistantMessages) {
-    const content = (m.content || '').trim()
-    if (content) {
-      await chats.appendMessage(chatId, 'assistant', content, {
-        characterId: m.characterId ?? undefined,
-      })
-    }
+  const localAssistantMessages = chat.messages
+    .filter((m) => m.role === 'assistant' && m.id.startsWith('local_'))
+    .map((m) => ({
+      content: (m.content || '').trim(),
+      characterId: m.characterId ?? null,
+    }))
+    .filter((m) => !!m.content)
+
+  await chats.load(chatId)
+  let serverMessages = activeChat.value?.messages ?? []
+
+  const hasEquivalentServerMessage = (candidate: { content: string; characterId: string | null }) => {
+    return serverMessages.some((m) => {
+      if (m.id.startsWith('local_')) return false
+      if (m.role !== 'assistant') return false
+      if ((m.characterId ?? null) !== candidate.characterId) return false
+      return (m.content || '').trim() === candidate.content
+    })
+  }
+
+  for (const candidate of localAssistantMessages) {
+    if (hasEquivalentServerMessage(candidate)) continue
+    const updatedChat = await chats.appendMessage(chatId, 'assistant', candidate.content, {
+      characterId: candidate.characterId ?? undefined,
+    })
+    serverMessages = updatedChat.messages
   }
   await chats.load(chatId)
 }
@@ -1801,11 +1967,22 @@ function handlePrimaryAction() {
  *
  * @param {ChatMessage} m - 消息对象（来自types/models.ts）
  */
-function handleSwitchPreviousVersion(m: ChatMessage) {
+async function handleSwitchPreviousVersion(m: ChatMessage) {
   const newContent = versions.switchToPreviousVersion(m)
   if (newContent !== null && activeChat.value) {
-    const msg = activeChat.value.messages.find(msg => msg.id === m.id)
+    const msg = activeChat.value.messages.find((msg) => msg.id === m.id)
     if (msg) msg.content = newContent
+    const gv = msg?.greetingVariants
+    if (gv && gv.length > 1 && !m.id.startsWith('local_') && activeChat.value) {
+      const idx = versions.getCurrentVersionIndex(m)
+      try {
+        await chats.updateMessage(activeChat.value.id, m.id, m.role, newContent, m.characterId, {
+          greetingVariantIndex: idx,
+        })
+      } catch (e) {
+        console.error(e)
+      }
+    }
   }
 }
 
@@ -1816,11 +1993,22 @@ function handleSwitchPreviousVersion(m: ChatMessage) {
  *
  * @param {ChatMessage} m - 消息对象（来自types/models.ts）
  */
-function handleSwitchNextVersion(m: ChatMessage) {
+async function handleSwitchNextVersion(m: ChatMessage) {
   const newContent = versions.switchToNextVersion(m)
   if (newContent !== null && activeChat.value) {
-    const msg = activeChat.value.messages.find(msg => msg.id === m.id)
+    const msg = activeChat.value.messages.find((msg) => msg.id === m.id)
     if (msg) msg.content = newContent
+    const gv = msg?.greetingVariants
+    if (gv && gv.length > 1 && !m.id.startsWith('local_') && activeChat.value) {
+      const idx = versions.getCurrentVersionIndex(m)
+      try {
+        await chats.updateMessage(activeChat.value.id, m.id, m.role, newContent, m.characterId, {
+          greetingVariantIndex: idx,
+        })
+      } catch (e) {
+        console.error(e)
+      }
+    }
   }
 }
 
@@ -1901,7 +2089,7 @@ async function handleRewriteMessage(m: ChatMessage) {
             '/api/generate/group',
             { chatId, characterId },
             (evt) => {
-              if (stopRequested.value) return
+              if (shouldIgnoreStreamingEventWhileStopping(evt.event)) return
               if (evt.event === 'delta') {
                 const data = evt.data as { text?: string } | undefined
                 const t = data?.text
@@ -1968,7 +2156,7 @@ async function handleRewriteMessage(m: ChatMessage) {
               userPersona: selectedPersona.value ?? null,
             },
             (evt) => {
-              if (stopRequested.value) return
+              if (shouldIgnoreStreamingEventWhileStopping(evt.event)) return
               if (evt.event === 'delta') {
                 const data = evt.data as { text?: string } | undefined
                 const t = data?.text
@@ -2476,7 +2664,7 @@ async function handleSaveAndSend() {
               userPersona: selectedPersona.value ?? null,
             },
             (evt) => {
-              if (stopRequested.value) return
+              if (shouldIgnoreStreamingEventWhileStopping(evt.event)) return
               if (evt.event === 'delta') {
                 const data = evt.data as { text?: string } | undefined
                 const t = data?.text
@@ -2730,6 +2918,7 @@ const editingPersonaAvatarUrl = computed(() => {
             :user-avatar-url="userAvatarUrl"
             :character-avatar-url="characterAvatarUrl"
             :is-generating="isGenerating"
+            :is-interjecting="group.isInterjecting.value"
             :reasoning-message-id="chatReasoningMessageId"
             :reasoning-content="chatReasoningContent"
             :reasoning-blocks="chatReasoningBlocks"
@@ -2978,7 +3167,8 @@ const editingPersonaAvatarUrl = computed(() => {
                     :src="editingCharacterAvatarUrl"
                     :size="120"
                     aspect="auto"
-                    object-fit="contain"
+                    object-fit="cover"
+                    :object-position="avatarObjectPositionByFocus(actions.editingCharacter.value.avatarFocusX, actions.editingCharacter.value.avatarFocusY)"
                     rounded="rounded-xl"
                     class="border-2 border-brand-a40 shadow-heavy bg-surface-overlay"
                   />
@@ -3030,6 +3220,86 @@ const editingPersonaAvatarUrl = computed(() => {
                   <span class="opacity-60 text-xs ml-2 text-brand">该项参与对话</span>
                 </label>
                 <textarea v-model="actions.editingCharacter.value.firstMessage" class="input textarea h-24" placeholder="开场白..."></textarea>
+              </div>
+
+              <div class="form-group">
+                <label class="label">
+                  <span>额外首句</span>
+                  <span class="opacity-60 text-xs ml-2" v-pre>支持 {{user}} 占位符</span>
+                  <span class="opacity-60 text-xs ml-2 text-brand">该项参与对话</span>
+                </label>
+                <div class="overflow-x-auto custom-scrollbar rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay/50 p-2">
+                  <div class="flex w-full min-w-0 min-h-[6.5rem] flex-nowrap items-stretch gap-2">
+                    <textarea
+                      v-model="extraFirstMessageDraft"
+                      class="input textarea h-24 max-w-full shrink-0"
+                      :style="{
+                        width: hasAnyExtraFirstEntries ? 'min(50%, 18rem)' : 'min(70%, 28rem)',
+                      }"
+                      placeholder="其他开场情景..."
+                    />
+                    <div class="flex shrink-0 flex-col justify-center gap-1.5">
+                      <button
+                        type="button"
+                        class="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[var(--color-border-subtle)] bg-surface-overlay text-[var(--color-text-secondary)] hover:bg-surface-muted transition-colors"
+                        title="追加为草稿（保留输入框）"
+                        @click="appendExtraFirstMessageCheck"
+                      >
+                        <Check class="w-[18px] h-[18px]" />
+                      </button>
+                      <button
+                        type="button"
+                        class="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[var(--color-border-subtle)] bg-surface-overlay text-[var(--color-text-secondary)] hover:bg-surface-muted transition-colors"
+                        title="追加为已保存并清空输入"
+                        @click="appendExtraFirstMessagePlus"
+                      >
+                        <Plus class="w-[18px] h-[18px]" />
+                      </button>
+                    </div>
+                    <div
+                      v-if="extraFirstMessageEntriesIndexed.length"
+                      class="flex shrink-0 items-stretch gap-2"
+                    >
+                      <div
+                        v-for="entry in extraFirstMessageEntriesIndexed"
+                        :key="entry.index"
+                        class="flex shrink-0 items-start gap-1"
+                      >
+                        <button
+                          type="button"
+                          class="shrink-0 inline-flex flex-col items-start text-left px-3 py-2 text-xs border rounded-md hover:bg-surface-muted transition-colors w-[200px] min-h-[4.5rem] max-h-28 overflow-y-auto custom-scrollbar bg-surface-muted/80 text-[var(--color-text)]"
+                          :class="
+                            extraEntryIsEmpty(entry)
+                              ? 'border-dashed border-[var(--color-border)] text-[var(--color-text-muted)]'
+                              : 'border-[var(--color-border-subtle)]'
+                          "
+                          @click="fillExtraFirstDraft(entry.text)"
+                        >
+                          <span
+                            v-if="entry.chip"
+                            class="mb-1 shrink-0 rounded px-1 py-0.5 text-[10px] bg-brand-a10 text-brand border border-brand-a20"
+                          >已保存</span>
+                          <span
+                            v-else
+                            class="mb-1 shrink-0 rounded px-1 py-0.5 text-[10px] text-[var(--color-text-muted)] border border-[var(--color-border-subtle)]"
+                          >草稿</span>
+                          <span class="whitespace-pre-wrap break-words">{{ displayExtraEntryLabel(entry) }}</span>
+                        </button>
+                        <button
+                          type="button"
+                          class="shrink-0 inline-flex h-7 w-7 items-center justify-center rounded border border-[var(--color-border-subtle)] text-[var(--color-text-muted)] hover:bg-surface-muted hover:text-[var(--color-text)]"
+                          title="从列表移除此条"
+                          @click.stop="removeExtraFirstMessageAt(entry.index)"
+                        >
+                          <X class="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <p class="text-xs text-[var(--color-text-muted)] mt-1.5 leading-relaxed">
+                  对号：追加为草稿并保留输入；加号：追加为「已保存」并清空输入。仅「已保存」的额外首句会进入单聊开场变体；草稿仅本地编辑用。下方列出全部条目（含「（空）」），均可删除。保存角色时会去掉空文本；占位符替换后为空也不会写入变体。
+                </p>
               </div>
 
               <div class="form-group">
@@ -3278,15 +3548,45 @@ const editingPersonaAvatarUrl = computed(() => {
     </div>
   </div>
 
+  <div v-if="showEmbeddedCardConfirmModal" class="modal">
+    <div class="modal-backdrop" @click="clearEmbeddedCardPreviewState"></div>
+    <div class="modal-content chat-modal-width-568-90 min-w-0 glass-panel theme-panel-bg backdrop-blur-2xl backdrop-saturate-[1.8] border border-[var(--color-border)]">
+      <div class="modal-header border-b border-[var(--color-border-subtle)]">
+        <h3 class="modal-title text-[var(--color-text)]">检测到 PNG 内嵌角色卡</h3>
+        <button class="modal-close text-[var(--color-text-muted)] hover:text-[var(--color-text)]" @click="clearEmbeddedCardPreviewState">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface-muted)] p-4 text-sm text-[var(--color-text-secondary)] space-y-2">
+          <p>是否用内嵌角色数据覆盖当前编辑内容？</p>
+          <p class="text-xs text-[var(--color-text-muted)]">
+            确认后将覆盖简介、Personality、Scenario、首句、示例对话、系统提示词、额外首句，并重置世界书绑定为内嵌角色卡对应世界书（若存在）；当前上传图片会保留为头像。
+          </p>
+          <p class="text-xs text-[var(--color-text-muted)]">
+            检测结果：角色名「{{ embeddedCardPreview?.card?.name || '未命名角色' }}」，
+            世界书：{{ embeddedCardPreview?.worldbook ? '有（将新建并绑定）' : '无（将清空绑定）' }}。
+          </p>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" :disabled="embeddedCardImporting" @click="clearEmbeddedCardPreviewState">仅使用头像</button>
+        <button class="btn btn-primary" :disabled="embeddedCardImporting" @click="confirmImportEmbeddedCard">
+          {{ embeddedCardImporting ? '导入中...' : '覆盖当前编辑' }}
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- 头像裁剪 -->
   <AvatarCropper
     v-model:show="actions.showCharacterAvatarCropper.value"
-    @save="actions.handleCharacterAvatarSave"
+    :preserve-original="true"
+    :focus-aspect="1"
+    @save="handleCharacterAvatarSave"
   />
 
   <AvatarCropper
     v-model:show="actions.showPersonaAvatarCropper.value"
-    @save="actions.handlePersonaAvatarSave"
+    @save="handlePersonaAvatarSave"
   />
 </template>
 
