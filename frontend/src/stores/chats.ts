@@ -275,7 +275,11 @@ export const useChatsStore = defineStore('chats', {
     async rename(chatId: string, title: string) {
       const chat = await apiPut<Chat>(`/api/chats/${chatId}`, { title })
       this.activeChat = chat
-      if (this.characterId) await this.loadList(this.characterId)
+      if (chat.isGroup) {
+        await this.loadGroupList()
+      } else if (this.characterId) {
+        await this.loadList(this.characterId)
+      }
       return chat
     },
     /**
@@ -374,9 +378,24 @@ export const useChatsStore = defineStore('chats', {
      * @param {string | null | undefined} [characterId] - 群聊时发言人角色ID，传入以保持发言人
      * @returns {Promise<Chat>} 更新后的聊天会话
      */
-    async updateMessage(chatId: string, messageId: string, role: 'system' | 'user' | 'assistant', content: string, characterId?: string | null) {
-      const body: { role: string; content: string; characterId?: string | null } = { role, content }
+    async updateMessage(
+      chatId: string,
+      messageId: string,
+      role: 'system' | 'user' | 'assistant',
+      content: string,
+      characterId?: string | null,
+      opts?: { greetingVariantIndex?: number | null },
+    ) {
+      const body: {
+        role: string
+        content: string
+        characterId?: string | null
+        greetingVariantIndex?: number | null
+      } = { role, content }
       if (characterId !== undefined) body.characterId = characterId
+      if (opts && typeof opts.greetingVariantIndex === 'number') {
+        body.greetingVariantIndex = opts.greetingVariantIndex
+      }
       const chat = await apiPut<Chat>(`/api/chats/${chatId}/messages/${messageId}`, body)
       this.activeChat = chat
       if (this.characterId) await this.loadList(this.characterId)

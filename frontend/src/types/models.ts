@@ -284,7 +284,13 @@ export interface Settings {
  *    - avatar: 头像文件名
  *    - createdAt: 创建时间（ISO格式）
  *    - updatedAt: 更新时间（ISO格式）
+ *    - extraFirstMessageEntries: 额外首句（chip 为 true 时在编辑区显示为矩形 chip）
  */
+export interface ExtraFirstMessageEntry {
+  text: string
+  chip: boolean
+}
+
 export interface CharacterCard {
   version: number
   id: string
@@ -296,7 +302,11 @@ export interface CharacterCard {
   exampleDialogue: string
   systemPrompt: string
   avatar: string
+  /** 头像展示焦点（百分比，0-100），用于会话内矩形头像定位，不会修改原图像素 */
+  avatarFocusX?: number | null
+  avatarFocusY?: number | null
   attachedWorldBookIds?: string[]
+  extraFirstMessageEntries?: ExtraFirstMessageEntry[]
   createdAt: string
   updatedAt: string
 }
@@ -330,6 +340,10 @@ export interface ChatMessage {
   ts: string
   /** 长期记忆在上一条保存后、本条消息之后被更新；仅最新一条带此标记的消息存在 */
   memoryUpdatedAfterThis?: boolean
+  /** 单聊开场白多版本（占位符已替换）；开始对话后由服务端清除 */
+  greetingVariants?: string[] | null
+  /** 当前选中的开场变体下标（与 greetingVariants 对齐） */
+  greetingVariantIndex?: number | null
 }
 
 export interface ChatImageAttachment {
