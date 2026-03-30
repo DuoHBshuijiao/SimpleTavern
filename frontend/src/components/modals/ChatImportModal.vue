@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { apiGet } from '../../api/http'
 import { useSettingsImport } from '../../composables/useSettingsImport'
+import { notifyMessage } from '../../composables/useNotify'
 import type { CharacterCard, Chat, UserPersona } from '../../types/models'
 import ModernSelect from '../ModernSelect.vue'
 
@@ -37,7 +38,7 @@ function buildJanitorBridgeMissingMessage(): string {
   ].join('\n')
 }
 
-/** 未检测到扩展时走与主聊天一致的错误栈（ErrorModal），无回调时退回 alert。 */
+/** 未检测到扩展时走与主聊天一致的错误栈（ErrorModal），无回调时退回全局通知。 */
 function notifyJanitorBridgeMissingIfNeeded(): void {
   if (isJanitorBridgeInstalled()) return
   const message = buildJanitorBridgeMissingMessage()
@@ -45,7 +46,7 @@ function notifyJanitorBridgeMissingIfNeeded(): void {
   if (props.pushError) {
     props.pushError({ message, source: 'main', title })
   } else {
-    alert(`${title}\n\n${message}`)
+    void notifyMessage(message, { title })
   }
 }
 
@@ -162,9 +163,9 @@ async function handleImportChange(e: Event) {
   try {
     const result = await importSettingsFile(file)
     await refreshDataAfterImport()
-    alert(formatImportResultMessage(result))
+    await notifyMessage(formatImportResultMessage(result))
   } catch (err) {
-    alert(err instanceof Error ? err.message : String(err))
+    await notifyMessage(err instanceof Error ? err.message : String(err))
   } finally {
     input.value = ''
   }
@@ -177,12 +178,12 @@ async function handleStImportChange(e: Event) {
   try {
     const result = await importSettingsFile(file)
     await refreshDataAfterImport()
-    alert(formatImportResultMessage(result))
+    await notifyMessage(formatImportResultMessage(result))
   } catch (err) {
     if (props.pushError) {
       props.pushError({ message: err instanceof Error ? err.message : String(err), source: 'main', title: 'SillyTavern 导入失败' })
     } else {
-      alert(err instanceof Error ? err.message : String(err))
+      await notifyMessage(err instanceof Error ? err.message : String(err))
     }
   } finally {
     input.value = ''
@@ -192,18 +193,18 @@ async function handleStImportChange(e: Event) {
 async function openJanitorLinkAndTryCapture() {
   const raw = janitorLink.value.trim()
   if (!raw) {
-    alert('请先填写 JanitorAI 聊天链接。')
+    await notifyMessage('请先填写 JanitorAI 聊天链接。')
     return
   }
   let parsed: URL
   try {
     parsed = new URL(raw)
   } catch {
-    alert('链接格式无效。')
+    await notifyMessage('链接格式无效。')
     return
   }
   if (!/(\.|^)janitorai\.com$/i.test(parsed.hostname)) {
-    alert('仅支持 JanitorAI 链接。')
+    await notifyMessage('仅支持 JanitorAI 链接。')
     return
   }
   parsed.searchParams.set('_st_import', '1')
@@ -216,18 +217,18 @@ async function openJanitorLinkAndTryCapture() {
 async function openJaiCharacterUrlAndCapture() {
   const raw = jaiCharacterUrl.value.trim()
   if (!raw) {
-    alert('请先填写 JanitorAI 角色页链接。')
+    await notifyMessage('请先填写 JanitorAI 角色页链接。')
     return
   }
   let parsed: URL
   try {
     parsed = new URL(raw)
   } catch {
-    alert('链接格式无效。')
+    await notifyMessage('链接格式无效。')
     return
   }
   if (!/(\.|^)janitorai\.com$/i.test(parsed.hostname)) {
-    alert('仅支持 JanitorAI 链接。')
+    await notifyMessage('仅支持 JanitorAI 链接。')
     return
   }
   parsed.searchParams.set('_st_char_html', '1')
@@ -253,11 +254,11 @@ async function loadPendingPreview(pendingId: string) {
 
 async function confirmJanitorImport() {
   if (!props.pendingId) {
-    alert('未检测到待导入的数据。')
+    await notifyMessage('未检测到待导入的数据。')
     return
   }
   if (!selectedCharacterId.value) {
-    alert('请选择角色。')
+    await notifyMessage('请选择角色。')
     return
   }
   janitorConfirming.value = true
@@ -276,7 +277,9 @@ async function confirmJanitorImport() {
     }
     const result = (await r.json()) as JanitorConfirmResult
     await refreshDataAfterImport()
-    alert(`导入完成：${(result.imported || []).join(', ') || '无'}${result.warnings?.length ? '\n警告：' + result.warnings.join('; ') : ''}`)
+    await notifyMessage(
+      `导入完成：${(result.imported || []).join(', ') || '无'}${result.warnings?.length ? '\n警告：' + result.warnings.join('; ') : ''}`,
+    )
     emit('janitor-imported', {
       chatId: result.chat.id,
       characterId: result.chat.characterId ?? null,
@@ -284,7 +287,7 @@ async function confirmJanitorImport() {
     })
     close()
   } catch (err) {
-    alert(err instanceof Error ? err.message : String(err))
+    await notifyMessage(err instanceof Error ? err.message : String(err))
   } finally {
     janitorConfirming.value = false
   }
@@ -376,7 +379,7 @@ async function confirmJanitorImport() {
                 </div>
               </div>
               <label class="mt-3 flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
-                <input v-model="openAfterImport" type="checkbox" />
+                <input v-model="openAfterImport" type="checkbox" class="accent-brand" />
                 导入后打开该会话
               </label>
               <div class="mt-3">
