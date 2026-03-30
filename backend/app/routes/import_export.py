@@ -1,12 +1,12 @@
 """
 导入导出路由模块
 
-提供数据导入导出功能，支持聊天、角色、设置的导出和导入。
+提供数据导入导出功能，支持聊天、角色、设置以及 SillyTavern 角色卡的导出和导入。
 
 主要功能：
     - GET /chats/{chat_id}/export: 导出聊天会话（支持txt和json格式）
     - GET /settings/backup: 备份设置（支持basic/with_characters/with_chats三种范围）
-    - POST /import: 导入数据（支持zip/json/txt格式）
+    - POST /import: 导入数据（支持zip/json/txt以及ST png/json角色卡）
     - POST /import/janitor/pending: 暂存Janitor捕获的聊天数据（独立字典，与角色 HTML 导入无关）
     - GET /import/janitor/pending/{pending_id}: 获取Janitor待导入预览
     - POST /import/janitor/confirm: 确认导入Janitor聊天到本地会话
@@ -29,12 +29,14 @@ from __future__ import annotations
 import io
 import json
 import re
+import base64
 import zipfile
 from datetime import datetime, timedelta
 from urllib.parse import quote, urlparse
 from typing import Any
 from uuid import uuid4
-from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
+from urllib.request import Request as UrllibRequest, urlopen
 
 from fastapi import APIRouter, Body, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
@@ -61,6 +63,7 @@ from app.storage import (
 
 router = APIRouter(tags=["import_export"])
 JANITOR_CHAT_PENDING_TTL_SECONDS = 10 * 60
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 # 仅暂存 Janitor「聊天」捕获；角色 HTML 导入走独立接口，不写入此字典。
 _janitor_chat_pending_store: dict[str, tuple[datetime, dict[str, Any]]] = {}
 
@@ -203,10 +206,14 @@ def _strip_html(html: str) -> str:
 
 def _extract_meta_content(html: str, keys: list[str]) -> str:
     for key in keys:
-        pattern = rf'<meta[^>]+(?:property|name)=["\']{re.escape(key)}["\'][^>]+content=["\']([^"\']+)["\']'
-        match = re.search(pattern, html, flags=re.I)
-        if match and match.group(1).strip():
-            return match.group(1).strip()
+        patterns = [
+            rf'<meta[^>]+(?:property|name)=["\']{re.escape(key)}["\'][^>]+content=["\']([^"\']+)["\']',
+            rf'<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name)=["\']{re.escape(key)}["\']',
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, html, flags=re.I)
+            if match and match.group(1).strip():
+                return match.group(1).strip()
     return ""
 
 
@@ -236,17 +243,109 @@ def _guess_image_ext(url: str, content_type: str | None) -> str:
     return "jpg"
 
 
+def _bytes_look_like_image(data: bytes) -> bool:
+    if len(data) < 12:
+        return False
+    if data[:4] == b"\x89PNG":
+        return True
+    if len(data) >= 2 and data[:2] == b"\xff\xd8":
+        return True
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return True
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return True
+    return False
+
+
+# 部分 CDN 对非浏览器 UA/无 Referer 会返回非图片体或错误页，导致「下载失败」
+_JANITOR_AVATAR_FETCH_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    ),
+    "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://janitorai.com/",
+}
+
+
 def _download_avatar_from_url(image_url: str) -> str:
-    req = Request(image_url, headers={"User-Agent": "SimpleTavern/1.0"})
-    with urlopen(req, timeout=10) as resp:
-        payload = resp.read()
-        ext = _guess_image_ext(image_url, resp.headers.get("Content-Type"))
+    req = UrllibRequest(image_url, headers=_JANITOR_AVATAR_FETCH_HEADERS)
+    try:
+        with urlopen(req, timeout=45) as resp:
+            payload = resp.read()
+            ct = resp.headers.get("Content-Type")
+            ext = _guess_image_ext(image_url, ct)
+    except HTTPError as e:
+        raise RuntimeError(f"HTTP {e.code}") from e
+    except URLError as e:
+        raise RuntimeError(f"网络错误: {e.reason!s}") from e
+    if not payload:
+        raise RuntimeError("空响应")
+    if not _bytes_look_like_image(payload):
+        head = payload[:80].decode("utf-8", errors="replace").strip()
+        if head.startswith("<") or head.startswith("{"):
+            raise RuntimeError("响应不是图片（可能为错误页）")
+        raise RuntimeError("响应不是已知图片格式")
     filename = f"{uuid4().hex}.{ext}"
     save_avatar(filename, payload)
     return filename
 
 
-def _parse_character_from_html(html: str) -> tuple[CharacterCard, list[str]]:
+def _normalize_avatar_url_hint(raw: str | None) -> str:
+    if not isinstance(raw, str):
+        return ""
+    s = raw.strip()
+    if not s.startswith(("http://", "https://")):
+        return ""
+    return s
+
+
+def _is_janitor_ui_avatar_noise(url: str) -> bool:
+    u = url.lower()
+    if "logopink" in u:
+        return True
+    if "favicon" in u or "apple-touch-icon" in u or "mask-icon" in u:
+        return True
+    if "assets.janitorai.com" in u and ("logo" in u or u.endswith(".svg")):
+        return True
+    return False
+
+
+def _extract_avatar_image_from_html(html: str) -> str:
+    patterns = [
+        r'<img[^>]+class=["\'][^"\']*\bavatar-image\b[^"\']*["\'][^>]*src=["\'](https?://[^"\']+)["\']',
+        r'<img[^>]+src=["\'](https?://[^"\']+)["\'][^>]+class=["\'][^"\']*\bavatar-image\b[^"\']*["\']',
+    ]
+    for pat in patterns:
+        m = re.search(pat, html, flags=re.I)
+        if m:
+            candidate = m.group(1).strip()
+            if candidate and not _is_janitor_ui_avatar_noise(candidate):
+                return candidate
+    for m in re.finditer(r'<img[^>]+src=["\'](https?://[^"\']+)["\']', html, flags=re.I):
+        candidate = m.group(1).strip()
+        if candidate and not _is_janitor_ui_avatar_noise(candidate):
+            return candidate
+    return ""
+
+
+def _resolve_character_avatar_url(html: str, avatar_url_hint: str | None) -> str:
+    hint = _normalize_avatar_url_hint(avatar_url_hint)
+    if hint:
+        return hint
+    meta_url = _extract_meta_content(html, ["og:image", "og:image:secure_url", "twitter:image"])
+    if meta_url and not _is_janitor_ui_avatar_noise(meta_url):
+        return meta_url
+    from_img = _extract_avatar_image_from_html(html)
+    if from_img:
+        return from_img
+    if meta_url:
+        return meta_url
+    return ""
+
+
+def _parse_character_from_html(html: str, avatar_url_hint: str | None = None) -> tuple[CharacterCard, list[str]]:
     warnings: list[str] = []
     text = _strip_html(html)
     all_labels = ["Character Name", "Character Bio", "Bio", "Personality", "Scenario", "First Message", "First message"]
@@ -267,11 +366,7 @@ def _parse_character_from_html(html: str) -> tuple[CharacterCard, list[str]]:
     scenario = _extract_labeled_block(text, ["Scenario"], all_labels)
     first_message = _extract_labeled_block(text, ["First Message", "First message", "首句"], all_labels)
 
-    avatar_url = _extract_meta_content(html, ["og:image", "twitter:image"])
-    if not avatar_url:
-        img_match = re.search(r'<img[^>]+src=["\'](https?://[^"\']+)["\']', html, flags=re.I)
-        if img_match:
-            avatar_url = img_match.group(1)
+    avatar_url = _resolve_character_avatar_url(html, avatar_url_hint)
 
     card = CharacterCard(
         name=name,
@@ -284,8 +379,11 @@ def _parse_character_from_html(html: str) -> tuple[CharacterCard, list[str]]:
     if avatar_url:
         try:
             card.avatar = _download_avatar_from_url(avatar_url)
-        except Exception:
-            warnings.append("角色图片下载失败，已跳过头像")
+        except Exception as e:
+            detail = str(e).strip() or type(e).__name__
+            if len(detail) > 120:
+                detail = detail[:117] + "..."
+            warnings.append(f"角色图片下载失败，已跳过头像（{detail}）")
     else:
         warnings.append("未识别到角色图片链接")
     return card, warnings
@@ -886,6 +984,202 @@ def _parse_chat_text(content: str) -> Chat:
     return Chat.model_validate(chat_data)
 
 
+def _extract_png_text_map(payload: bytes) -> dict[str, list[str]]:
+    """
+    解析 PNG tEXt chunks，返回 key -> 文本值列表。
+    """
+    if len(payload) < 8 or payload[:8] != PNG_SIGNATURE:
+        raise ValueError("not a png")
+    cursor = 8
+    text_map: dict[str, list[str]] = {}
+    while cursor + 8 <= len(payload):
+        chunk_len = int.from_bytes(payload[cursor:cursor + 4], "big")
+        chunk_type = payload[cursor + 4:cursor + 8]
+        data_start = cursor + 8
+        data_end = data_start + chunk_len
+        crc_end = data_end + 4
+        if data_end > len(payload) or crc_end > len(payload):
+            break
+        if chunk_type == b"tEXt":
+            raw = payload[data_start:data_end]
+            null_idx = raw.find(b"\x00")
+            if null_idx > 0:
+                key = raw[:null_idx].decode("latin-1", errors="ignore").strip()
+                val = raw[null_idx + 1:].decode("latin-1", errors="ignore")
+                if key:
+                    text_map.setdefault(key, []).append(val)
+        if chunk_type == b"IEND":
+            break
+        cursor = crc_end
+    return text_map
+
+
+def _decode_st_blob_to_json(raw_text: str) -> dict[str, Any]:
+    """
+    解码 ST PNG 文本块中的 JSON：支持直接 JSON 或 Base64(JSON)。
+    """
+    text = (raw_text or "").strip()
+    if not text:
+        raise ValueError("empty st payload")
+    if text.startswith("{"):
+        parsed = json.loads(text)
+        if not isinstance(parsed, dict):
+            raise ValueError("st payload is not object")
+        return parsed
+    compact = "".join(text.split())
+    padded = compact + ("=" * (-len(compact) % 4))
+    decoded = base64.b64decode(padded.encode("ascii"), validate=False)
+    parsed = json.loads(decoded.decode("utf-8"))
+    if not isinstance(parsed, dict):
+        raise ValueError("st payload is not object")
+    return parsed
+
+
+def _extract_st_json_from_png(payload: bytes) -> dict[str, Any]:
+    """
+    从 PNG 中提取 SillyTavern 卡片 JSON（ccv3 优先，其次 chara）。
+    """
+    text_map = _extract_png_text_map(payload)
+    values_ccv3 = text_map.get("ccv3", [])
+    values_chara = text_map.get("chara", [])
+    for candidate in values_ccv3 + values_chara:
+        try:
+            return _decode_st_blob_to_json(candidate)
+        except Exception:
+            continue
+    raise ValueError("png does not contain valid ccv3/chara data")
+
+
+def _coalesce_st_text(*values: Any) -> str:
+    for v in values:
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    return ""
+
+
+def _looks_like_st_card(raw: Any) -> bool:
+    if not isinstance(raw, dict):
+        return False
+    data = raw.get("data")
+    if isinstance(data, dict) and (
+        isinstance(raw.get("spec"), str)
+        or "first_mes" in data
+        or "mes_example" in data
+        or "alternate_greetings" in data
+        or "character_book" in data
+    ):
+        return True
+    st_like_keys = {"first_mes", "mes_example", "alternate_greetings", "character_book", "spec", "spec_version"}
+    return any(k in raw for k in st_like_keys)
+
+
+def _build_extra_first_entries(raw_data: dict[str, Any]) -> list[dict[str, Any]]:
+    source = raw_data.get("alternate_greetings")
+    if not isinstance(source, list):
+        return []
+    entries: list[dict[str, Any]] = []
+    for item in source:
+        if isinstance(item, str):
+            text = item.strip()
+        elif isinstance(item, dict):
+            text = str(item.get("text") or "").strip()
+        else:
+            text = str(item or "").strip()
+        if not text:
+            continue
+        entries.append({"text": text, "chip": True})
+    return entries
+
+
+def _st_entry_regex(raw_entry: dict[str, Any]) -> str:
+    if bool(raw_entry.get("constant")):
+        return ".*"
+    keys_raw = raw_entry.get("keys")
+    keys: list[str] = []
+    if isinstance(keys_raw, list):
+        for item in keys_raw:
+            s = str(item or "").strip()
+            if s:
+                keys.append(s)
+    if not keys:
+        return ""
+    if bool(raw_entry.get("use_regex")):
+        return "|".join(keys)
+    return "|".join(re.escape(k) for k in keys)
+
+
+def _build_worldbook_from_st(card_name: str, raw_data: dict[str, Any]) -> WorldBook | None:
+    character_book = raw_data.get("character_book")
+    if not isinstance(character_book, dict):
+        return None
+    entries_raw = character_book.get("entries")
+    if not isinstance(entries_raw, list) or not entries_raw:
+        return None
+    entries: list[dict[str, Any]] = []
+    for idx, raw in enumerate(entries_raw):
+        if not isinstance(raw, dict):
+            continue
+        content = str(raw.get("content") or "").strip()
+        title = str(raw.get("comment") or "").strip()
+        enabled = bool(raw.get("enabled", True))
+        try:
+            order_index = int(raw.get("insertion_order", idx))
+        except Exception:
+            order_index = idx
+        entries.append({
+            "title": title or f"条目 {idx + 1}",
+            "content": content,
+            "enabled": enabled,
+            "orderIndex": order_index,
+            "regex": _st_entry_regex(raw),
+        })
+    if not entries:
+        return None
+    wb_name = _coalesce_st_text(character_book.get("name"), f"{card_name or '角色'} 世界书")
+    return WorldBook(name=wb_name, entries=entries)
+
+
+def _map_st_to_character_and_worldbook(raw: dict[str, Any]) -> tuple[CharacterCard, WorldBook | None]:
+    data = raw.get("data") if isinstance(raw.get("data"), dict) else {}
+    merged = dict(raw)
+    if isinstance(data, dict):
+        merged.update(data)
+    card = CharacterCard(
+        name=_coalesce_st_text(merged.get("name"), "新角色"),
+        description=_coalesce_st_text(merged.get("description")),
+        personality=_coalesce_st_text(merged.get("personality")),
+        scenario=_coalesce_st_text(merged.get("scenario")),
+        firstMessage=_coalesce_st_text(merged.get("first_mes"), merged.get("firstMessage")),
+        exampleDialogue=_coalesce_st_text(merged.get("mes_example"), merged.get("exampleDialogue")),
+        systemPrompt=_coalesce_st_text(merged.get("system_prompt"), merged.get("systemPrompt")),
+        extraFirstMessageEntries=_build_extra_first_entries(merged),
+    )
+    worldbook = _build_worldbook_from_st(card.name, merged)
+    return card, worldbook
+
+
+def _import_sillytavern_card(raw: dict[str, Any], avatar_filename: str | None = None) -> dict[str, Any]:
+    card, worldbook = _map_st_to_character_and_worldbook(raw)
+    if isinstance(avatar_filename, str) and avatar_filename.strip():
+        card.avatar = avatar_filename.strip()
+    imported = ["character"]
+    warnings: list[str] = []
+    saved_worldbook: WorldBook | None = None
+    if worldbook is not None:
+        saved_worldbook = save_worldbook(worldbook)
+        card.attachedWorldBookIds = [saved_worldbook.id]
+        imported.append("worldbook")
+    saved_card = save_character(card)
+    out: dict[str, Any] = {
+        "imported": imported,
+        "warnings": warnings,
+        "character": saved_card.model_dump(mode="json"),
+    }
+    if saved_worldbook is not None:
+        out["worldbook"] = saved_worldbook.model_dump(mode="json")
+    return out
+
+
 def _import_from_json(raw: Any) -> dict[str, Any]:
     """
     从JSON数据导入
@@ -906,6 +1200,9 @@ def _import_from_json(raw: Any) -> dict[str, Any]:
 
     if isinstance(raw, dict) and raw.get("type") == "chat_export":
         raw = raw.get("chat")
+
+    if _looks_like_st_card(raw):
+        return _import_sillytavern_card(raw)
 
     if isinstance(raw, dict) and ("name" in raw and ("personality" in raw or "systemPrompt" in raw)):
         card = CharacterCard.model_validate(raw)
@@ -1092,8 +1389,8 @@ def _decode_character_html_bytes(payload: bytes) -> str:
         return payload.decode("utf-8", errors="ignore")
 
 
-def _import_character_from_html_string(html: str) -> dict[str, Any]:
-    card, warnings = _parse_character_from_html(html)
+def _import_character_from_html_string(html: str, avatar_url_hint: str | None = None) -> dict[str, Any]:
+    card, warnings = _parse_character_from_html(html, avatar_url_hint=avatar_url_hint)
     saved = save_character(card)
     return {
         "ok": True,
@@ -1119,13 +1416,16 @@ async def import_janitor_character_html(request: Request, file: UploadFile | Non
         if not isinstance(raw_html, str) or not raw_html.strip():
             raise HTTPException(status_code=400, detail="html is required")
         html = raw_html
+        raw_hint = body.get("avatarUrl")
+        avatar_url_hint = raw_hint.strip() if isinstance(raw_hint, str) and raw_hint.strip() else None
     else:
+        avatar_url_hint = None
         if file is None:
             raise HTTPException(status_code=400, detail="file is required for multipart upload")
         payload = await file.read()
         html = _decode_character_html_bytes(payload)
     try:
-        return _import_character_from_html_string(html)
+        return _import_character_from_html_string(html, avatar_url_hint=avatar_url_hint)
     except HTTPException:
         raise
     except Exception as e:
@@ -1139,6 +1439,7 @@ async def import_data(file: UploadFile = File(...)) -> dict:
     
     自动识别文件格式并导入：
     - ZIP文件（PK开头）：解压并导入所有内容
+    - PNG文件（含 ccv3/chara tEXt）：按 SillyTavern 角色卡导入
     - JSON文件：导入设置/聊天/角色
     - TXT文件：解析聊天导出或角色卡片文本
     
@@ -1160,6 +1461,11 @@ async def import_data(file: UploadFile = File(...)) -> dict:
         if payload[:4] == b"PK\x03\x04":
             result = _import_from_zip(payload)
             return {"ok": True, **result}
+        if payload[:8] == PNG_SIGNATURE:
+            st_raw = _extract_st_json_from_png(payload)
+            avatar_filename = f"{uuid4().hex}.png"
+            save_avatar(avatar_filename, payload)
+            return {"ok": True, **_import_sillytavern_card(st_raw, avatar_filename=avatar_filename)}
         if filename.endswith(".json") or (file.content_type and "json" in file.content_type):
             raw = json.loads(payload.decode("utf-8"))
             result = _import_from_json(raw)
