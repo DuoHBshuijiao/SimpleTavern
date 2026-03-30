@@ -40,6 +40,62 @@ from typing import Any, AsyncIterator, Literal
 
 import httpx
 
+# 上游 4xx/5xx 响应体最大展示长度（避免日志/UI 被巨页吞没）
+_MAX_ERROR_BODY_CHARS = 12000
+
+
+def _upstream_http_error_text(body: str) -> str:
+    """
+    从上游 JSON 中尽量提取可读错误（OpenAI error.message、Gemini error.message 等），
+    否则回退为截断后的原始 body。httpx 默认的 HTTPStatusError 字符串不含响应体，调试时难以定位。
+    """
+    raw = (body or "").strip()
+    if not raw:
+        return "(empty response body)"
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return raw[:_MAX_ERROR_BODY_CHARS]
+    if not isinstance(data, dict):
+        return raw[:_MAX_ERROR_BODY_CHARS]
+    err = data.get("error")
+    if isinstance(err, dict):
+        m = err.get("message")
+        if isinstance(m, str) and m.strip():
+            status = err.get("status")
+            code = err.get("code")
+            bits: list[str] = [m.strip()]
+            if status:
+                bits.append(str(status))
+            elif code is not None:
+                bits.append(str(code))
+            return ": ".join(bits) if len(bits) > 1 else bits[0]
+    if isinstance(err, str) and err.strip():
+        return err.strip()
+    m = data.get("message")
+    if isinstance(m, str) and m.strip():
+        return m.strip()
+    return raw[:_MAX_ERROR_BODY_CHARS]
+
+
+def _raise_http_error(r: httpx.Response) -> None:
+    """非流式响应：失败时抛出带响应正文的 HTTPStatusError。"""
+    if r.status_code < 400:
+        return
+    detail = _upstream_http_error_text(r.text or "")
+    msg = f"HTTP {r.status_code} {r.reason_phrase} for {r.url}\n{detail}"
+    raise httpx.HTTPStatusError(msg, request=r.request, response=r)
+
+
+async def _raise_stream_http_error(r: httpx.Response) -> None:
+    """流式响应：必须先读完全 body，否则 text 不可用。"""
+    if r.status_code < 400:
+        return
+    await r.aread()
+    detail = _upstream_http_error_text(r.text or "")
+    msg = f"HTTP {r.status_code} {r.reason_phrase} for {r.url}\n{detail}"
+    raise httpx.HTTPStatusError(msg, request=r.request, response=r)
+
 
 def _normalize_base_url(base_url: str) -> str:
     """
@@ -328,7 +384,7 @@ async def chat_completions(
 
     async with httpx.AsyncClient(timeout=120) as client:
         r = await client.post(url, headers=headers, json=payload)
-        r.raise_for_status()
+        _raise_http_error(r)
         data = r.json()
         choices = data.get("choices") or []
         if not choices:
@@ -390,7 +446,7 @@ async def chat_completions_message(
     )
     async with httpx.AsyncClient(timeout=120) as client:
         r = await client.post(url, headers=headers, json=payload)
-        r.raise_for_status()
+        _raise_http_error(r)
         data = r.json()
         choices = data.get("choices") or []
         if not choices:
@@ -450,7 +506,7 @@ async def stream_chat_completions(
 
     async with httpx.AsyncClient(timeout=None) as client:
         async with client.stream("POST", url, headers=headers, json=payload) as r:
-            r.raise_for_status()
+            await _raise_stream_http_error(r)
             async for line in r.aiter_lines():
                 if not line:
                     continue
