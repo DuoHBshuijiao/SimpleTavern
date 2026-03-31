@@ -239,10 +239,82 @@ def check_backend_runtime(venv_python, backend_dir):
         return False, str(e)
 
 
-def check_backend_deps(venv_python, backend_dir):
-    """检查后端依赖与应用导入是否可用。"""
-    ok, _ = check_backend_runtime(venv_python, backend_dir)
-    return ok
+_REQUIREMENTS_HASH_FILENAME = ".requirements-hash"
+
+
+def compute_requirements_hash(backend_dir: Path) -> str:
+    """对 backend/requirements.txt 内容计算 SHA256（与 pip 解析无关，仅检测清单变更）。"""
+    req_file = backend_dir / "requirements.txt"
+    return hashlib.sha256(req_file.read_bytes()).hexdigest()
+
+
+def get_saved_requirements_hash(venv_dir: Path) -> str | None:
+    """读取 venv 内记录的 requirements 摘要，不存在或无效则返回 None。"""
+    path = venv_dir / _REQUIREMENTS_HASH_FILENAME
+    if not path.is_file():
+        return None
+    try:
+        content = path.read_text(encoding="utf-8").strip()
+        return content if content else None
+    except Exception:
+        return None
+
+
+def save_requirements_hash(venv_dir: Path, hash_value: str) -> None:
+    """将 requirements 摘要写入虚拟环境目录（与已安装依赖对应）。"""
+    (venv_dir / _REQUIREMENTS_HASH_FILENAME).write_text(hash_value + "\n", encoding="utf-8")
+
+
+def requirements_synced_with_venv(venv_dir: Path, backend_dir: Path) -> tuple[bool, str]:
+    """
+    判断当前 requirements.txt 是否与上次 pip install 后记录一致。
+    不一致或从未记录时返回 (False, 原因)，需执行 pip install -r。
+    """
+    req_file = backend_dir / "requirements.txt"
+    if not req_file.is_file():
+        return False, "缺少 requirements.txt"
+    try:
+        current = compute_requirements_hash(backend_dir)
+    except Exception as e:
+        return False, f"读取 requirements.txt 失败: {e}"
+    saved = get_saved_requirements_hash(venv_dir)
+    if saved is None:
+        return False, "未记录 requirements 摘要（需同步依赖）"
+    if saved != current:
+        return False, "requirements.txt 已变更"
+    return True, ""
+
+
+def check_backend_deps(venv_python, backend_dir, venv_dir: Path):
+    """检查后端依赖可导入，且 requirements.txt 与 venv 内记录一致。"""
+    runtime_ok, _ = check_backend_runtime(venv_python, backend_dir)
+    if not runtime_ok:
+        return False
+    synced, _ = requirements_synced_with_venv(venv_dir, backend_dir)
+    return synced
+
+
+def maybe_run_pip_check(venv_python: str, backend_dir: Path) -> None:
+    """
+    在 pip install 之后：运行 pip check 做环境一致性检查；失败时仅警告，不中断部署。
+    """
+    try:
+        result = subprocess.run(
+            [venv_python, "-m", "pip", "check"],
+            cwd=backend_dir,
+            capture_output=True,
+            text=True,
+        )
+    except Exception as e:
+        print_warning(f"无法执行 pip check（已跳过）: {e}")
+        return
+    if result.returncode == 0:
+        return
+    combined = ((result.stdout or "") + "\n" + (result.stderr or "")).strip()
+    print_warning("pip check 报告依赖问题（应用仍可能可运行）:")
+    if combined:
+        print_warning(_summarize_command_output(result.stdout, result.stderr, max_lines=20))
+
 
 def check_deployment_status(venv_dir, backend_dir, frontend_dir):
     """
@@ -261,9 +333,9 @@ def check_deployment_status(venv_dir, backend_dir, frontend_dir):
     # 检查虚拟环境
     status['venv_exists'] = venv_dir.exists() and venv_python.exists()
     
-    # 检查后端依赖
+    # 检查后端依赖（应用可导入 + requirements 摘要与 venv 记录一致）
     if status['venv_exists']:
-        status['backend_deps_ok'] = check_backend_deps(str(venv_python), backend_dir)
+        status['backend_deps_ok'] = check_backend_deps(str(venv_python), backend_dir, venv_dir)
     
     # 检查前端 node_modules
     node_modules = frontend_dir / 'node_modules'
@@ -551,7 +623,14 @@ def main():
                 print_error("后端依赖安装失败")
                 wait_for_exit()
                 sys.exit(1)
-            
+
+            try:
+                save_requirements_hash(venv_dir, compute_requirements_hash(backend_dir))
+            except Exception as e:
+                print_warning(f"写入 requirements 摘要失败（下次可能重复安装依赖）: {e}")
+
+            maybe_run_pip_check(venv_python, backend_dir)
+
             print_success("后端依赖安装完成")
             print()
         else:

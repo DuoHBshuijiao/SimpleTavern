@@ -43,6 +43,8 @@ BACKEND_DIR="$ROOT_DIR/backend"
 FRONTEND_DIR="$ROOT_DIR/frontend"
 VENV_DIR="$ROOT_DIR/venv"
 VENV_PYTHON="$VENV_DIR/bin/python"
+# 与 deploy.py 一致：记录上次 pip install 对应的 requirements.txt 摘要
+REQ_HASH_FILE="$VENV_DIR/.requirements-hash"
 
 # ========================================
 # 检查 Python
@@ -86,6 +88,27 @@ fi
 print_success "环境检查通过"
 echo ""
 
+# 与 deploy.py 一致：对 requirements.txt 的 SHA256（判断清单是否相对上次安装变更）
+hash_requirements_file() {
+    local f="$1"
+    if command -v sha256sum &> /dev/null; then
+        sha256sum "$f" | awk '{print $1}'
+    elif command -v shasum &> /dev/null; then
+        shasum -a 256 "$f" | awk '{print $1}'
+    elif command -v openssl &> /dev/null; then
+        openssl dgst -sha256 "$f" | awk '{print $2}'
+    elif [ -n "$PYTHON_CMD" ]; then
+        "$PYTHON_CMD" -c 'import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$f"
+    else
+        echo ""
+    fi
+}
+
+CURRENT_REQ_HASH=""
+if [ -f "$BACKEND_DIR/requirements.txt" ]; then
+    CURRENT_REQ_HASH=$(hash_requirements_file "$BACKEND_DIR/requirements.txt")
+fi
+
 # ========================================
 # 检查部署状态
 # ========================================
@@ -101,10 +124,15 @@ if [ -d "$VENV_DIR" ] && [ -f "$VENV_PYTHON" ]; then
     VENV_EXISTS="✓"
 fi
 
-# 检查后端依赖
+# 检查后端依赖（与 deploy.py：在 backend 目录下 import app.main + requirements 摘要一致）
 if [ "$VENV_EXISTS" = "✓" ]; then
-    if "$VENV_PYTHON" -c "import uvicorn; import fastapi; print('ok')" 2>/dev/null | grep -q "ok"; then
-        BACKEND_DEPS_OK="✓"
+    if (cd "$BACKEND_DIR" && "$VENV_PYTHON" -c "import app.main; print('ok')" 2>/dev/null | grep -q "ok"); then
+        if [ -n "$CURRENT_REQ_HASH" ] && [ -f "$REQ_HASH_FILE" ]; then
+            SAVED_HASH=$(tr -d '\r\n' < "$REQ_HASH_FILE" 2>/dev/null || true)
+            if [ "$SAVED_HASH" = "$CURRENT_REQ_HASH" ]; then
+                BACKEND_DEPS_OK="✓"
+            fi
+        fi
     fi
 fi
 
@@ -171,6 +199,19 @@ else
         if [ $? -ne 0 ]; then
             print_error "后端依赖安装失败"
             exit 1
+        fi
+        H=$(hash_requirements_file "$BACKEND_DIR/requirements.txt")
+        if [ -n "$H" ]; then
+            printf '%s\n' "$H" > "$REQ_HASH_FILE"
+        else
+            print_warning "无法写入 requirements 摘要（下次可能重复安装依赖）；请确保存在 sha256sum、openssl 或可用 Python"
+        fi
+        set +e
+        "$VENV_PYTHON" -m pip check
+        PC=$?
+        set -e
+        if [ $PC -ne 0 ]; then
+            print_warning "pip check 报告依赖问题（应用仍可能可运行）"
         fi
         print_success "后端依赖安装完成"
     else
