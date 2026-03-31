@@ -414,6 +414,12 @@ watch(
     if (!(s as Settings).draftHelpDefaults) (s as Settings).draftHelpDefaults = ensureDraftHelpDefaults()
     if (s.selectedFont === undefined) (s as Settings).selectedFont = null
     if ((s as Settings).messageFontSize === undefined) (s as Settings).messageFontSize = null
+    if (!s.prompts) {
+      s.prompts = { globalSystem: '', globalPrefill: '' }
+    } else {
+      if (s.prompts.globalSystem === undefined) s.prompts.globalSystem = ''
+      if (s.prompts.globalPrefill === undefined) s.prompts.globalPrefill = ''
+    }
 
     globalDraft.value = s
     chatDraft.value = ensureOverrides(props.chat ? clone(props.chat.overrides) : undefined)
@@ -1424,6 +1430,16 @@ async function checkUpdate() {
                 ></textarea>
               </div>
 
+              <div class="space-y-1.5">
+                <label class="block text-sm font-medium text-[var(--color-text-secondary)]">Prefill 设置</label>
+                <textarea 
+                  v-model="globalDraft.prompts.globalPrefill" 
+                  rows="2"
+                  class="input textarea w-full resize-none"
+                  placeholder="以助手身份附加在请求末尾，模型在其后续写；留空则不启用"
+                ></textarea>
+              </div>
+
               <!-- Parameters (Ensured Visibility) -->
               <div class="grid grid-cols-2 gap-4 pt-2">
                 <div class="space-y-1.5">
@@ -1547,34 +1563,39 @@ async function checkUpdate() {
 
               <div class="space-y-3">
                 <div class="text-sm font-medium text-[var(--color-text-secondary)]">数据备份与导入</div>
-                <div class="text-xs text-[var(--color-text-muted)]">
-                  备份会导出全部系统设置（含用户 Persona 头像）；“包含角色卡/包含全部聊天记录”同时包含世界书数据。
-                </div>
-                <div class="flex gap-2">
-                  <button 
-                    class="px-4 py-2 bg-surface-muted hover:bg-surface-hover text-[var(--color-text)] rounded-lg text-sm transition-colors whitespace-nowrap"
-                    @click="downloadSettingsBackup('basic')"
-                  >
-                    基本设置
-                  </button>
-                  <button 
-                    class="px-4 py-2 bg-surface-muted hover:bg-surface-hover text-[var(--color-text)] rounded-lg text-sm transition-colors whitespace-nowrap"
-                    @click="downloadSettingsBackup('with_characters')"
-                  >
-                    包含角色卡（含世界书）
-                  </button>
-                  <button 
-                    class="px-4 py-2 bg-surface-muted hover:bg-surface-hover text-[var(--color-text)] rounded-lg text-sm transition-colors whitespace-nowrap"
-                    @click="downloadSettingsBackup('with_chats')"
-                  >
-                    包含全部聊天记录（含世界书）
-                  </button>
-                  <button 
-                    class="px-4 py-2 bg-surface-muted hover:bg-surface-hover text-[var(--color-text)] rounded-lg text-sm transition-colors whitespace-nowrap"
-                    @click="triggerImport"
-                  >
-                    导入数据
-                  </button>
+                <div class="flex flex-col gap-2">
+                  <div class="grid grid-cols-2 gap-2">
+                    <button 
+                      type="button"
+                      class="px-3 py-2 bg-surface-muted hover:bg-surface-hover text-[var(--color-text)] rounded-lg text-sm transition-colors text-center leading-tight min-w-0"
+                      @click="downloadSettingsBackup('basic')"
+                    >
+                      基本设置
+                    </button>
+                    <button 
+                      type="button"
+                      class="px-3 py-2 bg-surface-muted hover:bg-surface-hover text-[var(--color-text)] rounded-lg text-sm transition-colors text-center leading-tight min-w-0"
+                      @click="downloadSettingsBackup('with_characters')"
+                    >
+                      包含角色卡
+                    </button>
+                  </div>
+                  <div class="grid grid-cols-2 gap-2">
+                    <button 
+                      type="button"
+                      class="px-3 py-2 bg-surface-muted hover:bg-surface-hover text-[var(--color-text)] rounded-lg text-sm transition-colors text-center leading-tight min-w-0"
+                      @click="downloadSettingsBackup('with_chats')"
+                    >
+                      包含全部聊天记录
+                    </button>
+                    <button 
+                      type="button"
+                      class="px-3 py-2 bg-surface-muted hover:bg-surface-hover text-[var(--color-text)] rounded-lg text-sm transition-colors text-center leading-tight min-w-0"
+                      @click="triggerImport"
+                    >
+                      导入数据
+                    </button>
+                  </div>
                   <input
                     ref="importInputRef"
                     type="file"
@@ -1582,6 +1603,9 @@ async function checkUpdate() {
                     accept=".txt,.json,.zip"
                     @change="handleImportChange"
                   />
+                </div>
+                <div class="text-xs text-[var(--color-text-muted)]">
+                  备份会导出全部系统设置（含用户 Persona 头像）；“包含角色卡/包含全部聊天记录”同时包含世界书数据。
                 </div>
               </div>
 
