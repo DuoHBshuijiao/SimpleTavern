@@ -35,14 +35,15 @@ AI助手路由模块
 from __future__ import annotations
 
 import json
-import re
-from pathlib import Path
 from typing import Any, AsyncIterator
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from app.assistant_tools.context import AssistantToolContext
+from app.assistant_tools.digest import args_digest as _tool_args_digest
+from app.assistant_tools.executor import build_openai_tools_list, execute_tool
 from app.llm.openai_compat import chat_completions_message, stream_chat_completions
 from app.schemas import (
     build_reasoning_request_config,
@@ -104,6 +105,7 @@ class AssistantStreamRequest(BaseModel):
     appendUserMessage: bool | None = True
     chatId: str | None = None
     allowWriteMemory: bool | None = None
+    allowDestructiveTools: bool | None = None
     scope: str | None = None
 
 
@@ -121,568 +123,40 @@ def _sse(event: str, data_obj: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data_obj, ensure_ascii=False)}\n\n"
 
 
-def _resolve_ai_path(path_str: str) -> Path:
-    """
-    解析AI工作空间内的相对路径
-    
-    确保路径在ai_workspace目录下，不允许绝对路径或越界访问。
-    
-    Args:
-        path_str: 相对路径字符串
-    
-    Returns:
-        Path: 解析后的完整路径
-    
-    Raises:
-        ValueError: 路径为空、为绝对路径或越界时抛出
-    """
-    if not path_str or path_str.strip() == "":
-        raise ValueError("path is required")
-    raw = Path(path_str)
-    if raw.is_absolute():
-        raise ValueError("absolute path is not allowed")
-    base = ai_workspace_dir().resolve()
-    target = (base / raw).resolve()
-    try:
-        target.relative_to(base)
-    except ValueError as exc:
-        raise ValueError("path must be under ai_workspace") from exc
-    return target
-
-
-def _tool_read_file(args: dict[str, Any]) -> dict[str, Any]:
-    """
-    工具：读取文件
-    
-    Args:
-        args: 工具参数，包含path
-    
-    Returns:
-        dict[str, Any]: 工具执行结果
-    """
-    path_str = str(args.get("path") or "")
-    target = _resolve_ai_path(path_str)
-    if not target.exists() or not target.is_file():
-        return {"ok": False, "error": "file not found", "path": path_str}
-    content = target.read_text(encoding="utf-8")
-    return {"ok": True, "path": path_str, "content": content}
-
-
-def _tool_create_file(args: dict[str, Any]) -> dict[str, Any]:
-    """
-    工具：创建文件
-    
-    文件已存在时失败。
-    
-    Args:
-        args: 工具参数，包含path和content
-    
-    Returns:
-        dict[str, Any]: 工具执行结果
-    """
-    path_str = str(args.get("path") or "")
-    content = str(args.get("content") or "")
-    target = _resolve_ai_path(path_str)
-    if target.exists():
-        return {"ok": False, "error": "file already exists", "path": path_str}
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(content, encoding="utf-8")
-    return {"ok": True, "path": path_str}
-
-
-def _tool_write_file(args: dict[str, Any]) -> dict[str, Any]:
-    """
-    工具：写入文件
-    
-    文件存在则覆盖。
-    
-    Args:
-        args: 工具参数，包含path和content
-    
-    Returns:
-        dict[str, Any]: 工具执行结果
-    """
-    path_str = str(args.get("path") or "")
-    content = str(args.get("content") or "")
-    target = _resolve_ai_path(path_str)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(content, encoding="utf-8")
-    return {"ok": True, "path": path_str}
-
-
-def _tool_delete_file(args: dict[str, Any]) -> dict[str, Any]:
-    """
-    工具：删除文件
-    
-    Args:
-        args: 工具参数，包含path
-    
-    Returns:
-        dict[str, Any]: 工具执行结果
-    """
-    path_str = str(args.get("path") or "")
-    target = _resolve_ai_path(path_str)
-    if target.exists() and target.is_file():
-        target.unlink(missing_ok=True)
-    return {"ok": True, "path": path_str}
-
-
 def _load_chat_context(chat_id: str) -> Chat | None:
-    """
-    加载聊天上下文
-    
-    Args:
-        chat_id: 聊天会话ID
-    
-    Returns:
-        Chat | None: 聊天对象，不存在返回None
-    """
     try:
         return load_chat(chat_id)
     except FileNotFoundError:
         return None
 
 
-def _tool_read_whole_chat_json(chat_id: str) -> dict[str, Any]:
-    """
-    工具：读取全部聊天记录（完整 chat.json 内容）
-
-    Args:
-        chat_id: 聊天会话ID
-
-    Returns:
-        dict[str, Any]: 工具执行结果，包含全部聊天记录
-    """
-    chat = _load_chat_context(chat_id)
-    if chat is None:
-        return {"ok": False, "error": "chat not found", "chatId": chat_id}
-    return {"ok": True, "chat": chat.model_dump(mode="json")}
-
-
-def _tool_read_latest_chat_json(chat_id: str) -> dict[str, Any]:
-    """
-    工具：读取自上一次记忆更新标记到最新的聊天记录（用于总结的上下文）。
-    若不存在 memoryUpdatedAfterThis 标记，则与 read_whole_chat_json 行为一致，返回完整聊天记录。
-
-    Args:
-        chat_id: 聊天会话ID
-
-    Returns:
-        dict[str, Any]: 工具执行结果，包含从标记到最新的聊天记录或完整记录
-    """
-    chat = _load_chat_context(chat_id)
-    if chat is None:
-        return {"ok": False, "error": "chat not found", "chatId": chat_id}
-    payload = chat.model_dump(mode="json")
-    messages = payload.get("messages") or []
-    start_index = 0
-    for i, m in enumerate(messages):
-        if m.get("memoryUpdatedAfterThis") is True:
-            start_index = i
-            break
-    payload["messages"] = messages[start_index:]
-    return {"ok": True, "chat": payload}
-
-
-def _tool_append_chat_memory(chat_id: str, args: dict[str, Any]) -> dict[str, Any]:
-    """
-    工具：在已有长期记忆末尾换行后追加传入的字符串内容（助手默认使用的记忆添加方式）。
-
-    Args:
-        chat_id: 聊天会话ID
-        args: 工具参数，包含 content 字符串
-
-    Returns:
-        dict[str, Any]: 工具执行结果
-    """
-    chat = _load_chat_context(chat_id)
-    if chat is None:
-        return {"ok": False, "error": "chat not found", "chatId": chat_id}
-    content = str(args.get("content") or "").strip()
-    current = (getattr(chat.overrides, "longTermMemory", None) or "").strip()
-    new_content = (current + "\n" + content).strip() if current else content
-    save_chat_memory(chat.characterId, chat.id, new_content)
-    chat.overrides.longTermMemory = new_content
-    mark_last_message_memory_updated(chat)
-    save_chat(chat)
-    return {"ok": True, "chatId": chat_id}
-
-
-def _tool_read_chat_memory(chat_id: str) -> dict[str, Any]:
-    """
-    工具：读取聊天长期记忆
-    
-    Args:
-        chat_id: 聊天会话ID
-    
-    Returns:
-        dict[str, Any]: 工具执行结果
-    """
-    chat = _load_chat_context(chat_id)
-    if chat is None:
-        return {"ok": False, "error": "chat not found", "chatId": chat_id}
-    try:
-        memory = load_chat_memory(chat.characterId, chat.id)
-    except FileNotFoundError:
-        return {"ok": False, "error": "chat memory not found", "chatId": chat_id}
-    return {"ok": True, "chatId": chat_id, "content": memory}
-
-
-def _tool_overwrite_chat_memory(chat_id: str, args: dict[str, Any]) -> dict[str, Any]:
-    """
-    工具：覆盖聊天长期记忆
-    
-    Args:
-        chat_id: 聊天会话ID
-        args: 工具参数，包含content
-    
-    Returns:
-        dict[str, Any]: 工具执行结果
-    """
-    chat = _load_chat_context(chat_id)
-    if chat is None:
-        return {"ok": False, "error": "chat not found", "chatId": chat_id}
-    content = str(args.get("content") or "")
-    save_chat_memory(chat.characterId, chat.id, content)
-    chat.overrides.longTermMemory = content
-    mark_last_message_memory_updated(chat)
-    save_chat(chat)
-    return {"ok": True, "chatId": chat_id}
-
-
-def _tool_read_character_card(chat_id: str, args: dict[str, Any]) -> dict[str, Any]:
-    """
-    工具：读取角色卡片
-    
-    只能读取当前聊天参与的角色。
-    
-    Args:
-        chat_id: 聊天会话ID
-        args: 工具参数，包含characterId
-    
-    Returns:
-        dict[str, Any]: 工具执行结果
-    """
-    chat = _load_chat_context(chat_id)
-    if chat is None:
-        return {"ok": False, "error": "chat not found", "chatId": chat_id}
-    target_id = str(args.get("characterId") or "")
-    participant_ids = set(chat.memberIds or [])
-    if not participant_ids:
-        participant_ids.add(chat.characterId)
-    if target_id not in participant_ids:
-        return {"ok": False, "error": "character not in chat", "characterId": target_id}
-    try:
-        card = load_character(target_id)
-    except FileNotFoundError:
-        return {"ok": False, "error": "character not found", "characterId": target_id}
-    return {"ok": True, "character": card.model_dump(mode="json")}
-
-
-def _tool_list_participants(chat_id: str) -> dict[str, Any]:
-    """
-    工具：列出聊天参与者
-    
-    Args:
-        chat_id: 聊天会话ID
-    
-    Returns:
-        dict[str, Any]: 工具执行结果，包含参与者列表
-    """
-    chat = _load_chat_context(chat_id)
-    if chat is None:
-        return {"ok": False, "error": "chat not found", "chatId": chat_id}
-    participant_ids = chat.memberIds if chat.isGroup else [chat.characterId]
-    participants = []
-    for cid in participant_ids:
-        try:
-            card = load_character(cid)
-            participants.append({"id": cid, "name": card.name, "avatar": card.avatar})
-        except FileNotFoundError:
-            participants.append({"id": cid, "name": "", "avatar": ""})
-    return {"ok": True, "participants": participants}
-
-
-def _tool_time_is() -> dict[str, Any]:
-    """
-    工具：获取当前时间
-    
-    Returns:
-        dict[str, Any]: 工具执行结果，包含当前时间（格式：YYYY/MM/DD - HH:MM:SS）
-    """
-    from datetime import datetime
-    now = datetime.now()
-    time_str = now.strftime("%Y/%m/%d - %H:%M:%S")
-    return {"ok": True, "time": time_str}
-
-
-def _try_parse_character_card(path_str: str, content: str | None) -> dict[str, Any] | None:
-    """
-    尝试解析角色卡片
-    
-    如果路径是character_card.json，尝试从内容或文件中解析角色卡片。
-    
-    Args:
-        path_str: 文件路径
-        content: 文件内容（可选）
-    
-    Returns:
-        dict[str, Any] | None: 解析后的角色卡片字典，失败返回None
-    """
-    if Path(path_str).name != "character_card.json":
-        return None
-    raw: Any
-    try:
-        raw = json.loads(content) if content is not None else None
-    except Exception:
-        raw = None
-    if raw is None:
-        try:
-            target = _resolve_ai_path(path_str)
-            raw = json.loads(target.read_text(encoding="utf-8"))
-        except Exception:
-            return None
-    try:
-        card = CharacterCard.model_validate(raw)
-    except Exception:
-        return None
-    return card.model_dump(mode="json")
-
-
-def _build_tools(chat_id: str | None, allow_write_memory: bool) -> list[dict[str, Any]]:
-    """
-    构建工具列表
-    
-    根据chat_id和allow_write_memory决定包含哪些工具。
-    
-    Args:
-        chat_id: 聊天会话ID（可选）
-        allow_write_memory: 是否允许写入长期记忆
-    
-    Returns:
-        list[dict[str, Any]]: 工具定义列表
-    """
-    tools = [
-        {
-            "type": "function",
-            "function": {
-                "name": "time_is",
-                "description": "获取当前时间",
-                "parameters": {
-                    "type": "object",
-                    "properties": {},
-                    "additionalProperties": False,
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "read_file",
-                "description": "读取 data/ai_workspace/ 下的文件内容",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "path": {"type": "string", "description": "相对路径，如 character_card.json"}
-                    },
-                    "required": ["path"],
-                    "additionalProperties": False,
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "create_file",
-                "description": "新建文件并写入内容（文件已存在时失败）",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "path": {"type": "string", "description": "相对路径，如 character_card.json"},
-                        "content": {"type": "string", "description": "文件内容"},
-                    },
-                    "required": ["path", "content"],
-                    "additionalProperties": False,
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "write_file",
-                "description": "写入文件内容（存在则覆盖）",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "path": {"type": "string", "description": "相对路径，如 character_card.json"},
-                        "content": {"type": "string", "description": "文件内容"},
-                    },
-                    "required": ["path", "content"],
-                    "additionalProperties": False,
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "delete_file",
-                "description": "删除 data/ai_workspace/ 下的文件",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "path": {"type": "string", "description": "相对路径，如 character_card.json"}
-                    },
-                    "required": ["path"],
-                    "additionalProperties": False,
-                },
-            },
-        },
-    ]
-    if chat_id:
-        tools.extend(
-            [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "read_latest_chat_json",
-                        "description": "读取自上次记忆更新到最新的聊天记录（默认聊天读取工具，用于总结的上下文）；无标记时等同完整记录",
-                        "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
-                    },
-                },
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "read_whole_chat_json",
-                        "description": "读取当前聊天的全部聊天记录（完整 chat.json 内容）",
-                        "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
-                    },
-                },
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "read_chat_memory",
-                        "description": "读取当前聊天 chat_memory.json 的内容",
-                        "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
-                    },
-                },
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "read_character_card",
-                        "description": "读取当前聊天参与角色的角色卡",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {"characterId": {"type": "string"}},
-                            "required": ["characterId"],
-                            "additionalProperties": False,
-                        },
-                    },
-                },
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "list_participants",
-                        "description": "列出当前聊天参与角色及其ID",
-                        "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
-                    },
-                },
-            ]
-        )
-        if allow_write_memory:
-            tools.extend(
-                [
-                    {
-                        "type": "function",
-                        "function": {
-                            "name": "append_chat_memory",
-                            "description": "在长期记忆末尾换行后追加内容（默认记忆添加工具）",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {"content": {"type": "string"}},
-                                "required": ["content"],
-                                "additionalProperties": False,
-                            },
-                        },
-                    },
-                    {
-                        "type": "function",
-                        "function": {
-                            "name": "overwrite_chat_memory",
-                            "description": "覆盖当前聊天 chat_memory.json 的全部内容（仅在用户明确要求重写全部记忆时使用）",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {"content": {"type": "string"}},
-                                "required": ["content"],
-                                "additionalProperties": False,
-                            },
-                        },
-                    },
-                ]
-            )
-    return tools
-
-
-def _run_tool(
-    name: str,
+def _tool_record_payload(
+    tool_name: str,
+    loop_index: int,
+    result: dict[str, Any],
     args: dict[str, Any],
-    chat_id: str | None,
-    allow_write_memory: bool,
-) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    """
-    执行工具调用
-    
-    Args:
-        name: 工具名称
-        args: 工具参数
-        chat_id: 聊天会话ID（可选）
-        allow_write_memory: 是否允许写入长期记忆
-    
-    Returns:
-        tuple[dict[str, Any], dict[str, Any] | None]: (工具执行结果, 解析出的角色卡片)
-    """
-    content_for_card: str | None = None
-    path_str = str(args.get("path") or "")
-    try:
-        if name == "time_is":
-            return _tool_time_is(), None
-        if name == "read_file":
-            return _tool_read_file(args), None
-        if name == "create_file":
-            content_for_card = str(args.get("content") or "")
-            result = _tool_create_file(args)
-        elif name == "write_file":
-            content_for_card = str(args.get("content") or "")
-            result = _tool_write_file(args)
-        elif name == "delete_file":
-            result = _tool_delete_file(args)
-        elif name == "read_latest_chat_json" and chat_id:
-            return _tool_read_latest_chat_json(chat_id), None
-        elif name == "read_whole_chat_json" and chat_id:
-            return _tool_read_whole_chat_json(chat_id), None
-        elif name == "read_chat_memory" and chat_id:
-            return _tool_read_chat_memory(chat_id), None
-        elif name == "append_chat_memory":
-            if not chat_id:
-                return {"ok": False, "error": "记忆写入需要当前在聊天会话中（需提供 chatId），工作区模式下无法写入记忆。"}, None
-            if not allow_write_memory:
-                return {"ok": False, "error": "本回合未允许写入长期记忆。用户需在本条消息中明确表达写入/更新/保存/记录记忆的意图（例如：「保存到记忆」「写入长期记忆」）后，记忆工具才会可用。"}, None
-            return _tool_append_chat_memory(chat_id, args), None
-        elif name == "overwrite_chat_memory":
-            if not chat_id:
-                return {"ok": False, "error": "记忆覆盖需要当前在聊天会话中（需提供 chatId），工作区模式下无法写入记忆。"}, None
-            if not allow_write_memory:
-                return {"ok": False, "error": "本回合未允许写入长期记忆。用户需在本条消息中明确表达写入/更新/保存/记录记忆的意图后，记忆工具才会可用。"}, None
-            return _tool_overwrite_chat_memory(chat_id, args), None
-        elif name == "read_character_card" and chat_id:
-            return _tool_read_character_card(chat_id, args), None
-        elif name == "list_participants" and chat_id:
-            return _tool_list_participants(chat_id), None
-        else:
-            return {"ok": False, "error": "unknown tool"}, None
-        card = _try_parse_character_card(path_str, content_for_card)
-        return result, card
-    except Exception as exc:
-        return {"ok": False, "error": str(exc), "path": path_str}, None
+) -> dict[str, Any]:
+    msg = str(result.get("message") or "")
+    return {
+        "toolName": tool_name,
+        "loopIndex": loop_index,
+        "ok": bool(result.get("ok")),
+        "code": result.get("code"),
+        "message": msg,
+        "argsDigest": _tool_args_digest(args),
+    }
+
+
+def _make_tool_trace_message(
+    tool_name: str,
+    loop_index: int,
+    result: dict[str, Any],
+    args: dict[str, Any],
+) -> ChatMessage:
+    rec = _tool_record_payload(tool_name, loop_index, result, args)
+    content = json.dumps(rec, ensure_ascii=False)
+    return ChatMessage(role="system", content=content, toolTrace=True, toolRecord=rec)
+
 
 
 def _clear_reasoning_content(messages: list[dict[str, Any]]) -> None:
@@ -818,29 +292,6 @@ def _clear_assistant_chat_by_scope(scope: str | None, chat_id: str | None) -> No
         _clear_assistant_chat(chat_id)
 
 
-def _explicit_memory_write_requested(text: str) -> bool:
-    """
-    检查用户消息中是否明确要求写入长期记忆
-    
-    Args:
-        text: 用户消息文本
-    
-    Returns:
-        bool: 如果包含写入记忆的关键词返回True
-    """
-    if not text:
-        return False
-    patterns = [
-        r"写入.*记忆",
-        r"更新.*记忆",
-        r"保存.*记忆",
-        r"记录.*记忆",
-        r"写.*长期记忆",
-        r"保存.*长期记忆",
-    ]
-    return any(re.search(p, text) for p in patterns)
-
-
 def _build_chat_participants_prompt(chat_id: str | None) -> str | None:
     """
     构建聊天参与者提示词
@@ -894,7 +345,7 @@ def put_workspace_character_card(card: CharacterCard) -> CharacterCard:
     """
     保存工作区角色卡草稿
 
-    写入 data/ai_workspace/character_card.json，供助手工具 write_file 与前端共用同一暂存位置。
+    写入 data/ai_workspace/character_card.json，供助手工具 workspace_write_file 与前端共用同一暂存位置。
     """
     return save_workspace_character_card(card)
 
@@ -1068,16 +519,17 @@ def delete_assistant_message(
 @router.post("/assistant/stream")
 async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
     """
-    流式AI助手对话
-    
-    支持工具调用、多轮对话、推理内容等。支持workspace和chat两种作用域。
-    自动检测用户消息中是否包含写入记忆的请求。
-    
+    流式 AI 助手对话。
+
+    支持工具调用、多轮对话、推理内容等；作用域可为 workspace 或 chat。
+    长期记忆写入与破坏性工具是否可用仅由请求体中的 allowWriteMemory、
+    allowDestructiveTools 决定（工作区作用域下不会开启记忆写入）。
+
     Args:
         req: 流式请求对象
-    
+
     Returns:
-        StreamingResponse: SSE流式响应
+        StreamingResponse: SSE 流式响应
     """
     settings = load_settings()
     assistant_settings = load_assistant_settings()
@@ -1126,9 +578,18 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
         chat.messages = existing_messages
         _save_assistant_chat_by_scope(scope, chat_id, chat)
 
+    _LEGACY_TOOL_TRACE_MAX = 2000
     conversation: list[dict[str, Any]] = []
     for m in existing_messages:
-        if getattr(m, "toolTrace", False):
+        if getattr(m, "toolTrace", False) and not getattr(m, "toolRecord", None):
+            raw = (m.content or "").strip()
+            if raw:
+                text = raw if len(raw) <= _LEGACY_TOOL_TRACE_MAX else raw[:_LEGACY_TOOL_TRACE_MAX] + "…"
+                conversation.append({"role": "system", "content": text})
+            continue
+        tr = getattr(m, "toolRecord", None)
+        if isinstance(tr, dict):
+            conversation.append({"role": "system", "content": json.dumps(tr, ensure_ascii=False)})
             continue
         msg_dict = {"role": m.role, "content": m.content}
         if hasattr(m, "extra") and isinstance(m.extra, dict) and "reasoning_content" in m.extra:
@@ -1148,12 +609,18 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
     if model == "deepseek-reasoner" or thinking_enabled:
         _clear_reasoning_content(llm_msgs)
 
-    allow_write_memory = req.allowWriteMemory
-    if allow_write_memory is None and scope != "workspace":
-        allow_write_memory = _explicit_memory_write_requested(req.userMessage)
+    allow_write_memory = bool(req.allowWriteMemory) if req.allowWriteMemory is not None else False
     if scope == "workspace":
         allow_write_memory = False
-    tools = _build_tools(chat_id, bool(allow_write_memory))
+    allow_destructive_tools = bool(req.allowDestructiveTools) if req.allowDestructiveTools is not None else False
+    tool_ctx = AssistantToolContext(
+        chat_id=chat_id,
+        scope=scope,
+        allow_write_memory=allow_write_memory,
+        allow_destructive_tools=allow_destructive_tools,
+        assistant_settings=assistant_settings,
+    )
+    tools = build_openai_tools_list(tool_ctx)
     extra_body = filter_reasoning_extra_body_for_upstream(model, reasoning_cfg["extra_body"])
 
     # 非流式：与全局设置 streamEnabled 一致，返回 JSON
@@ -1161,6 +628,8 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
         current_messages = list(llm_msgs)
         max_turns = 8
         tool_traces: list[dict[str, Any]] = []
+        wb_updates: list[dict[str, Any]] = []
+        co_updates: list[dict[str, Any]] = []
         last_card: Any = None
         try:
             for _ in range(max_turns):
@@ -1202,8 +671,11 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
                         "messageId": assistant_msg_obj.id,
                         "toolTraces": tool_traces,
                         "card": last_card,
+                        "worldbookUpdated": wb_updates,
+                        "chatOverridesUpdated": co_updates,
                     })
 
+                tool_idx = 0
                 for tool_call in resp.tool_calls or []:
                     fn = (tool_call.get("function") or {}).get("name")
                     raw_args = (tool_call.get("function") or {}).get("arguments") or "{}"
@@ -1212,17 +684,21 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
                     except Exception:
                         args = {}
                     tool_name = str(fn)
-                    result, card = _run_tool(tool_name, args, chat_id, bool(allow_write_memory))
-                    if card:
-                        last_card = card
-                    trace_content = f"工具调用：{tool_name}"
-                    if args:
-                        trace_content += f"\n参数：{json.dumps(args, ensure_ascii=False)}"
-                    trace_msg = ChatMessage(role="system", content=trace_content, toolTrace=True)
+                    outcome = execute_tool(tool_name, args, tool_ctx)
+                    result = outcome.result
+                    if outcome.card:
+                        last_card = outcome.card
+                    if outcome.worldbook_updated:
+                        wb_updates.append(outcome.worldbook_updated)
+                    if outcome.chat_overrides_updated:
+                        co_updates.append(outcome.chat_overrides_updated)
+                    trace_msg = _make_tool_trace_message(tool_name, tool_idx, result, args)
+                    tool_idx += 1
                     trace_chat = _resolve_assistant_chat_by_scope(scope, chat_id)
                     trace_chat.messages.append(trace_msg)
                     _save_assistant_chat_by_scope(scope, chat_id, trace_chat)
-                    tool_traces.append({"content": trace_content, "messageId": trace_msg.id})
+                    tr = trace_msg.toolRecord or {}
+                    tool_traces.append({"record": tr, "messageId": trace_msg.id, "content": trace_msg.content})
                     tool_result_msg = {
                         "role": "tool",
                         "tool_call_id": tool_call.get("id"),
@@ -1246,6 +722,7 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
         """
         current_messages = list(llm_msgs)
         max_turns = 8
+        tool_idx_stream = 0
 
         for _ in range(max_turns):
             final_content = ""
@@ -1306,24 +783,26 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
                 except Exception:
                     args = {}
                 tool_name = str(fn)
-                result, card = _run_tool(tool_name, args, chat_id, bool(allow_write_memory))
-                trace_content = f"工具调用：{tool_name}"
-                if args:
-                    trace_content += f"\n参数：{json.dumps(args, ensure_ascii=False)}"
-                trace_msg = ChatMessage(role="system", content=trace_content, toolTrace=True)
+                outcome = execute_tool(tool_name, args, tool_ctx)
+                result = outcome.result
+                trace_msg = _make_tool_trace_message(tool_name, tool_idx_stream, result, args)
+                tool_idx_stream += 1
                 trace_chat = _resolve_assistant_chat_by_scope(scope, chat_id)
                 trace_chat.messages.append(trace_msg)
                 _save_assistant_chat_by_scope(scope, chat_id, trace_chat)
-                yield _sse("tool_trace", {"content": trace_content, "messageId": trace_msg.id})
-                if card:
-                    yield _sse("card", {"card": card})
-                # 记忆写入工具执行成功后，推送当前会话的更新，以便前端立即刷新长期记忆与「已保存」标记
-                if tool_name in ("append_chat_memory", "overwrite_chat_memory") and result.get("ok") and chat_id:
-                    try:
-                        updated_chat = load_chat(chat_id)
-                        yield _sse("chat_memory_updated", {"chat": updated_chat.model_dump(mode="json")})
-                    except Exception:
-                        pass
+                tr = trace_msg.toolRecord or {}
+                yield _sse(
+                    "tool_trace",
+                    {"record": tr, "messageId": trace_msg.id, "content": trace_msg.content},
+                )
+                if outcome.card:
+                    yield _sse("card", {"card": outcome.card})
+                if outcome.chat_memory_updated:
+                    yield _sse("chat_memory_updated", {"chat": outcome.chat_memory_updated})
+                if outcome.worldbook_updated:
+                    yield _sse("worldbook_updated", outcome.worldbook_updated)
+                if outcome.chat_overrides_updated:
+                    yield _sse("chat_overrides_updated", outcome.chat_overrides_updated)
                 tool_result_msg = {
                     "role": "tool",
                     "tool_call_id": tool_call.get("id"),
