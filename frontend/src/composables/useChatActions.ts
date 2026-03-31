@@ -379,7 +379,10 @@ export function useChatActions(deps: ChatActionsDeps) {
       firstMessage: (typeof cardObj.firstMessage === 'string' ? cardObj.firstMessage : undefined) ?? current.firstMessage,
       exampleDialogue: (typeof cardObj.exampleDialogue === 'string' ? cardObj.exampleDialogue : undefined) ?? current.exampleDialogue,
       systemPrompt: (typeof cardObj.systemPrompt === 'string' ? cardObj.systemPrompt : undefined) ?? current.systemPrompt,
-      avatar: (typeof cardObj.avatar === 'string' ? cardObj.avatar : undefined) ?? current.avatar,
+      avatar:
+        typeof cardObj.avatar === 'string' && cardObj.avatar !== ''
+          ? cardObj.avatar
+          : current.avatar,
       avatarFocusX:
         (typeof cardObj.avatarFocusX === 'number' ? cardObj.avatarFocusX : undefined)
         ?? current.avatarFocusX
