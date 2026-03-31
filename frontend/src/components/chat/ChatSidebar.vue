@@ -55,7 +55,7 @@
  *    - 位置：组件层，提供侧边栏功能
  */
 import type { CharacterCard, UserPersona, Chat } from '../../types/models'
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import ModernAvatar from '../ModernAvatar.vue'
 import ConfirmPopover from '../ConfirmPopover.vue'
 
@@ -238,6 +238,20 @@ const deleteConfirmMessage = computed(() => {
 
 const deleteTargetEl = ref<HTMLElement | null>(null)
 
+const characterListScrollRef = ref<HTMLElement | null>(null)
+
+watch(
+  () => props.selectedCharacterId,
+  async (id) => {
+    if (!id) return
+    await nextTick()
+    const root = characterListScrollRef.value
+    if (!root) return
+    const el = root.querySelector(`[data-character-id="${CSS.escape(id)}"]`)
+    el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  },
+)
+
 function confirmDeletePersona(persona: UserPersona, event: Event) {
   deleteTargetEl.value = (event.currentTarget as HTMLElement)
   deleteConfirm.value = { type: 'persona', id: persona.id, label: persona.name || '未命名身份' }
@@ -339,7 +353,7 @@ function confirmDelete() {
       </div>
 
       <!-- 角色列表区域 (中间，弹性伸缩) -->
-      <div class="flex-1 overflow-y-auto min-h-0 custom-scrollbar p-3">
+      <div ref="characterListScrollRef" class="flex-1 overflow-y-auto min-h-0 custom-scrollbar p-3">
         <div class="flex items-center justify-between mb-2 px-1">
           <span class="text-xs font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">角色列表</span>
           <button 
@@ -354,6 +368,7 @@ function confirmDelete() {
           <div 
             v-for="c in characters"
             :key="c.id"
+            :data-character-id="c.id"
             class="group relative flex items-start gap-3 p-3 rounded-2xl transition-all duration-200 border-y border-r border-transparent border-l-2"
             :class="selectedCharacterId === c.id ? 'bg-brand-a10 border-l-brand shadow-sm' : 'border-l-transparent hover:bg-surface-muted'"
             style="border: 1px solid var(--color-border);"
