@@ -89,6 +89,10 @@ function handleModelSelect(opt: { value: string; presetId?: string }) {
   })
 }
 
+function clearBoundModel() {
+  emit('update:settings', { ...props.settings, model: null, presetId: null })
+}
+
 /**
  * 关闭弹窗
  *
@@ -135,7 +139,17 @@ function save() {
 
           <!-- 模型绑定 -->
           <div class="form-group">
-            <label class="label">绑定模型</label>
+            <div class="flex items-center justify-between gap-2 mb-2">
+              <label class="label mb-0">绑定模型</label>
+              <button
+                type="button"
+                class="btn btn-xs btn-secondary shrink-0"
+                :disabled="!settings.model && !settings.presetId"
+                @click="clearBoundModel"
+              >
+                清除
+              </button>
+            </div>
             <ModernSelect
               :model-value="settings.model"
               :selected-preset-id="settings.presetId ?? null"
