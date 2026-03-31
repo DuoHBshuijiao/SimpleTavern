@@ -128,6 +128,33 @@ def _build_group_identity_guardrail(char_name: str | None) -> str:
     return f"[仅允许使用{resolved}的身份输出下一条回复。]"
 
 
+def _resolve_and_append_global_prefill(
+    messages: list[dict],
+    settings: Any,
+    *,
+    char_name: str,
+    user_name: str,
+) -> str:
+    """若配置了全局 Prefill，在 messages 末尾追加一条 assistant；返回解析后的文本（无则空串）。
+
+    仅用于主对话生成：/generate/stream、/generate/group、/generate/interject。
+    不得用于 draft-help、/assistant/stream 等其它 LLM 上下文（避免误注入续写前缀）。
+    展示与落库的助手内容仅使用模型输出，不包含上述 Prefill。
+    """
+    raw = getattr(settings.prompts, "globalPrefill", None) or ""
+    if not isinstance(raw, str) or not raw.strip():
+        return ""
+    resolved = replace_placeholders_in_text(
+        raw.strip(),
+        char_name=char_name or "角色",
+        user_name=user_name or "用户",
+    )
+    if not resolved.strip():
+        return ""
+    messages.append({"role": "assistant", "content": resolved})
+    return resolved
+
+
 def _build_data_url(image_bytes: bytes, mime_type: str) -> str:
     return f"data:{mime_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
 
@@ -774,6 +801,18 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
         c.pop("_message_id", None)
         messages.append(c)
 
+    prefill_user = (
+        (persona_for_prompt.name or "").strip() or "用户"
+        if persona_for_prompt
+        else "用户"
+    )
+    _resolve_and_append_global_prefill(
+        messages,
+        settings,
+        char_name=character.name or "角色",
+        user_name=prefill_user,
+    )
+
     reasoning_cfg = build_reasoning_request_config(settings)
     thinking_enabled = reasoning_cfg["thinking_enabled"]
     extra_body = filter_reasoning_extra_body_for_upstream(model, reasoning_cfg["extra_body"])
@@ -799,7 +838,8 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
                     full_text.append(chunk.text)
                     yield _sse("delta", {"text": chunk.text})
 
-            assistant_content = "".join(full_text).strip()
+            streamed = "".join(full_text)
+            assistant_content = streamed.strip()
             if assistant_content:
                 assistant_msg = ChatMessage(role="assistant", content=assistant_content)
                 chat.messages.append(assistant_msg)
@@ -1276,6 +1316,12 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
         c.pop("_message_id", None)
         messages.append(c)
     messages.append({"role": "user", "content": _build_group_identity_guardrail(character.name)})
+    _resolve_and_append_global_prefill(
+        messages,
+        settings,
+        char_name=character.name or "角色",
+        user_name=runtime_user_name,
+    )
 
     reasoning_cfg = build_reasoning_request_config(settings)
     thinking_enabled = reasoning_cfg["thinking_enabled"]
@@ -1302,7 +1348,8 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
                     full_text.append(chunk.text)
                     yield _sse("delta", {"text": chunk.text})
 
-            assistant_content = "".join(full_text).strip()
+            streamed = "".join(full_text)
+            assistant_content = streamed.strip()
             if assistant_content:
                 assistant_msg = ChatMessage(
                     role="assistant",
@@ -1643,6 +1690,12 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
         c.pop("_message_id", None)
         messages.append(c)
     messages.append({"role": "user", "content": _build_group_identity_guardrail(character.name)})
+    _resolve_and_append_global_prefill(
+        messages,
+        settings,
+        char_name=character.name or "角色",
+        user_name=runtime_user_name,
+    )
 
     reasoning_cfg = build_reasoning_request_config(settings)
     thinking_enabled = reasoning_cfg["thinking_enabled"]
@@ -1669,7 +1722,8 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
                     full_text.append(chunk.text)
                     yield _sse("delta", {"text": chunk.text})
 
-            assistant_content = "".join(full_text).strip()
+            streamed = "".join(full_text)
+            assistant_content = streamed.strip()
             if assistant_content:
                 assistant_msg = ChatMessage(
                     role="assistant",
