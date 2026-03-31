@@ -89,6 +89,39 @@ def count_tokens_for_messages(messages: list[dict]) -> int | None:
     return total
 
 
+def trim_dict_messages_to_token_budget(
+    messages: list[dict[str, Any]],
+    max_tokens: int,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """
+    从时间顺序列表头部丢弃最旧消息，直到总 token <= max_tokens；保留最新消息。
+    tokenizer 不可用时返回原列表并带警告。
+    """
+    warnings: list[str] = []
+    if max_tokens < 1 or not messages:
+        return list(messages), warnings
+    total = count_tokens_for_messages(messages)
+    if total is None:
+        warnings.append("token_count_unavailable")
+        return list(messages), warnings
+    if total <= max_tokens:
+        return list(messages), warnings
+    kept = list(messages)
+    while len(kept) > 1:
+        t = count_tokens_for_messages(kept)
+        if t is None:
+            warnings.append("token_count_unavailable")
+            return list(messages), warnings
+        if t <= max_tokens:
+            return kept, warnings
+        kept = kept[1:]
+    if kept:
+        t1 = count_tokens_for_messages(kept)
+        if t1 is not None and t1 > max_tokens:
+            warnings.append("single_message_exceeds_token_budget")
+    return kept, warnings
+
+
 def trim_messages_to_context(
     messages: list[dict],
     context_size: int,
