@@ -201,11 +201,16 @@ def _map_st_to_character_and_worldbook(raw: dict[str, Any]) -> tuple[CharacterCa
     merged = dict(raw)
     if isinstance(data, dict):
         merged.update(data)
+    description = _coalesce_st_text(merged.get("description"))
+    personality = _coalesce_st_text(merged.get("personality"))
+    scenario = _coalesce_st_text(merged.get("scenario"))
+    if not personality and not scenario and description:
+        personality = description
     card = CharacterCard(
         name=_coalesce_st_text(merged.get("name"), "新角色"),
-        description=_coalesce_st_text(merged.get("description")),
-        personality=_coalesce_st_text(merged.get("personality")),
-        scenario=_coalesce_st_text(merged.get("scenario")),
+        description=description,
+        personality=personality,
+        scenario=scenario,
         firstMessage=_coalesce_st_text(merged.get("first_mes"), merged.get("firstMessage")),
         exampleDialogue=_coalesce_st_text(merged.get("mes_example"), merged.get("exampleDialogue")),
         systemPrompt=_coalesce_st_text(merged.get("system_prompt"), merged.get("systemPrompt")),
