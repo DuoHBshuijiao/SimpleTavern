@@ -254,6 +254,11 @@ const assistant = useAssistant({
   chatId: assistantChatId,
   streamEnabled: isStreamEnabled,
   onChatMemoryUpdated: (chat) => chats.applyChatPayload(chat),
+  onChatOverridesUpdated: (p) => {
+    if (p.chatId && p.chatId === chats.activeChatId) {
+      void chats.load(p.chatId)
+    }
+  },
 })
 
 const errorStack = useErrorStack(6000)
@@ -3025,11 +3030,15 @@ const editingPersonaAvatarUrl = computed(() => {
       :reasoning-blocks="assistant.assistantReasoningBlocks.value"
       :streaming-content="assistant.assistantStreamingContent.value"
       :streaming-reasoning="assistant.assistantStreamingReasoning.value"
+      :allow-write-memory="assistant.allowWriteMemoryEnabled.value"
+      :allow-destructive-tools="assistant.allowDestructiveToolsEnabled.value"
       :current-model="assistantCurrentModel"
       :current-preset-id="assistant.assistantSettings.value.presetId ?? null"
       :model-options="chatModelOptions"
       @update:is-open="assistant.isAssistantPanelOpen.value = $event"
       @update:draft="assistant.assistantDraft.value = $event"
+      @toggle-write-memory="assistant.toggleAllowWriteMemory"
+      @toggle-destructive="assistant.toggleAllowDestructiveTools"
       @send="assistant.sendMessage('chat')"
       @reset="assistant.resetChat"
       @open-settings="assistant.showAssistantSettings.value = true"
@@ -3404,6 +3413,18 @@ const editingPersonaAvatarUrl = computed(() => {
               </div>
             </div>
             <div class="pt-4 border-t border-[var(--color-border-subtle)]">
+              <div class="flex flex-wrap gap-2 mb-2">
+                <button
+                  type="button"
+                  class="text-[10px] px-2.5 py-1 rounded-lg border transition-colors"
+                  :class="assistant.allowDestructiveToolsEnabled.value
+                    ? 'bg-amber-500/15 border-amber-500/50 text-amber-200'
+                    : 'border-[var(--color-border-subtle)] text-[var(--color-text-muted)]'"
+                  @click="assistant.toggleAllowDestructiveTools"
+                >
+                  破坏性工具
+                </button>
+              </div>
               <textarea
                 v-model="assistant.workspaceAssistantDraft.value"
                 class="input textarea h-24"
@@ -3551,6 +3572,28 @@ const editingPersonaAvatarUrl = computed(() => {
               placeholder="未启用（不限制）"
             />
             <p class="text-xs text-[var(--color-text-muted)] mt-1">填 0 或留空表示未启用。实际上下文总限制长度为该 Context Size 限制加上角色卡、用户信息、自定义系统提示词。</p>
+          </div>
+          <div class="form-group">
+            <label class="label">助手读取消息条数上限</label>
+            <input
+              v-model.number="assistant.assistantSettings.value.tool_read_max_messages"
+              type="number"
+              min="1"
+              class="input w-full"
+              placeholder="未限制（仅受服务端硬上限）"
+            />
+            <p class="text-xs text-[var(--color-text-muted)] mt-1">限制 chat_read_conversation 返回的最大消息条数；留空表示不额外限制。</p>
+          </div>
+          <div class="form-group">
+            <label class="label">助手读取消息 token 上限（估算）</label>
+            <input
+              v-model.number="assistant.assistantSettings.value.tool_read_max_tokens"
+              type="number"
+              min="1"
+              class="input w-full"
+              placeholder="未限制"
+            />
+            <p class="text-xs text-[var(--color-text-muted)] mt-1">对返回的消息列表做 token 估算裁剪（保留最新）；留空表示不启用。</p>
           </div>
         </div>
       </div>

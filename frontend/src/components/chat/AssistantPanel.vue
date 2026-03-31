@@ -77,6 +77,10 @@ const props = defineProps<{
   streamingContent?: string
   /** 当前正在流式接收的思考内容 */
   streamingReasoning?: string
+  /** 是否显示记忆写入 / 破坏性工具开关（仅聊天作用域） */
+  showToolPermissionToggles?: boolean
+  allowWriteMemory?: boolean
+  allowDestructiveTools?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -89,6 +93,8 @@ const emit = defineEmits<{
   'edit-message': [m: AssistantMessage]
   'delete-message': [m: AssistantMessage]
   'rewrite-message': [m: AssistantMessage]
+  'toggle-write-memory': []
+  'toggle-destructive': []
 }>()
 
 // Markdown 渲染器
@@ -355,6 +361,31 @@ watch(
 
     <!-- 输入区域 -->
     <div class="pt-4 pb-4 px-4 border-t border-white/5 bg-black/10 backdrop-blur-sm">
+      <div
+        v-if="showToolPermissionToggles !== false"
+        class="flex flex-wrap gap-2 mb-2"
+      >
+        <button
+          type="button"
+          class="text-[10px] px-2.5 py-1 rounded-lg border transition-colors"
+          :class="allowWriteMemory
+            ? 'bg-brand/25 border-brand text-brand-foreground shadow-[0_0_0_1px_rgba(183,110,121,0.35)]'
+            : 'border-white/10 text-gray-500 hover:border-white/20'"
+          @click="emit('toggle-write-memory')"
+        >
+          记忆写入
+        </button>
+        <button
+          type="button"
+          class="text-[10px] px-2.5 py-1 rounded-lg border transition-colors"
+          :class="allowDestructiveTools
+            ? 'bg-amber-500/20 border-amber-500/60 text-amber-100 shadow-[0_0_0_1px_rgba(245,158,11,0.35)]'
+            : 'border-white/10 text-gray-500 hover:border-white/20'"
+          @click="emit('toggle-destructive')"
+        >
+          破坏性工具
+        </button>
+      </div>
       <div class="relative">
         <textarea
           :value="draft"
