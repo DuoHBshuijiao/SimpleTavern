@@ -17,6 +17,7 @@
     - UserPersona: 用户Persona
     - Settings: 全局设置
     - AssistantSettings: AI助手设置
+    - AssistantSettingsUpdate: AI助手设置部分更新（PUT 合并用）
     - AssistantChat: AI助手聊天记录
     - CharacterCard: 角色卡片
     - ChatMessage: 聊天消息
@@ -298,10 +299,11 @@ class AssistantSettings(BaseModel):
     """
     AI助手设置模型
     
-    用于配置AI助手的行为参数。
+    用于配置AI助手的行为参数。prompt 仍持久化并在服务端推理时使用，
+    但 API 的 GET/PUT 响应中不再包含 prompt，避免在客户端暴露。
     
     主要属性：
-        prompt: 助手系统提示词
+        prompt: 助手系统提示词（仅存储与内部使用）
         temperature: 温度参数，范围0.0-2.0
         model: 使用的模型名称
         presetId: 关联的API预设ID
@@ -309,6 +311,21 @@ class AssistantSettings(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     prompt: str = ""
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+    model: str | None = None
+    presetId: str | None = None
+    context_size: int | None = Field(default=None, ge=0, description="上下文总长度限制(token)，0或空表示未启用；最近消息裁剪用")
+
+
+class AssistantSettingsUpdate(BaseModel):
+    """
+    AI 助手设置部分更新（PUT 请求体）。
+
+    未在 JSON 中出现的字段表示不修改；与已有 AssistantSettings 合并后保存。
+    """
+    model_config = ConfigDict(extra="allow")
+
+    prompt: str | None = None
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     model: str | None = None
     presetId: str | None = None

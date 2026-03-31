@@ -6,7 +6,7 @@
  *
  * 主要功能：
  *    - 消息管理：加载、发送、编辑、删除助手消息
- *    - 设置管理：加载和保存助手设置（提示词、温度、模型等）
+ *    - 设置管理：加载和保存助手设置（温度、模型等）
  *    - 流式对话：支持SSE流式接收助手回复
  *    - 作用域管理：区分聊天作用域和工作区作用域
  *    - 消息重写：支持重写助手消息
@@ -16,7 +16,7 @@
  *    - buildPath: 构建助手API路径
  *    - normalizeMessages: 规范化消息数组
  *    - allowMemoryWrite: 检测是否允许写入记忆
- *    - loadSettings: 加载助手设置
+ *    - loadSettings: 加载助手设置（不含服务端保留的助手系统提示词）
  *    - saveSettings: 保存助手设置
  *    - loadChat: 加载助手聊天记录
  *    - loadState: 加载助手完整状态
@@ -50,7 +50,6 @@ export type AssistantMessage = {
 export type AssistantScope = 'chat' | 'workspace'
 
 export interface AssistantSettings {
-  prompt: string
   temperature: number | null
   model: string | null
   presetId: string | null
@@ -97,7 +96,6 @@ export function useAssistant(options: UseAssistantOptions) {
   const showAssistantSettings = ref(false)
   const isAssistantPanelOpen = ref(false)
   const assistantSettings = ref<AssistantSettings>({
-    prompt: '',
     temperature: null,
     model: null,
     presetId: null,
@@ -217,17 +215,19 @@ export function useAssistant(options: UseAssistantOptions) {
   /**
    * 加载助手设置
    *
-   * 从服务器加载助手设置（提示词、温度、模型等）。
+   * 从服务器加载助手设置（温度、模型等）。
    * 使用apiGet函数（来自api/http.ts）发送GET请求到/api/assistant/settings。
    *
    * @returns {Promise<void>} 完成时返回
    */
   async function loadSettings() {
-    const res = await apiGet<{ prompt: string; temperature: number | null; model: string | null; presetId?: string | null; context_size?: number | null }>(
-      '/api/assistant/settings',
-    )
+    const res = await apiGet<{
+      temperature: number | null
+      model: string | null
+      presetId?: string | null
+      context_size?: number | null
+    }>('/api/assistant/settings')
     assistantSettings.value = {
-      prompt: res.prompt ?? '',
       temperature: res.temperature ?? null,
       model: res.model ?? null,
       presetId: res.presetId ?? null,
@@ -251,7 +251,9 @@ export function useAssistant(options: UseAssistantOptions) {
 
   async function saveSettings() {
     const payload = {
-      ...assistantSettings.value,
+      temperature: assistantSettings.value.temperature,
+      model: assistantSettings.value.model,
+      presetId: assistantSettings.value.presetId,
       context_size: normalizeContextSize(assistantSettings.value.context_size),
     }
     await apiPut('/api/assistant/settings', payload)

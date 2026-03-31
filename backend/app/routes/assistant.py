@@ -49,6 +49,7 @@ from app.schemas import (
     filter_reasoning_extra_body_for_upstream,
     AssistantChat,
     AssistantSettings,
+    AssistantSettingsUpdate,
     Chat,
     CharacterCard,
     ChatMessage,
@@ -898,10 +899,14 @@ def put_workspace_character_card(card: CharacterCard) -> CharacterCard:
     return save_workspace_character_card(card)
 
 
-@router.get("/assistant/settings", response_model=AssistantSettings)
+@router.get(
+    "/assistant/settings",
+    response_model=AssistantSettings,
+    response_model_exclude={"prompt"},
+)
 def get_assistant_settings() -> AssistantSettings:
     """
-    获取AI助手设置
+    获取AI助手设置（响应中不包含 prompt）。
     
     Returns:
         AssistantSettings: 助手设置对象
@@ -909,18 +914,25 @@ def get_assistant_settings() -> AssistantSettings:
     return load_assistant_settings()
 
 
-@router.put("/assistant/settings", response_model=AssistantSettings)
-def put_assistant_settings(settings: AssistantSettings) -> AssistantSettings:
+@router.put(
+    "/assistant/settings",
+    response_model=AssistantSettings,
+    response_model_exclude={"prompt"},
+)
+def put_assistant_settings(body: AssistantSettingsUpdate) -> AssistantSettings:
     """
-    更新AI助手设置
+    更新AI助手设置：请求体中未出现的字段保留原值（含 prompt）。
     
     Args:
-        settings: 助手设置对象
+        body: 部分字段更新
     
     Returns:
-        AssistantSettings: 保存后的设置对象
+        AssistantSettings: 保存后的设置对象（响应中不包含 prompt）
     """
-    return save_assistant_settings(settings)
+    existing = load_assistant_settings()
+    patch = body.model_dump(exclude_unset=True)
+    merged = existing.model_copy(update=patch)
+    return save_assistant_settings(merged)
 
 
 @router.get("/assistant/chat", response_model=AssistantChat)

@@ -3531,14 +3531,6 @@ const editingPersonaAvatarUrl = computed(() => {
       <div class="modal-body">
         <div class="space-y-6">
           <div class="form-group">
-            <label class="label">提示词</label>
-            <textarea
-              v-model="assistant.assistantSettings.value.prompt"
-              class="input textarea h-48"
-              placeholder="输入聊天助手提示词..."
-            ></textarea>
-          </div>
-          <div class="form-group">
             <label class="label">温度</label>
             <input
               v-model.number="assistant.assistantSettings.value.temperature"
