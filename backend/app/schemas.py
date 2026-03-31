@@ -315,6 +315,16 @@ class AssistantSettings(BaseModel):
     model: str | None = None
     presetId: str | None = None
     context_size: int | None = Field(default=None, ge=0, description="上下文总长度限制(token)，0或空表示未启用；最近消息裁剪用")
+    tool_read_max_messages: int | None = Field(
+        default=None,
+        ge=1,
+        description="助手 chat_read_conversation 最多返回的消息条数；空表示仅受服务端硬上限约束",
+    )
+    tool_read_max_tokens: int | None = Field(
+        default=None,
+        ge=1,
+        description="助手 chat_read_conversation 返回消息列表的最大 token 数（估算）；空表示不启用",
+    )
 
 
 class AssistantSettingsUpdate(BaseModel):
@@ -330,6 +340,16 @@ class AssistantSettingsUpdate(BaseModel):
     model: str | None = None
     presetId: str | None = None
     context_size: int | None = Field(default=None, ge=0, description="上下文总长度限制(token)，0或空表示未启用；最近消息裁剪用")
+    tool_read_max_messages: int | None = Field(
+        default=None,
+        ge=1,
+        description="助手 chat_read_conversation 最多返回的消息条数；空表示仅受服务端硬上限约束",
+    )
+    tool_read_max_tokens: int | None = Field(
+        default=None,
+        ge=1,
+        description="助手 chat_read_conversation 返回消息列表的最大 token 数（估算）；空表示不启用",
+    )
 
 
 class AssistantChat(BaseModel):
@@ -478,6 +498,8 @@ class ChatMessage(BaseModel):
         default=None,
         description="当前选中的开场变体下标（与 greetingVariants 对齐）；避免仅靠 content 反推在重复文案时错位",
     )
+    toolTrace: bool = False
+    toolRecord: dict[str, Any] | None = None
 
 
 class ChatImageAttachment(BaseModel):
