@@ -1125,6 +1125,10 @@ watch(
   async (cid) => {
     if (!cid) return
     await chats.loadList(cid)
+    const ac = chats.activeChat
+    if (ac?.isGroup && ac.memberIds?.includes(cid)) {
+      return
+    }
     const first = chats.list[0]
     if (first) {
       await chats.load(first.id)
@@ -1134,6 +1138,19 @@ watch(
     }
   },
   { immediate: true },
+)
+
+/** 激活群聊时若当前选中角色不在成员内，同步为群内第一个仍存在的成员（顺序同 memberIds） */
+watch(
+  () => activeChat.value?.id,
+  () => {
+    const chat = activeChat.value
+    if (!chat?.isGroup || !chat.memberIds?.length) return
+    const sel = selectedCharacterId.value
+    if (sel && chat.memberIds.includes(sel)) return
+    const first = chat.memberIds.find((id) => characters.list.some((c) => c.id === id))
+    if (first) selectedCharacterId.value = first
+  },
 )
 
 /**
@@ -3304,7 +3321,10 @@ const editingPersonaAvatarUrl = computed(() => {
               </div>
 
               <div class="form-group">
-                <label class="label">示例对话</label>
+                <label class="label">
+                  <span>示例对话</span>
+                  <span class="opacity-60 text-xs ml-2 text-brand">该项参与对话</span>
+                </label>
                 <textarea v-model="actions.editingCharacter.value.exampleDialogue" class="input textarea h-48" placeholder="示例对话..."></textarea>
               </div>
 
