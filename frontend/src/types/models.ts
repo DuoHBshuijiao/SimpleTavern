@@ -248,6 +248,7 @@ export interface Settings {
   draftHelpDefaults?: DraftHelpSettings
   prompts: {
     globalSystem: string
+    globalPrefill: string
   }
   streamEnabled: boolean
   pureAiMode: boolean

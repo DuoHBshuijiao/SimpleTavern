@@ -161,10 +161,12 @@ class SettingsPrompts(BaseModel):
     
     主要属性：
         globalSystem: 全局系统提示词，会注入到所有对话中
+        globalPrefill: 全局 Prefill，以 assistant 身份附加在请求末尾供模型续写；不通过 SSE 展示，也不写入已保存消息
     """
     model_config = ConfigDict(extra="allow")
 
     globalSystem: str = ""
+    globalPrefill: str = ""
 
 
 class SettingsLLM(BaseModel):
