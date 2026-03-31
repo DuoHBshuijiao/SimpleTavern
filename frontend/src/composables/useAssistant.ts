@@ -15,7 +15,7 @@
  *    - getState: 获取指定作用域的状态
  *    - buildPath: 构建助手API路径
  *    - normalizeMessages: 规范化消息数组
- *    - allowMemoryWrite: 检测是否允许写入记忆
+ *    - 记忆写入 / 破坏性工具：由界面开关与请求体控制
  *    - loadSettings: 加载助手设置（不含服务端保留的助手系统提示词）
  *    - saveSettings: 保存助手设置
  *    - loadChat: 加载助手聊天记录
@@ -45,6 +45,8 @@ export type AssistantMessage = {
   role: 'user' | 'assistant' | 'system'
   content: string
   ts: string
+  /** 结构化工具调用记录（与后端 ChatMessage.toolRecord 对齐） */
+  toolRecord?: Record<string, unknown>
 }
 
 export type AssistantScope = 'chat' | 'workspace'
@@ -55,6 +57,10 @@ export interface AssistantSettings {
   presetId: string | null
   /** 上下文总长度限制（token），用于裁剪最近消息 */
   context_size: number | null
+  /** 助手读取会话消息条数上限（服务端 chat_read_conversation） */
+  tool_read_max_messages?: number | null
+  /** 助手读取会话消息 token 估算上限（服务端 chat_read_conversation） */
+  tool_read_max_tokens?: number | null
 }
 
 /** 主聊天会话类型（与 stores/chats 中当前会话一致），用于记忆更新回调 */
@@ -66,10 +72,14 @@ export interface UseAssistantOptions {
   streamEnabled?: ComputedRef<boolean>
   /** 助手在聊天作用域写入长期记忆后，SSE 会推送 chat_memory_updated；若传入此回调则用其更新当前会话状态，使设置抽屉与消息列表立即刷新 */
   onChatMemoryUpdated?: (chat: ChatPayload) => void
+  /** 世界书被助手修改后 SSE worldbook_updated（可选，用于刷新世界书列表等） */
+  onWorldbookUpdated?: (payload: { worldbookId?: string }) => void
+  /** 当前会话 Chat.overrides 被助手修改后 SSE chat_overrides_updated */
+  onChatOverridesUpdated?: (payload: { chatId?: string }) => void
 }
 
 export function useAssistant(options: UseAssistantOptions) {
-  const { chatId, streamEnabled, onChatMemoryUpdated } = options
+  const { chatId, streamEnabled, onChatMemoryUpdated, onWorldbookUpdated, onChatOverridesUpdated } = options
 
   // Chat scope 状态
   const assistantMessages = ref<AssistantMessage[]>([])
@@ -100,7 +110,77 @@ export function useAssistant(options: UseAssistantOptions) {
     model: null,
     presetId: null,
     context_size: null,
+    tool_read_max_messages: null,
+    tool_read_max_tokens: null,
   })
+
+  const LS_ASSISTANT_MEM = 'assistant_allow_write_memory'
+  const LS_ASSISTANT_DEST = 'assistant_allow_destructive_tools'
+  const LS_WARNED_MEM = 'assistant_warned_memory_switch'
+  const LS_WARNED_DEST = 'assistant_warned_destructive_switch'
+
+  const allowWriteMemoryEnabled = ref(false)
+  const allowDestructiveToolsEnabled = ref(false)
+
+  function loadAssistantToolPrefs() {
+    try {
+      allowWriteMemoryEnabled.value = localStorage.getItem(LS_ASSISTANT_MEM) === '1'
+      allowDestructiveToolsEnabled.value = localStorage.getItem(LS_ASSISTANT_DEST) === '1'
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function persistAssistantToolPrefs() {
+    try {
+      localStorage.setItem(LS_ASSISTANT_MEM, allowWriteMemoryEnabled.value ? '1' : '0')
+      localStorage.setItem(LS_ASSISTANT_DEST, allowDestructiveToolsEnabled.value ? '1' : '0')
+    } catch {
+      /* ignore */
+    }
+  }
+
+  loadAssistantToolPrefs()
+
+  function toggleAllowWriteMemory() {
+    if (!allowWriteMemoryEnabled.value && !localStorage.getItem(LS_WARNED_MEM)) {
+      // eslint-disable-next-line no-alert
+      if (
+        !window.confirm(
+          '开启「记忆写入」后，助手可在当前会话中追加或覆盖长期记忆。请仅在信任当前对话时使用。',
+        )
+      ) {
+        return
+      }
+      try {
+        localStorage.setItem(LS_WARNED_MEM, '1')
+      } catch {
+        /* ignore */
+      }
+    }
+    allowWriteMemoryEnabled.value = !allowWriteMemoryEnabled.value
+    persistAssistantToolPrefs()
+  }
+
+  function toggleAllowDestructiveTools() {
+    if (!allowDestructiveToolsEnabled.value && !localStorage.getItem(LS_WARNED_DEST)) {
+      // eslint-disable-next-line no-alert
+      if (
+        !window.confirm(
+          '开启「破坏性工具」后，助手可执行删除文件、删除世界书、覆盖整卡与覆盖全部记忆等不可逆操作。请谨慎使用。',
+        )
+      ) {
+        return
+      }
+      try {
+        localStorage.setItem(LS_WARNED_DEST, '1')
+      } catch {
+        /* ignore */
+      }
+    }
+    allowDestructiveToolsEnabled.value = !allowDestructiveToolsEnabled.value
+    persistAssistantToolPrefs()
+  }
 
   // 消息编辑状态
   const showAssistantMessageEditor = ref(false)
@@ -188,28 +268,11 @@ export function useAssistant(options: UseAssistantOptions) {
         role: m.role as 'user' | 'assistant' | 'system',
         content: m.content ?? '',
         ts: m.ts ?? new Date().toISOString(),
+        toolRecord:
+          m && typeof (m as { toolRecord?: unknown }).toolRecord === 'object' && (m as { toolRecord?: unknown }).toolRecord
+            ? ((m as { toolRecord: Record<string, unknown> }).toolRecord)
+            : undefined,
       }))
-  }
-
-  /**
-   * 检测是否允许写入记忆
-   *
-   * 通过正则表达式检测用户消息中是否包含写入记忆的指令。
-   *
-   * @param {string} text - 用户消息文本
-   * @returns {boolean} 是否允许写入记忆
-   */
-  function allowMemoryWrite(text: string): boolean {
-    if (!text) return false
-    const patterns = [
-      /写入.*记忆/,
-      /更新.*记忆/,
-      /保存.*记忆/,
-      /记录.*记忆/,
-      /写.*长期记忆/,
-      /保存.*长期记忆/,
-    ]
-    return patterns.some((p) => p.test(text))
   }
 
   /**
@@ -226,12 +289,16 @@ export function useAssistant(options: UseAssistantOptions) {
       model: string | null
       presetId?: string | null
       context_size?: number | null
+      tool_read_max_messages?: number | null
+      tool_read_max_tokens?: number | null
     }>('/api/assistant/settings')
     assistantSettings.value = {
       temperature: res.temperature ?? null,
       model: res.model ?? null,
       presetId: res.presetId ?? null,
       context_size: res.context_size ?? null,
+      tool_read_max_messages: res.tool_read_max_messages ?? null,
+      tool_read_max_tokens: res.tool_read_max_tokens ?? null,
     }
   }
 
@@ -255,9 +322,21 @@ export function useAssistant(options: UseAssistantOptions) {
       model: assistantSettings.value.model,
       presetId: assistantSettings.value.presetId,
       context_size: normalizeContextSize(assistantSettings.value.context_size),
+      tool_read_max_messages:
+        assistantSettings.value.tool_read_max_messages != null &&
+        assistantSettings.value.tool_read_max_messages >= 1
+          ? assistantSettings.value.tool_read_max_messages
+          : null,
+      tool_read_max_tokens:
+        assistantSettings.value.tool_read_max_tokens != null &&
+        assistantSettings.value.tool_read_max_tokens >= 1
+          ? assistantSettings.value.tool_read_max_tokens
+          : null,
     }
     await apiPut('/api/assistant/settings', payload)
     assistantSettings.value.context_size = payload.context_size
+    assistantSettings.value.tool_read_max_messages = payload.tool_read_max_messages ?? null
+    assistantSettings.value.tool_read_max_tokens = payload.tool_read_max_tokens ?? null
   }
 
   /**
@@ -562,7 +641,8 @@ export function useAssistant(options: UseAssistantOptions) {
       temperature: assistantSettings.value.temperature,
       appendUserMessage: shouldAppend,
       chatId: scope === 'chat' ? chatId.value : null,
-      allowWriteMemory: scope === 'chat' ? allowMemoryWrite(text) : false,
+      allowWriteMemory: scope === 'chat' ? allowWriteMemoryEnabled.value : false,
+      allowDestructiveTools: allowDestructiveToolsEnabled.value,
       scope,
     }
 
@@ -599,20 +679,32 @@ export function useAssistant(options: UseAssistantOptions) {
                 reasoningBuffer = ''
               }
             } else if (evt.event === 'tool_trace') {
-              const data = evt.data as { content?: string; messageId?: string } | undefined
-              const content = data?.content
+              const data = evt.data as {
+                content?: string
+                messageId?: string
+                record?: Record<string, unknown>
+              } | undefined
+              const content = data?.content ?? ''
+              const rec = data?.record
               const toolMessageId = data?.messageId || `assistant_tool_${Date.now()}`
               state.streamingReasoning.value = ''
               if (reasoningBuffer.trim()) {
                 state.reasoningBlocks.value = [...state.reasoningBlocks.value, { messageId: toolMessageId, content: reasoningBuffer }]
                 reasoningBuffer = ''
               }
-              if (typeof content === 'string' && content.trim()) {
+              const display =
+                typeof content === 'string' && content.trim()
+                  ? content
+                  : rec
+                    ? JSON.stringify(rec)
+                    : ''
+              if (display) {
                 state.messages.value.push({
                   id: toolMessageId,
                   role: 'system',
-                  content,
+                  content: display,
                   ts: new Date().toISOString(),
+                  toolRecord: rec,
                 })
               }
             } else if (evt.event === 'card') {
@@ -627,6 +719,12 @@ export function useAssistant(options: UseAssistantOptions) {
               if (scope === 'chat' && chatPayload?.id && chatId.value === chatPayload.id && onChatMemoryUpdated) {
                 onChatMemoryUpdated(chatPayload)
               }
+            } else if (evt.event === 'worldbook_updated') {
+              const data = evt.data as { worldbookId?: string } | undefined
+              onWorldbookUpdated?.(data ?? {})
+            } else if (evt.event === 'chat_overrides_updated') {
+              const data = evt.data as { chatId?: string } | undefined
+              onChatOverridesUpdated?.(data ?? {})
             } else if (evt.event === 'error') {
               const data = evt.data as { message?: string } | undefined
               state.streamError.value = String(data?.message ?? 'unknown error')
@@ -640,18 +738,33 @@ export function useAssistant(options: UseAssistantOptions) {
           stream?: boolean
           content?: string
           messageId?: string
-          toolTraces?: Array<{ content: string; messageId: string }>
+          toolTraces?: Array<{ content?: string; messageId: string; record?: Record<string, unknown> }>
           card?: unknown
+          worldbookUpdated?: Array<{ worldbookId?: string }>
+          chatOverridesUpdated?: Array<{ chatId?: string }>
           error?: string
         }>('/api/assistant/stream', body)
         if (res?.ok && res.stream === false) {
+          if (Array.isArray(res.worldbookUpdated)) {
+            for (const u of res.worldbookUpdated) {
+              onWorldbookUpdated?.(u ?? {})
+            }
+          }
+          if (Array.isArray(res.chatOverridesUpdated)) {
+            for (const u of res.chatOverridesUpdated) {
+              onChatOverridesUpdated?.(u ?? {})
+            }
+          }
           if (Array.isArray(res.toolTraces)) {
             for (const tt of res.toolTraces) {
+              const c = tt.content || (tt.record ? JSON.stringify(tt.record) : '')
+              if (!c) continue
               state.messages.value.push({
                 id: tt.messageId || `assistant_tool_${Date.now()}`,
                 role: 'system',
-                content: tt.content || '',
+                content: c,
                 ts: new Date().toISOString(),
+                toolRecord: tt.record,
               })
             }
           }
@@ -729,6 +842,10 @@ export function useAssistant(options: UseAssistantOptions) {
     showAssistantSettings,
     isAssistantPanelOpen,
     assistantSettings,
+    allowWriteMemoryEnabled,
+    allowDestructiveToolsEnabled,
+    toggleAllowWriteMemory,
+    toggleAllowDestructiveTools,
 
     // 消息编辑状态
     showAssistantMessageEditor,
