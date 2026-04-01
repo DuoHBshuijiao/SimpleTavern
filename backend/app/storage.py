@@ -1296,6 +1296,29 @@ def _assistant_chat_has_missing_ids(raw: Any) -> bool:
     return False
 
 
+def _assistant_raw_fix_missing_tool_call_ids(raw: Any) -> bool:
+    """
+    为 role=tool 但缺少 tool_call_id 的消息补全占位 id，避免 model_validate 失败。
+    返回是否修改了 raw（用于与 missing id 修复一样写回磁盘）。
+    """
+    if not isinstance(raw, dict):
+        return False
+    messages = raw.get("messages")
+    if not isinstance(messages, list):
+        return False
+    changed = False
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        if msg.get("role") != "tool":
+            continue
+        t = msg.get("tool_call_id")
+        if t is None or (isinstance(t, str) and not t.strip()):
+            msg["tool_call_id"] = f"legacy_missing_{uuid4().hex}"
+            changed = True
+    return changed
+
+
 def load_assistant_settings() -> AssistantSettings:
     """
     加载AI助手设置
@@ -1332,8 +1355,9 @@ def load_assistant_chat() -> AssistantChat:
     """
     path = _assistant_chat_path()
     raw = read_json(path)
+    fixed_tool_ids = _assistant_raw_fix_missing_tool_call_ids(raw)
     chat = AssistantChat.model_validate(raw)
-    if _assistant_chat_has_missing_ids(raw):
+    if _assistant_chat_has_missing_ids(raw) or fixed_tool_ids:
         write_json(path, chat.model_dump(mode="json"))
     return chat
 
@@ -1354,8 +1378,9 @@ def load_assistant_workspace_chat() -> AssistantChat:
         write_json(path, chat.model_dump(mode="json"))
         return chat
     raw = read_json(path)
+    fixed_tool_ids = _assistant_raw_fix_missing_tool_call_ids(raw)
     chat = AssistantChat.model_validate(raw)
-    if _assistant_chat_has_missing_ids(raw):
+    if _assistant_chat_has_missing_ids(raw) or fixed_tool_ids:
         write_json(path, chat.model_dump(mode="json"))
     return chat
 
@@ -1382,8 +1407,9 @@ def load_assistant_chat_for_chat(chat_id: str) -> AssistantChat:
         write_json(path, chat.model_dump(mode="json"))
         return chat
     raw = read_json(path)
+    fixed_tool_ids = _assistant_raw_fix_missing_tool_call_ids(raw)
     chat = AssistantChat.model_validate(raw)
-    if _assistant_chat_has_missing_ids(raw):
+    if _assistant_chat_has_missing_ids(raw) or fixed_tool_ids:
         write_json(path, chat.model_dump(mode="json"))
     return chat
 

@@ -453,15 +453,19 @@ class WorldBook(BaseModel):
     updatedAt: str = Field(default_factory=_now_iso)
 
 
-ChatRole = Literal["system", "user", "assistant"]
+ChatRole = Literal["system", "user", "assistant", "tool"]
 """
 聊天消息角色类型
 
-支持三种角色：
+支持四种角色：
     - system: 系统消息
     - user: 用户消息
     - assistant: AI助手消息
+    - tool: 工具返回（OpenAI Chat Completions 对齐；主会话正常对话不应写入）
 """
+
+MainChatRole = Literal["system", "user", "assistant"]
+"""主聊天、追加/更新消息等路径允许的角色（不含 tool，避免客户端伪造工具链）。"""
 
 
 class ChatMessage(BaseModel):
@@ -473,7 +477,7 @@ class ChatMessage(BaseModel):
     主要属性：
         version: 版本号
         id: 消息唯一标识符，自动生成
-        role: 消息角色（system/user/assistant）
+        role: 消息角色（system/user/assistant/tool）
         content: 消息内容
         characterId: 群聊中标识发言角色ID
         senderPersonaId: 发送者Persona ID，用于切换身份后保持历史消息显示
@@ -500,6 +504,27 @@ class ChatMessage(BaseModel):
     )
     toolTrace: bool = False
     toolRecord: dict[str, Any] | None = None
+    tool_call_id: str | None = Field(
+        default=None,
+        description="当 role=tool 时对应 assistant.tool_calls[].id（OpenAI tool_call_id）",
+    )
+    tool_calls: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="当 role=assistant 且本轮需调用工具时，与 OpenAI 返回结构兼容（id/type/function）",
+    )
+    reasoningContent: str | None = Field(
+        default=None,
+        description="推理/思考链文本（与上游 reasoning_content 对应，持久化用）",
+    )
+
+    @model_validator(mode="after")
+    def _validate_tool_fields(self) -> ChatMessage:
+        if self.role == "tool":
+            if not (self.tool_call_id and str(self.tool_call_id).strip()):
+                raise ValueError("role=tool 时必须提供非空的 tool_call_id")
+        if self.tool_calls is not None and self.role != "assistant":
+            raise ValueError("仅 assistant 消息可包含 tool_calls")
+        return self
 
 
 class ChatImageAttachment(BaseModel):
@@ -682,7 +707,7 @@ class AppendMessageRequest(BaseModel):
         senderName: 发送者名称
         senderAvatar: 发送者头像
     """
-    role: ChatRole
+    role: MainChatRole
     content: str
     images: list[ChatImageAttachment] = Field(default_factory=list)
     characterId: str | None = None
@@ -705,7 +730,7 @@ class UpdateMessageRequest(BaseModel):
         senderName: 发送者名称
         senderAvatar: 发送者头像
     """
-    role: ChatRole
+    role: MainChatRole
     content: str
     images: list[ChatImageAttachment] | None = None
     characterId: str | None = None
@@ -784,7 +809,7 @@ class DraftHelpConversationMessage(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     id: str
-    role: ChatRole
+    role: MainChatRole
     content: str
     characterId: str | None = None
     senderName: str | None = None
