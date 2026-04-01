@@ -35,14 +35,14 @@
  *    - 依赖：依赖vue
  *    - 位置：组件层，提供消息编辑功能
  */
-import type { ChatMessage } from '../../types/models'
+import type { MainChatRole } from '../../types/models'
 import ModernAvatar from '../ModernAvatar.vue'
 import { Settings, X } from 'lucide-vue-next'
 
 const props = defineProps<{
   show: boolean
   messageId: string | null
-  messageRole: ChatMessage['role']
+  messageRole: MainChatRole
   messageContent: string
   characterAvatarUrl: string | null
   userAvatarUrl: string | null
@@ -51,7 +51,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:show': [value: boolean]
-  'update:messageRole': [role: ChatMessage['role']]
+  'update:messageRole': [role: MainChatRole]
   'update:messageContent': [content: string]
   'save': []
   'save-and-send': []

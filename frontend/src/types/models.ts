@@ -30,11 +30,14 @@
  */
 
 /**
- * 聊天消息角色类型
- *
- * 定义消息的发送者角色：系统、用户或助手。
+ * 主聊天可编辑/追加的角色（不含 tool，避免客户端伪造工具链）
  */
-export type ChatRole = 'system' | 'user' | 'assistant'
+export type MainChatRole = 'system' | 'user' | 'assistant'
+
+/**
+ * 聊天消息角色类型（含 OpenAI 对齐的 tool；主会话正常不应出现 tool）
+ */
+export type ChatRole = MainChatRole | 'tool'
 
 /**
  * LLM生成参数接口

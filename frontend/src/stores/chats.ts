@@ -50,7 +50,7 @@
 
 import { defineStore } from 'pinia'
 
-import type { Chat, ChatMessage, ChatOverrides, GroupMemberSettings } from '../types/models'
+import type { Chat, ChatMessage, ChatOverrides, GroupMemberSettings, MainChatRole } from '../types/models'
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/http'
 
 /**
@@ -351,7 +351,7 @@ export const useChatsStore = defineStore('chats', {
      */
     async appendMessage(
       chatId: string,
-      role: 'system' | 'user' | 'assistant',
+      role: MainChatRole,
       content: string,
       options?: { characterId?: string }
     ) {
@@ -381,7 +381,7 @@ export const useChatsStore = defineStore('chats', {
     async updateMessage(
       chatId: string,
       messageId: string,
-      role: 'system' | 'user' | 'assistant',
+      role: MainChatRole,
       content: string,
       characterId?: string | null,
       opts?: { greetingVariantIndex?: number | null },

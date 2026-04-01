@@ -45,6 +45,7 @@ import type {
   ChatMessage, 
   CharacterCard,
   ExtraFirstMessageEntry,
+  MainChatRole,
   WorldBook,
   Settings, 
   UserPersona, 
@@ -111,7 +112,7 @@ export function useChatActions(deps: ChatActionsDeps) {
   // ========== 消息编辑 ==========
   const showMessageEditor = ref(false)
   const editingMessageId = ref<string | null>(null)
-  const editingMessageRole = ref<ChatMessage['role']>('assistant')
+  const editingMessageRole = ref<MainChatRole>('assistant')
   const editingMessageContent = ref('')
   /** 群聊时当前编辑消息的发言人角色ID，保存时传回后端以保持发言人不变 */
   const editingMessageCharacterId = ref<string | null | undefined>(undefined)
@@ -131,6 +132,7 @@ export function useChatActions(deps: ChatActionsDeps) {
     if (!activeChat.value) return
     if (isGenerating.value) return
     if (m.id.startsWith('local_')) return
+    if (m.role === 'tool') return
     editingMessageId.value = m.id
     editingMessageRole.value = m.role
     editingMessageContent.value = initialContent ?? m.content

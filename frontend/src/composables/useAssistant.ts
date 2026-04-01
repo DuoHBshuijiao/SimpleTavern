@@ -42,10 +42,12 @@ import { postAndConsumeSse } from '../api/sse'
 
 export type AssistantMessage = {
   id: string
-  role: 'user' | 'assistant' | 'system'
+  role: 'user' | 'assistant' | 'system' | 'tool'
   content: string
   ts: string
-  /** 结构化工具调用记录（与后端 ChatMessage.toolRecord 对齐） */
+  /** OpenAI 对齐：对应 assistant.tool_calls[].id */
+  tool_call_id?: string
+  /** 结构化工具调用记录（与后端 ChatMessage.toolRecord 对齐；SSE 工具步骤或历史 system 摘要） */
   toolRecord?: Record<string, unknown>
 }
 
@@ -262,12 +264,22 @@ export function useAssistant(options: UseAssistantOptions) {
       .filter((m): m is { role?: string; id?: string; content?: string; ts?: string } => 
         m !== null && typeof m === 'object' && (m as { role?: string }).role !== undefined
       )
-      .filter((m) => m.role === 'user' || m.role === 'assistant' || m.role === 'system')
+      .filter(
+        (m) =>
+          m.role === 'user' ||
+          m.role === 'assistant' ||
+          m.role === 'system' ||
+          m.role === 'tool',
+      )
       .map((m, idx: number) => ({
         id: m.id ?? `assistant_msg_${Date.now()}_${idx}`,
-        role: m.role as 'user' | 'assistant' | 'system',
+        role: m.role as 'user' | 'assistant' | 'system' | 'tool',
         content: m.content ?? '',
         ts: m.ts ?? new Date().toISOString(),
+        tool_call_id:
+          typeof (m as { tool_call_id?: unknown }).tool_call_id === 'string'
+            ? (m as { tool_call_id: string }).tool_call_id
+            : undefined,
         toolRecord:
           m && typeof (m as { toolRecord?: unknown }).toolRecord === 'object' && (m as { toolRecord?: unknown }).toolRecord
             ? ((m as { toolRecord: Record<string, unknown> }).toolRecord)
@@ -439,6 +451,7 @@ export function useAssistant(options: UseAssistantOptions) {
    * @param {AssistantScope} scope - 作用域（'chat'或'workspace'）
    */
   function openEditMessage(m: AssistantMessage, scope: AssistantScope) {
+    if (m.role === 'system' || m.role === 'tool') return
     editingAssistantMessage.value = m
     editingAssistantMessageContent.value = m.content
     editingAssistantMessageScope.value = scope
@@ -701,7 +714,7 @@ export function useAssistant(options: UseAssistantOptions) {
               if (display) {
                 state.messages.value.push({
                   id: toolMessageId,
-                  role: 'system',
+                  role: 'tool',
                   content: display,
                   ts: new Date().toISOString(),
                   toolRecord: rec,
@@ -761,7 +774,7 @@ export function useAssistant(options: UseAssistantOptions) {
               if (!c) continue
               state.messages.value.push({
                 id: tt.messageId || `assistant_tool_${Date.now()}`,
-                role: 'system',
+                role: 'tool',
                 content: c,
                 ts: new Date().toISOString(),
                 toolRecord: tt.record,

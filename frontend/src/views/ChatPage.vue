@@ -1996,7 +1996,7 @@ async function handleSwitchPreviousVersion(m: ChatMessage) {
     const msg = activeChat.value.messages.find((msg) => msg.id === m.id)
     if (msg) msg.content = newContent
     const gv = msg?.greetingVariants
-    if (gv && gv.length > 1 && !m.id.startsWith('local_') && activeChat.value) {
+    if (gv && gv.length > 1 && !m.id.startsWith('local_') && activeChat.value && m.role !== 'tool') {
       const idx = versions.getCurrentVersionIndex(m)
       try {
         await chats.updateMessage(activeChat.value.id, m.id, m.role, newContent, m.characterId, {
@@ -2022,7 +2022,7 @@ async function handleSwitchNextVersion(m: ChatMessage) {
     const msg = activeChat.value.messages.find((msg) => msg.id === m.id)
     if (msg) msg.content = newContent
     const gv = msg?.greetingVariants
-    if (gv && gv.length > 1 && !m.id.startsWith('local_') && activeChat.value) {
+    if (gv && gv.length > 1 && !m.id.startsWith('local_') && activeChat.value && m.role !== 'tool') {
       const idx = versions.getCurrentVersionIndex(m)
       try {
         await chats.updateMessage(activeChat.value.id, m.id, m.role, newContent, m.characterId, {
@@ -3097,7 +3097,7 @@ const editingPersonaAvatarUrl = computed(() => {
     <MessageEditorModal
       :show="assistant.showAssistantMessageEditor.value"
       :message-id="assistant.editingAssistantMessage.value?.id || null"
-      :message-role="assistant.editingAssistantMessage.value?.role || 'user'"
+      :message-role="(assistant.editingAssistantMessage.value?.role === 'tool' ? 'assistant' : assistant.editingAssistantMessage.value?.role) || 'user'"
       :message-content="assistant.editingAssistantMessageContent.value"
       :character-avatar-url="null"
       :user-avatar-url="null"
