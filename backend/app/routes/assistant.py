@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import json
 from typing import Any, AsyncIterator
+from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -43,6 +44,7 @@ from pydantic import BaseModel, Field
 
 from app.assistant_tools.context import AssistantToolContext
 from app.assistant_tools.digest import args_digest as _tool_args_digest
+from app.assistant_tools.result import compact_tool_result_json_for_llm
 from app.assistant_tools.executor import build_openai_tools_list, execute_tool
 from app.llm.openai_compat import chat_completions_message, stream_chat_completions
 from app.schemas import (
@@ -54,6 +56,7 @@ from app.schemas import (
     Chat,
     CharacterCard,
     ChatMessage,
+    MainChatRole,
     UpdateMessageRequest,
 )
 from app.storage import (
@@ -80,7 +83,7 @@ from app.storage import (
     save_chat_memory,
     save_assistant_settings,
 )
-from app.tokenizer_service import trim_messages_to_context
+from app.tokenizer_service import trim_assistant_openai_messages_to_context
 
 
 router = APIRouter(tags=["assistant"])
@@ -147,16 +150,111 @@ def _tool_record_payload(
     }
 
 
-def _make_tool_trace_message(
-    tool_name: str,
-    loop_index: int,
-    result: dict[str, Any],
-    args: dict[str, Any],
-) -> ChatMessage:
-    rec = _tool_record_payload(tool_name, loop_index, result, args)
-    content = json.dumps(rec, ensure_ascii=False)
-    return ChatMessage(role="system", content=content, toolTrace=True, toolRecord=rec)
+def _reasoning_from_msg(m: ChatMessage) -> str | None:
+    if getattr(m, "reasoningContent", None):
+        s = (m.reasoningContent or "").strip()
+        if s:
+            return s
+    extra = getattr(m, "model_extra", None) or {}
+    if isinstance(extra, dict) and extra.get("reasoning_content"):
+        s = str(extra["reasoning_content"]).strip()
+        if s:
+            return s
+    return None
 
+
+def _normalize_tool_calls_ids(tool_calls: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """为每条 tool_call 补全非空 id，保证与落库的 role=tool.tool_call_id 一致。"""
+    if not tool_calls:
+        return []
+    out: list[dict[str, Any]] = []
+    for tc in tool_calls:
+        tc_copy = dict(tc) if isinstance(tc, dict) else {}
+        tid = str(tc_copy.get("id") or "").strip()
+        if not tid:
+            tid = f"call_{uuid4().hex}"
+        tc_copy["id"] = tid
+        out.append(tc_copy)
+    return out
+
+
+def _assistant_messages_to_openai(messages: list[ChatMessage]) -> list[dict[str, Any]]:
+    """
+    将持久化的助手 ChatMessage 列表重建为发给上游的 OpenAI 风格 messages。
+    含 assistant.tool_calls、role=tool + tool_call_id；旧版仅 toolTrace/toolRecord 的仍用 system 摘要，不伪造 id。
+    """
+    out: list[dict[str, Any]] = []
+    _LEGACY_TOOL_TRACE_MAX = 2000
+    for m in messages:
+        if m.role == "tool":
+            tid = (getattr(m, "tool_call_id", None) or "").strip()
+            if tid:
+                out.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tid,
+                        "content": m.content or "",
+                    }
+                )
+            else:
+                raw = (m.content or "").strip()
+                if raw:
+                    text = raw if len(raw) <= _LEGACY_TOOL_TRACE_MAX else raw[:_LEGACY_TOOL_TRACE_MAX] + "…"
+                    out.append({"role": "system", "content": f"[tool message missing tool_call_id] {text}"})
+            continue
+
+        if m.role == "assistant" and getattr(m, "tool_calls", None):
+            d: dict[str, Any] = {
+                "role": "assistant",
+                "content": m.content or "",
+                "tool_calls": m.tool_calls,
+            }
+            rc = _reasoning_from_msg(m)
+            if rc:
+                d["reasoning_content"] = rc
+            out.append(d)
+            continue
+
+        if getattr(m, "toolTrace", False) and not getattr(m, "toolRecord", None):
+            raw = (m.content or "").strip()
+            if raw:
+                text = raw if len(raw) <= _LEGACY_TOOL_TRACE_MAX else raw[:_LEGACY_TOOL_TRACE_MAX] + "…"
+                out.append({"role": "system", "content": text})
+            continue
+
+        tr = getattr(m, "toolRecord", None)
+        if isinstance(tr, dict):
+            out.append({"role": "system", "content": json.dumps(tr, ensure_ascii=False)})
+            continue
+
+        msg_dict: dict[str, Any] = {"role": m.role, "content": m.content}
+        if m.role == "assistant":
+            rc = _reasoning_from_msg(m)
+            if rc:
+                msg_dict["reasoning_content"] = rc
+        out.append(msg_dict)
+    return out
+
+
+def _compact_tool_result_contents_for_llm(messages: list[dict[str, Any]]) -> None:
+    """在进入模型前压缩 role=tool 的 ToolResult JSON；与 trim 顺序：先 compact 再按段裁剪。"""
+    for m in messages:
+        if m.get("role") != "tool":
+            continue
+        c = m.get("content")
+        if isinstance(c, str) and c:
+            m["content"] = compact_tool_result_json_for_llm(c)
+
+
+def _normalize_assistant_chat_for_save(chat: AssistantChat) -> None:
+    """保存前校验/规范化助手消息，避免非法组合写入磁盘。"""
+    normalized: list[ChatMessage] = []
+    for m in chat.messages:
+        try:
+            normalized.append(ChatMessage.model_validate(m.model_dump(mode="json")))
+        except Exception:
+            normalized.append(m)
+    chat.messages = normalized
 
 
 def _clear_reasoning_content(messages: list[dict[str, Any]]) -> None:
@@ -273,6 +371,7 @@ def _save_assistant_chat_by_scope(scope: str | None, chat_id: str | None, chat: 
     Returns:
         AssistantChat: 保存后的助手聊天对象
     """
+    _normalize_assistant_chat_for_save(chat)
     if scope == "workspace":
         return save_assistant_workspace_chat(chat)
     return _save_assistant_chat(chat_id, chat)
@@ -406,7 +505,7 @@ def get_assistant_chat(
 
 class AppendAssistantMessageRequest(BaseModel):
     """追加助手消息请求"""
-    role: str = "assistant"
+    role: MainChatRole = "assistant"
     content: str = ""
 
 
@@ -568,8 +667,6 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
         base_url = first_preset.baseUrl
         api_key = first_preset.apiKey
 
-    messages_for_llm: list[dict[str, Any]] = []
-    
     existing_messages = chat.messages or []
     
     if req.appendUserMessage:
@@ -578,26 +675,11 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
         chat.messages = existing_messages
         _save_assistant_chat_by_scope(scope, chat_id, chat)
 
-    _LEGACY_TOOL_TRACE_MAX = 2000
-    conversation: list[dict[str, Any]] = []
-    for m in existing_messages:
-        if getattr(m, "toolTrace", False) and not getattr(m, "toolRecord", None):
-            raw = (m.content or "").strip()
-            if raw:
-                text = raw if len(raw) <= _LEGACY_TOOL_TRACE_MAX else raw[:_LEGACY_TOOL_TRACE_MAX] + "…"
-                conversation.append({"role": "system", "content": text})
-            continue
-        tr = getattr(m, "toolRecord", None)
-        if isinstance(tr, dict):
-            conversation.append({"role": "system", "content": json.dumps(tr, ensure_ascii=False)})
-            continue
-        msg_dict = {"role": m.role, "content": m.content}
-        if hasattr(m, "extra") and isinstance(m.extra, dict) and "reasoning_content" in m.extra:
-            msg_dict["reasoning_content"] = m.extra["reasoning_content"]
-        conversation.append(msg_dict)
+    conversation = _assistant_messages_to_openai(list(existing_messages))
+    _compact_tool_result_contents_for_llm(conversation)
     context_size = getattr(assistant_settings, "context_size", None)
     if context_size and context_size >= 1:
-        conversation = trim_messages_to_context(conversation, context_size, None)
+        conversation = trim_assistant_openai_messages_to_context(conversation, context_size, None)
 
     llm_msgs: list[dict[str, Any]] = []
     _ensure_system_prompt(llm_msgs, assistant_settings.prompt)
@@ -642,25 +724,28 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
                     tools=tools,
                     extra_body=extra_body,
                 )
+                tool_calls_raw = resp.tool_calls
+                tool_calls_for_llm: list[dict[str, Any]] | None = None
+                if tool_calls_raw is not None:
+                    tool_calls_for_llm = _normalize_tool_calls_ids(tool_calls_raw)
                 llm_assistant_msg: dict[str, Any] = {
                     "role": resp.role or "assistant",
                     "content": resp.content or "",
                 }
                 if resp.reasoning_content:
                     llm_assistant_msg["reasoning_content"] = resp.reasoning_content
-                if resp.tool_calls is not None:
-                    llm_assistant_msg["tool_calls"] = resp.tool_calls
+                if tool_calls_for_llm is not None:
+                    llm_assistant_msg["tool_calls"] = tool_calls_for_llm
                 current_messages.append(llm_assistant_msg)
 
-                if not resp.tool_calls:
+                if not tool_calls_raw:
                     final_content = resp.content or ""
                     final_reasoning_content = resp.reasoning_content
                     assistant_msg_obj = ChatMessage(
                         role=resp.role or "assistant",
                         content=final_content,
+                        reasoningContent=final_reasoning_content or None,
                     )
-                    if final_reasoning_content:
-                        assistant_msg_obj.model_config["extra"] = {"reasoning_content": final_reasoning_content}
                     chat_to_save = _resolve_assistant_chat_by_scope(scope, chat_id)
                     chat_to_save.messages.append(assistant_msg_obj)
                     _save_assistant_chat_by_scope(scope, chat_id, chat_to_save)
@@ -675,8 +760,18 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
                         "chatOverridesUpdated": co_updates,
                     })
 
+                assistant_with_tools = ChatMessage(
+                    role=resp.role or "assistant",
+                    content=resp.content or "",
+                    tool_calls=list(tool_calls_for_llm or []),
+                    reasoningContent=resp.reasoning_content or None,
+                )
+                chat_turn = _resolve_assistant_chat_by_scope(scope, chat_id)
+                chat_turn.messages.append(assistant_with_tools)
+                _save_assistant_chat_by_scope(scope, chat_id, chat_turn)
+
                 tool_idx = 0
-                for tool_call in resp.tool_calls or []:
+                for tool_call in tool_calls_for_llm or []:
                     fn = (tool_call.get("function") or {}).get("name")
                     raw_args = (tool_call.get("function") or {}).get("arguments") or "{}"
                     try:
@@ -692,16 +787,21 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
                         wb_updates.append(outcome.worldbook_updated)
                     if outcome.chat_overrides_updated:
                         co_updates.append(outcome.chat_overrides_updated)
-                    trace_msg = _make_tool_trace_message(tool_name, tool_idx, result, args)
-                    tool_idx += 1
+                    tid = str(tool_call.get("id") or "").strip()
+                    tool_msg = ChatMessage(
+                        role="tool",
+                        tool_call_id=tid,
+                        content=json.dumps(result, ensure_ascii=False),
+                    )
                     trace_chat = _resolve_assistant_chat_by_scope(scope, chat_id)
-                    trace_chat.messages.append(trace_msg)
+                    trace_chat.messages.append(tool_msg)
                     _save_assistant_chat_by_scope(scope, chat_id, trace_chat)
-                    tr = trace_msg.toolRecord or {}
-                    tool_traces.append({"record": tr, "messageId": trace_msg.id, "content": trace_msg.content})
+                    tr = _tool_record_payload(tool_name, tool_idx, result, args)
+                    tool_idx += 1
+                    tool_traces.append({"record": tr, "messageId": tool_msg.id, "content": tool_msg.content})
                     tool_result_msg = {
                         "role": "tool",
-                        "tool_call_id": tool_call.get("id"),
+                        "tool_call_id": tid,
                         "content": json.dumps(result, ensure_ascii=False),
                     }
                     current_messages.append(tool_result_msg)
@@ -732,6 +832,7 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
                 "content": "",
             }
             tool_calls_from_stream: list[dict[str, Any]] | None = None
+            normalized_stream: list[dict[str, Any]] = []
 
             try:
                 async for chunk in stream_chat_completions(
@@ -759,23 +860,33 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
                 llm_assistant_msg["reasoning_content"] = final_reasoning_content
             llm_assistant_msg["content"] = final_content
             if tool_calls_from_stream:
-                llm_assistant_msg["tool_calls"] = tool_calls_from_stream
+                normalized_stream = _normalize_tool_calls_ids(tool_calls_from_stream)
+                llm_assistant_msg["tool_calls"] = normalized_stream
             current_messages.append(llm_assistant_msg)
 
             if not tool_calls_from_stream:
                 assistant_msg_obj = ChatMessage(
                     role="assistant",
                     content=final_content,
+                    reasoningContent=final_reasoning_content or None,
                 )
-                if final_reasoning_content:
-                    assistant_msg_obj.model_config["extra"] = {"reasoning_content": final_reasoning_content}
                 chat_to_save = _resolve_assistant_chat_by_scope(scope, chat_id)
                 chat_to_save.messages.append(assistant_msg_obj)
                 _save_assistant_chat_by_scope(scope, chat_id, chat_to_save)
                 yield _sse("done", {"ok": True, "messageId": assistant_msg_obj.id})
                 return
 
-            for tool_call in tool_calls_from_stream or []:
+            assistant_with_tools = ChatMessage(
+                role="assistant",
+                content=final_content or "",
+                tool_calls=list(normalized_stream),
+                reasoningContent=final_reasoning_content or None,
+            )
+            chat_turn = _resolve_assistant_chat_by_scope(scope, chat_id)
+            chat_turn.messages.append(assistant_with_tools)
+            _save_assistant_chat_by_scope(scope, chat_id, chat_turn)
+
+            for tool_call in normalized_stream:
                 fn = (tool_call.get("function") or {}).get("name")
                 raw_args = (tool_call.get("function") or {}).get("arguments") or "{}"
                 try:
@@ -785,15 +896,20 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
                 tool_name = str(fn)
                 outcome = execute_tool(tool_name, args, tool_ctx)
                 result = outcome.result
-                trace_msg = _make_tool_trace_message(tool_name, tool_idx_stream, result, args)
-                tool_idx_stream += 1
+                tid = str(tool_call.get("id") or "").strip()
+                tool_msg = ChatMessage(
+                    role="tool",
+                    tool_call_id=tid,
+                    content=json.dumps(result, ensure_ascii=False),
+                )
                 trace_chat = _resolve_assistant_chat_by_scope(scope, chat_id)
-                trace_chat.messages.append(trace_msg)
+                trace_chat.messages.append(tool_msg)
                 _save_assistant_chat_by_scope(scope, chat_id, trace_chat)
-                tr = trace_msg.toolRecord or {}
+                tr = _tool_record_payload(tool_name, tool_idx_stream, result, args)
+                tool_idx_stream += 1
                 yield _sse(
                     "tool_trace",
-                    {"record": tr, "messageId": trace_msg.id, "content": trace_msg.content},
+                    {"record": tr, "messageId": tool_msg.id, "content": tool_msg.content},
                 )
                 if outcome.card:
                     yield _sse("card", {"card": outcome.card})
@@ -805,7 +921,7 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
                     yield _sse("chat_overrides_updated", outcome.chat_overrides_updated)
                 tool_result_msg = {
                     "role": "tool",
-                    "tool_call_id": tool_call.get("id"),
+                    "tool_call_id": tid,
                     "content": json.dumps(result, ensure_ascii=False),
                 }
                 current_messages.append(tool_result_msg)

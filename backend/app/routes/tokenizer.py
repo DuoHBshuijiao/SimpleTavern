@@ -42,9 +42,13 @@ def _message_to_count_dict(msg) -> dict:
     role = getattr(msg, "role", "unknown")
     content = (getattr(msg, "content", None) or "") or ""
     out = {"role": role, "content": content}
-    extra = getattr(msg, "model_extra", None)
-    if isinstance(extra, dict) and "reasoning_content" in extra:
-        out["reasoning_content"] = extra["reasoning_content"]
+    rc = getattr(msg, "reasoningContent", None)
+    if rc:
+        out["reasoning_content"] = rc
+    else:
+        extra = getattr(msg, "model_extra", None)
+        if isinstance(extra, dict) and "reasoning_content" in extra:
+            out["reasoning_content"] = extra["reasoning_content"]
     return out
 
 

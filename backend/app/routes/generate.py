@@ -1254,8 +1254,10 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
             prefix = f"[{char_name_for_message}]: "
             content = f"{prefix}{raw_content}" if isinstance(raw_content, str) else [{"type": "text", "text": prefix}, *raw_content]
             conversation.append({"role": "assistant", "content": content, "_message_id": m.id})
-        else:
-            conversation.append({"role": m.role, "content": raw_content, "_message_id": m.id})
+        elif m.role == "tool":
+            continue
+        elif m.role == "system":
+            conversation.append({"role": "system", "content": raw_content, "_message_id": m.id})
     conversation = _slice_conversation_with_anchor(
         conversation,
         getattr(chat.overrides, "contextStartMessageId", None),
@@ -1628,8 +1630,10 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
             prefix = f"[{char_name_for_message}]: "
             content = f"{prefix}{raw_content}" if isinstance(raw_content, str) else [{"type": "text", "text": prefix}, *raw_content]
             conversation.append({"role": "assistant", "content": content, "_message_id": m.id})
-        else:
-            conversation.append({"role": m.role, "content": raw_content, "_message_id": m.id})
+        elif m.role == "tool":
+            continue
+        elif m.role == "system":
+            conversation.append({"role": "system", "content": raw_content, "_message_id": m.id})
     conversation = _slice_conversation_with_anchor(
         conversation,
         getattr(chat.overrides, "contextStartMessageId", None),
