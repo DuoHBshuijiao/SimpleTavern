@@ -154,9 +154,10 @@ function expandReasoning(messageId: string, e: MouseEvent) {
   expandedReasoningMessageId.value = messageId
 }
 
-function collapseReasoning(e: MouseEvent) {
+function toggleReasoning(messageId: string, e: MouseEvent) {
   e.stopPropagation()
-  expandedReasoningMessageId.value = null
+  expandedReasoningMessageId.value =
+    expandedReasoningMessageId.value === messageId ? null : messageId
 }
 
 function openImagePreview(src: string, alt: string) {
@@ -673,7 +674,7 @@ onBeforeUnmount(() => {
             <span v-if="m.role === 'system'" class="text-[10px] bg-yellow-500/10 text-yellow-500 px-1.5 py-0.5 rounded">SYSTEM</span>
           </div>
 
-          <!-- 思考链气泡：在角色名下方、正文上方，小圆角，默认折叠 80px，仅点击气泡展开、仅点击图标收起；多轮回复按 messageId 显示对应思考内容 -->
+          <!-- 思考链气泡：在角色名下方、正文上方，小圆角，默认折叠 80px；点击气泡或图标展开，展开时点击图标收起；多轮回复按 messageId 显示对应思考内容 -->
           <div
             v-if="m.role === 'assistant' && getReasoningForMessage(m)"
             class="reasoning-bubble-surface w-full max-w-full rounded-lg text-xs leading-relaxed relative transition-[max-height] duration-300 mb-2"
@@ -685,8 +686,8 @@ onBeforeUnmount(() => {
               type="button"
               class="reasoning-toggle-icon absolute top-2 right-2 w-6 h-6 flex items-center justify-center rounded hover:bg-white/10 transition-transform duration-200"
               :class="isReasoningExpanded(m.id) ? 'rotate-90' : ''"
-              aria-label="收起思考"
-              @click="collapseReasoning"
+              :aria-label="isReasoningExpanded(m.id) ? '收起思考' : '展开思考'"
+              @click="toggleReasoning(m.id, $event)"
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="15 18 9 12 15 6" />

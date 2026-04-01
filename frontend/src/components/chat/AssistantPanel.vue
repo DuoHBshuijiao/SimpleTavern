@@ -194,7 +194,7 @@ function confirmReset(event: Event) {
   }
 }
 
-// 思考气泡：仅点击气泡体展开，仅点击图标收起
+// 思考气泡：点击气泡或图标展开，展开时点击图标收起
 const expandedReasoningMessageId = ref<string | null>(null)
 
 function isReasoningExpanded(messageId: string) {
@@ -206,9 +206,10 @@ function expandReasoning(messageId: string, e: MouseEvent) {
   expandedReasoningMessageId.value = messageId
 }
 
-function collapseReasoning(e: MouseEvent) {
+function toggleReasoning(messageId: string, e: MouseEvent) {
   e.stopPropagation()
-  expandedReasoningMessageId.value = null
+  expandedReasoningMessageId.value =
+    expandedReasoningMessageId.value === messageId ? null : messageId
 }
 
 /** 获取某条消息对应的思考链内容：已保存的块 或 当前正在流式接收的思考（仅对最后一条助手消息） */
@@ -228,6 +229,18 @@ function getDisplayContent(m: AssistantMessage, isLastAssistant: boolean): strin
     return (m.content || '') + props.streamingContent
   }
   return m.content ?? ''
+}
+
+/** 工具轮次落库的 JSON（或 SSE 摘要）：格式化为可读 Markdown */
+function getToolDisplayMarkdown(m: AssistantMessage): string {
+  const raw = m.content ?? ''
+  if (!raw.trim()) return ''
+  try {
+    const o = JSON.parse(raw) as unknown
+    return '```json\n' + JSON.stringify(o, null, 2) + '\n```'
+  } catch {
+    return raw
+  }
 }
 
 // 消息列表滚动容器：打开面板时自动滚到底部
@@ -299,11 +312,11 @@ watch(
         v-for="(m, idx) in messages"
         :key="m.id"
         class="flex flex-col gap-1 group"
-        :class="m.role === 'user' ? 'items-end' : (m.role === 'system' ? 'items-center' : 'items-start')"
+        :class="m.role === 'user' ? 'items-end' : (m.role === 'system' || m.role === 'tool' ? 'items-center' : 'items-start')"
       >
-        <!-- 思考链气泡：在对应消息（助手或工具）上方，小圆角，默认折叠 100px，仅点击气泡展开、仅点击图标收起 -->
+        <!-- 思考链气泡：在对应消息（助手或工具）上方，小圆角，默认折叠 100px；点击气泡或图标展开，展开时点击图标收起 -->
         <div
-          v-if="getReasoningContentForMessage(m.id, m.role === 'assistant' && idx === messages.length - 1)"
+          v-if="m.role !== 'tool' && getReasoningContentForMessage(m.id, m.role === 'assistant' && idx === messages.length - 1)"
           class="reasoning-bubble-surface w-full max-w-[90%] rounded-lg text-xs leading-relaxed relative transition-[max-height] duration-300"
           :class="isReasoningExpanded(m.id) ? 'max-h-[80vh] overflow-y-auto' : 'max-h-[100px] overflow-hidden cursor-pointer'"
           @click="expandReasoning(m.id, $event)"
@@ -313,8 +326,8 @@ watch(
             type="button"
             class="reasoning-toggle-icon absolute top-2 right-2 w-6 h-6 flex items-center justify-center rounded hover:bg-white/10 transition-transform duration-200"
             :class="isReasoningExpanded(m.id) ? 'rotate-90' : ''"
-            aria-label="收起思考"
-            @click="collapseReasoning"
+            :aria-label="isReasoningExpanded(m.id) ? '收起思考' : '展开思考'"
+            @click="toggleReasoning(m.id, $event)"
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <polyline points="15 18 9 12 15 6" />
@@ -325,14 +338,23 @@ watch(
           class="px-4 py-2.5 rounded-2xl text-sm leading-relaxed max-w-[90%] shadow-sm border transition-colors"
           :class="m.role === 'user'
             ? 'bg-brand-a20 backdrop-blur-sm border-brand-a20 text-gray-100 rounded-tr-sm'
-            : (m.role === 'system'
+            : (m.role === 'system' || m.role === 'tool'
               ? 'bg-yellow-500/10 border-yellow-500/20 text-gray-300 rounded-lg text-xs'
               : 'bg-white/5 backdrop-blur-md border-white/10 text-gray-200 rounded-tl-sm')"
         >
-          <div class="prose prose-invert prose-sm max-w-none" v-html="renderMarkdown(getDisplayContent(m, m.role === 'assistant' && idx === messages.length - 1))"></div>
+          <div
+            v-if="m.role === 'tool'"
+            class="text-[10px] uppercase tracking-wider text-yellow-500/80 mb-1"
+          >
+            工具结果
+          </div>
+          <div
+            class="prose prose-invert prose-sm max-w-none"
+            v-html="renderMarkdown(m.role === 'tool' ? getToolDisplayMarkdown(m) : getDisplayContent(m, m.role === 'assistant' && idx === messages.length - 1))"
+          ></div>
         </div>
         <!-- 消息操作 -->
-        <div v-if="m.role !== 'system'" class="flex items-center gap-3 px-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div v-if="m.role !== 'system' && m.role !== 'tool'" class="flex items-center gap-3 px-1 opacity-0 group-hover:opacity-100 transition-opacity">
           <button
             v-if="m.role === 'assistant'"
             class="text-[10px] text-gray-600 hover:text-blue-400 transition-colors"
