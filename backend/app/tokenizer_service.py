@@ -6,8 +6,11 @@ Tokenizer 目录：backend/tokenizer/deepseek_v3_tokenizer（与 app 目录同�
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
+
+from app.assistant_tool_rounds import segment_openai_messages_for_assistant
 
 # 从 app 目录定位到 backend/tokenizer/deepseek_v3_tokenizer
 _APP_DIR = Path(__file__).resolve().parent
@@ -69,12 +72,21 @@ def count_tokens(text: str | None) -> int | None:
 
 
 def _count_message_tokens(msg: dict) -> int | None:
-    """单条消息的 token 数（role + content，可选 reasoning_content）。"""
+    """单条消息的 token 数：role、content、reasoning_content、tool_calls、tool_call_id。"""
     role = msg.get("role", "unknown")
     content = (msg.get("content") or "") or ""
     parts = [f"{role}: {content}"]
     if msg.get("reasoning_content"):
         parts.append(str(msg["reasoning_content"]))
+    if msg.get("tool_calls"):
+        try:
+            parts.append(json.dumps(msg["tool_calls"], ensure_ascii=False))
+        except (TypeError, ValueError):
+            parts.append(str(msg["tool_calls"]))
+    if msg.get("role") == "tool":
+        tid = (msg.get("tool_call_id") or "") or ""
+        if tid:
+            parts.append(f"tool_call_id:{tid}")
     return count_tokens("\n".join(parts))
 
 
@@ -167,3 +179,45 @@ def trim_messages_to_context(
             break
     keep_indices.reverse()
     return [messages[i] for i in keep_indices]
+
+
+def trim_assistant_openai_messages_to_context(
+    messages: list[dict],
+    context_size: int,
+    long_term_memory_text: str | None = None,
+) -> list[dict]:
+    """
+    按 context_size 裁剪助手 OpenAI 消息：以「工具轮次段」为原子单元，从最新往旧累加，
+    避免只保留半截 assistant.tool_calls 或孤立 role=tool。
+
+    tokenizer 不可用时返回原列表（与 trim_messages_to_context 一致）。
+    """
+    if not messages or context_size < 1:
+        return list(messages)
+    memory_tokens = count_tokens(long_term_memory_text)
+    if memory_tokens is None:
+        return list(messages)
+    budget = context_size - memory_tokens
+    if budget <= 0:
+        return []
+    segments = segment_openai_messages_for_assistant(messages)
+    seg_tokens: list[int | None] = []
+    for seg in segments:
+        t = count_tokens_for_messages(seg)
+        seg_tokens.append(t)
+    if any(t is None for t in seg_tokens):
+        return list(messages)
+    total = 0
+    keep_seg_indices: list[int] = []
+    for i in range(len(segments) - 1, -1, -1):
+        t = seg_tokens[i]
+        if total + t <= budget:
+            total += t
+            keep_seg_indices.append(i)
+        else:
+            break
+    keep_seg_indices.reverse()
+    out: list[dict] = []
+    for idx in keep_seg_indices:
+        out.extend(segments[idx])
+    return out
