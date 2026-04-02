@@ -41,6 +41,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from app.assistant import load_agent_system_prompt
 from app.assistant_tools.context import AssistantToolContext
 from app.assistant_tools.result import compact_tool_result_json_for_llm
 from app.services.assistant_agent import (
@@ -441,7 +442,7 @@ def get_assistant_settings() -> AssistantSettings:
 )
 def put_assistant_settings(body: AssistantSettingsUpdate) -> AssistantSettings:
     """
-    更新AI助手设置：请求体中未出现的字段保留原值（含 prompt）。
+    更新AI助手设置：请求体中未出现的字段保留原值。系统提示词由 AGENT.md 提供，不依赖本接口。
     
     Args:
         body: 部分字段更新
@@ -652,7 +653,7 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
         conversation = trim_assistant_openai_messages_to_context(conversation, context_size, None)
 
     llm_msgs: list[dict[str, Any]] = []
-    _ensure_system_prompt(llm_msgs, assistant_settings.prompt)
+    _ensure_system_prompt(llm_msgs, load_agent_system_prompt())
     participants_prompt = _build_chat_participants_prompt(chat_id)
     if participants_prompt:
         llm_msgs.append({"role": "system", "content": participants_prompt})

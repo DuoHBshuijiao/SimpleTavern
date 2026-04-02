@@ -299,11 +299,12 @@ class AssistantSettings(BaseModel):
     """
     AI助手设置模型
     
-    用于配置AI助手的行为参数。prompt 仍持久化并在服务端推理时使用，
-    但 API 的 GET/PUT 响应中不再包含 prompt，避免在客户端暴露。
+    用于配置AI助手的行为参数。系统提示词由仓库内 app/assistant/AGENT.md 在运行时加载，
+    不再使用本字段参与推理；prompt 键可仍存在于旧版 JSON 中，已废弃。
+    API 的 GET/PUT 响应中不包含 prompt。
     
     主要属性：
-        prompt: 助手系统提示词（仅存储与内部使用）
+        prompt: 已废弃（推理用 AGENT.md）；历史数据可能仍含该键
         temperature: 温度参数，范围0.0-2.0
         model: 使用的模型名称
         presetId: 关联的API预设ID
@@ -342,6 +343,7 @@ class AssistantSettingsUpdate(BaseModel):
     AI 助手设置部分更新（PUT 请求体）。
 
     未在 JSON 中出现的字段表示不修改；与已有 AssistantSettings 合并后保存。
+    prompt 已废弃（系统提示见 app/assistant/AGENT.md）；若仍传入会写入 JSON 但不影响推理。
     """
     model_config = ConfigDict(extra="allow")
 
