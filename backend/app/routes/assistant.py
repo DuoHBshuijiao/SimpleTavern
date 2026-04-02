@@ -36,17 +36,17 @@ from __future__ import annotations
 
 import json
 from typing import Any, AsyncIterator
-from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.assistant_tools.context import AssistantToolContext
-from app.assistant_tools.digest import args_digest as _tool_args_digest
 from app.assistant_tools.result import compact_tool_result_json_for_llm
-from app.assistant_tools.executor import build_openai_tools_list, execute_tool
-from app.llm.openai_compat import chat_completions_message, stream_chat_completions
+from app.services.assistant_agent import (
+    AssistantAgentRunContext,
+    AssistantAgentService,
+)
 from app.schemas import (
     build_reasoning_request_config,
     filter_reasoning_extra_body_for_upstream,
@@ -109,6 +109,8 @@ class AssistantStreamRequest(BaseModel):
     chatId: str | None = None
     allowWriteMemory: bool | None = None
     allowDestructiveTools: bool | None = None
+    maxToolTurns: int | None = Field(default=None, ge=1)
+    maxToolsPerTurn: int | None = Field(default=None, ge=1)
     scope: str | None = None
 
 
@@ -133,23 +135,6 @@ def _load_chat_context(chat_id: str) -> Chat | None:
         return None
 
 
-def _tool_record_payload(
-    tool_name: str,
-    loop_index: int,
-    result: dict[str, Any],
-    args: dict[str, Any],
-) -> dict[str, Any]:
-    msg = str(result.get("message") or "")
-    return {
-        "toolName": tool_name,
-        "loopIndex": loop_index,
-        "ok": bool(result.get("ok")),
-        "code": result.get("code"),
-        "message": msg,
-        "argsDigest": _tool_args_digest(args),
-    }
-
-
 def _reasoning_from_msg(m: ChatMessage) -> str | None:
     if getattr(m, "reasoningContent", None):
         s = (m.reasoningContent or "").strip()
@@ -161,21 +146,6 @@ def _reasoning_from_msg(m: ChatMessage) -> str | None:
         if s:
             return s
     return None
-
-
-def _normalize_tool_calls_ids(tool_calls: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
-    """为每条 tool_call 补全非空 id，保证与落库的 role=tool.tool_call_id 一致。"""
-    if not tool_calls:
-        return []
-    out: list[dict[str, Any]] = []
-    for tc in tool_calls:
-        tc_copy = dict(tc) if isinstance(tc, dict) else {}
-        tid = str(tc_copy.get("id") or "").strip()
-        if not tid:
-            tid = f"call_{uuid4().hex}"
-        tc_copy["id"] = tid
-        out.append(tc_copy)
-    return out
 
 
 def _assistant_messages_to_openai(messages: list[ChatMessage]) -> list[dict[str, Any]]:
@@ -702,113 +672,47 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
         allow_destructive_tools=allow_destructive_tools,
         assistant_settings=assistant_settings,
     )
-    tools = build_openai_tools_list(tool_ctx)
     extra_body = filter_reasoning_extra_body_for_upstream(model, reasoning_cfg["extra_body"])
+    agent_ctx = AssistantAgentRunContext(
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+        temperature=temperature,
+        messages=llm_msgs,
+        extra_body=extra_body,
+        tool_ctx=tool_ctx,
+        load_chat=lambda: _resolve_assistant_chat_by_scope(scope, chat_id),
+        save_chat=lambda assistant_chat: _save_assistant_chat_by_scope(scope, chat_id, assistant_chat),
+        max_tool_turns=req.maxToolTurns or assistant_settings.maxToolTurns or 8,
+        max_tools_per_turn=req.maxToolsPerTurn or assistant_settings.maxToolsPerTurn,
+    )
+    agent = AssistantAgentService(agent_ctx)
 
     # 非流式：与全局设置 streamEnabled 一致，返回 JSON
     if not getattr(settings, "streamEnabled", True):
-        current_messages = list(llm_msgs)
-        max_turns = 8
-        tool_traces: list[dict[str, Any]] = []
-        wb_updates: list[dict[str, Any]] = []
-        co_updates: list[dict[str, Any]] = []
-        last_card: Any = None
-        try:
-            for _ in range(max_turns):
-                resp = await chat_completions_message(
-                    base_url=base_url,
-                    api_key=api_key,
-                    model=model,
-                    messages=current_messages,
-                    temperature=temperature,
-                    tools=tools,
-                    extra_body=extra_body,
-                )
-                tool_calls_raw = resp.tool_calls
-                tool_calls_for_llm: list[dict[str, Any]] | None = None
-                if tool_calls_raw is not None:
-                    tool_calls_for_llm = _normalize_tool_calls_ids(tool_calls_raw)
-                llm_assistant_msg: dict[str, Any] = {
-                    "role": resp.role or "assistant",
-                    "content": resp.content or "",
-                }
-                if resp.reasoning_content:
-                    llm_assistant_msg["reasoning_content"] = resp.reasoning_content
-                if tool_calls_for_llm is not None:
-                    llm_assistant_msg["tool_calls"] = tool_calls_for_llm
-                current_messages.append(llm_assistant_msg)
-
-                if not tool_calls_raw:
-                    final_content = resp.content or ""
-                    final_reasoning_content = resp.reasoning_content
-                    assistant_msg_obj = ChatMessage(
-                        role=resp.role or "assistant",
-                        content=final_content,
-                        reasoningContent=final_reasoning_content or None,
-                    )
-                    chat_to_save = _resolve_assistant_chat_by_scope(scope, chat_id)
-                    chat_to_save.messages.append(assistant_msg_obj)
-                    _save_assistant_chat_by_scope(scope, chat_id, chat_to_save)
-                    return JSONResponse({
-                        "ok": True,
-                        "stream": False,
-                        "content": final_content,
-                        "messageId": assistant_msg_obj.id,
-                        "toolTraces": tool_traces,
-                        "card": last_card,
-                        "worldbookUpdated": wb_updates,
-                        "chatOverridesUpdated": co_updates,
-                    })
-
-                assistant_with_tools = ChatMessage(
-                    role=resp.role or "assistant",
-                    content=resp.content or "",
-                    tool_calls=list(tool_calls_for_llm or []),
-                    reasoningContent=resp.reasoning_content or None,
-                )
-                chat_turn = _resolve_assistant_chat_by_scope(scope, chat_id)
-                chat_turn.messages.append(assistant_with_tools)
-                _save_assistant_chat_by_scope(scope, chat_id, chat_turn)
-
-                tool_idx = 0
-                for tool_call in tool_calls_for_llm or []:
-                    fn = (tool_call.get("function") or {}).get("name")
-                    raw_args = (tool_call.get("function") or {}).get("arguments") or "{}"
-                    try:
-                        args = json.loads(raw_args)
-                    except Exception:
-                        args = {}
-                    tool_name = str(fn)
-                    outcome = execute_tool(tool_name, args, tool_ctx)
-                    result = outcome.result
-                    if outcome.card:
-                        last_card = outcome.card
-                    if outcome.worldbook_updated:
-                        wb_updates.append(outcome.worldbook_updated)
-                    if outcome.chat_overrides_updated:
-                        co_updates.append(outcome.chat_overrides_updated)
-                    tid = str(tool_call.get("id") or "").strip()
-                    tool_msg = ChatMessage(
-                        role="tool",
-                        tool_call_id=tid,
-                        content=json.dumps(result, ensure_ascii=False),
-                    )
-                    trace_chat = _resolve_assistant_chat_by_scope(scope, chat_id)
-                    trace_chat.messages.append(tool_msg)
-                    _save_assistant_chat_by_scope(scope, chat_id, trace_chat)
-                    tr = _tool_record_payload(tool_name, tool_idx, result, args)
-                    tool_idx += 1
-                    tool_traces.append({"record": tr, "messageId": tool_msg.id, "content": tool_msg.content})
-                    tool_result_msg = {
-                        "role": "tool",
-                        "tool_call_id": tid,
-                        "content": json.dumps(result, ensure_ascii=False),
-                    }
-                    current_messages.append(tool_result_msg)
-
-            return JSONResponse({"ok": False, "error": "tool call loop limit exceeded"}, status_code=500)
-        except Exception as e:
-            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        result = await agent.run_nonstream()
+        if not result.ok:
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "error": result.error or "unknown error",
+                    "code": result.error_code,
+                },
+                status_code=500,
+            )
+        return JSONResponse(
+            {
+                "ok": True,
+                "stream": False,
+                "content": result.content,
+                "messageId": result.message_id,
+                "toolTraces": result.tool_traces,
+                "toolRecords": result.tool_records,
+                "card": result.card,
+                "worldbookUpdated": result.worldbook_updated,
+                "chatOverridesUpdated": result.chat_overrides_updated,
+            }
+        )
 
     async def event_iter() -> AsyncIterator[str]:
         """
@@ -820,113 +724,8 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
         Yields:
             str: SSE格式的事件字符串
         """
-        current_messages = list(llm_msgs)
-        max_turns = 8
-        tool_idx_stream = 0
-
-        for _ in range(max_turns):
-            final_content = ""
-            final_reasoning_content = ""
-            llm_assistant_msg: dict[str, Any] = {
-                "role": "assistant",
-                "content": "",
-            }
-            tool_calls_from_stream: list[dict[str, Any]] | None = None
-            normalized_stream: list[dict[str, Any]] = []
-
-            try:
-                async for chunk in stream_chat_completions(
-                    base_url=base_url,
-                    api_key=api_key,
-                    model=model,
-                    messages=current_messages,
-                    temperature=temperature,
-                    tools=tools,
-                    extra_body=extra_body,
-                ):
-                    if chunk.kind == "reasoning":
-                        final_reasoning_content += chunk.text
-                        yield _sse("reasoning", {"text": chunk.text})
-                    elif chunk.kind == "content":
-                        final_content += chunk.text
-                        yield _sse("delta", {"text": chunk.text})
-                    elif chunk.kind == "finish":
-                        tool_calls_from_stream = chunk.tool_calls
-            except Exception as exc:
-                yield _sse("error", {"message": str(exc)})
-                return
-
-            if final_reasoning_content:
-                llm_assistant_msg["reasoning_content"] = final_reasoning_content
-            llm_assistant_msg["content"] = final_content
-            if tool_calls_from_stream:
-                normalized_stream = _normalize_tool_calls_ids(tool_calls_from_stream)
-                llm_assistant_msg["tool_calls"] = normalized_stream
-            current_messages.append(llm_assistant_msg)
-
-            if not tool_calls_from_stream:
-                assistant_msg_obj = ChatMessage(
-                    role="assistant",
-                    content=final_content,
-                    reasoningContent=final_reasoning_content or None,
-                )
-                chat_to_save = _resolve_assistant_chat_by_scope(scope, chat_id)
-                chat_to_save.messages.append(assistant_msg_obj)
-                _save_assistant_chat_by_scope(scope, chat_id, chat_to_save)
-                yield _sse("done", {"ok": True, "messageId": assistant_msg_obj.id})
-                return
-
-            assistant_with_tools = ChatMessage(
-                role="assistant",
-                content=final_content or "",
-                tool_calls=list(normalized_stream),
-                reasoningContent=final_reasoning_content or None,
-            )
-            chat_turn = _resolve_assistant_chat_by_scope(scope, chat_id)
-            chat_turn.messages.append(assistant_with_tools)
-            _save_assistant_chat_by_scope(scope, chat_id, chat_turn)
-
-            for tool_call in normalized_stream:
-                fn = (tool_call.get("function") or {}).get("name")
-                raw_args = (tool_call.get("function") or {}).get("arguments") or "{}"
-                try:
-                    args = json.loads(raw_args)
-                except Exception:
-                    args = {}
-                tool_name = str(fn)
-                outcome = execute_tool(tool_name, args, tool_ctx)
-                result = outcome.result
-                tid = str(tool_call.get("id") or "").strip()
-                tool_msg = ChatMessage(
-                    role="tool",
-                    tool_call_id=tid,
-                    content=json.dumps(result, ensure_ascii=False),
-                )
-                trace_chat = _resolve_assistant_chat_by_scope(scope, chat_id)
-                trace_chat.messages.append(tool_msg)
-                _save_assistant_chat_by_scope(scope, chat_id, trace_chat)
-                tr = _tool_record_payload(tool_name, tool_idx_stream, result, args)
-                tool_idx_stream += 1
-                yield _sse(
-                    "tool_trace",
-                    {"record": tr, "messageId": tool_msg.id, "content": tool_msg.content},
-                )
-                if outcome.card:
-                    yield _sse("card", {"card": outcome.card})
-                if outcome.chat_memory_updated:
-                    yield _sse("chat_memory_updated", {"chat": outcome.chat_memory_updated})
-                if outcome.worldbook_updated:
-                    yield _sse("worldbook_updated", outcome.worldbook_updated)
-                if outcome.chat_overrides_updated:
-                    yield _sse("chat_overrides_updated", outcome.chat_overrides_updated)
-                tool_result_msg = {
-                    "role": "tool",
-                    "tool_call_id": tid,
-                    "content": json.dumps(result, ensure_ascii=False),
-                }
-                current_messages.append(tool_result_msg)
-
-        yield _sse("error", {"message": "tool call loop limit exceeded"})
+        async for event in agent.iter_events():
+            yield _sse(event.kind, event.data)
 
     return StreamingResponse(
         event_iter(),
