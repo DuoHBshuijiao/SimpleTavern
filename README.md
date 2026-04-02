@@ -27,7 +27,7 @@
 | 前端 UI | Vue 3、Pinia、Vue Router | 组件化 SPA |
 | 前端构建 | Vite 7、TypeScript、`vue-tsc` | 开发热更新；生产构建前做类型检查 |
 | 样式 | Tailwind CSS 4（`@tailwindcss/vite`）、PostCSS | 与工具类、自定义 `variables.css` 等协同 |
-| 后端 | FastAPI、Uvicorn | REST + SSE；路由统一挂在 `/api` 下（开发时 Vite 将 `/api` 代理到 `http://127.0.0.1:8000`） |
+| 后端 | FastAPI、Uvicorn | REST + SSE；路由统一挂在 `/api` 下（开发时 Vite 将 `/api` 代理到 `http://127.0.0.1:9091`） |
 | 持久化 | 本地 JSON 文件 | 设置、角色、会话等位于 `data/`，见后端 `storage` 模块 |
 
 后端 Python 依赖版本下限见 `backend/requirements.txt`（如 `fastapi>=0.110`、`pydantic>=2.6`、`portalocker` 等）。前端依赖见 `frontend/package.json`。
@@ -81,7 +81,7 @@
 | Windows | `python deploy.py` |
 | Linux / macOS | `python3 deploy.py` 或 `chmod +x deploy.sh` 后 `./deploy.sh` |
 
-脚本将检查环境、创建 `venv/`、安装前后端依赖、构建前端，并启动后端（默认 **8000**）与前端预览（默认 **4173**），通常会尝试打开浏览器。停止服务：`Ctrl+C`。
+脚本将检查环境、创建 `venv/`、安装前后端依赖、构建前端，并启动后端（默认 **9091**）与前端预览（默认 **9081**），通常会尝试打开浏览器。停止服务：`Ctrl+C`。
 
 根目录还提供 `deploy.sh`、`deploy.bat`；手动分步说明见下文。
 
@@ -93,10 +93,10 @@
 
 | 步骤 | 目录 | 命令 |
 | --- | --- | --- |
-| 后端 | `backend` | 激活虚拟环境后：`python -m uvicorn app.main:app --reload --port 8000`（局域网可访问可加 `--host 0.0.0.0`） |
-| 前端 | `frontend` | `npm install` 后：`npm run dev`（通过 Vite 代理访问 `/api`） |
+| 后端 | `backend` | 激活虚拟环境后：`python -m uvicorn app.main:app --reload --port 9091`（局域网可访问可加 `--host 0.0.0.0`） |
+| 前端 | `frontend` | `npm install` 后：`npm run dev`（通过 Vite 代理访问 `/api`，开发服务器默认监听 **9081**，见 `vite.config.ts`） |
 
-生产形态可先 `npm run build`，再用 `npm run preview -- --port 4173 --host` 提供静态资源，行为与一键部署脚本中的前端启动方式一致。
+生产形态可先 `npm run build`，再用 `npm run preview -- --port 9081 --host` 提供静态资源，行为与一键部署脚本中的前端启动方式一致。
 
 ### 手动部署（简要）
 
@@ -124,7 +124,7 @@
 | CORS | 后端默认 `allow_origins=["*"]`，便于本地开发；若将服务暴露于不可信网络，需自行收紧策略。 | `backend/app/main.py` |
 | 部署脚本（Windows） | 脚本内对 Windows 命令行、引号等有特殊处理，避免嵌套 `cmd` 引号问题。 | `deploy.py` |
 
-**运维常见问题**（非代码缺陷）：8000 / 4173 端口占用时可改 `uvicorn` 与 `vite preview` 的端口参数；系统找不到 `python` / `npm` 时请安装或改用 `py`、`python3` 等。
+**运维常见问题**（非代码缺陷）：9091 / 9081 端口占用时可改 `uvicorn` 与 `vite preview` 的端口参数；系统找不到 `python` / `npm` 时请安装或改用 `py`、`python3` 等。
 
 ---
 

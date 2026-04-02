@@ -3,8 +3,8 @@
   const CHANNEL = 'st-janitor-bridge';
   const ACTIVATE_PARAM = '_st_import';
   const APP_BASE_PARAM = '_st_app_base';
-  const DEFAULT_API_BASE = 'http://127.0.0.1:8000';
-  const DEFAULT_APP_BASE = 'http://127.0.0.1:5173';
+  const DEFAULT_API_BASE = 'http://127.0.0.1:9091';
+  const DEFAULT_APP_BASE = 'http://127.0.0.1:9081';
   const CHAR_HTML_PARAM = '_st_char_html';
   const state = {
     sent: false,

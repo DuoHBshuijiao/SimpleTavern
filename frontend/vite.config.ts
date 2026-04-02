@@ -9,11 +9,16 @@ export default defineConfig({
     tailwindcss(),
   ],
   server: {
+    port: 9081,
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:8000',
+        target: 'http://127.0.0.1:9091',
         changeOrigin: true,
       },
     },
+  },
+  preview: {
+    port: 9081,
+    host: true,
   },
 })

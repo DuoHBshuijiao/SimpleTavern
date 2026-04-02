@@ -5,7 +5,7 @@ SimpleTavern 更新执行脚本（由后端 /api/update/run 触发）
 用法: python update_runner.py <backend_pid> <repo_root>
 
 步骤：
-1. 结束占用 4173 端口的进程（前端）
+1. 结束占用 9081 端口的进程（前端）
 2. 结束后端进程（backend_pid）
 3. 结束后端进程的父进程（主终端）
 4. 将 data/update/update.zip 解压并覆盖到仓库根目录
@@ -144,8 +144,8 @@ def main() -> None:
     if not grandparent_pid or grandparent_pid == 0:
         grandparent_pid = None
 
-    # 1. 结束前端（4173）
-    _kill_by_port(4173)
+    # 1. 结束前端（9081）
+    _kill_by_port(9081)
     time.sleep(1)
     # 2. 结束后端（仅杀后端进程，不杀子进程，否则会连本更新脚本所在 cmd/python 一起杀掉）
     _kill_pid(backend_pid, kill_tree=False)

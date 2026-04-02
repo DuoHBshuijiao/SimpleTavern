@@ -280,18 +280,18 @@ fi
 # ========================================
 print_info "启动后端服务..."
 cd "$BACKEND_DIR"
-"$VENV_PYTHON" -m uvicorn app.main:app --host 0.0.0.0 --port 8000 &
+"$VENV_PYTHON" -m uvicorn app.main:app --host 0.0.0.0 --port 9091 &
 BACKEND_PID=$!
 sleep 3
-print_success "后端服务已启动: http://localhost:8000"
+print_success "后端服务已启动: http://localhost:9091"
 echo ""
 
 print_info "启动前端服务..."
 cd "$FRONTEND_DIR"
-npm run preview -- --port 4173 --host &
+npm run preview -- --port 9081 --host &
 FRONTEND_PID=$!
 sleep 3
-print_success "前端服务已启动: http://localhost:4173"
+print_success "前端服务已启动: http://localhost:9081"
 echo ""
 
 # ========================================
@@ -299,19 +299,19 @@ echo ""
 # ========================================
 print_info "正在打开浏览器..."
 if command -v xdg-open &> /dev/null; then
-    xdg-open http://localhost:4173
+    xdg-open http://localhost:9081
 elif command -v open &> /dev/null; then
-    open http://localhost:4173
+    open http://localhost:9081
 else
-    print_warning "无法自动打开浏览器，请手动访问: http://localhost:4173"
+    print_warning "无法自动打开浏览器，请手动访问: http://localhost:9081"
 fi
 echo ""
 
 echo "=================================================="
 print_success "服务已启动！"
 echo "=================================================="
-print_info "后端地址: http://localhost:8000"
-print_info "前端地址: http://localhost:4173"
+print_info "后端地址: http://localhost:9091"
+print_info "前端地址: http://localhost:9081"
 print_info "虚拟环境: $VENV_DIR"
 echo ""
 print_warning "按 Ctrl+C 停止服务"

@@ -456,8 +456,8 @@ def _windows_try_backend_cmd_k(venv_python: str, backend_dir: Path, backend_port
 
 def start_services(venv_python, npm_cmd, backend_dir, frontend_dir):
     """启动后端和前端服务"""
-    backend_port = 8000
-    frontend_port = 4173
+    backend_port = 9091
+    frontend_port = 9081
     backend_url = f"http://localhost:{backend_port}"
     frontend_url = f"http://localhost:{frontend_port}"
     
