@@ -261,12 +261,12 @@ const assistant = useAssistant({
   },
 })
 
-function onAssistantSettingsMemoryChange(e: Event) {
-  assistant.setAllowWriteMemory((e.target as HTMLInputElement).checked)
+async function onAssistantSettingsMemoryChange(e: Event) {
+  await assistant.setAllowWriteMemory((e.target as HTMLInputElement).checked)
 }
 
-function onAssistantSettingsDestructiveChange(e: Event) {
-  assistant.setAllowDestructiveTools((e.target as HTMLInputElement).checked)
+async function onAssistantSettingsDestructiveChange(e: Event) {
+  await assistant.setAllowDestructiveTools((e.target as HTMLInputElement).checked)
 }
 
 const errorStack = useErrorStack(6000)

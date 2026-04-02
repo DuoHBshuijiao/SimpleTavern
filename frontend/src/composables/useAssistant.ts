@@ -39,6 +39,7 @@ import { ref } from 'vue'
 import type { ComputedRef } from 'vue'
 import { apiGet, apiPost, apiPut, apiDelete } from '../api/http'
 import { postAndConsumeSse } from '../api/sse'
+import { notifyConfirm } from './useNotify'
 
 export type AssistantMessage = {
   id: string
@@ -150,17 +151,15 @@ export function useAssistant(options: UseAssistantOptions) {
 
   loadAssistantToolPrefs()
 
-  function setAllowWriteMemory(next: boolean) {
+  async function setAllowWriteMemory(next: boolean) {
     if (allowWriteMemoryEnabled.value === next) return
     if (next && !localStorage.getItem(LS_WARNED_MEM)) {
-      // eslint-disable-next-line no-alert
-      if (
-        !window.confirm(
+      const ok = await notifyConfirm({
+        title: '提示',
+        message:
           '开启「记忆写入」后，助手可在当前会话中追加或覆盖长期记忆。请仅在信任当前对话时使用。',
-        )
-      ) {
-        return
-      }
+      })
+      if (!ok) return
       try {
         localStorage.setItem(LS_WARNED_MEM, '1')
       } catch {
@@ -171,17 +170,16 @@ export function useAssistant(options: UseAssistantOptions) {
     persistAssistantToolPrefs()
   }
 
-  function setAllowDestructiveTools(next: boolean) {
+  async function setAllowDestructiveTools(next: boolean) {
     if (allowDestructiveToolsEnabled.value === next) return
     if (next && !localStorage.getItem(LS_WARNED_DEST)) {
-      // eslint-disable-next-line no-alert
-      if (
-        !window.confirm(
+      const ok = await notifyConfirm({
+        title: '提示',
+        message:
           '开启「破坏性工具」后，助手可执行删除文件、删除世界书、覆盖整卡与覆盖全部记忆等不可逆操作。请谨慎使用。',
-        )
-      ) {
-        return
-      }
+        variant: 'danger',
+      })
+      if (!ok) return
       try {
         localStorage.setItem(LS_WARNED_DEST, '1')
       } catch {
@@ -193,11 +191,11 @@ export function useAssistant(options: UseAssistantOptions) {
   }
 
   function toggleAllowWriteMemory() {
-    setAllowWriteMemory(!allowWriteMemoryEnabled.value)
+    void setAllowWriteMemory(!allowWriteMemoryEnabled.value)
   }
 
   function toggleAllowDestructiveTools() {
-    setAllowDestructiveTools(!allowDestructiveToolsEnabled.value)
+    void setAllowDestructiveTools(!allowDestructiveToolsEnabled.value)
   }
 
   // 消息编辑状态
