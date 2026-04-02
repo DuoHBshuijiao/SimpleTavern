@@ -261,6 +261,14 @@ const assistant = useAssistant({
   },
 })
 
+function onAssistantSettingsMemoryChange(e: Event) {
+  assistant.setAllowWriteMemory((e.target as HTMLInputElement).checked)
+}
+
+function onAssistantSettingsDestructiveChange(e: Event) {
+  assistant.setAllowDestructiveTools((e.target as HTMLInputElement).checked)
+}
+
 const errorStack = useErrorStack(6000)
 const imageFallbackDialog = ref<{
   visible: boolean
@@ -3022,6 +3030,7 @@ const editingPersonaAvatarUrl = computed(() => {
 
     <!-- 聊天助手面板 -->
     <AssistantPanel
+      :show-tool-permission-toggles="true"
       :is-open="assistant.isAssistantPanelOpen.value"
       :messages="assistant.assistantMessages.value"
       :draft="assistant.assistantDraft.value"
@@ -3413,10 +3422,18 @@ const editingPersonaAvatarUrl = computed(() => {
               </div>
             </div>
             <div class="pt-4 border-t border-[var(--color-border-subtle)]">
-              <div class="flex flex-wrap gap-2 mb-2">
+              <div class="flex flex-wrap gap-2 mb-2 items-center">
                 <button
                   type="button"
-                  class="text-[10px] px-2.5 py-1 rounded-lg border transition-colors"
+                  disabled
+                  title="仅聊天会话中可用"
+                  class="text-xs px-2.5 py-1 rounded-lg border cursor-not-allowed opacity-50 border-[var(--color-border-subtle)] text-[var(--color-text-muted)]"
+                >
+                  记忆写入
+                </button>
+                <button
+                  type="button"
+                  class="text-xs px-2.5 py-1 rounded-lg border transition-colors"
                   :class="assistant.allowDestructiveToolsEnabled.value
                     ? 'bg-amber-500/15 border-amber-500/50 text-amber-200'
                     : 'border-[var(--color-border-subtle)] text-[var(--color-text-muted)]'"
@@ -3424,6 +3441,7 @@ const editingPersonaAvatarUrl = computed(() => {
                 >
                   破坏性工具
                 </button>
+                <span class="text-[10px] text-[var(--color-text-muted)]">工作区不写长期记忆</span>
               </div>
               <textarea
                 v-model="assistant.workspaceAssistantDraft.value"
@@ -3594,6 +3612,64 @@ const editingPersonaAvatarUrl = computed(() => {
               placeholder="未限制"
             />
             <p class="text-xs text-[var(--color-text-muted)] mt-1">对返回的消息列表做 token 估算裁剪（保留最新）；留空表示不启用。</p>
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="form-group">
+              <label class="label">最大工具轮次</label>
+              <input
+                v-model.number="assistant.assistantSettings.value.maxToolTurns"
+                type="number"
+                min="1"
+                class="input w-full"
+                placeholder="默认 8"
+              />
+              <p class="text-xs text-[var(--color-text-muted)] mt-1">限制单次助手请求可进入多少轮 tool_calls。</p>
+            </div>
+            <div class="form-group">
+              <label class="label">单轮工具数上限</label>
+              <input
+                v-model.number="assistant.assistantSettings.value.maxToolsPerTurn"
+                type="number"
+                min="1"
+                class="input w-full"
+                placeholder="未限制"
+              />
+              <p class="text-xs text-[var(--color-text-muted)] mt-1">超出部分会写入 LIMIT_EXCEEDED 结果并跳过执行。</p>
+            </div>
+          </div>
+          <div class="form-group border-t border-[var(--color-border-subtle)] pt-6">
+            <p class="label mb-3">工具权限</p>
+            <p class="text-xs text-[var(--color-text-muted)] mb-4">
+              以下开关与侧栏消息列表底部的权限按钮同步，变更后立即写入本机偏好。
+            </p>
+            <label class="flex items-start gap-3 cursor-pointer mb-4">
+              <input
+                type="checkbox"
+                class="accent-brand mt-0.5 h-4 w-4 shrink-0 rounded border border-[var(--color-border)]"
+                :checked="assistant.allowWriteMemoryEnabled.value"
+                @change="onAssistantSettingsMemoryChange"
+              />
+              <span>
+                <span class="text-sm text-[var(--color-text)]">允许记忆写入</span>
+                <span class="block text-xs text-[var(--color-text-muted)] mt-1">
+                  开启后助手可在当前聊天会话中追加或覆盖长期记忆；仅作用于「聊天助手」，工作区助手不可用。
+                </span>
+              </span>
+            </label>
+            <label class="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                class="accent-brand mt-0.5 h-4 w-4 shrink-0 rounded border border-[var(--color-border)]"
+                :checked="assistant.allowDestructiveToolsEnabled.value"
+                @change="onAssistantSettingsDestructiveChange"
+              />
+              <span>
+                <span class="text-sm text-[var(--color-text)]">允许破坏性工具</span>
+                <span class="block text-xs text-[var(--color-text-muted)] mt-1">
+                  开启后助手可执行删除文件、删除世界书、覆盖整卡与覆盖全部记忆等不可逆操作。
+                </span>
+              </span>
+            </label>
           </div>
         </div>
       </div>
