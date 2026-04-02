@@ -63,6 +63,10 @@ export interface AssistantSettings {
   tool_read_max_messages?: number | null
   /** 助手读取会话消息 token 估算上限（服务端 chat_read_conversation） */
   tool_read_max_tokens?: number | null
+  /** 单次请求最大工具轮次数 */
+  maxToolTurns?: number | null
+  /** 单轮最大工具调用数 */
+  maxToolsPerTurn?: number | null
 }
 
 /** 主聊天会话类型（与 stores/chats 中当前会话一致），用于记忆更新回调 */
@@ -114,6 +118,8 @@ export function useAssistant(options: UseAssistantOptions) {
     context_size: null,
     tool_read_max_messages: null,
     tool_read_max_tokens: null,
+    maxToolTurns: 8,
+    maxToolsPerTurn: null,
   })
 
   const LS_ASSISTANT_MEM = 'assistant_allow_write_memory'
@@ -144,8 +150,9 @@ export function useAssistant(options: UseAssistantOptions) {
 
   loadAssistantToolPrefs()
 
-  function toggleAllowWriteMemory() {
-    if (!allowWriteMemoryEnabled.value && !localStorage.getItem(LS_WARNED_MEM)) {
+  function setAllowWriteMemory(next: boolean) {
+    if (allowWriteMemoryEnabled.value === next) return
+    if (next && !localStorage.getItem(LS_WARNED_MEM)) {
       // eslint-disable-next-line no-alert
       if (
         !window.confirm(
@@ -160,12 +167,13 @@ export function useAssistant(options: UseAssistantOptions) {
         /* ignore */
       }
     }
-    allowWriteMemoryEnabled.value = !allowWriteMemoryEnabled.value
+    allowWriteMemoryEnabled.value = next
     persistAssistantToolPrefs()
   }
 
-  function toggleAllowDestructiveTools() {
-    if (!allowDestructiveToolsEnabled.value && !localStorage.getItem(LS_WARNED_DEST)) {
+  function setAllowDestructiveTools(next: boolean) {
+    if (allowDestructiveToolsEnabled.value === next) return
+    if (next && !localStorage.getItem(LS_WARNED_DEST)) {
       // eslint-disable-next-line no-alert
       if (
         !window.confirm(
@@ -180,8 +188,16 @@ export function useAssistant(options: UseAssistantOptions) {
         /* ignore */
       }
     }
-    allowDestructiveToolsEnabled.value = !allowDestructiveToolsEnabled.value
+    allowDestructiveToolsEnabled.value = next
     persistAssistantToolPrefs()
+  }
+
+  function toggleAllowWriteMemory() {
+    setAllowWriteMemory(!allowWriteMemoryEnabled.value)
+  }
+
+  function toggleAllowDestructiveTools() {
+    setAllowDestructiveTools(!allowDestructiveToolsEnabled.value)
   }
 
   // 消息编辑状态
@@ -287,6 +303,37 @@ export function useAssistant(options: UseAssistantOptions) {
       }))
   }
 
+  function normalizePositiveInt(value: number | null | undefined): number | null {
+    if (value == null || Number.isNaN(value) || value < 1) return null
+    return Math.floor(value)
+  }
+
+  function upsertToolMessage(
+    state: ReturnType<typeof getState>,
+    payload: {
+      messageId?: string
+      content?: string
+      record?: Record<string, unknown>
+    },
+  ) {
+    const id = payload.messageId || `assistant_tool_${Date.now()}`
+    const content = payload.content ?? ''
+    const existing = state.messages.value.find((message) => message.id === id)
+    if (existing) {
+      existing.role = 'tool'
+      existing.content = content || existing.content
+      existing.toolRecord = payload.record ?? existing.toolRecord
+      return
+    }
+    state.messages.value.push({
+      id,
+      role: 'tool',
+      content,
+      ts: new Date().toISOString(),
+      toolRecord: payload.record,
+    })
+  }
+
   /**
    * 加载助手设置
    *
@@ -303,6 +350,8 @@ export function useAssistant(options: UseAssistantOptions) {
       context_size?: number | null
       tool_read_max_messages?: number | null
       tool_read_max_tokens?: number | null
+      maxToolTurns?: number | null
+      maxToolsPerTurn?: number | null
     }>('/api/assistant/settings')
     assistantSettings.value = {
       temperature: res.temperature ?? null,
@@ -311,6 +360,8 @@ export function useAssistant(options: UseAssistantOptions) {
       context_size: res.context_size ?? null,
       tool_read_max_messages: res.tool_read_max_messages ?? null,
       tool_read_max_tokens: res.tool_read_max_tokens ?? null,
+      maxToolTurns: res.maxToolTurns ?? 8,
+      maxToolsPerTurn: res.maxToolsPerTurn ?? null,
     }
   }
 
@@ -344,11 +395,15 @@ export function useAssistant(options: UseAssistantOptions) {
         assistantSettings.value.tool_read_max_tokens >= 1
           ? assistantSettings.value.tool_read_max_tokens
           : null,
+      maxToolTurns: normalizePositiveInt(assistantSettings.value.maxToolTurns),
+      maxToolsPerTurn: normalizePositiveInt(assistantSettings.value.maxToolsPerTurn),
     }
     await apiPut('/api/assistant/settings', payload)
     assistantSettings.value.context_size = payload.context_size
     assistantSettings.value.tool_read_max_messages = payload.tool_read_max_messages ?? null
     assistantSettings.value.tool_read_max_tokens = payload.tool_read_max_tokens ?? null
+    assistantSettings.value.maxToolTurns = payload.maxToolTurns ?? 8
+    assistantSettings.value.maxToolsPerTurn = payload.maxToolsPerTurn ?? null
   }
 
   /**
@@ -697,29 +752,32 @@ export function useAssistant(options: UseAssistantOptions) {
                 messageId?: string
                 record?: Record<string, unknown>
               } | undefined
-              const content = data?.content ?? ''
-              const rec = data?.record
-              const toolMessageId = data?.messageId || `assistant_tool_${Date.now()}`
               state.streamingReasoning.value = ''
               if (reasoningBuffer.trim()) {
-                state.reasoningBlocks.value = [...state.reasoningBlocks.value, { messageId: toolMessageId, content: reasoningBuffer }]
+                state.reasoningBlocks.value = [...state.reasoningBlocks.value, { messageId: data?.messageId || `assistant_tool_${Date.now()}`, content: reasoningBuffer }]
                 reasoningBuffer = ''
               }
-              const display =
-                typeof content === 'string' && content.trim()
-                  ? content
-                  : rec
-                    ? JSON.stringify(rec)
-                    : ''
-              if (display) {
-                state.messages.value.push({
-                  id: toolMessageId,
-                  role: 'tool',
-                  content: display,
-                  ts: new Date().toISOString(),
-                  toolRecord: rec,
-                })
+              upsertToolMessage(state, {
+                messageId: data?.messageId,
+                content: data?.content ?? (data?.record ? JSON.stringify(data.record) : ''),
+                record: data?.record,
+              })
+            } else if (evt.event === 'tool_record') {
+              const data = evt.data as {
+                content?: string
+                messageId?: string
+                record?: Record<string, unknown>
+              } | undefined
+              state.streamingReasoning.value = ''
+              if (reasoningBuffer.trim()) {
+                state.reasoningBlocks.value = [...state.reasoningBlocks.value, { messageId: data?.messageId || `assistant_tool_${Date.now()}`, content: reasoningBuffer }]
+                reasoningBuffer = ''
               }
+              upsertToolMessage(state, {
+                messageId: data?.messageId,
+                content: data?.content ?? (data?.record ? JSON.stringify(data.record) : ''),
+                record: data?.record,
+              })
             } else if (evt.event === 'card') {
               const data = evt.data as { card?: unknown } | undefined
               const card = data?.card
@@ -752,6 +810,7 @@ export function useAssistant(options: UseAssistantOptions) {
           content?: string
           messageId?: string
           toolTraces?: Array<{ content?: string; messageId: string; record?: Record<string, unknown> }>
+          toolRecords?: Array<{ content?: string; messageId: string; record?: Record<string, unknown> }>
           card?: unknown
           worldbookUpdated?: Array<{ worldbookId?: string }>
           chatOverridesUpdated?: Array<{ chatId?: string }>
@@ -770,14 +829,19 @@ export function useAssistant(options: UseAssistantOptions) {
           }
           if (Array.isArray(res.toolTraces)) {
             for (const tt of res.toolTraces) {
-              const c = tt.content || (tt.record ? JSON.stringify(tt.record) : '')
-              if (!c) continue
-              state.messages.value.push({
-                id: tt.messageId || `assistant_tool_${Date.now()}`,
-                role: 'tool',
-                content: c,
-                ts: new Date().toISOString(),
-                toolRecord: tt.record,
+              upsertToolMessage(state, {
+                messageId: tt.messageId,
+                content: tt.content || (tt.record ? JSON.stringify(tt.record) : ''),
+                record: tt.record,
+              })
+            }
+          }
+          if (Array.isArray(res.toolRecords)) {
+            for (const tt of res.toolRecords) {
+              upsertToolMessage(state, {
+                messageId: tt.messageId,
+                content: tt.content || (tt.record ? JSON.stringify(tt.record) : ''),
+                record: tt.record,
               })
             }
           }
@@ -857,6 +921,8 @@ export function useAssistant(options: UseAssistantOptions) {
     assistantSettings,
     allowWriteMemoryEnabled,
     allowDestructiveToolsEnabled,
+    setAllowWriteMemory,
+    setAllowDestructiveTools,
     toggleAllowWriteMemory,
     toggleAllowDestructiveTools,
 
