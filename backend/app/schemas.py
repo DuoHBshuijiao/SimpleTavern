@@ -325,6 +325,16 @@ class AssistantSettings(BaseModel):
         ge=1,
         description="助手 chat_read_conversation 返回消息列表的最大 token 数（估算）；空表示不启用",
     )
+    maxToolTurns: int | None = Field(
+        default=8,
+        ge=1,
+        description="助手单次请求内允许的最大工具轮次数；空时回退默认值 8",
+    )
+    maxToolsPerTurn: int | None = Field(
+        default=None,
+        ge=1,
+        description="单轮 assistant.tool_calls 最大允许执行数；空表示不额外限制",
+    )
 
 
 class AssistantSettingsUpdate(BaseModel):
@@ -349,6 +359,16 @@ class AssistantSettingsUpdate(BaseModel):
         default=None,
         ge=1,
         description="助手 chat_read_conversation 返回消息列表的最大 token 数（估算）；空表示不启用",
+    )
+    maxToolTurns: int | None = Field(
+        default=None,
+        ge=1,
+        description="助手单次请求内允许的最大工具轮次数；空表示不修改",
+    )
+    maxToolsPerTurn: int | None = Field(
+        default=None,
+        ge=1,
+        description="单轮 assistant.tool_calls 最大允许执行数；空表示不修改/不限制",
     )
 
 
