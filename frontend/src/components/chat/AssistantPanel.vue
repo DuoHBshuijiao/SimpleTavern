@@ -231,16 +231,72 @@ function getDisplayContent(m: AssistantMessage, isLastAssistant: boolean): strin
   return m.content ?? ''
 }
 
-/** 工具轮次落库的 JSON（或 SSE 摘要）：格式化为可读 Markdown */
-function getToolDisplayMarkdown(m: AssistantMessage): string {
+function parseToolContent(raw: string): Record<string, unknown> | null {
+  if (!raw.trim()) return null
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null
+  } catch {
+    return null
+  }
+}
+
+function getToolRecord(m: AssistantMessage): Record<string, unknown> | null {
+  if (m.toolRecord && typeof m.toolRecord === 'object') return m.toolRecord
+  const parsed = parseToolContent(m.content ?? '')
+  if (parsed && typeof parsed.toolName === 'string') return parsed
+  return null
+}
+
+function getToolStepTitle(m: AssistantMessage): string {
+  const record = getToolRecord(m)
+  const toolName = typeof record?.toolName === 'string' ? record.toolName : '未知工具'
+  const loopIndex = typeof record?.loopIndex === 'number' ? record.loopIndex : null
+  return loopIndex != null ? `步骤 ${loopIndex + 1} · ${toolName}` : toolName
+}
+
+function getToolMessage(m: AssistantMessage): string {
+  const record = getToolRecord(m)
+  if (typeof record?.message === 'string' && record.message.trim()) return record.message
+  const parsed = parseToolContent(m.content ?? '')
+  if (typeof parsed?.message === 'string' && parsed.message.trim()) return parsed.message
+  return ''
+}
+
+function getToolArgsDigest(m: AssistantMessage): string {
+  const record = getToolRecord(m)
+  return typeof record?.argsDigest === 'string' ? record.argsDigest : ''
+}
+
+function isToolOk(m: AssistantMessage): boolean {
+  const record = getToolRecord(m)
+  if (typeof record?.ok === 'boolean') return record.ok
+  const parsed = parseToolContent(m.content ?? '')
+  return Boolean(parsed?.ok)
+}
+
+function getToolCode(m: AssistantMessage): string {
+  const record = getToolRecord(m)
+  if (typeof record?.code === 'string' && record.code.trim()) return record.code
+  const parsed = parseToolContent(m.content ?? '')
+  return typeof parsed?.code === 'string' ? parsed.code : ''
+}
+
+function getToolStatusLabel(m: AssistantMessage): string {
+  return isToolOk(m) ? '成功' : (getToolCode(m) || '失败')
+}
+
+function getToolStatusClass(m: AssistantMessage): string {
+  return isToolOk(m)
+    ? 'bg-emerald-500/15 text-emerald-200 border border-emerald-400/30'
+    : 'bg-amber-500/15 text-amber-100 border border-amber-400/30'
+}
+
+function getToolDetailContent(m: AssistantMessage): string {
   const raw = m.content ?? ''
   if (!raw.trim()) return ''
-  try {
-    const o = JSON.parse(raw) as unknown
-    return '```json\n' + JSON.stringify(o, null, 2) + '\n```'
-  } catch {
-    return raw
-  }
+  const parsed = parseToolContent(raw)
+  return parsed ? JSON.stringify(parsed, null, 2) : raw
 }
 
 // 消息列表滚动容器：打开面板时自动滚到底部
@@ -279,16 +335,32 @@ watch(
 </script>
 
 <template>
+  <!-- Teleport 到 body，避免主聊天区（含 z-50 助手按钮等）的层叠上下文遮挡侧栏下半部分 -->
+  <Teleport to="body">
   <aside
-    class="fixed right-4 top-4 bottom-4 theme-panel-bg backdrop-blur-xl backdrop-saturate-[1.8] border border-[var(--color-border)] shadow-glass-panel rounded-2xl transition-all duration-300 overflow-hidden flex flex-col z-20"
+    class="fixed right-4 top-4 bottom-4 theme-panel-bg backdrop-blur-xl backdrop-saturate-[1.8] border border-[var(--color-border)] shadow-glass-panel rounded-2xl transition-all duration-300 overflow-hidden flex flex-col z-[100] pointer-events-auto"
     :class="isOpen ? 'translate-x-0 w-[360px] opacity-100' : 'translate-x-[calc(100%+20px)] w-[360px] opacity-0 pointer-events-none'"
     style="contain: content; will-change: transform, opacity;"
   >
     <!-- 头部 -->
     <div class="flex items-center justify-between px-4 py-3 border-b border-white/5 shrink-0 bg-white/5 backdrop-blur-md">
-      <span class="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2">
-        <span class="w-2 h-2 rounded-full bg-[#b76e79] animate-pulse"></span>
+      <span class="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2 flex-wrap min-w-0">
+        <span class="w-2 h-2 rounded-full bg-[#b76e79] animate-pulse shrink-0"></span>
         聊天助手
+        <span
+          v-if="allowWriteMemory"
+          class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold normal-case tracking-normal bg-brand/20 text-brand-foreground border border-brand/40"
+          title="已允许记忆写入"
+        >
+          记忆
+        </span>
+        <span
+          v-if="allowDestructiveTools"
+          class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold normal-case tracking-normal bg-amber-500/20 text-amber-100 border border-amber-500/40"
+          title="已允许破坏性工具"
+        >
+          破坏
+        </span>
       </span>
       <div class="flex items-center gap-2">
         <button class="text-gray-500 hover:text-white transition-colors" @click="emit('open-settings')">
@@ -300,8 +372,12 @@ watch(
       </div>
     </div>
 
-    <!-- 消息列表 -->
-    <div ref="messagesListEl" class="flex-1 overflow-y-auto custom-scrollbar space-y-4 px-4 py-3">
+    <!-- 消息列表：底部工具权限悬浮在列表之上（不占用独立条带） -->
+    <div class="min-h-0 flex-1 relative flex flex-col overflow-hidden">
+      <div
+        ref="messagesListEl"
+        class="min-h-0 flex-1 overflow-y-auto custom-scrollbar space-y-4 px-4 pt-3 pb-14"
+      >
       <div v-if="messages.length === 0" class="text-xs text-gray-600 text-center py-12 flex flex-col items-center gap-3">
         <div class="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center text-xl">
             <Sparkles class="w-6 h-6 text-yellow-400" />
@@ -342,15 +418,31 @@ watch(
               ? 'bg-yellow-500/10 border-yellow-500/20 text-gray-300 rounded-lg text-xs'
               : 'bg-white/5 backdrop-blur-md border-white/10 text-gray-200 rounded-tl-sm')"
         >
+          <template v-if="m.role === 'tool'">
+            <div class="flex items-start justify-between gap-3 mb-2">
+              <div class="min-w-0">
+                <div class="text-[10px] uppercase tracking-wider text-yellow-500/80">工具步骤</div>
+                <div class="text-sm text-gray-100 break-words">{{ getToolStepTitle(m) }}</div>
+              </div>
+              <span class="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold" :class="getToolStatusClass(m)">
+                {{ getToolStatusLabel(m) }}
+              </span>
+            </div>
+            <div v-if="getToolMessage(m)" class="text-xs text-gray-200 whitespace-pre-wrap break-words">
+              {{ getToolMessage(m) }}
+            </div>
+            <div v-if="getToolArgsDigest(m)" class="mt-2 text-[10px] text-gray-400 break-all">
+              argsDigest: {{ getToolArgsDigest(m) }}
+            </div>
+            <details class="mt-2 rounded-lg border border-white/8 bg-black/20 overflow-hidden">
+              <summary class="cursor-pointer px-3 py-2 text-[11px] text-gray-300 select-none">查看结果 JSON</summary>
+              <pre class="px-3 pb-3 text-[11px] leading-relaxed text-gray-300 whitespace-pre-wrap break-words">{{ getToolDetailContent(m) }}</pre>
+            </details>
+          </template>
           <div
-            v-if="m.role === 'tool'"
-            class="text-[10px] uppercase tracking-wider text-yellow-500/80 mb-1"
-          >
-            工具结果
-          </div>
-          <div
+            v-else
             class="prose prose-invert prose-sm max-w-none"
-            v-html="renderMarkdown(m.role === 'tool' ? getToolDisplayMarkdown(m) : getDisplayContent(m, m.role === 'assistant' && idx === messages.length - 1))"
+            v-html="renderMarkdown(getDisplayContent(m, m.role === 'assistant' && idx === messages.length - 1))"
           ></div>
         </div>
         <!-- 消息操作 -->
@@ -379,35 +471,40 @@ watch(
           </button>
         </div>
       </div>
+      </div>
+      <div
+        v-if="showToolPermissionToggles !== false"
+        class="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex flex-wrap items-end gap-2 px-4 pb-3 pt-2"
+      >
+        <div class="pointer-events-auto flex flex-wrap gap-2">
+          <button
+            type="button"
+            class="text-xs px-2.5 py-1 rounded-lg border transition-colors shadow-lg backdrop-blur-sm"
+            :class="allowWriteMemory
+              ? 'bg-brand/30 border-brand text-brand-foreground shadow-[0_0_0_1px_rgba(183,110,121,0.35)]'
+              : 'border-white/15 bg-black/40 text-gray-300 hover:border-white/25'"
+            @click="emit('toggle-write-memory')"
+          >
+            记忆写入
+          </button>
+          <button
+            type="button"
+            class="text-xs px-2.5 py-1 rounded-lg border transition-colors shadow-lg backdrop-blur-sm"
+            :class="allowDestructiveTools
+              ? 'bg-amber-500/25 border-amber-500/60 text-amber-100 shadow-[0_0_0_1px_rgba(245,158,11,0.35)]'
+              : 'border-white/15 bg-black/40 text-gray-300 hover:border-white/25'"
+            @click="emit('toggle-destructive')"
+          >
+            破坏性工具
+          </button>
+        </div>
+      </div>
     </div>
 
     <!-- 输入区域 -->
-    <div class="pt-4 pb-4 px-4 border-t border-white/5 bg-black/10 backdrop-blur-sm">
-      <div
-        v-if="showToolPermissionToggles !== false"
-        class="flex flex-wrap gap-2 mb-2"
-      >
-        <button
-          type="button"
-          class="text-[10px] px-2.5 py-1 rounded-lg border transition-colors"
-          :class="allowWriteMemory
-            ? 'bg-brand/25 border-brand text-brand-foreground shadow-[0_0_0_1px_rgba(183,110,121,0.35)]'
-            : 'border-white/10 text-gray-500 hover:border-white/20'"
-          @click="emit('toggle-write-memory')"
-        >
-          记忆写入
-        </button>
-        <button
-          type="button"
-          class="text-[10px] px-2.5 py-1 rounded-lg border transition-colors"
-          :class="allowDestructiveTools
-            ? 'bg-amber-500/20 border-amber-500/60 text-amber-100 shadow-[0_0_0_1px_rgba(245,158,11,0.35)]'
-            : 'border-white/10 text-gray-500 hover:border-white/20'"
-          @click="emit('toggle-destructive')"
-        >
-          破坏性工具
-        </button>
-      </div>
+    <div
+      class="shrink-0 pt-4 pb-4 px-4 border-t border-white/5 bg-black/10 backdrop-blur-sm shadow-[0_-12px_32px_-8px_rgba(0,0,0,0.35)] relative z-10"
+    >
       <div class="relative">
         <textarea
           :value="draft"
@@ -457,6 +554,7 @@ watch(
       @update:show="(val) => !val && closeConfirm()"
     />
   </aside>
+  </Teleport>
 </template>
 
 <style scoped>
