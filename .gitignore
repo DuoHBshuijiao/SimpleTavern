@@ -17,3 +17,6 @@ ChatPage_old_discard.vue
 .cursor
 .shared
 功能清单.md
+
+backend/tests/
+.github/copilot-instructions.md
