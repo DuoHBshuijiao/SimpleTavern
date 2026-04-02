@@ -18,6 +18,7 @@ CONFLICT = "CONFLICT"
 UPSTREAM_VALIDATION = "UPSTREAM_VALIDATION"
 INTERNAL = "INTERNAL"
 UNKNOWN_TOOL = "UNKNOWN_TOOL"
+LIMIT_EXCEEDED = "LIMIT_EXCEEDED"
 
 
 def ok(data: dict[str, Any] | None = None, *, tool: str) -> dict[str, Any]:
