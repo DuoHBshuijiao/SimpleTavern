@@ -90,7 +90,7 @@ import SettingsDrawer from '../components/SettingsDrawer.vue'
 import AvatarCropper from '../components/AvatarCropper.vue'
 import ModernAvatar from '../components/ModernAvatar.vue'
 import ModernSelect from '../components/ModernSelect.vue'
-import { Users, Settings, Sparkles, Loader2, X, MoreHorizontal, GripVertical, Check, Plus } from 'lucide-vue-next'
+import { Users, Settings, Sparkles, Loader2, X, MoreHorizontal, GripVertical, Check, Plus, Search } from 'lucide-vue-next'
 
 // API
 import { postAndConsumeSse } from '../api/sse'
@@ -314,6 +314,9 @@ const chatSearchLoading = ref(false)
 const chatSearchResults = ref<Array<{ messageId: string; messageIndex: number; snippet: string }>>([])
 const chatSearchCursor = ref(0)
 const chatSearchInputRef = ref<HTMLInputElement | null>(null)
+const showHeaderMoreMenu = ref(false)
+const headerMoreMenuRef = ref<HTMLElement | null>(null)
+const headerMoreButtonRef = ref<HTMLElement | null>(null)
 
 watch(streamError, (value) => {
   if (!value) return
@@ -335,6 +338,7 @@ onBeforeUnmount(() => {
   clearDraftImages()
   errorStack.clearAll()
   window.removeEventListener('keydown', handleGlobalKeydown)
+  window.removeEventListener('pointerdown', handleHeaderPointerdown)
   if (chatSearchTimer) clearTimeout(chatSearchTimer)
 })
 
@@ -976,6 +980,7 @@ function jumpToSearchResult(idx: number) {
 }
 
 function openChatSearchBar() {
+  showHeaderMoreMenu.value = false
   showChatSearch.value = true
   nextTick(() => {
     chatSearchInputRef.value?.focus()
@@ -987,7 +992,27 @@ function closeChatSearchBar() {
   showChatSearch.value = false
 }
 
+function toggleHeaderMoreMenu() {
+  showHeaderMoreMenu.value = !showHeaderMoreMenu.value
+}
+
+function closeHeaderMoreMenu() {
+  showHeaderMoreMenu.value = false
+}
+
+function handleHeaderPointerdown(e: PointerEvent) {
+  const target = e.target as Node | null
+  if (!target) return
+  if (headerMoreMenuRef.value?.contains(target) || headerMoreButtonRef.value?.contains(target)) return
+  closeHeaderMoreMenu()
+}
+
 function handleGlobalKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') {
+    closeHeaderMoreMenu()
+    if (showChatSearch.value) closeChatSearchBar()
+    return
+  }
   if (!(e.ctrlKey && (e.key === 'f' || e.key === 'F'))) return
   if (!activeChat.value) return
   const target = e.target as HTMLElement | null
@@ -1050,6 +1075,7 @@ onMounted(async () => {
   await characters.loadAll()
   await chats.loadGroupList()
   window.addEventListener('keydown', handleGlobalKeydown)
+  window.addEventListener('pointerdown', handleHeaderPointerdown)
 
   if (!selectedCharacterId.value) {
     const first = characters.list[0]
@@ -1194,6 +1220,7 @@ watch(
       versions.clearAll()
     }
     // 切换会话时自动关闭搜索面板并重置搜索状态
+    showHeaderMoreMenu.value = false
     showChatSearch.value = false
     chatSearchQuery.value = ''
     chatSearchResults.value = []
@@ -2831,69 +2858,147 @@ const editingPersonaAvatarUrl = computed(() => {
             class="absolute top-0 left-0 right-0 z-10 flex flex-col theme-header-bg pointer-events-none"
             style="transform: translateZ(0);"
           >
-            <div class="h-14 flex items-center justify-between px-6">
-              <div class="pointer-events-auto flex items-center gap-3">
-                <template v-if="activeChat.isGroup">
-                  <span class="text-[var(--color-purple)]"><Users class="w-4 h-4" /></span>
-                  <h2 class="text-lg font-bold text-[var(--color-purple-text)] shadow-sm">{{ activeChat.title }}</h2>
-                  <span class="text-xs text-[var(--color-text-muted)]">({{ activeChat.memberIds.length }}个角色)</span>
-                  <button 
-                    class="ml-1 p-1 text-[var(--color-purple)] hover:text-[var(--color-text)] transition-colors" 
-                    title="群聊设置"
-                    @click="showGroupSettings = true"
-                  >
-                    <Settings class="w-4 h-4" />
-                  </button>
-                </template>
-                <template v-else>
-                  <h2 class="text-lg font-bold text-[var(--color-text)] shadow-sm">{{ selectedCharacter?.name }}</h2>
-                  <span class="text-[var(--color-text-muted)]">/</span>
-                  <span class="text-sm text-[var(--color-text-muted)]">{{ activeChat.title }}</span>
-                </template>
-              </div>
-              <div class="pointer-events-auto flex-1 px-4 min-w-[190px] max-w-xl">
-                <div v-if="showChatSearch" class="flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-surface-overlay px-2 py-1">
-                  <input
-                    ref="chatSearchInputRef"
-                    v-model="chatSearchQuery"
-                    class="flex-1 bg-transparent outline-none text-sm"
-                    placeholder="搜索当前会话（Ctrl+F）"
-                    @keydown.enter.prevent="runChatSearch"
-                    @keydown.esc.prevent="closeChatSearchBar"
-                  />
-                  <span class="text-xs text-[var(--color-text-muted)]">
-                    {{ chatSearchResults.length ? `${chatSearchCursor + 1}/${chatSearchResults.length}` : (chatSearchLoading ? '搜索中...' : '0') }}
-                  </span>
-                  <button class="btn btn-xs btn-secondary" @click="goToPrevSearchResult">上一个</button>
-                  <button class="btn btn-xs btn-secondary" @click="goToNextSearchResult">下一个</button>
-                  <button class="btn btn-xs btn-secondary" @click="closeChatSearchBar">关闭</button>
+            <div class="flex items-start justify-between gap-4 px-6 pt-3 pb-2">
+              <div class="pointer-events-auto flex min-w-0 flex-1 items-start gap-3">
+                <div
+                  v-if="activeChat.isGroup"
+                  class="mt-1 shrink-0 text-[var(--color-purple)]"
+                >
+                  <Users class="w-4 h-4" />
+                </div>
+                <div class="min-w-0 flex-1">
+                  <template v-if="activeChat.isGroup">
+                    <div class="flex min-w-0 items-center gap-2">
+                      <h2 class="truncate text-lg font-bold text-[var(--color-purple-text)] shadow-sm">{{ activeChat.title }}</h2>
+                      <span class="shrink-0 rounded-full border border-[var(--color-border-subtle)] bg-surface-muted/70 px-2 py-0.5 text-[11px] text-[var(--color-text-muted)]">
+                        {{ activeChat.memberIds.length }} 个角色
+                      </span>
+                    </div>
+                    <div class="mt-1 flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
+                      <span class="truncate">群聊会话</span>
+                    </div>
+                  </template>
+                  <template v-else>
+                    <div class="flex min-w-0 items-center gap-2">
+                      <h2 class="truncate text-lg font-bold text-[var(--color-text)] shadow-sm">{{ selectedCharacter?.name }}</h2>
+                      <span class="text-[var(--color-text-muted)]">/</span>
+                      <span class="truncate text-sm text-[var(--color-text-muted)]">{{ activeChat.title }}</span>
+                    </div>
+                    <div class="mt-1 flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
+                      <span class="truncate">当前会话</span>
+                    </div>
+                  </template>
                 </div>
               </div>
-              <div class="pointer-events-auto flex items-center gap-2 shrink-0 min-w-[200px] max-w-[300px] justify-end">
-                <button class="btn btn-sm btn-secondary" :disabled="!activeChat" @click="showExportModal = true">
-                  导出
+
+              <div class="pointer-events-auto shrink-0 flex items-start gap-2">
+                <button
+                  v-if="!showChatSearch"
+                  class="header-action-chip"
+                  :disabled="!activeChat"
+                  title="搜索当前会话（Ctrl+F）"
+                  @click="openChatSearchBar"
+                >
+                  <Search class="w-3.5 h-3.5" />
+                  <span>搜索</span>
+                  <span class="header-action-shortcut">Ctrl+F</span>
                 </button>
-                <button class="btn btn-sm btn-secondary" @click="showImportModal = true">
-                  导入
+                <button
+                  v-if="activeChat.isGroup"
+                  class="header-action-chip"
+                  title="群聊设置"
+                  @click="showGroupSettings = true"
+                >
+                  <Settings class="w-3.5 h-3.5" />
+                  <span>群聊</span>
                 </button>
-                <button class="btn btn-sm btn-primary" @click="settingsTab = 'global'; showSettings = true">
-                  设置
+                <button class="header-action-chip" @click="settingsTab = 'global'; showSettings = true">
+                  <Settings class="w-3.5 h-3.5" />
+                  <span>设置</span>
+                </button>
+                <div class="relative">
+                  <button
+                    ref="headerMoreButtonRef"
+                    class="header-action-chip header-action-chip--icon"
+                    :class="showHeaderMoreMenu ? 'header-action-chip--active' : ''"
+                    :aria-expanded="showHeaderMoreMenu"
+                    title="更多操作"
+                    @click="toggleHeaderMoreMenu"
+                  >
+                    <MoreHorizontal class="w-4 h-4" />
+                    <span class="sr-only">更多操作</span>
+                  </button>
+                  <div
+                    v-if="showHeaderMoreMenu"
+                    ref="headerMoreMenuRef"
+                    class="header-more-menu"
+                    role="menu"
+                    aria-label="更多操作"
+                  >
+                    <button class="header-more-menu__item" role="menuitem" :disabled="!activeChat" @click="showExportModal = true; closeHeaderMoreMenu()">
+                      <span class="header-more-menu__label">导出当前会话</span>
+                      <span class="header-more-menu__meta">聊天记录</span>
+                    </button>
+                    <button class="header-more-menu__item" role="menuitem" @click="showImportModal = true; closeHeaderMoreMenu()">
+                      <span class="header-more-menu__label">导入会话</span>
+                      <span class="header-more-menu__meta">JSON / 扩展来源</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div
+              v-if="showChatSearch"
+              class="px-6 pb-2 pointer-events-auto"
+            >
+              <div class="flex items-center gap-3 rounded-xl border border-[var(--color-border)] bg-surface-overlay/85 px-3 py-2 shadow-lg">
+                <div class="flex shrink-0 items-center gap-2 border-r border-[var(--color-border-subtle)] pr-3">
+                  <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-surface-muted/80 text-[var(--color-text-secondary)]">
+                    <Search class="w-4 h-4" />
+                  </span>
+                  <div class="leading-tight">
+                    <div class="text-xs text-[var(--color-text-secondary)]">会话搜索</div>
+                    <div class="text-[11px] text-[var(--color-text-muted)]">
+                      {{ chatSearchResults.length ? `${chatSearchCursor + 1}/${chatSearchResults.length}` : (chatSearchLoading ? '搜索中...' : '输入后定位消息') }}
+                    </div>
+                  </div>
+                </div>
+
+                <input
+                  ref="chatSearchInputRef"
+                  v-model="chatSearchQuery"
+                  class="min-w-0 flex-1 bg-transparent text-sm outline-none"
+                  placeholder="搜索当前会话（Ctrl+F）"
+                  @keydown.enter.prevent="runChatSearch"
+                  @keydown.esc.prevent="closeChatSearchBar"
+                />
+
+                <div class="flex shrink-0 items-center gap-1 rounded-lg bg-surface-muted/80 p-1">
+                  <button class="btn btn-xs btn-secondary" @click="goToPrevSearchResult">上一个</button>
+                  <button class="btn btn-xs btn-secondary" @click="goToNextSearchResult">下一个</button>
+                </div>
+
+                <button class="btn btn-xs btn-secondary shrink-0" @click="closeChatSearchBar">
+                  关闭
                 </button>
               </div>
             </div>
-            
+
             <!-- 群成员头像行 -->
             <div v-if="activeChat.isGroup && groupMembers.length > 0" class="px-6 pb-2 pointer-events-auto">
-              <div class="flex items-center gap-2 overflow-x-auto pb-1">
-                <div class="text-xs text-[var(--color-text-muted)] shrink-0">成员:</div>
+              <div class="flex items-center gap-3 overflow-x-auto rounded-xl border border-[var(--color-border-subtle)] bg-surface-overlay/55 px-3 py-2">
+                <div class="shrink-0 text-[11px] tracking-[0.08em] text-[var(--color-text-muted)]">
+                  成员
+                </div>
                 <div 
                   v-for="(member, idx) in groupMembers" 
                   :key="member.id"
-                  class="flex items-center gap-1 shrink-0 bg-surface-muted px-2 py-1 rounded-lg transition-colors group/member"
+                  class="flex items-center gap-1.5 shrink-0 rounded-full border border-[var(--color-border-subtle)] bg-surface-muted/80 px-2.5 py-1 transition-colors group/member"
                   :class="group.canInterject.value ? 'cursor-pointer hover:bg-[var(--color-purple-bg)]' : ''"
                   @click="group.canInterject.value && triggerInterject(member.id)"
                 >
-                  <span class="text-xs text-[var(--color-text-muted)]">{{ idx + 1 }}.</span>
+                  <span class="text-[10px] text-[var(--color-text-muted)]">{{ idx + 1 }}</span>
                   <ModernAvatar 
                     :src="member.avatar ? `/api/avatars/${member.avatar}` : null" 
                     :name="member.name" 
@@ -2901,18 +3006,18 @@ const editingPersonaAvatarUrl = computed(() => {
                     aspect="1"
                     rounded="rounded"
                   />
-                  <span class="text-xs text-[var(--color-text-secondary)] max-w-[60px] truncate">{{ member.name }}</span>
+                  <span class="max-w-[72px] truncate text-xs text-[var(--color-text-secondary)]">{{ member.name }}</span>
                   <span 
                     v-if="group.getMemberSettings(member.id).probability < 1" 
-                    class="text-[10px] text-yellow-400 ml-0.5"
+                    class="rounded-full border border-[var(--color-warning)]/20 bg-[var(--color-warning-bg)] px-1.5 py-0.5 text-[10px] leading-none text-[var(--color-warning-text)]"
                   >
                     {{ Math.round(group.getMemberSettings(member.id).probability * 100) }}%
                   </span>
                 </div>
-                <div v-if="!group.effectivePureAiMode.value" class="flex items-center gap-1 shrink-0 bg-brand-a10 px-2 py-1 rounded-lg border border-brand-a20">
+                <div v-if="!group.effectivePureAiMode.value" class="flex items-center gap-1.5 shrink-0 rounded-full border border-brand-a20 bg-brand-a10 px-2.5 py-1">
                   <ModernAvatar :src="userAvatarUrl" :name="userName" :size="20" aspect="1" rounded="rounded" />
-                  <span class="text-xs text-brand max-w-[60px] truncate">{{ userName }}</span>
-                  <span class="text-[10px] text-brand-a60">(你)</span>
+                  <span class="max-w-[72px] truncate text-xs text-brand">{{ userName }}</span>
+                  <span class="text-[10px] text-brand-a60">你</span>
                 </div>
               </div>
             </div>
@@ -2921,13 +3026,13 @@ const editingPersonaAvatarUrl = computed(() => {
               class="px-6 pb-2 pointer-events-auto"
             >
               <div
-                class="flex gap-2 items-stretch rounded-lg border border-[var(--color-border)] bg-surface-overlay shadow-lg max-h-48 overflow-x-auto overflow-y-hidden px-2 py-1"
+                class="flex items-stretch gap-2 overflow-x-auto overflow-y-hidden rounded-xl border border-[var(--color-border)] bg-surface-overlay/85 px-2 py-2 shadow-lg max-h-48"
               >
                 <button
                   v-for="(hit, idx) in chatSearchResults"
                   :key="`${hit.messageId}_${idx}`"
-                  class="shrink-0 inline-flex items-start text-left px-3 py-2 text-xs border border-[var(--color-border-subtle)] rounded-md hover:bg-surface-muted transition-colors w-[200px]"
-                  :class="idx === chatSearchCursor ? 'bg-surface-muted' : ''"
+                  class="inline-flex w-[220px] shrink-0 items-start rounded-lg border border-[var(--color-border-subtle)] px-3 py-2 text-left text-xs transition-colors hover:bg-surface-muted"
+                  :class="idx === chatSearchCursor ? 'bg-surface-muted' : 'bg-surface-muted/55'"
                   @click="jumpToSearchResult(idx)"
                 >
                   {{ hit.snippet }}
@@ -3723,6 +3828,101 @@ const editingPersonaAvatarUrl = computed(() => {
 </template>
 
 <style scoped>
+.header-action-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2rem;
+  padding: 0.4rem 0.7rem;
+  border-radius: 0.85rem;
+  border: 1px solid var(--color-border-subtle);
+  background: color-mix(in srgb, var(--color-surface-overlay, rgba(18, 22, 30, 0.72)) 88%, transparent);
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+  line-height: 1;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease;
+  backdrop-filter: blur(var(--blur-light));
+  -webkit-backdrop-filter: blur(var(--blur-light));
+}
+
+.header-action-chip:hover:not(:disabled),
+.header-action-chip:focus-visible {
+  background: color-mix(in srgb, var(--color-surface-overlay, rgba(18, 22, 30, 0.72)) 96%, var(--color-border-subtle) 4%);
+  border-color: var(--color-border);
+  color: var(--color-text);
+}
+
+.header-action-chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.header-action-chip--icon {
+  padding-inline: 0.6rem;
+}
+
+.header-action-chip--active {
+  border-color: var(--color-border);
+  color: var(--color-text);
+  background: color-mix(in srgb, var(--color-surface-overlay, rgba(18, 22, 30, 0.72)) 92%, var(--color-border-subtle) 8%);
+}
+
+.header-action-shortcut {
+  padding: 0.15rem 0.35rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--color-text-muted);
+  font-size: 0.65rem;
+  letter-spacing: 0.04em;
+}
+
+.header-more-menu {
+  position: absolute;
+  top: calc(100% + 0.45rem);
+  right: 0;
+  width: 14rem;
+  padding: 0.45rem;
+  border-radius: 1rem;
+  border: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-surface-overlay, rgba(18, 22, 30, 0.86)) 94%, transparent);
+  box-shadow: var(--shadow-glass-panel, 0 16px 40px rgba(0, 0, 0, 0.24));
+  backdrop-filter: blur(var(--blur-light));
+  -webkit-backdrop-filter: blur(var(--blur-light));
+}
+
+.header-more-menu__item {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 0.8rem;
+  color: var(--color-text-secondary);
+  text-align: left;
+  transition: background-color 160ms ease, color 160ms ease;
+}
+
+.header-more-menu__item:hover:not(:disabled),
+.header-more-menu__item:focus-visible {
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--color-text);
+}
+
+.header-more-menu__item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.header-more-menu__label {
+  font-size: 0.8rem;
+}
+
+.header-more-menu__meta {
+  font-size: 0.68rem;
+  color: var(--color-text-muted);
+}
+
 .custom-scrollbar::-webkit-scrollbar {
   width: 4px;
 }
