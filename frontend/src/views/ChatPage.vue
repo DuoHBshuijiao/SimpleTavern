@@ -2874,18 +2874,12 @@ const editingPersonaAvatarUrl = computed(() => {
                         {{ activeChat.memberIds.length }} 个角色
                       </span>
                     </div>
-                    <div class="mt-1 flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
-                      <span class="truncate">群聊会话</span>
-                    </div>
                   </template>
                   <template v-else>
                     <div class="flex min-w-0 items-center gap-2">
                       <h2 class="truncate text-lg font-bold text-[var(--color-text)] shadow-sm">{{ selectedCharacter?.name }}</h2>
                       <span class="text-[var(--color-text-muted)]">/</span>
                       <span class="truncate text-sm text-[var(--color-text-muted)]">{{ activeChat.title }}</span>
-                    </div>
-                    <div class="mt-1 flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
-                      <span class="truncate">当前会话</span>
                     </div>
                   </template>
                 </div>

@@ -186,12 +186,12 @@ export const THEME_IDS = ['blue', 'green', 'teal', 'violet', 'amber', 'rose'] as
 export type ThemeId = (typeof THEME_IDS)[number]
 
 export const THEME_OPTIONS: Array<{ label: string; value: ThemeId }> = [
-  { label: '蓝色（默认）', value: 'blue' },
-  { label: '绿色（鼠尾草）', value: 'green' },
+  { label: '雾玫瑰', value: 'rose' },
+  { label: '天青蓝', value: 'blue' },
+  { label: '鼠尾草', value: 'green' },
   { label: '青碧色', value: 'teal' },
   { label: '雾紫色', value: 'violet' },
   { label: '琥珀色', value: 'amber' },
-  { label: '雾玫瑰', value: 'rose' },
 ]
 
 const LEGACY_THEME_IDS: Record<string, ThemeId> = {
@@ -217,7 +217,7 @@ export function normalizeThemeId(raw: string | null | undefined): ThemeId {
   if (raw != null && raw !== '' && raw in LEGACY_THEME_IDS) {
     return LEGACY_THEME_IDS[raw]!
   }
-  return 'blue'
+  return 'rose'
 }
 
 /** 将 reasoning effort 归一化为受支持值；兼容历史 extra_high 与布尔开关 */
@@ -237,7 +237,7 @@ export function normalizeReasoningEffort(
 
 export interface Settings {
   version: number
-  /** 主题色系，空值或非法值时前端兜底为 blue */
+  /** 主题色系，空值或非法值时前端兜底为 rose（雾玫瑰） */
   themeId?: ThemeId | string | null
   llm: {
     baseUrl: string

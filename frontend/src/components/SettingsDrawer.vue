@@ -406,7 +406,7 @@ watch(
       (s as Settings).thinkingMode,
     )
     if ((s as Settings).themeId === undefined || (s as Settings).themeId === null) {
-      (s as Settings).themeId = 'blue'
+      (s as Settings).themeId = 'rose'
     } else {
       ;(s as Settings).themeId = normalizeThemeId((s as Settings).themeId as string)
     }
@@ -1375,7 +1375,7 @@ async function checkUpdate() {
                   placeholder="选择色系..."
                   class="w-full"
                 />
-                <p class="text-xs text-[var(--color-text-muted)]">均为暗色玻璃底 + 柔和强调色，整体保持接近默认蓝色的轻盈阅读体验；未设置时默认蓝色系。</p>
+                <p class="text-xs text-[var(--color-text-muted)]">暗色玻璃底，仅强调色随主题变化；未设置时默认为雾玫瑰。</p>
               </div>
 
               <!-- Base URL -->
