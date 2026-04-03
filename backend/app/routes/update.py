@@ -22,7 +22,7 @@ from app.storage import get_repo_root, get_update_dir
 
 router = APIRouter(tags=["update"])
 
-CURRENT_VERSION = "v0.304"
+CURRENT_VERSION = "v0.305"
 GITHUB_REPO = "DuoHBshuijiao/SimpleTavern"
 GITHUB_API_LATEST = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
