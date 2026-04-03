@@ -595,8 +595,8 @@ const isDraftHelperRunning = computed(() => {
   position: absolute;
   right: -4rem; /* -right-16 */
   bottom: 2.5rem; /* bottom-10 */
-  margin-top: 49px;
-  margin-bottom: 49px;
+  margin-top: 105px;
+  margin-bottom: 105px;
   background-color: var(--color-border-subtle);
 }
 
