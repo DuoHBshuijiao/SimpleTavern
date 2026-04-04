@@ -76,7 +76,7 @@ import {
 } from '../composables'
 
 // 子组件
-import { ChatSidebar, MessageList, ChatInput, AssistantPanel } from '../components/chat'
+import { ChatSidebar, MessageList, ChatInput, AssistantPanel, AssistantThread } from '../components/chat'
 import {
   GroupCreatorModal,
   MessageEditorModal,
@@ -330,6 +330,15 @@ watch(
     if (!value) return
     errorStack.pushError({ message: value, source: 'assistant', title: '助手错误' })
     assistant.assistantStreamError.value = null
+  }
+)
+
+watch(
+  () => assistant.workspaceAssistantStreamError.value,
+  (value) => {
+    if (!value) return
+    errorStack.pushError({ message: value, source: 'assistant', title: '工作区助手错误' })
+    assistant.workspaceAssistantStreamError.value = null
   }
 )
 
@@ -3118,11 +3127,10 @@ const editingPersonaAvatarUrl = computed(() => {
               设置
             </button>
           </div>
-          <div class="w-20 h-20 rounded-2xl bg-surface-muted mb-6 flex items-center justify-center text-4xl">👋</div>
-          <h3 class="text-xl font-bold text-[var(--color-text)] mb-2">欢迎来到 SimpleTavern</h3>
-          <p class="text-[var(--color-text-muted)] mb-8 leading-relaxed px-4 max-w-[468px] w-full">请在左侧选择一个角色并开始会话，或者创建一个新的角色。</p>
+          <h3 class="text-xl font-bold text-[var(--color-text)] mb-2">未打开会话</h3>
+          <p class="text-[var(--color-text-muted)] mb-8 leading-relaxed px-4 max-w-[468px] w-full">从左侧选择角色以进入现有会话或新建会话。如果还没有角色，先创建一个。</p>
           <button class="bg-brand text-on-brand px-6 py-2 rounded-xl hover:bg-brand-hover transition-colors" @click="openCreateCharacter">
-            创建新角色
+            创建角色
           </button>
         </div>
       </main>
@@ -3135,7 +3143,6 @@ const editingPersonaAvatarUrl = computed(() => {
       :draft="assistant.assistantDraft.value"
       :is-generating="assistant.isAssistantGenerating.value"
       :stream-error="assistant.assistantStreamError.value"
-      :reasoning-blocks="assistant.assistantReasoningBlocks.value"
       :streaming-content="assistant.assistantStreamingContent.value"
       :streaming-reasoning="assistant.assistantStreamingReasoning.value"
       :allow-write-memory="assistant.allowWriteMemoryEnabled.value"
@@ -3205,7 +3212,7 @@ const editingPersonaAvatarUrl = computed(() => {
     <MessageEditorModal
       :show="assistant.showAssistantMessageEditor.value"
       :message-id="assistant.editingAssistantMessage.value?.id || null"
-      :message-role="(assistant.editingAssistantMessage.value?.role === 'tool' ? 'assistant' : assistant.editingAssistantMessage.value?.role) || 'user'"
+      :message-role="(assistant.editingAssistantMessage.value?.role === 'tool' || assistant.editingAssistantMessage.value?.role === 'reasoning' ? 'assistant' : assistant.editingAssistantMessage.value?.role) || 'user'"
       :message-content="assistant.editingAssistantMessageContent.value"
       :character-avatar-url="null"
       :user-avatar-url="null"
@@ -3293,8 +3300,8 @@ const editingPersonaAvatarUrl = computed(() => {
         </button>
       </div>
       <div class="modal-body">
-        <div v-if="actions.editingCharacter.value" class="flex gap-6 h-[70vh]">
-          <div class="flex-1 overflow-y-auto pr-2 custom-scrollbar">
+        <div v-if="actions.editingCharacter.value" class="flex min-h-0 min-w-0 gap-6 h-[70vh]">
+          <div class="min-h-0 min-w-[min(50%,18rem)] flex-1 basis-0 overflow-y-auto pr-2 custom-scrollbar">
             <div class="space-y-6">
               <div class="flex gap-6">
                 <div class="flex flex-col items-center gap-3">
@@ -3494,7 +3501,7 @@ const editingPersonaAvatarUrl = computed(() => {
           </div>
 
           <!-- 角色编辑助手 -->
-          <div class="flex-[0.66] shrink-0 glass-panel rounded-2xl p-4 flex flex-col shadow-inner">
+          <div class="flex min-h-0 min-w-0 max-w-[50%] flex-[0.66] basis-0 flex-col glass-panel rounded-2xl p-4 shadow-inner">
             <div class="flex items-center justify-between mb-4 px-1">
               <span class="text-sm font-bold text-[var(--color-text-secondary)] uppercase tracking-widest flex items-center gap-2">
                 <span class="w-2 h-2 rounded-full bg-brand animate-pulse"></span>
@@ -3504,21 +3511,20 @@ const editingPersonaAvatarUrl = computed(() => {
                 <MoreHorizontal class="w-4 h-4" />
               </button>
             </div>
-            <div class="flex-1 overflow-y-auto custom-scrollbar space-y-4 pr-2 mb-4">
+            <div class="min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-auto custom-scrollbar space-y-4 pr-2 mb-4">
               <div v-if="assistant.workspaceAssistantMessages.value.length === 0" class="text-xs text-[var(--color-text-muted)] text-center py-12 flex flex-col items-center gap-3">
                 <div class="w-12 h-12 rounded-full bg-surface-muted flex items-center justify-center text-xl">
                     <Sparkles class="w-6 h-6 text-[var(--color-warning)]" />
                 </div>
                 开始和助手对话以完善你的角色卡
               </div>
-              <div v-for="m in assistant.workspaceAssistantMessages.value" :key="m.id" class="flex flex-col gap-1 group" :class="m.role === 'user' ? 'items-end' : 'items-start'">
-                <div
-                  class="px-4 py-2.5 rounded-2xl text-sm leading-relaxed max-w-[90%] shadow-sm border transition-colors"
-                  :class="m.role === 'user' ? 'bg-brand-a10 border-brand-a20 text-[var(--color-text)] rounded-tr-sm' : 'bg-surface-muted border-[var(--color-border-subtle)] text-[var(--color-text)] rounded-tl-sm'"
-                >
-                  <div class="prose prose-invert prose-sm max-w-none">{{ m.content }}</div>
-                </div>
-              </div>
+              <AssistantThread
+                :messages="assistant.workspaceAssistantMessages.value"
+                :is-generating="assistant.isWorkspaceAssistantGenerating.value"
+                :streaming-content="assistant.workspaceStreamingContent.value"
+                :streaming-reasoning="assistant.workspaceStreamingReasoning.value"
+                :show-message-actions="false"
+              />
             </div>
             <div class="pt-4 border-t border-[var(--color-border-subtle)]">
               <div class="flex flex-wrap gap-2 mb-2 items-center">
@@ -3680,7 +3686,7 @@ const editingPersonaAvatarUrl = computed(() => {
             />
           </div>
           <div class="form-group">
-            <label class="label">Context Size</label>
+            <label class="label">上下文长度</label>
             <input
               v-model.number="assistant.assistantSettings.value.context_size"
               type="number"
@@ -3688,7 +3694,7 @@ const editingPersonaAvatarUrl = computed(() => {
               class="input w-full"
               placeholder="未启用（不限制）"
             />
-            <p class="text-xs text-[var(--color-text-muted)] mt-1">填 0 或留空表示未启用。实际上下文总限制长度为该 Context Size 限制加上角色卡、用户信息、自定义系统提示词。</p>
+            <p class="text-xs text-[var(--color-text-muted)] mt-1">填 0 或留空表示未启用。实际上下文总限制长度为该「上下文长度」限制加上角色卡、用户信息、自定义系统提示词。</p>
           </div>
           <div class="form-group">
             <label class="label">助手读取消息条数上限</label>
@@ -3699,7 +3705,7 @@ const editingPersonaAvatarUrl = computed(() => {
               class="input w-full"
               placeholder="未限制（仅受服务端硬上限）"
             />
-            <p class="text-xs text-[var(--color-text-muted)] mt-1">限制 chat_read_conversation 返回的最大消息条数；留空表示不额外限制。</p>
+            <p class="text-xs text-[var(--color-text-muted)] mt-1">限制「读取会话」工具返回的最大消息条数；留空表示不额外限制。</p>
           </div>
           <div class="form-group">
             <label class="label">助手读取消息 token 上限（估算）</label>
@@ -3733,7 +3739,7 @@ const editingPersonaAvatarUrl = computed(() => {
                 class="input w-full"
                 placeholder="未限制"
               />
-              <p class="text-xs text-[var(--color-text-muted)] mt-1">超出部分会写入 LIMIT_EXCEEDED 结果并跳过执行。</p>
+              <p class="text-xs text-[var(--color-text-muted)] mt-1">超出部分会写入「超出限制」占位结果并跳过执行。</p>
             </div>
           </div>
           <div class="form-group border-t border-[var(--color-border-subtle)] pt-6">

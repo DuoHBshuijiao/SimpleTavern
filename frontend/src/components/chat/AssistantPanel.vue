@@ -38,13 +38,13 @@
  *
  * 文件关系：
  *    - 被导入：被views/ChatPage.vue使用
- *    - 导入：导入markdown-it库、composables/useAssistant.ts的AssistantMessage类型、components/ModernSelect.vue
- *    - 依赖：依赖vue、markdown-it
+ *    - 导入：导入composables/useAssistant.ts的AssistantMessage类型、components/ModernSelect.vue、AssistantThread
+ *    - 依赖：依赖vue
  *    - 位置：组件层，提供聊天助手面板功能
  */
-import MarkdownIt from 'markdown-it'
 import type { AssistantMessage } from '../../composables/useAssistant'
 import ModernSelect from '../ModernSelect.vue'
+import AssistantThread from './AssistantThread.vue'
 import ConfirmPopover from '../../components/ConfirmPopover.vue'
 import { Sparkles, Loader2, MoreHorizontal, X } from 'lucide-vue-next'
 import { ref, watch, nextTick } from 'vue'
@@ -71,8 +71,6 @@ const props = defineProps<{
   currentModel: string
   currentPresetId?: string | null
   modelOptions: ModelOptions
-  /** 思考链块列表：每项为 { messageId, content }，展示在对应消息之前 */
-  reasoningBlocks?: Array<{ messageId: string; content: string }>
   /** 当前正在流式接收的正文（用于打字机效果） */
   streamingContent?: string
   /** 当前正在流式接收的思考内容 */
@@ -97,25 +95,6 @@ const emit = defineEmits<{
   'toggle-destructive': []
 }>()
 
-// Markdown 渲染器
-const md = new MarkdownIt({
-  html: false,
-  linkify: true,
-  breaks: true,
-})
-
-/**
- * 渲染Markdown
- *
- * 使用MarkdownIt渲染Markdown文本为HTML。
- *
- * @param {string} text - Markdown文本
- * @returns {string} 渲染后的HTML
- */
-function renderMarkdown(text: string) {
-  return md.render(text ?? '')
-}
-
 /**
  * 处理键盘事件
  *
@@ -129,7 +108,6 @@ function handleKeydown(e: KeyboardEvent) {
   }
 }
 
-// 确认弹窗状态
 const confirmState = ref<{
   show: boolean
   target: HTMLElement | null
@@ -143,34 +121,12 @@ const confirmState = ref<{
   title: '',
   message: '',
   confirmText: '确认',
-  onConfirm: () => {}
+  onConfirm: () => {},
 })
 
 function closeConfirm() {
   confirmState.value.show = false
   confirmState.value.target = null
-}
-
-/**
- * 确认删除消息
- *
- * 弹出确认对话框，确认后触发删除消息事件。
- *
- * @param {AssistantMessage} m - 要删除的消息
- * @param {Event} event - 点击事件
- */
-function confirmDelete(m: AssistantMessage, event: Event) {
-  confirmState.value = {
-    show: true,
-    target: event.currentTarget as HTMLElement,
-    title: '删除消息',
-    message: '确定删除这条消息？',
-    confirmText: '删除',
-    onConfirm: () => {
-      emit('delete-message', m)
-      closeConfirm()
-    }
-  }
 }
 
 /**
@@ -192,111 +148,6 @@ function confirmReset(event: Event) {
       closeConfirm()
     }
   }
-}
-
-// 思考气泡：点击气泡或图标展开，展开时点击图标收起
-const expandedReasoningMessageId = ref<string | null>(null)
-
-function isReasoningExpanded(messageId: string) {
-  return expandedReasoningMessageId.value === messageId
-}
-
-function expandReasoning(messageId: string, e: MouseEvent) {
-  if ((e.target as HTMLElement).closest('.reasoning-toggle-icon')) return
-  expandedReasoningMessageId.value = messageId
-}
-
-function toggleReasoning(messageId: string, e: MouseEvent) {
-  e.stopPropagation()
-  expandedReasoningMessageId.value =
-    expandedReasoningMessageId.value === messageId ? null : messageId
-}
-
-/** 获取某条消息对应的思考链内容：已保存的块 或 当前正在流式接收的思考（仅对最后一条助手消息） */
-function getReasoningContentForMessage(messageId: string, isLastAssistant: boolean): string | undefined {
-  if (isLastAssistant && props.isGenerating && (props.streamingReasoning ?? '').trim()) {
-    return props.streamingReasoning!.trim()
-  }
-  const blocks = props.reasoningBlocks
-  if (!Array.isArray(blocks)) return undefined
-  const block = blocks.find((b) => b.messageId === messageId)
-  return block?.content?.trim() || undefined
-}
-
-/** 获取某条助手消息的展示正文：生成中且为最后一条时用流式内容，否则用消息内容 */
-function getDisplayContent(m: AssistantMessage, isLastAssistant: boolean): string {
-  if (isLastAssistant && props.isGenerating && (props.streamingContent ?? '')) {
-    return (m.content || '') + props.streamingContent
-  }
-  return m.content ?? ''
-}
-
-function parseToolContent(raw: string): Record<string, unknown> | null {
-  if (!raw.trim()) return null
-  try {
-    const parsed = JSON.parse(raw) as unknown
-    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null
-  } catch {
-    return null
-  }
-}
-
-function getToolRecord(m: AssistantMessage): Record<string, unknown> | null {
-  if (m.toolRecord && typeof m.toolRecord === 'object') return m.toolRecord
-  const parsed = parseToolContent(m.content ?? '')
-  if (parsed && typeof parsed.toolName === 'string') return parsed
-  return null
-}
-
-function getToolStepTitle(m: AssistantMessage): string {
-  const record = getToolRecord(m)
-  const toolName = typeof record?.toolName === 'string' ? record.toolName : '未知工具'
-  const loopIndex = typeof record?.loopIndex === 'number' ? record.loopIndex : null
-  return loopIndex != null ? `步骤 ${loopIndex + 1} · ${toolName}` : toolName
-}
-
-function getToolMessage(m: AssistantMessage): string {
-  const record = getToolRecord(m)
-  if (typeof record?.message === 'string' && record.message.trim()) return record.message
-  const parsed = parseToolContent(m.content ?? '')
-  if (typeof parsed?.message === 'string' && parsed.message.trim()) return parsed.message
-  return ''
-}
-
-function getToolArgsDigest(m: AssistantMessage): string {
-  const record = getToolRecord(m)
-  return typeof record?.argsDigest === 'string' ? record.argsDigest : ''
-}
-
-function isToolOk(m: AssistantMessage): boolean {
-  const record = getToolRecord(m)
-  if (typeof record?.ok === 'boolean') return record.ok
-  const parsed = parseToolContent(m.content ?? '')
-  return Boolean(parsed?.ok)
-}
-
-function getToolCode(m: AssistantMessage): string {
-  const record = getToolRecord(m)
-  if (typeof record?.code === 'string' && record.code.trim()) return record.code
-  const parsed = parseToolContent(m.content ?? '')
-  return typeof parsed?.code === 'string' ? parsed.code : ''
-}
-
-function getToolStatusLabel(m: AssistantMessage): string {
-  return isToolOk(m) ? '成功' : (getToolCode(m) || '失败')
-}
-
-function getToolStatusClass(m: AssistantMessage): string {
-  return isToolOk(m)
-    ? 'bg-emerald-500/15 text-emerald-200 border border-emerald-400/30'
-    : 'bg-amber-500/15 text-amber-100 border border-amber-400/30'
-}
-
-function getToolDetailContent(m: AssistantMessage): string {
-  const raw = m.content ?? ''
-  if (!raw.trim()) return ''
-  const parsed = parseToolContent(raw)
-  return parsed ? JSON.stringify(parsed, null, 2) : raw
 }
 
 // 消息列表滚动容器：打开面板时自动滚到底部
@@ -376,7 +227,7 @@ watch(
     <div class="min-h-0 flex-1 relative flex flex-col overflow-hidden">
       <div
         ref="messagesListEl"
-        class="min-h-0 flex-1 overflow-y-auto custom-scrollbar space-y-4 px-4 pt-3 pb-14"
+        class="min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-auto custom-scrollbar space-y-4 px-4 pt-3 pb-14"
       >
       <div v-if="messages.length === 0" class="text-xs text-gray-600 text-center py-12 flex flex-col items-center gap-3">
         <div class="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center text-xl">
@@ -384,93 +235,15 @@ watch(
         </div>
         开始和助手对话以获得帮助
       </div>
-      <div
-        v-for="(m, idx) in messages"
-        :key="m.id"
-        class="flex flex-col gap-1 group"
-        :class="m.role === 'user' ? 'items-end' : (m.role === 'system' || m.role === 'tool' ? 'items-center' : 'items-start')"
-      >
-        <!-- 思考链气泡：在对应消息（助手或工具）上方，小圆角，默认折叠 100px；点击气泡或图标展开，展开时点击图标收起 -->
-        <div
-          v-if="m.role !== 'tool' && getReasoningContentForMessage(m.id, m.role === 'assistant' && idx === messages.length - 1)"
-          class="reasoning-bubble-surface w-full max-w-[90%] rounded-lg text-xs leading-relaxed relative transition-[max-height] duration-300"
-          :class="isReasoningExpanded(m.id) ? 'max-h-[80vh] overflow-y-auto' : 'max-h-[100px] overflow-hidden cursor-pointer'"
-          @click="expandReasoning(m.id, $event)"
-        >
-          <div class="pr-8 py-2.5 pl-3 whitespace-pre-wrap break-words">{{ getReasoningContentForMessage(m.id, m.role === 'assistant' && idx === messages.length - 1) }}</div>
-          <button
-            type="button"
-            class="reasoning-toggle-icon absolute top-2 right-2 w-6 h-6 flex items-center justify-center rounded hover:bg-white/10 transition-transform duration-200"
-            :class="isReasoningExpanded(m.id) ? 'rotate-90' : ''"
-            :aria-label="isReasoningExpanded(m.id) ? '收起思考' : '展开思考'"
-            @click="toggleReasoning(m.id, $event)"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="15 18 9 12 15 6" />
-            </svg>
-          </button>
-        </div>
-        <div
-          class="px-4 py-2.5 rounded-2xl text-sm leading-relaxed max-w-[90%] shadow-sm border transition-colors"
-          :class="m.role === 'user'
-            ? 'bg-brand-a20 backdrop-blur-sm border-brand-a20 text-gray-100 rounded-tr-sm'
-            : (m.role === 'system' || m.role === 'tool'
-              ? 'bg-yellow-500/10 border-yellow-500/20 text-gray-300 rounded-lg text-xs'
-              : 'bg-white/5 backdrop-blur-md border-white/10 text-gray-200 rounded-tl-sm')"
-        >
-          <template v-if="m.role === 'tool'">
-            <div class="flex items-start justify-between gap-3 mb-2">
-              <div class="min-w-0">
-                <div class="text-[10px] uppercase tracking-wider text-yellow-500/80">工具步骤</div>
-                <div class="text-sm text-gray-100 break-words">{{ getToolStepTitle(m) }}</div>
-              </div>
-              <span class="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold" :class="getToolStatusClass(m)">
-                {{ getToolStatusLabel(m) }}
-              </span>
-            </div>
-            <div v-if="getToolMessage(m)" class="text-xs text-gray-200 whitespace-pre-wrap break-words">
-              {{ getToolMessage(m) }}
-            </div>
-            <div v-if="getToolArgsDigest(m)" class="mt-2 text-[10px] text-gray-400 break-all">
-              argsDigest: {{ getToolArgsDigest(m) }}
-            </div>
-            <details class="mt-2 rounded-lg border border-white/8 bg-black/20 overflow-hidden">
-              <summary class="cursor-pointer px-3 py-2 text-[11px] text-gray-300 select-none">查看结果 JSON</summary>
-              <pre class="px-3 pb-3 text-[11px] leading-relaxed text-gray-300 whitespace-pre-wrap break-words">{{ getToolDetailContent(m) }}</pre>
-            </details>
-          </template>
-          <div
-            v-else
-            class="prose prose-invert prose-sm max-w-none"
-            v-html="renderMarkdown(getDisplayContent(m, m.role === 'assistant' && idx === messages.length - 1))"
-          ></div>
-        </div>
-        <!-- 消息操作 -->
-        <div v-if="m.role !== 'system' && m.role !== 'tool'" class="flex items-center gap-3 px-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          <button
-            v-if="m.role === 'assistant'"
-            class="text-[10px] text-gray-600 hover:text-blue-400 transition-colors"
-            @click="emit('rewrite-message', m)"
-            :disabled="isGenerating"
-          >
-            重写
-          </button>
-          <button 
-            class="text-[10px] text-gray-600 hover:text-brand transition-colors" 
-            @click="emit('edit-message', m)" 
-            :disabled="isGenerating"
-          >
-            编辑
-          </button>
-          <button 
-            class="text-[10px] text-gray-600 hover:text-red-400 transition-colors" 
-            :disabled="isGenerating"
-            @click="confirmDelete(m, $event)"
-          >
-            删除
-          </button>
-        </div>
-      </div>
+      <AssistantThread
+        :messages="messages"
+        :is-generating="isGenerating"
+        :streaming-content="streamingContent"
+        :streaming-reasoning="streamingReasoning"
+        @edit-message="emit('edit-message', $event)"
+        @delete-message="emit('delete-message', $event)"
+        @rewrite-message="emit('rewrite-message', $event)"
+      />
       </div>
       <div
         v-if="showToolPermissionToggles !== false"
@@ -542,7 +315,6 @@ watch(
       </div>
     </div>
 
-    <!-- 确认弹窗 -->
     <ConfirmPopover
       :show="confirmState.show"
       :target="confirmState.target"
@@ -551,7 +323,7 @@ watch(
       :confirm-text="confirmState.confirmText"
       @confirm="confirmState.onConfirm"
       @cancel="closeConfirm"
-      @update:show="(val) => !val && closeConfirm()"
+      @update:show="(value) => !value && closeConfirm()"
     />
   </aside>
   </Teleport>

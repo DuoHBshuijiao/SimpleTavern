@@ -43,9 +43,11 @@ import { notifyConfirm } from './useNotify'
 
 export type AssistantMessage = {
   id: string
-  role: 'user' | 'assistant' | 'system' | 'tool'
+  role: 'user' | 'assistant' | 'system' | 'tool' | 'reasoning'
   content: string
   ts: string
+  /** 持久化助手消息上的推理/思考链（与后端 reasoningContent 对齐；仅 assistant 从 API 恢复时可能有） */
+  reasoningContent?: string | null
   /** OpenAI 对齐：对应 assistant.tool_calls[].id */
   tool_call_id?: string
   /** 结构化工具调用记录（与后端 ChatMessage.toolRecord 对齐；SSE 工具步骤或历史 system 摘要） */
@@ -93,8 +95,6 @@ export function useAssistant(options: UseAssistantOptions) {
   const assistantDraft = ref('')
   const isAssistantGenerating = ref(false)
   const assistantStreamError = ref<string | null>(null)
-  /** 思考链块列表：每项为 { messageId, content }，展示在对应消息之前（仅前端临时，刷新后消失） */
-  const assistantReasoningBlocks = ref<Array<{ messageId: string; content: string }>>([])
   /** 当前正在流式接收的正文（仅 chat 作用域），用于实时打字机效果 */
   const assistantStreamingContent = ref('')
   /** 当前正在流式接收的思考内容（仅 chat 作用域），用于实时显示 */
@@ -105,7 +105,6 @@ export function useAssistant(options: UseAssistantOptions) {
   const workspaceAssistantDraft = ref('')
   const isWorkspaceAssistantGenerating = ref(false)
   const workspaceAssistantStreamError = ref<string | null>(null)
-  const workspaceReasoningBlocks = ref<Array<{ messageId: string; content: string }>>([])
   const workspaceStreamingContent = ref('')
   const workspaceStreamingReasoning = ref('')
 
@@ -225,7 +224,6 @@ export function useAssistant(options: UseAssistantOptions) {
         draft: workspaceAssistantDraft,
         streamError: workspaceAssistantStreamError,
         isGenerating: isWorkspaceAssistantGenerating,
-        reasoningBlocks: workspaceReasoningBlocks,
         streamingContent: workspaceStreamingContent,
         streamingReasoning: workspaceStreamingReasoning,
       }
@@ -235,7 +233,6 @@ export function useAssistant(options: UseAssistantOptions) {
       draft: assistantDraft,
       streamError: assistantStreamError,
       isGenerating: isAssistantGenerating,
-      reasoningBlocks: assistantReasoningBlocks,
       streamingContent: assistantStreamingContent,
       streamingReasoning: assistantStreamingReasoning,
     }
@@ -285,20 +282,27 @@ export function useAssistant(options: UseAssistantOptions) {
           m.role === 'system' ||
           m.role === 'tool',
       )
-      .map((m, idx: number) => ({
-        id: m.id ?? `assistant_msg_${Date.now()}_${idx}`,
-        role: m.role as 'user' | 'assistant' | 'system' | 'tool',
-        content: m.content ?? '',
-        ts: m.ts ?? new Date().toISOString(),
-        tool_call_id:
-          typeof (m as { tool_call_id?: unknown }).tool_call_id === 'string'
-            ? (m as { tool_call_id: string }).tool_call_id
-            : undefined,
-        toolRecord:
-          m && typeof (m as { toolRecord?: unknown }).toolRecord === 'object' && (m as { toolRecord?: unknown }).toolRecord
-            ? ((m as { toolRecord: Record<string, unknown> }).toolRecord)
-            : undefined,
-      }))
+      .map((m, idx: number) => {
+        const rc =
+          typeof (m as { reasoningContent?: unknown }).reasoningContent === 'string'
+            ? (m as { reasoningContent: string }).reasoningContent
+            : null
+        return {
+          id: m.id ?? `assistant_msg_${Date.now()}_${idx}`,
+          role: m.role as 'user' | 'assistant' | 'system' | 'tool',
+          content: m.content ?? '',
+          ts: m.ts ?? new Date().toISOString(),
+          reasoningContent: rc && rc.trim() ? rc : undefined,
+          tool_call_id:
+            typeof (m as { tool_call_id?: unknown }).tool_call_id === 'string'
+              ? (m as { tool_call_id: string }).tool_call_id
+              : undefined,
+          toolRecord:
+            m && typeof (m as { toolRecord?: unknown }).toolRecord === 'object' && (m as { toolRecord?: unknown }).toolRecord
+              ? ((m as { toolRecord: Record<string, unknown> }).toolRecord)
+              : undefined,
+        }
+      })
   }
 
   function normalizePositiveInt(value: number | null | undefined): number | null {
@@ -329,6 +333,30 @@ export function useAssistant(options: UseAssistantOptions) {
       content,
       ts: new Date().toISOString(),
       toolRecord: payload.record,
+    })
+  }
+
+  function pushReasoningSegment(state: ReturnType<typeof getState>, text: string, seq: number) {
+    const trimmed = text.trim()
+    if (!trimmed) return
+    const now = new Date().toISOString()
+    state.messages.value.push({
+      id: `assistant_reasoning_${Date.now()}_${seq}`,
+      role: 'reasoning',
+      content: trimmed,
+      ts: now,
+    })
+  }
+
+  function pushAssistantSegment(state: ReturnType<typeof getState>, text: string, seq: number) {
+    const trimmed = text.trim()
+    if (!trimmed) return
+    const now = new Date().toISOString()
+    state.messages.value.push({
+      id: `assistant_ai_${Date.now()}_${seq}`,
+      role: 'assistant',
+      content: trimmed,
+      ts: now,
     })
   }
 
@@ -464,7 +492,6 @@ export function useAssistant(options: UseAssistantOptions) {
     assistantMessages.value = []
     assistantDraft.value = ''
     assistantStreamError.value = null
-    assistantReasoningBlocks.value = []
   }
 
   /**
@@ -480,7 +507,6 @@ export function useAssistant(options: UseAssistantOptions) {
     workspaceAssistantMessages.value = []
     workspaceAssistantDraft.value = ''
     workspaceAssistantStreamError.value = null
-    workspaceReasoningBlocks.value = []
   }
 
   /**
@@ -504,7 +530,7 @@ export function useAssistant(options: UseAssistantOptions) {
    * @param {AssistantScope} scope - 作用域（'chat'或'workspace'）
    */
   function openEditMessage(m: AssistantMessage, scope: AssistantScope) {
-    if (m.role === 'system' || m.role === 'tool') return
+    if (m.role === 'system' || m.role === 'tool' || m.role === 'reasoning') return
     editingAssistantMessage.value = m
     editingAssistantMessageContent.value = m.content
     editingAssistantMessageScope.value = scope
@@ -605,6 +631,12 @@ export function useAssistant(options: UseAssistantOptions) {
    * @returns {Promise<void>} 完成时返回
    */
   async function deleteMessage(m: AssistantMessage, scope: AssistantScope) {
+    if (m.role === 'reasoning') {
+      const state = getState(scope)
+      const idx = state.messages.value.findIndex((msg) => msg.id === m.id)
+      if (idx >= 0) state.messages.value.splice(idx, 1)
+      return
+    }
     try {
       await apiDelete(buildPath(`/api/assistant/chat/messages/${m.id}`, scope))
       await loadChat(scope)
@@ -686,14 +718,6 @@ export function useAssistant(options: UseAssistantOptions) {
       })
     }
     
-    const assistantMsgId = `assistant_ai_${Date.now()}`
-    const assistantMsg: AssistantMessage = {
-      id: assistantMsgId,
-      role: 'assistant',
-      content: '',
-      ts: now,
-    }
-    state.messages.value.push(assistantMsg)
     state.streamingContent.value = ''
     state.streamingReasoning.value = ''
     state.isGenerating.value = true
@@ -714,6 +738,40 @@ export function useAssistant(options: UseAssistantOptions) {
 
     let aborted = false
     let reasoningBuffer = ''
+    let deltaBuffer = ''
+    let needsFlushBeforeTool = true
+    let afterToolTrace = false
+    let segmentSeq = 0
+
+    function flushSegmentBeforeToolsIfNeeded() {
+      state.streamingReasoning.value = ''
+      state.streamingContent.value = ''
+      if (!needsFlushBeforeTool) return
+      if (reasoningBuffer.trim()) {
+        pushReasoningSegment(state, reasoningBuffer, segmentSeq++)
+        reasoningBuffer = ''
+      }
+      if (deltaBuffer.trim()) {
+        pushAssistantSegment(state, deltaBuffer, segmentSeq++)
+        deltaBuffer = ''
+      }
+      needsFlushBeforeTool = false
+    }
+
+    function handleToolEvent(data: {
+      content?: string
+      messageId?: string
+      record?: Record<string, unknown>
+    } | undefined) {
+      flushSegmentBeforeToolsIfNeeded()
+      afterToolTrace = true
+      upsertToolMessage(state, {
+        messageId: data?.messageId,
+        content: data?.content ?? (data?.record ? JSON.stringify(data.record) : ''),
+        record: data?.record,
+      })
+    }
+
     try {
       if (useStream) {
         await postAndConsumeSse(
@@ -724,13 +782,21 @@ export function useAssistant(options: UseAssistantOptions) {
               const data = evt.data as { text?: string } | undefined
               const t = data?.text
               if (typeof t === 'string') {
-                assistantMsg.content += t
+                if (afterToolTrace) {
+                  needsFlushBeforeTool = true
+                  afterToolTrace = false
+                }
+                deltaBuffer += t
                 state.streamingContent.value += t
               }
             } else if (evt.event === 'reasoning') {
               const data = evt.data as { text?: string } | undefined
               const t = data?.text
               if (typeof t === 'string') {
+                if (afterToolTrace) {
+                  needsFlushBeforeTool = true
+                  afterToolTrace = false
+                }
                 reasoningBuffer += t
                 state.streamingReasoning.value += t
               }
@@ -738,11 +804,24 @@ export function useAssistant(options: UseAssistantOptions) {
               state.streamingContent.value = ''
               state.streamingReasoning.value = ''
               if (reasoningBuffer.trim()) {
-                const data = evt.data as { messageId?: string } | undefined
-                const serverMessageId = data?.messageId
-                const blockMessageId = typeof serverMessageId === 'string' && serverMessageId ? serverMessageId : assistantMsgId
-                state.reasoningBlocks.value = [...state.reasoningBlocks.value, { messageId: blockMessageId, content: reasoningBuffer }]
+                pushReasoningSegment(state, reasoningBuffer, segmentSeq++)
                 reasoningBuffer = ''
+              }
+              if (deltaBuffer.trim()) {
+                pushAssistantSegment(state, deltaBuffer, segmentSeq++)
+                deltaBuffer = ''
+              }
+              const data = evt.data as { messageId?: string } | undefined
+              const serverMessageId = data?.messageId
+              if (typeof serverMessageId === 'string' && serverMessageId.trim()) {
+                const msgs = state.messages.value
+                for (let i = msgs.length - 1; i >= 0; i--) {
+                  const m = msgs[i]
+                  if (m && m.role === 'assistant') {
+                    m.id = serverMessageId.trim()
+                    break
+                  }
+                }
               }
             } else if (evt.event === 'tool_trace') {
               const data = evt.data as {
@@ -750,32 +829,14 @@ export function useAssistant(options: UseAssistantOptions) {
                 messageId?: string
                 record?: Record<string, unknown>
               } | undefined
-              state.streamingReasoning.value = ''
-              if (reasoningBuffer.trim()) {
-                state.reasoningBlocks.value = [...state.reasoningBlocks.value, { messageId: data?.messageId || `assistant_tool_${Date.now()}`, content: reasoningBuffer }]
-                reasoningBuffer = ''
-              }
-              upsertToolMessage(state, {
-                messageId: data?.messageId,
-                content: data?.content ?? (data?.record ? JSON.stringify(data.record) : ''),
-                record: data?.record,
-              })
+              handleToolEvent(data)
             } else if (evt.event === 'tool_record') {
               const data = evt.data as {
                 content?: string
                 messageId?: string
                 record?: Record<string, unknown>
               } | undefined
-              state.streamingReasoning.value = ''
-              if (reasoningBuffer.trim()) {
-                state.reasoningBlocks.value = [...state.reasoningBlocks.value, { messageId: data?.messageId || `assistant_tool_${Date.now()}`, content: reasoningBuffer }]
-                reasoningBuffer = ''
-              }
-              upsertToolMessage(state, {
-                messageId: data?.messageId,
-                content: data?.content ?? (data?.record ? JSON.stringify(data.record) : ''),
-                record: data?.record,
-              })
+              handleToolEvent(data)
             } else if (evt.event === 'card') {
               const data = evt.data as { card?: unknown } | undefined
               const card = data?.card
@@ -843,8 +904,17 @@ export function useAssistant(options: UseAssistantOptions) {
               })
             }
           }
-          if (typeof res.content === 'string') {
-            assistantMsg.content = res.content
+          if (typeof res.content === 'string' && res.content.trim()) {
+            const mid =
+              typeof res.messageId === 'string' && res.messageId.trim()
+                ? res.messageId.trim()
+                : `assistant_ai_${Date.now()}`
+            state.messages.value.push({
+              id: mid,
+              role: 'assistant',
+              content: res.content,
+              ts: new Date().toISOString(),
+            })
           }
           if (res.card != null && onCardReceived) {
             onCardReceived(res.card)
@@ -865,14 +935,27 @@ export function useAssistant(options: UseAssistantOptions) {
       state.streamingContent.value = ''
       state.streamingReasoning.value = ''
       state.isGenerating.value = false
-      if (aborted && assistantMsg.content.trim()) {
-        try {
-          await apiPost(buildPath('/api/assistant/chat/messages', scope), {
-            role: 'assistant',
-            content: assistantMsg.content,
-          })
-        } catch (_) {
-          // 持久化失败时仍重新加载，避免本地与服务器不一致
+      if (aborted) {
+        const msgs = state.messages.value
+        const parts: string[] = []
+        for (let i = msgs.length - 1; i >= 0; i--) {
+          const m = msgs[i]
+          if (!m) continue
+          if (m.role === 'user') break
+          if (m.role === 'assistant' && m.content.trim()) {
+            parts.unshift(m.content.trim())
+          }
+        }
+        const merged = parts.join('\n\n')
+        if (merged.trim()) {
+          try {
+            await apiPost(buildPath('/api/assistant/chat/messages', scope), {
+              role: 'assistant',
+              content: merged,
+            })
+          } catch (_) {
+            // 持久化失败时仍重新加载，避免本地与服务器不一致
+          }
         }
       }
       await loadChat(scope)
@@ -900,7 +983,6 @@ export function useAssistant(options: UseAssistantOptions) {
     assistantDraft,
     isAssistantGenerating,
     assistantStreamError,
-    assistantReasoningBlocks,
     assistantStreamingContent,
     assistantStreamingReasoning,
 
@@ -909,7 +991,6 @@ export function useAssistant(options: UseAssistantOptions) {
     workspaceAssistantDraft,
     isWorkspaceAssistantGenerating,
     workspaceAssistantStreamError,
-    workspaceReasoningBlocks,
     workspaceStreamingContent,
     workspaceStreamingReasoning,
 
