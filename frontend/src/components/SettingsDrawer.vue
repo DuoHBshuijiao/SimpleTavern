@@ -6,6 +6,7 @@
  * - 提供应用设置的编辑界面
  * - 管理全局设置（LLM配置、API预设、生成参数等）
  * - 管理聊天覆盖设置（提示词、长期记忆、生成参数等）
+ * - 底部「保存设置」一次提交全局草稿与当前会话覆盖（若适用）
  * - 支持导入导出设置
  * - 支持API预设管理
  * - 支持模型候选列表管理
@@ -51,7 +52,7 @@ import ModernSelect from './ModernSelect.vue'
 import { apiGet, apiPost, apiPut } from '../api/http'
 import { useAppFont } from '../composables/useAppFont'
 import { useSettingsImport } from '../composables/useSettingsImport'
-import { X, Eye, EyeOff, Check, Loader2, GripVertical } from 'lucide-vue-next'
+import { X, Eye, EyeOff, Check, Loader2, GripVertical, ChevronDown } from 'lucide-vue-next'
 import WorldBookEditorModal from './modals/WorldBookEditorModal.vue'
 import WorldBookSessionAttachModal from './modals/WorldBookSessionAttachModal.vue'
 import { concatEnabledWorldBookContents, countTokensForText } from '../utils/tokenEstimate'
@@ -116,11 +117,14 @@ watch(
 
 const globalDraft = ref<Settings | null>(null)
 const chatDraft = ref<ChatOverrides | null>(null)
+const isSaving = ref(false)
 
 const showApiKey = ref(false)
 const editingPresetId = ref<string | null>(null)
 const editingPresetShowApiKey = ref(false)
 const presetModelsLoading = ref(false)
+/** 预设「模型列表」区内多选，仅用于批量删除（非通用 API 工具） */
+const presetModelListSelection = ref<Set<string>>(new Set())
 const importInputRef = ref<HTMLInputElement | null>(null)
 const worldbooks = ref<WorldBook[]>([])
 /** 全部世界书列表：按书 ID 缓存启用条目正文的 token 估测 */
@@ -163,6 +167,27 @@ let memoryDebounceTimer: ReturnType<typeof setTimeout> | null = null
  */
 function close() {
   emit('update:show', false)
+}
+
+function formatSaveError(prefix: string, error: unknown): string {
+  return `${prefix}: ${error instanceof Error ? error.message : String(error)}`
+}
+
+/**
+ * 一次保存设置抽屉内的全部变更：先全局草稿，再当前会话覆盖（若适用）。
+ */
+async function handleSaveAll() {
+  if (isSaving.value) return
+  isSaving.value = true
+  try {
+    await saveGlobal()
+    await saveChatOverrides()
+    close()
+  } catch (error) {
+    await notifyMessage(formatSaveError('保存设置失败', error))
+  } finally {
+    isSaving.value = false
+  }
 }
 
 /**
@@ -239,7 +264,7 @@ async function hideSavedFloors() {
   if (!props.chat?.id || !chatDraft.value) return
   const anchorId = findLatestMemorySavedMessageId(props.chat)
   if (!anchorId) {
-    await notifyMessage('当前会话尚未找到“已保存记忆”标记消息，无法执行 hide。')
+    await notifyMessage('当前会话未找到「已保存记忆」标记消息，无法从该处截断上下文。')
     return
   }
   chatDraft.value.contextStartMessageId = anchorId
@@ -766,6 +791,29 @@ const editingPreset = computed(() => {
   return globalDraft.value.apiPresets.find(p => p.id === editingPresetId.value) || null
 })
 
+watch(editingPresetId, () => {
+  presetModelListSelection.value = new Set()
+})
+
+watch(
+  () => editingPreset.value?.models,
+  (models) => {
+    if (!models?.length) {
+      presetModelListSelection.value = new Set()
+      return
+    }
+    const allowed = new Set(models)
+    const next = new Set<string>()
+    for (const name of presetModelListSelection.value) {
+      if (allowed.has(name)) next.add(name)
+    }
+    if (next.size !== presetModelListSelection.value.size) {
+      presetModelListSelection.value = next
+    }
+  },
+  { deep: true },
+)
+
 const memoryTokenDisplay = computed(() => {
   if (memoryTokenLoading.value) return '…'
   if (memoryTokenEstimate.value === null) return '—'
@@ -819,6 +867,56 @@ async function deletePreset(id: string) {
     ? new Set(presets.flatMap(p => p.models || []))
     : new Set(globalDraft.value.llm.modelCandidates || [])
   globalDraft.value.llm.usedModels = (globalDraft.value.llm.usedModels || []).filter(m => available.has(m))
+}
+
+function togglePresetModelListSelection(name: string) {
+  const next = new Set(presetModelListSelection.value)
+  if (next.has(name)) next.delete(name)
+  else next.add(name)
+  presetModelListSelection.value = next
+}
+
+function selectAllPresetModelNames() {
+  const models = editingPreset.value?.models
+  if (!models?.length) return
+  presetModelListSelection.value = new Set(models)
+}
+
+function clearPresetModelListSelection() {
+  presetModelListSelection.value = new Set()
+}
+
+function removeSelectedPresetModelNames() {
+  const p = editingPreset.value
+  if (!p?.models?.length) return
+  const sel = presetModelListSelection.value
+  if (!sel.size) return
+  p.models = p.models.filter((m) => !sel.has(m))
+  presetModelListSelection.value = new Set()
+}
+
+async function clearAllPresetModelNames() {
+  const p = editingPreset.value
+  if (!p?.models?.length) return
+  const ok = await notifyConfirm({
+    title: '清空模型列表',
+    message: '确定删除该预设中的全部模型名？',
+    variant: 'danger',
+  })
+  if (!ok) return
+  p.models = []
+  presetModelListSelection.value = new Set()
+}
+
+function removeSinglePresetModelAt(idx: number) {
+  const p = editingPreset.value
+  if (!p?.models) return
+  const removed = p.models.splice(idx, 1)[0]
+  if (removed !== undefined) {
+    const next = new Set(presetModelListSelection.value)
+    next.delete(removed)
+    presetModelListSelection.value = next
+  }
 }
 
 /**
@@ -994,7 +1092,6 @@ async function saveGlobal() {
   await settingsStore.save(draft)
   globalDraft.value.generationDefaults.context_size = draft.generationDefaults.context_size
   globalDraft.value.draftHelpDefaults = draft.draftHelpDefaults
-  close()
 }
 
 /**
@@ -1120,8 +1217,6 @@ async function saveChatOverrides() {
       }
     }
   }
-
-  close()
 }
 
 /**
@@ -1281,385 +1376,447 @@ async function checkUpdate() {
         <!-- Header -->
         <div class="flex items-center justify-between px-6 py-4 border-b border-[var(--color-border-subtle)] bg-[var(--color-border-subtle)] rounded-t-2xl">
           <h2 class="text-lg font-bold text-[var(--color-text)]">设置</h2>
-          <button class="text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors" @click="close">
+          <button
+            type="button"
+            class="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text)] touch-manipulation"
+            @click="close"
+          >
             <X class="w-5 h-5" />
           </button>
         </div>
 
-        <!-- Tabs -->
-        <div class="flex border-b border-[var(--color-border-subtle)] bg-[var(--color-border-subtle)]" style="opacity: 1; color: transparent;">
+        <!-- Tabs：整块可点，高亮仅在内层 span，避免贴齐 Tab 栏四边 -->
+        <div class="flex gap-1 border-b border-[var(--color-border-subtle)] bg-[var(--color-border-subtle)] px-2 py-2" style="opacity: 1; color: transparent;">
           <button
             v-for="t in ['global', 'presets', 'chat']"
             :key="t"
-            class="flex-1 py-3 text-sm font-medium transition-colors relative"
-            :class="tab === t ? 'text-brand bg-brand-a10 rounded-lg' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-surface-muted rounded-lg'"
-            :style="tab === t ? 'opacity: 1; margin-top: 6px; margin-bottom: 6px;' : 'opacity: 1; margin-top: 6px; margin-bottom: 6px;'"
+            type="button"
+            class="group flex min-h-11 min-w-0 flex-1 touch-manipulation items-center justify-center px-0.5 py-0.5 text-sm font-medium transition-colors"
             @click="tab = t as any"
           >
-            {{ t === 'global' ? '全局设置' : t === 'presets' ? 'API 预设' : '当前会话' }}
+            <span
+              class="block min-h-10 w-full rounded-lg py-2 text-center transition-colors"
+              :class="
+                tab === t
+                  ? 'text-brand bg-brand-a10'
+                  : 'text-[var(--color-text-muted)] group-hover:text-[var(--color-text)] group-hover:bg-surface-muted'
+              "
+            >
+              {{ t === 'global' ? '全局设置' : t === 'presets' ? 'API 预设' : '当前会话' }}
+            </span>
           </button>
         </div>
 
         <!-- Content -->
-        <div class="flex-1 overflow-y-auto p-6 custom-scrollbar bg-transparent">
+        <div class="drawer-scroll flex-1 min-h-0 overflow-y-auto p-6 custom-scrollbar bg-transparent">
           <!-- Global Settings -->
           <div v-if="preloaded" v-show="tab === 'global'" class="space-y-6">
             <div v-if="!globalDraft" class="text-center text-[var(--color-text-muted)] py-8">加载中...</div>
-            <div v-else class="space-y-5">
+            <div v-else class="space-y-4">
               <div class="text-xs text-[var(--color-text-muted)] bg-surface-muted p-3 rounded-lg border border-[var(--color-border-subtle)]">
                 这里配置全局默认的 API 参数。如果配置了 "API 预设"，建议优先使用预设功能以便管理不同服务商。
               </div>
 
-              <!-- Stream Toggle -->
-              <div class="space-y-2">
-                <label class="block text-sm font-medium text-[var(--color-text-secondary)]">流式传输 (Streaming)</label>
-                <button 
-                  class="flex items-center gap-3 group cursor-pointer w-full text-left"
-                  @click="globalDraft.streamEnabled = !globalDraft.streamEnabled"
+              <!-- 连接与默认模型（默认展开） -->
+              <details open class="group rounded-xl border border-[var(--color-border-subtle)] bg-surface-muted/40 overflow-hidden">
+                <summary
+                  class="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3.5 text-sm font-semibold text-[var(--color-text-secondary)] select-none hover:bg-surface-hover/40 [&::-webkit-details-marker]:hidden"
                 >
-                  <div 
-                    class="w-10 h-5 rounded-full relative transition-colors duration-200"
-                    :class="globalDraft.streamEnabled ? 'bg-brand' : 'bg-[var(--color-track)]'"
-                  >
-                    <div 
-                      class="absolute top-1 w-3 h-3 rounded-full bg-[var(--color-on-brand)] transition-transform duration-200"
-                      :class="globalDraft.streamEnabled ? 'left-6' : 'left-1'"
-                    ></div>
+                  <span>连接与默认模型</span>
+                  <ChevronDown class="h-4 w-4 shrink-0 text-[var(--color-text-muted)] transition-transform duration-200 group-open:rotate-180" />
+                </summary>
+                <div class="space-y-5 border-t border-[var(--color-border-subtle)] px-4 pb-4 pt-4">
+                  <!-- Stream Toggle -->
+                  <div class="space-y-2">
+                    <label class="block text-sm font-medium text-[var(--color-text-secondary)]">流式传输</label>
+                    <button
+                      type="button"
+                      class="flex min-h-11 w-full cursor-pointer items-center gap-3 py-1 text-left group"
+                      @click="globalDraft.streamEnabled = !globalDraft.streamEnabled"
+                    >
+                      <div
+                        class="relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200"
+                        :class="globalDraft.streamEnabled ? 'bg-brand' : 'bg-[var(--color-track)]'"
+                      >
+                        <div
+                          class="absolute top-1 h-4 w-4 rounded-full bg-[var(--color-on-brand)] transition-transform duration-200"
+                          :class="globalDraft.streamEnabled ? 'left-6' : 'left-1'"
+                        ></div>
+                      </div>
+                      <span class="text-xs text-[var(--color-text-secondary)]">
+                        {{ globalDraft.streamEnabled ? '已开启' : '已关闭' }}
+                      </span>
+                    </button>
                   </div>
-                  <span class="text-xs text-[var(--color-text-secondary)]">
-                    {{ globalDraft.streamEnabled ? '已开启' : '已关闭' }}
-                  </span>
-                </button>
-              </div>
 
-              <!-- Pure AI Mode Toggle -->
-              <div class="space-y-2">
-                <label class="block text-sm font-medium text-[var(--color-text-secondary)]">纯 AI 模式</label>
-                <button
-                  class="flex items-center gap-3 group cursor-pointer w-full text-left"
-                  @click="globalDraft.pureAiMode = !globalDraft.pureAiMode"
-                >
-                  <div
-                    class="w-10 h-5 rounded-full relative transition-colors duration-200"
-                    :class="globalDraft.pureAiMode ? 'bg-brand' : 'bg-[var(--color-track)]'"
-                  >
-                    <div
-                      class="absolute top-1 w-3 h-3 rounded-full bg-[var(--color-on-brand)] transition-transform duration-200"
-                      :class="globalDraft.pureAiMode ? 'left-6' : 'left-1'"
-                    ></div>
+                  <!-- Pure AI Mode Toggle -->
+                  <div class="space-y-2">
+                    <label class="block text-sm font-medium text-[var(--color-text-secondary)]">纯 AI 模式</label>
+                    <button
+                      type="button"
+                      class="flex min-h-11 w-full cursor-pointer items-center gap-3 py-1 text-left group"
+                      @click="globalDraft.pureAiMode = !globalDraft.pureAiMode"
+                    >
+                      <div
+                        class="relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200"
+                        :class="globalDraft.pureAiMode ? 'bg-brand' : 'bg-[var(--color-track)]'"
+                      >
+                        <div
+                          class="absolute top-1 h-4 w-4 rounded-full bg-[var(--color-on-brand)] transition-transform duration-200"
+                          :class="globalDraft.pureAiMode ? 'left-6' : 'left-1'"
+                        ></div>
+                      </div>
+                      <span class="text-xs text-[var(--color-text-secondary)]">
+                        {{ globalDraft.pureAiMode ? '已开启：不注入用户 Persona，用户发言将以「系统」角色影响世界' : '已关闭：正常对话模式' }}
+                      </span>
+                    </button>
                   </div>
-                  <span class="text-xs text-[var(--color-text-secondary)]">
-                    {{ globalDraft.pureAiMode ? '已开启：不注入用户 Persona，用户发言将以 system 影响世界' : '已关闭：正常对话模式' }}
-                  </span>
-                </button>
-              </div>
 
-              <!-- Reasoning Effort -->
-              <div class="space-y-1.5">
-                <label class="block text-sm font-medium text-[var(--color-text-secondary)]">思考模式</label>
-                <ModernSelect
-                  v-model="globalDraft.reasoningEffort"
-                  :options="[...REASONING_EFFORT_OPTIONS]"
-                  placeholder="选择思考深度..."
-                  class="w-full"
-                />
-                <p class="text-xs text-[var(--color-text-muted)]">none 为关闭思考；其他档位会开启思考并请求更高推理深度。</p>
-              </div>
-
-              <!-- 界面色系 -->
-              <div class="space-y-1.5">
-                <label class="block text-sm font-medium text-[var(--color-text-secondary)]">界面色系</label>
-                <ModernSelect
-                  v-model="globalDraft.themeId"
-                  :options="[...THEME_OPTIONS]"
-                  placeholder="选择色系..."
-                  class="w-full"
-                />
-                <p class="text-xs text-[var(--color-text-muted)]">暗色玻璃底，仅强调色随主题变化；未设置时默认为雾玫瑰。</p>
-              </div>
-
-              <!-- Base URL -->
-              <div class="space-y-1.5">
-                <label class="block text-sm font-medium text-[var(--color-text-secondary)]">默认 API Base URL</label>
-                <input 
-                  v-model="globalDraft.llm.baseUrl" 
-                  type="text" 
-                  placeholder="https://api.openai.com 或 …/v1/chat/completions"
-                  class="input w-full"
-                />
-                <p class="text-xs text-[var(--color-text-muted)]">支持 Base（如 https://api.openai.com 或 …/v1）或完整 chat/completions 地址；末尾有无 / 均可。</p>
-              </div>
-
-              <!-- API Key -->
-              <div class="space-y-1.5">
-                <label class="block text-sm font-medium text-[var(--color-text-secondary)]">默认 API Key</label>
-                <div class="relative">
-                  <input 
-                    v-model="globalDraft.llm.apiKey" 
-                    :type="showApiKey ? 'text' : 'password'"
-                    class="input w-full pr-10"
-                  />
-                  <button 
-                    class="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] p-1"
-                    @click="showApiKey = !showApiKey"
-                  >
-                    <component :is="showApiKey ? Eye : EyeOff" class="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-
-              <div class="space-y-1.5">
-                 <label class="block text-sm font-medium text-[var(--color-text-secondary)]">默认模型名称</label>
-                 <input 
-                    v-model="globalDraft.llm.defaultModel" 
-                    type="text" 
-                    class="input w-full"
-                    placeholder="例如: gpt-3.5-turbo"
-                 />
-              </div>
-
-              <div class="h-px bg-[var(--color-border-subtle)] my-4"></div>
-
-              <!-- Global System Prompt -->
-              <div class="space-y-1.5">
-                <label class="block text-sm font-medium text-[var(--color-text-secondary)]">全局 System Prompt</label>
-                <textarea 
-                  v-model="globalDraft.prompts.globalSystem" 
-                  rows="4"
-                  class="input textarea w-full resize-none"
-                ></textarea>
-              </div>
-
-              <div class="space-y-1.5">
-                <label class="block text-sm font-medium text-[var(--color-text-secondary)]">Prefill 设置</label>
-                <textarea 
-                  v-model="globalDraft.prompts.globalPrefill" 
-                  rows="2"
-                  class="input textarea w-full resize-none"
-                  placeholder="以助手身份附加在请求末尾，模型在其后续写；留空则不启用"
-                ></textarea>
-              </div>
-
-              <!-- Parameters (Ensured Visibility) -->
-              <div class="grid grid-cols-2 gap-4 pt-2">
-                <div class="space-y-1.5">
-                  <label class="block text-sm font-medium text-[var(--color-text-secondary)]">Temperature</label>
-                  <input 
-                    v-model.number="globalDraft.generationDefaults.temperature" 
-                    type="number" 
-                    step="0.1" min="0" max="2"
-                    placeholder="默认"
-                    class="input w-full"
-                  />
-                </div>
-                <div class="space-y-1.5">
-                  <label class="block text-sm font-medium text-[var(--color-text-secondary)]">Top P</label>
-                  <input 
-                    v-model.number="globalDraft.generationDefaults.top_p" 
-                    type="number" 
-                    step="0.1" min="0" max="1"
-                    placeholder="默认"
-                    class="input w-full"
-                  />
-                </div>
-                <div class="space-y-1.5">
-                  <label class="block text-sm font-medium text-[var(--color-text-secondary)]">Max Tokens</label>
-                  <input 
-                    v-model.number="globalDraft.generationDefaults.max_tokens" 
-                    type="number" 
-                    step="128" min="1"
-                    placeholder="默认"
-                    class="input w-full"
-                  />
-                </div>
-              </div>
-              <div class="space-y-2 pt-2">
-                <div class="text-sm font-medium text-[var(--color-text-secondary)]">上下文</div>
-                <div class="grid grid-cols-2 gap-4">
-                <div class="space-y-1.5">
-                  <label class="block text-sm font-medium text-[var(--color-text-secondary)]">Context Size</label>
-                  <input 
-                    v-model.number="globalDraft.generationDefaults.context_size" 
-                    type="number" 
-                    min="0"
-                    placeholder="未启用（默认不限制）"
-                    class="input w-full"
-                  />
-                </div>
+                  <!-- Reasoning Effort -->
                   <div class="space-y-1.5">
-                    <label class="block text-sm font-medium text-[var(--color-text-secondary)]">草稿助手上下文条数限制</label>
-                    <input
-                      :value="globalDraft.draftHelpDefaults?.context_message_limit ?? ''"
-                      type="text"
-                      inputmode="numeric"
-                      pattern="[0-9]*"
-                      placeholder="未启用（跟随当前逻辑）"
-                      class="input w-full"
-                      @input="handleGlobalDraftHelpLimitInput"
-                    />
-                  </div>
-                </div>
-              </div>
-              <p class="text-xs text-[var(--color-text-muted)] mt-2">实际上下文总限制长度为该 Context Size 限制加上角色卡、用户信息、自定义系统提示词。草稿助手条数限制只统计最近消息条数，留空则回退到现有上下文逻辑。</p>
-
-              <div class="h-px bg-[var(--color-border-subtle)] my-4"></div>
-
-              <!-- 字体自定义 -->
-              <div class="space-y-3">
-                <div class="text-sm font-medium text-[var(--color-text-secondary)]">字体</div>
-                <div class="flex gap-2 items-center">
-                  <div class="relative group flex-1 min-w-0 max-w-[172px]">
+                    <label class="block text-sm font-medium text-[var(--color-text-secondary)]">思考模式</label>
                     <ModernSelect
-                      v-model="fontModel"
-                      :options="fontOptions"
-                      placement="top"
-                      searchable
-                      placeholder="选择字体..."
-                      class="w-full min-w-0"
+                      v-model="globalDraft.reasoningEffort"
+                      :options="[...REASONING_EFFORT_OPTIONS]"
+                      placeholder="选择思考深度..."
+                      class="w-full"
                     />
+                    <p class="text-xs text-[var(--color-text-muted)]">选「无」则关闭思考；其他档位会开启思考并请求更高推理深度。</p>
                   </div>
-                  <div class="flex items-center gap-1 h-9 bg-surface-muted border border-[var(--color-border)] rounded-lg px-1 py-0.5">
-                    <button
-                      type="button"
-                      class="p-1.5 text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-surface-hover rounded transition-colors"
-                      aria-label="减小字号"
-                      @click="stepMessageFontSize(-1)"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                    </button>
+
+                  <!-- Base URL -->
+                  <div class="space-y-1.5">
+                    <label class="block text-sm font-medium text-[var(--color-text-secondary)]">默认 API 基础地址</label>
                     <input
-                      v-model.number="messageFontSizeModel"
-                      type="number"
-                      min="8"
-                      max="72"
-                      placeholder=""
-                      class="w-10 bg-transparent border-0 text-center text-sm text-[var(--color-text)] focus:outline-none focus:ring-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      v-model="globalDraft.llm.baseUrl"
+                      type="text"
+                      placeholder="https://api.openai.com 或 …/v1/chat/completions"
+                      class="input w-full"
                     />
+                    <p class="text-xs text-[var(--color-text-muted)]">支持 Base（如 https://api.openai.com 或 …/v1）或完整 chat/completions 地址；末尾有无 / 均可。</p>
+                  </div>
+
+                  <!-- API Key -->
+                  <div class="space-y-1.5">
+                    <label class="block text-sm font-medium text-[var(--color-text-secondary)]">默认 API Key</label>
+                    <div class="relative">
+                      <input
+                        v-model="globalDraft.llm.apiKey"
+                        :type="showApiKey ? 'text' : 'password'"
+                        class="input w-full pr-11"
+                      />
+                      <button
+                        type="button"
+                        class="absolute right-1 top-1/2 flex min-h-10 min-w-10 -translate-y-1/2 items-center justify-center rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
+                        @click="showApiKey = !showApiKey"
+                      >
+                        <component :is="showApiKey ? Eye : EyeOff" class="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="space-y-1.5">
+                    <label class="block text-sm font-medium text-[var(--color-text-secondary)]">默认模型名称</label>
+                    <input
+                      v-model="globalDraft.llm.defaultModel"
+                      type="text"
+                      class="input w-full"
+                      placeholder="例如: gpt-3.5-turbo"
+                    />
+                  </div>
+                </div>
+              </details>
+
+              <!-- 提示词与生成参数（默认折叠） -->
+              <details class="group rounded-xl border border-[var(--color-border-subtle)] bg-surface-muted/40 overflow-hidden">
+                <summary
+                  class="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3.5 text-sm font-semibold text-[var(--color-text-secondary)] select-none hover:bg-surface-hover/40 [&::-webkit-details-marker]:hidden"
+                >
+                  <span>提示词与生成参数</span>
+                  <ChevronDown class="h-4 w-4 shrink-0 text-[var(--color-text-muted)] transition-transform duration-200 group-open:rotate-180" />
+                </summary>
+                <div class="space-y-5 border-t border-[var(--color-border-subtle)] px-4 pb-4 pt-4">
+                  <!-- Global System Prompt -->
+                  <div class="space-y-1.5">
+                    <label class="block text-sm font-medium text-[var(--color-text-secondary)]">全局系统提示词</label>
+                    <textarea
+                      v-model="globalDraft.prompts.globalSystem"
+                      rows="4"
+                      class="input textarea w-full resize-none"
+                    ></textarea>
+                  </div>
+
+                  <div class="space-y-1.5">
+                    <label class="block text-sm font-medium text-[var(--color-text-secondary)]">预填内容</label>
+                    <textarea
+                      v-model="globalDraft.prompts.globalPrefill"
+                      rows="2"
+                      class="input textarea w-full resize-none"
+                      placeholder="以助手身份附加在请求末尾，模型在其后续写；留空则不启用"
+                    ></textarea>
+                  </div>
+
+                  <!-- Parameters (Ensured Visibility) -->
+                  <div class="grid grid-cols-2 gap-4 pt-2">
+                    <div class="space-y-1.5">
+                      <label class="block text-sm font-medium text-[var(--color-text-secondary)]">Temperature</label>
+                      <input
+                        v-model.number="globalDraft.generationDefaults.temperature"
+                        type="number"
+                        step="0.1"
+                        min="0"
+                        max="2"
+                        placeholder="默认"
+                        class="input w-full"
+                      />
+                    </div>
+                    <div class="space-y-1.5">
+                      <label class="block text-sm font-medium text-[var(--color-text-secondary)]">Top P</label>
+                      <input
+                        v-model.number="globalDraft.generationDefaults.top_p"
+                        type="number"
+                        step="0.1"
+                        min="0"
+                        max="1"
+                        placeholder="默认"
+                        class="input w-full"
+                      />
+                    </div>
+                    <div class="space-y-1.5">
+                      <label class="block text-sm font-medium text-[var(--color-text-secondary)]">最大输出长度</label>
+                      <input
+                        v-model.number="globalDraft.generationDefaults.max_tokens"
+                        type="number"
+                        step="128"
+                        min="1"
+                        placeholder="默认"
+                        class="input w-full"
+                      />
+                    </div>
+                  </div>
+                  <div class="space-y-2 pt-2">
+                    <div class="text-sm font-medium text-[var(--color-text-secondary)]">上下文</div>
+                    <div class="grid grid-cols-2 gap-4">
+                      <div class="space-y-1.5">
+                        <label class="block text-sm font-medium text-[var(--color-text-secondary)]">上下文长度</label>
+                        <input
+                          v-model.number="globalDraft.generationDefaults.context_size"
+                          type="number"
+                          min="0"
+                          placeholder="未启用（默认不限制）"
+                          class="input w-full"
+                        />
+                      </div>
+                      <div class="space-y-1.5">
+                        <label class="block text-sm font-medium text-[var(--color-text-secondary)]">草稿助手上下文条数限制</label>
+                        <input
+                          :value="globalDraft.draftHelpDefaults?.context_message_limit ?? ''"
+                          type="text"
+                          inputmode="numeric"
+                          pattern="[0-9]*"
+                          placeholder="未启用（跟随当前逻辑）"
+                          class="input w-full"
+                          @input="handleGlobalDraftHelpLimitInput"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <p class="text-xs text-[var(--color-text-muted)]">
+                    实际上下文总限制长度为该「上下文长度」限制加上角色卡、用户信息、自定义系统提示词。草稿助手条数限制只统计最近消息条数，留空则回退到现有上下文逻辑。
+                  </p>
+                </div>
+              </details>
+
+              <!-- 外观与数据（默认折叠） -->
+              <details class="group rounded-xl border border-[var(--color-border-subtle)] bg-surface-muted/40 overflow-hidden">
+                <summary
+                  class="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3.5 text-sm font-semibold text-[var(--color-text-secondary)] select-none hover:bg-surface-hover/40 [&::-webkit-details-marker]:hidden"
+                >
+                  <span>外观与数据</span>
+                  <ChevronDown class="h-4 w-4 shrink-0 text-[var(--color-text-muted)] transition-transform duration-200 group-open:rotate-180" />
+                </summary>
+                <div class="space-y-5 border-t border-[var(--color-border-subtle)] px-4 pb-4 pt-4">
+                  <!-- 界面色系 -->
+                  <div class="space-y-1.5">
+                    <label class="block text-sm font-medium text-[var(--color-text-secondary)]">界面色系</label>
+                    <ModernSelect
+                      v-model="globalDraft.themeId"
+                      :options="[...THEME_OPTIONS]"
+                      placeholder="选择色系..."
+                      class="w-full"
+                    />
+                    <p class="text-xs text-[var(--color-text-muted)]">暗色玻璃底，仅强调色随主题变化；未设置时默认为雾玫瑰。</p>
+                  </div>
+
+                  <!-- 字体自定义 -->
+                  <div class="space-y-3">
+                    <div class="text-sm font-medium text-[var(--color-text-secondary)]">字体</div>
+                    <div class="flex flex-wrap gap-2 items-center">
+                      <div class="relative group flex-1 min-w-0 max-w-[172px]">
+                        <ModernSelect
+                          v-model="fontModel"
+                          :options="fontOptions"
+                          placement="top"
+                          searchable
+                          placeholder="选择字体..."
+                          class="w-full min-w-0"
+                        />
+                      </div>
+                      <div class="flex h-10 items-center gap-0.5 rounded-lg border border-[var(--color-border)] bg-surface-muted px-1 py-0.5">
+                        <button
+                          type="button"
+                          class="flex min-h-9 min-w-9 items-center justify-center rounded-md p-2 text-[var(--color-text-muted)] transition-colors hover:bg-surface-hover hover:text-[var(--color-text)]"
+                          aria-label="减小字号"
+                          @click="stepMessageFontSize(-1)"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                        </button>
+                        <input
+                          v-model.number="messageFontSizeModel"
+                          type="number"
+                          min="8"
+                          max="72"
+                          placeholder=""
+                          class="w-10 bg-transparent border-0 text-center text-sm text-[var(--color-text)] focus:outline-none focus:ring-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        />
+                        <button
+                          type="button"
+                          class="flex min-h-9 min-w-9 items-center justify-center rounded-md p-2 text-[var(--color-text-muted)] transition-colors hover:bg-surface-hover hover:text-[var(--color-text)]"
+                          aria-label="增大字号"
+                          @click="stepMessageFontSize(1)"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                        </button>
+                      </div>
+                      <button
+                        type="button"
+                        class="min-h-10 rounded-lg bg-surface-muted px-4 py-2 text-sm text-[var(--color-text)] transition-colors whitespace-nowrap hover:bg-surface-hover"
+                        @click="triggerFontImport"
+                      >
+                        导入字体
+                      </button>
+                      <input
+                        ref="fontInputRef"
+                        type="file"
+                        class="hidden"
+                        accept=".ttf,.otf,.woff,.woff2"
+                        @change="handleFontImport"
+                      />
+                    </div>
+                  </div>
+
+                  <div class="space-y-3">
+                    <div class="text-sm font-medium text-[var(--color-text-secondary)]">数据备份与导入</div>
+                    <div class="flex flex-col gap-2">
+                      <div class="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          class="min-h-10 rounded-lg bg-surface-muted px-3 py-2 text-center text-sm leading-tight text-[var(--color-text)] transition-colors min-w-0 hover:bg-surface-hover"
+                          @click="downloadSettingsBackup('basic')"
+                        >
+                          基本设置
+                        </button>
+                        <button
+                          type="button"
+                          class="min-h-10 rounded-lg bg-surface-muted px-3 py-2 text-center text-sm leading-tight text-[var(--color-text)] transition-colors min-w-0 hover:bg-surface-hover"
+                          @click="downloadSettingsBackup('with_characters')"
+                        >
+                          包含角色卡
+                        </button>
+                      </div>
+                      <div class="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          class="min-h-10 rounded-lg bg-surface-muted px-3 py-2 text-center text-sm leading-tight text-[var(--color-text)] transition-colors min-w-0 hover:bg-surface-hover"
+                          @click="downloadSettingsBackup('with_chats')"
+                        >
+                          包含全部聊天记录
+                        </button>
+                        <button
+                          type="button"
+                          class="min-h-10 rounded-lg bg-surface-muted px-3 py-2 text-center text-sm leading-tight text-[var(--color-text)] transition-colors min-w-0 hover:bg-surface-hover"
+                          @click="triggerImport"
+                        >
+                          导入数据
+                        </button>
+                      </div>
+                      <input
+                        ref="importInputRef"
+                        type="file"
+                        class="hidden"
+                        accept=".txt,.json,.zip"
+                        @change="handleImportChange"
+                      />
+                    </div>
+                    <div class="text-xs text-[var(--color-text-muted)]">
+                      备份会导出全部系统设置（含用户 Persona 头像）；“包含角色卡/包含全部聊天记录”同时包含世界书数据。
+                    </div>
+                  </div>
+                </div>
+              </details>
+
+              <!-- 应用与更新（默认折叠） -->
+              <details class="group rounded-xl border border-[var(--color-border-subtle)] bg-surface-muted/40 overflow-hidden">
+                <summary
+                  class="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3.5 text-sm font-semibold text-[var(--color-text-secondary)] select-none hover:bg-surface-hover/40 [&::-webkit-details-marker]:hidden"
+                >
+                  <span>应用与更新</span>
+                  <ChevronDown class="h-4 w-4 shrink-0 text-[var(--color-text-muted)] transition-transform duration-200 group-open:rotate-180" />
+                </summary>
+                <div class="space-y-3 border-t border-[var(--color-border-subtle)] px-4 pb-4 pt-4">
+                  <div class="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
-                      class="p-1.5 text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-surface-hover rounded transition-colors"
-                      aria-label="增大字号"
-                      @click="stepMessageFontSize(1)"
+                      class="min-h-10 rounded-lg bg-surface-muted px-4 py-2 text-sm text-[var(--color-text)] transition-colors whitespace-nowrap hover:bg-surface-hover"
+                      :disabled="checkUpdateLoading"
+                      @click="checkUpdate"
                     >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                      检查更新
                     </button>
+                    <span v-if="checkUpdateMessage" class="text-xs text-[var(--color-text-secondary)]">{{ checkUpdateMessage }}</span>
                   </div>
-                  <button
-                    type="button"
-                    class="px-4 py-2 bg-surface-muted hover:bg-surface-hover text-[var(--color-text)] rounded-lg text-sm transition-colors whitespace-nowrap"
-                    @click="triggerFontImport"
-                  >
-                    导入字体
-                  </button>
-                  <input
-                    ref="fontInputRef"
-                    type="file"
-                    class="hidden"
-                    accept=".ttf,.otf,.woff,.woff2"
-                    @change="handleFontImport"
-                  />
+                  <a
+                    href="https://github.com/DuoHBshuijiao/SimpleTavern/releases"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="block cursor-pointer text-center text-xs text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text-secondary)] hover:underline"
+                  >{{ appVersion || '…' }}</a>
                 </div>
-              </div>
-
-              <div class="space-y-3">
-                <div class="text-sm font-medium text-[var(--color-text-secondary)]">数据备份与导入</div>
-                <div class="flex flex-col gap-2">
-                  <div class="grid grid-cols-2 gap-2">
-                    <button 
-                      type="button"
-                      class="px-3 py-2 bg-surface-muted hover:bg-surface-hover text-[var(--color-text)] rounded-lg text-sm transition-colors text-center leading-tight min-w-0"
-                      @click="downloadSettingsBackup('basic')"
-                    >
-                      基本设置
-                    </button>
-                    <button 
-                      type="button"
-                      class="px-3 py-2 bg-surface-muted hover:bg-surface-hover text-[var(--color-text)] rounded-lg text-sm transition-colors text-center leading-tight min-w-0"
-                      @click="downloadSettingsBackup('with_characters')"
-                    >
-                      包含角色卡
-                    </button>
-                  </div>
-                  <div class="grid grid-cols-2 gap-2">
-                    <button 
-                      type="button"
-                      class="px-3 py-2 bg-surface-muted hover:bg-surface-hover text-[var(--color-text)] rounded-lg text-sm transition-colors text-center leading-tight min-w-0"
-                      @click="downloadSettingsBackup('with_chats')"
-                    >
-                      包含全部聊天记录
-                    </button>
-                    <button 
-                      type="button"
-                      class="px-3 py-2 bg-surface-muted hover:bg-surface-hover text-[var(--color-text)] rounded-lg text-sm transition-colors text-center leading-tight min-w-0"
-                      @click="triggerImport"
-                    >
-                      导入数据
-                    </button>
-                  </div>
-                  <input
-                    ref="importInputRef"
-                    type="file"
-                    class="hidden"
-                    accept=".txt,.json,.zip"
-                    @change="handleImportChange"
-                  />
-                </div>
-                <div class="text-xs text-[var(--color-text-muted)]">
-                  备份会导出全部系统设置（含用户 Persona 头像）；“包含角色卡/包含全部聊天记录”同时包含世界书数据。
-                </div>
-              </div>
-
-               <div class="pt-4 flex justify-end">
-                <button 
-                  class="px-6 py-2 bg-brand hover:bg-brand-hover text-on-brand rounded-lg font-medium shadow-brand transition-all whitespace-nowrap"
-                  @click="saveGlobal"
-                >
-                  保存全局设置
-                </button>
-              </div>
-
-              <div class="h-px bg-[var(--color-border-subtle)] my-4"></div>
-              <div class="flex justify-start gap-2 items-center">
-                <button
-                  type="button"
-                  class="px-4 py-2 bg-surface-muted hover:bg-surface-hover text-[var(--color-text)] rounded-lg text-sm transition-colors whitespace-nowrap"
-                  :disabled="checkUpdateLoading"
-                  @click="checkUpdate"
-                >
-                  检查更新
-                </button>
-                <span v-if="checkUpdateMessage" class="text-xs text-[var(--color-text-secondary)]">{{ checkUpdateMessage }}</span>
-              </div>
-              <a
-                href="https://github.com/DuoHBshuijiao/SimpleTavern/releases"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="text-xs text-[var(--color-text-muted)] text-center block cursor-pointer hover:text-[var(--color-text-secondary)] hover:underline transition-colors"
-              >{{ appVersion || '…' }}</a>
+              </details>
             </div>
           </div>
 
           <!-- Presets Management -->
           <div v-if="preloaded" v-show="tab === 'presets'" class="space-y-6 h-full flex flex-col">
               <div v-if="!globalDraft" class="text-center text-[var(--color-text-muted)] py-8">加载中...</div>
-              <div v-else class="flex flex-1 min-h-0 gap-4">
-                  <!-- Preset List -->
-                  <div class="w-1/3 flex flex-col border-r border-[var(--color-border-subtle)] pr-4">
-                      <div class="flex justify-between items-center mb-3">
-                          <span class="text-sm font-bold text-[var(--color-text-secondary)]">预设列表</span>
-                          <button class="text-xs bg-brand-a20 text-brand px-2 py-1 rounded hover:bg-brand-a30 transition-colors" @click="createPreset">+ 新建</button>
+              <div v-else class="flex flex-1 min-h-0 gap-3">
+                  <!-- Preset List：略宽于原 1/3，删除绝对定位让名称独占整行可截断宽度 -->
+                  <div class="flex min-w-0 flex-[0_0_46%] flex-col border-r border-[var(--color-border-subtle)] pr-3">
+                      <div class="mb-2 flex items-center justify-between gap-1.5">
+                          <span class="shrink-0 text-xs font-bold text-[var(--color-text-secondary)] sm:text-sm">预设列表</span>
+                          <button
+                            type="button"
+                            class="inline-flex min-h-8 shrink-0 items-center rounded-md bg-brand-a20 px-2 py-0.5 text-[11px] font-medium leading-tight text-brand transition-colors hover:bg-brand-a30 touch-manipulation sm:px-2.5 sm:text-xs"
+                            @click="createPreset"
+                          >
+                            + 新建
+                          </button>
                       </div>
-                      <div class="flex-1 overflow-y-auto space-y-1 custom-scrollbar">
+                      <div class="drawer-scroll flex-1 space-y-1 overflow-y-auto custom-scrollbar">
                           <div 
                               v-for="p in globalDraft.apiPresets" 
                               :key="p.id"
-                              class="px-3 py-2 rounded-lg cursor-pointer text-sm transition-colors flex justify-between items-center group"
+                              class="group relative flex min-h-10 cursor-pointer items-center rounded-lg py-1.5 pl-2 pr-1 text-sm transition-colors"
                               :class="editingPresetId === p.id ? 'bg-brand-a10 text-brand' : 'text-[var(--color-text-secondary)] hover:bg-surface-muted'"
                               @click="editingPresetId = p.id"
                           >
-                              <span class="truncate">{{ p.name }}</span>
-                              <button class="opacity-0 group-hover:opacity-100 text-[var(--color-text-muted)] hover:text-error px-1" @click.stop="deletePreset(p.id)">
-                                <X class="w-3 h-3" />
+                              <span class="min-w-0 max-w-full truncate pr-7">{{ p.name }}</span>
+                              <button
+                                type="button"
+                                class="absolute right-0.5 top-1/2 inline-flex min-h-8 min-w-8 -translate-y-1/2 items-center justify-center rounded-md text-[var(--color-text-muted)] opacity-0 pointer-events-none touch-manipulation hover:text-error group-hover:pointer-events-auto group-hover:opacity-100"
+                                @click.stop="deletePreset(p.id)"
+                              >
+                                <X class="h-3.5 w-3.5" />
                               </button>
                           </div>
                            <div v-if="globalDraft.apiPresets.length === 0" class="text-xs text-[var(--color-text-muted)] text-center py-4">无预设</div>
@@ -1668,7 +1825,7 @@ async function checkUpdate() {
 
                   <!-- Preset Editor -->
                   <div class="flex-1 flex flex-col min-w-0" v-if="editingPreset">
-                       <div class="space-y-4 overflow-y-auto custom-scrollbar pr-2 pb-4">
+                       <div class="drawer-scroll space-y-4 overflow-y-auto custom-scrollbar pr-2 pb-4">
                           <div class="space-y-1.5">
                               <label class="block text-xs font-medium text-[var(--color-text-secondary)]">预设名称</label>
                               <input 
@@ -1679,7 +1836,7 @@ async function checkUpdate() {
                           </div>
 
                            <div class="space-y-1.5">
-                              <label class="block text-xs font-medium text-[var(--color-text-secondary)]">Base URL</label>
+                              <label class="block text-xs font-medium text-[var(--color-text-secondary)]">API 基础地址</label>
                               <input 
                                   v-model="editingPreset.baseUrl" 
                                   type="text" 
@@ -1698,7 +1855,8 @@ async function checkUpdate() {
                                       class="input input-sm w-full pr-8"
                                   />
                                   <button 
-                                      class="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
+                                      type="button"
+                                      class="absolute right-1.5 top-1/2 inline-flex min-h-9 min-w-9 -translate-y-1/2 items-center justify-center rounded-md text-[var(--color-text-muted)] touch-manipulation hover:text-[var(--color-text-secondary)]"
                                       @click="editingPresetShowApiKey = !editingPresetShowApiKey"
                                   >
                                       <component :is="editingPresetShowApiKey ? Eye : EyeOff" class="w-4 h-4" />
@@ -1707,10 +1865,10 @@ async function checkUpdate() {
                           </div>
 
                           <div class="space-y-2">
-                               <div class="flex justify-between items-center">
+                               <div class="flex justify-between items-center gap-2 flex-wrap">
                                    <label class="block text-xs font-medium text-[var(--color-text-secondary)]">模型列表</label>
                                    <button 
-                                      class="text-xs text-brand hover:text-brand-hover flex items-center gap-1" 
+                                      class="text-xs text-brand hover:text-brand-hover flex items-center gap-1 shrink-0" 
                                       :disabled="presetModelsLoading"
                                       @click="openModelSelector(editingPreset!)"
                                    >
@@ -1718,16 +1876,69 @@ async function checkUpdate() {
                                       <span>从 API 获取并筛选</span>
                                    </button>
                                </div>
-                               <div class="bg-surface-overlay border border-[var(--color-border)] rounded-lg p-2 min-h-[100px] max-h-[200px] overflow-y-auto custom-scrollbar">
+                               <div
+                                 v-if="editingPreset.models.length"
+                                 class="flex flex-wrap items-center gap-x-1 gap-y-0.5 text-[10px] leading-tight text-[var(--color-text-secondary)]"
+                               >
+                                 <button
+                                   type="button"
+                                   class="min-h-0 rounded px-0.5 py-0 text-brand hover:underline disabled:pointer-events-none disabled:opacity-40"
+                                   @click="selectAllPresetModelNames"
+                                 >
+                                   全选
+                                 </button>
+                                 <span class="select-none text-[var(--color-text-muted)]">·</span>
+                                 <button
+                                   type="button"
+                                   class="min-h-0 rounded px-0.5 py-0 text-brand hover:underline disabled:pointer-events-none disabled:opacity-40"
+                                   :disabled="presetModelListSelection.size === 0"
+                                   @click="clearPresetModelListSelection"
+                                 >
+                                   清空选择
+                                 </button>
+                                 <span class="select-none text-[var(--color-text-muted)]">·</span>
+                                 <button
+                                   type="button"
+                                   class="min-h-0 rounded px-0.5 py-0 text-error/90 hover:underline disabled:pointer-events-none disabled:opacity-40"
+                                   :disabled="presetModelListSelection.size === 0"
+                                   @click="removeSelectedPresetModelNames"
+                                 >
+                                   删除所选
+                                 </button>
+                                 <span class="select-none text-[var(--color-text-muted)]">·</span>
+                                 <button
+                                   type="button"
+                                   class="min-h-0 rounded px-0.5 py-0 text-error/90 hover:underline disabled:pointer-events-none disabled:opacity-40"
+                                   @click="clearAllPresetModelNames"
+                                 >
+                                   清空全部
+                                 </button>
+                               </div>
+                               <div class="drawer-scroll bg-surface-overlay border border-[var(--color-border)] rounded-lg p-2 min-h-[100px] max-h-[200px] overflow-y-auto custom-scrollbar">
                                    <div class="flex flex-wrap gap-2">
-                                       <div v-for="(m, idx) in editingPreset.models" :key="m" class="bg-surface-muted rounded px-2 py-1 text-xs text-[var(--color-text-secondary)] flex items-center gap-1">
-                                           {{ m }}
-                                           <button class="hover:text-error" @click="editingPreset!.models.splice(idx, 1)">
+                                       <div
+                                         v-for="(m, idx) in editingPreset.models"
+                                         :key="`${idx}-${m}`"
+                                         role="button"
+                                         tabindex="0"
+                                         class="group relative inline-flex max-w-full cursor-pointer items-center gap-1 rounded-md border border-[var(--color-border-subtle)] bg-surface-overlay/55 px-2 py-1 text-xs text-[var(--color-text-secondary)] backdrop-blur-sm transition-[box-shadow,border-color] hover:bg-surface-overlay/80"
+                                         :class="presetModelListSelection.has(m) ? 'ring-1 ring-brand/50 border-brand/35 shadow-[0_0_0_1px_color-mix(in_srgb,var(--color-brand)_25%,transparent)]' : ''"
+                                         @click="togglePresetModelListSelection(m)"
+                                         @keydown.enter.prevent="togglePresetModelListSelection(m)"
+                                         @keydown.space.prevent="togglePresetModelListSelection(m)"
+                                       >
+                                           <span class="min-w-0 truncate">{{ m }}</span>
+                                           <button
+                                             type="button"
+                                             class="shrink-0 rounded p-0.5 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:text-error group-hover:opacity-100 focus:opacity-100 focus:outline-none"
+                                             aria-label="移除此模型"
+                                             @click.stop="removeSinglePresetModelAt(idx)"
+                                           >
                                             <X class="w-3 h-3" />
                                            </button>
                                        </div>
                                         <div v-if="!editingPreset.models.length" class="text-xs text-[var(--color-text-muted)] w-full text-center py-4">
-                                            点击上方“从 API 获取”或手动添加
+                                            点击上方「从 API 获取并筛选」或手动添加
                                         </div>
                                    </div>
                                </div>
@@ -1753,23 +1964,6 @@ async function checkUpdate() {
                       选择或创建一个预设
                   </div>
               </div>
-              
-               <div class="pt-2 flex justify-end">
-                <button 
-                  class="px-6 py-2 bg-brand hover:bg-brand-hover text-on-brand rounded-lg font-medium shadow-brand transition-all whitespace-nowrap"
-                  @click="saveGlobal"
-                >
-                  保存所有配置
-                </button>
-              </div>
-
-              <div class="h-px bg-[var(--color-border-subtle)] my-4"></div>
-              <a
-                href="https://github.com/DuoHBshuijiao/SimpleTavern/releases"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="text-xs text-[var(--color-text-muted)] text-center block cursor-pointer hover:text-[var(--color-text-secondary)] hover:underline transition-colors"
-              >{{ appVersion || '…' }}</a>
           </div>
 
           <!-- Chat Specific Settings -->
@@ -1781,11 +1975,11 @@ async function checkUpdate() {
               </div>
 
               <div class="space-y-1.5">
-                <label class="block text-sm font-medium text-[var(--color-text-secondary)]">会话 System Prompt (Override)</label>
+                <label class="block text-sm font-medium text-[var(--color-text-secondary)]">会话系统提示（覆盖全局）</label>
                 <textarea 
                   v-model="chatDraft.prompt" 
                   rows="4"
-                  placeholder="留空则使用角色默认Prompt"
+                  placeholder="留空则使用角色默认提示词"
                   class="input textarea w-full resize-none"
                 ></textarea>
               </div>
@@ -1802,8 +1996,8 @@ async function checkUpdate() {
                   </div>
                 </div>
                 <div class="flex items-center gap-2 pb-1">
-                  <button class="btn btn-xs btn-secondary" @click="hideSavedFloors">hide（隐藏已保存楼层）</button>
-                  <button class="btn btn-xs btn-secondary" @click="resetHiddenFloors">恢复全部隐藏楼层</button>
+                  <button class="btn btn-xs btn-secondary" @click="hideSavedFloors">从已存记忆处截断</button>
+                  <button class="btn btn-xs btn-secondary" @click="resetHiddenFloors">恢复完整上下文</button>
                   <span v-if="chatDraft.contextStartMessageId" class="text-xs text-[var(--color-text-muted)]">
                     当前已设置上下文起点
                   </span>
@@ -1811,7 +2005,7 @@ async function checkUpdate() {
                 <textarea 
                   v-model="chatDraft.longTermMemory"
                   rows="4"
-                  placeholder="会插入 System Prompt，留空则不启用"
+                  placeholder="会插入系统提示词，留空则不启用"
                   class="input textarea w-full resize-none"
                 ></textarea>
               </div>
@@ -1829,7 +2023,7 @@ async function checkUpdate() {
                 />
                 <div v-if="chatDraft?.presetId" class="text-xs text-brand mt-1 flex items-center gap-1">
                     <span>🔗 已关联 API 预设:</span>
-                    <span class="font-bold">{{ globalDraft?.apiPresets.find(p => p.id === chatDraft?.presetId)?.name || 'Unknown' }}</span>
+                    <span class="font-bold">{{ globalDraft?.apiPresets.find(p => p.id === chatDraft?.presetId)?.name || '未知预设' }}</span>
                 </div>
               </div>
 
@@ -1855,7 +2049,7 @@ async function checkUpdate() {
                   />
                 </div>
                 <div class="space-y-1.5">
-                  <label class="block text-sm font-medium text-[var(--color-text-secondary)]">Max Tokens</label>
+                  <label class="block text-sm font-medium text-[var(--color-text-secondary)]">最大输出长度</label>
                   <input 
                     v-model.number="chatDraft.params.max_tokens" 
                     type="number" 
@@ -1869,7 +2063,7 @@ async function checkUpdate() {
                 <div class="text-sm font-medium text-[var(--color-text-secondary)]">上下文</div>
                 <div class="grid grid-cols-2 gap-4">
                 <div class="space-y-1.5">
-                  <label class="block text-sm font-medium text-[var(--color-text-secondary)]">Context Size</label>
+                  <label class="block text-sm font-medium text-[var(--color-text-secondary)]">上下文长度</label>
                   <input 
                     v-model.number="chatDraft.params.context_size" 
                     type="number" 
@@ -1892,7 +2086,7 @@ async function checkUpdate() {
                   </div>
                 </div>
               </div>
-              <p class="text-xs text-[var(--color-text-muted)] mt-2">实际上下文总限制长度为该 Context Size 限制加上角色卡、用户信息、自定义系统提示词。草稿助手优先使用当前会话的条数限制，其次全局，最后回退到现有上下文逻辑。</p>
+              <p class="text-xs text-[var(--color-text-muted)] mt-2">实际上下文总限制长度为该「上下文长度」限制加上角色卡、用户信息、自定义系统提示词。草稿助手优先使用当前会话的条数限制，其次全局，最后回退到现有上下文逻辑。</p>
 
               <div class="space-y-2">
                 <div class="flex flex-wrap items-center justify-between gap-2">
@@ -1926,7 +2120,7 @@ async function checkUpdate() {
                   />
                   <button class="btn btn-sm btn-secondary" @click="addWorldBookToOrder">加入顺序</button>
                 </div>
-                <div class="max-h-[180px] space-y-2 overflow-y-auto rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay p-2">
+                <div class="drawer-scroll max-h-[180px] space-y-2 overflow-y-auto rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay p-2">
                   <div
                     v-for="book in currentChatWorldbooks"
                     :key="book.id"
@@ -2004,7 +2198,7 @@ async function checkUpdate() {
                   >
                     <div class="flex min-w-0 flex-1 flex-col gap-0.5">
                       <div class="flex items-center gap-1.5">
-                        <span class="shrink-0 cursor-grab text-[var(--color-text-muted)] active:cursor-grabbing" title="拖动排序" aria-hidden="true">
+                        <span class="shrink-0 cursor-grab text-[var(--color-text-muted)] active:cursor-grabbing" aria-hidden="true">
                           <GripVertical class="w-4 h-4" />
                         </span>
                         <span class="truncate text-xs text-[var(--color-text)]">{{ idx + 1 }}. {{ worldBookName(att.worldBookId) }}</span>
@@ -2025,30 +2219,27 @@ async function checkUpdate() {
 
               <!-- Group Member Settings (Removed, moved to independent GroupSettingsModal) -->
 
-               <div class="pt-4 flex justify-end gap-3">
-                <button 
-                  class="px-4 py-2 text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors whitespace-nowrap"
-                  @click="close"
-                >
-                  取消
-                </button>
-                <button 
-                  class="px-6 py-2 bg-brand hover:bg-brand-hover text-on-brand rounded-lg font-medium shadow-brand transition-all whitespace-nowrap"
-                  @click="saveChatOverrides(); saveGlobal()"
-                >
-                  保存设置
-                </button>
-              </div>
-
-              <div class="h-px bg-[var(--color-border-subtle)] my-4"></div>
-              <a
-                href="https://github.com/DuoHBshuijiao/SimpleTavern/releases"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="text-xs text-[var(--color-text-muted)] text-center block cursor-pointer hover:text-[var(--color-text-secondary)] hover:underline transition-colors"
-              >{{ appVersion || '…' }}</a>
             </div>
           </div>
+        </div>
+
+        <div class="shrink-0 flex justify-end gap-3 border-t border-[var(--color-border-subtle)] px-6 py-4 bg-[var(--color-border-subtle)] rounded-b-2xl">
+          <button
+            type="button"
+            class="inline-flex min-h-11 items-center justify-center px-5 py-2 text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text)] touch-manipulation whitespace-nowrap"
+            :disabled="isSaving"
+            @click="close"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            class="inline-flex min-h-11 items-center justify-center rounded-lg bg-brand px-6 py-2 font-medium text-on-brand shadow-brand transition-all touch-manipulation hover:bg-brand-hover whitespace-nowrap"
+            :disabled="isSaving"
+            @click="handleSaveAll"
+          >
+            {{ isSaving ? '保存中...' : '保存设置' }}
+          </button>
         </div>
       </div>
   </div>
@@ -2060,10 +2251,14 @@ async function checkUpdate() {
       <div class="absolute inset-0 bg-overlay-heavy backdrop-blur-sm" @click="showModelSelector = false"></div>
       
       <!-- Modal -->
-      <div class="relative w-full max-w-lg min-w-[300px] glass-panel rounded-2xl shadow-2xl flex flex-col max-h-[85vh] m-4">
+      <div class="relative w-full max-w-lg min-w-[400px] glass-panel rounded-2xl shadow-2xl flex flex-col max-h-[85vh] m-4">
       <div class="p-4 border-b border-[var(--color-border)] flex justify-between items-center bg-surface-muted rounded-t-2xl">
         <h3 class="font-bold text-[var(--color-text)]">选择模型</h3>
-        <button class="text-[var(--color-text-muted)] hover:text-[var(--color-text)]" @click="showModelSelector = false">
+        <button
+          type="button"
+          class="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg text-[var(--color-text-muted)] touch-manipulation hover:text-[var(--color-text)]"
+          @click="showModelSelector = false"
+        >
             <X class="w-5 h-5" />
         </button>
       </div>
@@ -2077,7 +2272,7 @@ async function checkUpdate() {
         />
       </div>
       
-      <div class="flex-1 overflow-y-auto p-2 bg-transparent">
+      <div class="drawer-scroll flex-1 overflow-y-auto bg-transparent p-2">
         <div v-if="filteredCandidates.length === 0" class="text-center text-[var(--color-text-muted)] py-8 text-sm">
           未找到模型
         </div>
@@ -2085,7 +2280,7 @@ async function checkUpdate() {
           <div 
             v-for="m in filteredCandidates" 
             :key="m"
-            class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-surface-muted cursor-pointer transition-colors"
+            class="flex min-h-11 cursor-pointer items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-surface-muted touch-manipulation"
             @click="toggleCandidate(m)"
           >
             <div 
@@ -2102,8 +2297,8 @@ async function checkUpdate() {
       <div class="p-4 border-t border-[var(--color-border)] flex justify-between items-center bg-surface-muted rounded-b-2xl">
         <div class="text-xs text-[var(--color-text-muted)]">已选 {{ selectedCandidateModels.size }} 个模型</div>
         <div class="flex gap-2">
-          <button class="px-4 py-2 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors" @click="showModelSelector = false">取消</button>
-          <button class="px-4 py-2 text-sm bg-brand hover:bg-brand-hover text-on-brand rounded-lg shadow-brand transition-all" @click="saveModelSelection">确认</button>
+          <button type="button" class="inline-flex min-h-11 items-center justify-center px-4 py-2 text-sm text-[var(--color-text-muted)] touch-manipulation transition-colors hover:text-[var(--color-text)]" @click="showModelSelector = false">取消</button>
+          <button type="button" class="inline-flex min-h-11 items-center justify-center rounded-lg bg-brand px-4 py-2 text-sm text-on-brand shadow-brand transition-all touch-manipulation hover:bg-brand-hover" @click="saveModelSelection">确认</button>
         </div>
       </div>
     </div>
@@ -2166,5 +2361,12 @@ async function checkUpdate() {
 }
 .custom-scrollbar:hover::-webkit-scrollbar-thumb {
   background: var(--color-border-strong);
+}
+
+/* 触摸：纵向滚动更顺手，减少与页面手势冲突；iOS 惯性滚动 */
+.drawer-scroll {
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
 }
 </style>
