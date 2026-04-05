@@ -465,6 +465,18 @@ def _build_user_persona_prompt(settings: Settings, chat: Chat) -> str | None:
     return "\n".join(parts) if parts else None
 
 
+def _resolve_session_system_prompt_mode(chat: Chat) -> str:
+    return "override" if getattr(chat.overrides, "sessionSystemPromptMode", None) == "override" else "append"
+
+
+def _should_include_global_system_prompt(chat: Chat, settings: Settings) -> bool:
+    if not settings.prompts.globalSystem or not settings.prompts.globalSystem.strip():
+        return False
+    if _resolve_session_system_prompt_mode(chat) != "override":
+        return True
+    return not bool((chat.overrides.prompt or "").strip())
+
+
 def _build_single_system_prompt(chat: Chat, settings: Settings) -> str:
     """
     构建单聊系统提示词
@@ -477,7 +489,7 @@ def _build_single_system_prompt(chat: Chat, settings: Settings) -> str:
         str: 系统提示词
     """
     prompt_parts: list[str] = []
-    if settings.prompts.globalSystem:
+    if _should_include_global_system_prompt(chat, settings):
         prompt_parts.append(settings.prompts.globalSystem)
 
     if not _resolve_pure_ai_mode(settings, chat):
@@ -547,7 +559,7 @@ def _build_group_system_prompt(chat: Chat, settings: Settings, character_id: str
         str: 系统提示词
     """
     prompt_parts: list[str] = []
-    if settings.prompts.globalSystem:
+    if _should_include_global_system_prompt(chat, settings):
         prompt_parts.append(settings.prompts.globalSystem)
 
     if not _resolve_pure_ai_mode(settings, chat):
