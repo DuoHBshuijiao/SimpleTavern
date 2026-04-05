@@ -85,8 +85,11 @@ export interface WorldBookAttachment {
   insertDepth: number
 }
 
+export type SessionSystemPromptMode = 'append' | 'override'
+
 export interface ChatOverrides {
   prompt?: string | null
+  sessionSystemPromptMode?: SessionSystemPromptMode
   longTermMemory?: string | null
   /** 上下文起点消息ID：设置后仅从该消息开始参与发送上下文 */
   contextStartMessageId?: string | null
@@ -252,6 +255,7 @@ export interface Settings {
   prompts: {
     globalSystem: string
     globalPrefill: string
+    globalPrefillEnabled: boolean
   }
   streamEnabled: boolean
   pureAiMode: boolean

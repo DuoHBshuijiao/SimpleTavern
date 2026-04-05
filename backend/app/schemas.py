@@ -168,6 +168,7 @@ class SettingsPrompts(BaseModel):
 
     globalSystem: str = ""
     globalPrefill: str = ""
+    globalPrefillEnabled: bool = True
 
 
 class SettingsLLM(BaseModel):
@@ -588,6 +589,7 @@ class ChatOverrides(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     prompt: str | None = None
+    sessionSystemPromptMode: Literal["append", "override"] = "append"
     longTermMemory: str | None = None
     contextStartMessageId: str | None = None
     presetId: str | None = None
