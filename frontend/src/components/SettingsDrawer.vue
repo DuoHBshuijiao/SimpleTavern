@@ -224,6 +224,7 @@ function ensureOverrides(v?: Partial<ChatOverrides> | null): ChatOverrides {
   const worldBookIds = attachments.map((a) => a.worldBookId)
   return {
     prompt: v?.prompt ?? null,
+    sessionSystemPromptMode: v?.sessionSystemPromptMode === 'override' ? 'override' : 'append',
     longTermMemory: v?.longTermMemory ?? null,
     contextStartMessageId: v?.contextStartMessageId ?? null,
     presetId: v?.presetId ?? null,
@@ -440,10 +441,11 @@ watch(
     if (s.selectedFont === undefined) (s as Settings).selectedFont = null
     if ((s as Settings).messageFontSize === undefined) (s as Settings).messageFontSize = null
     if (!s.prompts) {
-      s.prompts = { globalSystem: '', globalPrefill: '' }
+      s.prompts = { globalSystem: '', globalPrefill: '', globalPrefillEnabled: true }
     } else {
       if (s.prompts.globalSystem === undefined) s.prompts.globalSystem = ''
       if (s.prompts.globalPrefill === undefined) s.prompts.globalPrefill = ''
+      if (s.prompts.globalPrefillEnabled === undefined) s.prompts.globalPrefillEnabled = true
     }
 
     globalDraft.value = s
@@ -1546,8 +1548,28 @@ async function checkUpdate() {
                     ></textarea>
                   </div>
 
-                  <div class="space-y-1.5">
-                    <label class="block text-sm font-medium text-[var(--color-text-secondary)]">预填内容</label>
+                  <div class="space-y-2">
+                    <div class="flex items-center justify-between gap-3">
+                      <label class="block text-sm font-medium text-[var(--color-text-secondary)]">预填内容</label>
+                      <button
+                        type="button"
+                        class="flex min-h-11 cursor-pointer items-center gap-3 py-1 text-left group"
+                        @click="globalDraft.prompts.globalPrefillEnabled = !globalDraft.prompts.globalPrefillEnabled"
+                      >
+                        <div
+                          class="relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200"
+                          :class="globalDraft.prompts.globalPrefillEnabled ? 'bg-brand' : 'bg-[var(--color-track)]'"
+                        >
+                          <div
+                            class="absolute top-1 h-4 w-4 rounded-full bg-[var(--color-on-brand)] transition-transform duration-200"
+                            :class="globalDraft.prompts.globalPrefillEnabled ? 'left-6' : 'left-1'"
+                          ></div>
+                        </div>
+                        <span class="text-xs text-[var(--color-text-secondary)]">
+                          {{ globalDraft.prompts.globalPrefillEnabled ? '已开启：发送请求时附加预填' : '已关闭：保留文案但暂不生效' }}
+                        </span>
+                      </button>
+                    </div>
                     <textarea
                       v-model="globalDraft.prompts.globalPrefill"
                       rows="2"
@@ -1786,12 +1808,14 @@ async function checkUpdate() {
             </div>
           </div>
 
-          <!-- Presets Management -->
-          <div v-if="preloaded" v-show="tab === 'presets'" class="space-y-6 h-full flex flex-col">
+          <!-- Presets Management：主滚动与全局/会话 Tab 共用外层 drawer-scroll，避免内层窄栏+双滚动条 -->
+          <div v-if="preloaded" v-show="tab === 'presets'" class="space-y-6">
               <div v-if="!globalDraft" class="text-center text-[var(--color-text-muted)] py-8">加载中...</div>
-              <div v-else class="flex flex-1 min-h-0 gap-3">
-                  <!-- Preset List：略宽于原 1/3，删除绝对定位让名称独占整行可截断宽度 -->
-                  <div class="flex min-w-0 flex-[0_0_46%] flex-col border-r border-[var(--color-border-subtle)] pr-3">
+              <div v-else class="flex gap-3 items-start">
+                  <!-- Preset List：sticky 吸附，右侧长表单滚动时左栏留在可视区；列表过长时仅内层滚动 -->
+                  <div
+                    class="sticky top-0 z-10 flex min-w-0 flex-[0_0_min(11rem,34%)] flex-col self-start border-r border-[var(--color-border-subtle)] pr-3"
+                  >
                       <div class="mb-2 flex items-center justify-between gap-1.5">
                           <span class="shrink-0 text-xs font-bold text-[var(--color-text-secondary)] sm:text-sm">预设列表</span>
                           <button
@@ -1802,7 +1826,7 @@ async function checkUpdate() {
                             + 新建
                           </button>
                       </div>
-                      <div class="drawer-scroll flex-1 space-y-1 overflow-y-auto custom-scrollbar">
+                      <div class="drawer-scroll max-h-[min(55vh,22rem)] space-y-1 overflow-y-auto custom-scrollbar">
                           <div 
                               v-for="p in globalDraft.apiPresets" 
                               :key="p.id"
@@ -1824,8 +1848,8 @@ async function checkUpdate() {
                   </div>
 
                   <!-- Preset Editor -->
-                  <div class="flex-1 flex flex-col min-w-0" v-if="editingPreset">
-                       <div class="drawer-scroll space-y-4 overflow-y-auto custom-scrollbar pr-2 pb-4">
+                  <div class="min-w-0 flex-1 flex flex-col" v-if="editingPreset">
+                       <div class="min-w-0 space-y-4 pb-4">
                           <div class="space-y-1.5">
                               <label class="block text-xs font-medium text-[var(--color-text-secondary)]">预设名称</label>
                               <input 
@@ -1960,7 +1984,7 @@ async function checkUpdate() {
                           </div>
                        </div>
                   </div>
-                  <div v-else class="flex-1 flex items-center justify-center text-[var(--color-text-muted)] text-sm">
+                  <div v-else class="flex min-h-[12rem] flex-1 items-center justify-center text-[var(--color-text-muted)] text-sm">
                       选择或创建一个预设
                   </div>
               </div>
@@ -1974,8 +1998,27 @@ async function checkUpdate() {
                 这些设置仅应用于当前会话，并会覆盖全局设置。模型选择将自动关联对应的 API 预设。
               </div>
 
-              <div class="space-y-1.5">
-                <label class="block text-sm font-medium text-[var(--color-text-secondary)]">会话系统提示（覆盖全局）</label>
+              <div class="space-y-2">
+                <div class="flex items-center justify-between gap-3">
+                  <label class="block text-sm font-medium text-[var(--color-text-secondary)]">会话系统提示</label>
+                  <div class="btn-group shrink-0">
+                    <button
+                      type="button"
+                      class="btn btn-xs touch-manipulation"
+                      :class="chatDraft.sessionSystemPromptMode === 'override' ? 'btn-secondary' : 'btn-primary'"
+                      @click="chatDraft.sessionSystemPromptMode = 'append'"
+                    >追加全局</button>
+                    <button
+                      type="button"
+                      class="btn btn-xs touch-manipulation"
+                      :class="chatDraft.sessionSystemPromptMode === 'override' ? 'btn-primary' : 'btn-secondary'"
+                      @click="chatDraft.sessionSystemPromptMode = 'override'"
+                    >覆盖全局</button>
+                  </div>
+                </div>
+                <p class="text-xs text-[var(--color-text-muted)]">
+                  追加全局会保留全局系统提示并在后面附加本会话内容；覆盖全局会在本会话提示非空时跳过全局系统提示。
+                </p>
                 <textarea 
                   v-model="chatDraft.prompt" 
                   rows="4"
@@ -2368,5 +2411,6 @@ async function checkUpdate() {
   touch-action: pan-y;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-y: contain;
+  scrollbar-gutter: stable;
 }
 </style>
