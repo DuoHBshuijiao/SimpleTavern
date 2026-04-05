@@ -475,6 +475,12 @@ async function runDraftHelper(mode: 'write' | 'enhance', sourceDraft: string) {
       draftHelper.value.lastGenerated = draftMessage.value
       return
     }
+    // 非用户终止的失败（如 HTTP 400）：复位 UI，避免状态栏卡在「思考中」且终止无效（aborter 已在 finally 清空）
+    if (draftHelperAborter.value === controller) {
+      draftHelper.value.status = null
+      draftHelper.value.mode = null
+      draftHelper.value.lastGenerated = ''
+    }
     throw e
   } finally {
     if (draftHelperAborter.value === controller) {
@@ -485,6 +491,10 @@ async function runDraftHelper(mode: 'write' | 'enhance', sourceDraft: string) {
 }
 
 async function handleOpenDraftHelper(mode: 'write' | 'enhance') {
+  if (mode === 'enhance' && !draftMessage.value.trim()) {
+    streamError.value = '润色前请先输入草稿内容'
+    return
+  }
   try {
     const sourceDraft = draftMessage.value
     await runDraftHelper(mode, sourceDraft)
