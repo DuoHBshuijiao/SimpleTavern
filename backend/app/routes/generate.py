@@ -128,6 +128,30 @@ def _build_group_identity_guardrail(char_name: str | None) -> str:
     return f"[仅允许使用{resolved}的身份输出下一条回复。]"
 
 
+def _resolve_session_system_prompt_mode(chat: Any, runtime: Any | None = None) -> str:
+    mode = getattr(runtime, "sessionSystemPromptMode", None) if runtime is not None else None
+    if mode is None and chat is not None and getattr(chat, "overrides", None) is not None:
+        mode = getattr(chat.overrides, "sessionSystemPromptMode", None)
+    return "override" if mode == "override" else "append"
+
+
+def _resolve_effective_session_prompt(chat: Any, runtime: Any | None = None) -> str:
+    if runtime is not None and getattr(runtime, "prompt", None) is not None:
+        return getattr(runtime, "prompt", None) or ""
+    if chat is not None and getattr(chat, "overrides", None) is not None:
+        return getattr(chat.overrides, "prompt", None) or ""
+    return ""
+
+
+def _should_include_global_system_prompt(settings: Any, chat: Any, runtime: Any | None = None) -> bool:
+    global_system = getattr(getattr(settings, "prompts", None), "globalSystem", None) or ""
+    if not isinstance(global_system, str) or not global_system.strip():
+        return False
+    if _resolve_session_system_prompt_mode(chat, runtime) != "override":
+        return True
+    return not _resolve_effective_session_prompt(chat, runtime).strip()
+
+
 def _resolve_and_append_global_prefill(
     messages: list[dict],
     settings: Any,
@@ -141,6 +165,8 @@ def _resolve_and_append_global_prefill(
     不得用于 draft-help、/assistant/stream 等其它 LLM 上下文（避免误注入续写前缀）。
     展示与落库的助手内容仅使用模型输出，不包含上述 Prefill。
     """
+    if not getattr(settings.prompts, "globalPrefillEnabled", True):
+        return ""
     raw = getattr(settings.prompts, "globalPrefill", None) or ""
     if not isinstance(raw, str) or not raw.strip():
         return ""
@@ -594,7 +620,7 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
 
     runtime = req.runtimeOverrides
     prompt_parts: list[str] = []
-    if settings.prompts.globalSystem:
+    if _should_include_global_system_prompt(settings, chat, runtime):
         prompt_parts.append(settings.prompts.globalSystem)
     
     # 用户 persona：优先使用请求体中的 userPersona（保证首条消息等场景下即使用户未保存设置也能带上正确身份）
@@ -1085,7 +1111,7 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
 
     runtime = req.runtimeOverrides
     prompt_parts: list[str] = []
-    if settings.prompts.globalSystem:
+    if _should_include_global_system_prompt(settings, chat, runtime):
         prompt_parts.append(settings.prompts.globalSystem)
     
     selected_persona = _resolve_selected_persona(settings, chat, pure_ai_mode)
@@ -1466,7 +1492,7 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
         raise HTTPException(status_code=404, detail="character not found")
 
     prompt_parts: list[str] = []
-    if settings.prompts.globalSystem:
+    if _should_include_global_system_prompt(settings, chat, None):
         prompt_parts.append(settings.prompts.globalSystem)
     
     selected_persona = _resolve_selected_persona(settings, chat, pure_ai_mode)
