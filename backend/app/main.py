@@ -27,6 +27,7 @@ FastAPI应用入口模块
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -36,6 +37,7 @@ from app.routes.avatars import router as avatars_router
 from app.routes.characters import router as characters_router
 from app.routes.chats import router as chats_router
 from app.routes.clipboard import router as clipboard_router
+from app.routes.data_integrity import router as data_integrity_router
 from app.routes.font import router as font_router
 from app.routes.generate import router as generate_router
 from app.routes.import_export import router as import_export_router
@@ -45,8 +47,10 @@ from app.routes.assistant import router as assistant_router
 from app.routes.tokenizer import router as tokenizer_router
 from app.routes.update import router as update_router
 from app.routes.worldbooks import router as worldbooks_router
+from app.services.data_integrity import data_integrity_service
 from app.storage import ensure_data_initialized
 from app.tokenizer_service import warmup_tokenizer
+from app.version import APP_VERSION
 
 
 @asynccontextmanager
@@ -57,10 +61,18 @@ async def lifespan(app: FastAPI):
     """
     ensure_data_initialized()
     warmup_tokenizer()
-    yield
+    integrity_scan_task = asyncio.create_task(data_integrity_service.run_startup_scan())
+    try:
+        yield
+    finally:
+        integrity_scan_task.cancel()
+        try:
+            await integrity_scan_task
+        except asyncio.CancelledError:
+            pass
 
 
-app = FastAPI(title="SimpleTavern", version="v0.307", lifespan=lifespan)
+app = FastAPI(title="SimpleTavern", version=APP_VERSION, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -88,6 +100,7 @@ app.include_router(settings_router, prefix="/api")
 app.include_router(characters_router, prefix="/api")
 app.include_router(chats_router, prefix="/api")
 app.include_router(clipboard_router, prefix="/api")
+app.include_router(data_integrity_router, prefix="/api")
 app.include_router(llm_router, prefix="/api")
 app.include_router(generate_router, prefix="/api")
 app.include_router(avatars_router, prefix="/api")
