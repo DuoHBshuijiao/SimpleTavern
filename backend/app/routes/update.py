@@ -13,18 +13,27 @@ import os
 import re
 import subprocess
 import sys
-from pathlib import Path
+from typing import Any
 
 import httpx
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
-from app.storage import get_repo_root, get_update_dir
+from app.storage import get_repo_root, get_update_dir, load_update_ignore, save_update_ignore
+from app.version import APP_VERSION
 
 router = APIRouter(tags=["update"])
 
-CURRENT_VERSION = "v0.307"
 GITHUB_REPO = "DuoHBshuijiao/SimpleTavern"
 GITHUB_API_LATEST = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+
+
+class IgnoredTagRequest(BaseModel):
+    tag: str
+
+
+def _current_version_tuple() -> tuple[int, ...]:
+    return _parse_version(APP_VERSION)
 
 
 def _parse_version(tag: str) -> tuple[int, ...]:
@@ -41,13 +50,67 @@ def _is_newer(latest_tag: str, current: str) -> bool:
     return a > b
 
 
+def _fetch_latest_release() -> dict[str, Any]:
+    r = httpx.get(GITHUB_API_LATEST, timeout=10.0)
+    r.raise_for_status()
+    data = r.json()
+    if not isinstance(data, dict):
+        raise ValueError("GitHub releases/latest 返回格式异常")
+    return data
+
+
+def _sanitize_release_notes(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    return text or None
+
+
+def _build_update_payload(release: dict[str, Any]) -> dict[str, Any]:
+    tag = str(release.get("tag_name") or "").strip()
+    zip_url = str(release.get("zipball_url") or "").strip() or None
+    release_notes = _sanitize_release_notes(release.get("body"))
+    if not tag:
+        return {
+            "currentVersion": APP_VERSION,
+            "latestVersion": None,
+            "hasUpdate": False,
+            "tagName": None,
+            "zipUrl": None,
+            "releaseNotes": None,
+        }
+    has_update = _is_newer(tag, APP_VERSION)
+    return {
+        "currentVersion": APP_VERSION,
+        "latestVersion": tag,
+        "hasUpdate": has_update,
+        "tagName": tag if has_update else None,
+        "zipUrl": zip_url if has_update else None,
+        "releaseNotes": release_notes if has_update else None,
+    }
+
+
+def _load_ignored_release_tag() -> str | None:
+    raw = load_update_ignore()
+    tag = raw.get("ignoredReleaseTag")
+    if not isinstance(tag, str):
+        return None
+    tag = tag.strip()
+    if not tag:
+        return None
+    if _current_version_tuple() >= _parse_version(tag):
+        save_update_ignore(None)
+        return None
+    return tag
+
+
 @router.get("/update/version")
 def get_version() -> dict:
     """
     返回当前应用版本号，供前端展示用。
     仅返回版本字符串，不请求 GitHub。
     """
-    return {"version": CURRENT_VERSION}
+    return {"version": APP_VERSION}
 
 
 @router.get("/update/check")
@@ -57,29 +120,43 @@ def check_update() -> dict:
     请求 GitHub API 获取最新 release，与当前版本比较。
     """
     try:
-        r = httpx.get(GITHUB_API_LATEST, timeout=10.0)
-        r.raise_for_status()
-        data = r.json()
-        tag = (data.get("tag_name") or "").strip()
-        zip_url = data.get("zipball_url") or ""
-        if not tag:
-            return {
-                "currentVersion": CURRENT_VERSION,
-                "latestVersion": None,
-                "hasUpdate": False,
-                "tagName": None,
-                "zipUrl": None,
-            }
-        has = _is_newer(tag, CURRENT_VERSION)
-        return {
-            "currentVersion": CURRENT_VERSION,
-            "latestVersion": tag,
-            "hasUpdate": has,
-            "tagName": tag if has else None,
-            "zipUrl": zip_url if has else None,
-        }
+        return _build_update_payload(_fetch_latest_release())
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"检查更新失败: {e}")
+
+
+@router.get("/update/startup-check")
+def startup_check_update() -> dict:
+    """启动阶段自动检查更新；会套用 ignoredReleaseTag 计算 shouldNotify。"""
+    try:
+        payload = _build_update_payload(_fetch_latest_release())
+        ignored_tag = _load_ignored_release_tag()
+        latest = payload.get("tagName")
+        should_notify = bool(payload.get("hasUpdate") and latest and latest != ignored_tag)
+        return {
+            **payload,
+            "ignoredReleaseTag": ignored_tag,
+            "shouldNotify": should_notify,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"启动更新检查失败: {e}")
+
+
+@router.put("/update/ignored-tag")
+def set_ignored_update_tag(body: IgnoredTagRequest) -> dict:
+    """保存当前被用户忽略的 release tag。"""
+    tag = body.tag.strip()
+    if not tag:
+        raise HTTPException(status_code=400, detail="tag 不能为空")
+    save_update_ignore(tag)
+    return {"ignoredReleaseTag": tag}
+
+
+@router.delete("/update/ignored-tag")
+def clear_ignored_update_tag() -> dict:
+    """清空已忽略的 release tag。"""
+    save_update_ignore(None)
+    return {"ignoredReleaseTag": None}
 
 
 @router.post("/update/download")
