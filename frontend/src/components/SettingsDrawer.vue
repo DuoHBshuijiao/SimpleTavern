@@ -50,6 +50,7 @@ import {
 } from '../types/models'
 import ModernSelect from './ModernSelect.vue'
 import { apiGet, apiPost, apiPut } from '../api/http'
+import { downloadUpdate, getManualUpdateCheck, runUpdate } from '../api/update'
 import { useAppFont } from '../composables/useAppFont'
 import { useSettingsImport } from '../composables/useSettingsImport'
 import { X, Eye, EyeOff, Check, Loader2, GripVertical, ChevronDown } from 'lucide-vue-next'
@@ -1320,13 +1321,7 @@ async function checkUpdate() {
   checkUpdateLoading.value = true
   checkUpdateMessage.value = '正在检查更新...'
   try {
-    const res = await apiGet<{
-      currentVersion: string
-      latestVersion: string | null
-      hasUpdate: boolean
-      tagName: string | null
-      zipUrl: string | null
-    }>('/api/update/check')
+    const res = await getManualUpdateCheck()
     if (!res.hasUpdate || !res.tagName) {
       checkUpdateMessage.value = '当前已是最新版本'
       return
@@ -1346,9 +1341,9 @@ async function checkUpdate() {
       draft.generationDefaults.context_size = normalizeContextSize(draft.generationDefaults.context_size)
       await settingsStore.save(draft)
     }
-    await apiPost('/api/update/download', { tagName: res.tagName })
+    await downloadUpdate(res.tagName)
     checkUpdateMessage.value = '正在启动更新...'
-    await apiPost('/api/update/run', {})
+    await runUpdate()
     checkUpdateMessage.value = '更新已启动，请等待脚本执行完毕'
     setTimeout(() => close(), 1500)
   } catch (e) {
