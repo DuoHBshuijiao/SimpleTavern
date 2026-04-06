@@ -62,7 +62,8 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useCharactersStore, useChatsStore, useSettingsStore } from '../stores'
+import { useCharactersStore, useChatsStore, useSettingsStore, useUiStore } from '../stores'
+import type { SettingsDrawerTab } from '../stores/ui'
 import type { CharacterCard, ChatImageAttachment, ChatMessage, ExtraFirstMessageEntry, GroupMemberSettings, Chat, WorldBook } from '../types/models'
 
 // Composables
@@ -102,6 +103,7 @@ import { notifyMessage } from '../composables/useNotify'
 const settings = useSettingsStore()
 const characters = useCharactersStore()
 const chats = useChatsStore()
+const uiStore = useUiStore()
 const route = useRoute()
 const router = useRouter()
 const { refreshDataAfterImport } = useSettingsImport()
@@ -133,7 +135,7 @@ const showImportModal = ref(false)
 const JANITOR_CHAT_PENDING_STORAGE_KEY = 'simpletavern:janitorChatPendingId'
 const janitorPendingId = ref<string | null>(null)
 const janitorPendingReloadNonce = ref(0)
-const settingsTab = ref<'global' | 'presets' | 'chat'>('global')
+const settingsTab = ref<SettingsDrawerTab>('global')
 const isGenerating = ref(false)
 const streamError = ref<string | null>(null)
 const sidebarCollapsed = ref(false)
@@ -151,6 +153,12 @@ const chatReasoningMessageId = ref<string | null>(null)
 const chatReasoningContent = ref('')
 /** 主聊天多轮思考链块：每项为 { messageId, content }，仅前端临时展示，不写进上下文 */
 const chatReasoningBlocks = ref<Array<{ messageId: string; content: string }>>([])
+
+watch(() => uiStore.settingsDrawerRequestNonce, (nonce) => {
+  if (!nonce) return
+  settingsTab.value = uiStore.requestedSettingsTab
+  showSettings.value = true
+})
 
 function shouldIgnoreStreamingEventWhileStopping(eventName: string): boolean {
   return stopRequested.value && (eventName === 'delta' || eventName === 'reasoning')
