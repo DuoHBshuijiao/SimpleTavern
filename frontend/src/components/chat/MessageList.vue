@@ -118,6 +118,8 @@ const BUFFER_ITEMS = 26
 const SCROLL_BOTTOM_SHOW_THRESHOLD = 200
 const SCROLL_BOTTOM_NEAR_THRESHOLD = 24
 const AUTO_FOLLOW_DISTANCE_THRESHOLD = 300
+/** 用户曾用滚轮向上或拖动滚动条解除跟底；回到贴底带内或强制滚底时清除 */
+const userDismissedAutoFollow = ref(false)
 let contentResizeObserver: ResizeObserver | null = null
 
 // 删除确认状态
@@ -460,6 +462,48 @@ function shouldAutoFollowBottom(el: HTMLElement): boolean {
   return getRealDistanceFromBottom(el) <= AUTO_FOLLOW_DISTANCE_THRESHOLD
 }
 
+function effectiveCanFollow(el: HTMLElement): boolean {
+  if (userDismissedAutoFollow.value) return false
+  return wasNearBottomBeforeMutation.value || shouldAutoFollowBottom(el)
+}
+
+/** 滚轮事件目标是否处于主列表内的嵌套纵向滚动区（如思考气泡），避免误解除跟底 */
+function isWheelTargetInsideNestedScrollable(eventTarget: EventTarget | null, root: HTMLElement): boolean {
+  let node: Node | null = eventTarget instanceof Node ? eventTarget : null
+  while (node && node !== root) {
+    if (node instanceof HTMLElement) {
+      const st = window.getComputedStyle(node)
+      const oy = st.overflowY
+      if ((oy === 'auto' || oy === 'scroll') && node.scrollHeight > node.clientHeight + 1) {
+        return true
+      }
+    }
+    node = node.parentNode
+  }
+  return false
+}
+
+function handleListWheel(e: WheelEvent) {
+  const root = scrollRef.value
+  if (!root || e.currentTarget !== root) return
+  if (e.deltaY <= 0) return
+  if (isWheelTargetInsideNestedScrollable(e.target, root)) return
+  userDismissedAutoFollow.value = true
+}
+
+/** 经典滚动条区域（overlay 滚动条时宽度可能为 0，无法检测） */
+function handleListPointerDown(e: PointerEvent) {
+  const el = scrollRef.value
+  if (!el || e.currentTarget !== el) return
+  if (e.button !== 0) return
+  const barW = el.offsetWidth - el.clientWidth
+  if (barW <= 0) return
+  const rect = el.getBoundingClientRect()
+  if (e.clientX >= rect.right - barW) {
+    userDismissedAutoFollow.value = true
+  }
+}
+
 function alignToBottom(el: HTMLElement, instant: boolean) {
   const previousBehavior = el.style.scrollBehavior
   if (instant) {
@@ -477,7 +521,10 @@ function scrollToBottom(instant = false, force = false) {
   nextTick(() => {
     const el = scrollRef.value
     if (!el) return
-    const canAutoFollow = wasNearBottomBeforeMutation.value || shouldAutoFollowBottom(el)
+    if (force || instant) {
+      userDismissedAutoFollow.value = false
+    }
+    const canAutoFollow = effectiveCanFollow(el)
     if (!force && !instant && !canAutoFollow) {
       syncScrollMetrics(el)
       return
@@ -488,7 +535,7 @@ function scrollToBottom(instant = false, force = false) {
       requestAnimationFrame(() => {
         const current = scrollRef.value
         if (!current) return
-        if (wasNearBottomBeforeMutation.value || shouldAutoFollowBottom(current)) {
+        if (effectiveCanFollow(current)) {
           alignToBottom(current, true)
         } else {
           syncScrollMetrics(current)
@@ -499,8 +546,16 @@ function scrollToBottom(instant = false, force = false) {
 }
 
 function handleScroll() {
-  if (!scrollRef.value) return
-  syncScrollMetrics(scrollRef.value)
+  const el = scrollRef.value
+  if (!el) return
+  const oldScrollTop = scrollTop.value
+  const oldDist = Math.max(0, el.scrollHeight - el.clientHeight - oldScrollTop)
+  syncScrollMetrics(el)
+  const nowDist = realDistanceFromBottom.value
+  // 从贴底带外重新滚入带内时恢复跟底；带内向上滚仅置位 dismiss，不会在仍 ≤300px 时被误清除
+  if (nowDist <= AUTO_FOLLOW_DISTANCE_THRESHOLD && oldDist > AUTO_FOLLOW_DISTANCE_THRESHOLD) {
+    userDismissedAutoFollow.value = false
+  }
 }
 
 function updateViewport() {
@@ -579,6 +634,7 @@ watch(
   () => props.chatId,
   () => {
     measuredHeights.value = {}
+    userDismissedAutoFollow.value = false
     nextTick(() => {
       updateViewport()
       if (!scrollRef.value) return
@@ -597,11 +653,10 @@ onMounted(() => {
     contentResizeObserver = new ResizeObserver(() => {
       const el = scrollRef.value
       if (!el) return
-      const nearBottom =
-        wasNearBottomBeforeMutation.value || shouldAutoFollowBottom(el)
+      const canFollow = effectiveCanFollow(el)
       // 仅主生成或插话流式时在贴底带内跟底；非输出时布局抖动不应触发贴底
       const outputPhase = props.isGenerating || props.isInterjecting
-      if (outputPhase && nearBottom) {
+      if (outputPhase && canFollow) {
         alignToBottom(el, true)
       } else {
         syncScrollMetrics(el)
@@ -629,6 +684,8 @@ onBeforeUnmount(() => {
       :class="isGroup ? 'pt-32' : 'pt-24'"
       style="contain: content; transform: translateZ(0);"
       @scroll="handleScroll"
+      @wheel.passive="handleListWheel"
+      @pointerdown="handleListPointerDown"
     >
       <div ref="contentRef" class="max-w-4xl mx-auto" style="padding-top: 98px;">
       <div v-if="topSpacerHeight > 0" :style="{ height: `${topSpacerHeight}px` }"></div>
