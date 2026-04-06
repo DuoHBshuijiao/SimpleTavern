@@ -143,6 +143,34 @@ def get_update_dir() -> Path:
     return _data_dir() / "update"
 
 
+def update_ignore_path() -> Path:
+    """返回 data/update_ignore.json 路径。"""
+    return _data_dir() / "update_ignore.json"
+
+
+def load_update_ignore() -> dict[str, Any]:
+    """读取更新忽略配置；损坏时自愈为 {}。"""
+    path = update_ignore_path()
+    if not path.exists():
+        return {}
+    try:
+        raw = read_json(path)
+    except Exception:
+        write_json(path, {})
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def save_update_ignore(ignored_release_tag: str | None) -> dict[str, str]:
+    """保存 ignoredReleaseTag；空值会写入空对象。"""
+    tag = (ignored_release_tag or "").strip()
+    payload: dict[str, str] = {}
+    if tag:
+        payload["ignoredReleaseTag"] = tag
+    write_json(update_ignore_path(), payload)
+    return payload
+
+
 def _settings_path() -> Path:
     """
     获取设置文件路径
