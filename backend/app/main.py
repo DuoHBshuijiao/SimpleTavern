@@ -41,6 +41,7 @@ from app.routes.data_integrity import router as data_integrity_router
 from app.routes.font import router as font_router
 from app.routes.generate import router as generate_router
 from app.routes.import_export import router as import_export_router
+from app.routes.page_backgrounds import router as page_backgrounds_router
 from app.routes.settings import router as settings_router
 from app.routes.llm import router as llm_router
 from app.routes.assistant import router as assistant_router
@@ -105,6 +106,7 @@ app.include_router(llm_router, prefix="/api")
 app.include_router(generate_router, prefix="/api")
 app.include_router(avatars_router, prefix="/api")
 app.include_router(font_router, prefix="/api")
+app.include_router(page_backgrounds_router, prefix="/api")
 app.include_router(import_export_router, prefix="/api")
 app.include_router(assistant_router, prefix="/api")
 app.include_router(tokenizer_router, prefix="/api")
