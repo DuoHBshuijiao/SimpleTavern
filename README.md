@@ -118,6 +118,7 @@
 | --- | --- | --- |
 | Tailwind v4 与 `group-hover` | `group-hover:opacity-*` 位于 CSS Layer；若在非 Layer 的自定义 CSS 中重复定义 `opacity-*`，会覆盖上述变体，导致悬停透明度不生效。请勿在 `frontend/src/styles/utilities.css` 等处重复定义与 Tailwind 冲突的 `opacity-*`。 | `utilities.css` 注释 |
 | 玻璃拟态与构建 | 部分旧类名（如 `.glass-panel-floating`、`.stained-glass`）已弃用，宜改用 Tailwind `backdrop-*`。注释中说明：esbuild 压缩 CSS 时可能改变 `backdrop-filter` 内空格，导致 `saturate` 等失效，故推荐工具类路径。 | `glass.css` |
+| MessageList 虚拟滚动与顶栏几何 | 2026-04 曾出现消息列表在每个会话各自固定的滚动阈值处突然重定位。根因是禁用浏览器默认 `overflow-anchor`、改用 `ref/watch` 间接同步虚拟窗口，并在高度测量阶段手动改 `scrollTop`，导致窗口切换与高度写回拆成多轮更新。当前实现依赖 `frontend/src/components/chat/MessageList.vue` 中默认 scroll anchoring、直接 computed 的 `windowStart/windowEnd`；原生滚动条与顶栏重叠的问题暂不通过修改 scrollport 几何解决，后续更适合改成独立自绘滚动条。 | `MessageList.vue` |
 | 剪贴板与本地路径 | 自 QQ 等应用粘贴的 HTML 可能带 `file://` 图片链接；浏览器无法直接读取任意本地路径，此类图片在纯前端提取流程中不可用。后端剪贴板接口仅允许解析**系统临时目录**下的路径，以降低任意文件读取风险。 | `ChatInput.vue`、`clipboard.py` |
 | SSE 与界面响应 | 前端 SSE 处理约每 20 个事件让出主线程一次，减轻大量缓冲时界面「憋到最后才刷新」的卡顿感。 | `frontend/src/api/sse.ts` |
 | 存储并发与查找 | 单用户场景仍可能因前端并发请求产生短暂并发写，对关键写路径使用文件锁避免撕裂。按 `chatId` 定位会话需在无 DB 设计下扫描角色目录，数据量大时存在额外 I/O。 | `backend/app/storage.py` |
