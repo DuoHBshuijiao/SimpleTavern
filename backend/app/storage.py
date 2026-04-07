@@ -123,6 +123,16 @@ def _fonts_dir() -> Path:
     return _data_dir() / "fonts"
 
 
+def _page_backgrounds_dir() -> Path:
+    """
+    获取页面背景图目录路径
+
+    Returns:
+        Path: data/page_backgrounds 目录的Path对象
+    """
+    return _data_dir() / "page_backgrounds"
+
+
 def _worldbooks_dir() -> Path:
     """
     获取世界书目录路径
@@ -228,6 +238,7 @@ def ensure_data_initialized() -> None:
     _chats_dir().mkdir(parents=True, exist_ok=True)
     _avatars_dir().mkdir(parents=True, exist_ok=True)
     _fonts_dir().mkdir(parents=True, exist_ok=True)
+    _page_backgrounds_dir().mkdir(parents=True, exist_ok=True)
     _ai_workspace_dir().mkdir(parents=True, exist_ok=True)
     _worldbooks_dir().mkdir(parents=True, exist_ok=True)
 
@@ -1272,6 +1283,59 @@ def save_font(filename: str, data: bytes) -> str:
     p = font_path(filename)
     p.write_bytes(data)
     return filename
+
+
+def page_backgrounds_dir() -> Path:
+    """
+    获取页面背景图目录路径（公开接口）
+
+    Returns:
+        Path: data/page_backgrounds 目录路径
+    """
+    return _page_backgrounds_dir()
+
+
+def page_background_path(filename: str) -> Path:
+    """
+    获取页面背景图文件路径
+
+    Args:
+        filename: 背景图文件名
+
+    Returns:
+        Path: 背景图文件完整路径
+    """
+    return _page_backgrounds_dir() / filename
+
+
+def save_page_background(filename: str, data: bytes) -> str:
+    """
+    保存页面背景图到 data/page_backgrounds。
+
+    Args:
+        filename: 背景图文件名（需为安全文件名）
+        data: 背景图二进制数据
+
+    Returns:
+        str: 保存的文件名
+    """
+    p = page_background_path(filename)
+    p.write_bytes(data)
+    return filename
+
+
+def delete_page_background(filename: str) -> None:
+    """
+    删除页面背景图文件
+
+    Args:
+        filename: 背景图文件名
+    """
+    if not filename:
+        return
+    p = page_background_path(filename)
+    if p.exists():
+        p.unlink(missing_ok=True)
 
 
 def _assistant_chat_has_missing_ids(raw: Any) -> bool:
