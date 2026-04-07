@@ -34,7 +34,7 @@
  *    - 依赖：依赖vue、stores、api/http.ts
  *    - 位置：组件层，提供设置管理功能
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useChatsStore, useCharactersStore, useSettingsStore } from '../stores'
 import {
   normalizeReasoningEffort,
@@ -49,9 +49,10 @@ import {
   type WorldBookAttachment,
 } from '../types/models'
 import ModernSelect from './ModernSelect.vue'
-import { apiGet, apiPost, apiPut } from '../api/http'
+import { apiDelete, apiGet, apiPost, apiPut } from '../api/http'
 import { downloadUpdate, getManualUpdateCheck, runUpdate } from '../api/update'
 import { useAppFont } from '../composables/useAppFont'
+import { usePageBackground } from '../composables/usePageBackground'
 import { useSettingsImport } from '../composables/useSettingsImport'
 import { X, Eye, EyeOff, Check, Loader2, GripVertical, ChevronDown } from 'lucide-vue-next'
 import WorldBookEditorModal from './modals/WorldBookEditorModal.vue'
@@ -85,8 +86,15 @@ const {
 } = useSettingsImport()
 
 const tab = ref<'global' | 'presets' | 'chat'>('global')
+/** 设置抽屉顶部 Tab 滑块位置（0–2），用于高光背景平移 */
+const settingsTabIndex = computed(() =>
+  tab.value === 'global' ? 0 : tab.value === 'presets' ? 1 : 2,
+)
 const preloaded = ref(false)
 const chatTabEverOpened = ref(false)
+const pageBackgroundInputRef = ref<HTMLInputElement | null>(null)
+const savedPageBackgroundImage = ref<string | null>(null)
+const pendingPageBackgroundUploads = new Set<string>()
 
 watch(() => props.initialTab, (newTab) => {
   if (newTab) tab.value = newTab
@@ -98,6 +106,14 @@ watch(tab, (t) => {
 
 const worldBookCreateExpanded = ref(false)
 const worldBookNewNameDraft = ref('')
+
+/** 全局设置 Tab 内折叠区块（不用原生 details，否则关闭时子树被立刻隐藏，grid 高度过渡无法反复播放） */
+const globalAccordionOpen = reactive({
+  connection: false,
+  prompts: false,
+  appearance: false,
+  app: false,
+})
 
 // 打开设置抽屉时从后端获取版本号（仅请求一次）
 watch(
@@ -111,6 +127,7 @@ watch(
     if (!visible) {
       worldBookCreateExpanded.value = false
       worldBookNewNameDraft.value = ''
+      void deletePendingPageBackgrounds(savedPageBackgroundImage.value)
     }
   },
   { immediate: true }
@@ -159,7 +176,9 @@ const messagesSinceLastMemoryUpdate = ref<number | null>(null)
 const tokensSinceLastMemoryUpdate = ref<number | null>(null)
 const memoryTokenLoading = ref(false)
 const chatTokenLoading = ref(false)
+const suppressTokenEstimates = ref(false)
 let memoryDebounceTimer: ReturnType<typeof setTimeout> | null = null
+const worldbookTokenEstimateCache = new Map<string, { updatedAt: string | null; tokens: number | null }>()
 
 /**
  * 关闭抽屉
@@ -168,6 +187,29 @@ let memoryDebounceTimer: ReturnType<typeof setTimeout> | null = null
  */
 function close() {
   emit('update:show', false)
+}
+
+async function deletePageBackgroundFile(filename: string | null | undefined) {
+  const normalized = filename?.trim()
+  if (!normalized) return
+  try {
+    await apiDelete(`/api/page-backgrounds/${encodeURIComponent(normalized)}`)
+  } catch {
+    // 后台文件清理失败不应阻塞设置流程；下次同名资源也不会再被引用。
+  }
+}
+
+function markSavedPageBackground(filename: string | null | undefined) {
+  const normalized = filename?.trim() || null
+  savedPageBackgroundImage.value = normalized
+  if (normalized) pendingPageBackgroundUploads.delete(normalized)
+}
+
+async function deletePendingPageBackgrounds(exceptFilename: string | null | undefined = null) {
+  const keep = exceptFilename?.trim() || null
+  const stale = [...pendingPageBackgroundUploads].filter((name) => name !== keep)
+  stale.forEach((name) => pendingPageBackgroundUploads.delete(name))
+  await Promise.allSettled(stale.map((name) => deletePageBackgroundFile(name)))
 }
 
 function formatSaveError(prefix: string, error: unknown): string {
@@ -180,6 +222,7 @@ function formatSaveError(prefix: string, error: unknown): string {
 async function handleSaveAll() {
   if (isSaving.value) return
   isSaving.value = true
+  suppressTokenEstimates.value = true
   try {
     await saveGlobal()
     await saveChatOverrides()
@@ -187,6 +230,7 @@ async function handleSaveAll() {
   } catch (error) {
     await notifyMessage(formatSaveError('保存设置失败', error))
   } finally {
+    suppressTokenEstimates.value = false
     isSaving.value = false
   }
 }
@@ -253,6 +297,36 @@ function ensureDraftHelpDefaults(target?: { context_message_limit?: number | nul
   }
 }
 
+const pageBackground = usePageBackground(() => globalDraft.value)
+
+const pageBackgroundOpacityModel = computed({
+  get: () => Math.round(pageBackground.opacity.value * 100),
+  set: (value: number | string) => {
+    if (!globalDraft.value) return
+    const numeric = Number(value)
+    if (!Number.isFinite(numeric)) {
+      globalDraft.value.pageBackgroundOpacity = null
+      return
+    }
+    const clamped = Math.max(0, Math.min(100, numeric))
+    globalDraft.value.pageBackgroundOpacity = clamped >= 100 ? null : Number((clamped / 100).toFixed(2))
+  },
+})
+
+const pageBackgroundBlurModel = computed({
+  get: () => Math.round(pageBackground.blurPx.value),
+  set: (value: number | string) => {
+    if (!globalDraft.value) return
+    const numeric = Number(value)
+    if (!Number.isFinite(numeric)) {
+      globalDraft.value.pageBackgroundBlurPx = null
+      return
+    }
+    const clamped = Math.max(0, Math.min(64, Math.round(numeric)))
+    globalDraft.value.pageBackgroundBlurPx = clamped <= 0 ? null : clamped
+  },
+})
+
 function findLatestMemorySavedMessageId(chat: Chat | null): string | null {
   if (!chat?.messages?.length) return null
   for (let i = chat.messages.length - 1; i >= 0; i--) {
@@ -280,6 +354,7 @@ async function resetHiddenFloors() {
 }
 
 async function fetchMemoryTokenCount() {
+  if (suppressTokenEstimates.value) return
   memoryTokenLoading.value = true
   memoryTokenEstimate.value = null
   try {
@@ -294,6 +369,7 @@ async function fetchMemoryTokenCount() {
 }
 
 async function fetchChatTokenCount() {
+  if (suppressTokenEstimates.value) return
   const c = props.chat
   if (!c?.id) {
     chatTokenEstimate.value = null
@@ -338,33 +414,58 @@ onMounted(() => {
 })
 
 async function refreshWorldbookTokenTotals() {
-  worldbookTokenTotals.value = {}
   const list = worldbooks.value
-  if (list.length === 0) return
+  if (list.length === 0) {
+    worldbookTokenTotals.value = {}
+    return
+  }
+  const map: Record<string, number | null> = {}
+  const staleBooks: WorldBook[] = []
+  for (const book of list) {
+    const cached = worldbookTokenEstimateCache.get(book.id)
+    const updatedAt = book.updatedAt ?? null
+    if (cached && cached.updatedAt === updatedAt) {
+      map[book.id] = cached.tokens
+    } else {
+      staleBooks.push(book)
+    }
+  }
+  if (staleBooks.length === 0) {
+    worldbookTokenTotals.value = map
+    return
+  }
   worldbookTokensLoading.value = true
   try {
     const results = await Promise.all(
-      list.map(async (b) => {
+      staleBooks.map(async (b) => {
         const text = concatEnabledWorldBookContents(b)
         const n = await countTokensForText(text)
         return [b.id, n] as const
       }),
     )
-    const map: Record<string, number | null> = {}
-    for (const [id, n] of results) map[id] = n
+    for (const [id, n] of results) {
+      map[id] = n
+      const book = staleBooks.find((item) => item.id === id)
+      worldbookTokenEstimateCache.set(id, {
+        updatedAt: book?.updatedAt ?? null,
+        tokens: n,
+      })
+    }
     worldbookTokenTotals.value = map
   } finally {
     worldbookTokensLoading.value = false
   }
 }
 
-async function loadWorldBooks() {
+async function loadWorldBooks(options?: { refreshTokenTotals?: boolean }) {
   try {
     worldbooks.value = await apiGet<WorldBook[]>('/api/worldbooks')
   } catch {
     worldbooks.value = []
   }
-  await refreshWorldbookTokenTotals()
+  if (options?.refreshTokenTotals !== false) {
+    await refreshWorldbookTokenTotals()
+  }
 }
 
 function worldbookTokenHint(bookId: string): string {
@@ -440,6 +541,9 @@ watch(
     if (!s.apiPresets) s.apiPresets = []
     if (!(s as Settings).draftHelpDefaults) (s as Settings).draftHelpDefaults = ensureDraftHelpDefaults()
     if (s.selectedFont === undefined) (s as Settings).selectedFont = null
+    if ((s as Settings).pageBackgroundImage === undefined) (s as Settings).pageBackgroundImage = null
+    if ((s as Settings).pageBackgroundOpacity === undefined) (s as Settings).pageBackgroundOpacity = null
+    if ((s as Settings).pageBackgroundBlurPx === undefined) (s as Settings).pageBackgroundBlurPx = null
     if ((s as Settings).messageFontSize === undefined) (s as Settings).messageFontSize = null
     if (!s.prompts) {
       s.prompts = { globalSystem: '', globalPrefill: '', globalPrefillEnabled: true }
@@ -449,6 +553,8 @@ watch(
       if (s.prompts.globalPrefillEnabled === undefined) s.prompts.globalPrefillEnabled = true
     }
 
+    pendingPageBackgroundUploads.clear()
+    markSavedPageBackground((s as Settings).pageBackgroundImage ?? null)
     globalDraft.value = s
     chatDraft.value = ensureOverrides(props.chat ? clone(props.chat.overrides) : undefined)
 
@@ -756,9 +862,11 @@ async function clearWorldBookSessionActivationById(worldbookId: string) {
 watch(
   () => chatDraft.value?.longTermMemory,
   () => {
+    if (suppressTokenEstimates.value) return
     if (memoryDebounceTimer) clearTimeout(memoryDebounceTimer)
     memoryDebounceTimer = setTimeout(() => {
       memoryDebounceTimer = null
+      if (suppressTokenEstimates.value) return
       if (props.show && tab.value === 'chat') fetchMemoryTokenCount()
     }, 400)
   },
@@ -767,6 +875,7 @@ watch(
 watch(
   () => [props.chat?.id, tab.value] as const,
   ([chatId, t]) => {
+    if (suppressTokenEstimates.value) return
     if (props.show && t === 'chat') {
       fetchMemoryTokenCount()
       if (chatId) fetchChatTokenCount()
@@ -1085,6 +1194,7 @@ function handleChatModelSelect(option: any) {
  */
 async function saveGlobal() {
   if (!globalDraft.value) return
+  const previousSavedPageBackground = savedPageBackgroundImage.value
   const draft = {
     ...globalDraft.value,
     generationDefaults: { ...globalDraft.value.generationDefaults },
@@ -1092,9 +1202,24 @@ async function saveGlobal() {
   }
   draft.generationDefaults.context_size = normalizeContextSize(draft.generationDefaults.context_size)
   draft.draftHelpDefaults.context_message_limit = normalizePositiveInteger(draft.draftHelpDefaults.context_message_limit)
+  draft.pageBackgroundImage = draft.pageBackgroundImage ?? null
+  draft.pageBackgroundOpacity = draft.pageBackgroundOpacity == null
+    ? null
+    : Math.max(0, Math.min(1, draft.pageBackgroundOpacity))
+  draft.pageBackgroundBlurPx = draft.pageBackgroundBlurPx == null
+    ? null
+    : Math.max(0, Math.min(64, draft.pageBackgroundBlurPx))
   await settingsStore.save(draft)
   globalDraft.value.generationDefaults.context_size = draft.generationDefaults.context_size
   globalDraft.value.draftHelpDefaults = draft.draftHelpDefaults
+  globalDraft.value.pageBackgroundImage = settingsStore.settings?.pageBackgroundImage ?? draft.pageBackgroundImage
+  globalDraft.value.pageBackgroundOpacity = draft.pageBackgroundOpacity
+  globalDraft.value.pageBackgroundBlurPx = draft.pageBackgroundBlurPx
+  markSavedPageBackground(globalDraft.value.pageBackgroundImage ?? null)
+  await deletePendingPageBackgrounds(globalDraft.value.pageBackgroundImage ?? null)
+  if (previousSavedPageBackground && previousSavedPageBackground !== globalDraft.value.pageBackgroundImage) {
+    await deletePageBackgroundFile(previousSavedPageBackground)
+  }
 }
 
 /**
@@ -1114,6 +1239,109 @@ function normalizeContextSize(v: number | null | undefined): number | null {
 function normalizePositiveInteger(v: number | null | undefined): number | null {
   if (v == null || Number.isNaN(v) || v < 1) return null
   return Math.floor(v)
+}
+
+interface ComparableChatOverrides {
+  prompt: string | null
+  sessionSystemPromptMode: 'append' | 'override'
+  longTermMemory: string | null
+  contextStartMessageId: string | null
+  presetId: string | null
+  pureAiMode: boolean | null
+  worldBookAttachments: Array<{
+    worldBookId: string
+    scanDepth: number | null
+    insertDepth: number
+  }>
+  worldBookGlobalExclusions: string[]
+  params: {
+    model: string | null
+    temperature: number | null
+    top_p: number | null
+    max_tokens: number | null
+    context_size: number | null
+  }
+  draftHelp: {
+    context_message_limit: number | null
+  }
+}
+
+function normalizeWorldBookGlobalExclusions(ids: string[] | undefined): string[] {
+  return [...new Set((ids || []).filter((id) => Boolean(id)))]
+}
+
+function normalizeComparableChatOverrides(source?: Partial<ChatOverrides> | null): ComparableChatOverrides {
+  const overrides = ensureOverrides(source)
+  const draftHelp = ensureDraftHelpDefaults(overrides.draftHelp)
+  return {
+    prompt: overrides.prompt ?? null,
+    sessionSystemPromptMode: overrides.sessionSystemPromptMode === 'override' ? 'override' : 'append',
+    longTermMemory: overrides.longTermMemory ?? null,
+    contextStartMessageId: overrides.contextStartMessageId ?? null,
+    presetId: overrides.presetId ?? null,
+    pureAiMode: overrides.pureAiMode ?? null,
+    worldBookAttachments: (overrides.worldBookAttachments || []).map((attachment) => ({
+      worldBookId: attachment.worldBookId,
+      scanDepth: attachment.scanDepth ?? null,
+      insertDepth: attachment.insertDepth && attachment.insertDepth >= 1 ? attachment.insertDepth : 5,
+    })),
+    worldBookGlobalExclusions: normalizeWorldBookGlobalExclusions(overrides.worldBookGlobalExclusions),
+    params: {
+      model: overrides.params.model ?? null,
+      temperature: overrides.params.temperature ?? null,
+      top_p: overrides.params.top_p ?? null,
+      max_tokens: overrides.params.max_tokens ?? null,
+      context_size: normalizeContextSize(overrides.params.context_size),
+    },
+    draftHelp: {
+      context_message_limit: normalizePositiveInteger(draftHelp.context_message_limit),
+    },
+  }
+}
+
+function comparableOverridesEqual(left: ComparableChatOverrides, right: ComparableChatOverrides): boolean {
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
+function orderedWorldBookIdsFromComparable(source: ComparableChatOverrides): string[] {
+  return source.worldBookAttachments.map((attachment) => attachment.worldBookId)
+}
+
+function sessionBoundWorldBookIdsFromComparable(source: ComparableChatOverrides): string[] {
+  return source.worldBookAttachments
+    .map((attachment) => attachment.worldBookId)
+    .filter((worldBookId) => {
+      const book = worldbooks.value.find((item) => item.id === worldBookId)
+      return book ? !book.globalActive : true
+    })
+}
+
+function stringArraysEqual(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index])
+}
+
+function applyNormalizedComparableToDraft(source: ComparableChatOverrides) {
+  if (!chatDraft.value) return
+  chatDraft.value.prompt = source.prompt
+  chatDraft.value.sessionSystemPromptMode = source.sessionSystemPromptMode
+  chatDraft.value.longTermMemory = source.longTermMemory
+  chatDraft.value.contextStartMessageId = source.contextStartMessageId
+  chatDraft.value.presetId = source.presetId
+  chatDraft.value.pureAiMode = source.pureAiMode
+  chatDraft.value.worldBookAttachments = source.worldBookAttachments.map((attachment) => ({ ...attachment }))
+  syncWorldBookIdsFromAttachments()
+  chatDraft.value.worldBookGlobalExclusions = [...source.worldBookGlobalExclusions]
+  chatDraft.value.params = { ...source.params }
+  chatDraft.value.draftHelp = { ...source.draftHelp }
+}
+
+async function ensureCharactersLoadedForSave() {
+  if (charactersStore.list.length > 0) return
+  try {
+    await charactersStore.loadAll()
+  } catch {
+    // 保留极低频的后续单项兜底，避免列表加载失败阻塞保存。
+  }
 }
 
 function updateDigitsOnlyField(rawValue: string, onValue: (value: number | null) => void, input: HTMLInputElement | null) {
@@ -1144,7 +1372,7 @@ function handleChatDraftHelpLimitInput(e: Event) {
  * 将本会话 id 写入/移出非全局世界书的 sessionChatIds，与后端 collect_active_worldbooks 一致。
  */
 async function syncWorldBookSessionChatIdsForChat(chatId: string, attachments: WorldBookAttachment[]) {
-  await loadWorldBooks()
+  await loadWorldBooks({ refreshTokenTotals: false })
   const boundIds = new Set((attachments || []).map((a) => a.worldBookId).filter(Boolean))
   for (const wb of worldbooks.value) {
     if (wb.globalActive) continue
@@ -1163,7 +1391,7 @@ async function syncWorldBookSessionChatIdsForChat(chatId: string, attachments: W
       })
     }
   }
-  await loadWorldBooks()
+  await loadWorldBooks({ refreshTokenTotals: false })
 }
 
 async function saveChatOverrides() {
@@ -1176,23 +1404,41 @@ async function saveChatOverrides() {
   }
   draft.params.context_size = normalizeContextSize(draft.params.context_size)
   draft.draftHelp.context_message_limit = normalizePositiveInteger(draft.draftHelp.context_message_limit)
-  await chatsStore.updateOverrides(chat.id, draft)
-  chatDraft.value.params.context_size = draft.params.context_size
-  chatDraft.value.draftHelp = draft.draftHelp
+  const normalizedDraft = normalizeComparableChatOverrides(draft)
+  const normalizedCurrent = normalizeComparableChatOverrides(chat.overrides)
+  const shouldSaveOverrides = !comparableOverridesEqual(normalizedDraft, normalizedCurrent)
+  const shouldSyncWorldBookBindings = !stringArraysEqual(
+    sessionBoundWorldBookIdsFromComparable(normalizedCurrent),
+    sessionBoundWorldBookIdsFromComparable(normalizedDraft),
+  )
+  const shouldSyncCharacterWorldBookOrder = !stringArraysEqual(
+    orderedWorldBookIdsFromComparable(normalizedCurrent),
+    orderedWorldBookIdsFromComparable(normalizedDraft),
+  )
 
-  try {
-    await syncWorldBookSessionChatIdsForChat(chat.id, draft.worldBookAttachments || [])
-  } catch (e) {
-    await notifyMessage('同步世界书会话绑定失败: ' + (e instanceof Error ? e.message : String(e)))
-    await loadWorldBooks()
+  applyNormalizedComparableToDraft(normalizedDraft)
+
+  if (!shouldSaveOverrides) {
     return
   }
 
+  await chatsStore.updateOverrides(chat.id, chatDraft.value, { skipLoadList: true })
+
+  if (shouldSyncWorldBookBindings) {
+    try {
+      await syncWorldBookSessionChatIdsForChat(chat.id, normalizedDraft.worldBookAttachments)
+    } catch (e) {
+      await notifyMessage('同步世界书会话绑定失败: ' + (e instanceof Error ? e.message : String(e)))
+      await loadWorldBooks({ refreshTokenTotals: false })
+      return
+    }
+  }
+
   // 单聊：将当前会话的世界书顺序同步到角色卡 attachedWorldBookIds，便于「含世界书」ZIP 导出一致
-  if (!chat.isGroup && chat.characterId) {
+  if (!chat.isGroup && chat.characterId && shouldSyncCharacterWorldBookOrder) {
     const ordered: string[] = []
     const seen = new Set<string>()
-    const wbOrder = (draft.worldBookAttachments || []).map((a) => a.worldBookId)
+    const wbOrder = normalizedDraft.worldBookAttachments.map((a) => a.worldBookId)
     for (const id of wbOrder) {
       if (id && !seen.has(id)) {
         seen.add(id)
@@ -1200,6 +1446,7 @@ async function saveChatOverrides() {
       }
     }
     const characterId = chat.characterId
+    await ensureCharactersLoadedForSave()
     let char = charactersStore.list.find((c) => c.id === characterId)
     if (!char) {
       try {
@@ -1264,6 +1511,10 @@ function triggerFontImport() {
   fontInputRef.value?.click()
 }
 
+function triggerPageBackgroundImport() {
+  pageBackgroundInputRef.value?.click()
+}
+
 /**
  * 处理导入字体：上传到 data/fonts，刷新列表并设为当前选中，实时应用。
  * 字体不随备份导出。
@@ -1286,6 +1537,39 @@ async function handleFontImport(e: Event) {
     }
   } catch (err) {
     await notifyMessage('导入字体失败: ' + String(err))
+  }
+}
+
+async function handlePageBackgroundImport(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  input.value = ''
+  const previousDraftImage = globalDraft.value?.pageBackgroundImage ?? null
+  const fd = new FormData()
+  fd.append('file', file)
+  try {
+    const response = await fetch('/api/page-backgrounds', { method: 'POST', body: fd })
+    if (!response.ok) throw new Error(await response.text())
+    const { filename } = (await response.json()) as { filename: string }
+    pendingPageBackgroundUploads.add(filename)
+    if (globalDraft.value) globalDraft.value.pageBackgroundImage = filename
+    if (previousDraftImage && previousDraftImage !== filename && pendingPageBackgroundUploads.has(previousDraftImage)) {
+      pendingPageBackgroundUploads.delete(previousDraftImage)
+      void deletePageBackgroundFile(previousDraftImage)
+    }
+  } catch (err) {
+    await notifyMessage('导入页面背景失败: ' + String(err))
+  }
+}
+
+async function clearPageBackground() {
+  const filename = globalDraft.value?.pageBackgroundImage ?? null
+  if (!globalDraft.value || !filename) return
+  globalDraft.value.pageBackgroundImage = null
+  if (pendingPageBackgroundUploads.has(filename)) {
+    pendingPageBackgroundUploads.delete(filename)
+    await deletePageBackgroundFile(filename)
   }
 }
 
@@ -1337,9 +1621,7 @@ async function checkUpdate() {
     }
     checkUpdateMessage.value = '正在保存设置并下载...'
     if (globalDraft.value) {
-      const draft = { ...globalDraft.value, generationDefaults: { ...globalDraft.value.generationDefaults } }
-      draft.generationDefaults.context_size = normalizeContextSize(draft.generationDefaults.context_size)
-      await settingsStore.save(draft)
+      await saveGlobal()
     }
     await downloadUpdate(res.tagName)
     checkUpdateMessage.value = '正在启动更新...'
@@ -1382,20 +1664,27 @@ async function checkUpdate() {
           </button>
         </div>
 
-        <!-- Tabs：整块可点，高亮仅在内层 span，避免贴齐 Tab 栏四边 -->
-        <div class="flex gap-1 border-b border-[var(--color-border-subtle)] bg-[var(--color-border-subtle)] px-2 py-2" style="opacity: 1; color: transparent;">
+        <!-- Tabs：整块可点；底层滑块平移承载高光，与 gap-1 / px-2 对齐 -->
+        <div class="relative flex gap-1 border-b border-[var(--color-border-subtle)] bg-[var(--color-border-subtle)] px-2 py-2">
+          <div
+            class="pointer-events-none absolute left-2 top-2 bottom-2 rounded-lg bg-brand-a10 transition-transform duration-[400ms] ease-out"
+            :style="{
+              width: 'calc((100% - 1.5rem) / 3)',
+              transform: `translateX(calc(${settingsTabIndex} * (100% + 0.25rem)))`,
+            }"
+          />
           <button
             v-for="t in ['global', 'presets', 'chat']"
             :key="t"
             type="button"
-            class="group flex min-h-11 min-w-0 flex-1 touch-manipulation items-center justify-center px-0.5 py-0.5 text-sm font-medium transition-colors"
+            class="group relative z-10 flex min-h-11 min-w-0 flex-1 touch-manipulation items-center justify-center px-0.5 py-0.5 text-sm font-medium transition-colors duration-[400ms]"
             @click="tab = t as any"
           >
             <span
-              class="block min-h-10 w-full rounded-lg py-2 text-center transition-colors"
+              class="block min-h-10 w-full rounded-lg py-2 text-center transition-colors duration-[400ms]"
               :class="
                 tab === t
-                  ? 'text-brand bg-brand-a10'
+                  ? 'text-brand'
                   : 'text-[var(--color-text-muted)] group-hover:text-[var(--color-text)] group-hover:bg-surface-muted'
               "
             >
@@ -1414,15 +1703,26 @@ async function checkUpdate() {
                 这里配置全局默认的 API 参数。如果配置了 "API 预设"，建议优先使用预设功能以便管理不同服务商。
               </div>
 
-              <!-- 连接与默认模型（默认展开） -->
-              <details open class="group rounded-xl border border-[var(--color-border-subtle)] bg-surface-muted/40 overflow-hidden">
-                <summary
-                  class="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3.5 text-sm font-semibold text-[var(--color-text-secondary)] select-none hover:bg-surface-hover/40 [&::-webkit-details-marker]:hidden"
+              <!-- 连接与默认模型（默认收起） -->
+              <div class="rounded-xl border border-[var(--color-border-subtle)] bg-surface-muted/40 overflow-hidden">
+                <button
+                  type="button"
+                  class="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3.5 text-left text-sm font-semibold text-[var(--color-text-secondary)] select-none hover:bg-surface-hover/40"
+                  :aria-expanded="globalAccordionOpen.connection"
+                  @click="globalAccordionOpen.connection = !globalAccordionOpen.connection"
                 >
                   <span>连接与默认模型</span>
-                  <ChevronDown class="h-4 w-4 shrink-0 text-[var(--color-text-muted)] transition-transform duration-200 group-open:rotate-180" />
-                </summary>
-                <div class="space-y-5 border-t border-[var(--color-border-subtle)] px-4 pb-4 pt-4">
+                  <ChevronDown
+                    class="h-4 w-4 shrink-0 text-[var(--color-text-muted)] transition-transform duration-[800ms] ease-in-out"
+                    :class="globalAccordionOpen.connection ? 'rotate-180' : ''"
+                  />
+                </button>
+                <div
+                  class="grid transition-[grid-template-rows] duration-[800ms] ease-in-out"
+                  :class="globalAccordionOpen.connection ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'"
+                >
+                  <div class="min-h-0 overflow-hidden">
+                    <div class="space-y-5 border-t border-[var(--color-border-subtle)] px-4 pb-4 pt-4">
                   <!-- Stream Toggle -->
                   <div class="space-y-2">
                     <label class="block text-sm font-medium text-[var(--color-text-secondary)]">流式传输</label>
@@ -1432,12 +1732,15 @@ async function checkUpdate() {
                       @click="globalDraft.streamEnabled = !globalDraft.streamEnabled"
                     >
                       <div
-                        class="relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200"
+                        class="relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200 ease-out"
                         :class="globalDraft.streamEnabled ? 'bg-brand' : 'bg-[var(--color-track)]'"
                       >
                         <div
-                          class="absolute top-1 h-4 w-4 rounded-full bg-[var(--color-on-brand)] transition-transform duration-200"
-                          :class="globalDraft.streamEnabled ? 'left-6' : 'left-1'"
+                          class="absolute left-1 top-1 h-4 w-4 rounded-full bg-[var(--color-on-brand)]"
+                          :style="{
+                            transform: globalDraft.streamEnabled ? 'translateX(1.25rem)' : 'translateX(0)',
+                            transition: 'transform 200ms ease-out',
+                          }"
                         ></div>
                       </div>
                       <span class="text-xs text-[var(--color-text-secondary)]">
@@ -1455,12 +1758,15 @@ async function checkUpdate() {
                       @click="globalDraft.pureAiMode = !globalDraft.pureAiMode"
                     >
                       <div
-                        class="relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200"
+                        class="relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200 ease-out"
                         :class="globalDraft.pureAiMode ? 'bg-brand' : 'bg-[var(--color-track)]'"
                       >
                         <div
-                          class="absolute top-1 h-4 w-4 rounded-full bg-[var(--color-on-brand)] transition-transform duration-200"
-                          :class="globalDraft.pureAiMode ? 'left-6' : 'left-1'"
+                          class="absolute left-1 top-1 h-4 w-4 rounded-full bg-[var(--color-on-brand)]"
+                          :style="{
+                            transform: globalDraft.pureAiMode ? 'translateX(1.25rem)' : 'translateX(0)',
+                            transition: 'transform 200ms ease-out',
+                          }"
                         ></div>
                       </div>
                       <span class="text-xs text-[var(--color-text-secondary)]">
@@ -1521,25 +1827,38 @@ async function checkUpdate() {
                       placeholder="例如: gpt-3.5-turbo"
                     />
                   </div>
+                    </div>
+                  </div>
                 </div>
-              </details>
+              </div>
 
               <!-- 提示词与生成参数（默认折叠） -->
-              <details class="group rounded-xl border border-[var(--color-border-subtle)] bg-surface-muted/40 overflow-hidden">
-                <summary
-                  class="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3.5 text-sm font-semibold text-[var(--color-text-secondary)] select-none hover:bg-surface-hover/40 [&::-webkit-details-marker]:hidden"
+              <div class="rounded-xl border border-[var(--color-border-subtle)] bg-surface-muted/40 overflow-hidden">
+                <button
+                  type="button"
+                  class="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3.5 text-left text-sm font-semibold text-[var(--color-text-secondary)] select-none hover:bg-surface-hover/40"
+                  :aria-expanded="globalAccordionOpen.prompts"
+                  @click="globalAccordionOpen.prompts = !globalAccordionOpen.prompts"
                 >
                   <span>提示词与生成参数</span>
-                  <ChevronDown class="h-4 w-4 shrink-0 text-[var(--color-text-muted)] transition-transform duration-200 group-open:rotate-180" />
-                </summary>
-                <div class="space-y-5 border-t border-[var(--color-border-subtle)] px-4 pb-4 pt-4">
+                  <ChevronDown
+                    class="h-4 w-4 shrink-0 text-[var(--color-text-muted)] transition-transform duration-[800ms] ease-in-out"
+                    :class="globalAccordionOpen.prompts ? 'rotate-180' : ''"
+                  />
+                </button>
+                <div
+                  class="grid transition-[grid-template-rows] duration-[800ms] ease-in-out"
+                  :class="globalAccordionOpen.prompts ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'"
+                >
+                  <div class="min-h-0 overflow-hidden">
+                    <div class="space-y-5 border-t border-[var(--color-border-subtle)] px-4 pb-4 pt-4">
                   <!-- Global System Prompt -->
                   <div class="space-y-1.5">
                     <label class="block text-sm font-medium text-[var(--color-text-secondary)]">全局系统提示词</label>
                     <textarea
                       v-model="globalDraft.prompts.globalSystem"
                       rows="4"
-                      class="input textarea w-full resize-none"
+                      class="input textarea w-full resize-y"
                     ></textarea>
                   </div>
 
@@ -1552,12 +1871,15 @@ async function checkUpdate() {
                         @click="globalDraft.prompts.globalPrefillEnabled = !globalDraft.prompts.globalPrefillEnabled"
                       >
                         <div
-                          class="relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200"
+                          class="relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200 ease-out"
                           :class="globalDraft.prompts.globalPrefillEnabled ? 'bg-brand' : 'bg-[var(--color-track)]'"
                         >
                           <div
-                            class="absolute top-1 h-4 w-4 rounded-full bg-[var(--color-on-brand)] transition-transform duration-200"
-                            :class="globalDraft.prompts.globalPrefillEnabled ? 'left-6' : 'left-1'"
+                            class="absolute left-1 top-1 h-4 w-4 rounded-full bg-[var(--color-on-brand)]"
+                            :style="{
+                              transform: globalDraft.prompts.globalPrefillEnabled ? 'translateX(1.25rem)' : 'translateX(0)',
+                              transition: 'transform 200ms ease-out',
+                            }"
                           ></div>
                         </div>
                         <span class="text-xs text-[var(--color-text-secondary)]">
@@ -1568,7 +1890,7 @@ async function checkUpdate() {
                     <textarea
                       v-model="globalDraft.prompts.globalPrefill"
                       rows="2"
-                      class="input textarea w-full resize-none"
+                      class="input textarea w-full resize-y"
                       placeholder="以助手身份附加在请求末尾，模型在其后续写；留空则不启用"
                     ></textarea>
                   </div>
@@ -1641,18 +1963,120 @@ async function checkUpdate() {
                   <p class="text-xs text-[var(--color-text-muted)]">
                     实际上下文总限制长度为该「上下文长度」限制加上角色卡、用户信息、自定义系统提示词。草稿助手条数限制只统计最近消息条数，留空则回退到现有上下文逻辑。
                   </p>
+                    </div>
+                  </div>
                 </div>
-              </details>
+              </div>
 
               <!-- 外观与数据（默认折叠） -->
-              <details class="group rounded-xl border border-[var(--color-border-subtle)] bg-surface-muted/40 overflow-hidden">
-                <summary
-                  class="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3.5 text-sm font-semibold text-[var(--color-text-secondary)] select-none hover:bg-surface-hover/40 [&::-webkit-details-marker]:hidden"
+              <div class="rounded-xl border border-[var(--color-border-subtle)] bg-surface-muted/40 overflow-hidden">
+                <button
+                  type="button"
+                  class="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3.5 text-left text-sm font-semibold text-[var(--color-text-secondary)] select-none hover:bg-surface-hover/40"
+                  :aria-expanded="globalAccordionOpen.appearance"
+                  @click="globalAccordionOpen.appearance = !globalAccordionOpen.appearance"
                 >
                   <span>外观与数据</span>
-                  <ChevronDown class="h-4 w-4 shrink-0 text-[var(--color-text-muted)] transition-transform duration-200 group-open:rotate-180" />
-                </summary>
-                <div class="space-y-5 border-t border-[var(--color-border-subtle)] px-4 pb-4 pt-4">
+                  <ChevronDown
+                    class="h-4 w-4 shrink-0 text-[var(--color-text-muted)] transition-transform duration-[800ms] ease-in-out"
+                    :class="globalAccordionOpen.appearance ? 'rotate-180' : ''"
+                  />
+                </button>
+                <div
+                  class="grid transition-[grid-template-rows] duration-[800ms] ease-in-out"
+                  :class="globalAccordionOpen.appearance ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'"
+                >
+                  <div class="min-h-0 overflow-hidden">
+                    <div class="space-y-5 border-t border-[var(--color-border-subtle)] px-4 pb-4 pt-4">
+                  <div class="space-y-3 rounded-xl border border-[var(--color-border-subtle)] bg-surface-overlay/35 p-3.5">
+                    <div class="flex flex-wrap items-start justify-between gap-3">
+                      <div class="min-w-0 space-y-1">
+                        <div class="text-sm font-medium text-[var(--color-text-secondary)]">页面背景</div>
+                        <p class="text-xs leading-relaxed text-[var(--color-text-muted)]">
+                          图片只叠在主题底色之上；调低透明度时，底部主题渐变会继续透出。
+                        </p>
+                      </div>
+                      <div class="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          class="min-h-10 rounded-lg bg-surface-muted px-4 py-2 text-sm text-[var(--color-text)] transition-colors whitespace-nowrap hover:bg-surface-hover"
+                          @click="triggerPageBackgroundImport"
+                        >
+                          导入图片
+                        </button>
+                        <button
+                          v-if="globalDraft.pageBackgroundImage"
+                          type="button"
+                          class="min-h-10 rounded-lg border border-[var(--color-border-subtle)] bg-transparent px-4 py-2 text-sm text-[var(--color-text-secondary)] transition-colors whitespace-nowrap hover:bg-surface-hover/30 hover:text-[var(--color-text)]"
+                          @click="clearPageBackground"
+                        >
+                          清除
+                        </button>
+                      </div>
+                      <input
+                        ref="pageBackgroundInputRef"
+                        type="file"
+                        class="hidden"
+                        accept="image/*,.png,.jpg,.jpeg,.webp,.gif"
+                        @change="handlePageBackgroundImport"
+                      />
+                    </div>
+
+                    <div
+                      v-if="pageBackground.imageUrl.value"
+                      class="w-1/2 min-w-[12rem] max-w-[22rem] overflow-hidden rounded-xl border border-[var(--color-border-subtle)] bg-surface-muted/70"
+                    >
+                      <div class="h-32 overflow-hidden">
+                        <img
+                          :src="pageBackground.imageUrl.value || ''"
+                          alt="页面背景预览"
+                          class="h-full w-full object-cover object-center"
+                          :style="pageBackground.imageStyle.value"
+                        />
+                      </div>
+                    </div>
+                    <div
+                      v-else
+                      class="rounded-xl border border-dashed border-[var(--color-border-subtle)] bg-surface-muted/35 px-3 py-4 text-xs leading-relaxed text-[var(--color-text-muted)]"
+                    >
+                      还未导入页面背景。聊天页将继续仅使用当前主题渐变。
+                    </div>
+
+                    <div class="grid gap-3 md:grid-cols-2">
+                      <label class="space-y-2">
+                        <div class="flex items-center justify-between gap-2 text-xs text-[var(--color-text-secondary)]">
+                          <span>透明度</span>
+                          <span>{{ pageBackgroundOpacityModel }}%</span>
+                        </div>
+                        <input
+                          v-model="pageBackgroundOpacityModel"
+                          type="range"
+                          min="0"
+                          max="100"
+                          step="1"
+                          class="input-range"
+                        />
+                        <p class="text-xs text-[var(--color-text-muted)]">100% 为完整显示图片，降低后可透出主题底色。</p>
+                      </label>
+
+                      <label class="space-y-2">
+                        <div class="flex items-center justify-between gap-2 text-xs text-[var(--color-text-secondary)]">
+                          <span>模糊</span>
+                          <span>{{ pageBackgroundBlurModel }} px</span>
+                        </div>
+                        <input
+                          v-model="pageBackgroundBlurModel"
+                          type="range"
+                          min="0"
+                          max="64"
+                          step="1"
+                          class="input-range"
+                        />
+                        <p class="text-xs text-[var(--color-text-muted)]">仅作用于图片层，不会影响主题底色与界面内容。</p>
+                      </label>
+                    </div>
+                  </div>
+
                   <!-- 界面色系 -->
                   <div class="space-y-1.5">
                     <label class="block text-sm font-medium text-[var(--color-text-secondary)]">界面色系</label>
@@ -1769,37 +2193,52 @@ async function checkUpdate() {
                       备份会导出全部系统设置（含用户 Persona 头像）；“包含角色卡/包含全部聊天记录”同时包含世界书数据。
                     </div>
                   </div>
+                    </div>
+                  </div>
                 </div>
-              </details>
+              </div>
 
               <!-- 应用与更新（默认折叠） -->
-              <details class="group rounded-xl border border-[var(--color-border-subtle)] bg-surface-muted/40 overflow-hidden">
-                <summary
-                  class="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3.5 text-sm font-semibold text-[var(--color-text-secondary)] select-none hover:bg-surface-hover/40 [&::-webkit-details-marker]:hidden"
+              <div class="rounded-xl border border-[var(--color-border-subtle)] bg-surface-muted/40 overflow-hidden">
+                <button
+                  type="button"
+                  class="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3.5 text-left text-sm font-semibold text-[var(--color-text-secondary)] select-none hover:bg-surface-hover/40"
+                  :aria-expanded="globalAccordionOpen.app"
+                  @click="globalAccordionOpen.app = !globalAccordionOpen.app"
                 >
                   <span>应用与更新</span>
-                  <ChevronDown class="h-4 w-4 shrink-0 text-[var(--color-text-muted)] transition-transform duration-200 group-open:rotate-180" />
-                </summary>
-                <div class="space-y-3 border-t border-[var(--color-border-subtle)] px-4 pb-4 pt-4">
-                  <div class="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      class="min-h-10 rounded-lg bg-surface-muted px-4 py-2 text-sm text-[var(--color-text)] transition-colors whitespace-nowrap hover:bg-surface-hover"
-                      :disabled="checkUpdateLoading"
-                      @click="checkUpdate"
-                    >
-                      检查更新
-                    </button>
-                    <span v-if="checkUpdateMessage" class="text-xs text-[var(--color-text-secondary)]">{{ checkUpdateMessage }}</span>
+                  <ChevronDown
+                    class="h-4 w-4 shrink-0 text-[var(--color-text-muted)] transition-transform duration-[800ms] ease-in-out"
+                    :class="globalAccordionOpen.app ? 'rotate-180' : ''"
+                  />
+                </button>
+                <div
+                  class="grid transition-[grid-template-rows] duration-[800ms] ease-in-out"
+                  :class="globalAccordionOpen.app ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'"
+                >
+                  <div class="min-h-0 overflow-hidden">
+                    <div class="space-y-3 border-t border-[var(--color-border-subtle)] px-4 pb-4 pt-4">
+                      <div class="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          class="min-h-10 rounded-lg bg-surface-muted px-4 py-2 text-sm text-[var(--color-text)] transition-colors whitespace-nowrap hover:bg-surface-hover"
+                          :disabled="checkUpdateLoading"
+                          @click="checkUpdate"
+                        >
+                          检查更新
+                        </button>
+                        <span v-if="checkUpdateMessage" class="text-xs text-[var(--color-text-secondary)]">{{ checkUpdateMessage }}</span>
+                      </div>
+                      <a
+                        href="https://github.com/DuoHBshuijiao/SimpleTavern/releases"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="block cursor-pointer text-center text-xs text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text-secondary)] hover:underline"
+                      >{{ appVersion || '…' }}</a>
+                    </div>
                   </div>
-                  <a
-                    href="https://github.com/DuoHBshuijiao/SimpleTavern/releases"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="block cursor-pointer text-center text-xs text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text-secondary)] hover:underline"
-                  >{{ appVersion || '…' }}</a>
                 </div>
-              </details>
+              </div>
             </div>
           </div>
 
@@ -1996,17 +2435,32 @@ async function checkUpdate() {
               <div class="space-y-2">
                 <div class="flex items-center justify-between gap-3">
                   <label class="block text-sm font-medium text-[var(--color-text-secondary)]">会话系统提示</label>
-                  <div class="btn-group shrink-0">
+                  <div class="relative inline-flex shrink-0 gap-1 rounded-lg border border-[var(--color-border-subtle)] bg-surface-muted p-1">
+                    <div
+                      class="pointer-events-none absolute left-1 top-1 bottom-1 rounded-md bg-brand shadow-sm transition-transform duration-[400ms] ease-out"
+                      :style="{
+                        width: 'calc((100% - 0.75rem) / 2)',
+                        transform: `translateX(calc(${chatDraft.sessionSystemPromptMode === 'override' ? 1 : 0} * (100% + 0.25rem)))`,
+                      }"
+                    />
                     <button
                       type="button"
-                      class="btn btn-xs touch-manipulation"
-                      :class="chatDraft.sessionSystemPromptMode === 'override' ? 'btn-secondary' : 'btn-primary'"
+                      class="relative z-10 min-w-[4.25rem] flex-1 rounded-md px-2 py-1 text-center text-xs font-medium transition-colors duration-[400ms] ease-out touch-manipulation"
+                      :class="
+                        chatDraft.sessionSystemPromptMode === 'append'
+                          ? 'text-[var(--color-on-brand)]'
+                          : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'
+                      "
                       @click="chatDraft.sessionSystemPromptMode = 'append'"
                     >追加全局</button>
                     <button
                       type="button"
-                      class="btn btn-xs touch-manipulation"
-                      :class="chatDraft.sessionSystemPromptMode === 'override' ? 'btn-primary' : 'btn-secondary'"
+                      class="relative z-10 min-w-[4.25rem] flex-1 rounded-md px-2 py-1 text-center text-xs font-medium transition-colors duration-[400ms] ease-out touch-manipulation"
+                      :class="
+                        chatDraft.sessionSystemPromptMode === 'override'
+                          ? 'text-[var(--color-on-brand)]'
+                          : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'
+                      "
                       @click="chatDraft.sessionSystemPromptMode = 'override'"
                     >覆盖全局</button>
                   </div>
@@ -2018,7 +2472,7 @@ async function checkUpdate() {
                   v-model="chatDraft.prompt" 
                   rows="4"
                   placeholder="留空则使用角色默认提示词"
-                  class="input textarea w-full resize-none"
+                  class="input textarea w-full resize-y"
                 ></textarea>
               </div>
 
@@ -2044,7 +2498,7 @@ async function checkUpdate() {
                   v-model="chatDraft.longTermMemory"
                   rows="4"
                   placeholder="会插入系统提示词，留空则不启用"
-                  class="input textarea w-full resize-none"
+                  class="input textarea w-full resize-y"
                 ></textarea>
               </div>
 
