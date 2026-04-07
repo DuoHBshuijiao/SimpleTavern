@@ -157,8 +157,10 @@ function getChatAvatars(chat: Chat): { src: string | null; name: string; objectP
       const key = (m.senderPersonaId || '') + '|' + (m.senderAvatar || '') + '|' + (m.senderName || '')
       if (seen.has(key)) continue
       seen.add(key)
+      const senderResolved = m.senderPersonaId ? getPersonaById(m.senderPersonaId) : null
+      const userAvatarFile = senderResolved?.avatar || m.senderAvatar
       avatars.push({
-        src: m.senderAvatar ? `/api/avatars/${m.senderAvatar}` : null,
+        src: userAvatarFile ? `/api/avatars/${userAvatarFile}` : null,
         name: m.senderName || '你',
         objectPosition: '50% 50%',
       })
@@ -305,15 +307,15 @@ function confirmDelete() {
 
 <template>
   <aside 
-    class="flex flex-col theme-panel-bg backdrop-blur-xl backdrop-saturate-[1.8] border border-[var(--color-border)] shadow-glass-panel rounded-2xl transition-all duration-300 relative flex-shrink-0 my-4 h-[calc(100vh-2rem)]"
+    class="flex flex-col theme-panel-bg backdrop-blur-xl backdrop-saturate-[1.8] border border-[var(--color-border)] shadow-glass-panel rounded-2xl transition-[margin-left,opacity] duration-300 relative flex-shrink-0 mt-3 mb-4 h-[calc(100vh-1.75rem)]"
     :class="collapsed ? '-ml-[21rem] w-80 opacity-0 pointer-events-none' : 'ml-4 w-80 opacity-100'"
     style="contain: content; will-change: margin-left, opacity;"
   >
     <div class="flex flex-col h-full overflow-hidden rounded-2xl">
       
-      <!-- 用户身份区域 (头部) -->
-      <div class="p-4 bg-surface-overlay border-b border-[var(--color-border-subtle)] shrink-0">
-        <div class="flex items-center justify-between mb-3">
+      <!-- 用户身份区域 (头部)：滚动区全宽使滚动条贴侧栏右缘，内容用 px-4 与标题对齐 -->
+      <div class="bg-surface-overlay border-b border-[var(--color-border-subtle)] shrink-0">
+        <div class="flex items-center justify-between mb-3 px-4 pt-4">
           <span class="text-xs font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">我的身份</span>
           <button 
             class="text-xs text-brand hover:text-brand-hover transition-colors px-2 py-0.5 rounded hover:bg-brand-a10" 
@@ -322,32 +324,34 @@ function confirmDelete() {
             + 新建
           </button>
         </div>
-        
-        <div class="space-y-2 max-h-[140px] overflow-y-auto pr-1 custom-scrollbar">
-          <div 
-            v-for="p in personas"
-            :key="p.id"
-            class="group flex items-center gap-3 p-2 rounded-xl transition-all duration-200 border-y border-r border-transparent border-l-2"
-            :class="selectedPersonaId === p.id ? 'bg-brand-a10 border-l-brand' : 'border-l-transparent hover:bg-surface-muted'"
-            style="border: 1px solid var(--color-border);"
-            @click="emit('select-persona', p.id)"
-          >
-            <ModernAvatar :src="p.avatar ? `/api/avatars/${p.avatar}` : null" :name="p.name" :size="36" aspect="1" />
-            <div class="flex-1 min-w-0">
-              <div class="font-medium text-sm truncate" :class="selectedPersonaId === p.id ? 'text-brand' : 'text-[var(--color-text-secondary)]'">{{ p.name }}</div>
+
+        <div class="max-h-[140px] overflow-y-auto min-h-0 custom-scrollbar pb-4">
+          <div class="space-y-2 px-4">
+            <div 
+              v-for="p in personas"
+              :key="p.id"
+              class="group flex items-center gap-3 p-2 rounded-xl transition-all duration-200 border-y border-r border-transparent border-l-2"
+              :class="selectedPersonaId === p.id ? 'bg-brand-a10 border-l-brand' : 'border-l-transparent hover:bg-surface-muted'"
+              style="border: 1px solid var(--color-border);"
+              @click="emit('select-persona', p.id)"
+            >
+              <ModernAvatar :src="p.avatar ? `/api/avatars/${p.avatar}` : null" :name="p.name" :size="36" aspect="1" />
+              <div class="flex-1 min-w-0">
+                <div class="font-medium text-sm truncate" :class="selectedPersonaId === p.id ? 'text-brand' : 'text-[var(--color-text-secondary)]'">{{ p.name }}</div>
+              </div>
+              <div class="opacity-0 group-hover:opacity-100 flex gap-1 transition-opacity ml-auto bg-surface-overlay rounded-lg backdrop-blur-sm p-0.5">
+                <button class="p-1 hover:text-[var(--color-text)] text-[var(--color-text-muted)] transition-colors" @click.stop="emit('edit-persona', p)">
+                  <Pencil class="w-3.5 h-3.5" />
+                </button>
+                <button class="p-1 hover:text-error text-[var(--color-text-muted)] transition-colors" @click.stop="confirmDeletePersona(p, $event)">
+                  <Trash2 class="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
-            <div class="opacity-0 group-hover:opacity-100 flex gap-1 transition-opacity ml-auto bg-surface-overlay rounded-lg backdrop-blur-sm p-0.5">
-              <button class="p-1 hover:text-[var(--color-text)] text-[var(--color-text-muted)] transition-colors" @click.stop="emit('edit-persona', p)">
-                <Pencil class="w-3.5 h-3.5" />
-              </button>
-              <button class="p-1 hover:text-error text-[var(--color-text-muted)] transition-colors" @click.stop="confirmDeletePersona(p, $event)">
-                <Trash2 class="w-3.5 h-3.5" />
-              </button>
+            
+            <div v-if="!personas.length" class="text-xs text-[var(--color-text-muted)] text-center py-2">
+              点击上方新建创建你的第一个身份
             </div>
-          </div>
-          
-          <div v-if="!personas.length" class="text-xs text-[var(--color-text-muted)] text-center py-2">
-            点击上方新建创建你的第一个身份
           </div>
         </div>
       </div>
