@@ -112,8 +112,20 @@
   .theme-panel-bg {
     background: linear-gradient(to bottom right, var(--app-panel-from), var(--app-panel-to));
   }
+  /* 聊天顶栏：半透明磨砂玻璃，圆角胶囊条，无投影 */
   .theme-header-bg {
-    background: linear-gradient(to bottom, var(--app-header-from), var(--app-header-via), transparent);
+    background: color-mix(in srgb, var(--color-surface) 38%, transparent);
+    backdrop-filter: blur(var(--blur-heavy)) saturate(1.75);
+    -webkit-backdrop-filter: blur(var(--blur-heavy)) saturate(1.75);
+    box-shadow: none;
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-2xl);
+    transform: translateZ(0);
+    backface-visibility: hidden;
+  }
+
+  .theme-header-bg--square {
+    border-radius: 0;
   }
 
   /* ========== 主题表面色（叠加/悬停） ========== */
