@@ -33,11 +33,11 @@
  *
  * 文件关系：
  *    - 被导入：被views/ChatPage.vue等组件使用
- *    - 导入：导入vue的computed、ref、onMounted、onUnmounted、nextTick
+ *    - 导入：导入vue的computed、ref、watch、onMounted、onUnmounted、nextTick
  *    - 依赖：依赖vue
  *    - 位置：组件层，提供选择器功能
  */
-import { computed, ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { computed, ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { Check, Loader2, ChevronDown } from 'lucide-vue-next'
 
 interface Option {
@@ -228,6 +228,68 @@ function updateDropdownPosition() {
   dropdownStyle.value = style
 }
 
+let positionRaf = 0
+let removePositionListeners: (() => void) | null = null
+
+function scheduleUpdateDropdownPosition() {
+  if (positionRaf) return
+  positionRaf = requestAnimationFrame(() => {
+    positionRaf = 0
+    updateDropdownPosition()
+  })
+}
+
+function attachDropdownPositionListeners() {
+  removePositionListeners?.()
+  const schedule = () => scheduleUpdateDropdownPosition()
+
+  const onScroll = () => schedule()
+  const onWinResize = () => schedule()
+
+  document.addEventListener('scroll', onScroll, true)
+  window.addEventListener('resize', onWinResize)
+
+  let ro: ResizeObserver | undefined
+  const trigger = triggerRef.value
+  if (trigger && typeof ResizeObserver !== 'undefined') {
+    ro = new ResizeObserver(schedule)
+    ro.observe(trigger)
+  }
+
+  const vv = typeof window !== 'undefined' ? window.visualViewport : null
+  const onVvResize = () => schedule()
+  const onVvScroll = () => schedule()
+  if (vv) {
+    vv.addEventListener('resize', onVvResize)
+    vv.addEventListener('scroll', onVvScroll)
+  }
+
+  removePositionListeners = () => {
+    document.removeEventListener('scroll', onScroll, true)
+    window.removeEventListener('resize', onWinResize)
+    ro?.disconnect()
+    if (vv) {
+      vv.removeEventListener('resize', onVvResize)
+      vv.removeEventListener('scroll', onVvScroll)
+    }
+    removePositionListeners = null
+  }
+}
+
+watch(isOpen, (open) => {
+  if (open) {
+    nextTick(() => {
+      attachDropdownPositionListeners()
+    })
+  } else {
+    removePositionListeners?.()
+    if (positionRaf) {
+      cancelAnimationFrame(positionRaf)
+      positionRaf = 0
+    }
+  }
+})
+
 /**
  * 打开下拉框
  *
@@ -315,6 +377,11 @@ onMounted(() => {
 
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
+  removePositionListeners?.()
+  if (positionRaf) {
+    cancelAnimationFrame(positionRaf)
+    positionRaf = 0
+  }
 })
 </script>
 
@@ -341,12 +408,14 @@ onUnmounted(() => {
 
     <!-- Dropdown Menu（Teleport 到 body 避免被父级 overflow-hidden 裁剪） -->
     <Teleport to="body">
-      <div
-        v-if="isOpen"
-        ref="dropdownRef"
-        class="z-dropdown select-dropdown theme-panel-bg rounded-xl shadow-glass-panel overflow-hidden flex flex-col max-h-[320px] animate-in fade-in zoom-in-95 duration-200 border border-[var(--color-border)] backdrop-blur-xl backdrop-saturate-[1.8]"
-        :style="dropdownStyle"
-      >
+      <Transition name="select-dropdown-pop">
+        <div
+          v-if="isOpen"
+          ref="dropdownRef"
+          class="z-dropdown select-dropdown theme-panel-bg rounded-xl shadow-glass-panel overflow-hidden flex flex-col max-h-[320px] border border-[var(--color-border)] backdrop-blur-xl backdrop-saturate-[1.8]"
+          :class="placement === 'top' ? 'select-dropdown-pop--top' : 'select-dropdown-pop--bottom'"
+          :style="dropdownStyle"
+        >
       <!-- Search Input -->
       <div v-if="searchable || allowCreate" class="p-2 border-b border-[var(--color-border-subtle)]">
         <input 
@@ -395,7 +464,8 @@ onUnmounted(() => {
            <span v-else>无匹配项</span>
         </div>
       </div>
-    </div>
+        </div>
+      </Transition>
     </Teleport>
   </div>
 </template>
@@ -433,5 +503,51 @@ onUnmounted(() => {
 }
 .custom-scrollbar:hover::-webkit-scrollbar-thumb {
   background: var(--color-border-strong);
+}
+
+/* 下拉：自上方滑入；上拉：自下方滑入（与 placement 一致） */
+.select-dropdown-pop-enter-active,
+.select-dropdown-pop-leave-active {
+  transition:
+    transform 0.2s cubic-bezier(0.33, 1, 0.68, 1),
+    opacity 0.2s ease;
+}
+
+.select-dropdown-pop-enter-from.select-dropdown-pop--bottom,
+.select-dropdown-pop-leave-to.select-dropdown-pop--bottom {
+  transform: translateY(-0.5rem);
+  opacity: 0;
+}
+
+.select-dropdown-pop-enter-to.select-dropdown-pop--bottom,
+.select-dropdown-pop-leave-from.select-dropdown-pop--bottom {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+.select-dropdown-pop-enter-from.select-dropdown-pop--top,
+.select-dropdown-pop-leave-to.select-dropdown-pop--top {
+  transform: translateY(0.5rem);
+  opacity: 0;
+}
+
+.select-dropdown-pop-enter-to.select-dropdown-pop--top,
+.select-dropdown-pop-leave-from.select-dropdown-pop--top {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .select-dropdown-pop-enter-active,
+  .select-dropdown-pop-leave-active {
+    transition: opacity 0.15s ease;
+  }
+
+  .select-dropdown-pop-enter-from.select-dropdown-pop--bottom,
+  .select-dropdown-pop-leave-to.select-dropdown-pop--bottom,
+  .select-dropdown-pop-enter-from.select-dropdown-pop--top,
+  .select-dropdown-pop-leave-to.select-dropdown-pop--top {
+    transform: none;
+  }
 }
 </style>
