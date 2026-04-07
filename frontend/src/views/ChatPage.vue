@@ -75,6 +75,7 @@ import {
   useChatActions,
   useSettingsImport,
 } from '../composables'
+import { usePageBackground } from '../composables/usePageBackground'
 
 // 子组件
 import { ChatSidebar, MessageList, ChatInput, AssistantPanel, AssistantThread } from '../components/chat'
@@ -98,6 +99,13 @@ import { postAndConsumeSse } from '../api/sse'
 import { apiPost, apiGet, apiPut } from '../api/http'
 import { useErrorStack } from '../composables/useErrorStack'
 import { notifyMessage } from '../composables/useNotify'
+import {
+  HEADER_EXPAND_MS,
+  HEADER_LIFT_EASE,
+  HEADER_LIFT_MS,
+  HEADER_SQUEEZE_EASE,
+  HEADER_SQUEEZE_MS,
+} from '../constants/chatHeaderMorph'
 
 // ========== Stores ==========
 const settings = useSettingsStore()
@@ -107,6 +115,7 @@ const uiStore = useUiStore()
 const route = useRoute()
 const router = useRouter()
 const { refreshDataAfterImport } = useSettingsImport()
+const pageBackground = usePageBackground(() => settings.settings)
 
 // ========== 页面级状态 ==========
 const selectedCharacterId = ref<string | null>(null)
@@ -139,6 +148,108 @@ const settingsTab = ref<SettingsDrawerTab>('global')
 const isGenerating = ref(false)
 const streamError = ref<string | null>(null)
 const sidebarCollapsed = ref(false)
+/** 主内容区左缘（用于助手 FAB 左贴边），随侧栏折叠与窗口变化测量 */
+const chatMainRef = ref<HTMLElement | null>(null)
+const contentAreaLeftPx = ref(0)
+let contentAreaLeftRaf = 0
+function updateContentAreaLeft() {
+  contentAreaLeftPx.value = chatMainRef.value?.getBoundingClientRect().left ?? 0
+}
+function scheduleContentAreaLeft() {
+  if (contentAreaLeftRaf) cancelAnimationFrame(contentAreaLeftRaf)
+  contentAreaLeftRaf = requestAnimationFrame(() => {
+    contentAreaLeftRaf = 0
+    updateContentAreaLeft()
+  })
+}
+/** 顶栏变形：inset 悬浮条 → lifting 仅上移贴顶 → full 拉满宽并直角 */
+const headerMorphPhase = ref<'inset' | 'lifting' | 'full'>('inset')
+/** 展开侧栏时恢复原状用较短过渡（ms） */
+const headerEasingMs = ref(320)
+
+let headerCompactDelayTimer: ReturnType<typeof setTimeout> | null = null
+let headerLiftChainTimer: ReturnType<typeof setTimeout> | null = null
+
+watch(sidebarCollapsed, (collapsed) => {
+  if (headerCompactDelayTimer) {
+    clearTimeout(headerCompactDelayTimer)
+    headerCompactDelayTimer = null
+  }
+  if (headerLiftChainTimer) {
+    clearTimeout(headerLiftChainTimer)
+    headerLiftChainTimer = null
+  }
+  if (!collapsed) {
+    headerEasingMs.value = HEADER_EXPAND_MS
+    headerMorphPhase.value = 'inset'
+    window.setTimeout(() => {
+      headerEasingMs.value = 320
+    }, 220)
+    return
+  }
+  headerMorphPhase.value = 'inset'
+  headerCompactDelayTimer = window.setTimeout(() => {
+    headerMorphPhase.value = 'lifting'
+    headerCompactDelayTimer = null
+    headerLiftChainTimer = window.setTimeout(() => {
+      headerMorphPhase.value = 'full'
+      headerLiftChainTimer = null
+    }, HEADER_LIFT_MS)
+  }, 1000)
+})
+
+watch(sidebarCollapsed, () => {
+  nextTick(() => {
+    updateContentAreaLeft()
+    window.setTimeout(() => updateContentAreaLeft(), 320)
+  })
+})
+
+const chatHeaderStyle = computed(() => {
+  const phase = headerMorphPhase.value
+  const collapsed = sidebarCollapsed.value
+  const ms = headerEasingMs.value
+  const insetLeft = collapsed ? 'calc(1rem + 0.75rem)' : 'calc(21rem + 0.75rem)'
+  const insetRight = '0.75rem'
+  const insetTop = '0.75rem'
+  const radiusOpen = 'var(--radius-2xl)'
+
+  if (phase === 'full') {
+    return {
+      position: 'fixed' as const,
+      left: '0',
+      right: '0',
+      top: '0',
+      zIndex: 10,
+      borderRadius: '0',
+      transition: `left ${HEADER_SQUEEZE_MS}ms ${HEADER_SQUEEZE_EASE}, right ${HEADER_SQUEEZE_MS}ms ${HEADER_SQUEEZE_EASE}, border-radius ${HEADER_SQUEEZE_MS}ms ${HEADER_SQUEEZE_EASE}`,
+    }
+  }
+
+  if (phase === 'lifting') {
+    return {
+      position: 'fixed' as const,
+      left: insetLeft,
+      right: insetRight,
+      top: '0',
+      zIndex: 10,
+      borderRadius: radiusOpen,
+      transition: `top ${HEADER_LIFT_MS}ms ${HEADER_LIFT_EASE}`,
+    }
+  }
+
+  const transition = `left ${ms}ms ease, right ${ms}ms ease, top ${ms}ms ease, border-radius ${ms}ms ease`
+  return {
+    position: 'fixed' as const,
+    left: insetLeft,
+    right: insetRight,
+    top: insetTop,
+    zIndex: 10,
+    borderRadius: radiusOpen,
+    transition,
+  }
+})
+
 const editingChatId = ref<string | null>(null)
 const editingTitle = ref('')
 const aborter = ref<AbortController | null>(null)
@@ -317,14 +428,148 @@ function buildDraftHelperConversation(): DraftHelpConversationMessage[] {
 }
 
 const showChatSearch = ref(false)
+/** 关闭搜索栏时先跑完面板离场动画再显示「搜索」chip，避免与收起动画抢布局造成顿挫 */
+const holdSearchChipUntilSearchPanelClosed = ref(false)
+/** 顶栏搜索区向下拓展（grid 0fr→1fr） */
+const chatSearchExpandOpen = ref(false)
+/** 拓展占位完成后「带出」搜索 UI（opacity / translate） */
+const chatSearchContentRevealed = ref(false)
+
+const SEARCH_OPEN_EXPAND_MS = 320
+const SEARCH_REVEAL_DELAY_MS = 500
+const SEARCH_CLOSE_CONTENT_MS = 280
+const SEARCH_EXPAND_COLLAPSE_MS = 320
+
+let chatSearchOpenRevealTimer: ReturnType<typeof setTimeout> | null = null
+let chatSearchCloseTimers: ReturnType<typeof setTimeout>[] = []
+
+function prefersReducedMotion(): boolean {
+  if (typeof window === 'undefined') return false
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+}
+
+/** 仅清理搜索面板展开/收起与 reveal 的定时器，不碰 chip 状态（关闭动画需与 chip 同场） */
+function clearChatSearchPanelAnimTimers() {
+  if (chatSearchOpenRevealTimer != null) {
+    clearTimeout(chatSearchOpenRevealTimer)
+    chatSearchOpenRevealTimer = null
+  }
+  chatSearchCloseTimers.forEach(clearTimeout)
+  chatSearchCloseTimers = []
+}
+
+/** 面板定时器 + chip 展开状态，用于切会话、卸载等完整重置 */
+function clearChatSearchAnimTimers() {
+  clearChatSearchPanelAnimTimers()
+  clearChatSearchChipsExpandState()
+}
 const chatSearchQuery = ref('')
 const chatSearchLoading = ref(false)
 const chatSearchResults = ref<Array<{ messageId: string; messageIndex: number; snippet: string }>>([])
-const chatSearchCursor = ref(0)
+/** 当前高亮的搜索结果 chip；-1 表示未选中（搜索成功后不再默认选中首条） */
+const chatSearchCursor = ref(-1)
+/** chip 行：grid 展开；清空结果时先收起再延迟清 DOM，以便高度过渡 */
+const chatSearchChipsGridOpen = ref(false)
+const chatSearchChipsCollapsing = ref(false)
+const chatSearchChipsDisplayHits = ref<Array<{ messageId: string; messageIndex: number; snippet: string }>>([])
+let chatSearchChipsClearTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearChatSearchChipsExpandState() {
+  if (chatSearchChipsClearTimer != null) {
+    clearTimeout(chatSearchChipsClearTimer)
+    chatSearchChipsClearTimer = null
+  }
+  chatSearchChipsDisplayHits.value = []
+  chatSearchChipsGridOpen.value = false
+  chatSearchChipsCollapsing.value = false
+}
+
+function syncChatSearchChipsRow(options?: { forceExpandAnimation?: boolean }) {
+  const hits = chatSearchResults.value
+  if (hits.length > 0) {
+    if (chatSearchChipsClearTimer != null) {
+      clearTimeout(chatSearchChipsClearTimer)
+      chatSearchChipsClearTimer = null
+    }
+    chatSearchChipsCollapsing.value = false
+    const wasEmpty = chatSearchChipsDisplayHits.value.length === 0
+    chatSearchChipsDisplayHits.value = hits.map((h) => ({ ...h }))
+    const shouldAnimateExpand =
+      !prefersReducedMotion() && (options?.forceExpandAnimation === true || wasEmpty)
+    if (shouldAnimateExpand) {
+      chatSearchChipsGridOpen.value = false
+      nextTick(() => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            chatSearchChipsGridOpen.value = true
+          })
+        })
+      })
+    } else {
+      chatSearchChipsGridOpen.value = true
+    }
+  } else {
+    if (chatSearchChipsDisplayHits.value.length === 0) {
+      chatSearchChipsGridOpen.value = false
+      return
+    }
+    if (prefersReducedMotion()) {
+      clearChatSearchChipsExpandState()
+      return
+    }
+    chatSearchChipsCollapsing.value = true
+    chatSearchChipsGridOpen.value = false
+    if (chatSearchChipsClearTimer != null) {
+      clearTimeout(chatSearchChipsClearTimer)
+      chatSearchChipsClearTimer = null
+    }
+    chatSearchChipsClearTimer = setTimeout(() => {
+      chatSearchChipsDisplayHits.value = []
+      chatSearchChipsCollapsing.value = false
+      chatSearchChipsClearTimer = null
+    }, SEARCH_CLOSE_CONTENT_MS)
+  }
+}
+
+const chatSearchHitsForNav = computed(() =>
+  chatSearchResults.value.length > 0 ? chatSearchResults.value : chatSearchChipsDisplayHits.value
+)
+
+watch(chatSearchResults, () => syncChatSearchChipsRow(), { deep: true })
+
 const chatSearchInputRef = ref<HTMLInputElement | null>(null)
 const showHeaderMoreMenu = ref(false)
 const headerMoreMenuRef = ref<HTMLElement | null>(null)
 const headerMoreButtonRef = ref<HTMLElement | null>(null)
+/** 固定顶栏实际高度（px），供消息列表滚动区顶部留白，使滚动条从顶栏下缘起算 */
+const chatHeaderRef = ref<HTMLElement | null>(null)
+const chatHeaderHeightPx = ref(72)
+/** 顶栏下缘视口 y（px）+ 间距，助手 FAB 的 top 不得小于此值（顶栏展开变高时自动下移） */
+const chatAssistantFabMinTopPx = ref(0)
+let chatHeaderResizeObserver: ResizeObserver | null = null
+
+const ASSISTANT_FAB_HEADER_GAP_PX = 8
+
+watch(
+  () => chatHeaderRef.value,
+  (el) => {
+    chatHeaderResizeObserver?.disconnect()
+    chatHeaderResizeObserver = null
+    if (!el) return
+    const apply = () => {
+      const rect = el.getBoundingClientRect()
+      const h = rect.height
+      if (h > 0) chatHeaderHeightPx.value = Math.round(h * 100) / 100
+      chatAssistantFabMinTopPx.value = Math.round((rect.bottom + ASSISTANT_FAB_HEADER_GAP_PX) * 100) / 100
+    }
+    apply()
+    chatHeaderResizeObserver = new ResizeObserver(() => {
+      apply()
+    })
+    chatHeaderResizeObserver.observe(el)
+  },
+  { flush: 'post' }
+)
 
 watch(streamError, (value) => {
   if (!value) return
@@ -357,6 +602,11 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleGlobalKeydown)
   window.removeEventListener('pointerdown', handleHeaderPointerdown)
   if (chatSearchTimer) clearTimeout(chatSearchTimer)
+  if (headerCompactDelayTimer) clearTimeout(headerCompactDelayTimer)
+  if (headerLiftChainTimer) clearTimeout(headerLiftChainTimer)
+  clearChatSearchChipsExpandState()
+  chatHeaderResizeObserver?.disconnect()
+  chatHeaderResizeObserver = null
 })
 
 /**
@@ -948,9 +1198,9 @@ async function handleModelSelect(option: any) {
  */
 const messageListRef = ref<InstanceType<typeof MessageList> | null>(null)
 
-function scrollToBottom(instant = false) {
+function scrollToBottom(instant = false, force = false) {
   nextTick(() => {
-    messageListRef.value?.scrollToBottom(instant)
+    messageListRef.value?.scrollToBottom(instant, force)
   })
 }
 
@@ -965,7 +1215,7 @@ async function runChatSearch() {
   const q = chatSearchQuery.value.trim()
   if (!chat || !q) {
     chatSearchResults.value = []
-    chatSearchCursor.value = 0
+    chatSearchCursor.value = -1
     return
   }
   chatSearchLoading.value = true
@@ -974,10 +1224,7 @@ async function runChatSearch() {
       `/api/chats/${encodeURIComponent(chat.id)}/search?q=${encodeURIComponent(q)}`
     )
     chatSearchResults.value = Array.isArray(res?.hits) ? res.hits : []
-    chatSearchCursor.value = 0
-    if (chatSearchResults.value.length > 0) {
-      jumpToMessageIndex(chatSearchResults.value[0]!.messageIndex)
-    }
+    chatSearchCursor.value = -1
   } finally {
     chatSearchLoading.value = false
   }
@@ -986,37 +1233,96 @@ async function runChatSearch() {
 let chatSearchTimer: ReturnType<typeof setTimeout> | null = null
 
 function goToNextSearchResult() {
-  const total = chatSearchResults.value.length
+  const list = chatSearchHitsForNav.value
+  const total = list.length
   if (!total) return
-  chatSearchCursor.value = (chatSearchCursor.value + 1) % total
-  jumpToMessageIndex(chatSearchResults.value[chatSearchCursor.value]!.messageIndex)
+  if (chatSearchCursor.value < 0) {
+    chatSearchCursor.value = 0
+  } else {
+    chatSearchCursor.value = (chatSearchCursor.value + 1) % total
+  }
+  jumpToMessageIndex(list[chatSearchCursor.value]!.messageIndex)
 }
 
 function goToPrevSearchResult() {
-  const total = chatSearchResults.value.length
+  const list = chatSearchHitsForNav.value
+  const total = list.length
   if (!total) return
-  chatSearchCursor.value = (chatSearchCursor.value - 1 + total) % total
-  jumpToMessageIndex(chatSearchResults.value[chatSearchCursor.value]!.messageIndex)
+  if (chatSearchCursor.value < 0) {
+    chatSearchCursor.value = total - 1
+  } else {
+    chatSearchCursor.value = (chatSearchCursor.value - 1 + total) % total
+  }
+  jumpToMessageIndex(list[chatSearchCursor.value]!.messageIndex)
 }
 
 function jumpToSearchResult(idx: number) {
-  const hit = chatSearchResults.value[idx]
+  const hit = chatSearchHitsForNav.value[idx]
   if (!hit) return
   chatSearchCursor.value = idx
   jumpToMessageIndex(hit.messageIndex)
 }
 
 function openChatSearchBar() {
+  holdSearchChipUntilSearchPanelClosed.value = false
   showHeaderMoreMenu.value = false
+  clearChatSearchPanelAnimTimers()
+  chatSearchExpandOpen.value = false
+  chatSearchContentRevealed.value = false
   showChatSearch.value = true
   nextTick(() => {
-    chatSearchInputRef.value?.focus()
-    chatSearchInputRef.value?.select()
+    if (prefersReducedMotion()) {
+      chatSearchExpandOpen.value = true
+      chatSearchContentRevealed.value = true
+      nextTick(() => {
+        if (chatSearchResults.value.length > 0) {
+          syncChatSearchChipsRow({ forceExpandAnimation: true })
+        }
+        chatSearchInputRef.value?.focus()
+        chatSearchInputRef.value?.select()
+      })
+      return
+    }
+    chatSearchExpandOpen.value = true
+    chatSearchOpenRevealTimer = window.setTimeout(() => {
+      chatSearchContentRevealed.value = true
+      chatSearchOpenRevealTimer = null
+      nextTick(() => {
+        if (chatSearchResults.value.length > 0) {
+          syncChatSearchChipsRow({ forceExpandAnimation: true })
+        }
+        chatSearchInputRef.value?.focus()
+        chatSearchInputRef.value?.select()
+      })
+    }, SEARCH_REVEAL_DELAY_MS)
   })
 }
 
 function closeChatSearchBar() {
-  showChatSearch.value = false
+  if (!showChatSearch.value) return
+  clearChatSearchPanelAnimTimers()
+  holdSearchChipUntilSearchPanelClosed.value = true
+  if (prefersReducedMotion()) {
+    chatSearchExpandOpen.value = false
+    chatSearchContentRevealed.value = false
+    showChatSearch.value = false
+    holdSearchChipUntilSearchPanelClosed.value = false
+    return
+  }
+  chatSearchContentRevealed.value = false
+  const half = SEARCH_CLOSE_CONTENT_MS / 2
+  const tExpand = window.setTimeout(() => {
+    chatSearchExpandOpen.value = false
+  }, half)
+  const totalEnd = Math.max(SEARCH_CLOSE_CONTENT_MS, half + SEARCH_EXPAND_COLLAPSE_MS)
+  const tDone = window.setTimeout(() => {
+    showChatSearch.value = false
+    holdSearchChipUntilSearchPanelClosed.value = false
+    chatSearchExpandOpen.value = false
+    chatSearchContentRevealed.value = false
+    chatSearchCloseTimers = []
+  }, totalEnd)
+  chatSearchCloseTimers = [tExpand, tDone]
 }
 
 function toggleHeaderMoreMenu() {
@@ -1108,6 +1414,17 @@ onMounted(async () => {
     const first = characters.list[0]
     if (first) selectedCharacterId.value = first.id
   }
+  nextTick(() => {
+    updateContentAreaLeft()
+    window.setTimeout(() => updateContentAreaLeft(), 320)
+  })
+  window.addEventListener('resize', scheduleContentAreaLeft, { passive: true })
+})
+
+onBeforeUnmount(() => {
+  clearChatSearchAnimTimers()
+  window.removeEventListener('resize', scheduleContentAreaLeft)
+  if (contentAreaLeftRaf) cancelAnimationFrame(contentAreaLeftRaf)
 })
 
 /**
@@ -1238,7 +1555,7 @@ watch(
   () => activeChat.value?.id,
   (next, prev) => {
     if (next && next !== prev) {
-      scrollToBottom(true)
+      scrollToBottom(true, true)
     }
     if (prev != null && next !== prev) {
       chatReasoningBlocks.value = []
@@ -1248,10 +1565,14 @@ watch(
     }
     // 切换会话时自动关闭搜索面板并重置搜索状态
     showHeaderMoreMenu.value = false
+    clearChatSearchAnimTimers()
+    holdSearchChipUntilSearchPanelClosed.value = false
+    chatSearchExpandOpen.value = false
+    chatSearchContentRevealed.value = false
     showChatSearch.value = false
     chatSearchQuery.value = ''
     chatSearchResults.value = []
-    chatSearchCursor.value = 0
+    chatSearchCursor.value = -1
   },
 )
 
@@ -1275,7 +1596,7 @@ watch(
 )
 
 watch(chatSearchQuery, () => {
-  if (!showChatSearch.value) return
+  if (!showChatSearch.value || !chatSearchContentRevealed.value) return
   if (chatSearchTimer) clearTimeout(chatSearchTimer)
   chatSearchTimer = setTimeout(() => {
     void runChatSearch()
@@ -1523,7 +1844,7 @@ async function sendUserMessage() {
       senderAvatar: userRole === 'user' ? (selectedPersona.value?.avatar ?? null) : null,
       ts: now,
     })
-    scrollToBottom()
+    scrollToBottom(true, true)
     
     try {
       await apiPost(`/api/chats/${chatId}/messages`, {
@@ -1574,7 +1895,7 @@ async function sendUserMessage() {
         senderAvatar: userRole === 'user' ? (selectedPersona.value?.avatar ?? null) : null,
         ts: now,
       })
-      scrollToBottom()
+      scrollToBottom(true, true)
       
       await apiPost(`/api/chats/${chatId}/messages`, {
         role: userRole,
@@ -1605,7 +1926,7 @@ async function sendUserMessage() {
         ts: now,
       })
       chats.addLocalMessage({ version: 1, id: localAssistantId, role: 'assistant', content: '', ts: now })
-      scrollToBottom()
+      scrollToBottom(true, true)
 
       if (useStream) {
         stream.registerStreamMessage(localAssistantId)
@@ -2838,8 +3159,19 @@ const editingPersonaAvatarUrl = computed(() => {
 </script>
 
 <template>
-  <div class="flex h-screen w-full theme-page-bg overflow-hidden font-sans">
-    
+  <div class="relative h-screen w-full overflow-hidden font-sans text-[var(--color-text)]">
+    <div class="absolute inset-0 theme-page-bg"></div>
+    <div v-if="pageBackground.hasImage.value" class="pointer-events-none absolute inset-0 z-[1] overflow-hidden">
+      <img
+        :src="pageBackground.imageUrl.value || ''"
+        alt=""
+        aria-hidden="true"
+        class="page-background-image"
+        :style="pageBackground.imageStyle.value"
+      />
+    </div>
+    <div class="relative z-10 flex h-full w-full overflow-hidden">
+
     <!-- 左侧侧边栏 -->
     <ChatSidebar
       :collapsed="sidebarCollapsed"
@@ -2874,16 +3206,18 @@ const editingPersonaAvatarUrl = computed(() => {
       @delete-chat="deleteChat"
     />
 
-    <!-- 右侧主区域 + 助手面板 -->
-    <div class="flex-1 flex min-w-0 relative">
-      <main class="flex-1 flex flex-col relative min-w-0 bg-transparent transition-all duration-300">
+    <!-- 右侧主区域 + 助手面板（侧栏折叠时保留与展开时 ml-4 一致的左侧留白） -->
+    <div class="flex-1 flex min-w-0 relative transition-[padding] duration-300" :class="{ 'pl-4': sidebarCollapsed }">
+      <main ref="chatMainRef" class="flex-1 flex flex-col relative min-w-0 bg-transparent">
       
         <!-- 聊天内容区 -->
         <div v-if="(selectedCharacter || activeChat?.isGroup) && activeChat" class="flex flex-col h-full relative">
           <!-- 顶部标题栏 -->
           <header 
-            class="absolute top-0 left-0 right-0 z-10 flex flex-col theme-header-bg pointer-events-none"
-            style="transform: translateZ(0);"
+            ref="chatHeaderRef"
+            class="flex flex-col theme-header-bg pointer-events-none"
+            :class="{ 'theme-header-bg--square': headerMorphPhase === 'full' }"
+            :style="chatHeaderStyle"
           >
             <div class="flex items-start justify-between gap-4 px-6 pt-3 pb-2">
               <div class="pointer-events-auto flex min-w-0 flex-1 items-start gap-3">
@@ -2896,7 +3230,7 @@ const editingPersonaAvatarUrl = computed(() => {
                 <div class="min-w-0 flex-1">
                   <template v-if="activeChat.isGroup">
                     <div class="flex min-w-0 items-center gap-2">
-                      <h2 class="truncate text-lg font-bold text-[var(--color-purple-text)] shadow-sm">{{ activeChat.title }}</h2>
+                      <h2 class="truncate text-lg font-bold text-[var(--color-purple-text)]">{{ activeChat.title }}</h2>
                       <span class="shrink-0 rounded-full border border-[var(--color-border-subtle)] bg-surface-muted/70 px-2 py-0.5 text-[11px] text-[var(--color-text-muted)]">
                         {{ activeChat.memberIds.length }} 个角色
                       </span>
@@ -2904,7 +3238,7 @@ const editingPersonaAvatarUrl = computed(() => {
                   </template>
                   <template v-else>
                     <div class="flex min-w-0 items-center gap-2">
-                      <h2 class="truncate text-lg font-bold text-[var(--color-text)] shadow-sm">{{ selectedCharacter?.name }}</h2>
+                      <h2 class="truncate text-lg font-bold text-[var(--color-text)]">{{ selectedCharacter?.name }}</h2>
                       <span class="text-[var(--color-text-muted)]">/</span>
                       <span class="truncate text-sm text-[var(--color-text-muted)]">{{ activeChat.title }}</span>
                     </div>
@@ -2913,17 +3247,20 @@ const editingPersonaAvatarUrl = computed(() => {
               </div>
 
               <div class="pointer-events-auto shrink-0 flex items-start gap-2">
-                <button
-                  v-if="!showChatSearch"
-                  class="header-action-chip"
-                  :disabled="!activeChat"
-                  title="搜索当前会话（Ctrl+F）"
-                  @click="openChatSearchBar"
-                >
-                  <Search class="w-3.5 h-3.5" />
-                  <span>搜索</span>
-                  <span class="header-action-shortcut">Ctrl+F</span>
-                </button>
+                <Transition name="header-search-trigger">
+                  <button
+                    v-if="!showChatSearch && !holdSearchChipUntilSearchPanelClosed"
+                    key="hdr-search-trigger"
+                    class="header-action-chip"
+                    :disabled="!activeChat"
+                    title="搜索当前会话（Ctrl+F）"
+                    @click="openChatSearchBar"
+                  >
+                    <Search class="w-3.5 h-3.5" />
+                    <span>搜索</span>
+                    <span class="header-action-shortcut">Ctrl+F</span>
+                  </button>
+                </Transition>
                 <button
                   v-if="activeChat.isGroup"
                   class="header-action-chip"
@@ -2949,22 +3286,25 @@ const editingPersonaAvatarUrl = computed(() => {
                     <MoreHorizontal class="w-4 h-4" />
                     <span class="sr-only">更多操作</span>
                   </button>
-                  <div
-                    v-if="showHeaderMoreMenu"
-                    ref="headerMoreMenuRef"
-                    class="header-more-menu"
-                    role="menu"
-                    aria-label="更多操作"
-                  >
-                    <button class="header-more-menu__item" role="menuitem" :disabled="!activeChat" @click="showExportModal = true; closeHeaderMoreMenu()">
-                      <span class="header-more-menu__label">导出当前会话</span>
-                      <span class="header-more-menu__meta">聊天记录</span>
-                    </button>
-                    <button class="header-more-menu__item" role="menuitem" @click="showImportModal = true; closeHeaderMoreMenu()">
-                      <span class="header-more-menu__label">导入会话</span>
-                      <span class="header-more-menu__meta">JSON / 扩展来源</span>
-                    </button>
-                  </div>
+                  <Transition name="header-more-pop">
+                    <div
+                      v-if="showHeaderMoreMenu"
+                      key="hdr-more-menu"
+                      ref="headerMoreMenuRef"
+                      class="header-more-menu"
+                      role="menu"
+                      aria-label="更多操作"
+                    >
+                      <button class="header-more-menu__item" role="menuitem" :disabled="!activeChat" @click="showExportModal = true; closeHeaderMoreMenu()">
+                        <span class="header-more-menu__label">导出当前会话</span>
+                        <span class="header-more-menu__meta">聊天记录</span>
+                      </button>
+                      <button class="header-more-menu__item" role="menuitem" @click="showImportModal = true; closeHeaderMoreMenu()">
+                        <span class="header-more-menu__label">导入会话</span>
+                        <span class="header-more-menu__meta">JSON / 扩展来源</span>
+                      </button>
+                    </div>
+                  </Transition>
                 </div>
               </div>
             </div>
@@ -2973,41 +3313,80 @@ const editingPersonaAvatarUrl = computed(() => {
               v-if="showChatSearch"
               class="px-6 pb-2 pointer-events-auto"
             >
-              <div class="flex items-center gap-3 rounded-xl border border-[var(--color-border)] bg-surface-overlay/85 px-3 py-2 shadow-lg">
-                <div class="flex shrink-0 items-center gap-2 border-r border-[var(--color-border-subtle)] pr-3">
-                  <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-surface-muted/80 text-[var(--color-text-secondary)]">
-                    <Search class="w-4 h-4" />
-                  </span>
-                  <div class="leading-tight">
-                    <div class="text-xs text-[var(--color-text-secondary)]">会话搜索</div>
-                    <div class="text-[11px] text-[var(--color-text-muted)]">
-                      {{ chatSearchResults.length ? `${chatSearchCursor + 1}/${chatSearchResults.length}` : (chatSearchLoading ? '搜索中...' : '输入后定位消息') }}
+              <div
+                class="chat-header-search-expand"
+                :class="{ 'chat-header-search-expand--open': chatSearchExpandOpen }"
+                :style="{
+                  '--chat-search-expand-ms': `${SEARCH_OPEN_EXPAND_MS}ms`,
+                  '--chat-search-collapse-ms': `${SEARCH_EXPAND_COLLAPSE_MS}ms`,
+                  '--chat-search-content-ms': `${SEARCH_CLOSE_CONTENT_MS}ms`,
+                }"
+              >
+                <div class="chat-header-search-expand-inner">
+                  <div
+                    class="chat-header-search-reveal-layer"
+                    :class="{ 'chat-header-search-reveal-layer--visible': chatSearchContentRevealed }"
+                  >
+                    <div class="chat-header-search-panel-inner flex items-center gap-3 py-1.5">
+                      <div class="flex shrink-0 items-center gap-2 border-r border-[var(--color-border-subtle)] pr-3">
+                        <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-surface-muted/80 text-[var(--color-text-secondary)]">
+                          <Search class="w-4 h-4" />
+                        </span>
+                        <div class="leading-tight">
+                          <div class="text-xs text-[var(--color-text-secondary)]">会话搜索</div>
+                          <div class="text-[11px] text-[var(--color-text-muted)]">
+                            {{ chatSearchHitsForNav.length ? (chatSearchCursor < 0 ? `—/${chatSearchHitsForNav.length}` : `${chatSearchCursor + 1}/${chatSearchHitsForNav.length}`) : (chatSearchLoading ? '搜索中...' : '输入后定位消息') }}
+                          </div>
+                        </div>
+                      </div>
+
+                      <input
+                        ref="chatSearchInputRef"
+                        v-model="chatSearchQuery"
+                        class="min-w-0 flex-1 bg-transparent text-sm outline-none"
+                        placeholder="搜索当前会话"
+                        @keydown.enter.prevent="runChatSearch"
+                        @keydown.esc.prevent="closeChatSearchBar"
+                      />
+
+                      <button class="btn btn-xs btn-secondary shrink-0" @click="goToPrevSearchResult">上一个</button>
+                      <button class="btn btn-xs btn-secondary shrink-0" @click="goToNextSearchResult">下一个</button>
+                      <button class="btn btn-xs btn-secondary shrink-0" @click="closeChatSearchBar">
+                        关闭
+                      </button>
+                    </div>
+
+                    <div
+                      v-if="chatSearchChipsDisplayHits.length > 0 || chatSearchChipsCollapsing"
+                      class="chat-search-chips-expand mt-2"
+                      :class="{ 'chat-search-chips-expand--open': chatSearchChipsGridOpen }"
+                      :style="{ '--chat-search-chips-ms': `${SEARCH_CLOSE_CONTENT_MS}ms` }"
+                    >
+                      <div class="chat-search-chips-expand-inner">
+                        <div
+                          v-if="chatSearchChipsDisplayHits.length > 0"
+                          class="flex items-stretch gap-2 overflow-x-auto overflow-y-hidden max-h-48 py-1"
+                        >
+                          <button
+                            v-for="(hit, idx) in chatSearchChipsDisplayHits"
+                            :key="`${hit.messageId}_${hit.messageIndex}`"
+                            class="inline-flex w-[220px] shrink-0 items-start rounded-lg border border-[var(--color-border-subtle)] px-3 py-2 text-left text-xs transition-colors hover:bg-surface-muted"
+                            :class="idx === chatSearchCursor ? 'bg-surface-muted' : 'bg-surface-muted/55'"
+                            @click="jumpToSearchResult(idx)"
+                          >
+                            {{ hit.snippet }}
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
-
-                <input
-                  ref="chatSearchInputRef"
-                  v-model="chatSearchQuery"
-                  class="min-w-0 flex-1 bg-transparent text-sm outline-none"
-                  placeholder="搜索当前会话（Ctrl+F）"
-                  @keydown.enter.prevent="runChatSearch"
-                  @keydown.esc.prevent="closeChatSearchBar"
-                />
-
-                <div class="flex shrink-0 items-center gap-1 rounded-lg bg-surface-muted/80 p-1">
-                  <button class="btn btn-xs btn-secondary" @click="goToPrevSearchResult">上一个</button>
-                  <button class="btn btn-xs btn-secondary" @click="goToNextSearchResult">下一个</button>
-                </div>
-
-                <button class="btn btn-xs btn-secondary shrink-0" @click="closeChatSearchBar">
-                  关闭
-                </button>
               </div>
             </div>
 
             <!-- 群成员头像行 -->
-            <div v-if="activeChat.isGroup && groupMembers.length > 0" class="px-6 pb-2 pointer-events-auto">
+            <Transition name="chat-header-groupstrip">
+            <div v-if="activeChat.isGroup && groupMembers.length > 0" key="hdr-group-strip" class="px-6 pb-2 pointer-events-auto">
               <div class="flex items-center gap-3 overflow-x-auto rounded-xl border border-[var(--color-border-subtle)] bg-surface-overlay/55 px-3 py-2">
                 <div class="shrink-0 text-[11px] tracking-[0.08em] text-[var(--color-text-muted)]">
                   成员
@@ -3042,24 +3421,7 @@ const editingPersonaAvatarUrl = computed(() => {
                 </div>
               </div>
             </div>
-            <div
-              v-if="showChatSearch && chatSearchResults.length > 0"
-              class="px-6 pb-2 pointer-events-auto"
-            >
-              <div
-                class="flex items-stretch gap-2 overflow-x-auto overflow-y-hidden rounded-xl border border-[var(--color-border)] bg-surface-overlay/85 px-2 py-2 shadow-lg max-h-48"
-              >
-                <button
-                  v-for="(hit, idx) in chatSearchResults"
-                  :key="`${hit.messageId}_${idx}`"
-                  class="inline-flex w-[220px] shrink-0 items-start rounded-lg border border-[var(--color-border-subtle)] px-3 py-2 text-left text-xs transition-colors hover:bg-surface-muted"
-                  :class="idx === chatSearchCursor ? 'bg-surface-muted' : 'bg-surface-muted/55'"
-                  @click="jumpToSearchResult(idx)"
-                >
-                  {{ hit.snippet }}
-                </button>
-              </div>
-            </div>
+            </Transition>
           </header>
 
           <!-- 消息列表 -->
@@ -3084,6 +3446,8 @@ const editingPersonaAvatarUrl = computed(() => {
             :has-multiple-versions="versions.hasMultipleVersions"
             :get-current-version-index="versions.getCurrentVersionIndex"
             :get-version-count="versions.getVersionCount"
+            :header-inset-px="chatHeaderHeightPx"
+            :sidebar-collapsed="sidebarCollapsed"
             @edit-message="(m) => actions.openEditMessage(m, versions.getDisplayContent(m))"
             @delete-message="actions.deleteMessage"
             @rewrite-message="handleRewriteMessage"
@@ -3095,6 +3459,10 @@ const editingPersonaAvatarUrl = computed(() => {
           <!-- 输入区域 -->
           <ChatInput
             v-model="draftMessage"
+            :sidebar-collapsed="sidebarCollapsed"
+            :header-morph-phase="headerMorphPhase"
+            :content-area-left-px="contentAreaLeftPx"
+            :assistant-fab-min-top-px="chatAssistantFabMinTopPx"
             :is-generating="isGenerating"
             :stream-error="streamError"
             :draft-images="draftImages"
@@ -3132,9 +3500,9 @@ const editingPersonaAvatarUrl = computed(() => {
           />
         </div>
 
-        <!-- 空状态 -->
-        <div v-else class="flex flex-col items-center justify-center h-full text-center p-8 opacity-60">
-          <div class="absolute top-4 right-4 pointer-events-auto opacity-100 flex items-center gap-2">
+        <!-- 空状态：勿用整层 opacity 压暗（子元素无法抵消）；弱化用语义色，保证文字清晰、不糊 -->
+        <div v-else class="relative flex flex-col items-center justify-center h-full text-center p-8">
+          <div class="absolute top-4 right-4 pointer-events-auto flex items-center gap-2">
             <button class="btn btn-sm btn-secondary" disabled>
               导出
             </button>
@@ -3145,11 +3513,13 @@ const editingPersonaAvatarUrl = computed(() => {
               设置
             </button>
           </div>
-          <h3 class="text-xl font-bold text-[var(--color-text)] mb-2">未打开会话</h3>
-          <p class="text-[var(--color-text-muted)] mb-8 leading-relaxed px-4 max-w-[468px] w-full">从左侧选择角色以进入现有会话或新建会话。如果还没有角色，先创建一个。</p>
-          <button class="bg-brand text-on-brand px-6 py-2 rounded-xl hover:bg-brand-hover transition-colors" @click="openCreateCharacter">
-            创建角色
-          </button>
+          <div class="flex flex-col items-center">
+            <h3 class="text-xl font-bold text-[var(--color-text-secondary)] mb-2">未打开会话</h3>
+            <p class="text-[var(--color-text-muted)] mb-8 leading-relaxed px-4 max-w-[468px] w-full">从左侧选择角色以进入现有会话或新建会话。如果还没有角色，先创建一个。</p>
+            <button class="bg-brand text-on-brand px-6 py-2 rounded-xl hover:bg-brand-hover transition-colors" @click="openCreateCharacter">
+              创建角色
+            </button>
+          </div>
         </div>
       </main>
 
@@ -3304,6 +3674,7 @@ const editingPersonaAvatarUrl = computed(() => {
       @update:settings="actions.editingMemberSettings.value = $event"
       @save="actions.saveMemberSettings"
     />
+    </div>
   </div>
 </div>
 
@@ -3846,6 +4217,16 @@ const editingPersonaAvatarUrl = computed(() => {
 </template>
 
 <style scoped>
+.page-background-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  transform-origin: center;
+  transition: opacity 160ms ease, filter 160ms ease, transform 160ms ease;
+  user-select: none;
+}
+
 .header-action-chip {
   display: inline-flex;
   align-items: center;
@@ -3858,9 +4239,19 @@ const editingPersonaAvatarUrl = computed(() => {
   color: var(--color-text-secondary);
   font-size: 0.75rem;
   line-height: 1;
-  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease;
+  transition:
+    background-color 200ms cubic-bezier(0.25, 1, 0.5, 1),
+    border-color 200ms cubic-bezier(0.25, 1, 0.5, 1),
+    color 200ms cubic-bezier(0.25, 1, 0.5, 1),
+    transform 180ms cubic-bezier(0.25, 1, 0.5, 1);
   backdrop-filter: blur(var(--blur-light));
   -webkit-backdrop-filter: blur(var(--blur-light));
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .header-action-chip:active:not(:disabled) {
+    transform: scale(0.97);
+  }
 }
 
 .header-action-chip:hover:not(:disabled),
@@ -3906,6 +4297,144 @@ const editingPersonaAvatarUrl = computed(() => {
   box-shadow: var(--shadow-glass-panel, 0 16px 40px rgba(0, 0, 0, 0.24));
   backdrop-filter: blur(var(--blur-light));
   -webkit-backdrop-filter: blur(var(--blur-light));
+  transform-origin: top right;
+}
+
+/* 与顶栏吸顶 morph（320 / 420 / 520ms）同气质的过渡：分层入场 / 退场 */
+
+.header-search-trigger-enter-active,
+.header-search-trigger-leave-active {
+  transition:
+    opacity 200ms cubic-bezier(0.25, 1, 0.5, 1),
+    transform 200ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.header-search-trigger-enter-from,
+.header-search-trigger-leave-to {
+  opacity: 0;
+  transform: translateY(-4px) scale(0.96);
+}
+
+.header-more-pop-enter-active,
+.header-more-pop-leave-active {
+  transition:
+    opacity 200ms cubic-bezier(0.25, 1, 0.5, 1),
+    transform 200ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.header-more-pop-enter-from,
+.header-more-pop-leave-to {
+  opacity: 0;
+  transform: translateY(-6px) scale(0.96);
+}
+
+/* 会话搜索：先 grid 向下拓展占位，再 reveal 层带出内容；关闭时先收内容，半程再收拓展 */
+.chat-header-search-expand {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--chat-search-expand-ms, 320ms) cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.chat-header-search-expand--open {
+  grid-template-rows: 1fr;
+}
+
+.chat-header-search-expand-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+
+.chat-header-search-reveal-layer {
+  opacity: 0;
+  transform: translateY(6px);
+  transition:
+    opacity var(--chat-search-content-ms, 280ms) cubic-bezier(0.4, 0, 0.2, 1),
+    transform var(--chat-search-content-ms, 280ms) cubic-bezier(0.25, 1, 0.5, 1);
+  pointer-events: none;
+}
+
+.chat-header-search-reveal-layer--visible {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.chat-header-groupstrip-enter-active,
+.chat-header-groupstrip-leave-active {
+  transition:
+    opacity 300ms cubic-bezier(0.4, 0, 0.2, 1),
+    transform 300ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.chat-header-groupstrip-enter-from,
+.chat-header-groupstrip-leave-to {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+/* 会话搜索命中 chip 行：与主搜索区相同 grid 手法，顶栏高度随 ResizeObserver 连续变化 */
+.chat-search-chips-expand {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--chat-search-chips-ms, 280ms) cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.chat-search-chips-expand--open {
+  grid-template-rows: 1fr;
+}
+
+.chat-search-chips-expand-inner {
+  overflow: hidden;
+  min-height: 0;
+  transform: translateY(8px);
+  opacity: 0;
+  transition:
+    transform var(--chat-search-chips-ms, 280ms) cubic-bezier(0.25, 1, 0.5, 1),
+    opacity var(--chat-search-chips-ms, 280ms) cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.chat-search-chips-expand--open .chat-search-chips-expand-inner {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .header-search-trigger-enter-active,
+  .header-search-trigger-leave-active,
+  .header-more-pop-enter-active,
+  .header-more-pop-leave-active,
+  .chat-header-groupstrip-enter-active,
+  .chat-header-groupstrip-leave-active {
+    transition-duration: 0.01ms !important;
+  }
+
+  .header-search-trigger-enter-from,
+  .header-search-trigger-leave-to,
+  .header-more-pop-enter-from,
+  .header-more-pop-leave-to,
+  .chat-header-groupstrip-enter-from,
+  .chat-header-groupstrip-leave-to {
+    opacity: 1;
+    transform: none;
+  }
+
+  .chat-search-chips-expand {
+    transition: none;
+  }
+
+  .chat-search-chips-expand-inner {
+    transform: none;
+    opacity: 1;
+    transition: none;
+  }
+
+  .chat-header-search-expand {
+    transition: none;
+  }
+
+  .chat-header-search-reveal-layer {
+    transition: none;
+  }
 }
 
 .header-more-menu__item {
