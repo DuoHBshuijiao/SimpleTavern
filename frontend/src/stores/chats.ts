@@ -53,6 +53,10 @@ import { defineStore } from 'pinia'
 import type { Chat, ChatMessage, ChatOverrides, GroupMemberSettings, MainChatRole } from '../types/models'
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/http'
 
+interface UpdateOverridesOptions {
+  skipLoadList?: boolean
+}
+
 /**
  * 聊天Store
  *
@@ -69,6 +73,14 @@ export const useChatsStore = defineStore('chats', {
     error: null as string | null,
   }),
   actions: {
+    mergeChatIntoList(chat: Chat) {
+      const list = chat.isGroup ? this.groupList : this.list
+      const index = list.findIndex((item) => item.id === chat.id)
+      if (index < 0) return
+      list.splice(index, 1, chat)
+      list.sort((a, b) => Date.parse(b.updatedAt || '') - Date.parse(a.updatedAt || ''))
+    },
+
     /**
      * 加载单聊列表
      *
@@ -251,14 +263,24 @@ export const useChatsStore = defineStore('chats', {
      * @param {ChatOverrides} overrides - 覆盖设置（来自types/models.ts）
      * @returns {Promise<Chat>} 更新后的聊天会话
      */
-    async updateOverrides(chatId: string, overrides: ChatOverrides) {
+    async updateOverrides(chatId: string, overrides: ChatOverrides, options?: UpdateOverridesOptions) {
       const { memberSettings, ...restOverrides } = overrides
       const chat = await apiPut<Chat>(`/api/chats/${chatId}`, { 
         overrides: restOverrides,
         memberSettings: memberSettings || undefined
       })
       this.activeChat = chat
-      if (this.characterId) await this.loadList(this.characterId)
+      const skipLoadList = options?.skipLoadList === true
+      if (chat.isGroup) {
+        if (skipLoadList) this.mergeChatIntoList(chat)
+        else await this.loadGroupList()
+        return chat
+      }
+      if (skipLoadList) {
+        this.mergeChatIntoList(chat)
+      } else if (this.characterId) {
+        await this.loadList(this.characterId)
+      }
       return chat
     },
     /**
