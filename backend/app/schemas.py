@@ -273,6 +273,9 @@ class Settings(BaseModel):
     userPersonas: list[UserPersona] = Field(default_factory=list)
     selectedPersonaId: str | None = None
     selectedFont: str | None = None  # 当前选中的自定义字体文件名，存于 data/fonts，不随备份导出
+    pageBackgroundImage: str | None = None  # 页面背景图文件名，存于 data/page_backgrounds
+    pageBackgroundOpacity: float | None = Field(default=None, ge=0.0, le=1.0)  # 背景图透明度；None 表示前端按 1 处理
+    pageBackgroundBlurPx: float | None = Field(default=None, ge=0.0, le=64.0)  # 背景图模糊半径(px)；None 表示前端按 0 处理
     messageFontSize: int | None = None  # 聊天窗口内消息文字字号（仅作用于消息气泡内容）
     worldBookEntryScanDepthDefault: int = 2
     createdAt: str = Field(default_factory=_now_iso)
