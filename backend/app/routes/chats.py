@@ -129,6 +129,8 @@ def _merge_overrides(existing: Chat, incoming: UpdateChatRequest) -> None:
     ov = incoming.overrides
     if ov.prompt is not None:
         existing.overrides.prompt = ov.prompt
+    if "sessionSystemPromptMode" in ov.model_fields_set:
+        existing.overrides.sessionSystemPromptMode = ov.sessionSystemPromptMode
     if getattr(ov, "longTermMemory", None) is not None:
         existing.overrides.longTermMemory = ov.longTermMemory
     if hasattr(ov, "contextStartMessageId"):
