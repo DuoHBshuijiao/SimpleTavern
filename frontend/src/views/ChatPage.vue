@@ -3215,7 +3215,7 @@ const editingPersonaAvatarUrl = computed(() => {
           <!-- 顶部标题栏 -->
           <header 
             ref="chatHeaderRef"
-            class="flex flex-col theme-header-bg pointer-events-none"
+            class="flex flex-col theme-header-bg backdrop-blur-[var(--blur-heavy)] backdrop-saturate-[1.75] pointer-events-none"
             :class="{ 'theme-header-bg--square': headerMorphPhase === 'full' }"
             :style="chatHeaderStyle"
           >
