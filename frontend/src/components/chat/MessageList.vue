@@ -10,6 +10,12 @@
  * - 自动滚动到底部
  * - 为流式输出设置DOM引用
  *
+ * 维护提醒：
+ * - 2026-04 曾出现 MessageList 在固定滚动阈值处突然重定位的问题。触发点对每个会话是固定且唯一的，长会话往往更早命中。
+ * - 根因不是随机竞态，而是“禁用浏览器原生 scroll anchoring + 用 ref/watch 间接驱动虚拟窗口 + 高度测量阶段手动改 scrollTop”叠加后，把一次窗口切换拆成了多轮更新。
+ * - 这里依赖浏览器默认的 overflow-anchor 行为，以及直接 computed 的 windowStart/windowEnd，来保证高度写回与窗口切换尽量原子完成；不要轻易恢复手动锚点补偿或 window-clamp 一类实验逻辑。
+ * - 当前选择是不再额外修饰原生滚动条与顶栏的重叠区域，先优先保证虚拟滚动几何稳定；后续若要彻底解决体验问题，建议直接上独立自绘滚动条，而不是再次改 scrollport 几何。
+ *
  * Props说明：
  * - messages: 消息列表（来自types/models.ts的ChatMessage[]类型）
  * - isGroup: 是否为群聊
@@ -89,6 +95,10 @@ const props = defineProps<{
   hasMultipleVersions: (m: ChatMessage) => boolean
   getCurrentVersionIndex: (m: ChatMessage) => number
   getVersionCount: (m: ChatMessage) => number
+  /** 固定顶栏高度（px），用于滚动区上方占位，使滚动条从顶栏下缘起算 */
+  headerInsetPx: number
+  /** 侧栏是否折叠；用于侧栏宽度动画结束后合并重排补偿，降低抖动 */
+  sidebarCollapsed?: boolean
 }>()
 
 function getChatImageUrl(imageId: string): string {
@@ -111,16 +121,22 @@ const scrollTop = ref(0)
 const viewportHeight = ref(0)
 const realDistanceFromBottom = ref(0)
 const wasNearBottomBeforeMutation = ref(true)
-const measuredHeights = ref<Record<number, number>>({})
+const measuredHeights = ref<Record<string, number>>({})
 const MESSAGE_ROW_GAP = 32
 const DEFAULT_ROW_HEIGHT = 220 + MESSAGE_ROW_GAP
+/** 保持较大的 overscan，让未测量消息在接近视口前就已挂载并完成测量，避免长会话中累计估高误差突然命中视口。 */
 const BUFFER_ITEMS = 26
 const SCROLL_BOTTOM_SHOW_THRESHOLD = 200
 const SCROLL_BOTTOM_NEAR_THRESHOLD = 24
 const AUTO_FOLLOW_DISTANCE_THRESHOLD = 300
+const SCROLL_TO_BOTTOM_SETTLE_MS = 140
 /** 用户曾用滚轮向上或拖动滚动条解除跟底；回到贴底带内或强制滚底时清除 */
 const userDismissedAutoFollow = ref(false)
 let contentResizeObserver: ResizeObserver | null = null
+let pendingBottomSnapToken = 0
+let pendingBottomSnapTimer: ReturnType<typeof setTimeout> | null = null
+let pendingBottomSnapScrollEndCleanup: (() => void) | null = null
+let pendingBottomSnapRefresh: (() => void) | null = null
 
 // 删除确认状态
 const deleteConfirm = ref<{
@@ -356,6 +372,12 @@ function getCharacterById(id: string): CharacterCard | null {
   return props.characters.find(c => c.id === id) ?? null
 }
 
+/** 按 ID 从全局设置中的身份列表解析当前头像（更新 persona 后与消息内快照解耦） */
+function getUserPersonaFromSettings(id: string | null | undefined): UserPersona | null {
+  if (!id) return null
+  return settingsStore.settings?.userPersonas?.find(p => p.id === id) ?? null
+}
+
 /**
  * 获取消息标签
  *
@@ -381,13 +403,18 @@ function getMessageLabel(m: ChatMessage): string {
  * 获取消息头像
  *
  * 根据消息角色和内容返回头像URL。
- * 用户消息优先使用发送者头像，助手消息优先使用角色头像。
+ * 用户消息：有 senderPersonaId 时优先用设置里该身份的当前头像，否则用消息快照 senderAvatar，再否则当前选中身份头像。
+ * 助手消息优先使用角色头像。
  *
  * @param {ChatMessage} m - 消息对象（来自types/models.ts）
  * @returns {string | null} 头像URL，如果未找到则返回null
  */
 function getMessageAvatar(m: ChatMessage): string | null {
   if (m.role === 'user') {
+    if (m.senderPersonaId) {
+      const live = getUserPersonaFromSettings(m.senderPersonaId)
+      if (live?.avatar) return `/api/avatars/${live.avatar}`
+    }
     if (m.senderAvatar) return `/api/avatars/${m.senderAvatar}`
     return props.userAvatarUrl
   }
@@ -486,6 +513,7 @@ function isWheelTargetInsideNestedScrollable(eventTarget: EventTarget | null, ro
 function handleListWheel(e: WheelEvent) {
   const root = scrollRef.value
   if (!root || e.currentTarget !== root) return
+  cancelPendingBottomSnap()
   if (e.deltaY <= 0) return
   if (isWheelTargetInsideNestedScrollable(e.target, root)) return
   userDismissedAutoFollow.value = true
@@ -496,6 +524,7 @@ function handleListPointerDown(e: PointerEvent) {
   const el = scrollRef.value
   if (!el || e.currentTarget !== el) return
   if (e.button !== 0) return
+  cancelPendingBottomSnap()
   const barW = el.offsetWidth - el.clientWidth
   if (barW <= 0) return
   const rect = el.getBoundingClientRect()
@@ -517,6 +546,93 @@ function alignToBottom(el: HTMLElement, instant: boolean) {
   }
 }
 
+function cancelPendingBottomSnap() {
+  pendingBottomSnapToken += 1
+  if (pendingBottomSnapTimer) {
+    clearTimeout(pendingBottomSnapTimer)
+    pendingBottomSnapTimer = null
+  }
+  if (pendingBottomSnapScrollEndCleanup) {
+    pendingBottomSnapScrollEndCleanup()
+    pendingBottomSnapScrollEndCleanup = null
+  }
+  pendingBottomSnapRefresh = null
+}
+
+function armBottomSnapAfterSmoothScroll(el: HTMLElement, force: boolean) {
+  cancelPendingBottomSnap()
+  const token = pendingBottomSnapToken
+
+  const finalize = () => {
+    if (token !== pendingBottomSnapToken) return
+    cancelPendingBottomSnap()
+    const current = scrollRef.value
+    if (!current || current !== el) return
+    if (!force && !effectiveCanFollow(current)) {
+      syncScrollMetrics(current)
+      return
+    }
+    alignToBottom(current, true)
+    requestAnimationFrame(() => {
+      const latest = scrollRef.value
+      if (!latest || latest !== el) return
+      if (!force && !effectiveCanFollow(latest)) {
+        syncScrollMetrics(latest)
+        return
+      }
+      alignToBottom(latest, true)
+    })
+  }
+
+  const refresh = () => {
+    if (token !== pendingBottomSnapToken) return
+    if (pendingBottomSnapTimer) {
+      clearTimeout(pendingBottomSnapTimer)
+    }
+    pendingBottomSnapTimer = setTimeout(() => {
+      pendingBottomSnapTimer = null
+      finalize()
+    }, SCROLL_TO_BOTTOM_SETTLE_MS)
+  }
+
+  pendingBottomSnapRefresh = refresh
+
+  if ('onscrollend' in el) {
+    const onScrollEnd = () => {
+      finalize()
+    }
+    el.addEventListener('scrollend', onScrollEnd as EventListener, { once: true })
+    pendingBottomSnapScrollEndCleanup = () => {
+      el.removeEventListener('scrollend', onScrollEnd as EventListener)
+    }
+  }
+
+  refresh()
+}
+
+function buildPrefixHeights(heightMap: Record<string, number>, messages: ChatMessage[]): number[] {
+  const out = new Array(messages.length + 1).fill(0)
+  for (let i = 0; i < messages.length; i++) {
+    const rowHeight = heightMap[messages[i]!.id] ?? DEFAULT_ROW_HEIGHT
+    out[i + 1] = out[i] + rowHeight
+  }
+  return out
+}
+
+function findIndexByOffset(offset: number, prefix: number[] = prefixHeights.value): number {
+  const count = Math.max(0, prefix.length - 1)
+  if (count <= 0) return 0
+  const target = Math.max(0, offset)
+  let l = 0
+  let r = count - 1
+  while (l <= r) {
+    const mid = (l + r) >> 1
+    if ((prefix[mid + 1] ?? 0) <= target) l = mid + 1
+    else r = mid - 1
+  }
+  return Math.max(0, Math.min(count - 1, l))
+}
+
 function scrollToBottom(instant = false, force = false) {
   nextTick(() => {
     const el = scrollRef.value
@@ -528,6 +644,11 @@ function scrollToBottom(instant = false, force = false) {
     if (!force && !instant && !canAutoFollow) {
       syncScrollMetrics(el)
       return
+    }
+    if (force && !instant) {
+      armBottomSnapAfterSmoothScroll(el, true)
+    } else {
+      cancelPendingBottomSnap()
     }
     alignToBottom(el, instant || !force)
     // 新消息刚插入时常会在下一帧完成真实高度测量，补一次贴底可避免 100~200px 回弹
@@ -551,6 +672,7 @@ function handleScroll() {
   const oldScrollTop = scrollTop.value
   const oldDist = Math.max(0, el.scrollHeight - el.clientHeight - oldScrollTop)
   syncScrollMetrics(el)
+  pendingBottomSnapRefresh?.()
   const nowDist = realDistanceFromBottom.value
   // 从贴底带外重新滚入带内时恢复跟底；带内向上滚仅置位 dismiss，不会在仍 ≤300px 时被误清除
   if (nowDist <= AUTO_FOLLOW_DISTANCE_THRESHOLD && oldDist > AUTO_FOLLOW_DISTANCE_THRESHOLD) {
@@ -564,32 +686,13 @@ function updateViewport() {
 }
 
 const totalCount = computed(() => props.messages.length)
-const prefixHeights = computed(() => {
-  const out = new Array(totalCount.value + 1).fill(0)
-  for (let i = 0; i < totalCount.value; i++) {
-    const h = measuredHeights.value[i] ?? DEFAULT_ROW_HEIGHT
-    out[i + 1] = out[i] + h
-  }
-  return out
-})
+const headerOverlayOffset = computed(() => Math.max(0, props.headerInsetPx) + 16)
+const prefixHeights = computed(() => buildPrefixHeights(measuredHeights.value, props.messages))
 const totalHeight = computed(() => prefixHeights.value[totalCount.value] ?? 0)
 const isNearBottom = computed(() => realDistanceFromBottom.value <= SCROLL_BOTTOM_NEAR_THRESHOLD)
 const showScrollToBottom = computed(() => realDistanceFromBottom.value > SCROLL_BOTTOM_SHOW_THRESHOLD)
 
-function findIndexByOffset(offset: number): number {
-  if (totalCount.value <= 0) return 0
-  const prefix = prefixHeights.value
-  let l = 0
-  let r = totalCount.value - 1
-  while (l <= r) {
-    const mid = (l + r) >> 1
-    if (prefix[mid + 1] <= offset) l = mid + 1
-    else r = mid - 1
-  }
-  return Math.max(0, Math.min(totalCount.value - 1, l))
-}
-
-const startIndex = computed(() => findIndexByOffset(scrollTop.value))
+const startIndex = computed(() => findIndexByOffset(scrollTop.value, prefixHeights.value))
 const visibleCount = computed(() => Math.max(1, Math.ceil((viewportHeight.value || 1) / DEFAULT_ROW_HEIGHT) + 1))
 const windowStart = computed(() => Math.max(0, startIndex.value - BUFFER_ITEMS))
 const windowEnd = computed(() => Math.max(0, Math.min(totalCount.value - 1, startIndex.value + visibleCount.value + BUFFER_ITEMS)))
@@ -597,13 +700,6 @@ const topSpacerHeight = computed(() => prefixHeights.value[windowStart.value] ??
 const bottomSpacerHeight = computed(() => {
   if (totalCount.value <= 0) return 0
   return Math.max(0, totalHeight.value - (prefixHeights.value[windowEnd.value + 1] ?? 0))
-})
-const messageIndexMap = computed(() => {
-  const map: Record<string, number> = {}
-  props.messages.forEach((m, idx) => {
-    map[m.id] = idx
-  })
-  return map
 })
 const visibleMessages = computed(() => {
   if (totalCount.value <= 0) return [] as ChatMessage[]
@@ -613,12 +709,10 @@ const visibleMessages = computed(() => {
 function setMessageRowRefById(messageId: string, el: unknown) {
   const domEl = normalizeElement(el)
   if (!domEl) return
-  const index = messageIndexMap.value[messageId]
-  if (index == null) return
-  const h = domEl.offsetHeight || DEFAULT_ROW_HEIGHT
-  const measured = h + MESSAGE_ROW_GAP
-  if ((measuredHeights.value[index] ?? 0) !== measured) {
-    measuredHeights.value = { ...measuredHeights.value, [index]: measured }
+  const measured = Math.ceil(domEl.getBoundingClientRect().height)
+  const rowHeight = (measured > 0 ? measured : DEFAULT_ROW_HEIGHT - MESSAGE_ROW_GAP) + MESSAGE_ROW_GAP
+  if ((measuredHeights.value[messageId] ?? DEFAULT_ROW_HEIGHT) !== rowHeight) {
+    measuredHeights.value = { ...measuredHeights.value, [messageId]: rowHeight }
   }
 }
 
@@ -633,10 +727,37 @@ function scrollToMessage(messageIndex: number) {
 watch(
   () => props.chatId,
   () => {
+    cancelPendingBottomSnap()
     measuredHeights.value = {}
     userDismissedAutoFollow.value = false
     nextTick(() => {
       updateViewport()
+      if (!scrollRef.value) return
+      syncScrollMetrics(scrollRef.value)
+    })
+  },
+)
+
+watch(
+  () => props.messages.map((message) => message.id),
+  (ids) => {
+    const validIds = new Set(ids)
+    const nextMeasured: Record<string, number> = {}
+    for (const [messageId, height] of Object.entries(measuredHeights.value)) {
+      if (validIds.has(messageId)) {
+        nextMeasured[messageId] = height
+      }
+    }
+    if (Object.keys(nextMeasured).length !== Object.keys(measuredHeights.value).length) {
+      measuredHeights.value = nextMeasured
+    }
+  },
+)
+
+watch(
+  () => props.headerInsetPx,
+  () => {
+    nextTick(() => {
       if (!scrollRef.value) return
       syncScrollMetrics(scrollRef.value)
     })
@@ -654,7 +775,6 @@ onMounted(() => {
       const el = scrollRef.value
       if (!el) return
       const canFollow = effectiveCanFollow(el)
-      // 仅主生成或插话流式时在贴底带内跟底；非输出时布局抖动不应触发贴底
       const outputPhase = props.isGenerating || props.isInterjecting
       if (outputPhase && canFollow) {
         alignToBottom(el, true)
@@ -669,6 +789,8 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  cancelPendingBottomSnap()
+  window.removeEventListener('resize', updateViewport)
   if (contentResizeObserver) {
     contentResizeObserver.disconnect()
     contentResizeObserver = null
@@ -680,14 +802,17 @@ onBeforeUnmount(() => {
   <div class="relative flex-1 min-h-0">
     <div
       ref="scrollRef"
-      class="h-full overflow-y-auto p-4 pb-4 scroll-smooth custom-scrollbar"
-      :class="isGroup ? 'pt-32' : 'pt-24'"
-      style="contain: content; transform: translateZ(0);"
+      class="h-full overflow-y-auto px-4 pb-4 scroll-smooth custom-scrollbar"
+      :style="{
+        paddingTop: `${headerOverlayOffset}px`,
+        transform: 'translateZ(0)',
+        contain: 'content',
+      }"
       @scroll="handleScroll"
       @wheel.passive="handleListWheel"
       @pointerdown="handleListPointerDown"
     >
-      <div ref="contentRef" class="max-w-4xl mx-auto" style="padding-top: 98px;">
+      <div ref="contentRef" class="max-w-4xl mx-auto">
       <div v-if="topSpacerHeight > 0" :style="{ height: `${topSpacerHeight}px` }"></div>
       <div 
         v-for="m in visibleMessages" 
@@ -754,7 +879,7 @@ onBeforeUnmount(() => {
 
           <!-- 气泡 -->
           <div 
-            class="message-bubble relative px-5 py-3.5 rounded-2xl text-[15px] leading-7 shadow-sm transition-all duration-200 border max-w-full min-w-0"
+            class="message-bubble relative px-5 py-3.5 rounded-2xl text-[15px] leading-7 shadow-sm transition-[background-color,border-color,box-shadow] duration-200 border max-w-full min-w-0"
             :class="[
               m.role === 'user' 
                 ? 'bg-brand-a20 backdrop-blur-sm border-brand-a20 text-gray-100 rounded-tr-sm hover:border-brand-a30' 
@@ -995,6 +1120,8 @@ onBeforeUnmount(() => {
   position: fixed;
   inset: 0;
   pointer-events: none;
+  /* 须高于 ChatPage 全屏背景图（含 blur/transform 的合成层），且低于 imageFallback(1400) 与通知(1500) */
+  z-index: 1300;
 }
 
 .image-preview-modal {
