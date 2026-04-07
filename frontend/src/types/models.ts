@@ -185,7 +185,7 @@ export interface ApiPreset {
  *    - updatedAt: 更新时间（ISO格式）
  */
 /** 界面色系：统一保持暗色玻璃底，仅替换柔和强调色 */
-export const THEME_IDS = ['blue', 'green', 'teal', 'violet', 'amber', 'rose'] as const
+export const THEME_IDS = ['blue', 'green', 'teal', 'violet', 'amber', 'rose', 'sunset'] as const
 export type ThemeId = (typeof THEME_IDS)[number]
 
 export const THEME_OPTIONS: Array<{ label: string; value: ThemeId }> = [
@@ -195,6 +195,7 @@ export const THEME_OPTIONS: Array<{ label: string; value: ThemeId }> = [
   { label: '青碧色', value: 'teal' },
   { label: '雾紫色', value: 'violet' },
   { label: '琥珀色', value: 'amber' },
+  { label: '落日紫', value: 'sunset' },
 ]
 
 const LEGACY_THEME_IDS: Record<string, ThemeId> = {
@@ -267,6 +268,12 @@ export interface Settings {
   selectedPersonaId: string | null
   /** 当前选中的自定义字体文件名，存于 data/fonts，不随备份导出 */
   selectedFont?: string | null
+  /** 页面背景图文件名，存于 data/page_backgrounds，不随备份导出 */
+  pageBackgroundImage?: string | null
+  /** 页面背景图透明度，空值表示按 1 处理 */
+  pageBackgroundOpacity?: number | null
+  /** 页面背景图模糊半径(px)，空值表示按 0 处理 */
+  pageBackgroundBlurPx?: number | null
   /** 聊天窗口内消息文字字号（仅作用于消息气泡内容），不指定则不覆盖 */
   messageFontSize?: number | null
   worldBookEntryScanDepthDefault?: number
