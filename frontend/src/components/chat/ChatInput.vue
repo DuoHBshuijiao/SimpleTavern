@@ -52,7 +52,14 @@
  *    - 位置：组件层，提供聊天输入功能
  */
 import { computed, ref } from 'vue'
+import { useAssistantFabPosition } from '../../composables/useAssistantFabPosition'
 import { apiPost } from '../../api/http'
+import {
+  MAIN_LAYOUT_TRANSITION_MS,
+  HEADER_LIFT_EASE,
+  HEADER_LIFT_MS,
+  type HeaderMorphPhase,
+} from '../../constants/chatHeaderMorph'
 import type { CharacterCard, GroupMemberSettings } from '../../types/models'
 import ModernAvatar from '../ModernAvatar.vue'
 import ModernSelect from '../ModernSelect.vue'
@@ -75,7 +82,16 @@ interface DraftImagePreview {
   previewUrl: string
 }
 
-const props = defineProps<{
+const props = withDefaults(
+  defineProps<{
+  /** 主内容区左缘（视口坐标），用于助手 FAB 左贴边 */
+  contentAreaLeftPx?: number
+  /** 助手 FAB 允许的最小 top（视口 px），一般为顶栏下缘 + 间距 */
+  assistantFabMinTopPx?: number
+  /** 侧栏是否收起（与顶栏 morph 联动） */
+  sidebarCollapsed?: boolean
+  /** 顶栏变形阶段：与 ChatPage headerMorphPhase 一致 */
+  headerMorphPhase?: HeaderMorphPhase
   // 输入状态
   modelValue: string
   isGenerating: boolean
@@ -106,7 +122,12 @@ const props = defineProps<{
   
   // 辅助函数
   getMemberSettings: (memberId: string) => GroupMemberSettings
-}>()
+  }>(),
+  {
+    sidebarCollapsed: false,
+    headerMorphPhase: 'inset',
+  }
+)
 
 const emit = defineEmits<{
   'update:modelValue': [value: string]
@@ -129,6 +150,23 @@ const emit = defineEmits<{
 const imageInputRef = ref<HTMLInputElement | null>(null)
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const showDraftHelperMenu = ref(false)
+
+const {
+  fabStyle,
+  onPointerDown: assistantFabPointerDown,
+  onPointerMove: assistantFabPointerMove,
+  onPointerUp: assistantFabPointerUp,
+  onPointerCancel: assistantFabPointerCancel,
+  onFabClick: assistantFabOnClick,
+} = useAssistantFabPosition(
+  () => props.contentAreaLeftPx ?? 0,
+  () => props.assistantFabMinTopPx ?? 0
+)
+
+function onAssistantFabClick(e: MouseEvent) {
+  if (assistantFabOnClick(e)) return
+  emit('toggle-assistant')
+}
 
 /**
  * 计算是否有草稿消息
@@ -386,17 +424,92 @@ const draftHelperStatusText = computed(() => {
 const isDraftHelperRunning = computed(() => {
   return props.draftHelperStatus === 'reasoning' || props.draftHelperStatus === 'writing'
 })
+
+/** 侧栏收起且顶栏已过 inset，进入 lifting/full 时下沉并盖住底部提示 */
+const sinkMorphed = computed(
+  () =>
+    props.sidebarCollapsed &&
+    (props.headerMorphPhase === 'lifting' || props.headerMorphPhase === 'full')
+)
+
+/** 与 inputPlaceholder 默认「发送消息...」分支一致，用于叠层占位与遮罩 */
+const isDefaultPlaceholderVariant = computed(() => {
+  if (props.isGenerating && props.isGroup && !props.isPaused) return false
+  if (props.showContinueButton) return false
+  return true
+})
+
+const ENHANCED_PLACEHOLDER_TEXT = 'Ctrl + Enter 发送消息...'
+
+const showPlaceholderReveal = computed(
+  () =>
+    sinkMorphed.value &&
+    !props.modelValue.trim() &&
+    !inputDisabled.value &&
+    isDefaultPlaceholderVariant.value &&
+    !props.draftHelperStatus
+)
+
+/** 与顶栏 lifting / 展开回弹共用时长与曲线（供子元素 transition 使用） */
+const morphCssVars = computed(() => {
+  if (!props.sidebarCollapsed) {
+    return {
+      '--chat-input-trans-dur': `${MAIN_LAYOUT_TRANSITION_MS}ms`,
+      '--chat-input-trans-ease': 'ease',
+    } as Record<string, string>
+  }
+  if (sinkMorphed.value) {
+    return {
+      '--chat-input-trans-dur': `${HEADER_LIFT_MS}ms`,
+      '--chat-input-trans-ease': HEADER_LIFT_EASE,
+    } as Record<string, string>
+  }
+  return {
+    '--chat-input-trans-dur': '320ms',
+    '--chat-input-trans-ease': 'ease',
+  } as Record<string, string>
+})
+
+/** 与叠层可见文案一致，并补充底部提示中的 Markdown 说明，供读屏 */
+const textareaAriaLabel = computed(() => {
+  if (showPlaceholderReveal.value) {
+    return `${ENHANCED_PLACEHOLDER_TEXT} Markdown 支持。`
+  }
+  return inputPlaceholder.value
+})
+
+const textareaPlaceholderAttr = computed(() =>
+  showPlaceholderReveal.value ? '' : inputPlaceholder.value
+)
+
+/** 顶栏 morph 变量挂在输入壳上，子树继承；与下沉负 margin 共用 transition */
+const shellInlineStyle = computed(() => ({
+  color: 'rgba(229, 231, 235, 1)',
+  backgroundColor: 'unset',
+  background: 'unset',
+  opacity: 1,
+  ...morphCssVars.value,
+}))
 </script>
 
 <template>
-  <div class="shrink-0 p-4 pb-6 w-full max-w-4xl mx-auto z-20 relative overflow-visible" style="color: rgba(229, 231, 235, 1); background-color: unset; background: unset; opacity: 1;">
+  <div
+    class="chat-input-shell shrink-0 px-4 pb-6 pt-0 w-full max-w-4xl mx-auto z-20 relative overflow-visible"
+    :class="{ 'chat-input-shell--sink': sinkMorphed }"
+    :style="shellInlineStyle"
+  >
+    <div class="chat-input-morph-wrap relative">
     <!-- 
       Refactored Container:
       - Uses bg-slate-900/70 and backdrop-blur-xl for strong glass effect
       - Uses border-white/10 for subtle border
       - Removed hardcoded hex colors
     -->
-    <div class="relative bg-surface-overlay backdrop-blur-xl border border-[var(--color-border)] rounded-2xl shadow-xl p-3 flex flex-col gap-2 transition-all focus-within:border-brand-a40 focus-within:ring-1 focus-within:ring-brand-a20 focus-within:bg-surface-overlay" style="opacity: 1;">
+    <div
+      class="chat-input-card-morph relative z-10 bg-surface-overlay backdrop-blur-xl border border-[var(--color-border)] rounded-2xl shadow-xl p-3 flex flex-col gap-2 focus-within:border-brand-a40 focus-within:ring-1 focus-within:ring-brand-a20 focus-within:bg-surface-overlay"
+      :class="{ 'chat-input-card--sink': sinkMorphed }"
+      style="opacity: 1;"
+    >
       <div v-if="draftHelperStatus" class="flex items-center justify-between gap-3 px-3 py-2 rounded-lg bg-[var(--color-border-subtle)] border border-[var(--color-border)]">
         <div class="text-xs text-[var(--color-text-secondary)] min-w-0">{{ draftHelperStatusText }}</div>
         <button
@@ -415,17 +528,27 @@ const isDraftHelperRunning = computed(() => {
           <button class="btn btn-xs btn-secondary" @click="emit('draft-helper-discard')">放弃</button>
         </div>
       </div>
+      <div class="relative min-h-[80px]">
       <textarea
         ref="textareaRef"
         :value="modelValue"
         @input="handleInput"
         @paste="handlePaste"
-        :placeholder="inputPlaceholder"
+        :placeholder="textareaPlaceholderAttr"
+        :aria-label="textareaAriaLabel"
         :disabled="inputDisabled"
-        class="input textarea !bg-transparent !border-0 text-base resize-none min-h-[80px] text-primary placeholder-gray-500"
+        class="input textarea !bg-transparent !border-0 text-base resize-none min-h-[80px] w-full text-primary placeholder-gray-500"
         :class="inputDisabled ? 'opacity-50' : ''"
         @keydown="handleKeydown"
       ></textarea>
+      <div
+        v-if="showPlaceholderReveal"
+        class="chat-input-placeholder-layer pointer-events-none absolute inset-0 box-border overflow-hidden text-left"
+        aria-hidden="true"
+      >
+        <span class="chat-input-placeholder-reveal text-base leading-normal text-gray-500">{{ ENHANCED_PLACEHOLDER_TEXT }}</span>
+      </div>
+      </div>
 
       <div v-if="draftImages.length" class="flex flex-wrap gap-2 px-1">
         <div
@@ -559,16 +682,25 @@ const isDraftHelperRunning = computed(() => {
           </div>
       </div>
     </div>
-    
-    <div class="text-center mt-2 text-xs text-[var(--color-text-muted)]">
+
+    <div
+      class="chat-input-footer-hint relative z-0 text-center mt-2 text-xs text-[var(--color-text-muted)] pointer-events-none"
+      :class="sinkMorphed ? 'opacity-0' : 'opacity-100'"
+    >
       Markdown 支持 · Ctrl + Enter 发送
     </div>
+    </div>
     
-    <!-- 助手按钮 -->
+    <!-- 助手按钮（可拖动，松手左右贴边，位置持久化） -->
     <button
-      class="assistant-button w-12 h-12 rounded-xl bg-assistant text-on-brand font-bold shadow-lg shadow-assistant/30 hover:bg-assistant/80 transition-all border border-[var(--color-border)] hover:scale-105 active:scale-95 flex items-center justify-center backdrop-blur-sm z-50"
-      title="聊天助手"
-      @click="emit('toggle-assistant')"
+      type="button"
+      class="assistant-button w-12 h-12 rounded-xl bg-assistant text-on-brand font-bold shadow-lg shadow-assistant/30 hover:bg-assistant/80 transition-[transform,background-color,box-shadow] border border-[var(--color-border)] hover:scale-105 active:scale-95 flex items-center justify-center backdrop-blur-sm cursor-grab active:cursor-grabbing"
+      :style="fabStyle"
+      @pointerdown="assistantFabPointerDown"
+      @pointermove="assistantFabPointerMove"
+      @pointerup="assistantFabPointerUp"
+      @pointercancel="assistantFabPointerCancel"
+      @click="onAssistantFabClick"
     >
       助手
     </button>
@@ -586,25 +718,84 @@ const isDraftHelperRunning = computed(() => {
   display: none;
 }
 
+/* 与 forms.css .input 内边距一致，叠层起点与原生 placeholder 对齐 */
+.chat-input-placeholder-layer {
+  padding: 0.5rem 0.75rem;
+}
+
+/*
+ * 下沉：transform 不占布局，会在壳顶留下与 translateY 等高的空隙。
+ * 外壳用等量负 margin-top 上移，与卡片下移相抵，消除与消息区之间的多余缝，且不挤占 flex-1 列表高度。
+ * margin 的 transition 必须挂在壳基类上：仅写在 --sink 上时，侧栏展开去掉类后元素失去 transition，margin 会瞬间归零而 transform 仍在过渡，造成底部「截断」感。
+ * --chat-input-sink-shift：卡片下移与壳负 margin 必须同值；略大于原 1.125rem，以盖住底部提示行（mt-2 + text-xs）并略有余量。
+ */
+.chat-input-shell {
+  --chat-input-sink-shift: 1.75rem;
+  margin-top: 0;
+  transition: margin-top var(--chat-input-trans-dur, 320ms) var(--chat-input-trans-ease, ease);
+}
+
+.chat-input-shell--sink {
+  margin-top: calc(-1 * var(--chat-input-sink-shift));
+}
+
+.chat-input-card-morph {
+  transition:
+    transform var(--chat-input-trans-dur, 320ms) var(--chat-input-trans-ease, ease),
+    border-color 200ms ease,
+    box-shadow 200ms ease,
+    background-color 200ms ease;
+}
+
+.chat-input-card--sink {
+  transform: translateY(var(--chat-input-sink-shift));
+}
+
+.chat-input-footer-hint {
+  transition: opacity var(--chat-input-trans-dur, 320ms) var(--chat-input-trans-ease, ease);
+}
+
+@keyframes chatInputPlaceholderLtr {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+.chat-input-placeholder-reveal {
+  animation: chatInputPlaceholderLtr var(--chat-input-trans-dur, 420ms) var(--chat-input-trans-ease, cubic-bezier(0.45, 0.05, 0.55, 0.95)) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-input-shell {
+    transition: none !important;
+  }
+  .chat-input-shell--sink {
+    margin-top: 0 !important;
+  }
+  .chat-input-card-morph {
+    transition: border-color 200ms ease, box-shadow 200ms ease, background-color 200ms ease !important;
+  }
+  .chat-input-card--sink {
+    transform: none !important;
+  }
+  .chat-input-footer-hint {
+    transition: none !important;
+  }
+  .chat-input-placeholder-reveal {
+    animation: none !important;
+    clip-path: none !important;
+  }
+}
+
 .draft-helper-menu {
   backdrop-filter: blur(var(--blur-light));
   -webkit-backdrop-filter: blur(var(--blur-light));
 }
 
 .assistant-button {
-  position: absolute;
-  right: -4rem; /* -right-16 */
-  bottom: 2.5rem; /* bottom-10 */
-  margin-top: 105px;
-  margin-bottom: 105px;
   background-color: var(--color-border-subtle);
-}
-
-@media (max-width: 2220px) {
-  .assistant-button {
-    position: fixed;
-    top: 1rem;
-    right: 1rem;
-  }
 }
 </style>
