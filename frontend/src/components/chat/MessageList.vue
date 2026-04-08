@@ -108,6 +108,7 @@ function getChatImageUrl(imageId: string): string {
 const emit = defineEmits<{
   'edit-message': [m: ChatMessage]
   'delete-message': [m: ChatMessage]
+  'read-aloud-message': [m: ChatMessage]
   'rewrite-message': [m: ChatMessage]
   'switch-previous-version': [m: ChatMessage]
   'switch-next-version': [m: ChatMessage]
@@ -946,6 +947,13 @@ onBeforeUnmount(() => {
 
           <!-- 底部操作栏 -->
           <div class="flex items-center gap-2 mt-1 px-1 transition-opacity opacity-0 group-hover:opacity-100">
+            <button
+              v-if="settingsStore.settings?.ttsEnabled && (m.role === 'assistant' || m.role === 'user') && !m.id.startsWith('local_') && getDisplayContent(m).trim()"
+              class="text-xs text-gray-600 hover:text-brand transition-colors"
+              @click="emit('read-aloud-message', m)"
+            >
+              朗读
+            </button>
             <button 
               v-if="m.role === 'assistant' && !m.id.startsWith('local_')" 
               class="text-xs text-gray-600 hover:text-blue-400 transition-colors" 
