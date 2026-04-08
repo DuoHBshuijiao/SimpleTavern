@@ -158,6 +158,8 @@ def _merge_overrides(existing: Chat, incoming: UpdateChatRequest) -> None:
             existing.overrides.draftHelp = ov.draftHelp
         elif hasattr(ov.draftHelp, "context_message_limit"):
             existing.overrides.draftHelp.context_message_limit = ov.draftHelp.context_message_limit
+    if "tts" in ov.model_fields_set:
+        existing.overrides.tts = ov.tts.model_copy(deep=True) if ov.tts is not None else None
 
     for key in ("model", "temperature", "top_p", "max_tokens", "context_size"):
         val = getattr(ov.params, key, None)
@@ -598,6 +600,7 @@ def update_message(chat_id: str, message_id: str, req: UpdateMessageRequest) -> 
     for m in chat.messages:
         if m.id == message_id:
             old_images = list(getattr(m, "images", []) or [])
+            content_changed = m.content != req.content
             m.role = req.role
             m.content = req.content
             if getattr(req, "images", None) is not None:
@@ -619,6 +622,9 @@ def update_message(chat_id: str, message_id: str, req: UpdateMessageRequest) -> 
             req_dump = req.model_dump(exclude_unset=True)
             if "greetingVariantIndex" in req_dump:
                 m.greetingVariantIndex = req_dump["greetingVariantIndex"]
+            if content_changed:
+                m.ttsAudioAssetId = None
+                m.ttsAudioSourceText = None
             chat.updatedAt = _now_iso()
             return save_chat(chat)
 
