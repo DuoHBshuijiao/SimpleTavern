@@ -22,8 +22,11 @@ function handleExport(format: 'txt' | 'json' | 'character' | 'character_with_wor
 <template>
   <Transition name="modal">
     <div v-if="show" class="modal">
-      <div class="modal-backdrop" @click="close"></div>
-      <div class="modal-content chat-modal-width-600-90 glass-panel theme-panel-bg backdrop-blur-2xl backdrop-saturate-[1.8] border border-[var(--color-border)]">
+      <!-- 背景模糊须用 Tailwind backdrop-*（见 README / glass.css：手写 backdrop-filter 经 esbuild 压缩可能失效） -->
+      <div class="modal-backdrop backdrop-blur-[var(--blur-heavy)]" @click="close"></div>
+      <div
+        class="modal-content chat-modal-width-600-90 glass-panel theme-panel-bg backdrop-blur-[var(--blur-heavy)] backdrop-saturate-[1.8] border border-[var(--color-border)]"
+      >
         <div class="modal-header border-b border-[var(--color-border-subtle)]">
           <h3 class="modal-title text-[var(--color-text)]">导出</h3>
           <button class="modal-close text-[var(--color-text-muted)] hover:text-[var(--color-text)]" @click="close">×</button>

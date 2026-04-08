@@ -5,6 +5,7 @@ import { useSettingsImport } from '../../composables/useSettingsImport'
 import { notifyMessage } from '../../composables/useNotify'
 import type { CharacterCard, Chat, UserPersona } from '../../types/models'
 import ModernSelect from '../ModernSelect.vue'
+import ThemedCheckbox from '../ThemedCheckbox.vue'
 
 declare global {
   interface Window {
@@ -297,8 +298,11 @@ async function confirmJanitorImport() {
 <template>
   <Transition name="modal">
     <div v-if="show" class="modal">
-      <div class="modal-backdrop" @click="close"></div>
-      <div class="modal-content chat-modal-width-568-90 min-w-0 glass-panel theme-panel-bg backdrop-blur-2xl backdrop-saturate-[1.8] border border-[var(--color-border)]">
+      <!-- 背景模糊须用 Tailwind backdrop-*（见 README / glass.css：手写 backdrop-filter 经 esbuild 压缩可能失效） -->
+      <div class="modal-backdrop backdrop-blur-[var(--blur-heavy)]" @click="close"></div>
+      <div
+        class="modal-content chat-modal-width-568-90 min-w-0 glass-panel theme-panel-bg backdrop-blur-[var(--blur-heavy)] backdrop-saturate-[1.8] border border-[var(--color-border)]"
+      >
         <div class="modal-header border-b border-[var(--color-border-subtle)]">
           <h3 class="modal-title text-[var(--color-text)]">导入</h3>
           <button class="modal-close text-[var(--color-text-muted)] hover:text-[var(--color-text)]" @click="close">×</button>
@@ -379,7 +383,7 @@ async function confirmJanitorImport() {
                 </div>
               </div>
               <label class="mt-3 flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
-                <input v-model="openAfterImport" type="checkbox" class="accent-brand" />
+                <ThemedCheckbox :checked="openAfterImport" @update:checked="openAfterImport = $event" />
                 导入后打开该会话
               </label>
               <div class="mt-3">

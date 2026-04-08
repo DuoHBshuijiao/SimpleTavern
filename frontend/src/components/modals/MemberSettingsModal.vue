@@ -34,6 +34,7 @@
 import type { GroupMemberSettings, CharacterCard } from '../../types/models'
 import ModernAvatar from '../ModernAvatar.vue'
 import ModernSelect from '../ModernSelect.vue'
+import ThemedCheckbox from '../ThemedCheckbox.vue'
 
 interface ModelOption {
   label: string
@@ -225,20 +226,16 @@ function save() {
             <label class="label">system prompt 插入字段</label>
             <div class="flex flex-wrap gap-4">
               <label class="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
-                <input 
-                  type="checkbox" 
-                  class="accent-brand" 
+                <ThemedCheckbox
                   :checked="settings.includePersonality !== false"
-                  @change="updateField('includePersonality', ($event.target as HTMLInputElement).checked)"
+                  @update:checked="updateField('includePersonality', $event)"
                 />
                 插入 Personality
               </label>
               <label class="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
-                <input 
-                  type="checkbox" 
-                  class="accent-brand" 
+                <ThemedCheckbox
                   :checked="settings.includeScenario !== false"
-                  @change="updateField('includeScenario', ($event.target as HTMLInputElement).checked)"
+                  @update:checked="updateField('includeScenario', $event)"
                 />
                 插入 Scenario
               </label>

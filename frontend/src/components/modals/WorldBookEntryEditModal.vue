@@ -5,6 +5,7 @@
 import { ref, watch } from 'vue'
 import { X } from 'lucide-vue-next'
 import type { WorldBookEntry } from '../../types/models'
+import ThemedCheckbox from '../ThemedCheckbox.vue'
 import { buildRegexFromInput } from '../../utils/regexCompat'
 import { validateWorldBookEntry } from '../../utils/worldBookValidation'
 
@@ -104,7 +105,7 @@ function close() {
 
             <div class="flex items-center gap-3">
               <label class="flex items-center gap-2 text-sm text-[var(--color-text-secondary)] cursor-pointer">
-                <input v-model="draft.enabled" type="checkbox" class="accent-brand" />
+                <ThemedCheckbox :checked="draft.enabled" @update:checked="draft.enabled = $event" />
                 启用
               </label>
             </div>

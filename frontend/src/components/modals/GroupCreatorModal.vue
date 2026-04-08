@@ -33,6 +33,7 @@ import { ref, computed, watch } from 'vue'
 import type { CharacterCard } from '../../types/models'
 import ModernAvatar from '../ModernAvatar.vue'
 import ModernSelect from '../ModernSelect.vue'
+import ThemedCheckbox from '../ThemedCheckbox.vue'
 
 const props = defineProps<{
   show: boolean
@@ -255,20 +256,16 @@ function handleCreate() {
                       <div class="text-[10px] text-gray-500">system prompt 插入：</div>
                       <div class="flex flex-wrap gap-3 text-xs text-gray-300">
                         <label class="flex items-center gap-1 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            class="accent-brand"
+                          <ThemedCheckbox
                             :checked="(groupMemberInclusions[c.id]?.includePersonality ?? true)"
-                            @change="(e) => { const checked = (e.target as HTMLInputElement).checked; const inc = groupMemberInclusions[c.id] ?? { includePersonality: true, includeScenario: true }; groupMemberInclusions[c.id] = inc; inc.includePersonality = checked }"
+                            @update:checked="(checked) => { const inc = groupMemberInclusions[c.id] ?? { includePersonality: true, includeScenario: true }; groupMemberInclusions[c.id] = inc; inc.includePersonality = checked }"
                           />
                           Personality
                         </label>
                         <label class="flex items-center gap-1 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            class="accent-brand"
+                          <ThemedCheckbox
                             :checked="(groupMemberInclusions[c.id]?.includeScenario ?? true)"
-                            @change="(e) => { const checked = (e.target as HTMLInputElement).checked; const inc = groupMemberInclusions[c.id] ?? { includePersonality: true, includeScenario: true }; groupMemberInclusions[c.id] = inc; inc.includeScenario = checked }"
+                            @update:checked="(checked) => { const inc = groupMemberInclusions[c.id] ?? { includePersonality: true, includeScenario: true }; groupMemberInclusions[c.id] = inc; inc.includeScenario = checked }"
                           />
                           Scenario
                         </label>
