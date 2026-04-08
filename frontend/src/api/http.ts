@@ -83,6 +83,19 @@ export async function apiPost<T>(path: string, body: unknown, signal?: AbortSign
 }
 
 /**
+ * 发送 multipart/form-data POST 请求
+ */
+export async function apiPostFormData<T>(path: string, body: FormData, signal?: AbortSignal): Promise<T> {
+  const r = await fetch(path, {
+    method: 'POST',
+    body,
+    signal,
+  })
+  if (!r.ok) throw new Error(await r.text())
+  return (await r.json()) as T
+}
+
+/**
  * 发送DELETE请求
  *
  * 向指定路径发送DELETE请求，删除资源。
