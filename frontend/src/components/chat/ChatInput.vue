@@ -88,6 +88,12 @@ const props = withDefaults(
   contentAreaLeftPx?: number
   /** 助手 FAB 允许的最小 top（视口 px），一般为顶栏下缘 + 间距 */
   assistantFabMinTopPx?: number
+  /** 非拖动导致的助手 FAB 位置持久化后（窗口、minTop 等），供与 TTS FAB 碰撞分离 */
+  onAssistantFabLayout?: () => void
+  /** 用户拖动助手 FAB 松手后：只移动助手以消除重叠，TTS 保持不动 */
+  onAssistantFabDragEnd?: () => void
+  /** 左右贴边 snap 结束后（与 onDragEnd 配合，保证贴边后再判碰撞） */
+  onAssistantFabSnapEnd?: () => void
   /** 侧栏是否收起（与顶栏 morph 联动） */
   sidebarCollapsed?: boolean
   /** 顶栏变形阶段：与 ChatPage headerMorphPhase 一致 */
@@ -150,9 +156,12 @@ const emit = defineEmits<{
 const imageInputRef = ref<HTMLInputElement | null>(null)
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const showDraftHelperMenu = ref(false)
+/** 碰撞检测用真实视口矩形（与 CSS 过渡中的 topPx 解耦） */
+const assistantFabButtonRef = ref<HTMLElement | null>(null)
 
 const {
   fabStyle,
+  setTopPxFromSeparation: setAssistantTopPxFromSeparation,
   onPointerDown: assistantFabPointerDown,
   onPointerMove: assistantFabPointerMove,
   onPointerUp: assistantFabPointerUp,
@@ -160,7 +169,12 @@ const {
   onFabClick: assistantFabOnClick,
 } = useAssistantFabPosition(
   () => props.contentAreaLeftPx ?? 0,
-  () => props.assistantFabMinTopPx ?? 0
+  () => props.assistantFabMinTopPx ?? 0,
+  {
+    onLayoutStable: () => props.onAssistantFabLayout?.(),
+    onDragEnd: () => props.onAssistantFabDragEnd?.(),
+    onSnapEnd: () => props.onAssistantFabSnapEnd?.(),
+  },
 )
 
 function onAssistantFabClick(e: MouseEvent) {
@@ -490,6 +504,12 @@ const shellInlineStyle = computed(() => ({
   opacity: 1,
   ...morphCssVars.value,
 }))
+
+function getAssistantFabRect(): DOMRect | null {
+  return assistantFabButtonRef.value?.getBoundingClientRect() ?? null
+}
+
+defineExpose({ getAssistantFabRect, setAssistantTopPx: setAssistantTopPxFromSeparation })
 </script>
 
 <template>
@@ -693,6 +713,7 @@ const shellInlineStyle = computed(() => ({
     
     <!-- 助手按钮（可拖动，松手左右贴边，位置持久化） -->
     <button
+      ref="assistantFabButtonRef"
       type="button"
       class="assistant-button w-12 h-12 rounded-xl bg-assistant text-on-brand font-bold shadow-lg shadow-assistant/30 hover:bg-assistant/80 transition-[transform,background-color,box-shadow] border border-[var(--color-border)] hover:scale-105 active:scale-95 flex items-center justify-center backdrop-blur-sm cursor-grab active:cursor-grabbing"
       :style="fabStyle"
