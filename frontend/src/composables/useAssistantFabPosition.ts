@@ -12,6 +12,9 @@ const DRAG_THRESHOLD = 5
 const EDGE_PAD = 8
 const SNAP_MS = 320
 const SNAP_EASE = 'cubic-bezier(0.34, 1.2, 0.64, 1)'
+/** 碰撞分离时的垂直位移（与贴边 snap 错开，避免与 snap 分支冲突） */
+const SEPARATION_MS = 280
+const SEPARATION_EASE = SNAP_EASE
 
 interface Stored {
   side: 'left' | 'right'
@@ -49,7 +52,15 @@ function clampTop(top: number, minTop: number): number {
 
 export function useAssistantFabPosition(
   getContentLeft: () => number,
-  getMinTop: () => number
+  getMinTop: () => number,
+  options?: {
+    /** 窗口变化、minTop 变化等非拖动持久化后 */
+    onLayoutStable?: () => void
+    /** 仅用户拖动松手后 */
+    onDragEnd?: () => void
+    /** 左右贴边 snap 动画结束后（用于贴边后再做碰撞检测） */
+    onSnapEnd?: () => void
+  },
 ) {
   const initial = loadStored()
   const side = ref<'left' | 'right'>(initial.side)
@@ -66,6 +77,12 @@ export function useAssistantFabPosition(
   const snapTopPx = ref<number | null>(null)
   let snapEndTimer: ReturnType<typeof setTimeout> | null = null
 
+  /** 碰撞分离：仅垂直 top 过渡 */
+  const isSeparationTopTransition = ref(false)
+  let separationEndTimer: ReturnType<typeof setTimeout> | null = null
+  /** 贴边 snap 未结束时延迟执行分离 */
+  let pendingSeparationTimer: ReturnType<typeof setTimeout> | null = null
+
   let pointerDown = false
   let hasDragged = false
   let grabOffsetX = 0
@@ -74,13 +91,30 @@ export function useAssistantFabPosition(
   let dragStartY = 0
   let suppressClick = false
 
-  function persist() {
+  function persist(source: 'layout' | 'drag' = 'layout') {
     saveStored({ side: side.value, topPx: topPx.value })
+    if (source === 'drag') options?.onDragEnd?.()
+    else options?.onLayoutStable?.()
   }
 
   function prefersReducedMotion(): boolean {
     if (typeof window === 'undefined' || !window.matchMedia) return false
     return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  }
+
+  function cancelVerticalSeparationAnimation() {
+    if (separationEndTimer != null) {
+      clearTimeout(separationEndTimer)
+      separationEndTimer = null
+    }
+    isSeparationTopTransition.value = false
+  }
+
+  function cancelPendingSeparation() {
+    if (pendingSeparationTimer != null) {
+      clearTimeout(pendingSeparationTimer)
+      pendingSeparationTimer = null
+    }
   }
 
   function cancelSnapAnimation() {
@@ -92,6 +126,7 @@ export function useAssistantFabPosition(
     snapAnimating.value = false
     snapLeftPx.value = null
     snapTopPx.value = null
+    cancelPendingSeparation()
   }
 
   function startSnapToEdge(fromLeft: number, fromTop: number, toLeft: number, toTop: number) {
@@ -112,6 +147,7 @@ export function useAssistantFabPosition(
         snapEndTimer = setTimeout(() => {
           snapEndTimer = null
           cancelSnapAnimation()
+          options?.onSnapEnd?.()
         }, SNAP_MS + 40)
       })
     })
@@ -150,6 +186,9 @@ export function useAssistantFabPosition(
       }
     }
     const top = clampTop(topPx.value, getMinTop())
+    const topTrans = isSeparationTopTransition.value
+      ? `top ${SEPARATION_MS}ms ${SEPARATION_EASE}`
+      : 'none'
     if (side.value === 'left') {
       return {
         position: 'fixed' as const,
@@ -158,7 +197,7 @@ export function useAssistantFabPosition(
         right: 'auto' as const,
         zIndex: 50,
         touchAction: 'none' as const,
-        transition: 'none',
+        transition: topTrans,
       }
     }
     return {
@@ -168,12 +207,66 @@ export function useAssistantFabPosition(
       left: 'auto' as const,
       zIndex: 50,
       touchAction: 'none' as const,
-      transition: 'none',
+      transition: topTrans,
     }
   })
 
+  /** 与 TTS FAB 碰撞检测一致：视口矩形 */
+  function getRect(): DOMRect | null {
+    const s = fabStyle.value
+    let left: number
+    if (s.left !== 'auto') {
+      left = parseFloat(String(s.left))
+    } else {
+      left = window.innerWidth - ASSISTANT_FAB_SIZE - RIGHT_GAP
+    }
+    const top = parseFloat(String(s.top))
+    return new DOMRect(left, top, ASSISTANT_FAB_SIZE, ASSISTANT_FAB_SIZE)
+  }
+
+  /** 由页面级碰撞分离调用（不触发 layout/drag 回调） */
+  function setTopPxFromSeparation(next: number) {
+    const clamped = clampTop(next, getMinTop())
+    if (Math.abs(clamped - topPx.value) < 0.5) return
+
+    const applyNow = () => {
+      if (prefersReducedMotion()) {
+        cancelVerticalSeparationAnimation()
+        topPx.value = clamped
+        saveStored({ side: side.value, topPx: topPx.value })
+        return
+      }
+      cancelVerticalSeparationAnimation()
+      isSeparationTopTransition.value = true
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          topPx.value = clamped
+          saveStored({ side: side.value, topPx: topPx.value })
+          if (separationEndTimer != null) clearTimeout(separationEndTimer)
+          separationEndTimer = setTimeout(() => {
+            separationEndTimer = null
+            isSeparationTopTransition.value = false
+          }, SEPARATION_MS + 50)
+        })
+      })
+    }
+
+    if (isSnapping.value) {
+      cancelPendingSeparation()
+      pendingSeparationTimer = setTimeout(() => {
+        pendingSeparationTimer = null
+        setTopPxFromSeparation(clamped)
+      }, SNAP_MS + 40)
+      return
+    }
+
+    applyNow()
+  }
+
   function onPointerDown(e: PointerEvent) {
     if (e.button !== 0) return
+    cancelVerticalSeparationAnimation()
+    cancelPendingSeparation()
     cancelSnapAnimation()
     const el = e.currentTarget as HTMLElement
     const rect = el.getBoundingClientRect()
@@ -225,7 +318,7 @@ export function useAssistantFabPosition(
       side.value = nextSide
       topPx.value = top
       suppressClick = true
-      persist()
+      persist('drag')
       startSnapToEdge(left, top, toLeft, top)
     }
 
@@ -251,6 +344,7 @@ export function useAssistantFabPosition(
   }
 
   function onResize() {
+    cancelVerticalSeparationAnimation()
     cancelSnapAnimation()
     topPx.value = clampTop(topPx.value, getMinTop())
     persist()
@@ -259,6 +353,7 @@ export function useAssistantFabPosition(
   watch(
     () => getMinTop(),
     () => {
+      cancelVerticalSeparationAnimation()
       topPx.value = clampTop(topPx.value, getMinTop())
       persist()
     }
@@ -280,11 +375,15 @@ export function useAssistantFabPosition(
   onUnmounted(() => {
     window.removeEventListener('resize', scheduleResize)
     if (raf) cancelAnimationFrame(raf)
+    cancelVerticalSeparationAnimation()
+    cancelPendingSeparation()
     cancelSnapAnimation()
   })
 
   return {
     fabStyle,
+    getRect,
+    setTopPxFromSeparation,
     onPointerDown,
     onPointerMove,
     onPointerUp,
