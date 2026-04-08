@@ -48,7 +48,9 @@ from app.routes.assistant import router as assistant_router
 from app.routes.tokenizer import router as tokenizer_router
 from app.routes.update import router as update_router
 from app.routes.worldbooks import router as worldbooks_router
+from app.routes.tts import router as tts_router
 from app.services.data_integrity import data_integrity_service
+from app.services.tts_cache import tts_cache_patrol
 from app.storage import ensure_data_initialized
 from app.tokenizer_service import warmup_tokenizer
 from app.version import APP_VERSION
@@ -63,9 +65,11 @@ async def lifespan(app: FastAPI):
     ensure_data_initialized()
     warmup_tokenizer()
     integrity_scan_task = asyncio.create_task(data_integrity_service.run_startup_scan())
+    await tts_cache_patrol.start()
     try:
         yield
     finally:
+        await tts_cache_patrol.stop()
         integrity_scan_task.cancel()
         try:
             await integrity_scan_task
@@ -112,3 +116,4 @@ app.include_router(assistant_router, prefix="/api")
 app.include_router(tokenizer_router, prefix="/api")
 app.include_router(update_router, prefix="/api")
 app.include_router(worldbooks_router, prefix="/api")
+app.include_router(tts_router, prefix="/api")
