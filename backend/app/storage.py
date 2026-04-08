@@ -143,6 +143,16 @@ def _worldbooks_dir() -> Path:
     return _data_dir() / "worldbooks"
 
 
+def _tts_cache_dir() -> Path:
+    """TTS 合成音频缓存目录。"""
+    return _data_dir() / "tts_cache"
+
+
+def get_tts_cache_dir() -> Path:
+    """返回 TTS 缓存目录，供路由/服务层使用。"""
+    return _tts_cache_dir()
+
+
 def get_repo_root() -> Path:
     """返回仓库根目录，供更新等模块使用。"""
     return _repo_root()
@@ -241,6 +251,7 @@ def ensure_data_initialized() -> None:
     _page_backgrounds_dir().mkdir(parents=True, exist_ok=True)
     _ai_workspace_dir().mkdir(parents=True, exist_ok=True)
     _worldbooks_dir().mkdir(parents=True, exist_ok=True)
+    _tts_cache_dir().mkdir(parents=True, exist_ok=True)
 
     if not _settings_path().exists():
         settings = Settings()
