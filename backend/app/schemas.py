@@ -213,6 +213,18 @@ class ApiPreset(BaseModel):
     baseUrl: str = "https://api.openai.com"
     apiKey: str = ""
     models: list[str] = Field(default_factory=list)
+    presetKind: str | None = Field(default=None, description="预设用途；'minimax' 表示 TTS 服务预设")
+    voiceCatalog: list["ApiPresetVoice"] = Field(default_factory=list)
+
+
+class ApiPresetVoice(BaseModel):
+    """API 预设内缓存的可选 TTS 音色条目。"""
+
+    model_config = ConfigDict(extra="allow")
+
+    voiceId: str
+    name: str
+    voiceType: str = "system"
 
 
 class UserPersona(BaseModel):
@@ -277,6 +289,8 @@ class Settings(BaseModel):
     pageBackgroundOpacity: float | None = Field(default=None, ge=0.0, le=1.0)  # 背景图透明度；None 表示前端按 1 处理
     pageBackgroundBlurPx: float | None = Field(default=None, ge=0.0, le=64.0)  # 背景图模糊半径(px)；None 表示前端按 0 处理
     messageFontSize: int | None = None  # 聊天窗口内消息文字字号（仅作用于消息气泡内容）
+    ttsEnabled: bool = False
+    ttsAudioCacheLimitMb: int = Field(default=200, ge=10, le=10000)
     worldBookEntryScanDepthDefault: int = 2
     createdAt: str = Field(default_factory=_now_iso)
     updatedAt: str = Field(default_factory=_now_iso)
@@ -542,6 +556,14 @@ class ChatMessage(BaseModel):
         default=None,
         description="推理/思考链文本（与上游 reasoning_content 对应，持久化用）",
     )
+    ttsAudioAssetId: str | None = Field(
+        default=None,
+        description="已合成的 TTS 音频文件 UUID（对应 data/tts_cache/{uuid}.mp3）",
+    )
+    ttsAudioSourceText: str | None = Field(
+        default=None,
+        description="生成上述缓存音频时对应的原始消息内容，用于判断能否复用缓存",
+    )
 
     @model_validator(mode="after")
     def _validate_tool_fields(self) -> ChatMessage:
@@ -576,6 +598,26 @@ class WorldBookAttachment(BaseModel):
     insertDepth: int = Field(default=5, ge=1)
 
 
+AutoReadScope = Literal["off", "assistant_only", "user_only", "all"]
+
+
+class TtsSessionConfig(BaseModel):
+    """会话级 TTS 配置，存于 ChatOverrides.tts。"""
+    model_config = ConfigDict(extra="allow")
+
+    autoReadScope: AutoReadScope = "off"
+    readGapSeconds: float = Field(default=0.0, ge=0.0)
+    model: str | None = None
+    voiceByCharacterId: dict[str, str] = Field(default_factory=dict)
+    voiceByPersonaId: dict[str, str] = Field(default_factory=dict)
+    presetId: str | None = None
+    preprocessEnabled: bool = False
+    preprocessModel: str | None = None
+    preprocessPresetId: str | None = None
+    preprocessTargetLanguage: str | None = None
+    injectEmotionTags: bool = False
+
+
 class ChatOverrides(BaseModel):
     """
     聊天覆盖设置模型
@@ -605,6 +647,7 @@ class ChatOverrides(BaseModel):
     )
     params: GenerationParams = Field(default_factory=GenerationParams)
     draftHelp: DraftHelpSettings = Field(default_factory=DraftHelpSettings)
+    tts: "TtsSessionConfig | None" = Field(default=None, description="会话级 TTS 配置")
 
     @model_validator(mode="after")
     def _sync_worldbook_attachments(self):
