@@ -103,6 +103,30 @@ export interface ChatOverrides {
   params: GenerationParams
   draftHelp?: DraftHelpSettings
   memberSettings?: Record<string, GroupMemberSettings>
+  tts?: TtsSessionConfig | null
+}
+
+export type AutoReadScope = 'off' | 'assistant_only' | 'user_only' | 'all'
+
+export interface ApiPresetVoice {
+  voiceId: string
+  name: string
+  voiceType: string
+}
+
+export interface TtsSessionConfig {
+  autoReadScope?: AutoReadScope
+  readGapSeconds?: number
+  model?: string | null
+  voiceByCharacterId?: Record<string, string>
+  voiceByPersonaId?: Record<string, string>
+  presetId?: string | null
+  preprocessEnabled?: boolean
+  preprocessModel?: string | null
+  preprocessPresetId?: string | null
+  /** 后处理目标语言，填入提示词与请求 JSON 的 language 字段；留空则不按语言翻译 */
+  preprocessTargetLanguage?: string | null
+  injectEmotionTags?: boolean
 }
 
 export interface WorldBookEntry {
@@ -164,6 +188,8 @@ export interface ApiPreset {
   baseUrl: string
   apiKey: string
   models: string[]
+  presetKind?: string | null
+  voiceCatalog?: ApiPresetVoice[]
 }
 
 /**
@@ -276,6 +302,10 @@ export interface Settings {
   pageBackgroundBlurPx?: number | null
   /** 聊天窗口内消息文字字号（仅作用于消息气泡内容），不指定则不覆盖 */
   messageFontSize?: number | null
+  /** TTS 总开关，默认关闭 */
+  ttsEnabled?: boolean
+  /** TTS 音频缓存上限（MB） */
+  ttsAudioCacheLimitMb?: number
   worldBookEntryScanDepthDefault?: number
   createdAt: string
   updatedAt: string
@@ -359,6 +389,10 @@ export interface ChatMessage {
   greetingVariants?: string[] | null
   /** 当前选中的开场变体下标（与 greetingVariants 对齐） */
   greetingVariantIndex?: number | null
+  /** 已合成的 TTS 音频文件 UUID */
+  ttsAudioAssetId?: string | null
+  /** 生成该缓存音频时对应的原始消息内容，用于判断是否复用缓存 */
+  ttsAudioSourceText?: string | null
 }
 
 export interface ChatImageAttachment {
