@@ -64,7 +64,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useCharactersStore, useChatsStore, useSettingsStore, useUiStore } from '../stores'
 import type { SettingsDrawerTab } from '../stores/ui'
-import type { CharacterCard, ChatImageAttachment, ChatMessage, ExtraFirstMessageEntry, GroupMemberSettings, Chat, WorldBook } from '../types/models'
+import type { ApiPreset, CharacterCard, ChatImageAttachment, ChatMessage, ExtraFirstMessageEntry, GroupMemberSettings, Chat, TtsSessionConfig, WorldBook } from '../types/models'
 
 // Composables
 import { 
@@ -92,6 +92,15 @@ import SettingsDrawer from '../components/SettingsDrawer.vue'
 import AvatarCropper from '../components/AvatarCropper.vue'
 import ModernAvatar from '../components/ModernAvatar.vue'
 import ModernSelect from '../components/ModernSelect.vue'
+import ThemedCheckbox from '../components/ThemedCheckbox.vue'
+import TtsPlaybackFab from '../components/chat/TtsPlaybackFab.vue'
+import { useTtsPlaybackQueue } from '../composables/useTtsPlaybackQueue'
+import {
+  computeAssistantNonOverlapTop,
+  computeTtsNonOverlapTop,
+  FAB_COLLISION_GAP_PX,
+  rectsOverlap,
+} from '../composables/useFabCollision'
 import { Users, Settings, Sparkles, Loader2, X, MoreHorizontal, GripVertical, Check, Plus, Search } from 'lucide-vue-next'
 
 // API
@@ -99,12 +108,14 @@ import { postAndConsumeSse } from '../api/sse'
 import { apiPost, apiGet, apiPut } from '../api/http'
 import { useErrorStack } from '../composables/useErrorStack'
 import { notifyMessage } from '../composables/useNotify'
+import { formatApiError } from '../utils/worldBookValidation'
 import {
   HEADER_EXPAND_MS,
   HEADER_LIFT_EASE,
   HEADER_LIFT_MS,
   HEADER_SQUEEZE_EASE,
   HEADER_SQUEEZE_MS,
+  MAIN_LAYOUT_TRANSITION_MS,
 } from '../constants/chatHeaderMorph'
 
 // ========== Stores ==========
@@ -116,6 +127,13 @@ const route = useRoute()
 const router = useRouter()
 const { refreshDataAfterImport } = useSettingsImport()
 const pageBackground = usePageBackground(() => settings.settings)
+
+// ========== TTS 播放队列 / 主聊天错误栈（TTS 失败亦入栈）==========
+const ttsQueue = useTtsPlaybackQueue()
+const ttsIsDownloading = computed(() => ttsQueue.isDownloading.value)
+const ttsIsPlaying = computed(() => ttsQueue.isPlaying.value)
+const ttsAudioPaused = computed(() => ttsQueue.audioPaused.value)
+const errorStack = useErrorStack(6000)
 
 // ========== 页面级状态 ==========
 const selectedCharacterId = ref<string | null>(null)
@@ -152,6 +170,8 @@ const sidebarCollapsed = ref(false)
 const chatMainRef = ref<HTMLElement | null>(null)
 const contentAreaLeftPx = ref(0)
 let contentAreaLeftRaf = 0
+let contentAreaLeftLayoutRaf = 0
+let contentAreaLeftSepDebounce: ReturnType<typeof setTimeout> | null = null
 function updateContentAreaLeft() {
   contentAreaLeftPx.value = chatMainRef.value?.getBoundingClientRect().left ?? 0
 }
@@ -161,6 +181,31 @@ function scheduleContentAreaLeft() {
     contentAreaLeftRaf = 0
     updateContentAreaLeft()
   })
+}
+function cancelContentAreaLeftLayoutSync() {
+  if (contentAreaLeftLayoutRaf) {
+    cancelAnimationFrame(contentAreaLeftLayoutRaf)
+    contentAreaLeftLayoutRaf = 0
+  }
+}
+/** 侧栏 padding 过渡期间每帧测量主区左缘，贴左 FAB 与主区同帧，避免对 left 做 CSS 插值带来的相位差 */
+function syncContentAreaLeftDuringLayoutTransition() {
+  cancelContentAreaLeftLayoutSync()
+  const start = performance.now()
+  const duration = MAIN_LAYOUT_TRANSITION_MS + 40
+  const tick = () => {
+    updateContentAreaLeft()
+    if (performance.now() - start < duration) {
+      contentAreaLeftLayoutRaf = requestAnimationFrame(() => {
+        contentAreaLeftLayoutRaf = 0
+        tick()
+      })
+    } else {
+      updateContentAreaLeft()
+      runChatFabSeparation()
+    }
+  }
+  tick()
 }
 /** 顶栏变形：inset 悬浮条 → lifting 仅上移贴顶 → full 拉满宽并直角 */
 const headerMorphPhase = ref<'inset' | 'lifting' | 'full'>('inset')
@@ -201,7 +246,8 @@ watch(sidebarCollapsed, (collapsed) => {
 watch(sidebarCollapsed, () => {
   nextTick(() => {
     updateContentAreaLeft()
-    window.setTimeout(() => updateContentAreaLeft(), 320)
+    runChatFabSeparation()
+    syncContentAreaLeftDuringLayoutTransition()
   })
 })
 
@@ -311,6 +357,33 @@ const selectedCharacter = computed(() => {
  * 从chatsStore获取当前激活的聊天会话。
  */
 const activeChat = computed(() => chats.activeChat)
+let observedTtsChatId: string | null = null
+let observedTtsMessageIds = new Set<string>()
+
+/** 自动朗读已入队的内容指纹（按会话），避免本地 id 入队后 chats.load 换成服务端 id 时重复入队 */
+const ttsAutoReadFingerprintsByChat = new Map<string, Set<string>>()
+
+function getTtsAutoReadFingerprintSet(chatId: string): Set<string> {
+  let s = ttsAutoReadFingerprintsByChat.get(chatId)
+  if (!s) {
+    s = new Set()
+    ttsAutoReadFingerprintsByChat.set(chatId, s)
+  }
+  return s
+}
+
+function makeTtsAutoReadContentFingerprint(chatId: string, message: ChatMessage, displayText: string): string {
+  const text = normalizeTtsCompareText(displayText)
+  const charKey =
+    message.role === 'assistant'
+      ? message.characterId || activeChat.value?.characterId || ''
+      : ''
+  const personaKey =
+    message.role === 'user'
+      ? message.senderPersonaId || activeChat.value?.userPersonaId || selectedPersona.value?.id || ''
+      : ''
+  return `${chatId}\0${message.role}\0${charKey}\0${personaKey}\0${text}`
+}
 
 /**
  * 计算助手聊天ID
@@ -348,6 +421,252 @@ const userName = computed(() => {
   return selectedPersona.value?.name || '你'
 })
 
+function normalizeTtsSessionConfig(source?: TtsSessionConfig | null): TtsSessionConfig {
+  return {
+    autoReadScope: source?.autoReadScope ?? 'off',
+    readGapSeconds: typeof source?.readGapSeconds === 'number' && Number.isFinite(source.readGapSeconds)
+      ? Math.max(0, source.readGapSeconds)
+      : 0,
+    model: source?.model?.trim() || null,
+    voiceByCharacterId: { ...(source?.voiceByCharacterId || {}) },
+    voiceByPersonaId: { ...(source?.voiceByPersonaId || {}) },
+    presetId: source?.presetId?.trim() || null,
+    preprocessEnabled: source?.preprocessEnabled === true,
+    preprocessModel: source?.preprocessModel?.trim() || null,
+    preprocessPresetId: source?.preprocessPresetId?.trim() || null,
+    preprocessTargetLanguage: source?.preprocessTargetLanguage?.trim() || null,
+    injectEmotionTags: source?.injectEmotionTags === true,
+  }
+}
+
+function getTtsPresets(): ApiPreset[] {
+  return (settings.settings?.apiPresets || []).filter((preset) => preset.presetKind === 'minimax')
+}
+
+function resolveTtsPreset(tts: TtsSessionConfig): ApiPreset | null {
+  if (tts.presetId) {
+    const matched = getTtsPresets().find((preset) => preset.id === tts.presetId)
+    if (matched) return matched
+  }
+  return getTtsPresets()[0] || null
+}
+
+function resolveTtsModel(tts: TtsSessionConfig, preset: ApiPreset | null): string {
+  return tts.model?.trim() || preset?.models?.[0] || 'speech-2.8-hd'
+}
+
+function resolveTtsVoiceId(message: ChatMessage, tts: TtsSessionConfig): string | null {
+  if (message.role === 'assistant') {
+    const characterId = message.characterId || activeChat.value?.characterId || null
+    return characterId ? tts.voiceByCharacterId?.[characterId]?.trim() || null : null
+  }
+  if (message.role === 'user') {
+    const personaId = message.senderPersonaId || activeChat.value?.userPersonaId || selectedPersona.value?.id || null
+    return personaId ? tts.voiceByPersonaId?.[personaId]?.trim() || null : null
+  }
+  return null
+}
+
+function rememberTtsAsset(messageId: string, assetId: string, contentText: string) {
+  const message = activeChat.value?.messages.find((item) => item.id === messageId)
+  if (!message) return
+  message.ttsAudioAssetId = assetId
+  message.ttsAudioSourceText = contentText
+}
+
+function clearTtsAsset(message?: ChatMessage | null) {
+  if (!message) return
+  message.ttsAudioAssetId = null
+  message.ttsAudioSourceText = null
+}
+
+/** 与合成/存档比对时统一换行与 Unicode，避免仅空白差异导致重复请求 */
+function normalizeTtsCompareText(s: string): string {
+  return s.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim().normalize('NFKC')
+}
+
+function invalidateTtsCacheIfTextChanged(
+  message: ChatMessage | null | undefined,
+  previousText: string,
+  nextText: string,
+) {
+  if (!message) return
+  if (normalizeTtsCompareText(previousText) === normalizeTtsCompareText(nextText)) return
+  clearTtsAsset(message)
+}
+
+/** 仅当缓存绑定的原始消息内容与本次一致时才复用；后处理文本允许波动。 */
+function canReuseTtsCache(message: ChatMessage, originalText: string): boolean {
+  const assetId = message.ttsAudioAssetId?.trim()
+  if (!assetId) return false
+  const currentContent = normalizeTtsCompareText(originalText)
+  const rawCached = message.ttsAudioSourceText
+  const hasStoredSource =
+    rawCached != null && String(rawCached).replace(/\s+/g, '').length > 0
+  if (hasStoredSource) {
+    return normalizeTtsCompareText(String(rawCached)) === currentContent
+  }
+  // 兼容旧缓存：历史记录可能只写入了 assetId；消息内容变更时会主动清空缓存字段，因此仍保留的 assetId 可直接复用。
+  return originalText.trim().length > 0
+}
+
+async function preprocessMessageForTts(text: string, tts: TtsSessionConfig): Promise<string> {
+  const raw = text.trim()
+  if (!raw || !tts.preprocessEnabled || !tts.preprocessModel?.trim()) return raw
+  const response = await apiPost<{ processedText: string }>('/api/tts/preprocess', {
+    text: raw,
+    model: tts.preprocessModel,
+    preset_id: tts.preprocessPresetId ?? null,
+    inject_emotion_tags: tts.injectEmotionTags === true,
+    target_language: tts.preprocessTargetLanguage?.trim() || null,
+  })
+  return response.processedText?.trim() || raw
+}
+
+async function enqueueMessageReadAloud(message: ChatMessage, mode: 'manual' | 'auto' = 'manual') {
+  const chat = activeChat.value
+  if (!chat) return false
+  const live = chat.messages.find((item) => item.id === message.id) ?? message
+  if (!settings.settings?.ttsEnabled) {
+    if (mode === 'manual') await notifyMessage('请先在全局设置里开启 TTS。')
+    return false
+  }
+  if (live.role !== 'assistant' && live.role !== 'user') return false
+
+  const tts = normalizeTtsSessionConfig(chat.overrides?.tts)
+  const preset = resolveTtsPreset(tts)
+  const voiceId = resolveTtsVoiceId(live, tts)
+  if (!voiceId) {
+    if (mode === 'manual') {
+      await notifyMessage(live.role === 'assistant' ? '当前角色未配置音色。' : '当前用户身份未配置音色。')
+    }
+    return false
+  }
+
+  const originalText = versions.getDisplayContent(live).trim()
+  if (!originalText) {
+    if (mode === 'manual') await notifyMessage('当前消息没有可朗读的文本。')
+    return false
+  }
+
+  /** 在任意 await 之前登记，避免 flush 入队尚未完成时 chats.load 触发 runAutoRead 重复入队 */
+  let autoReadFingerprint: string | null = null
+  if (mode === 'auto') {
+    const fp = makeTtsAutoReadContentFingerprint(chat.id, live, originalText)
+    const fpSet = getTtsAutoReadFingerprintSet(chat.id)
+    if (fpSet.has(fp)) return false
+    fpSet.add(fp)
+    autoReadFingerprint = fp
+  }
+
+  const existingAssetId = canReuseTtsCache(live, originalText)
+    ? (live.ttsAudioAssetId?.trim() ?? undefined)
+    : undefined
+
+  if (existingAssetId) {
+    await ttsQueue.enqueue(live.id, originalText, voiceId, {
+      model: resolveTtsModel(tts, preset),
+      existingAssetId,
+      chatId: chat.id,
+      presetId: preset?.id ?? tts.presetId ?? null,
+      gapSeconds: tts.readGapSeconds ?? 0,
+    })
+    return true
+  }
+
+  let spokenText = originalText
+  try {
+    spokenText = await preprocessMessageForTts(originalText, tts)
+  } catch (error) {
+    errorStack.pushError({
+      message: `${formatApiError(error)}（已回退为原始文本）`,
+      source: 'main',
+      title: 'TTS 文本后处理失败',
+    })
+  }
+
+  await ttsQueue.enqueue(live.id, spokenText, voiceId, {
+    model: resolveTtsModel(tts, preset),
+    existingAssetId,
+    chatId: chat.id,
+    contentText: originalText,
+    presetId: preset?.id ?? tts.presetId ?? null,
+    gapSeconds: tts.readGapSeconds ?? 0,
+    onReady: (assetId) => rememberTtsAsset(live.id, assetId, originalText),
+    onSynthesizeError: (e) => {
+      if (autoReadFingerprint) {
+        getTtsAutoReadFingerprintSet(chat.id).delete(autoReadFingerprint)
+      }
+      errorStack.pushError({
+        message: formatApiError(e),
+        source: 'main',
+        title: 'TTS 合成失败',
+      })
+    },
+  })
+  return true
+}
+
+async function handleReadAloudMessage(message: ChatMessage) {
+  await enqueueMessageReadAloud(message, 'manual')
+}
+
+/**
+ * 根据「已见过的消息 id」增量处理自动朗读；在服务端 reload 后由 flush 显式调用，避免仅依赖 watch 时漏触发。
+ */
+async function runAutoReadTtsForNewMessages() {
+  const chat = activeChat.value
+  if (!chat) return
+  if (observedTtsChatId !== chat.id) {
+    observedTtsChatId = chat.id
+    observedTtsMessageIds = new Set(chat.messages.map((message) => message.id))
+    return
+  }
+
+  const tts = normalizeTtsSessionConfig(chat.overrides?.tts)
+  const newMessages = chat.messages.filter((message) => !observedTtsMessageIds.has(message.id))
+  for (const message of newMessages) observedTtsMessageIds.add(message.id)
+
+  if (!settings.settings?.ttsEnabled || tts.autoReadScope === 'off' || newMessages.length === 0) return
+
+  for (const message of newMessages) {
+    const displayText =
+      message.role === 'assistant' ? versions.getDisplayContent(message) : message.content || ''
+    if (
+      getTtsAutoReadFingerprintSet(chat.id).has(
+        makeTtsAutoReadContentFingerprint(chat.id, message, displayText),
+      )
+    )
+      continue
+    if (message.id.startsWith('local_')) continue
+    if (tts.autoReadScope === 'assistant_only' && message.role !== 'assistant') continue
+    if (tts.autoReadScope === 'user_only' && message.role !== 'user') continue
+    if (tts.autoReadScope === 'all' && message.role !== 'assistant' && message.role !== 'user') continue
+    await enqueueMessageReadAloud(message, 'auto')
+  }
+}
+
+async function flushAutoReadTtsAfterChatReload() {
+  await nextTick()
+  await runAutoReadTtsForNewMessages()
+}
+
+watch(
+  () => activeChat.value?.id,
+  () => {
+    observedTtsChatId = activeChat.value?.id ?? null
+    observedTtsMessageIds = new Set((activeChat.value?.messages || []).map((message) => message.id))
+  },
+  { immediate: true },
+)
+
+watch(
+  () => activeChat.value?.messages?.map((message) => message.id).join('|') ?? '',
+  () => {
+    void runAutoReadTtsForNewMessages()
+  },
+)
+
 // ========== 初始化 Composables ==========
 // 流式输出
 const stream = useStreamOutput(
@@ -357,6 +676,35 @@ const stream = useStreamOutput(
 
 // 消息版本
 const versions = useMessageVersions()
+
+/** 用户消息落库后立即尝试自动朗读（无「输出完成」事件） */
+async function tryAutoReadUserMessage(localUserId: string) {
+  const chat = activeChat.value
+  if (!chat) return
+  if (!settings.settings?.ttsEnabled) return
+  const tts = normalizeTtsSessionConfig(chat.overrides?.tts)
+  if (tts.autoReadScope === 'off') return
+  if (tts.autoReadScope !== 'user_only' && tts.autoReadScope !== 'all') return
+  await nextTick()
+  const msg = chat.messages.find((m) => m.id === localUserId)
+  if (!msg || msg.role !== 'user') return
+  void enqueueMessageReadAloud(msg, 'auto')
+}
+
+/** 单个角色流式/非流式输出结束（flush 后内容已写入 store）时尝试自动朗读 */
+async function tryAutoReadAssistantAfterStreamFlush(localAssistantId: string) {
+  const chat = activeChat.value
+  if (!chat) return
+  if (!settings.settings?.ttsEnabled) return
+  const tts = normalizeTtsSessionConfig(chat.overrides?.tts)
+  if (tts.autoReadScope === 'off') return
+  if (tts.autoReadScope !== 'assistant_only' && tts.autoReadScope !== 'all') return
+  await nextTick()
+  const msg = chat.messages.find((m) => m.id === localAssistantId)
+  if (!msg || msg.role !== 'assistant') return
+  if (!versions.getDisplayContent(msg).trim()) return
+  void enqueueMessageReadAloud(msg, 'auto')
+}
 
 // 群聊逻辑
 const group = useGroupChat({
@@ -380,15 +728,14 @@ const assistant = useAssistant({
   },
 })
 
-async function onAssistantSettingsMemoryChange(e: Event) {
-  await assistant.setAllowWriteMemory((e.target as HTMLInputElement).checked)
+async function setAssistantWriteMemoryEnabled(checked: boolean) {
+  await assistant.setAllowWriteMemory(checked)
 }
 
-async function onAssistantSettingsDestructiveChange(e: Event) {
-  await assistant.setAllowDestructiveTools((e.target as HTMLInputElement).checked)
+async function setAssistantDestructiveToolsEnabled(checked: boolean) {
+  await assistant.setAllowDestructiveTools(checked)
 }
 
-const errorStack = useErrorStack(6000)
 const imageFallbackDialog = ref<{
   visible: boolean
   error: string
@@ -571,6 +918,86 @@ watch(
   { flush: 'post' }
 )
 
+/** 助手 FAB 与 TTS FAB 碰撞分离（useFabCollision 需在页面层调用两组件 getRect） */
+const chatInputRef = ref<InstanceType<typeof ChatInput> | null>(null)
+const ttsPlaybackFabRef = ref<InstanceType<typeof TtsPlaybackFab> | null>(null)
+
+/**
+ * 重叠时只移动「被锚定」的一侧：拖动助手则只挪助手，拖动 TTS 则只挪 TTS；布局类事件（挂载、resize、顶栏）默认只挪 TTS。
+ */
+function runChatFabSeparation(anchor: 'assistant' | 'tts' | null = null) {
+  if (!settings.settings?.ttsEnabled) return
+  nextTick(() => {
+    const a = chatInputRef.value?.getAssistantFabRect?.()
+    const t = ttsPlaybackFabRef.value?.getRect?.()
+    if (!a || !t) return
+    if (!rectsOverlap(a, t, FAB_COLLISION_GAP_PX)) return
+    const minTop = chatAssistantFabMinTopPx.value
+
+    if (anchor === 'assistant') {
+      const newTop = computeAssistantNonOverlapTop(t, a, minTop)
+      if (Math.abs(newTop - a.top) < 0.5) return
+      chatInputRef.value?.setAssistantTopPx?.(newTop)
+      return
+    }
+    const newTop = computeTtsNonOverlapTop(a, t, minTop)
+    if (Math.abs(newTop - t.top) < 0.5) return
+    ttsPlaybackFabRef.value?.setTtsTopPx?.(newTop)
+  })
+}
+
+watch(contentAreaLeftPx, () => {
+  if (contentAreaLeftSepDebounce) clearTimeout(contentAreaLeftSepDebounce)
+  contentAreaLeftSepDebounce = setTimeout(() => {
+    contentAreaLeftSepDebounce = null
+    runChatFabSeparation()
+  }, 48)
+})
+watch(chatAssistantFabMinTopPx, () => runChatFabSeparation())
+watch(
+  () => settings.settings?.ttsEnabled,
+  () => {
+    nextTick(() => nextTick(runChatFabSeparation))
+  },
+)
+
+/** TTS FAB：与输入栏下沉同相；顶栏 full 且 squeeze 结束后显示顶栏下替代控制条 */
+const ttsInputSinkActive = computed(
+  () =>
+    sidebarCollapsed.value &&
+    (headerMorphPhase.value === 'lifting' || headerMorphPhase.value === 'full')
+)
+
+const ttsTopBarControlsVisible = ref(false)
+let ttsTopBarRevealTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearTtsTopBarRevealTimer() {
+  if (ttsTopBarRevealTimer != null) {
+    clearTimeout(ttsTopBarRevealTimer)
+    ttsTopBarRevealTimer = null
+  }
+}
+
+watch(
+  () => [sidebarCollapsed.value, headerMorphPhase.value, settings.settings?.ttsEnabled] as const,
+  () => {
+    clearTtsTopBarRevealTimer()
+    if (!sidebarCollapsed.value || !settings.settings?.ttsEnabled) {
+      ttsTopBarControlsVisible.value = false
+      return
+    }
+    if (headerMorphPhase.value === 'full') {
+      ttsTopBarRevealTimer = setTimeout(() => {
+        ttsTopBarControlsVisible.value = true
+        ttsTopBarRevealTimer = null
+      }, HEADER_SQUEEZE_MS + 40)
+    } else {
+      ttsTopBarControlsVisible.value = false
+    }
+  },
+  { flush: 'post' }
+)
+
 watch(streamError, (value) => {
   if (!value) return
   errorStack.pushError({ message: value, source: 'main', title: '主聊天错误' })
@@ -604,6 +1031,7 @@ onBeforeUnmount(() => {
   if (chatSearchTimer) clearTimeout(chatSearchTimer)
   if (headerCompactDelayTimer) clearTimeout(headerCompactDelayTimer)
   if (headerLiftChainTimer) clearTimeout(headerLiftChainTimer)
+  clearTtsTopBarRevealTimer()
   clearChatSearchChipsExpandState()
   chatHeaderResizeObserver?.disconnect()
   chatHeaderResizeObserver = null
@@ -1416,7 +1844,11 @@ onMounted(async () => {
   }
   nextTick(() => {
     updateContentAreaLeft()
-    window.setTimeout(() => updateContentAreaLeft(), 320)
+    runChatFabSeparation()
+    window.setTimeout(() => {
+      updateContentAreaLeft()
+      runChatFabSeparation()
+    }, 320)
   })
   window.addEventListener('resize', scheduleContentAreaLeft, { passive: true })
 })
@@ -1425,6 +1857,8 @@ onBeforeUnmount(() => {
   clearChatSearchAnimTimers()
   window.removeEventListener('resize', scheduleContentAreaLeft)
   if (contentAreaLeftRaf) cancelAnimationFrame(contentAreaLeftRaf)
+  cancelContentAreaLeftLayoutSync()
+  if (contentAreaLeftSepDebounce) clearTimeout(contentAreaLeftSepDebounce)
 })
 
 /**
@@ -1749,6 +2183,7 @@ async function runGroupGeneration(
         stream.flushForMessage(localAssistantId)
         stopRequested.value = false
       }
+      void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
     } else {
       const res = await apiPost<{
         ok: boolean
@@ -1767,6 +2202,7 @@ async function runGroupGeneration(
         pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined)
         chats.appendLocalMessageContent(localAssistantId, res.content || '')
         scrollToBottom()
+        void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
       } else {
         throw new Error(res.error || 'unknown error')
       }
@@ -1845,7 +2281,8 @@ async function sendUserMessage() {
       ts: now,
     })
     scrollToBottom(true, true)
-    
+    void tryAutoReadUserMessage(localUserId)
+
     try {
       await apiPost(`/api/chats/${chatId}/messages`, {
         role: userRole,
@@ -1856,6 +2293,7 @@ async function sendUserMessage() {
         senderAvatar: userRole === 'user' ? (selectedPersona.value?.avatar ?? null) : null,
       })
       await chats.load(chatId)
+      await flushAutoReadTtsAfterChatReload()
     } catch (e: any) {
       streamError.value = e?.message ?? String(e)
     }
@@ -1896,7 +2334,8 @@ async function sendUserMessage() {
         ts: now,
       })
       scrollToBottom(true, true)
-      
+      void tryAutoReadUserMessage(localUserId)
+
       await apiPost(`/api/chats/${chatId}/messages`, {
         role: userRole,
         content: text,
@@ -1925,6 +2364,7 @@ async function sendUserMessage() {
         senderAvatar: userRole === 'user' ? (selectedPersona.value?.avatar ?? null) : null,
         ts: now,
       })
+      void tryAutoReadUserMessage(localUserId)
       chats.addLocalMessage({ version: 1, id: localAssistantId, role: 'assistant', content: '', ts: now })
       scrollToBottom(true, true)
 
@@ -1978,6 +2418,7 @@ async function sendUserMessage() {
           stream.flushForMessage(localAssistantId)
           stopRequested.value = false
         }
+        void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
       } else {
         const res = await apiPost<{
           ok: boolean
@@ -2003,6 +2444,7 @@ async function sendUserMessage() {
           pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined)
           chats.appendLocalMessageContent(localAssistantId, res.content || '')
           scrollToBottom()
+          void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
         } else {
           throw new Error(res.error || 'unknown error')
         }
@@ -2016,6 +2458,7 @@ async function sendUserMessage() {
           imageFallbackDialog.value.visible = false
           if (isGroup) {
             await chats.load(chatId)
+            await flushAutoReadTtsAfterChatReload()
           } else {
             const localAssistantId = `local_assistant_retry_${Date.now()}`
             chats.addLocalMessage({ version: 1, id: localAssistantId, role: 'assistant', content: '', ts: new Date().toISOString() })
@@ -2041,6 +2484,7 @@ async function sendUserMessage() {
               } finally {
                 stream.flushForMessage(localAssistantId)
               }
+              void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
             } else {
               const retryRes = await apiPost<{ ok: boolean; content: string; error?: string }>('/api/generate/stream', {
                 chatId,
@@ -2051,8 +2495,10 @@ async function sendUserMessage() {
               })
               if (!retryRes.ok) throw new Error(retryRes.error || 'unknown error')
               chats.appendLocalMessageContent(localAssistantId, retryRes.content || '')
+              void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
             }
             await chats.load(chatId)
+            await flushAutoReadTtsAfterChatReload()
           }
         })
       } else {
@@ -2067,6 +2513,7 @@ async function sendUserMessage() {
       stopStreamingHold.value = false
     } else {
       await chats.load(chatId)
+      await flushAutoReadTtsAfterChatReload()
     }
     await settings.load()
   }
@@ -2114,6 +2561,7 @@ async function continueGroupChat() {
       group.pendingMembers.value = []
       if (!skippedReload) {
         await chats.load(chatId)
+        await flushAutoReadTtsAfterChatReload()
         await settings.load()
       } else {
         await settings.load()
@@ -2168,6 +2616,7 @@ async function startNextRound() {
     if (!group.isPaused.value) {
       if (!skippedReload) {
         await chats.load(chatId)
+        await flushAutoReadTtsAfterChatReload()
       }
       await settings.load()
     }
@@ -2248,6 +2697,7 @@ async function triggerInterject(characterId: string) {
         stream.flushForMessage(localAssistantId)
         stopRequested.value = false
       }
+      void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
     } else {
       const res = await apiPost<{
         ok: boolean
@@ -2266,6 +2716,7 @@ async function triggerInterject(characterId: string) {
         pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined)
         chats.appendLocalMessageContent(localAssistantId, res.content || '')
         scrollToBottom()
+        void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
       } else {
         streamError.value = res.error || 'unknown error'
       }
@@ -2281,6 +2732,7 @@ async function triggerInterject(characterId: string) {
       stopStreamingHold.value = false
     } else {
       await chats.load(chatId)
+      await flushAutoReadTtsAfterChatReload()
     }
   }
 }
@@ -2334,6 +2786,7 @@ async function persistLocalStreamingMessages(chatId: string) {
     serverMessages = updatedChat.messages
   }
   await chats.load(chatId)
+  await flushAutoReadTtsAfterChatReload()
 }
 
 /**
@@ -2374,10 +2827,14 @@ function handlePrimaryAction() {
  * @param {ChatMessage} m - 消息对象（来自types/models.ts）
  */
 async function handleSwitchPreviousVersion(m: ChatMessage) {
+  const previousContent = versions.getDisplayContent(m)
   const newContent = versions.switchToPreviousVersion(m)
   if (newContent !== null && activeChat.value) {
     const msg = activeChat.value.messages.find((msg) => msg.id === m.id)
-    if (msg) msg.content = newContent
+    if (msg) {
+      invalidateTtsCacheIfTextChanged(msg, previousContent, newContent)
+      msg.content = newContent
+    }
     const gv = msg?.greetingVariants
     if (gv && gv.length > 1 && !m.id.startsWith('local_') && activeChat.value && m.role !== 'tool') {
       const idx = versions.getCurrentVersionIndex(m)
@@ -2400,10 +2857,14 @@ async function handleSwitchPreviousVersion(m: ChatMessage) {
  * @param {ChatMessage} m - 消息对象（来自types/models.ts）
  */
 async function handleSwitchNextVersion(m: ChatMessage) {
+  const previousContent = versions.getDisplayContent(m)
   const newContent = versions.switchToNextVersion(m)
   if (newContent !== null && activeChat.value) {
     const msg = activeChat.value.messages.find((msg) => msg.id === m.id)
-    if (msg) msg.content = newContent
+    if (msg) {
+      invalidateTtsCacheIfTextChanged(msg, previousContent, newContent)
+      msg.content = newContent
+    }
     const gv = msg?.greetingVariants
     if (gv && gv.length > 1 && !m.id.startsWith('local_') && activeChat.value && m.role !== 'tool') {
       const idx = versions.getCurrentVersionIndex(m)
@@ -2526,6 +2987,7 @@ async function handleRewriteMessage(m: ChatMessage) {
           stream.flushForMessage(localAssistantId)
           stopRequested.value = false
         }
+        void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
       } else {
         const res = await apiPost<{
           ok: boolean
@@ -2542,6 +3004,7 @@ async function handleRewriteMessage(m: ChatMessage) {
           pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined)
           chats.appendLocalMessageContent(localAssistantId, res.content || '')
           scrollToBottom()
+          void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
         } else {
           streamError.value = res.error || 'unknown error'
         }
@@ -2593,6 +3056,7 @@ async function handleRewriteMessage(m: ChatMessage) {
           stream.flushForMessage(localAssistantId)
           stopRequested.value = false
         }
+        void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
       } else {
         const res = await apiPost<{
           ok: boolean
@@ -2614,6 +3078,7 @@ async function handleRewriteMessage(m: ChatMessage) {
           pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined)
           chats.appendLocalMessageContent(localAssistantId, res.content || '')
           scrollToBottom()
+          void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
         } else {
           streamError.value = res.error || 'unknown error'
         }
@@ -2631,6 +3096,7 @@ async function handleRewriteMessage(m: ChatMessage) {
       stopStreamingHold.value = false
     } else {
       await chats.load(chatId)
+      await flushAutoReadTtsAfterChatReload()
     }
     await settings.load()
     
@@ -2986,8 +3452,12 @@ async function handleSaveEditedMessage() {
   const newContent = actions.editingMessageContent.value
   if (messageId && activeChat.value && newContent !== undefined) {
     const msg = activeChat.value.messages.find(m => m.id === messageId)
-    if (msg && versions.hasMultipleVersions(msg)) {
-      versions.updateCurrentVersionContent(messageId, newContent)
+    if (msg) {
+      const previousContent = versions.getDisplayContent(msg)
+      if (versions.hasMultipleVersions(msg)) {
+        versions.updateCurrentVersionContent(messageId, newContent)
+      }
+      invalidateTtsCacheIfTextChanged(msg, previousContent, newContent)
       msg.content = newContent
     }
   }
@@ -3040,6 +3510,7 @@ async function handleSaveAndSend() {
     group.showInterject()
     try {
       await chats.load(chatId)
+      await flushAutoReadTtsAfterChatReload()
     } catch {
       /* ignore */
     }
@@ -3101,6 +3572,7 @@ async function handleSaveAndSend() {
           stream.flushForMessage(localAssistantId)
           stopRequested.value = false
         }
+        void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
       } else {
         const res = await apiPost<{ ok: boolean; content: string; reasoningContent?: string; assistantMessageId?: string | null; error?: string }>('/api/generate/stream', {
           chatId,
@@ -3116,6 +3588,7 @@ async function handleSaveAndSend() {
           pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined)
           chats.appendLocalMessageContent(localAssistantId, res.content || '')
           scrollToBottom()
+          void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
         } else {
           streamError.value = res.error || 'unknown error'
         }
@@ -3132,6 +3605,7 @@ async function handleSaveAndSend() {
       stopStreamingHold.value = false
     } else {
       await chats.load(chatId)
+      await flushAutoReadTtsAfterChatReload()
     }
     await settings.load()
   }
@@ -3213,12 +3687,21 @@ const editingPersonaAvatarUrl = computed(() => {
         <!-- 聊天内容区 -->
         <div v-if="(selectedCharacter || activeChat?.isGroup) && activeChat" class="flex flex-col h-full relative">
           <!-- 顶部标题栏 -->
+          <!-- 磨砂仅放在独立底层；下拉菜单在上层，否则嵌套在父级 backdrop-filter 内时子级 backdrop 往往完全不生效 -->
           <header 
             ref="chatHeaderRef"
-            class="flex flex-col theme-header-bg backdrop-blur-[var(--blur-heavy)] backdrop-saturate-[1.75] pointer-events-none"
-            :class="{ 'theme-header-bg--square': headerMorphPhase === 'full' }"
+            class="relative flex flex-col pointer-events-none"
             :style="chatHeaderStyle"
           >
+            <div
+              class="pointer-events-none absolute inset-0 z-0 overflow-hidden theme-header-bg backdrop-blur-[var(--blur-heavy)] backdrop-saturate-[1.75]"
+              :style="{
+                borderRadius: chatHeaderStyle.borderRadius,
+                transition: chatHeaderStyle.transition,
+              }"
+              aria-hidden="true"
+            />
+            <div class="relative z-[1] flex min-w-0 flex-col">
             <div class="flex items-start justify-between gap-4 px-6 pt-3 pb-2">
               <div class="pointer-events-auto flex min-w-0 flex-1 items-start gap-3">
                 <div
@@ -3291,7 +3774,7 @@ const editingPersonaAvatarUrl = computed(() => {
                       v-if="showHeaderMoreMenu"
                       key="hdr-more-menu"
                       ref="headerMoreMenuRef"
-                      class="header-more-menu"
+                      class="header-more-menu backdrop-blur-[var(--blur-heavy)]"
                       role="menu"
                       aria-label="更多操作"
                     >
@@ -3422,6 +3905,7 @@ const editingPersonaAvatarUrl = computed(() => {
               </div>
             </div>
             </Transition>
+            </div>
           </header>
 
           <!-- 消息列表 -->
@@ -3450,6 +3934,7 @@ const editingPersonaAvatarUrl = computed(() => {
             :sidebar-collapsed="sidebarCollapsed"
             @edit-message="(m) => actions.openEditMessage(m, versions.getDisplayContent(m))"
             @delete-message="actions.deleteMessage"
+            @read-aloud-message="handleReadAloudMessage"
             @rewrite-message="handleRewriteMessage"
             @switch-previous-version="handleSwitchPreviousVersion"
             @switch-next-version="handleSwitchNextVersion"
@@ -3458,11 +3943,15 @@ const editingPersonaAvatarUrl = computed(() => {
 
           <!-- 输入区域 -->
           <ChatInput
+            ref="chatInputRef"
             v-model="draftMessage"
             :sidebar-collapsed="sidebarCollapsed"
             :header-morph-phase="headerMorphPhase"
             :content-area-left-px="contentAreaLeftPx"
             :assistant-fab-min-top-px="chatAssistantFabMinTopPx"
+            :on-assistant-fab-layout="() => runChatFabSeparation(null)"
+            :on-assistant-fab-drag-end="() => runChatFabSeparation('assistant')"
+            :on-assistant-fab-snap-end="() => runChatFabSeparation('assistant')"
             :is-generating="isGenerating"
             :stream-error="streamError"
             :draft-images="draftImages"
@@ -3497,6 +3986,24 @@ const editingPersonaAvatarUrl = computed(() => {
             @draft-helper-rewrite="handleDraftHelperRewrite"
             @draft-helper-discard="handleDraftHelperDiscard"
             @draft-helper-stop="handleDraftHelperStop"
+          />
+
+          <!-- TTS 播放/下载 FAB（仅在 TTS 启用时显示） -->
+          <TtsPlaybackFab
+            v-if="settings.settings?.ttsEnabled"
+            ref="ttsPlaybackFabRef"
+            :is-downloading="ttsIsDownloading"
+            :is-playing="ttsIsPlaying"
+            :audio-paused="ttsAudioPaused"
+            :content-area-left-px="contentAreaLeftPx"
+            :min-top-px="chatAssistantFabMinTopPx"
+            :input-sink-active="ttsInputSinkActive"
+            :show-top-bar-controls="ttsTopBarControlsVisible"
+            :on-tts-fab-layout="() => runChatFabSeparation(null)"
+            :on-tts-fab-drag-end="() => runChatFabSeparation('tts')"
+            :on-tts-fab-snap-end="() => runChatFabSeparation('tts')"
+            @toggle-download="ttsIsDownloading ? ttsQueue.abortAllDownloads() : undefined"
+            @toggle-play-pause="ttsQueue.togglePlayPause()"
           />
         </div>
 
@@ -4137,11 +4644,10 @@ const editingPersonaAvatarUrl = computed(() => {
               以下开关与侧栏消息列表底部的权限按钮同步，变更后立即写入本机偏好。
             </p>
             <label class="flex items-start gap-3 cursor-pointer mb-4">
-              <input
-                type="checkbox"
-                class="accent-brand mt-0.5 h-4 w-4 shrink-0 rounded border border-[var(--color-border)]"
+              <ThemedCheckbox
+                class="mt-0.5"
                 :checked="assistant.allowWriteMemoryEnabled.value"
-                @change="onAssistantSettingsMemoryChange"
+                @update:checked="setAssistantWriteMemoryEnabled"
               />
               <span>
                 <span class="text-sm text-[var(--color-text)]">允许记忆写入</span>
@@ -4151,11 +4657,10 @@ const editingPersonaAvatarUrl = computed(() => {
               </span>
             </label>
             <label class="flex items-start gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                class="accent-brand mt-0.5 h-4 w-4 shrink-0 rounded border border-[var(--color-border)]"
+              <ThemedCheckbox
+                class="mt-0.5"
                 :checked="assistant.allowDestructiveToolsEnabled.value"
-                @change="onAssistantSettingsDestructiveChange"
+                @update:checked="setAssistantDestructiveToolsEnabled"
               />
               <span>
                 <span class="text-sm text-[var(--color-text)]">允许破坏性工具</span>
@@ -4287,6 +4792,7 @@ const editingPersonaAvatarUrl = computed(() => {
 
 .header-more-menu {
   position: absolute;
+  z-index: 20;
   top: calc(100% + 0.45rem);
   right: 0;
   width: 14rem;
@@ -4295,9 +4801,8 @@ const editingPersonaAvatarUrl = computed(() => {
   border: 1px solid var(--color-border);
   background: color-mix(in srgb, var(--color-surface-overlay, rgba(18, 22, 30, 0.86)) 94%, transparent);
   box-shadow: var(--shadow-glass-panel, 0 16px 40px rgba(0, 0, 0, 0.24));
-  backdrop-filter: blur(var(--blur-light));
-  -webkit-backdrop-filter: blur(var(--blur-light));
   transform-origin: top right;
+  /* 磨砂用模板上的 backdrop-blur-[var(--blur-heavy)]（避免手写 backdrop-filter 经构建压缩失效，且勿嵌套在父级 backdrop 内） */
 }
 
 /* 与顶栏吸顶 morph（320 / 420 / 520ms）同气质的过渡：分层入场 / 退场 */
