@@ -1,0 +1,198 @@
+<script setup lang="ts">
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { ChevronDown } from 'lucide-vue-next'
+import type { ApiPresetVoice } from '../types/models'
+
+/** 与模板中 gap 一致：top-[calc(100%+0.375rem)] */
+const DROPDOWN_GAP_PX = 6
+/** 对应原 max-h-56 */
+const PANEL_MAX_PX = 224
+const PANEL_MIN_PX = 96
+
+const props = withDefaults(defineProps<{
+  modelValue: string
+  voices?: ApiPresetVoice[]
+  disabled?: boolean
+  placeholder?: string
+}>(), {
+  voices: () => [],
+  disabled: false,
+  placeholder: '填写 voice_id',
+})
+
+const emit = defineEmits<{
+  (e: 'update:modelValue', value: string): void
+}>()
+
+const rootRef = ref<HTMLElement | null>(null)
+const dropdownOpen = ref(false)
+/** 优先向下；空间不足时向上 */
+const dropdownPlacement = ref<'down' | 'up'>('down')
+const panelMaxHeightPx = ref(PANEL_MAX_PX)
+
+function updateDropdownPlacement() {
+  const root = rootRef.value
+  if (!root) return
+
+  const rect = root.getBoundingClientRect()
+  const viewportH = window.innerHeight
+  const spaceBelow = viewportH - rect.bottom - DROPDOWN_GAP_PX
+  const spaceAbove = rect.top - DROPDOWN_GAP_PX
+
+  const clampMax = (space: number) =>
+    Math.min(PANEL_MAX_PX, Math.max(PANEL_MIN_PX, Math.floor(space)))
+
+  if (spaceBelow >= PANEL_MAX_PX) {
+    dropdownPlacement.value = 'down'
+    panelMaxHeightPx.value = PANEL_MAX_PX
+  } else if (spaceAbove >= PANEL_MAX_PX) {
+    dropdownPlacement.value = 'up'
+    panelMaxHeightPx.value = PANEL_MAX_PX
+  } else if (spaceBelow >= spaceAbove) {
+    dropdownPlacement.value = 'down'
+    panelMaxHeightPx.value = clampMax(spaceBelow)
+  } else {
+    dropdownPlacement.value = 'up'
+    panelMaxHeightPx.value = clampMax(spaceAbove)
+  }
+}
+
+let placementListenersBound = false
+function onPlacementInvalidate() {
+  if (dropdownOpen.value) updateDropdownPlacement()
+}
+
+function bindPlacementListeners() {
+  if (placementListenersBound) return
+  placementListenersBound = true
+  window.addEventListener('resize', onPlacementInvalidate)
+  window.visualViewport?.addEventListener('resize', onPlacementInvalidate)
+  window.addEventListener('scroll', onPlacementInvalidate, true)
+}
+
+function unbindPlacementListeners() {
+  if (!placementListenersBound) return
+  placementListenersBound = false
+  window.removeEventListener('resize', onPlacementInvalidate)
+  window.visualViewport?.removeEventListener('resize', onPlacementInvalidate)
+  window.removeEventListener('scroll', onPlacementInvalidate, true)
+}
+
+const filteredVoices = computed(() => {
+  const query = props.modelValue.trim().toLowerCase()
+  if (!query) return props.voices
+  return props.voices.filter((voice) => {
+    return voice.voiceId.toLowerCase().includes(query) || voice.name.toLowerCase().includes(query)
+  })
+})
+
+function handleDocumentPointerDown(event: PointerEvent) {
+  const root = rootRef.value
+  if (!root) return
+  if (event.target instanceof Node && root.contains(event.target)) return
+  dropdownOpen.value = false
+}
+
+function toggleDropdown() {
+  if (props.disabled) return
+  dropdownOpen.value = !dropdownOpen.value
+}
+
+function chooseVoice(voiceId: string) {
+  emit('update:modelValue', voiceId)
+  dropdownOpen.value = false
+}
+
+function onInput(e: Event) {
+  const t = e.target as HTMLInputElement
+  emit('update:modelValue', t.value)
+}
+
+onMounted(() => {
+  document.addEventListener('pointerdown', handleDocumentPointerDown)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', handleDocumentPointerDown)
+  unbindPlacementListeners()
+})
+
+watch(dropdownOpen, (open) => {
+  if (open) {
+    nextTick(() => {
+      updateDropdownPlacement()
+      bindPlacementListeners()
+    })
+  } else {
+    unbindPlacementListeners()
+  }
+})
+</script>
+
+<template>
+  <div ref="rootRef" class="relative">
+    <input
+      :value="modelValue"
+      type="text"
+      class="input input-sm w-full pr-10"
+      :placeholder="placeholder"
+      :disabled="disabled"
+      @input="onInput"
+    />
+    <button
+      type="button"
+      class="absolute inset-y-1 right-1 inline-flex w-8 items-center justify-center rounded-md text-[var(--color-text-muted)] transition-colors hover:bg-surface-hover hover:text-[var(--color-text-secondary)]"
+      :disabled="disabled"
+      @click="toggleDropdown"
+    >
+      <ChevronDown class="h-4 w-4" :class="dropdownOpen ? 'rotate-180' : ''" />
+    </button>
+
+    <div
+      v-if="dropdownOpen"
+      class="absolute left-0 right-0 z-30 overflow-hidden rounded-xl border border-[var(--color-border-subtle)] bg-surface-overlay shadow-xl backdrop-blur-md"
+      :class="
+        dropdownPlacement === 'down'
+          ? 'top-[calc(100%+0.375rem)] bottom-auto'
+          : 'bottom-[calc(100%+0.375rem)] top-auto'
+      "
+    >
+      <div
+        class="overflow-y-auto p-1 custom-scrollbar"
+        :style="{ maxHeight: `${panelMaxHeightPx}px` }"
+      >
+        <button
+          v-for="voice in filteredVoices"
+          :key="voice.voiceId"
+          type="button"
+          class="flex w-full items-start justify-between gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-surface-hover"
+          @click="chooseVoice(voice.voiceId)"
+        >
+          <div class="min-w-0 flex-1">
+            <div class="truncate text-xs font-medium text-[var(--color-text-secondary)]">{{ voice.name }}</div>
+            <div class="truncate text-[10px] text-[var(--color-text-muted)]">{{ voice.voiceId }}</div>
+          </div>
+          <span class="shrink-0 rounded-full bg-surface-muted px-2 py-0.5 text-[10px] text-[var(--color-text-muted)]">{{ voice.voiceType }}</span>
+        </button>
+        <div v-if="filteredVoices.length === 0" class="px-3 py-3 text-xs text-[var(--color-text-muted)]">
+          暂无已获取音色
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 9999px;
+}
+</style>
