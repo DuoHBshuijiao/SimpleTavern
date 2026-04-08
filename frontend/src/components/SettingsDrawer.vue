@@ -41,15 +41,20 @@ import {
   normalizeThemeId,
   REASONING_EFFORT_OPTIONS,
   THEME_OPTIONS,
+  type AutoReadScope,
   type ApiPreset,
+  type ApiPresetVoice,
   type Chat,
   type ChatOverrides,
   type Settings,
+  type TtsSessionConfig,
   type WorldBook,
   type WorldBookAttachment,
 } from '../types/models'
 import ModernSelect from './ModernSelect.vue'
-import { apiDelete, apiGet, apiPost, apiPut } from '../api/http'
+import ThemedCheckbox from './ThemedCheckbox.vue'
+import TtsVoiceInput from './TtsVoiceInput.vue'
+import { apiDelete, apiGet, apiPost, apiPostFormData, apiPut } from '../api/http'
 import { downloadUpdate, getManualUpdateCheck, runUpdate } from '../api/update'
 import { useAppFont } from '../composables/useAppFont'
 import { usePageBackground } from '../composables/usePageBackground'
@@ -86,10 +91,6 @@ const {
 } = useSettingsImport()
 
 const tab = ref<'global' | 'presets' | 'chat'>('global')
-/** 设置抽屉顶部 Tab 滑块位置（0–2），用于高光背景平移 */
-const settingsTabIndex = computed(() =>
-  tab.value === 'global' ? 0 : tab.value === 'presets' ? 1 : 2,
-)
 const preloaded = ref(false)
 const chatTabEverOpened = ref(false)
 const pageBackgroundInputRef = ref<HTMLInputElement | null>(null)
@@ -112,26 +113,9 @@ const globalAccordionOpen = reactive({
   connection: false,
   prompts: false,
   appearance: false,
+  tts: false,
   app: false,
 })
-
-// 打开设置抽屉时从后端获取版本号（仅请求一次）
-watch(
-  () => props.show,
-  (visible) => {
-    if (visible && !appVersion.value) {
-      apiGet<{ version: string }>('/api/update/version')
-        .then((res) => { appVersion.value = res.version })
-        .catch(() => { appVersion.value = '' })
-    }
-    if (!visible) {
-      worldBookCreateExpanded.value = false
-      worldBookNewNameDraft.value = ''
-      void deletePendingPageBackgrounds(savedPageBackgroundImage.value)
-    }
-  },
-  { immediate: true }
-)
 
 const globalDraft = ref<Settings | null>(null)
 const chatDraft = ref<ChatOverrides | null>(null)
@@ -141,8 +125,10 @@ const showApiKey = ref(false)
 const editingPresetId = ref<string | null>(null)
 const editingPresetShowApiKey = ref(false)
 const presetModelsLoading = ref(false)
+const presetVoicesLoading = ref(false)
 /** 预设「模型列表」区内多选，仅用于批量删除（非通用 API 工具） */
 const presetModelListSelection = ref<Set<string>>(new Set())
+const presetVoiceListSelection = ref<Set<string>>(new Set())
 const importInputRef = ref<HTMLInputElement | null>(null)
 const worldbooks = ref<WorldBook[]>([])
 /** 全部世界书列表：按书 ID 缓存启用条目正文的 token 估测 */
@@ -156,6 +142,94 @@ const allWorldBooksSectionOpen = ref(false)
 const allWorldBooksListExpanded = ref(false)
 const sessionAttachModalShow = ref(false)
 const sessionAttachIdx = ref<number | null>(null)
+const ttsCloneSourceInputRef = ref<HTMLInputElement | null>(null)
+const ttsClonePromptInputRef = ref<HTMLInputElement | null>(null)
+const ttsCloneSourceFile = ref<File | null>(null)
+const ttsClonePromptFile = ref<File | null>(null)
+const ttsCloneLoading = ref(false)
+const ttsClonePreviewUrl = ref<string | null>(null)
+const ttsCloneDraft = reactive({
+  voiceId: '',
+  model: '',
+  previewText: '',
+  promptText: '',
+  needNoiseReduction: false,
+  needVolumeNormalization: false,
+})
+const ttsDesignLoading = ref(false)
+const ttsDesignPreviewUrl = ref<string | null>(null)
+const ttsDesignDraft = reactive({
+  prompt: '',
+  previewText: '',
+  voiceId: '',
+})
+
+const TTS_AUTO_READ_OPTIONS: Array<{ label: string; value: AutoReadScope }> = [
+  { label: '关', value: 'off' },
+  { label: '角色', value: 'assistant_only' },
+  { label: '用户', value: 'user_only' },
+  { label: '全部', value: 'all' },
+]
+
+// --- TTS 缓存统计（轮询后端 GET /api/tts/cache/stats） ---
+const ttsCacheStats = ref<{ usedBytes: number; limitBytes: number; lastPatrolAt: string; prunedFiles: number } | null>(null)
+let ttsCachePollTimer: ReturnType<typeof setInterval> | null = null
+
+function startTtsCachePoll() {
+  fetchTtsCacheStats()
+  if (ttsCachePollTimer) clearInterval(ttsCachePollTimer)
+  ttsCachePollTimer = setInterval(fetchTtsCacheStats, 30_000)
+}
+function stopTtsCachePoll() {
+  if (ttsCachePollTimer) { clearInterval(ttsCachePollTimer); ttsCachePollTimer = null }
+}
+async function fetchTtsCacheStats() {
+  try {
+    const res = await apiGet<{ usedBytes: number; limitBytes: number; lastPatrolAt: string; prunedFiles: number }>('/api/tts/cache/stats')
+    ttsCacheStats.value = res
+    console.log('[TTS][cache]', JSON.stringify(res))
+  } catch { /* ignore when TTS disabled */ }
+}
+const ttsCachePercent = computed(() => {
+  if (!ttsCacheStats.value || !ttsCacheStats.value.limitBytes) return 0
+  return Math.min(100, Math.max(0, (ttsCacheStats.value.usedBytes / ttsCacheStats.value.limitBytes) * 100))
+})
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1048576).toFixed(1)} MB`
+}
+
+// 打开设置抽屉时从后端获取版本号（仅请求一次）；依赖 globalDraft / TTS 轮询，须放在其后避免 TDZ
+watch(
+  () => props.show,
+  (visible) => {
+    if (visible && !appVersion.value) {
+      apiGet<{ version: string }>('/api/update/version')
+        .then((res) => { appVersion.value = res.version })
+        .catch(() => { appVersion.value = '' })
+    }
+    if (!visible) {
+      worldBookCreateExpanded.value = false
+      worldBookNewNameDraft.value = ''
+      void deletePendingPageBackgrounds(savedPageBackgroundImage.value)
+      stopTtsCachePoll()
+    } else {
+      // 打开时如果 TTS 已启用，开始轮询缓存统计
+      if (globalDraft.value?.ttsEnabled) startTtsCachePoll()
+    }
+  },
+  { immediate: true }
+)
+
+watch(
+  () => [props.show, globalDraft.value?.ttsEnabled] as const,
+  ([visible, enabled]) => {
+    if (!visible) return
+    if (enabled) startTtsCachePoll()
+    else stopTtsCachePoll()
+  },
+)
 
 // 检查更新
 const checkUpdateLoading = ref(false)
@@ -168,6 +242,12 @@ const showModelSelector = ref(false)
 const candidateModels = ref<string[]>([])
 const selectedCandidateModels = ref<Set<string>>(new Set())
 const modelSelectorQuery = ref('')
+
+// Voice Selector Modal State（与「从 API 获取并筛选」模型列表同交互）
+const showVoiceSelector = ref(false)
+const candidateVoices = ref<ApiPresetVoice[]>([])
+const selectedCandidateVoiceIds = ref<Set<string>>(new Set())
+const voiceSelectorQuery = ref('')
 
 // Token 估算（长期记忆 / 对话长度）
 const memoryTokenEstimate = ref<number | null>(null)
@@ -288,7 +368,142 @@ function ensureOverrides(v?: Partial<ChatOverrides> | null): ChatOverrides {
       context_message_limit: v?.draftHelp?.context_message_limit ?? null,
     },
     memberSettings: v?.memberSettings ? { ...v.memberSettings } : undefined,
+    tts: ensureTtsSessionConfig(v?.tts),
   }
+}
+
+function normalizeVoiceMap(source?: Record<string, string> | null): Record<string, string> {
+  const next: Record<string, string> = {}
+  for (const [key, value] of Object.entries(source || {})) {
+    const normalizedKey = String(key || '').trim()
+    const normalizedValue = String(value || '').trim()
+    if (!normalizedKey || !normalizedValue) continue
+    next[normalizedKey] = normalizedValue
+  }
+  return next
+}
+
+function ensureTtsSessionConfig(source?: TtsSessionConfig | null): TtsSessionConfig {
+  return {
+    autoReadScope: source?.autoReadScope ?? 'off',
+    readGapSeconds: typeof source?.readGapSeconds === 'number' && Number.isFinite(source.readGapSeconds)
+      ? Math.max(0, source.readGapSeconds)
+      : 0,
+    model: source?.model?.trim() || null,
+    voiceByCharacterId: normalizeVoiceMap(source?.voiceByCharacterId),
+    voiceByPersonaId: normalizeVoiceMap(source?.voiceByPersonaId),
+    presetId: source?.presetId?.trim() || null,
+    preprocessEnabled: source?.preprocessEnabled === true,
+    preprocessModel: source?.preprocessModel?.trim() || null,
+    preprocessPresetId: source?.preprocessPresetId?.trim() || null,
+    preprocessTargetLanguage: source?.preprocessTargetLanguage?.trim() || null,
+    injectEmotionTags: source?.injectEmotionTags === true,
+  }
+}
+
+function ensureChatTtsConfig(): TtsSessionConfig | null {
+  if (!chatDraft.value) return null
+  chatDraft.value.tts = ensureTtsSessionConfig(chatDraft.value.tts)
+  return chatDraft.value.tts
+}
+
+function updateChatTtsAutoReadScope(scope: AutoReadScope) {
+  const tts = ensureChatTtsConfig()
+  if (!tts) return
+  tts.autoReadScope = scope
+}
+
+function updateChatTtsReadGapSeconds(rawValue: string | number) {
+  const tts = ensureChatTtsConfig()
+  if (!tts) return
+  const numeric = Number(rawValue)
+  tts.readGapSeconds = Number.isFinite(numeric) ? Math.max(0, numeric) : 0
+}
+
+function updateChatTtsModel(option: { value: string; presetId?: string | null }) {
+  const tts = ensureChatTtsConfig()
+  if (!tts) return
+  tts.model = option.value?.trim() || null
+  tts.presetId = option.presetId ?? tts.presetId ?? null
+}
+
+function updateChatTtsPreprocessEnabled(enabled: boolean) {
+  const tts = ensureChatTtsConfig()
+  if (!tts) return
+  tts.preprocessEnabled = enabled
+}
+
+function updateChatTtsInjectEmotionTags(enabled: boolean) {
+  const tts = ensureChatTtsConfig()
+  if (!tts) return
+  tts.injectEmotionTags = enabled
+}
+
+function updateChatTtsPreprocessTargetLanguage(rawValue: string) {
+  const tts = ensureChatTtsConfig()
+  if (!tts) return
+  const v = rawValue.trim()
+  tts.preprocessTargetLanguage = v || null
+}
+
+function updateChatTtsPreprocessModel(option: { value: string; presetId?: string | null }) {
+  const tts = ensureChatTtsConfig()
+  if (!tts) return
+  tts.preprocessModel = option.value?.trim() || null
+  tts.preprocessPresetId = option.presetId ?? null
+}
+
+function getCharacterVoiceValue(characterId: string): string {
+  return chatDraft.value?.tts?.voiceByCharacterId?.[characterId] ?? ''
+}
+
+function updateCharacterVoiceValue(characterId: string, rawValue: string) {
+  const tts = ensureChatTtsConfig()
+  if (!tts) return
+  const value = rawValue.trim()
+  const next = { ...tts.voiceByCharacterId }
+  if (value) next[characterId] = value
+  else delete next[characterId]
+  tts.voiceByCharacterId = next
+}
+
+function getPersonaVoiceValue(personaId: string): string {
+  return chatDraft.value?.tts?.voiceByPersonaId?.[personaId] ?? ''
+}
+
+function updatePersonaVoiceValue(personaId: string, rawValue: string) {
+  const tts = ensureChatTtsConfig()
+  if (!tts) return
+  const value = rawValue.trim()
+  const next = { ...tts.voiceByPersonaId }
+  if (value) next[personaId] = value
+  else delete next[personaId]
+  tts.voiceByPersonaId = next
+}
+
+function isTtsPreset(preset?: ApiPreset | null): boolean {
+  return preset?.presetKind === 'minimax'
+}
+
+function setPresetTtsService(preset: ApiPreset, enabled: boolean) {
+  preset.presetKind = enabled ? 'minimax' : null
+  if (!enabled) {
+    preset.voiceCatalog = []
+  }
+}
+
+function normalizeVoiceCatalog(voices?: ApiPresetVoice[] | null): ApiPresetVoice[] {
+  const next = new Map<string, ApiPresetVoice>()
+  for (const voice of voices || []) {
+    const voiceId = String(voice.voiceId || '').trim()
+    if (!voiceId) continue
+    next.set(voiceId, {
+      voiceId,
+      name: String(voice.name || voiceId).trim() || voiceId,
+      voiceType: String(voice.voiceType || 'system').trim() || 'system',
+    })
+  }
+  return [...next.values()]
 }
 
 function ensureDraftHelpDefaults(target?: { context_message_limit?: number | null } | null) {
@@ -539,6 +754,10 @@ watch(
       ;(s as Settings).themeId = normalizeThemeId((s as Settings).themeId as string)
     }
     if (!s.apiPresets) s.apiPresets = []
+    s.apiPresets = s.apiPresets.map((preset) => ({
+      ...preset,
+      voiceCatalog: normalizeVoiceCatalog(preset.voiceCatalog),
+    }))
     if (!(s as Settings).draftHelpDefaults) (s as Settings).draftHelpDefaults = ensureDraftHelpDefaults()
     if (s.selectedFont === undefined) (s as Settings).selectedFont = null
     if ((s as Settings).pageBackgroundImage === undefined) (s as Settings).pageBackgroundImage = null
@@ -557,6 +776,8 @@ watch(
     markSavedPageBackground((s as Settings).pageBackgroundImage ?? null)
     globalDraft.value = s
     chatDraft.value = ensureOverrides(props.chat ? clone(props.chat.overrides) : undefined)
+    if (s.ttsEnabled) startTtsCachePoll()
+    else stopTtsCachePoll()
 
     if (fontList.value.length === 0) {
       try {
@@ -905,6 +1126,9 @@ const editingPreset = computed(() => {
 
 watch(editingPresetId, () => {
   presetModelListSelection.value = new Set()
+  presetVoiceListSelection.value = new Set()
+  ttsClonePreviewUrl.value = null
+  ttsDesignPreviewUrl.value = null
 })
 
 watch(
@@ -921,6 +1145,25 @@ watch(
     }
     if (next.size !== presetModelListSelection.value.size) {
       presetModelListSelection.value = next
+    }
+  },
+  { deep: true },
+)
+
+watch(
+  () => editingPreset.value?.voiceCatalog,
+  (voices) => {
+    if (!voices?.length) {
+      presetVoiceListSelection.value = new Set()
+      return
+    }
+    const allowed = new Set(voices.map((voice) => voice.voiceId))
+    const next = new Set<string>()
+    for (const voiceId of presetVoiceListSelection.value) {
+      if (allowed.has(voiceId)) next.add(voiceId)
+    }
+    if (next.size !== presetVoiceListSelection.value.size) {
+      presetVoiceListSelection.value = next
     }
   },
   { deep: true },
@@ -950,10 +1193,304 @@ function createPreset() {
     name: '新 API 预设',
     baseUrl: 'https://api.openai.com',
     apiKey: '',
-    models: []
+    models: [],
+    presetKind: null,
+    voiceCatalog: [],
   }
   globalDraft.value.apiPresets.push(newPreset)
   editingPresetId.value = newPreset.id
+}
+
+const ttsSessionModelOptions = computed(() => {
+  return (globalDraft.value?.apiPresets || [])
+    .filter((preset) => isTtsPreset(preset) && (preset.models?.length || 0) > 0)
+    .map((preset) => ({
+      label: preset.name,
+      options: (preset.models || []).map((modelName) => ({
+        label: modelName,
+        value: modelName,
+        presetId: preset.id,
+      })),
+    }))
+})
+
+const ttsPreprocessModelOptions = computed(() => {
+  return (globalDraft.value?.apiPresets || [])
+    .filter((preset) => !isTtsPreset(preset) && (preset.models?.length || 0) > 0)
+    .map((preset) => ({
+      label: preset.name,
+      options: (preset.models || []).map((modelName) => ({
+        label: modelName,
+        value: modelName,
+        presetId: preset.id,
+      })),
+    }))
+})
+
+const selectedChatTtsPreset = computed(() => {
+  const presetId = chatDraft.value?.tts?.presetId
+  if (!presetId) return null
+  return globalDraft.value?.apiPresets.find((preset) => preset.id === presetId) || null
+})
+
+const availableTtsVoices = computed(() => {
+  const selectedPreset = selectedChatTtsPreset.value
+  if (selectedPreset?.voiceCatalog?.length) return selectedPreset.voiceCatalog
+  const merged = (globalDraft.value?.apiPresets || [])
+    .filter((preset) => isTtsPreset(preset))
+    .flatMap((preset) => preset.voiceCatalog || [])
+  return normalizeVoiceCatalog(merged)
+})
+
+const currentChatCharacterVoiceRows = computed(() => {
+  const chat = props.chat
+  if (!chat) return [] as Array<{ id: string; name: string }>
+  const ids = chat.isGroup ? chat.memberIds : [chat.characterId]
+  return [...new Set(ids.filter(Boolean))].map((id) => ({
+    id,
+    name: charactersStore.list.find((character) => character.id === id)?.name || id,
+  }))
+})
+
+const currentChatPersonaVoiceRows = computed(() => {
+  const personas = globalDraft.value?.userPersonas || []
+  const ids = new Set<string>()
+  for (const persona of personas) ids.add(persona.id)
+  if (props.chat?.userPersonaId) ids.add(props.chat.userPersonaId)
+  if (globalDraft.value?.selectedPersonaId) ids.add(globalDraft.value.selectedPersonaId)
+  return [...ids].map((id) => ({
+    id,
+    name: personas.find((persona) => persona.id === id)?.name || id,
+    current: props.chat?.userPersonaId === id,
+  }))
+})
+
+const editingPresetVoiceCatalog = computed(() => normalizeVoiceCatalog(editingPreset.value?.voiceCatalog))
+
+function upsertEditingPresetVoiceCatalog(voices: ApiPresetVoice[]) {
+  const preset = editingPreset.value
+  if (!preset) return
+  const merged = normalizeVoiceCatalog([...(preset.voiceCatalog || []), ...voices])
+  preset.voiceCatalog = merged
+}
+
+function togglePresetVoiceSelection(voiceId: string) {
+  const next = new Set(presetVoiceListSelection.value)
+  if (next.has(voiceId)) next.delete(voiceId)
+  else next.add(voiceId)
+  presetVoiceListSelection.value = next
+}
+
+function selectAllPresetVoices() {
+  presetVoiceListSelection.value = new Set(editingPresetVoiceCatalog.value.map((voice) => voice.voiceId))
+}
+
+function clearPresetVoiceSelection() {
+  presetVoiceListSelection.value = new Set()
+}
+
+function removeSelectedPresetVoices() {
+  const preset = editingPreset.value
+  if (!preset?.voiceCatalog?.length || !presetVoiceListSelection.value.size) return
+  preset.voiceCatalog = preset.voiceCatalog.filter((voice) => !presetVoiceListSelection.value.has(voice.voiceId))
+  presetVoiceListSelection.value = new Set()
+}
+
+async function clearAllPresetVoices() {
+  const preset = editingPreset.value
+  if (!preset?.voiceCatalog?.length) return
+  const ok = await notifyConfirm({
+    title: '清空音色列表',
+    message: '确定删除该预设中的全部音色条目？',
+    variant: 'danger',
+  })
+  if (!ok) return
+  preset.voiceCatalog = []
+  presetVoiceListSelection.value = new Set()
+}
+
+/**
+ * 打开音色选择器：拉取 MiniMax 音色列表，在弹窗中筛选并勾选后写入预设（与模型列表「从 API 获取并筛选」一致）。
+ * 预设中已有但本次 API 未返回的音色会并入候选列表，避免仅打开弹窗就丢失本地条目。
+ */
+async function openVoiceSelector(preset: ApiPreset) {
+  if (!isTtsPreset(preset) || presetVoicesLoading.value) return
+  presetVoicesLoading.value = true
+  try {
+    const res = await apiPost<{ voices: ApiPresetVoice[] }>('/api/tts/test-voices', {
+      baseUrl: preset.baseUrl,
+      apiKey: preset.apiKey,
+      voice_type: 'all',
+    })
+    const apiNorm = normalizeVoiceCatalog(res.voices)
+    const apiIds = new Set(apiNorm.map((v) => v.voiceId))
+    const extraFromPreset = normalizeVoiceCatalog(
+      (preset.voiceCatalog || []).filter((v) => !apiIds.has(v.voiceId)),
+    )
+    candidateVoices.value = [...apiNorm, ...extraFromPreset]
+    selectedCandidateVoiceIds.value = new Set((preset.voiceCatalog || []).map((v) => v.voiceId))
+    voiceSelectorQuery.value = ''
+    showVoiceSelector.value = true
+  } catch (error) {
+    await notifyMessage('获取音色失败: ' + String(error))
+  } finally {
+    presetVoicesLoading.value = false
+  }
+}
+
+function toggleCandidateVoice(voiceId: string) {
+  const next = new Set(selectedCandidateVoiceIds.value)
+  if (next.has(voiceId)) next.delete(voiceId)
+  else next.add(voiceId)
+  selectedCandidateVoiceIds.value = next
+}
+
+function saveVoiceSelection() {
+  const preset = editingPreset.value
+  if (!preset) {
+    showVoiceSelector.value = false
+    return
+  }
+  preset.voiceCatalog = normalizeVoiceCatalog(
+    candidateVoices.value.filter((v) => selectedCandidateVoiceIds.value.has(v.voiceId)),
+  )
+  showVoiceSelector.value = false
+}
+
+const filteredVoiceCandidates = computed(() => {
+  const list = candidateVoices.value
+  const q = voiceSelectorQuery.value.trim().toLowerCase()
+  if (!q) return list
+  return list.filter((v) => {
+    return (
+      v.voiceId.toLowerCase().includes(q) ||
+      v.name.toLowerCase().includes(q) ||
+      v.voiceType.toLowerCase().includes(q)
+    )
+  })
+})
+
+function pickTtsCloneSourceFile() {
+  ttsCloneSourceInputRef.value?.click()
+}
+
+function pickTtsClonePromptFile() {
+  ttsClonePromptInputRef.value?.click()
+}
+
+function onTtsCloneSourceChange(event: Event) {
+  const input = event.target as HTMLInputElement | null
+  ttsCloneSourceFile.value = input?.files?.[0] ?? null
+}
+
+function onTtsClonePromptChange(event: Event) {
+  const input = event.target as HTMLInputElement | null
+  ttsClonePromptFile.value = input?.files?.[0] ?? null
+}
+
+async function submitTtsClone() {
+  const preset = editingPreset.value
+  if (!preset || !isTtsPreset(preset)) return
+  if (!ttsCloneSourceFile.value) {
+    await notifyMessage('请先选择待复刻音频文件')
+    return
+  }
+  if (!ttsCloneDraft.voiceId.trim()) {
+    await notifyMessage('请填写克隆后的 voice_id')
+    return
+  }
+
+  const body = new FormData()
+  body.append('baseUrl', preset.baseUrl)
+  body.append('apiKey', preset.apiKey)
+  body.append('voice_id', ttsCloneDraft.voiceId.trim())
+  body.append('source_file', ttsCloneSourceFile.value)
+  if (ttsCloneDraft.model.trim()) body.append('model', ttsCloneDraft.model.trim())
+  if (ttsCloneDraft.previewText.trim()) body.append('text', ttsCloneDraft.previewText.trim())
+  if (ttsClonePromptFile.value) body.append('prompt_file', ttsClonePromptFile.value)
+  if (ttsCloneDraft.promptText.trim()) body.append('prompt_text', ttsCloneDraft.promptText.trim())
+  body.append('need_noise_reduction', String(ttsCloneDraft.needNoiseReduction))
+  body.append('need_volume_normalization', String(ttsCloneDraft.needVolumeNormalization))
+
+  ttsCloneLoading.value = true
+  try {
+    const res = await apiPostFormData<{ voiceId: string; previewUrl?: string | null; voiceType: string }>('/api/tts/clone', body)
+    upsertEditingPresetVoiceCatalog([{ voiceId: res.voiceId, name: res.voiceId, voiceType: res.voiceType }])
+    ttsClonePreviewUrl.value = res.previewUrl ?? null
+  } catch (error) {
+    await notifyMessage('音色复刻失败: ' + String(error))
+  } finally {
+    ttsCloneLoading.value = false
+  }
+}
+
+async function submitTtsDesign() {
+  const preset = editingPreset.value
+  if (!preset || !isTtsPreset(preset)) return
+  if (!ttsDesignDraft.prompt.trim() || !ttsDesignDraft.previewText.trim()) {
+    await notifyMessage('请填写音色描述和试听文本')
+    return
+  }
+  ttsDesignLoading.value = true
+  try {
+    const res = await apiPost<{ voiceId: string; previewUrl?: string | null; voiceType: string }>('/api/tts/design', {
+      baseUrl: preset.baseUrl,
+      apiKey: preset.apiKey,
+      prompt: ttsDesignDraft.prompt.trim(),
+      preview_text: ttsDesignDraft.previewText.trim(),
+      voice_id: ttsDesignDraft.voiceId.trim() || null,
+    })
+    upsertEditingPresetVoiceCatalog([{ voiceId: res.voiceId, name: res.voiceId, voiceType: res.voiceType }])
+    ttsDesignPreviewUrl.value = res.previewUrl ?? null
+    if (!ttsDesignDraft.voiceId.trim()) ttsDesignDraft.voiceId = res.voiceId
+  } catch (error) {
+    await notifyMessage('音色设计失败: ' + String(error))
+  } finally {
+    ttsDesignLoading.value = false
+  }
+}
+
+interface ComparableTtsConfig {
+  autoReadScope: AutoReadScope
+  readGapSeconds: number
+  model: string | null
+  voiceByCharacterId: Record<string, string>
+  voiceByPersonaId: Record<string, string>
+  presetId: string | null
+  preprocessEnabled: boolean
+  preprocessModel: string | null
+  preprocessPresetId: string | null
+  preprocessTargetLanguage: string | null
+  injectEmotionTags: boolean
+}
+
+function normalizeComparableTtsConfig(source?: TtsSessionConfig | null): ComparableTtsConfig | null {
+  const normalized = ensureTtsSessionConfig(source)
+  const comparable: ComparableTtsConfig = {
+    autoReadScope: normalized.autoReadScope ?? 'off',
+    readGapSeconds: Math.max(0, Number(normalized.readGapSeconds ?? 0)),
+    model: normalized.model?.trim() || null,
+    voiceByCharacterId: normalizeVoiceMap(normalized.voiceByCharacterId),
+    voiceByPersonaId: normalizeVoiceMap(normalized.voiceByPersonaId),
+    presetId: normalized.presetId?.trim() || null,
+    preprocessEnabled: normalized.preprocessEnabled === true,
+    preprocessModel: normalized.preprocessModel?.trim() || null,
+    preprocessPresetId: normalized.preprocessPresetId?.trim() || null,
+    preprocessTargetLanguage: normalized.preprocessTargetLanguage?.trim() || null,
+    injectEmotionTags: normalized.injectEmotionTags === true,
+  }
+  const hasValue = comparable.autoReadScope !== 'off'
+    || comparable.readGapSeconds > 0
+    || comparable.model !== null
+    || comparable.presetId !== null
+    || comparable.preprocessEnabled
+    || comparable.preprocessModel !== null
+    || comparable.preprocessPresetId !== null
+    || comparable.preprocessTargetLanguage !== null
+    || comparable.injectEmotionTags
+    || Object.keys(comparable.voiceByCharacterId).length > 0
+    || Object.keys(comparable.voiceByPersonaId).length > 0
+  return hasValue ? comparable : null
 }
 
 /**
@@ -1199,6 +1736,10 @@ async function saveGlobal() {
     ...globalDraft.value,
     generationDefaults: { ...globalDraft.value.generationDefaults },
     draftHelpDefaults: { ...ensureDraftHelpDefaults(globalDraft.value.draftHelpDefaults) },
+    apiPresets: globalDraft.value.apiPresets.map((preset) => ({
+      ...preset,
+      voiceCatalog: normalizeVoiceCatalog(preset.voiceCatalog),
+    })),
   }
   draft.generationDefaults.context_size = normalizeContextSize(draft.generationDefaults.context_size)
   draft.draftHelpDefaults.context_message_limit = normalizePositiveInteger(draft.draftHelpDefaults.context_message_limit)
@@ -1264,6 +1805,7 @@ interface ComparableChatOverrides {
   draftHelp: {
     context_message_limit: number | null
   }
+  tts: ComparableTtsConfig | null
 }
 
 function normalizeWorldBookGlobalExclusions(ids: string[] | undefined): string[] {
@@ -1296,6 +1838,7 @@ function normalizeComparableChatOverrides(source?: Partial<ChatOverrides> | null
     draftHelp: {
       context_message_limit: normalizePositiveInteger(draftHelp.context_message_limit),
     },
+    tts: normalizeComparableTtsConfig(overrides.tts),
   }
 }
 
@@ -1333,6 +1876,8 @@ function applyNormalizedComparableToDraft(source: ComparableChatOverrides) {
   chatDraft.value.worldBookGlobalExclusions = [...source.worldBookGlobalExclusions]
   chatDraft.value.params = { ...source.params }
   chatDraft.value.draftHelp = { ...source.draftHelp }
+  // 与 ensureOverrides 一致：Comparable 里「全默认」时 tts 为 null，但会话草稿必须始终持有 TtsSessionConfig，避免模板访问 chatDraft.tts.model 崩溃。
+  chatDraft.value.tts = ensureTtsSessionConfig(source.tts)
 }
 
 async function ensureCharactersLoadedForSave() {
@@ -1401,6 +1946,7 @@ async function saveChatOverrides() {
     ...chatDraft.value,
     params: { ...chatDraft.value.params },
     draftHelp: { ...ensureDraftHelpDefaults(chatDraft.value.draftHelp) },
+    tts: ensureTtsSessionConfig(chatDraft.value.tts),
   }
   draft.params.context_size = normalizeContextSize(draft.params.context_size)
   draft.draftHelp.context_message_limit = normalizePositiveInteger(draft.draftHelp.context_message_limit)
@@ -1670,7 +2216,7 @@ async function checkUpdate() {
             class="pointer-events-none absolute left-2 top-2 bottom-2 rounded-lg bg-brand-a10 transition-transform duration-[400ms] ease-out"
             :style="{
               width: 'calc((100% - 1.5rem) / 3)',
-              transform: `translateX(calc(${settingsTabIndex} * (100% + 0.25rem)))`,
+              transform: `translateX(calc(${tab === 'global' ? 0 : tab === 'presets' ? 1 : 2} * (100% + 0.25rem)))`,
             }"
           />
           <button
@@ -2203,6 +2749,93 @@ async function checkUpdate() {
                 <button
                   type="button"
                   class="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3.5 text-left text-sm font-semibold text-[var(--color-text-secondary)] select-none hover:bg-surface-hover/40"
+                  :aria-expanded="globalAccordionOpen.tts"
+                  @click="globalAccordionOpen.tts = !globalAccordionOpen.tts"
+                >
+                  <span>文字转语音（TTS）</span>
+                  <ChevronDown
+                    class="h-4 w-4 shrink-0 text-[var(--color-text-muted)] transition-transform duration-[800ms] ease-in-out"
+                    :class="globalAccordionOpen.tts ? 'rotate-180' : ''"
+                  />
+                </button>
+                <div
+                  class="grid transition-[grid-template-rows] duration-[800ms] ease-in-out"
+                  :class="globalAccordionOpen.tts ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'"
+                >
+                  <div class="min-h-0 overflow-hidden">
+                    <div class="space-y-3 border-t border-[var(--color-border-subtle)] px-4 pb-4 pt-4">
+                      <!-- TTS 总开关 -->
+                      <div class="space-y-2">
+                        <label class="block text-sm font-medium text-[var(--color-text-secondary)]">启用文字转语音</label>
+                        <button
+                          type="button"
+                          class="flex min-h-11 w-full cursor-pointer items-center gap-3 py-1 text-left group"
+                          @click="globalDraft!.ttsEnabled = !globalDraft!.ttsEnabled; if (globalDraft!.ttsEnabled) startTtsCachePoll(); else stopTtsCachePoll()"
+                        >
+                          <div
+                            class="relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200 ease-out"
+                            :class="globalDraft!.ttsEnabled ? 'bg-brand' : 'bg-[var(--color-track)]'"
+                          >
+                            <div
+                              class="absolute left-1 top-1 h-4 w-4 rounded-full bg-[var(--color-on-brand)]"
+                              :style="{
+                                transform: globalDraft!.ttsEnabled ? 'translateX(1.25rem)' : 'translateX(0)',
+                                transition: 'transform 200ms ease-out',
+                              }"
+                            ></div>
+                          </div>
+                          <span class="text-xs text-[var(--color-text-secondary)]">
+                            {{ globalDraft!.ttsEnabled ? '已开启：启用语音合成功能' : '已关闭' }}
+                          </span>
+                        </button>
+                      </div>
+
+                      <!-- 缓存上限 -->
+                      <div v-if="globalDraft!.ttsEnabled" class="space-y-2">
+                        <label class="block text-sm font-medium text-[var(--color-text-secondary)]">缓存上限（MB）</label>
+                        <input
+                          v-model.number="globalDraft!.ttsAudioCacheLimitMb"
+                          type="number"
+                          min="10"
+                          max="10000"
+                          class="input w-full"
+                        />
+                        <!-- 缓存占比条 -->
+                        <div class="space-y-1">
+                          <div class="h-2 w-full rounded-full bg-[var(--color-track)] overflow-hidden">
+                            <div
+                              class="h-full rounded-full transition-[width] duration-500 ease-out"
+                              :class="ttsCachePercent > 90 ? 'bg-red-500' : ttsCachePercent > 70 ? 'bg-amber-500' : 'bg-brand'"
+                              :style="{ width: (ttsCacheStats ? ttsCachePercent : 0) + '%' }"
+                            ></div>
+                          </div>
+                          <div class="flex items-center justify-between text-xs text-[var(--color-text-muted)]">
+                            <span>{{ ttsCacheStats ? `${formatBytes(ttsCacheStats.usedBytes)} / ${formatBytes(ttsCacheStats.limitBytes)}` : '正在读取缓存占用...' }}</span>
+                            <button
+                              type="button"
+                              class="rounded px-2 py-0.5 text-xs text-[var(--color-text-secondary)] hover:bg-surface-hover transition-colors"
+                              :disabled="!ttsCacheStats"
+                              @click="apiDelete('/api/tts/cache/clear').then(() => fetchTtsCacheStats())"
+                            >
+                              清空缓存
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      <p class="text-xs text-[var(--color-text-muted)]">
+                        开启后可在聊天界面使用语音合成功能。需在 API 预设中配置 MiniMax TTS 预设。
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 应用与更新（默认折叠） -->
+              <div class="rounded-xl border border-[var(--color-border-subtle)] bg-surface-muted/40 overflow-hidden">
+                <button
+                  type="button"
+                  class="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3.5 text-left text-sm font-semibold text-[var(--color-text-secondary)] select-none hover:bg-surface-hover/40"
                   :aria-expanded="globalAccordionOpen.app"
                   @click="globalAccordionOpen.app = !globalAccordionOpen.app"
                 >
@@ -2269,6 +2902,12 @@ async function checkUpdate() {
                               @click="editingPresetId = p.id"
                           >
                               <span class="min-w-0 max-w-full truncate pr-7">{{ p.name }}</span>
+                              <span
+                                v-if="isTtsPreset(p)"
+                                class="absolute right-8 top-1.5 text-[11px] font-semibold leading-none text-brand"
+                                aria-label="TTS 预设"
+                                title="TTS 预设"
+                              >t</span>
                               <button
                                 type="button"
                                 class="absolute right-0.5 top-1/2 inline-flex min-h-8 min-w-8 -translate-y-1/2 items-center justify-center rounded-md text-[var(--color-text-muted)] opacity-0 pointer-events-none touch-manipulation hover:text-error group-hover:pointer-events-auto group-hover:opacity-100"
@@ -2285,7 +2924,17 @@ async function checkUpdate() {
                   <div class="min-w-0 flex-1 flex flex-col" v-if="editingPreset">
                        <div class="min-w-0 space-y-4 pb-4">
                           <div class="space-y-1.5">
-                              <label class="block text-xs font-medium text-[var(--color-text-secondary)]">预设名称</label>
+                              <div class="flex items-center justify-between gap-3">
+                                <label class="block text-xs font-medium text-[var(--color-text-secondary)]">预设名称</label>
+                                <button
+                                  type="button"
+                                  class="inline-flex items-center gap-2 text-xs text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text)]"
+                                  @click="setPresetTtsService(editingPreset!, !isTtsPreset(editingPreset))"
+                                >
+                                  <ThemedCheckbox :checked="isTtsPreset(editingPreset)" />
+                                  <span>作为 TTS 服务</span>
+                                </button>
+                              </div>
                               <input 
                                   v-model="editingPreset.name" 
                                   type="text" 
@@ -2415,6 +3064,116 @@ async function checkUpdate() {
                                       }"
                                    />
                                 </div>
+                          </div>
+
+                          <div v-if="isTtsPreset(editingPreset)" class="space-y-3 rounded-xl border border-[var(--color-border-subtle)] bg-surface-muted/35 p-3">
+                            <div class="flex items-center justify-between gap-2 flex-wrap">
+                              <label class="block text-xs font-medium text-[var(--color-text-secondary)]">音色列表</label>
+                              <button
+                                type="button"
+                                class="text-xs text-brand hover:text-brand-hover flex items-center gap-1 shrink-0"
+                                :disabled="presetVoicesLoading"
+                                @click="openVoiceSelector(editingPreset!)"
+                              >
+                                <Loader2 v-if="presetVoicesLoading" class="animate-spin w-3 h-3" />
+                                <span>从 API 获取并筛选</span>
+                              </button>
+                            </div>
+
+                            <div
+                              v-if="editingPresetVoiceCatalog.length"
+                              class="flex flex-wrap items-center gap-x-1 gap-y-0.5 text-[10px] leading-tight text-[var(--color-text-secondary)]"
+                            >
+                              <button type="button" class="min-h-0 rounded px-0.5 py-0 text-brand hover:underline" @click="selectAllPresetVoices">全选</button>
+                              <span class="select-none text-[var(--color-text-muted)]">·</span>
+                              <button type="button" class="min-h-0 rounded px-0.5 py-0 text-brand hover:underline disabled:pointer-events-none disabled:opacity-40" :disabled="presetVoiceListSelection.size === 0" @click="clearPresetVoiceSelection">清空选择</button>
+                              <span class="select-none text-[var(--color-text-muted)]">·</span>
+                              <button type="button" class="min-h-0 rounded px-0.5 py-0 text-error/90 hover:underline disabled:pointer-events-none disabled:opacity-40" :disabled="presetVoiceListSelection.size === 0" @click="removeSelectedPresetVoices">删除所选</button>
+                              <span class="select-none text-[var(--color-text-muted)]">·</span>
+                              <button type="button" class="min-h-0 rounded px-0.5 py-0 text-error/90 hover:underline disabled:pointer-events-none disabled:opacity-40" :disabled="editingPresetVoiceCatalog.length === 0" @click="clearAllPresetVoices">清空全部</button>
+                            </div>
+
+                            <div class="drawer-scroll bg-surface-overlay border border-[var(--color-border)] rounded-lg p-2 min-h-[96px] max-h-[200px] overflow-y-auto custom-scrollbar">
+                              <div class="flex flex-wrap gap-2">
+                                <button
+                                  v-for="voice in editingPresetVoiceCatalog"
+                                  :key="voice.voiceId"
+                                  type="button"
+                                  class="group relative inline-flex max-w-full cursor-pointer items-center gap-1 rounded-md border border-[var(--color-border-subtle)] bg-surface-overlay/55 px-2 py-1 text-xs text-[var(--color-text-secondary)] backdrop-blur-sm transition-[box-shadow,border-color] hover:bg-surface-overlay/80"
+                                  :class="presetVoiceListSelection.has(voice.voiceId) ? 'ring-1 ring-brand/50 border-brand/35 shadow-[0_0_0_1px_color-mix(in_srgb,var(--color-brand)_25%,transparent)]' : ''"
+                                  @click="togglePresetVoiceSelection(voice.voiceId)"
+                                >
+                                  <span class="min-w-0 truncate">{{ voice.name }}</span>
+                                  <span class="rounded-full bg-surface-muted px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)]">{{ voice.voiceType }}</span>
+                                </button>
+                                <div v-if="!editingPresetVoiceCatalog.length" class="text-xs text-[var(--color-text-muted)] w-full text-center py-4">点击上方「从 API 获取并筛选」或下方手动添加 voice_id</div>
+                              </div>
+                            </div>
+
+                            <div class="flex gap-2">
+                              <input
+                                type="text"
+                                placeholder="手动输入 voice_id 后按回车添加…"
+                                class="input input-sm flex-1 rounded px-2 py-1 text-xs outline-none font-mono"
+                                @keydown.enter="
+                                  (e) => {
+                                    const val = (e.target as HTMLInputElement).value.trim()
+                                    if (val) {
+                                      upsertEditingPresetVoiceCatalog([{ voiceId: val, name: val, voiceType: 'system' }])
+                                      ;(e.target as HTMLInputElement).value = ''
+                                    }
+                                  }
+                                "
+                              />
+                            </div>
+
+                            <div class="flex flex-col gap-3">
+                              <div class="space-y-2 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay px-3 py-3">
+                                <div class="text-xs font-medium text-[var(--color-text-secondary)]">音色快速复刻</div>
+                                <div class="flex flex-wrap gap-2">
+                                  <button type="button" class="btn btn-xs btn-secondary" @click="pickTtsCloneSourceFile">选择源音频</button>
+                                  <span class="text-[10px] text-[var(--color-text-muted)]">{{ ttsCloneSourceFile?.name || '未选择文件' }}</span>
+                                </div>
+                                <input ref="ttsCloneSourceInputRef" type="file" class="hidden" accept=".mp3,.wav,.m4a" @change="onTtsCloneSourceChange" />
+                                <input v-model="ttsCloneDraft.voiceId" type="text" class="input input-sm w-full" placeholder="voice_id" />
+                                <ModernSelect
+                                  v-model="ttsCloneDraft.model"
+                                  :options="ttsSessionModelOptions"
+                                  searchable
+                                  allow-create
+                                  placeholder="试听模型（可选）"
+                                  @select="(option) => { ttsCloneDraft.model = option.value }"
+                                />
+                                <textarea v-model="ttsCloneDraft.previewText" rows="2" class="input textarea w-full resize-y" placeholder="试听文本（可选）"></textarea>
+                                <div class="flex flex-wrap gap-2">
+                                  <button type="button" class="btn btn-xs btn-secondary" @click="pickTtsClonePromptFile">选择示例音频</button>
+                                  <span class="text-[10px] text-[var(--color-text-muted)]">{{ ttsClonePromptFile?.name || '可选' }}</span>
+                                </div>
+                                <input ref="ttsClonePromptInputRef" type="file" class="hidden" accept=".mp3,.wav,.m4a" @change="onTtsClonePromptChange" />
+                                <input v-model="ttsCloneDraft.promptText" type="text" class="input input-sm w-full" placeholder="示例音频对应文本（可选）" />
+                                <div class="flex flex-wrap gap-4 text-xs text-[var(--color-text-secondary)]">
+                                  <button type="button" class="inline-flex items-center gap-2 transition-colors hover:text-[var(--color-text)]" @click="ttsCloneDraft.needNoiseReduction = !ttsCloneDraft.needNoiseReduction">
+                                    <ThemedCheckbox :checked="ttsCloneDraft.needNoiseReduction" />
+                                    <span>降噪</span>
+                                  </button>
+                                  <button type="button" class="inline-flex items-center gap-2 transition-colors hover:text-[var(--color-text)]" @click="ttsCloneDraft.needVolumeNormalization = !ttsCloneDraft.needVolumeNormalization">
+                                    <ThemedCheckbox :checked="ttsCloneDraft.needVolumeNormalization" />
+                                    <span>音量归一</span>
+                                  </button>
+                                </div>
+                                <button type="button" class="btn btn-sm btn-primary w-full" :disabled="ttsCloneLoading" @click="submitTtsClone">{{ ttsCloneLoading ? '复刻中...' : '复刻并试听' }}</button>
+                                <audio v-if="ttsClonePreviewUrl" :src="ttsClonePreviewUrl" controls class="w-full"></audio>
+                              </div>
+
+                              <div class="space-y-2 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay px-3 py-3">
+                                <div class="text-xs font-medium text-[var(--color-text-secondary)]">音色设计</div>
+                                <textarea v-model="ttsDesignDraft.prompt" rows="3" class="input textarea w-full resize-y" placeholder="用自然语言描述想要的声音"></textarea>
+                                <textarea v-model="ttsDesignDraft.previewText" rows="2" class="input textarea w-full resize-y" placeholder="试听文本"></textarea>
+                                <input v-model="ttsDesignDraft.voiceId" type="text" class="input input-sm w-full" placeholder="voice_id（可选，不填则自动生成）" />
+                                <button type="button" class="btn btn-sm btn-primary w-full" :disabled="ttsDesignLoading" @click="submitTtsDesign">{{ ttsDesignLoading ? '设计中...' : '生成并试听' }}</button>
+                                <audio v-if="ttsDesignPreviewUrl" :src="ttsDesignPreviewUrl" controls class="w-full"></audio>
+                              </div>
+                            </div>
                           </div>
                        </div>
                   </div>
@@ -2709,6 +3468,172 @@ async function checkUpdate() {
                 </div>
               </div>
 
+              <div class="space-y-3 rounded-xl border border-[var(--color-border-subtle)] bg-surface-muted/35 p-4">
+                <div class="flex items-center justify-between gap-3">
+                  <div>
+                    <div class="text-sm font-medium text-[var(--color-text-secondary)]">文字转语音</div>
+                    <p class="mt-1 text-xs text-[var(--color-text-muted)]">
+                      会话级 TTS 设置挂在世界书之后保存；自动朗读范围使用“角色 / 用户 / 全部”语义。
+                    </p>
+                  </div>
+                  <span
+                    class="shrink-0 whitespace-nowrap rounded-full px-2 py-1 text-[11px] font-medium"
+                    :class="globalDraft.ttsEnabled ? 'bg-brand-a20 text-brand' : 'bg-surface-overlay text-[var(--color-text-muted)]'"
+                  >
+                    {{ globalDraft.ttsEnabled ? '启用' : '禁用' }}
+                  </span>
+                </div>
+
+                <div
+                  class="space-y-3"
+                  :class="globalDraft.ttsEnabled ? '' : 'opacity-55 pointer-events-none select-none'"
+                >
+                  <div v-if="!globalDraft.ttsEnabled" class="rounded-lg border border-dashed border-[var(--color-border-subtle)] bg-surface-overlay px-3 py-2 text-xs text-[var(--color-text-muted)]">
+                    请先在“全局设置 → 文字转语音（TTS）”里开启 TTS，当前会话配置才会生效。
+                  </div>
+
+                  <div class="space-y-1.5">
+                    <label class="block text-sm font-medium text-[var(--color-text-secondary)]">TTS 模型</label>
+                    <ModernSelect
+                      v-model="chatDraft.tts!.model"
+                      :selected-preset-id="chatDraft.tts?.presetId ?? null"
+                      :options="ttsSessionModelOptions"
+                      searchable
+                      allow-create
+                      placeholder="选择 TTS 模型..."
+                      :disabled="!globalDraft.ttsEnabled || ttsSessionModelOptions.length === 0"
+                      @select="updateChatTtsModel"
+                    />
+                    <p class="text-xs text-[var(--color-text-muted)]">
+                      先选模型，预设会自动关联到对应的 TTS 服务。
+                      <span v-if="selectedChatTtsPreset" class="text-brand">当前预设：{{ selectedChatTtsPreset.name }}</span>
+                    </p>
+                    <p v-if="ttsSessionModelOptions.length === 0" class="text-xs text-[var(--color-text-muted)]">
+                      还没有可用的 TTS 模型。请先在 API 预设中把目标预设标记为 TTS 服务并获取模型列表。
+                    </p>
+                  </div>
+
+                  <div class="space-y-2">
+                    <div class="text-sm font-medium text-[var(--color-text-secondary)]">自动朗读范围</div>
+                    <div class="relative inline-flex w-full gap-1 rounded-lg border border-[var(--color-border-subtle)] bg-surface-muted p-1">
+                      <div
+                        class="pointer-events-none absolute left-1 top-1 bottom-1 rounded-md bg-brand shadow-sm transition-transform duration-[400ms] ease-out"
+                        :style="{
+                          width: 'calc((100% - 1.25rem) / 4)',
+                          transform: `translateX(calc(${Math.max(0, TTS_AUTO_READ_OPTIONS.findIndex((option) => option.value === (chatDraft!.tts?.autoReadScope ?? 'off')))} * (100% + 0.25rem)))`,
+                        }"
+                      />
+                      <button
+                        v-for="option in TTS_AUTO_READ_OPTIONS"
+                        :key="option.value"
+                        type="button"
+                        class="relative z-10 min-h-[2.25rem] flex-1 rounded-md px-2 py-1 text-xs font-medium transition-colors duration-[400ms] ease-out"
+                        :class="(chatDraft.tts?.autoReadScope ?? 'off') === option.value ? 'text-[var(--color-on-brand)]' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'"
+                        @click="updateChatTtsAutoReadScope(option.value as AutoReadScope)"
+                      >
+                        {{ option.label }}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="space-y-1.5">
+                    <label class="block text-sm font-medium text-[var(--color-text-secondary)]">朗读间隔（秒）</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.1"
+                      class="input w-full"
+                      :value="chatDraft.tts?.readGapSeconds ?? 0"
+                      @input="updateChatTtsReadGapSeconds(($event.target as HTMLInputElement).value)"
+                    />
+                  </div>
+
+                  <div class="space-y-2 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay px-3 py-3">
+                    <div class="text-sm font-medium text-[var(--color-text-secondary)]">文本后处理</div>
+                    <div class="flex flex-wrap gap-4 text-xs text-[var(--color-text-secondary)]">
+                      <button type="button" class="inline-flex items-center gap-2 transition-colors hover:text-[var(--color-text)]" @click="updateChatTtsPreprocessEnabled(!(chatDraft.tts?.preprocessEnabled === true))">
+                        <ThemedCheckbox :checked="chatDraft.tts?.preprocessEnabled === true" />
+                        <span>启用文本后处理</span>
+                      </button>
+                      <button type="button" class="inline-flex items-center gap-2 transition-colors hover:text-[var(--color-text)]" :disabled="!(chatDraft.tts?.preprocessEnabled === true)" @click="updateChatTtsInjectEmotionTags(!(chatDraft.tts?.injectEmotionTags === true))">
+                        <ThemedCheckbox :checked="chatDraft.tts?.injectEmotionTags === true" :disabled="!(chatDraft.tts?.preprocessEnabled === true)" />
+                        <span>注入英文情绪标签</span>
+                      </button>
+                    </div>
+                    <div v-if="chatDraft.tts?.preprocessEnabled" class="space-y-1.5">
+                      <label class="block text-xs font-medium text-[var(--color-text-secondary)]">后处理目标语言</label>
+                      <input
+                        type="text"
+                        class="input w-full"
+                        :value="chatDraft.tts?.preprocessTargetLanguage ?? ''"
+                        placeholder="例如 简体中文、English（留空则不按语言翻译）"
+                        @input="updateChatTtsPreprocessTargetLanguage(($event.target as HTMLInputElement).value)"
+                      />
+                    </div>
+                    <ModernSelect
+                      v-if="chatDraft.tts?.preprocessEnabled"
+                      v-model="chatDraft.tts!.preprocessModel"
+                      :selected-preset-id="chatDraft.tts?.preprocessPresetId ?? null"
+                      :options="ttsPreprocessModelOptions"
+                      searchable
+                      allow-create
+                      placeholder="选择文本后处理模型..."
+                      :disabled="ttsPreprocessModelOptions.length === 0"
+                      @select="updateChatTtsPreprocessModel"
+                    />
+                    <p class="text-xs text-[var(--color-text-muted)]">
+                      后处理请求会以 JSON 发送 language、raw_text、inject_emotion_tags；目标语言同时写入提示词占位符。留空则不翻译。模型从普通文本预设里选；英文情绪标签由「注入」开关控制，不校验模型名。
+                    </p>
+                  </div>
+
+                  <div class="space-y-2">
+                    <div class="text-sm font-medium text-[var(--color-text-secondary)]">角色音色</div>
+                    <div v-if="currentChatCharacterVoiceRows.length" class="space-y-2">
+                      <div
+                        v-for="row in currentChatCharacterVoiceRows"
+                        :key="row.id"
+                        class="grid items-center gap-2 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay px-3 py-2 md:grid-cols-[minmax(0,11rem)_1fr]"
+                      >
+                        <div class="flex min-h-8 items-center text-xs text-[var(--color-text-secondary)]">{{ row.name }}</div>
+                        <TtsVoiceInput
+                          :model-value="getCharacterVoiceValue(row.id)"
+                          :voices="availableTtsVoices"
+                          placeholder="输入或下拉选择 voice_id"
+                          @update:model-value="updateCharacterVoiceValue(row.id, $event)"
+                        />
+                      </div>
+                    </div>
+                    <div v-else class="text-xs text-[var(--color-text-muted)]">当前会话没有可配置的角色。</div>
+                  </div>
+
+                  <div class="space-y-2">
+                    <div class="text-sm font-medium text-[var(--color-text-secondary)]">用户音色</div>
+                    <div v-if="currentChatPersonaVoiceRows.length" class="space-y-2">
+                      <div
+                        v-for="row in currentChatPersonaVoiceRows"
+                        :key="row.id"
+                        class="grid items-center gap-2 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay px-3 py-2 md:grid-cols-[minmax(0,11rem)_1fr]"
+                      >
+                        <div class="flex min-h-8 items-center text-xs text-[var(--color-text-secondary)]">
+                          {{ row.name }}
+                          <span v-if="row.current" class="ml-1 text-brand">当前</span>
+                        </div>
+                        <TtsVoiceInput
+                          :model-value="getPersonaVoiceValue(row.id)"
+                          :voices="availableTtsVoices"
+                          placeholder="输入或下拉选择 voice_id"
+                          @update:model-value="updatePersonaVoiceValue(row.id, $event)"
+                        />
+                      </div>
+                    </div>
+                    <div v-else class="text-xs text-[var(--color-text-muted)]">当前没有可用的用户身份音色入口。</div>
+                    <p v-if="availableTtsVoices.length === 0" class="text-xs text-[var(--color-text-muted)]">
+                      当前预设还没有已拉取的音色列表。你可以回到 API 预设里点击「从 API 获取并筛选」勾选音色，也可以直接手输 voice_id。
+                    </p>
+                  </div>
+                </div>
+              </div>
+
               <!-- Group Member Settings (Removed, moved to independent GroupSettingsModal) -->
 
             </div>
@@ -2795,6 +3720,84 @@ async function checkUpdate() {
       </div>
     </div>
   </div>
+  </Teleport>
+
+  <Teleport to="body">
+    <div v-if="showVoiceSelector" class="fixed inset-0 z-[60] flex items-center justify-center">
+      <div class="absolute inset-0 bg-overlay-heavy backdrop-blur-sm" @click="showVoiceSelector = false"></div>
+
+      <div class="relative m-4 flex max-h-[85vh] min-h-0 w-full max-w-lg min-w-[400px] flex-col rounded-2xl glass-panel shadow-2xl">
+        <div class="flex items-center justify-between rounded-t-2xl border-b border-[var(--color-border)] bg-surface-muted p-4">
+          <h3 class="font-bold text-[var(--color-text)]">选择音色</h3>
+          <button
+            type="button"
+            class="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg text-[var(--color-text-muted)] touch-manipulation hover:text-[var(--color-text)]"
+            @click="showVoiceSelector = false"
+          >
+            <X class="w-5 h-5" />
+          </button>
+        </div>
+
+        <div class="border-b border-[var(--color-border)] bg-transparent p-3">
+          <input v-model="voiceSelectorQuery" placeholder="筛选音色（名称、ID、类型）..." class="input w-full" autofocus />
+        </div>
+
+        <div class="drawer-scroll min-h-0 flex-1 overflow-y-auto bg-transparent p-2">
+          <div v-if="filteredVoiceCandidates.length === 0" class="py-8 text-center text-sm text-[var(--color-text-muted)]">
+            未找到音色
+          </div>
+          <div v-else class="space-y-1">
+            <div
+              v-for="v in filteredVoiceCandidates"
+              :key="v.voiceId"
+              class="flex min-h-11 cursor-pointer items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-surface-muted touch-manipulation"
+              @click="toggleCandidateVoice(v.voiceId)"
+            >
+              <div
+                class="flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors"
+                :class="selectedCandidateVoiceIds.has(v.voiceId) ? 'border-brand bg-brand' : 'border-[var(--color-border)]'"
+              >
+                <Check v-if="selectedCandidateVoiceIds.has(v.voiceId)" class="h-2.5 w-2.5 text-on-brand" />
+              </div>
+              <div class="min-w-0 flex-1">
+                <div
+                  class="truncate text-sm text-[var(--color-text-secondary)]"
+                  :class="selectedCandidateVoiceIds.has(v.voiceId) ? 'font-medium text-[var(--color-text)]' : ''"
+                >
+                  {{ v.name }}
+                </div>
+                <div class="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-[var(--color-text-muted)]">
+                  <span class="font-mono truncate">{{ v.voiceId }}</span>
+                  <span
+                    class="shrink-0 rounded-full bg-surface-muted px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)]"
+                  >{{ v.voiceType }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between rounded-b-2xl border-t border-[var(--color-border)] bg-surface-muted p-4">
+          <div class="text-xs text-[var(--color-text-muted)]">已选 {{ selectedCandidateVoiceIds.size }} 个音色</div>
+          <div class="flex gap-2">
+            <button
+              type="button"
+              class="inline-flex min-h-11 items-center justify-center px-4 py-2 text-sm text-[var(--color-text-muted)] touch-manipulation transition-colors hover:text-[var(--color-text)]"
+              @click="showVoiceSelector = false"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              class="inline-flex min-h-11 items-center justify-center rounded-lg bg-brand px-4 py-2 text-sm text-on-brand shadow-brand transition-all touch-manipulation hover:bg-brand-hover"
+              @click="saveVoiceSelection"
+            >
+              确认
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   </Teleport>
 
   <WorldBookEditorModal
