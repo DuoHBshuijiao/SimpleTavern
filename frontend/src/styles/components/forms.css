@@ -168,7 +168,7 @@
     width: 1rem;
     height: 1rem;
     border: 1px solid var(--color-border-strong);
-    border-radius: var(--radius-sm);
+    border-radius: 9999px;
     background-color: var(--color-dark-surface);
     cursor: pointer;
     transition: 
