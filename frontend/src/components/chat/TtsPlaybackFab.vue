@@ -3,13 +3,14 @@
  * TtsPlaybackFab - TTS 播放/下载双按钮浮动控件
  *
  * 竖排两颗 w-12 h-12 按钮：
- * 1. 下载控制（停止/恢复 二态）
+ * 1. 队列 / 停止下载
  * 2. 播放控制（暂停/播放 二态）
  *
  * 整个容器可拖动，与助手 FAB 互斥（碰撞弹开）。
  * 侧栏收起且顶栏 morph 时：与输入栏同步下沉，按贴边滑出视口；顶栏全宽动画结束后在顶栏下展示替代控制条。
  */
-import { computed, ref } from 'vue'
+import type { QueueItem, QueueItemStatus } from '../../composables/useTtsPlaybackQueue'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { useTtsFabPosition } from '../../composables/useTtsFabPosition'
 
 const props = withDefaults(
@@ -17,6 +18,8 @@ const props = withDefaults(
     isDownloading: boolean
     isPlaying: boolean
     audioPaused: boolean
+    /** 面板展示用（已过滤 done/aborted） */
+    queueItems: QueueItem[]
     contentAreaLeftPx: number
     minTopPx: number
     /** 与 ChatInput 输入栏下沉同相 */
@@ -37,11 +40,16 @@ const props = withDefaults(
 )
 
 const emit = defineEmits<{
-  (e: 'toggle-download'): void
+  (e: 'abort-download'): void
   (e: 'toggle-play-pause'): void
 }>()
 
 const ttsFabRootRef = ref<HTMLElement | null>(null)
+const queueBtnFabRef = ref<HTMLButtonElement | null>(null)
+const queueBtnTopRef = ref<HTMLButtonElement | null>(null)
+const panelRef = ref<HTMLElement | null>(null)
+const queuePanelOpen = ref(false)
+const panelStyle = ref<Record<string, string>>({})
 
 const {
   fabStyle,
@@ -79,9 +87,125 @@ const topBarStackStyle = computed(() => {
   }
 })
 
-function handleDownloadClick(e: MouseEvent) {
+const PANEL_MIN_W = 220
+const PANEL_MAX_W = 320
+const PANEL_GAP = 8
+
+/** 贴左时面板在按钮右侧，贴右时在按钮左侧，避免在下方展开压住暂停键 */
+function updatePanelPosition() {
+  const btn = props.showTopBarControls ? queueBtnTopRef.value : queueBtnFabRef.value
+  if (!btn) return
+  const r = btn.getBoundingClientRect()
+  const w = Math.min(PANEL_MAX_W, Math.max(PANEL_MIN_W, window.innerWidth - 24))
+  const maxPanelH = Math.min(window.innerHeight * 0.4, 280)
+
+  const dockLeft = side.value === 'left'
+  let left: number
+  if (dockLeft) {
+    left = r.right + PANEL_GAP
+  } else {
+    left = r.left - w - PANEL_GAP
+  }
+  left = Math.min(Math.max(8, left), window.innerWidth - w - 8)
+
+  let top = r.top
+  top = Math.min(Math.max(8, top), window.innerHeight - maxPanelH - 8)
+
+  panelStyle.value = {
+    top: `${top}px`,
+    left: `${left}px`,
+    width: `${w}px`,
+  }
+}
+
+function onOutsidePointerDown(e: PointerEvent) {
+  if (!queuePanelOpen.value) return
+  const t = e.target as Node
+  if (panelRef.value?.contains(t)) return
+  if (queueBtnFabRef.value?.contains(t)) return
+  if (queueBtnTopRef.value?.contains(t)) return
+  queuePanelOpen.value = false
+}
+
+function handleReposition() {
+  if (queuePanelOpen.value) updatePanelPosition()
+}
+
+let outsideBound = false
+function bindOutside() {
+  if (outsideBound) return
+  document.addEventListener('pointerdown', onOutsidePointerDown, true)
+  window.addEventListener('scroll', handleReposition, true)
+  window.addEventListener('resize', handleReposition)
+  outsideBound = true
+}
+function unbindOutside() {
+  if (!outsideBound) return
+  document.removeEventListener('pointerdown', onOutsidePointerDown, true)
+  window.removeEventListener('scroll', handleReposition, true)
+  window.removeEventListener('resize', handleReposition)
+  outsideBound = false
+}
+
+watch(queuePanelOpen, (open) => {
+  if (open) {
+    nextTick(() => {
+      if (!queuePanelOpen.value) return
+      updatePanelPosition()
+      bindOutside()
+    })
+  } else {
+    unbindOutside()
+  }
+})
+
+watch(
+  () => props.showTopBarControls,
+  () => {
+    if (queuePanelOpen.value) nextTick(() => updatePanelPosition())
+  },
+)
+
+watch(
+  () => props.queueItems.length,
+  () => {
+    if (queuePanelOpen.value) nextTick(() => updatePanelPosition())
+  },
+)
+
+watch(side, () => {
+  if (queuePanelOpen.value) nextTick(() => updatePanelPosition())
+})
+
+onUnmounted(() => {
+  unbindOutside()
+})
+
+function statusDotClass(status: QueueItemStatus): string {
+  switch (status) {
+    case 'preprocessing':
+      return 'tts-queue-dot tts-queue-dot--red'
+    case 'pending':
+    case 'downloading':
+      return 'tts-queue-dot tts-queue-dot--amber'
+    case 'ready':
+      return 'tts-queue-dot tts-queue-dot--blue'
+    case 'playing':
+      return 'tts-queue-dot tts-queue-dot--green'
+    case 'error':
+      return 'tts-queue-dot tts-queue-dot--gray'
+    default:
+      return 'tts-queue-dot tts-queue-dot--muted'
+  }
+}
+
+function handleQueueAction(e: MouseEvent) {
   if (onFabClick(e)) return
-  emit('toggle-download')
+  if (props.isDownloading) {
+    emit('abort-download')
+  } else {
+    queuePanelOpen.value = !queuePanelOpen.value
+  }
 }
 
 function handlePlayClick(e: MouseEvent) {
@@ -89,9 +213,13 @@ function handlePlayClick(e: MouseEvent) {
   emit('toggle-play-pause')
 }
 
-function handleTopDownloadClick(e: MouseEvent) {
+function handleTopQueueClick(e: MouseEvent) {
   e.stopPropagation()
-  emit('toggle-download')
+  if (props.isDownloading) {
+    emit('abort-download')
+  } else {
+    queuePanelOpen.value = !queuePanelOpen.value
+  }
 }
 
 function handleTopPlayClick(e: MouseEvent) {
@@ -108,73 +236,72 @@ defineExpose({ getRect: getTtsFabRect, setTtsTopPx: setTopPxFromSeparation })
 
 <template>
   <div class="tts-fab-host">
-  <div
-    ref="ttsFabRootRef"
-    class="flex flex-col gap-2 cursor-grab active:cursor-grabbing"
-    :class="{ 'tts-fab-root--hidden': showTopBarControls }"
-    :style="fabStyle"
-    @pointerdown="onPointerDown"
-    @pointermove="onPointerMove"
-    @pointerup="onPointerUp"
-    @pointercancel="onPointerCancel"
-  >
-    <!-- 下载控制按钮 -->
-    <button
-      type="button"
-      class="w-12 h-12 rounded-xl bg-surface-elevated text-[var(--color-text)] font-bold shadow-lg hover:bg-surface-hover transition-[transform,background-color,box-shadow] border border-[var(--color-border)] hover:scale-105 active:scale-95 flex items-center justify-center backdrop-blur-sm cursor-pointer"
-      :aria-label="isDownloading ? '停止下载' : '下载语音'"
-      :title="isDownloading ? '停止下载' : '下载语音'"
-      @click="handleDownloadClick"
+    <div
+      ref="ttsFabRootRef"
+      class="flex flex-col gap-2 cursor-grab active:cursor-grabbing"
+      :class="{ 'tts-fab-root--hidden': showTopBarControls }"
+      :style="fabStyle"
+      @pointerdown="onPointerDown"
+      @pointermove="onPointerMove"
+      @pointerup="onPointerUp"
+      @pointercancel="onPointerCancel"
     >
-      <svg
-        v-if="!isDownloading"
-        class="tts-icon tts-icon--fab"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        aria-hidden="true"
+      <!-- 队列 / 停止 -->
+      <button
+        ref="queueBtnFabRef"
+        type="button"
+        class="w-12 h-12 rounded-xl bg-surface-elevated text-[var(--color-text)] font-bold shadow-lg hover:bg-surface-hover transition-[transform,background-color,box-shadow] border border-[var(--color-border)] hover:scale-105 active:scale-95 flex items-center justify-center backdrop-blur-sm cursor-pointer"
+        :aria-label="isDownloading ? '停止下载' : '打开 TTS 队列'"
+        @click="handleQueueAction"
       >
-        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-        <polyline points="7 10 12 15 17 10" />
-        <line x1="12" y1="15" x2="12" y2="3" />
-      </svg>
-      <svg
-        v-else
-        class="tts-icon tts-icon--fab tts-icon--fill"
-        viewBox="0 0 24 24"
-        aria-hidden="true"
-      >
-        <rect x="6" y="6" width="12" height="12" rx="1.5" />
-      </svg>
-    </button>
+        <svg
+          v-if="!isDownloading"
+          class="tts-icon tts-icon--fab"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+          <polyline points="7 10 12 15 17 10" />
+          <line x1="12" y1="15" x2="12" y2="3" />
+        </svg>
+        <svg
+          v-else
+          class="tts-icon tts-icon--fab tts-icon--fill"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+        >
+          <rect x="6" y="6" width="12" height="12" rx="1.5" />
+        </svg>
+      </button>
 
-    <!-- 播放控制按钮 -->
-    <button
-      type="button"
-      class="w-12 h-12 rounded-xl bg-surface-elevated text-[var(--color-text)] font-bold shadow-lg hover:bg-surface-hover transition-[transform,background-color,box-shadow] border border-[var(--color-border)] hover:scale-105 active:scale-95 flex items-center justify-center backdrop-blur-sm cursor-pointer"
-      :aria-label="isPlaying && !audioPaused ? '暂停播放' : '播放'"
-      :title="isPlaying && !audioPaused ? '暂停播放' : '播放'"
-      @click="handlePlayClick"
-    >
-      <svg
-        v-if="!(isPlaying && !audioPaused)"
-        class="tts-icon tts-icon--fab tts-icon--fill"
-        viewBox="0 0 24 24"
-        aria-hidden="true"
+      <!-- 播放控制按钮 -->
+      <button
+        type="button"
+        class="w-12 h-12 rounded-xl bg-surface-elevated text-[var(--color-text)] font-bold shadow-lg hover:bg-surface-hover transition-[transform,background-color,box-shadow] border border-[var(--color-border)] hover:scale-105 active:scale-95 flex items-center justify-center backdrop-blur-sm cursor-pointer"
+        :aria-label="isPlaying && !audioPaused ? '暂停播放' : '播放'"
+        @click="handlePlayClick"
       >
-        <polygon points="8 5 19 12 8 19 8 5" />
-      </svg>
-      <svg v-else class="tts-icon tts-icon--fab tts-icon--fill" viewBox="0 0 24 24" aria-hidden="true">
-        <rect x="6" y="5" width="4" height="14" rx="1" />
-        <rect x="14" y="5" width="4" height="14" rx="1" />
-      </svg>
-    </button>
-  </div>
+        <svg
+          v-if="!(isPlaying && !audioPaused)"
+          class="tts-icon tts-icon--fab tts-icon--fill"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+        >
+          <polygon points="8 5 19 12 8 19 8 5" />
+        </svg>
+        <svg v-else class="tts-icon tts-icon--fab tts-icon--fill" viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="6" y="5" width="4" height="14" rx="1" />
+          <rect x="14" y="5" width="4" height="14" rx="1" />
+        </svg>
+      </button>
+    </div>
 
-  <!-- 不挂 body：与顶栏同属主内容 stacking，z 须低于 header 固定层 (z-10)，否则遮挡「更多」菜单 -->
+    <!-- 不挂 body：顶栏 TTS 条保持 z-9，低于 header 区域，避免挡「更多」菜单。队列面板单独 z-[11]，高于主内容壳 z-10，避免被消息气泡压住 -->
     <Transition name="tts-top-bar-fade">
       <div
         v-if="showTopBarControls"
@@ -183,11 +310,11 @@ defineExpose({ getRect: getTtsFabRect, setTtsTopPx: setTopPxFromSeparation })
       >
         <div class="pointer-events-auto flex flex-col gap-2">
           <button
+            ref="queueBtnTopRef"
             type="button"
             class="tts-top-bar-btn tts-top-bar-btn--queue"
-            :aria-label="isDownloading ? '停止下载' : '下载语音'"
-            :title="isDownloading ? '停止下载' : '下载语音'"
-            @click="handleTopDownloadClick"
+            :aria-label="isDownloading ? '停止下载' : '打开 TTS 队列'"
+            @click="handleTopQueueClick"
           >
             <span class="tts-top-bar-btn__glow tts-top-bar-btn__glow--queue" aria-hidden="true" />
             <svg
@@ -214,7 +341,6 @@ defineExpose({ getRect: getTtsFabRect, setTtsTopPx: setTopPxFromSeparation })
             type="button"
             class="tts-top-bar-btn tts-top-bar-btn--transport"
             :aria-label="isPlaying && !audioPaused ? '暂停播放' : '播放'"
-            :title="isPlaying && !audioPaused ? '暂停播放' : '播放'"
             @click="handleTopPlayClick"
           >
             <span class="tts-top-bar-btn__glow tts-top-bar-btn__glow--transport" aria-hidden="true" />
@@ -235,6 +361,44 @@ defineExpose({ getRect: getTtsFabRect, setTtsTopPx: setTopPxFromSeparation })
         </div>
       </div>
     </Transition>
+
+    <Teleport to="body">
+      <Transition name="tts-queue-panel-fade">
+        <div
+          v-if="queuePanelOpen"
+          ref="panelRef"
+          class="tts-queue-panel fixed z-[11] rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface-elevated)] shadow-lg backdrop-blur-sm max-h-[min(40vh,280px)] flex flex-col overflow-hidden"
+          :style="panelStyle"
+          role="region"
+          aria-label="TTS 队列"
+        >
+          <div class="tts-queue-panel__inner max-h-[min(40vh,280px)] overflow-y-auto px-2 py-2">
+            <p
+              v-if="queueItems.length === 0"
+              class="text-xs text-[var(--color-text-secondary)] px-1 py-2 text-center"
+            >
+              队列为空
+            </p>
+            <ul v-else class="flex flex-col gap-1.5 list-none m-0 p-0">
+              <li
+                v-for="(item, idx) in queueItems"
+                :key="`${item.messageId}-${idx}-${item.status}`"
+                class="flex items-center justify-between gap-2 min-h-[1.75rem] px-1.5 py-1 rounded-lg bg-[var(--color-surface-overlay)]/40"
+              >
+                <span class="text-xs text-[var(--color-text)] truncate flex-1 min-w-0">
+                  {{ item.previewLabel || '…' }}
+                </span>
+                <span
+                  class="shrink-0 w-2 h-2 rounded-full"
+                  :class="statusDotClass(item.status)"
+                  aria-hidden="true"
+                />
+              </li>
+            </ul>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>
 
@@ -259,6 +423,34 @@ defineExpose({ getRect: getTtsFabRect, setTtsTopPx: setTopPxFromSeparation })
 .tts-icon--fill {
   fill: currentColor;
   stroke: none;
+}
+
+.tts-queue-dot {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-border) 40%, transparent);
+}
+
+.tts-queue-dot--red {
+  background: #ef4444;
+}
+
+.tts-queue-dot--amber {
+  background: #fbbf24;
+}
+
+.tts-queue-dot--blue {
+  background: #3b82f6;
+}
+
+.tts-queue-dot--green {
+  background: #22c55e;
+}
+
+.tts-queue-dot--gray {
+  background: var(--color-text-tertiary, #9ca3af);
+}
+
+.tts-queue-dot--muted {
+  background: var(--color-text-tertiary, #9ca3af);
 }
 
 /* 顶栏 chip 气质 + 两键独立点缀（与 ChatPage .header-action-chip 对齐） */
@@ -371,13 +563,25 @@ defineExpose({ getRect: getTtsFabRect, setTtsTopPx: setTopPxFromSeparation })
   opacity: 0;
 }
 
+.tts-queue-panel-fade-enter-active,
+.tts-queue-panel-fade-leave-active {
+  transition: opacity 0.18s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.tts-queue-panel-fade-enter-from,
+.tts-queue-panel-fade-leave-to {
+  opacity: 0;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .tts-top-bar-btn {
     animation: none;
   }
 
   .tts-top-bar-fade-enter-active,
-  .tts-top-bar-fade-leave-active {
+  .tts-top-bar-fade-leave-active,
+  .tts-queue-panel-fade-enter-active,
+  .tts-queue-panel-fade-leave-active {
     transition-duration: 0.01ms !important;
   }
 }

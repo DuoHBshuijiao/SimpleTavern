@@ -108,6 +108,7 @@ import { postAndConsumeSse } from '../api/sse'
 import { apiPost, apiGet, apiPut } from '../api/http'
 import { useErrorStack } from '../composables/useErrorStack'
 import { notifyMessage } from '../composables/useNotify'
+import { isTtsApiPreset, resolveTtsProvider } from '../utils/apiPresetKind'
 import { formatApiError } from '../utils/worldBookValidation'
 import {
   HEADER_EXPAND_MS,
@@ -133,6 +134,9 @@ const ttsQueue = useTtsPlaybackQueue()
 const ttsIsDownloading = computed(() => ttsQueue.isDownloading.value)
 const ttsIsPlaying = computed(() => ttsQueue.isPlaying.value)
 const ttsAudioPaused = computed(() => ttsQueue.audioPaused.value)
+const ttsQueuePanelItems = computed(() =>
+  ttsQueue.queue.value.filter((i) => i.status !== 'done' && i.status !== 'aborted'),
+)
 const errorStack = useErrorStack(6000)
 
 // ========== 页面级状态 ==========
@@ -363,6 +367,17 @@ let observedTtsMessageIds = new Set<string>()
 /** 自动朗读已入队的内容指纹（按会话），避免本地 id 入队后 chats.load 换成服务端 id 时重复入队 */
 const ttsAutoReadFingerprintsByChat = new Map<string, Set<string>>()
 
+/** 手动朗读：入队完成前同步占位，避免连点两次都通过「队列尚无此项」检测 */
+const manualTtsReadInFlight = new Set<string>()
+
+/**
+ * 等待补绑到服务端消息的 TTS 合成结果。
+ * key = contentFingerprint（与 makeTtsAutoReadContentFingerprint 同源），
+ * value = 合成产出的 assetId + spokenText。
+ * 在 chats.load 完成后，遍历当前消息用指纹匹配并调用 bind-message。
+ */
+const pendingTtsBinds = new Map<string, { assetId: string; spokenText: string }>()
+
 function getTtsAutoReadFingerprintSet(chatId: string): Set<string> {
   let s = ttsAutoReadFingerprintsByChat.get(chatId)
   if (!s) {
@@ -440,7 +455,7 @@ function normalizeTtsSessionConfig(source?: TtsSessionConfig | null): TtsSession
 }
 
 function getTtsPresets(): ApiPreset[] {
-  return (settings.settings?.apiPresets || []).filter((preset) => preset.presetKind === 'minimax')
+  return (settings.settings?.apiPresets || []).filter((preset) => isTtsApiPreset(preset))
 }
 
 function resolveTtsPreset(tts: TtsSessionConfig): ApiPreset | null {
@@ -452,7 +467,13 @@ function resolveTtsPreset(tts: TtsSessionConfig): ApiPreset | null {
 }
 
 function resolveTtsModel(tts: TtsSessionConfig, preset: ApiPreset | null): string {
-  return tts.model?.trim() || preset?.models?.[0] || 'speech-2.8-hd'
+  if (tts.model?.trim()) return tts.model.trim()
+  if (preset?.models?.[0]?.trim()) return preset.models[0]!.trim()
+  const provider = resolveTtsProvider(preset)
+  if (provider === 'glm' || provider === 'glm_local') return 'glm-tts'
+  if (provider === 'qwen3_local') return 'qwen3-tts'
+  if (provider === 'omnivoice_local') return 'omnivoice-tts'
+  return 'speech-2.8-hd'
 }
 
 function resolveTtsVoiceId(message: ChatMessage, tts: TtsSessionConfig): string | null {
@@ -467,11 +488,18 @@ function resolveTtsVoiceId(message: ChatMessage, tts: TtsSessionConfig): string 
   return null
 }
 
-function rememberTtsAsset(messageId: string, assetId: string, contentText: string) {
+function rememberTtsAsset(messageId: string, assetId: string, spokenText: string, contentFingerprint?: string) {
   const message = activeChat.value?.messages.find((item) => item.id === messageId)
-  if (!message) return
-  message.ttsAudioAssetId = assetId
-  message.ttsAudioSourceText = contentText
+  if (message) {
+    message.ttsAudioAssetId = assetId
+    message.ttsAudioSourceText = spokenText
+  }
+  // 若使用 local_ id 合成，将结果存入 pending 等待 load 后补绑到服务端消息
+  if (contentFingerprint && messageId.startsWith('local_')) {
+    pendingTtsBinds.set(contentFingerprint, { assetId, spokenText })
+  }
+  // 合成完成往往晚于 chats.load 触发的 flushPendingTtsBinds，需在 pending 写入后立即再尝试补绑
+  void flushPendingTtsBinds()
 }
 
 function clearTtsAsset(message?: ChatMessage | null) {
@@ -495,11 +523,15 @@ function invalidateTtsCacheIfTextChanged(
   clearTtsAsset(message)
 }
 
-/** 仅当缓存绑定的原始消息内容与本次一致时才复用；后处理文本允许波动。 */
+/**
+ * 复用音频：用持久化的 message.content 与当前展示原文比对（不另存规范化副本）。
+ * ttsAudioSourceText 为朗读稿（可含翻译），不参与此比较；旧存档曾把原文误存进 source 时走兼容分支。
+ */
 function canReuseTtsCache(message: ChatMessage, originalText: string): boolean {
   const assetId = message.ttsAudioAssetId?.trim()
   if (!assetId) return false
   const currentContent = normalizeTtsCompareText(originalText)
+  if (normalizeTtsCompareText(message.content || '') === currentContent) return true
   const rawCached = message.ttsAudioSourceText
   const hasStoredSource =
     rawCached != null && String(rawCached).replace(/\s+/g, '').length > 0
@@ -513,10 +545,12 @@ function canReuseTtsCache(message: ChatMessage, originalText: string): boolean {
 async function preprocessMessageForTts(text: string, tts: TtsSessionConfig): Promise<string> {
   const raw = text.trim()
   if (!raw || !tts.preprocessEnabled || !tts.preprocessModel?.trim()) return raw
+  const preset = resolveTtsPreset(tts)
   const response = await apiPost<{ processedText: string }>('/api/tts/preprocess', {
     text: raw,
     model: tts.preprocessModel,
     preset_id: tts.preprocessPresetId ?? null,
+    provider: resolveTtsProvider(preset),
     inject_emotion_tags: tts.injectEmotionTags === true,
     target_language: tts.preprocessTargetLanguage?.trim() || null,
   })
@@ -549,62 +583,96 @@ async function enqueueMessageReadAloud(message: ChatMessage, mode: 'manual' | 'a
     return false
   }
 
-  /** 在任意 await 之前登记，避免 flush 入队尚未完成时 chats.load 触发 runAutoRead 重复入队 */
-  let autoReadFingerprint: string | null = null
-  if (mode === 'auto') {
-    const fp = makeTtsAutoReadContentFingerprint(chat.id, live, originalText)
-    const fpSet = getTtsAutoReadFingerprintSet(chat.id)
-    if (fpSet.has(fp)) return false
-    fpSet.add(fp)
-    autoReadFingerprint = fp
+  /** 手动：同一条消息已在队列中则忽略重复点击（done/aborted 已出队后可再点） */
+  if (mode === 'manual') {
+    const alreadyQueued = ttsQueue.queue.value.some(
+      (i) => i.messageId === live.id && i.status !== 'done' && i.status !== 'aborted',
+    )
+    if (alreadyQueued) return false
+    if (manualTtsReadInFlight.has(live.id)) return false
+    manualTtsReadInFlight.add(live.id)
   }
 
-  const existingAssetId = canReuseTtsCache(live, originalText)
-    ? (live.ttsAudioAssetId?.trim() ?? undefined)
-    : undefined
+  try {
+    /** 在任意 await 之前登记，避免 flush 入队尚未完成时 chats.load 触发 runAutoRead 重复入队 */
+    let autoReadFingerprint: string | null = null
+    if (mode === 'auto') {
+      const fp = makeTtsAutoReadContentFingerprint(chat.id, live, originalText)
+      const fpSet = getTtsAutoReadFingerprintSet(chat.id)
+      if (fpSet.has(fp)) return false
+      fpSet.add(fp)
+      autoReadFingerprint = fp
+    }
 
-  if (existingAssetId) {
-    await ttsQueue.enqueue(live.id, originalText, voiceId, {
+    const previewLabel = [...originalText].slice(0, 5).join('')
+
+    const existingAssetId = canReuseTtsCache(live, originalText)
+      ? (live.ttsAudioAssetId?.trim() ?? undefined)
+      : undefined
+
+    if (existingAssetId) {
+      await ttsQueue.enqueue(live.id, originalText, voiceId, {
+        previewLabel,
+        model: resolveTtsModel(tts, preset),
+        existingAssetId,
+        chatId: chat.id,
+        presetId: preset?.id ?? tts.presetId ?? null,
+        gapSeconds: tts.readGapSeconds ?? 0,
+        enqueueMode: mode === 'manual' ? 'manual' : 'auto',
+        manualPlacement: mode === 'manual' ? 'cachedJump' : 'tail',
+      })
+      return true
+    }
+
+    const needsPreprocess =
+      originalText.trim().length > 0 &&
+      tts.preprocessEnabled === true &&
+      !!tts.preprocessModel?.trim()
+
+    let spokenText = originalText
+    if (needsPreprocess) {
+      ttsQueue.beginPreprocessing(live.id, previewLabel)
+    }
+    try {
+      spokenText = await preprocessMessageForTts(originalText, tts)
+    } catch (error) {
+      errorStack.pushError({
+        message: `${formatApiError(error)}（已回退为原始文本）`,
+        source: 'main',
+        title: 'TTS 文本后处理失败',
+      })
+    } finally {
+      if (needsPreprocess) {
+        ttsQueue.endPreprocessing(live.id)
+      }
+    }
+
+    await ttsQueue.enqueue(live.id, spokenText, voiceId, {
+      previewLabel,
       model: resolveTtsModel(tts, preset),
       existingAssetId,
       chatId: chat.id,
+      contentText: originalText,
       presetId: preset?.id ?? tts.presetId ?? null,
       gapSeconds: tts.readGapSeconds ?? 0,
+      enqueueMode: mode === 'manual' ? 'manual' : 'auto',
+      manualPlacement: mode === 'manual' ? 'second' : 'tail',
+      onReady: (assetId) => rememberTtsAsset(live.id, assetId, spokenText, autoReadFingerprint ?? undefined),
+      onSynthesizeError: (e) => {
+        if (autoReadFingerprint) {
+          getTtsAutoReadFingerprintSet(chat.id).delete(autoReadFingerprint)
+        }
+        errorStack.pushError({
+          message: formatApiError(e),
+          source: 'main',
+          title: 'TTS 合成失败',
+        })
+      },
     })
     return true
+  } finally {
+    if (mode === 'manual') manualTtsReadInFlight.delete(live.id)
   }
-
-  let spokenText = originalText
-  try {
-    spokenText = await preprocessMessageForTts(originalText, tts)
-  } catch (error) {
-    errorStack.pushError({
-      message: `${formatApiError(error)}（已回退为原始文本）`,
-      source: 'main',
-      title: 'TTS 文本后处理失败',
-    })
-  }
-
-  await ttsQueue.enqueue(live.id, spokenText, voiceId, {
-    model: resolveTtsModel(tts, preset),
-    existingAssetId,
-    chatId: chat.id,
-    contentText: originalText,
-    presetId: preset?.id ?? tts.presetId ?? null,
-    gapSeconds: tts.readGapSeconds ?? 0,
-    onReady: (assetId) => rememberTtsAsset(live.id, assetId, originalText),
-    onSynthesizeError: (e) => {
-      if (autoReadFingerprint) {
-        getTtsAutoReadFingerprintSet(chat.id).delete(autoReadFingerprint)
-      }
-      errorStack.pushError({
-        message: formatApiError(e),
-        source: 'main',
-        title: 'TTS 合成失败',
-      })
-    },
-  })
-  return true
 }
 
 async function handleReadAloudMessage(message: ChatMessage) {
@@ -648,7 +716,38 @@ async function runAutoReadTtsForNewMessages() {
 
 async function flushAutoReadTtsAfterChatReload() {
   await nextTick()
+  // 补绑阶段：chats.load 已完成，消息 id 为服务端 UUID，将 pending 合成结果写回
+  await flushPendingTtsBinds()
   await runAutoReadTtsForNewMessages()
+}
+
+/** 遍历 pendingTtsBinds，按内容指纹匹配当前消息并调用 bind-message 写回 TTS 字段 */
+async function flushPendingTtsBinds() {
+  const chat = activeChat.value
+  if (!chat || pendingTtsBinds.size === 0) return
+
+  for (const message of chat.messages) {
+    if (message.id.startsWith('local_')) continue
+    const displayText = message.role === 'assistant' ? versions.getDisplayContent(message) : message.content || ''
+    const fp = makeTtsAutoReadContentFingerprint(chat.id, message, displayText)
+    const pending = pendingTtsBinds.get(fp)
+    if (!pending) continue
+
+    // 内存立即更新
+    message.ttsAudioAssetId = pending.assetId
+    message.ttsAudioSourceText = pending.spokenText
+    pendingTtsBinds.delete(fp)
+
+    // 异步写回磁盘，不阻塞后续
+    apiPost('/api/tts/bind-message', {
+      chat_id: chat.id,
+      message_id: message.id,
+      asset_id: pending.assetId,
+      spoken_text: pending.spokenText,
+    }).catch((e) => {
+      console.warn('[TTS] bind-message failed', e)
+    })
+  }
 }
 
 watch(
@@ -1522,7 +1621,7 @@ const availableModelSet = computed(() => {
   if (!settings.settings) return new Set<string>()
   const presets = settings.settings.apiPresets
   if (presets && presets.length > 0) {
-    return new Set(presets.flatMap(p => p.models || []))
+    return new Set(presets.filter((p) => !isTtsApiPreset(p)).flatMap((p) => p.models || []))
   }
   return new Set(settings.settings.llm.modelCandidates || [])
 })
@@ -1545,7 +1644,9 @@ const chatModelOptions = computed(() => {
       options: recentModels.map(m => {
         let preset = null
         if (settings.settings?.apiPresets) {
-          preset = settings.settings.apiPresets.find(p => p.models.includes(m))
+          preset = settings.settings.apiPresets.find(
+            (p) => !isTtsApiPreset(p) && p.models.includes(m),
+          )
         }
         return { label: m, value: m, presetId: preset ? preset.id : null }
       })
@@ -1554,6 +1655,7 @@ const chatModelOptions = computed(() => {
 
   if (settings.settings.apiPresets) {
     for (const preset of settings.settings.apiPresets) {
+      if (isTtsApiPreset(preset)) continue
       if (preset.models && preset.models.length > 0) {
         options.push({
           label: preset.name,
@@ -1610,7 +1712,9 @@ async function handleModelSelect(option: any) {
   if (option.presetId) {
     overrides.presetId = option.presetId
   } else {
-    const found = settings.settings?.apiPresets.find(p => p.models.includes(option.value))
+    const found = settings.settings?.apiPresets.find(
+      (p) => !isTtsApiPreset(p) && p.models.includes(option.value),
+    )
     if (found) overrides.presetId = found.id
     else overrides.presetId = null
   }
@@ -3995,6 +4099,7 @@ const editingPersonaAvatarUrl = computed(() => {
             :is-downloading="ttsIsDownloading"
             :is-playing="ttsIsPlaying"
             :audio-paused="ttsAudioPaused"
+            :queue-items="ttsQueuePanelItems"
             :content-area-left-px="contentAreaLeftPx"
             :min-top-px="chatAssistantFabMinTopPx"
             :input-sink-active="ttsInputSinkActive"
@@ -4002,7 +4107,7 @@ const editingPersonaAvatarUrl = computed(() => {
             :on-tts-fab-layout="() => runChatFabSeparation(null)"
             :on-tts-fab-drag-end="() => runChatFabSeparation('tts')"
             :on-tts-fab-snap-end="() => runChatFabSeparation('tts')"
-            @toggle-download="ttsIsDownloading ? ttsQueue.abortAllDownloads() : undefined"
+            @abort-download="ttsQueue.abortAllDownloads()"
             @toggle-play-pause="ttsQueue.togglePlayPause()"
           />
         </div>
