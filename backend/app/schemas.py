@@ -52,6 +52,7 @@ from app.regex_compat import compile_user_regex
 
 
 ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh"]
+TtsProvider = Literal["minimax", "glm", "glm_local", "qwen3_local", "omnivoice_local"]
 
 
 class ReasoningRequestConfig(TypedDict):
@@ -213,8 +214,61 @@ class ApiPreset(BaseModel):
     baseUrl: str = "https://api.openai.com"
     apiKey: str = ""
     models: list[str] = Field(default_factory=list)
-    presetKind: str | None = Field(default=None, description="预设用途；'minimax' 表示 TTS 服务预设")
+    presetKind: str | None = Field(default=None, description="预设用途；'tts' 表示 TTS 服务预设")
+    ttsProvider: TtsProvider | None = Field(default=None, description="TTS 服务提供商；仅当 presetKind='tts' 时有意义")
     voiceCatalog: list["ApiPresetVoice"] = Field(default_factory=list)
+    ttsGlmLocalRepoPath: str | None = Field(default=None, description="GLM-TTS 仓库根目录（glm_local 专用）")
+    ttsGlmLocalPort: int = Field(default=8088, description="GLM-TTS 本地 API 端口（glm_local 专用）")
+    ttsGlmLocalManaged: bool = Field(default=False, description="是否由应用托管 GLM-TTS 子进程（glm_local 专用）")
+    ttsQwen3LocalRepoPath: str | None = Field(default=None, description="Qwen3-TTS 仓库根目录（qwen3_local 专用）")
+    ttsQwen3LocalPort: int = Field(default=8080, description="Qwen3-TTS 本地 FastAPI 网关端口（qwen3_local 专用）")
+    ttsQwen3LocalManaged: bool = Field(default=False, description="是否由应用托管 Qwen3-TTS 子进程（qwen3_local 专用）")
+    ttsQwen3LocalModelId: str | None = Field(
+        default="Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
+        description="Qwen3-TTS CustomVoice 网关模型 ID（POST /v1/tts/custom_voice；qwen3_local 专用）",
+    )
+    ttsQwen3LocalBaseModelId: str | None = Field(
+        default="Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+        description="Qwen3-TTS Base 网关模型 ID（POST /v1/tts/voice_clone；第二端口子进程；qwen3_local 专用）",
+    )
+    ttsQwen3LocalVoiceClonePort: int | None = Field(
+        default=None,
+        description="语音克隆专用网关端口，默认为主端口+1；须与主端口不同（qwen3_local 专用）",
+    )
+    ttsQwen3LocalDevice: str | None = Field(default="cuda:0", description="Qwen3-TTS 启动 device（qwen3_local 专用）")
+    ttsQwen3LocalDefaultLanguage: str | None = Field(
+        default="Auto",
+        description="Qwen3-TTS 默认 language 参数（qwen3_local 专用）",
+    )
+    ttsOmniVoiceLocalRepoPath: str | None = Field(default=None, description="OmniVoice 仓库根目录（omnivoice_local 专用）")
+    ttsOmniVoiceLocalPort: int = Field(default=8089, description="OmniVoice 本地 FastAPI 网关端口（omnivoice_local 专用）")
+    ttsOmniVoiceLocalManaged: bool = Field(default=False, description="是否由应用托管 OmniVoice 子进程（omnivoice_local 专用）")
+    ttsOmniVoiceLocalModelId: str | None = Field(
+        default="k2-fsa/OmniVoice",
+        description="OmniVoice 启动模型 ID 或本地路径（omnivoice_local 专用）",
+    )
+    ttsOmniVoiceLocalDevice: str | None = Field(default="cuda:0", description="OmniVoice 启动 device（omnivoice_local 专用）")
+    ttsOmniVoiceLocalDefaultLanguage: str | None = Field(
+        default=None,
+        description="OmniVoice 默认 language 参数（omnivoice_local 专用）",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_tts_kind(cls, data: Any) -> Any:
+        """兼容旧版 minimax 标识，统一迁移到 tts + ttsProvider。"""
+        if not isinstance(data, dict):
+            return data
+        incoming = dict(data)
+        preset_kind = incoming.get("presetKind")
+        provider = incoming.get("ttsProvider")
+        if preset_kind == "minimax":
+            incoming["presetKind"] = "tts"
+            if provider in (None, ""):
+                incoming["ttsProvider"] = "minimax"
+        elif preset_kind == "tts" and provider in (None, ""):
+            incoming["ttsProvider"] = "minimax"
+        return incoming
 
 
 class ApiPresetVoice(BaseModel):
@@ -225,6 +279,15 @@ class ApiPresetVoice(BaseModel):
     voiceId: str
     name: str
     voiceType: str = "system"
+    promptText: str | None = Field(
+        default=None,
+        description="参考音频对应的转写文本（glm_local / omnivoice_local / qwen3_local 语音克隆专用）",
+    )
+    promptAudioPath: str | None = Field(
+        default=None,
+        description="参考音频本机绝对路径（glm_local / omnivoice_local / qwen3_local 语音克隆专用）",
+    )
+    instruction: str | None = Field(default=None, description="Qwen3 / OmniVoice 的 instruction / instruct 文本")
 
 
 class UserPersona(BaseModel):
@@ -562,7 +625,7 @@ class ChatMessage(BaseModel):
     )
     ttsAudioSourceText: str | None = Field(
         default=None,
-        description="生成上述缓存音频时对应的原始消息内容，用于判断能否复用缓存",
+        description="实际送入 TTS 合成的文本（含后处理/翻译后的朗读稿）",
     )
 
     @model_validator(mode="after")
