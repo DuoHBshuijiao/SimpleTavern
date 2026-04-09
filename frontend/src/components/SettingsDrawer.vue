@@ -47,6 +47,7 @@ import {
   type Chat,
   type ChatOverrides,
   type Settings,
+  type TtsProvider,
   type TtsSessionConfig,
   type WorldBook,
   type WorldBookAttachment,
@@ -62,6 +63,7 @@ import { useSettingsImport } from '../composables/useSettingsImport'
 import { X, Eye, EyeOff, Check, Loader2, GripVertical, ChevronDown } from 'lucide-vue-next'
 import WorldBookEditorModal from './modals/WorldBookEditorModal.vue'
 import WorldBookSessionAttachModal from './modals/WorldBookSessionAttachModal.vue'
+import { isTtsApiPreset, resolveTtsProvider } from '../utils/apiPresetKind'
 import { concatEnabledWorldBookContents, countTokensForText } from '../utils/tokenEstimate'
 import { notifyConfirm, notifyMessage } from '../composables/useNotify'
 
@@ -164,11 +166,152 @@ const ttsDesignDraft = reactive({
   voiceId: '',
 })
 
+// GLM-TTS（本地）参考音色新增草稿
+const glmLocalVoiceDraft = reactive({
+  voiceId: '',
+  name: '',
+  promptText: '',
+  promptAudioPath: '',
+})
+
+const qwen3LocalVoiceDraft = reactive({
+  voiceId: '',
+  name: '',
+  instruction: '',
+  promptText: '',
+  promptAudioPath: '',
+})
+
+const omniVoiceLocalVoiceDraft = reactive({
+  voiceId: '',
+  name: '',
+  promptText: '',
+  promptAudioPath: '',
+  instruction: '',
+})
+
+function addGlmLocalVoice() {
+  const id = glmLocalVoiceDraft.voiceId.trim()
+  if (!id) return
+  upsertEditingPresetVoiceCatalog([{
+    voiceId: id,
+    name: glmLocalVoiceDraft.name.trim() || id,
+    voiceType: 'local',
+    promptText: glmLocalVoiceDraft.promptText.trim() || null,
+    promptAudioPath: glmLocalVoiceDraft.promptAudioPath.trim() || null,
+  }])
+  glmLocalVoiceDraft.voiceId = ''
+  glmLocalVoiceDraft.name = ''
+  glmLocalVoiceDraft.promptText = ''
+  glmLocalVoiceDraft.promptAudioPath = ''
+}
+
+function updateGlmLocalVoiceField(voiceId: string, field: 'promptText' | 'promptAudioPath', value: string) {
+  const preset = editingPreset.value
+  if (!preset?.voiceCatalog) return
+  const voice = preset.voiceCatalog.find((v) => v.voiceId === voiceId)
+  if (voice) {
+    voice[field] = value.trim() || null
+  }
+}
+
+function addQwen3LocalVoice() {
+  const speaker = qwen3LocalVoiceDraft.voiceId.trim()
+  if (!speaker) return
+  upsertEditingPresetVoiceCatalog([{
+    voiceId: speaker,
+    name: qwen3LocalVoiceDraft.name.trim() || speaker,
+    voiceType: 'local',
+    instruction: qwen3LocalVoiceDraft.instruction.trim() || null,
+    promptText: qwen3LocalVoiceDraft.promptText.trim() || null,
+    promptAudioPath: qwen3LocalVoiceDraft.promptAudioPath.trim() || null,
+  }])
+  qwen3LocalVoiceDraft.voiceId = ''
+  qwen3LocalVoiceDraft.name = ''
+  qwen3LocalVoiceDraft.instruction = ''
+  qwen3LocalVoiceDraft.promptText = ''
+  qwen3LocalVoiceDraft.promptAudioPath = ''
+}
+
+function updateQwen3LocalVoiceField(
+  voiceId: string,
+  field: 'name' | 'instruction' | 'promptText' | 'promptAudioPath',
+  value: string,
+) {
+  const preset = editingPreset.value
+  if (!preset?.voiceCatalog) return
+  const voice = preset.voiceCatalog.find((v) => v.voiceId === voiceId)
+  if (!voice) return
+  if (field === 'name') {
+    voice.name = value.trim() || voice.voiceId
+    return
+  }
+  if (field === 'instruction') {
+    voice.instruction = value.trim() || null
+    return
+  }
+  voice[field] = value.trim() || null
+}
+
+function onQwen3VoiceClonePortInput(e: Event) {
+  const preset = editingPreset.value
+  if (!preset) return
+  const raw = (e.target as HTMLInputElement).value
+  if (raw === '') {
+    preset.ttsQwen3LocalVoiceClonePort = null
+    return
+  }
+  const n = Number.parseInt(raw, 10)
+  preset.ttsQwen3LocalVoiceClonePort = Number.isFinite(n) ? n : null
+}
+
+function addOmniVoiceLocalVoice() {
+  const id = omniVoiceLocalVoiceDraft.voiceId.trim()
+  if (!id) return
+  upsertEditingPresetVoiceCatalog([{
+    voiceId: id,
+    name: omniVoiceLocalVoiceDraft.name.trim() || id,
+    voiceType: 'local',
+    promptText: omniVoiceLocalVoiceDraft.promptText.trim() || null,
+    promptAudioPath: omniVoiceLocalVoiceDraft.promptAudioPath.trim() || null,
+    instruction: omniVoiceLocalVoiceDraft.instruction.trim() || null,
+  }])
+  omniVoiceLocalVoiceDraft.voiceId = ''
+  omniVoiceLocalVoiceDraft.name = ''
+  omniVoiceLocalVoiceDraft.promptText = ''
+  omniVoiceLocalVoiceDraft.promptAudioPath = ''
+  omniVoiceLocalVoiceDraft.instruction = ''
+}
+
+function updateOmniVoiceLocalVoiceField(
+  voiceId: string,
+  field: 'name' | 'promptText' | 'promptAudioPath' | 'instruction',
+  value: string,
+) {
+  const preset = editingPreset.value
+  if (!preset?.voiceCatalog) return
+  const voice = preset.voiceCatalog.find((v) => v.voiceId === voiceId)
+  if (!voice) return
+  if (field === 'name') {
+    voice.name = value.trim() || voice.voiceId
+    return
+  }
+  voice[field] = value.trim() || null
+}
+
 const TTS_AUTO_READ_OPTIONS: Array<{ label: string; value: AutoReadScope }> = [
   { label: '关', value: 'off' },
   { label: '角色', value: 'assistant_only' },
   { label: '用户', value: 'user_only' },
   { label: '全部', value: 'all' },
+]
+
+const TTS_PROVIDER_OPTIONS: Array<{ label: string; value: TtsProvider }> = [
+  { label: 'MiniMax（兼容）', value: 'minimax' },
+  { label: 'GLM TTS（智谱）', value: 'glm' },
+  { label: 'GLM-TTS（本地）', value: 'glm_local' },
+  { label: 'Qwen3-TTS（本地）', value: 'qwen3_local' },
+  { label: 'OmniVoice（本地）', value: 'omnivoice_local' },
 ]
 
 // --- TTS 缓存统计（轮询后端 GET /api/tts/cache/stats） ---
@@ -436,7 +579,7 @@ function updateChatTtsPreprocessEnabled(enabled: boolean) {
 function updateChatTtsInjectEmotionTags(enabled: boolean) {
   const tts = ensureChatTtsConfig()
   if (!tts) return
-  tts.injectEmotionTags = enabled
+  tts.injectEmotionTags = selectedChatTtsProvider.value === 'minimax' ? enabled : false
 }
 
 function updateChatTtsPreprocessTargetLanguage(rawValue: string) {
@@ -482,14 +625,110 @@ function updatePersonaVoiceValue(personaId: string, rawValue: string) {
 }
 
 function isTtsPreset(preset?: ApiPreset | null): boolean {
-  return preset?.presetKind === 'minimax'
+  return isTtsApiPreset(preset)
+}
+
+function normalizePresetDraft(preset: ApiPreset): ApiPreset {
+  const isTts = isTtsApiPreset(preset)
+  return {
+    ...preset,
+    presetKind: isTts ? 'tts' : (preset.presetKind ?? null),
+    ttsProvider: isTts ? resolveTtsProvider(preset) : null,
+    voiceCatalog: normalizeVoiceCatalog(preset.voiceCatalog),
+  }
+}
+
+function resetTtsPresetTransientUi() {
+  presetVoiceListSelection.value = new Set()
+  candidateVoices.value = []
+  selectedCandidateVoiceIds.value = new Set()
+  showVoiceSelector.value = false
+  ttsClonePreviewUrl.value = null
+  ttsDesignPreviewUrl.value = null
+  ttsClonePromptFile.value = null
+  ttsCloneDraft.promptText = ''
+  ttsCloneDraft.needNoiseReduction = false
+  ttsCloneDraft.needVolumeNormalization = false
+}
+
+function applyPresetTtsProvider(
+  preset: ApiPreset,
+  provider: TtsProvider,
+  options?: { notifyOnSwitch?: boolean },
+) {
+  const nextProvider: TtsProvider = provider === 'glm'
+    ? 'glm'
+    : provider === 'glm_local'
+      ? 'glm_local'
+      : provider === 'qwen3_local'
+        ? 'qwen3_local'
+        : provider === 'omnivoice_local'
+          ? 'omnivoice_local'
+        : 'minimax'
+  const previousProvider = resolveTtsProvider(preset)
+  preset.presetKind = 'tts'
+  preset.ttsProvider = nextProvider
+  if (previousProvider === nextProvider) return
+  preset.voiceCatalog = []
+  resetTtsPresetTransientUi()
+  if (nextProvider === 'glm' && !preset.models.includes('glm-tts')) {
+    preset.models = ['glm-tts', ...preset.models.filter((modelName) => modelName !== 'glm-tts')]
+  }
+  if (nextProvider === 'glm_local') {
+    // 本地模式初始化默认字段
+    if (!preset.ttsGlmLocalPort) preset.ttsGlmLocalPort = 8088
+    if (preset.ttsGlmLocalManaged === undefined) preset.ttsGlmLocalManaged = false
+    if (!preset.baseUrl || preset.baseUrl === 'https://api.openai.com') {
+      preset.baseUrl = `http://127.0.0.1:${preset.ttsGlmLocalPort}`
+    }
+  }
+  if (nextProvider === 'qwen3_local') {
+    if (!preset.ttsQwen3LocalPort) preset.ttsQwen3LocalPort = 8080
+    if (preset.ttsQwen3LocalManaged === undefined) preset.ttsQwen3LocalManaged = false
+    if (!preset.ttsQwen3LocalModelId?.trim()) preset.ttsQwen3LocalModelId = 'Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice'
+    if (!preset.ttsQwen3LocalBaseModelId?.trim()) preset.ttsQwen3LocalBaseModelId = 'Qwen/Qwen3-TTS-12Hz-1.7B-Base'
+    if (!preset.ttsQwen3LocalDevice?.trim()) preset.ttsQwen3LocalDevice = 'cuda:0'
+    if (!preset.ttsQwen3LocalDefaultLanguage?.trim()) preset.ttsQwen3LocalDefaultLanguage = 'Auto'
+    if (!preset.baseUrl || preset.baseUrl === 'https://api.openai.com') {
+      preset.baseUrl = `http://127.0.0.1:${preset.ttsQwen3LocalPort}`
+    }
+  }
+  if (nextProvider === 'omnivoice_local') {
+    if (!preset.ttsOmniVoiceLocalPort) preset.ttsOmniVoiceLocalPort = 8089
+    if (preset.ttsOmniVoiceLocalManaged === undefined) preset.ttsOmniVoiceLocalManaged = false
+    if (!preset.ttsOmniVoiceLocalModelId?.trim()) preset.ttsOmniVoiceLocalModelId = 'k2-fsa/OmniVoice'
+    if (preset.ttsOmniVoiceLocalDevice === undefined || preset.ttsOmniVoiceLocalDevice === null) preset.ttsOmniVoiceLocalDevice = 'cuda:0'
+    if (!preset.models.includes('omnivoice-tts')) {
+      preset.models = ['omnivoice-tts', ...preset.models.filter((modelName) => modelName !== 'omnivoice-tts')]
+    }
+    if (!preset.baseUrl || preset.baseUrl === 'https://api.openai.com') {
+      preset.baseUrl = `http://127.0.0.1:${preset.ttsOmniVoiceLocalPort}`
+    }
+  }
+  if (options?.notifyOnSwitch !== false) {
+    void notifyMessage('已切换 TTS 提供商，请重新配置音色。')
+  }
 }
 
 function setPresetTtsService(preset: ApiPreset, enabled: boolean) {
-  preset.presetKind = enabled ? 'minimax' : null
   if (!enabled) {
+    preset.presetKind = null
+    preset.ttsProvider = null
     preset.voiceCatalog = []
+    resetTtsPresetTransientUi()
+    return
   }
+  applyPresetTtsProvider(preset, resolveTtsProvider(preset), { notifyOnSwitch: false })
+}
+
+function setPresetTtsProvider(preset: ApiPreset, provider: TtsProvider) {
+  applyPresetTtsProvider(preset, provider)
+}
+
+function onEditingPresetTtsProviderChange(v: string) {
+  const preset = editingPreset.value
+  if (!preset) return
+  setPresetTtsProvider(preset, v as TtsProvider)
 }
 
 function normalizeVoiceCatalog(voices?: ApiPresetVoice[] | null): ApiPresetVoice[] {
@@ -497,10 +736,25 @@ function normalizeVoiceCatalog(voices?: ApiPresetVoice[] | null): ApiPresetVoice
   for (const voice of voices || []) {
     const voiceId = String(voice.voiceId || '').trim()
     if (!voiceId) continue
+    const promptText =
+      voice.promptText != null && String(voice.promptText).trim()
+        ? String(voice.promptText).trim()
+        : null
+    const promptAudioPath =
+      voice.promptAudioPath != null && String(voice.promptAudioPath).trim()
+        ? String(voice.promptAudioPath).trim()
+        : null
+    const instruction =
+      voice.instruction != null && String(voice.instruction).trim()
+        ? String(voice.instruction).trim()
+        : null
     next.set(voiceId, {
       voiceId,
       name: String(voice.name || voiceId).trim() || voiceId,
       voiceType: String(voice.voiceType || 'system').trim() || 'system',
+      promptText,
+      promptAudioPath,
+      instruction,
     })
   }
   return [...next.values()]
@@ -754,10 +1008,7 @@ watch(
       ;(s as Settings).themeId = normalizeThemeId((s as Settings).themeId as string)
     }
     if (!s.apiPresets) s.apiPresets = []
-    s.apiPresets = s.apiPresets.map((preset) => ({
-      ...preset,
-      voiceCatalog: normalizeVoiceCatalog(preset.voiceCatalog),
-    }))
+    s.apiPresets = s.apiPresets.map((preset) => normalizePresetDraft(preset))
     if (!(s as Settings).draftHelpDefaults) (s as Settings).draftHelpDefaults = ensureDraftHelpDefaults()
     if (s.selectedFont === undefined) (s as Settings).selectedFont = null
     if ((s as Settings).pageBackgroundImage === undefined) (s as Settings).pageBackgroundImage = null
@@ -1124,6 +1375,50 @@ const editingPreset = computed(() => {
   return globalDraft.value.apiPresets.find(p => p.id === editingPresetId.value) || null
 })
 
+const editingPresetTtsProvider = computed<TtsProvider>(() => resolveTtsProvider(editingPreset.value))
+
+const editingPresetIsGlmLocal = computed(() => editingPresetTtsProvider.value === 'glm_local')
+
+const editingPresetIsQwen3Local = computed(() => editingPresetTtsProvider.value === 'qwen3_local')
+
+const editingPresetIsOmniVoiceLocal = computed(() => editingPresetTtsProvider.value === 'omnivoice_local')
+
+const editingPresetSupportsVoiceDesign = computed(() => editingPresetTtsProvider.value === 'minimax')
+
+const editingPresetSupportsPromptAudio = computed(() => editingPresetTtsProvider.value === 'minimax')
+
+const editingPresetSupportsVoiceFetch = computed(() => !['glm_local', 'qwen3_local', 'omnivoice_local'].includes(editingPresetTtsProvider.value))
+
+const editingPresetBaseUrlPlaceholder = computed(() => {
+  if (!editingPreset.value) return 'https://api.openai.com 或 …/v1/chat/completions'
+  if (!isTtsPreset(editingPreset.value)) return 'https://api.openai.com 或 …/v1/chat/completions'
+  if (editingPresetTtsProvider.value === 'glm_local') return 'http://127.0.0.1:8088'
+  if (editingPresetTtsProvider.value === 'qwen3_local') return 'http://127.0.0.1:8080'
+  if (editingPresetTtsProvider.value === 'omnivoice_local') return 'http://127.0.0.1:8089'
+  return editingPresetTtsProvider.value === 'glm'
+    ? 'https://open.bigmodel.cn/api 或 …/api/paas/v4/audio/speech'
+    : 'https://api.minimaxi.com 或 MiniMax TTS 完整接口地址'
+})
+
+const editingPresetBaseUrlHint = computed(() => {
+  if (!editingPreset.value) return '支持 Base（如 …/v1 或 …/v1/）或完整 chat/completions 地址；末尾有无 / 均可。'
+  if (!isTtsPreset(editingPreset.value)) {
+    return '支持 Base（如 …/v1 或 …/v1/）或完整 chat/completions 地址；末尾有无 / 均可。'
+  }
+  if (editingPresetTtsProvider.value === 'glm_local') {
+    return '本地 GLM-TTS API 地址，通常为 http://127.0.0.1:<端口>；启用托管时会根据端口自动生成。'
+  }
+  if (editingPresetTtsProvider.value === 'qwen3_local') {
+    return '本地 Qwen3-TTS FastAPI 网关地址，通常为 http://127.0.0.1:<端口>；启用托管时会根据端口自动生成。'
+  }
+  if (editingPresetTtsProvider.value === 'omnivoice_local') {
+    return '本地 OmniVoice FastAPI 地址，通常为 http://127.0.0.1:<端口>；启用托管时会根据端口自动生成。'
+  }
+  return editingPresetTtsProvider.value === 'glm'
+    ? 'GLM TTS 推荐填写 https://open.bigmodel.cn/api，也兼容完整 /api/paas/v4/... 接口地址。'
+    : 'MiniMax 兼容基础域名、/v1、或完整 TTS 接口地址。'
+})
+
 watch(editingPresetId, () => {
   presetModelListSelection.value = new Set()
   presetVoiceListSelection.value = new Set()
@@ -1195,6 +1490,7 @@ function createPreset() {
     apiKey: '',
     models: [],
     presetKind: null,
+    ttsProvider: null,
     voiceCatalog: [],
   }
   globalDraft.value.apiPresets.push(newPreset)
@@ -1231,6 +1527,16 @@ const selectedChatTtsPreset = computed(() => {
   const presetId = chatDraft.value?.tts?.presetId
   if (!presetId) return null
   return globalDraft.value?.apiPresets.find((preset) => preset.id === presetId) || null
+})
+
+const selectedChatTtsProvider = computed<TtsProvider>(() => resolveTtsProvider(selectedChatTtsPreset.value))
+
+watch(selectedChatTtsProvider, (provider) => {
+  if (provider === 'minimax') return
+  const tts = chatDraft.value?.tts
+  if (tts?.injectEmotionTags) {
+    tts.injectEmotionTags = false
+  }
 })
 
 const availableTtsVoices = computed(() => {
@@ -1320,6 +1626,7 @@ async function openVoiceSelector(preset: ApiPreset) {
     const res = await apiPost<{ voices: ApiPresetVoice[] }>('/api/tts/test-voices', {
       baseUrl: preset.baseUrl,
       apiKey: preset.apiKey,
+      provider: resolveTtsProvider(preset),
       voice_type: 'all',
     })
     const apiNorm = normalizeVoiceCatalog(res.voices)
@@ -1391,6 +1698,7 @@ function onTtsClonePromptChange(event: Event) {
 async function submitTtsClone() {
   const preset = editingPreset.value
   if (!preset || !isTtsPreset(preset)) return
+  const provider = resolveTtsProvider(preset)
   if (!ttsCloneSourceFile.value) {
     await notifyMessage('请先选择待复刻音频文件')
     return
@@ -1403,14 +1711,17 @@ async function submitTtsClone() {
   const body = new FormData()
   body.append('baseUrl', preset.baseUrl)
   body.append('apiKey', preset.apiKey)
+  body.append('provider', provider)
   body.append('voice_id', ttsCloneDraft.voiceId.trim())
   body.append('source_file', ttsCloneSourceFile.value)
   if (ttsCloneDraft.model.trim()) body.append('model', ttsCloneDraft.model.trim())
   if (ttsCloneDraft.previewText.trim()) body.append('text', ttsCloneDraft.previewText.trim())
-  if (ttsClonePromptFile.value) body.append('prompt_file', ttsClonePromptFile.value)
+  if (provider === 'minimax' && ttsClonePromptFile.value) body.append('prompt_file', ttsClonePromptFile.value)
   if (ttsCloneDraft.promptText.trim()) body.append('prompt_text', ttsCloneDraft.promptText.trim())
-  body.append('need_noise_reduction', String(ttsCloneDraft.needNoiseReduction))
-  body.append('need_volume_normalization', String(ttsCloneDraft.needVolumeNormalization))
+  if (provider === 'minimax') {
+    body.append('need_noise_reduction', String(ttsCloneDraft.needNoiseReduction))
+    body.append('need_volume_normalization', String(ttsCloneDraft.needVolumeNormalization))
+  }
 
   ttsCloneLoading.value = true
   try {
@@ -1427,6 +1738,10 @@ async function submitTtsClone() {
 async function submitTtsDesign() {
   const preset = editingPreset.value
   if (!preset || !isTtsPreset(preset)) return
+  if (resolveTtsProvider(preset) !== 'minimax') {
+    await notifyMessage('GLM TTS 暂不支持音色设计')
+    return
+  }
   if (!ttsDesignDraft.prompt.trim() || !ttsDesignDraft.previewText.trim()) {
     await notifyMessage('请填写音色描述和试听文本')
     return
@@ -1436,6 +1751,7 @@ async function submitTtsDesign() {
     const res = await apiPost<{ voiceId: string; previewUrl?: string | null; voiceType: string }>('/api/tts/design', {
       baseUrl: preset.baseUrl,
       apiKey: preset.apiKey,
+      provider: resolveTtsProvider(preset),
       prompt: ttsDesignDraft.prompt.trim(),
       preview_text: ttsDesignDraft.previewText.trim(),
       voice_id: ttsDesignDraft.voiceId.trim() || null,
@@ -1510,10 +1826,10 @@ async function deletePreset(id: string) {
   if (editingPresetId.value === id) {
     editingPresetId.value = globalDraft.value.apiPresets[0]?.id || null
   }
-  // 从「最近使用」中移除已不在任何预设（或全局候选）中的模型
+  // 从「最近使用」中移除已不在任何非 TTS 预设（或全局候选）中的模型
   const presets = globalDraft.value.apiPresets
   const available = presets.length > 0
-    ? new Set(presets.flatMap(p => p.models || []))
+    ? new Set(presets.filter((p) => !isTtsApiPreset(p)).flatMap((p) => p.models || []))
     : new Set(globalDraft.value.llm.modelCandidates || [])
   globalDraft.value.llm.usedModels = (globalDraft.value.llm.usedModels || []).filter(m => available.has(m))
 }
@@ -1694,6 +2010,7 @@ const chatModelOptions = computed(() => {
   if (!globalDraft.value) return []
 
   for (const preset of globalDraft.value.apiPresets) {
+      if (isTtsApiPreset(preset)) continue
       if (preset.models && preset.models.length > 0) {
           options.push({
               label: preset.name,
@@ -1736,10 +2053,7 @@ async function saveGlobal() {
     ...globalDraft.value,
     generationDefaults: { ...globalDraft.value.generationDefaults },
     draftHelpDefaults: { ...ensureDraftHelpDefaults(globalDraft.value.draftHelpDefaults) },
-    apiPresets: globalDraft.value.apiPresets.map((preset) => ({
-      ...preset,
-      voiceCatalog: normalizeVoiceCatalog(preset.voiceCatalog),
-    })),
+    apiPresets: globalDraft.value.apiPresets.map((preset) => normalizePresetDraft(preset)),
   }
   draft.generationDefaults.context_size = normalizeContextSize(draft.generationDefaults.context_size)
   draft.draftHelpDefaults.context_message_limit = normalizePositiveInteger(draft.draftHelpDefaults.context_message_limit)
@@ -2824,7 +3138,7 @@ async function checkUpdate() {
                       </div>
 
                       <p class="text-xs text-[var(--color-text-muted)]">
-                        开启后可在聊天界面使用语音合成功能。需在 API 预设中配置 MiniMax TTS 预设。
+                        开启后可在聊天界面使用语音合成功能。需在 API 预设中至少配置一个 TTS 服务预设，可选 MiniMax 或 GLM TTS。
                       </p>
                     </div>
                   </div>
@@ -2940,6 +3254,16 @@ async function checkUpdate() {
                                   type="text" 
                                   class="input input-sm w-full"
                               />
+                              <div v-if="isTtsPreset(editingPreset)" class="space-y-1.5">
+                                <label class="block text-[11px] font-medium text-[var(--color-text-muted)]">TTS 提供商</label>
+                                <ModernSelect
+                                  :model-value="editingPresetTtsProvider"
+                                  :options="TTS_PROVIDER_OPTIONS"
+                                  class="w-full"
+                                  placeholder="选择 TTS 提供商…"
+                                  @update:model-value="onEditingPresetTtsProviderChange"
+                                />
+                              </div>
                           </div>
 
                            <div class="space-y-1.5">
@@ -2947,10 +3271,10 @@ async function checkUpdate() {
                               <input 
                                   v-model="editingPreset.baseUrl" 
                                   type="text" 
-                                  placeholder="https://api.openai.com 或 …/v1/chat/completions"
+                                  :placeholder="editingPresetBaseUrlPlaceholder"
                                   class="input input-sm w-full"
                               />
-                              <p class="text-xs text-[var(--color-text-muted)]">支持 Base（如 …/v1 或 …/v1/）或完整 chat/completions 地址；末尾有无 / 均可。</p>
+                              <p class="text-xs text-[var(--color-text-muted)]">{{ editingPresetBaseUrlHint }}</p>
                           </div>
 
                           <div class="space-y-1.5">
@@ -3067,9 +3391,126 @@ async function checkUpdate() {
                           </div>
 
                           <div v-if="isTtsPreset(editingPreset)" class="space-y-3 rounded-xl border border-[var(--color-border-subtle)] bg-surface-muted/35 p-3">
+                            <p class="text-[11px] text-[var(--color-text-muted)]">
+                              当前提供商：{{ editingPresetTtsProvider === 'glm_local' ? 'GLM-TTS（本地）' : editingPresetTtsProvider === 'qwen3_local' ? 'Qwen3-TTS（本地）' : editingPresetTtsProvider === 'omnivoice_local' ? 'OmniVoice（本地）' : editingPresetTtsProvider === 'glm' ? 'GLM TTS（智谱）' : 'MiniMax（兼容）' }}
+                            </p>
+
+                            <!-- GLM-TTS 本地专属配置 -->
+                            <template v-if="editingPresetIsGlmLocal">
+                              <div class="space-y-2">
+                                <label class="block text-xs font-medium text-[var(--color-text-secondary)]">仓库路径</label>
+                                <input v-model="editingPreset!.ttsGlmLocalRepoPath" type="text" class="input input-sm w-full" placeholder="E:\GLM-TTS（GLM-TTS 仓库根目录）" />
+                                <p class="text-[10px] text-[var(--color-text-muted)]">指向包含 run_api_gpu.ps1 的已就绪 GLM-TTS 目录。</p>
+                              </div>
+                              <div class="flex items-center gap-3">
+                                <div class="flex-1 space-y-1">
+                                  <label class="block text-xs font-medium text-[var(--color-text-secondary)]">端口</label>
+                                  <input v-model.number="editingPreset!.ttsGlmLocalPort" type="number" min="1" max="65535" class="input input-sm w-full" placeholder="8088" />
+                                </div>
+                                <div class="flex-1 space-y-1">
+                                  <label class="block text-xs font-medium text-[var(--color-text-secondary)]">托管启动</label>
+                                  <button type="button" class="btn btn-xs w-full" :class="editingPreset!.ttsGlmLocalManaged ? 'btn-primary' : 'btn-secondary'" @click="editingPreset!.ttsGlmLocalManaged = !editingPreset!.ttsGlmLocalManaged">
+                                    {{ editingPreset!.ttsGlmLocalManaged ? '由程序启动' : '手动启动' }}
+                                  </button>
+                                </div>
+                              </div>
+                              <p class="text-[10px] text-[var(--color-text-muted)]">「由程序启动」会在首次合成前自动运行 run_api_gpu.ps1；「手动启动」需自行启动本地 API。</p>
+                            </template>
+
+                            <template v-else-if="editingPresetIsQwen3Local">
+                              <div class="space-y-2">
+                                <label class="block text-xs font-medium text-[var(--color-text-secondary)]">仓库路径</label>
+                                <input v-model="editingPreset!.ttsQwen3LocalRepoPath" type="text" class="input input-sm w-full" placeholder="E:\Qwen3-TTS（Qwen3-TTS 仓库根目录）" />
+                                <p class="text-[10px] text-[var(--color-text-muted)]">指向安装好 Qwen3-TTS 与 its gateway 的仓库目录；托管模式会从这里启动 uvicorn 网关。</p>
+                              </div>
+                              <div class="grid gap-3 md:grid-cols-2">
+                                <div class="space-y-1">
+                                  <label class="block text-xs font-medium text-[var(--color-text-secondary)]">主端口（CustomVoice 网关）</label>
+                                  <input v-model.number="editingPreset!.ttsQwen3LocalPort" type="number" min="1" max="65535" class="input input-sm w-full" placeholder="8080" />
+                                </div>
+                                <div class="space-y-1">
+                                  <label class="block text-xs font-medium text-[var(--color-text-secondary)]">语音克隆端口（Base 网关）</label>
+                                  <input
+                                    :value="editingPreset!.ttsQwen3LocalVoiceClonePort ?? ''"
+                                    type="number"
+                                    min="1"
+                                    max="65535"
+                                    class="input input-sm w-full"
+                                    placeholder="留空 = 主端口 + 1"
+                                    @input="onQwen3VoiceClonePortInput"
+                                  />
+                                </div>
+                              </div>
+                              <div class="grid gap-3 md:grid-cols-2">
+                                <div class="space-y-1">
+                                  <label class="block text-xs font-medium text-[var(--color-text-secondary)]">托管启动</label>
+                                  <button type="button" class="btn btn-xs w-full" :class="editingPreset!.ttsQwen3LocalManaged ? 'btn-primary' : 'btn-secondary'" @click="editingPreset!.ttsQwen3LocalManaged = !editingPreset!.ttsQwen3LocalManaged">
+                                    {{ editingPreset!.ttsQwen3LocalManaged ? '由程序启动' : '手动启动' }}
+                                  </button>
+                                </div>
+                                <div class="space-y-1">
+                                  <label class="block text-xs font-medium text-[var(--color-text-secondary)]">设备</label>
+                                  <input v-model="editingPreset!.ttsQwen3LocalDevice" type="text" class="input input-sm w-full" placeholder="cuda:0" />
+                                </div>
+                              </div>
+                              <div class="grid gap-3 md:grid-cols-2">
+                                <div class="space-y-1">
+                                  <label class="block text-xs font-medium text-[var(--color-text-secondary)]">CustomVoice 模型 ID（/custom_voice）</label>
+                                  <input v-model="editingPreset!.ttsQwen3LocalModelId" type="text" class="input input-sm w-full" placeholder="Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice" />
+                                </div>
+                                <div class="space-y-1">
+                                  <label class="block text-xs font-medium text-[var(--color-text-secondary)]">Base 模型 ID（/voice_clone）</label>
+                                  <input v-model="editingPreset!.ttsQwen3LocalBaseModelId" type="text" class="input input-sm w-full" placeholder="Qwen/Qwen3-TTS-12Hz-1.7B-Base" />
+                                </div>
+                              </div>
+                              <div class="space-y-1">
+                                <label class="block text-xs font-medium text-[var(--color-text-secondary)]">默认语言</label>
+                                <input v-model="editingPreset!.ttsQwen3LocalDefaultLanguage" type="text" class="input input-sm w-full" placeholder="Auto" />
+                              </div>
+                              <p class="text-[10px] text-[var(--color-text-muted)]">
+                                托管模式会启动<strong>两个</strong> uvicorn：主端口加载 CustomVoice（仅 speaker → /v1/tts/custom_voice）；语音克隆端口加载 Base（参考音频+转写 → /v1/tts/voice_clone）。两端口必须不同；手动启动时需自行各启一个网关并填好 Base URL（主地址对应主端口）。
+                              </p>
+                            </template>
+
+                            <template v-else-if="editingPresetIsOmniVoiceLocal">
+                              <div class="space-y-2">
+                                <label class="block text-xs font-medium text-[var(--color-text-secondary)]">仓库路径</label>
+                                <input v-model="editingPreset!.ttsOmniVoiceLocalRepoPath" type="text" class="input input-sm w-full" placeholder="E:\OmniVoice（OmniVoice 仓库根目录）" />
+                                <p class="text-[10px] text-[var(--color-text-muted)]">指向安装好 OmniVoice 与其 .venv 的仓库目录；托管模式会从这里启动 uvicorn。</p>
+                              </div>
+                              <div class="grid gap-3 md:grid-cols-2">
+                                <div class="space-y-1">
+                                  <label class="block text-xs font-medium text-[var(--color-text-secondary)]">端口</label>
+                                  <input v-model.number="editingPreset!.ttsOmniVoiceLocalPort" type="number" min="1" max="65535" class="input input-sm w-full" placeholder="8089" />
+                                </div>
+                                <div class="space-y-1">
+                                  <label class="block text-xs font-medium text-[var(--color-text-secondary)]">托管启动</label>
+                                  <button type="button" class="btn btn-xs w-full" :class="editingPreset!.ttsOmniVoiceLocalManaged ? 'btn-primary' : 'btn-secondary'" @click="editingPreset!.ttsOmniVoiceLocalManaged = !editingPreset!.ttsOmniVoiceLocalManaged">
+                                    {{ editingPreset!.ttsOmniVoiceLocalManaged ? '由程序启动' : '手动启动' }}
+                                  </button>
+                                </div>
+                              </div>
+                              <div class="grid gap-3 md:grid-cols-2">
+                                <div class="space-y-1">
+                                  <label class="block text-xs font-medium text-[var(--color-text-secondary)]">模型 ID / 路径</label>
+                                  <input v-model="editingPreset!.ttsOmniVoiceLocalModelId" type="text" class="input input-sm w-full" placeholder="k2-fsa/OmniVoice" />
+                                </div>
+                                <div class="space-y-1">
+                                  <label class="block text-xs font-medium text-[var(--color-text-secondary)]">设备</label>
+                                  <input v-model="editingPreset!.ttsOmniVoiceLocalDevice" type="text" class="input input-sm w-full" placeholder="cuda:0（留空则交给 OmniVoice 自动选择）" />
+                                </div>
+                              </div>
+                              <div class="space-y-1">
+                                <label class="block text-xs font-medium text-[var(--color-text-secondary)]">默认语言</label>
+                                <input v-model="editingPreset!.ttsOmniVoiceLocalDefaultLanguage" type="text" class="input input-sm w-full" placeholder="例如 zh、Chinese、English（可留空）" />
+                              </div>
+                              <p class="text-[10px] text-[var(--color-text-muted)]">托管模式会执行 python -m uvicorn omnivoice.api.server:app --host 127.0.0.1 --port &lt;port&gt;，并通过环境变量传入模型与 device；后端调用 JSON 接口 /v1/tts。</p>
+                            </template>
+
                             <div class="flex items-center justify-between gap-2 flex-wrap">
                               <label class="block text-xs font-medium text-[var(--color-text-secondary)]">音色列表</label>
                               <button
+                                v-if="editingPresetSupportsVoiceFetch"
                                 type="button"
                                 class="text-xs text-brand hover:text-brand-hover flex items-center gap-1 shrink-0"
                                 :disabled="presetVoicesLoading"
@@ -3106,11 +3547,11 @@ async function checkUpdate() {
                                   <span class="min-w-0 truncate">{{ voice.name }}</span>
                                   <span class="rounded-full bg-surface-muted px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)]">{{ voice.voiceType }}</span>
                                 </button>
-                                <div v-if="!editingPresetVoiceCatalog.length" class="text-xs text-[var(--color-text-muted)] w-full text-center py-4">点击上方「从 API 获取并筛选」或下方手动添加 voice_id</div>
+                                <div v-if="!editingPresetVoiceCatalog.length" class="text-xs text-[var(--color-text-muted)] w-full text-center py-4">{{ editingPresetIsGlmLocal ? '请在下方添加本地参考音色' : editingPresetIsQwen3Local ? '请在下方添加 Qwen3 音色条目' : editingPresetIsOmniVoiceLocal ? '请在下方添加 OmniVoice 音色条目' : '点击上方「从 API 获取并筛选」或下方手动添加 voice_id' }}</div>
                               </div>
                             </div>
 
-                            <div class="flex gap-2">
+                            <div v-if="!editingPresetIsGlmLocal && !editingPresetIsQwen3Local && !editingPresetIsOmniVoiceLocal" class="flex gap-2">
                               <input
                                 type="text"
                                 placeholder="手动输入 voice_id 后按回车添加…"
@@ -3119,7 +3560,7 @@ async function checkUpdate() {
                                   (e) => {
                                     const val = (e.target as HTMLInputElement).value.trim()
                                     if (val) {
-                                      upsertEditingPresetVoiceCatalog([{ voiceId: val, name: val, voiceType: 'system' }])
+                                      upsertEditingPresetVoiceCatalog([{ voiceId: val, name: val, voiceType: editingPresetTtsProvider === 'glm' ? 'private' : 'system' }])
                                       ;(e.target as HTMLInputElement).value = ''
                                     }
                                   }
@@ -3127,9 +3568,90 @@ async function checkUpdate() {
                               />
                             </div>
 
-                            <div class="flex flex-col gap-3">
+                            <!-- GLM-TTS（本地）参考音色编辑 -->
+                            <template v-if="editingPresetIsGlmLocal">
                               <div class="space-y-2 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay px-3 py-3">
-                                <div class="text-xs font-medium text-[var(--color-text-secondary)]">音色快速复刻</div>
+                                <div class="text-xs font-medium text-[var(--color-text-secondary)]">添加本地参考音色</div>
+                                <input v-model="glmLocalVoiceDraft.voiceId" type="text" class="input input-sm w-full" placeholder="音色 ID（唯一标识）" />
+                                <input v-model="glmLocalVoiceDraft.name" type="text" class="input input-sm w-full" placeholder="音色名称（显示用）" />
+                                <input v-model="glmLocalVoiceDraft.promptAudioPath" type="text" class="input input-sm w-full font-mono" placeholder="参考音频路径（wav/flac 绝对路径）" />
+                                <input v-model="glmLocalVoiceDraft.promptText" type="text" class="input input-sm w-full" placeholder="参考音频对应转写文本（推荐填写）" />
+                                <p class="text-[10px] text-[var(--color-text-muted)]">每条音色需要一段参考音频和对应文本。路径为本机文件绝对路径。</p>
+                                <button
+                                  type="button"
+                                  class="btn btn-sm btn-primary w-full"
+                                  :disabled="!glmLocalVoiceDraft.voiceId.trim()"
+                                  @click="addGlmLocalVoice"
+                                >添加音色</button>
+                              </div>
+
+                              <!-- 已添加的音色详情编辑 -->
+                              <div v-for="voice in editingPresetVoiceCatalog" :key="'detail-' + voice.voiceId" class="space-y-1 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay/60 px-3 py-2 text-xs">
+                                <div class="flex items-center justify-between">
+                                  <span class="font-medium text-[var(--color-text-secondary)]">{{ voice.name }} <span class="text-[10px] text-[var(--color-text-muted)]">({{ voice.voiceId }})</span></span>
+                                </div>
+                                <input :value="voice.promptAudioPath ?? ''" type="text" class="input input-sm w-full font-mono text-[10px]" placeholder="参考音频路径" @change="(e) => updateGlmLocalVoiceField(voice.voiceId, 'promptAudioPath', (e.target as HTMLInputElement).value)" />
+                                <input :value="voice.promptText ?? ''" type="text" class="input input-sm w-full text-[10px]" placeholder="参考转写文本" @change="(e) => updateGlmLocalVoiceField(voice.voiceId, 'promptText', (e.target as HTMLInputElement).value)" />
+                              </div>
+                            </template>
+
+                            <template v-else-if="editingPresetIsQwen3Local">
+                              <div class="space-y-2 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay px-3 py-3">
+                                <div class="text-xs font-medium text-[var(--color-text-secondary)]">添加 Qwen3 音色</div>
+                                <input v-model="qwen3LocalVoiceDraft.voiceId" type="text" class="input input-sm w-full font-mono" placeholder="音色 ID（唯一标识；无参考音频时作为 speaker 传给 custom_voice）" />
+                                <input v-model="qwen3LocalVoiceDraft.name" type="text" class="input input-sm w-full" placeholder="显示名称（可选）" />
+                                <input v-model="qwen3LocalVoiceDraft.promptAudioPath" type="text" class="input input-sm w-full font-mono" placeholder="参考音频路径（wav/flac 绝对路径，语音克隆时填写）" />
+                                <input v-model="qwen3LocalVoiceDraft.promptText" type="text" class="input input-sm w-full" placeholder="参考音频对应转写文本（语音克隆时推荐填写）" />
+                                <input v-model="qwen3LocalVoiceDraft.instruction" type="text" class="input input-sm w-full" placeholder="instruction（可选，仅 custom_voice 模式）" />
+                                <p class="text-[10px] text-[var(--color-text-muted)]">参考音频与转写走第二端口上的 Base 网关（/voice_clone）；仅 speaker 走主端口 CustomVoice（/custom_voice）。路径为本机绝对路径。</p>
+                                <button
+                                  type="button"
+                                  class="btn btn-sm btn-primary w-full"
+                                  :disabled="!qwen3LocalVoiceDraft.voiceId.trim()"
+                                  @click="addQwen3LocalVoice"
+                                >添加音色</button>
+                              </div>
+
+                              <div v-for="voice in editingPresetVoiceCatalog" :key="'detail-qwen-' + voice.voiceId" class="space-y-1 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay/60 px-3 py-2 text-xs">
+                                <div class="font-medium text-[var(--color-text-secondary)]">{{ voice.voiceId }}</div>
+                                <input :value="voice.name" type="text" class="input input-sm w-full text-[10px]" placeholder="显示名称" @change="(e) => updateQwen3LocalVoiceField(voice.voiceId, 'name', (e.target as HTMLInputElement).value)" />
+                                <input :value="voice.promptAudioPath ?? ''" type="text" class="input input-sm w-full font-mono text-[10px]" placeholder="参考音频路径" @change="(e) => updateQwen3LocalVoiceField(voice.voiceId, 'promptAudioPath', (e.target as HTMLInputElement).value)" />
+                                <input :value="voice.promptText ?? ''" type="text" class="input input-sm w-full text-[10px]" placeholder="参考转写文本" @change="(e) => updateQwen3LocalVoiceField(voice.voiceId, 'promptText', (e.target as HTMLInputElement).value)" />
+                                <input :value="voice.instruction ?? ''" type="text" class="input input-sm w-full text-[10px]" placeholder="instruction（可选）" @change="(e) => updateQwen3LocalVoiceField(voice.voiceId, 'instruction', (e.target as HTMLInputElement).value)" />
+                              </div>
+                            </template>
+
+                            <template v-else-if="editingPresetIsOmniVoiceLocal">
+                              <div class="space-y-2 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay px-3 py-3">
+                                <div class="text-xs font-medium text-[var(--color-text-secondary)]">添加 OmniVoice 音色条目</div>
+                                <input v-model="omniVoiceLocalVoiceDraft.voiceId" type="text" class="input input-sm w-full font-mono" placeholder="音色 ID（用于会话里选择）" />
+                                <input v-model="omniVoiceLocalVoiceDraft.name" type="text" class="input input-sm w-full" placeholder="显示名称（可选）" />
+                                <input v-model="omniVoiceLocalVoiceDraft.promptAudioPath" type="text" class="input input-sm w-full font-mono" placeholder="参考音频路径（克隆模式，可选）" />
+                                <input v-model="omniVoiceLocalVoiceDraft.promptText" type="text" class="input input-sm w-full" placeholder="参考音频转写文本（克隆模式，可选）" />
+                                <input v-model="omniVoiceLocalVoiceDraft.instruction" type="text" class="input input-sm w-full" placeholder="instruction / instruct（音色设计模式，可选）" />
+                                <p class="text-[10px] text-[var(--color-text-muted)]">优先级为：参考音频可读则走克隆；否则有 instruction 走音色设计；两者都留空时仅按文本自动生成音色。</p>
+                                <button
+                                  type="button"
+                                  class="btn btn-sm btn-primary w-full"
+                                  :disabled="!omniVoiceLocalVoiceDraft.voiceId.trim()"
+                                  @click="addOmniVoiceLocalVoice"
+                                >添加音色</button>
+                              </div>
+
+                              <div v-for="voice in editingPresetVoiceCatalog" :key="'detail-omnivoice-' + voice.voiceId" class="space-y-1 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay/60 px-3 py-2 text-xs">
+                                <div class="font-medium text-[var(--color-text-secondary)]">{{ voice.voiceId }}</div>
+                                <input :value="voice.name" type="text" class="input input-sm w-full text-[10px]" placeholder="显示名称" @change="(e) => updateOmniVoiceLocalVoiceField(voice.voiceId, 'name', (e.target as HTMLInputElement).value)" />
+                                <input :value="voice.promptAudioPath ?? ''" type="text" class="input input-sm w-full font-mono text-[10px]" placeholder="参考音频路径（可选）" @change="(e) => updateOmniVoiceLocalVoiceField(voice.voiceId, 'promptAudioPath', (e.target as HTMLInputElement).value)" />
+                                <input :value="voice.promptText ?? ''" type="text" class="input input-sm w-full text-[10px]" placeholder="参考转写文本（可选）" @change="(e) => updateOmniVoiceLocalVoiceField(voice.voiceId, 'promptText', (e.target as HTMLInputElement).value)" />
+                                <input :value="voice.instruction ?? ''" type="text" class="input input-sm w-full text-[10px]" placeholder="instruction / instruct（可选）" @change="(e) => updateOmniVoiceLocalVoiceField(voice.voiceId, 'instruction', (e.target as HTMLInputElement).value)" />
+                              </div>
+                            </template>
+
+                            <!-- 非 glm_local：保留原有的手动添加 + 克隆 + 设计 -->
+                            <template v-else>
+                              <div class="flex flex-col gap-3">
+                                <div class="space-y-2 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay px-3 py-3">
+                                  <div class="text-xs font-medium text-[var(--color-text-secondary)]">音色快速复刻</div>
                                 <div class="flex flex-wrap gap-2">
                                   <button type="button" class="btn btn-xs btn-secondary" @click="pickTtsCloneSourceFile">选择源音频</button>
                                   <span class="text-[10px] text-[var(--color-text-muted)]">{{ ttsCloneSourceFile?.name || '未选择文件' }}</span>
@@ -3141,17 +3663,17 @@ async function checkUpdate() {
                                   :options="ttsSessionModelOptions"
                                   searchable
                                   allow-create
-                                  placeholder="试听模型（可选）"
+                                  :placeholder="editingPresetTtsProvider === 'glm' ? '复刻模型（可选，默认 glm-tts-clone）' : '试听模型（可选）'"
                                   @select="(option) => { ttsCloneDraft.model = option.value }"
                                 />
-                                <textarea v-model="ttsCloneDraft.previewText" rows="2" class="input textarea w-full resize-y" placeholder="试听文本（可选）"></textarea>
-                                <div class="flex flex-wrap gap-2">
+                                <textarea v-model="ttsCloneDraft.previewText" rows="2" class="input textarea w-full resize-y" :placeholder="editingPresetTtsProvider === 'glm' ? '试听文本（GLM 必填，留空则后端用默认试听文案）' : '试听文本（可选）'"></textarea>
+                                <div v-if="editingPresetSupportsPromptAudio" class="flex flex-wrap gap-2">
                                   <button type="button" class="btn btn-xs btn-secondary" @click="pickTtsClonePromptFile">选择示例音频</button>
                                   <span class="text-[10px] text-[var(--color-text-muted)]">{{ ttsClonePromptFile?.name || '可选' }}</span>
                                 </div>
-                                <input ref="ttsClonePromptInputRef" type="file" class="hidden" accept=".mp3,.wav,.m4a" @change="onTtsClonePromptChange" />
-                                <input v-model="ttsCloneDraft.promptText" type="text" class="input input-sm w-full" placeholder="示例音频对应文本（可选）" />
-                                <div class="flex flex-wrap gap-4 text-xs text-[var(--color-text-secondary)]">
+                                <input v-if="editingPresetSupportsPromptAudio" ref="ttsClonePromptInputRef" type="file" class="hidden" accept=".mp3,.wav,.m4a" @change="onTtsClonePromptChange" />
+                                <input v-model="ttsCloneDraft.promptText" type="text" class="input input-sm w-full" :placeholder="editingPresetTtsProvider === 'glm' ? '示例音频文本（可选）' : '示例音频对应文本（可选）'" />
+                                <div v-if="editingPresetSupportsPromptAudio" class="flex flex-wrap gap-4 text-xs text-[var(--color-text-secondary)]">
                                   <button type="button" class="inline-flex items-center gap-2 transition-colors hover:text-[var(--color-text)]" @click="ttsCloneDraft.needNoiseReduction = !ttsCloneDraft.needNoiseReduction">
                                     <ThemedCheckbox :checked="ttsCloneDraft.needNoiseReduction" />
                                     <span>降噪</span>
@@ -3161,11 +3683,12 @@ async function checkUpdate() {
                                     <span>音量归一</span>
                                   </button>
                                 </div>
+                                <p v-if="editingPresetTtsProvider === 'glm'" class="text-[11px] text-[var(--color-text-muted)]">GLM 复刻会使用上传的源音频作为样本；额外示例音频与降噪/归一化参数不适用。</p>
                                 <button type="button" class="btn btn-sm btn-primary w-full" :disabled="ttsCloneLoading" @click="submitTtsClone">{{ ttsCloneLoading ? '复刻中...' : '复刻并试听' }}</button>
                                 <audio v-if="ttsClonePreviewUrl" :src="ttsClonePreviewUrl" controls class="w-full"></audio>
                               </div>
 
-                              <div class="space-y-2 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay px-3 py-3">
+                              <div v-if="editingPresetSupportsVoiceDesign" class="space-y-2 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay px-3 py-3">
                                 <div class="text-xs font-medium text-[var(--color-text-secondary)]">音色设计</div>
                                 <textarea v-model="ttsDesignDraft.prompt" rows="3" class="input textarea w-full resize-y" placeholder="用自然语言描述想要的声音"></textarea>
                                 <textarea v-model="ttsDesignDraft.previewText" rows="2" class="input textarea w-full resize-y" placeholder="试听文本"></textarea>
@@ -3173,7 +3696,12 @@ async function checkUpdate() {
                                 <button type="button" class="btn btn-sm btn-primary w-full" :disabled="ttsDesignLoading" @click="submitTtsDesign">{{ ttsDesignLoading ? '设计中...' : '生成并试听' }}</button>
                                 <audio v-if="ttsDesignPreviewUrl" :src="ttsDesignPreviewUrl" controls class="w-full"></audio>
                               </div>
+
+                              <div v-else class="rounded-lg border border-dashed border-[var(--color-border-subtle)] bg-surface-overlay px-3 py-3 text-xs text-[var(--color-text-muted)]">
+                                GLM TTS 暂不支持音色设计，当前仅支持音色列表、上传与音色复刻。
+                              </div>
                             </div>
+                            </template>
                           </div>
                        </div>
                   </div>
@@ -3506,7 +4034,7 @@ async function checkUpdate() {
                     />
                     <p class="text-xs text-[var(--color-text-muted)]">
                       先选模型，预设会自动关联到对应的 TTS 服务。
-                      <span v-if="selectedChatTtsPreset" class="text-brand">当前预设：{{ selectedChatTtsPreset.name }}</span>
+                      <span v-if="selectedChatTtsPreset" class="text-brand">当前预设：{{ selectedChatTtsPreset.name }} · {{ selectedChatTtsProvider === 'glm_local' ? 'GLM-TTS（本地）' : selectedChatTtsProvider === 'qwen3_local' ? 'Qwen3-TTS（本地）' : selectedChatTtsProvider === 'omnivoice_local' ? 'OmniVoice（本地）' : selectedChatTtsProvider === 'glm' ? 'GLM TTS' : 'MiniMax' }}</span>
                     </p>
                     <p v-if="ttsSessionModelOptions.length === 0" class="text-xs text-[var(--color-text-muted)]">
                       还没有可用的 TTS 模型。请先在 API 预设中把目标预设标记为 TTS 服务并获取模型列表。
@@ -3555,8 +4083,8 @@ async function checkUpdate() {
                         <ThemedCheckbox :checked="chatDraft.tts?.preprocessEnabled === true" />
                         <span>启用文本后处理</span>
                       </button>
-                      <button type="button" class="inline-flex items-center gap-2 transition-colors hover:text-[var(--color-text)]" :disabled="!(chatDraft.tts?.preprocessEnabled === true)" @click="updateChatTtsInjectEmotionTags(!(chatDraft.tts?.injectEmotionTags === true))">
-                        <ThemedCheckbox :checked="chatDraft.tts?.injectEmotionTags === true" :disabled="!(chatDraft.tts?.preprocessEnabled === true)" />
+                      <button type="button" class="inline-flex items-center gap-2 transition-colors hover:text-[var(--color-text)]" :disabled="!(chatDraft.tts?.preprocessEnabled === true) || selectedChatTtsProvider !== 'minimax'" @click="updateChatTtsInjectEmotionTags(!(chatDraft.tts?.injectEmotionTags === true))">
+                        <ThemedCheckbox :checked="chatDraft.tts?.injectEmotionTags === true" :disabled="!(chatDraft.tts?.preprocessEnabled === true) || selectedChatTtsProvider !== 'minimax'" />
                         <span>注入英文情绪标签</span>
                       </button>
                     </div>
@@ -3582,7 +4110,7 @@ async function checkUpdate() {
                       @select="updateChatTtsPreprocessModel"
                     />
                     <p class="text-xs text-[var(--color-text-muted)]">
-                      后处理请求会以 JSON 发送 language、raw_text、inject_emotion_tags；目标语言同时写入提示词占位符。留空则不翻译。模型从普通文本预设里选；英文情绪标签由「注入」开关控制，不校验模型名。
+                      后处理请求会以 JSON 发送 language、raw_text、inject_emotion_tags；目标语言同时写入提示词占位符。留空则不翻译。模型从普通文本预设里选；英文情绪标签仅对 MiniMax TTS 生效。
                     </p>
                   </div>
 
