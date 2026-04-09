@@ -107,11 +107,15 @@ export interface ChatOverrides {
 }
 
 export type AutoReadScope = 'off' | 'assistant_only' | 'user_only' | 'all'
+export type TtsProvider = 'minimax' | 'glm' | 'glm_local' | 'qwen3_local' | 'omnivoice_local'
 
 export interface ApiPresetVoice {
   voiceId: string
   name: string
   voiceType: string
+  promptText?: string | null
+  promptAudioPath?: string | null
+  instruction?: string | null
 }
 
 export interface TtsSessionConfig {
@@ -189,7 +193,25 @@ export interface ApiPreset {
   apiKey: string
   models: string[]
   presetKind?: string | null
+  ttsProvider?: TtsProvider | null
   voiceCatalog?: ApiPresetVoice[]
+  ttsGlmLocalRepoPath?: string | null
+  ttsGlmLocalPort?: number
+  ttsGlmLocalManaged?: boolean
+  ttsQwen3LocalRepoPath?: string | null
+  ttsQwen3LocalPort?: number
+  ttsQwen3LocalManaged?: boolean
+  ttsQwen3LocalModelId?: string | null
+  ttsQwen3LocalBaseModelId?: string | null
+  ttsQwen3LocalVoiceClonePort?: number | null
+  ttsQwen3LocalDevice?: string | null
+  ttsQwen3LocalDefaultLanguage?: string | null
+  ttsOmniVoiceLocalRepoPath?: string | null
+  ttsOmniVoiceLocalPort?: number
+  ttsOmniVoiceLocalManaged?: boolean
+  ttsOmniVoiceLocalModelId?: string | null
+  ttsOmniVoiceLocalDevice?: string | null
+  ttsOmniVoiceLocalDefaultLanguage?: string | null
 }
 
 /**
@@ -391,7 +413,7 @@ export interface ChatMessage {
   greetingVariantIndex?: number | null
   /** 已合成的 TTS 音频文件 UUID */
   ttsAudioAssetId?: string | null
-  /** 生成该缓存音频时对应的原始消息内容，用于判断是否复用缓存 */
+  /** 实际送入 TTS 合成的文本（含后处理/翻译后的朗读稿） */
   ttsAudioSourceText?: string | null
 }
 
