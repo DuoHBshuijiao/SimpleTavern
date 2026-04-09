@@ -50,6 +50,9 @@ from app.routes.update import router as update_router
 from app.routes.worldbooks import router as worldbooks_router
 from app.routes.tts import router as tts_router
 from app.services.data_integrity import data_integrity_service
+from app.services.glm_local_tts_process import stop as stop_glm_local_tts
+from app.services.omnivoice_local_tts_process import stop as stop_omnivoice_local_tts
+from app.services.qwen3_local_tts_process import stop as stop_qwen3_local_tts
 from app.services.tts_cache import tts_cache_patrol
 from app.storage import ensure_data_initialized
 from app.tokenizer_service import warmup_tokenizer
@@ -70,6 +73,9 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         await tts_cache_patrol.stop()
+        stop_glm_local_tts()
+        stop_omnivoice_local_tts()
+        stop_qwen3_local_tts()
         integrity_scan_task.cancel()
         try:
             await integrity_scan_task
