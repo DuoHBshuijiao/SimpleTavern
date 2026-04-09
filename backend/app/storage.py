@@ -153,6 +153,28 @@ def get_tts_cache_dir() -> Path:
     return _tts_cache_dir()
 
 
+def get_huggingface_data_dir() -> Path:
+    """
+    Hugging Face 缓存根目录（用作子进程 HF_HOME）。
+
+    Hub 快照与 model.safetensors 等通常位于 ``<此路径>/hub``。
+    """
+    return _data_dir() / "huggingface"
+
+
+def apply_hf_cache_env(env: dict[str, str]) -> None:
+    """
+    将 HF / Transformers / PyTorch Hub 缓存定向到 data/huggingface 下。
+
+    仅设置 ``HF_HOME``（不再设置已弃用的 ``TRANSFORMERS_CACHE``；Transformers 会跟随 HF_HOME）。
+    仅影响传入的 env（例如托管 TTS 子进程），不修改当前进程的全局环境。
+    """
+    hf = get_huggingface_data_dir()
+    env["HF_HOME"] = str(hf)
+    env.pop("TRANSFORMERS_CACHE", None)
+    env["TORCH_HOME"] = str(hf / "torch")
+
+
 def get_repo_root() -> Path:
     """返回仓库根目录，供更新等模块使用。"""
     return _repo_root()
@@ -252,6 +274,7 @@ def ensure_data_initialized() -> None:
     _ai_workspace_dir().mkdir(parents=True, exist_ok=True)
     _worldbooks_dir().mkdir(parents=True, exist_ok=True)
     _tts_cache_dir().mkdir(parents=True, exist_ok=True)
+    get_huggingface_data_dir().mkdir(parents=True, exist_ok=True)
 
     if not _settings_path().exists():
         settings = Settings()
