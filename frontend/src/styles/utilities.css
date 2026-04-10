@@ -134,6 +134,22 @@
   .bg-overlay { background-color: var(--color-overlay); }
   .bg-overlay-heavy { background-color: var(--color-overlay-heavy); }
 
+  /* 主聊天可拖动 FAB（助手 / TTS）：统一中性底与悬停；助手色令牌保留在 variables 中但不在此使用 */
+  .chat-fab-surface {
+    background-color: var(--color-border-subtle);
+    color: var(--color-text);
+  }
+  .chat-fab-surface:hover {
+    background-color: var(--color-surface-hover);
+  }
+
+  /* TTS 队列等浮层：与 chat-fab-surface 同底与边框，无整容器悬停变色 */
+  .chat-fab-panel {
+    background-color: var(--color-border-subtle);
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+  }
+
   /* ========== Flex 工具类 ========== */
   .flex { display: flex; }
   .inline-flex { display: inline-flex; }
