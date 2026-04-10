@@ -34,23 +34,32 @@ AI助手路由模块
 
 from __future__ import annotations
 
+import base64
 import json
 from typing import Any, AsyncIterator
+from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.assistant import load_agent_system_prompt
+from app.attachment_policy import (
+    ASSISTANT_IMAGE_ATTACHMENT_MAX_BYTES,
+    ASSISTANT_TEXT_ATTACHMENT_MAX_BYTES,
+    assistant_attachment_kind,
+)
 from app.assistant_tools.context import AssistantToolContext
 from app.assistant_tools.result import compact_tool_result_json_for_llm
 from app.services.assistant_agent import (
     AssistantAgentRunContext,
     AssistantAgentService,
 )
+from app.services.user_message_content import build_user_message_content
 from app.schemas import (
     build_reasoning_request_config,
     filter_reasoning_extra_body_for_upstream,
+    AssistantAttachment,
     AssistantChat,
     AssistantSettings,
     AssistantSettingsUpdate,
@@ -61,9 +70,12 @@ from app.schemas import (
     UpdateMessageRequest,
 )
 from app.storage import (
+    assistant_attachment_path,
+    clear_assistant_chat_attachments,
+    clear_workspace_session_attachments,
+    load_assistant_attachment_bytes,
     ai_workspace_dir,
     save_workspace_character_card,
-    clear_ai_workspace,
     clear_assistant_chat,
     clear_assistant_chat_for_chat,
     clear_assistant_workspace_chat,
@@ -79,6 +91,7 @@ from app.storage import (
     save_assistant_chat,
     save_assistant_chat_for_chat,
     save_assistant_workspace_chat,
+    save_assistant_attachment,
     mark_last_message_memory_updated,
     save_chat,
     save_chat_memory,
@@ -113,6 +126,29 @@ class AssistantStreamRequest(BaseModel):
     maxToolTurns: int | None = Field(default=None, ge=1)
     maxToolsPerTurn: int | None = Field(default=None, ge=1)
     scope: str | None = None
+    attachments: list[AssistantAttachment] = Field(default_factory=list)
+
+
+class AssistantAttachmentUploadItem(BaseModel):
+    fileData: str
+    mimeType: str
+    originalName: str | None = None
+
+
+class AssistantAttachmentIngestRequest(BaseModel):
+    scope: str
+    chatId: str | None = None
+    workspaceSessionId: str | None = None
+    files: list[AssistantAttachmentUploadItem] = Field(default_factory=list)
+
+
+class AssistantAttachmentIngestResponse(BaseModel):
+    attachments: list[AssistantAttachment] = Field(default_factory=list)
+    workspaceSessionId: str | None = None
+
+
+class WorkspaceSessionCleanupRequest(BaseModel):
+    sessionId: str
 
 
 def _sse(event: str, data_obj: dict) -> str:
@@ -147,6 +183,33 @@ def _reasoning_from_msg(m: ChatMessage) -> str | None:
         if s:
             return s
     return None
+
+
+def _attachment_display_name(attachment: AssistantAttachment) -> str:
+    return (attachment.originalName or attachment.filename or attachment.id or "未命名附件").strip() or "未命名附件"
+
+
+def _assistant_user_message_content(message: ChatMessage) -> str | list[dict[str, Any]]:
+    text_attachments: list[tuple[str, str]] = []
+    image_items: list[tuple[bytes, str]] = []
+    for attachment in getattr(message, "attachments", []) or []:
+        if attachment.kind == "text":
+            try:
+                raw = load_assistant_attachment_bytes(attachment)
+                text_attachments.append((_attachment_display_name(attachment), raw.decode("utf-8")))
+            except FileNotFoundError:
+                text_attachments.append((_attachment_display_name(attachment), "[附件已缺失]"))
+        elif attachment.kind == "image":
+            try:
+                image_items.append((load_assistant_attachment_bytes(attachment), attachment.mimeType or "image/png"))
+            except FileNotFoundError:
+                continue
+    return build_user_message_content(
+        message.content or "",
+        text_attachments=text_attachments,
+        image_items=image_items,
+        image_fallback_mode=False,
+    )
 
 
 def _assistant_messages_to_openai(messages: list[ChatMessage]) -> list[dict[str, Any]]:
@@ -198,7 +261,10 @@ def _assistant_messages_to_openai(messages: list[ChatMessage]) -> list[dict[str,
             out.append({"role": "system", "content": json.dumps(tr, ensure_ascii=False)})
             continue
 
-        msg_dict: dict[str, Any] = {"role": m.role, "content": m.content}
+        msg_dict: dict[str, Any] = {
+            "role": m.role,
+            "content": _assistant_user_message_content(m) if m.role == "user" else m.content,
+        }
         if m.role == "assistant":
             rc = _reasoning_from_msg(m)
             if rc:
@@ -389,6 +455,42 @@ def _build_chat_participants_prompt(chat_id: str | None) -> str | None:
     return "\n".join(lines)
 
 
+def _validate_assistant_attachment_upload(item: AssistantAttachmentUploadItem) -> tuple[str, bytes]:
+    kind = assistant_attachment_kind(item.mimeType, item.originalName)
+    if kind is None:
+        raise HTTPException(status_code=400, detail=f"unsupported attachment type: {item.originalName or item.mimeType or 'unknown'}")
+    raw = item.fileData
+    if "," in raw:
+        raw = raw.split(",", 1)[1]
+    try:
+        data = base64.b64decode(raw)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="invalid attachment fileData") from exc
+    size_limit = ASSISTANT_IMAGE_ATTACHMENT_MAX_BYTES if kind == "image" else ASSISTANT_TEXT_ATTACHMENT_MAX_BYTES
+    if len(data) > size_limit:
+        raise HTTPException(status_code=400, detail=f"attachment too large: {item.originalName or item.mimeType or 'unknown'}")
+    if kind == "text":
+        try:
+            data.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise HTTPException(status_code=400, detail=f"attachment must be utf-8: {item.originalName or item.mimeType or 'unknown'}") from exc
+    return kind, data
+
+
+def _find_assistant_attachment(
+    attachment_id: str,
+    *,
+    scope: str | None,
+    chat_id: str | None,
+) -> AssistantAttachment | None:
+    chat = _resolve_assistant_chat_by_scope(scope, chat_id)
+    for message in chat.messages:
+        for attachment in getattr(message, "attachments", []) or []:
+            if attachment.id == attachment_id:
+                return attachment
+    return None
+
+
 @router.get("/assistant/workspace/character-card")
 def get_workspace_character_card() -> dict[str, Any]:
     """
@@ -418,6 +520,86 @@ def put_workspace_character_card(card: CharacterCard) -> CharacterCard:
     写入 data/ai_workspace/character_card.json，供助手工具 workspace_write_file 与前端共用同一暂存位置。
     """
     return save_workspace_character_card(card)
+
+
+@router.post("/assistant/attachments/ingest", response_model=AssistantAttachmentIngestResponse)
+def ingest_assistant_attachments(req: AssistantAttachmentIngestRequest) -> AssistantAttachmentIngestResponse:
+    """将助手附件写入 ai_workspace/ingest，并返回稳定附件元数据。"""
+    scope = (req.scope or "").strip()
+    if scope not in {"chat", "workspace"}:
+        raise HTTPException(status_code=400, detail="invalid scope")
+    if scope == "chat":
+        chat_id = (req.chatId or "").strip()
+        if not chat_id:
+            raise HTTPException(status_code=400, detail="chatId is required for chat scope")
+        if _load_chat_context(chat_id) is None:
+            raise HTTPException(status_code=404, detail="chat not found")
+        storage_scope = "assistant_chat"
+        storage_key = chat_id
+        workspace_session_id = None
+    else:
+        storage_scope = "workspace_session"
+        storage_key = (req.workspaceSessionId or "").strip() or uuid4().hex
+        workspace_session_id = storage_key
+
+    attachments: list[AssistantAttachment] = []
+    for item in req.files or []:
+        kind, data = _validate_assistant_attachment_upload(item)
+        attachments.append(
+            save_assistant_attachment(
+                data=data,
+                kind=kind,
+                storage_scope=storage_scope,
+                storage_key=storage_key,
+                mime_type=item.mimeType,
+                original_name=item.originalName,
+            )
+        )
+    return AssistantAttachmentIngestResponse(
+        attachments=attachments,
+        workspaceSessionId=workspace_session_id,
+    )
+
+
+@router.get("/assistant/attachments/{attachment_id}")
+def get_assistant_attachment(
+    attachment_id: str,
+    chatId: str | None = Query(default=None),
+    scope: str | None = Query(default=None),
+    storageScope: str | None = Query(default=None),
+    storageKey: str | None = Query(default=None),
+    filename: str | None = Query(default=None),
+    mimeType: str | None = Query(default=None),
+    kind: str | None = Query(default=None),
+) -> FileResponse:
+    """读取助手消息附件。工作区会在会话清理后返回 404，供前端降级展示。"""
+    attachment = _find_assistant_attachment(attachment_id, scope=scope, chat_id=chatId)
+    if attachment is None and storageScope and storageKey and filename and mimeType and kind in {"image", "text"}:
+      attachment = AssistantAttachment(
+          id=attachment_id,
+          kind=kind,
+          storageScope=storageScope,
+          storageKey=storageKey,
+          filename=filename,
+          mimeType=mimeType,
+          size=0,
+      )
+    if attachment is None:
+        raise HTTPException(status_code=404, detail="attachment not found")
+    try:
+        file_path = assistant_attachment_path(attachment)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="attachment file not found")
+    return FileResponse(file_path, media_type=attachment.mimeType or "application/octet-stream")
+
+
+@router.post("/assistant/workspace/session/cleanup")
+def cleanup_workspace_session(req: WorkspaceSessionCleanupRequest) -> dict[str, Any]:
+    """按 sessionId 删除工作区临时附件目录。"""
+    clear_workspace_session_attachments(req.sessionId)
+    return {"ok": True}
 
 
 @router.get(
@@ -502,7 +684,7 @@ def reset_assistant(
     """
     重置AI助手聊天
     
-    清空聊天记录，如果scope不是workspace则同时清空AI工作空间。
+    清空聊天记录；聊天作用域只清理自身 ingest 附件目录，不影响整个 ai_workspace。
     
     Args:
         chatId: 聊天会话ID（可选）
@@ -513,7 +695,7 @@ def reset_assistant(
     """
     _clear_assistant_chat_by_scope(scope, chatId)
     if scope != "workspace":
-        clear_ai_workspace()
+        clear_assistant_chat_attachments(chatId)
     return {"ok": True}
 
 
@@ -641,7 +823,11 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
     existing_messages = chat.messages or []
     
     if req.appendUserMessage:
-        new_user_msg = ChatMessage(role="user", content=req.userMessage)
+        new_user_msg = ChatMessage(
+            role="user",
+            content=req.userMessage,
+            attachments=list(req.attachments or []),
+        )
         existing_messages.append(new_user_msg)
         chat.messages = existing_messages
         _save_assistant_chat_by_scope(scope, chat_id, chat)
