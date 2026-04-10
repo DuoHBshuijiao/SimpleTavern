@@ -3,7 +3,7 @@
  * TtsPlaybackFab - TTS 播放/下载双按钮浮动控件
  *
  * 竖排两颗 w-12 h-12 按钮：
- * 1. 队列 / 停止下载
+ * 1. 队列（仅开关队列面板；终止下载在面板内）
  * 2. 播放控制（暂停/播放 二态）
  *
  * 整个容器可拖动，与助手 FAB 互斥（碰撞弹开）。
@@ -87,8 +87,8 @@ const topBarStackStyle = computed(() => {
   }
 })
 
-const PANEL_MIN_W = 220
-const PANEL_MAX_W = 320
+const PANEL_MIN_W = 110
+const PANEL_MAX_W = 160
 const PANEL_GAP = 8
 
 /** 贴左时面板在按钮右侧，贴右时在按钮左侧，避免在下方展开压住暂停键 */
@@ -173,6 +173,13 @@ watch(
   },
 )
 
+watch(
+  () => props.isDownloading,
+  () => {
+    if (queuePanelOpen.value) nextTick(() => updatePanelPosition())
+  },
+)
+
 watch(side, () => {
   if (queuePanelOpen.value) nextTick(() => updatePanelPosition())
 })
@@ -201,11 +208,7 @@ function statusDotClass(status: QueueItemStatus): string {
 
 function handleQueueAction(e: MouseEvent) {
   if (onFabClick(e)) return
-  if (props.isDownloading) {
-    emit('abort-download')
-  } else {
-    queuePanelOpen.value = !queuePanelOpen.value
-  }
+  queuePanelOpen.value = !queuePanelOpen.value
 }
 
 function handlePlayClick(e: MouseEvent) {
@@ -215,11 +218,12 @@ function handlePlayClick(e: MouseEvent) {
 
 function handleTopQueueClick(e: MouseEvent) {
   e.stopPropagation()
-  if (props.isDownloading) {
-    emit('abort-download')
-  } else {
-    queuePanelOpen.value = !queuePanelOpen.value
-  }
+  queuePanelOpen.value = !queuePanelOpen.value
+}
+
+function handleAbortInPanel(e: MouseEvent) {
+  e.stopPropagation()
+  emit('abort-download')
 }
 
 function handleTopPlayClick(e: MouseEvent) {
@@ -246,16 +250,15 @@ defineExpose({ getRect: getTtsFabRect, setTtsTopPx: setTopPxFromSeparation })
       @pointerup="onPointerUp"
       @pointercancel="onPointerCancel"
     >
-      <!-- 队列 / 停止 -->
+      <!-- 队列（仅开关面板） -->
       <button
         ref="queueBtnFabRef"
         type="button"
-        class="w-12 h-12 rounded-xl bg-surface-elevated text-[var(--color-text)] font-bold shadow-lg hover:bg-surface-hover transition-[transform,background-color,box-shadow] border border-[var(--color-border)] hover:scale-105 active:scale-95 flex items-center justify-center backdrop-blur-sm cursor-pointer"
-        :aria-label="isDownloading ? '停止下载' : '打开 TTS 队列'"
+        class="chat-fab-surface w-12 h-12 rounded-xl font-bold shadow-lg transition-[transform,background-color,box-shadow] border border-[var(--color-border)] hover:scale-105 active:scale-95 flex items-center justify-center backdrop-blur-sm cursor-pointer"
+        aria-label="打开 TTS 队列"
         @click="handleQueueAction"
       >
         <svg
-          v-if="!isDownloading"
           class="tts-icon tts-icon--fab"
           viewBox="0 0 24 24"
           fill="none"
@@ -269,20 +272,12 @@ defineExpose({ getRect: getTtsFabRect, setTtsTopPx: setTopPxFromSeparation })
           <polyline points="7 10 12 15 17 10" />
           <line x1="12" y1="15" x2="12" y2="3" />
         </svg>
-        <svg
-          v-else
-          class="tts-icon tts-icon--fab tts-icon--fill"
-          viewBox="0 0 24 24"
-          aria-hidden="true"
-        >
-          <rect x="6" y="6" width="12" height="12" rx="1.5" />
-        </svg>
       </button>
 
       <!-- 播放控制按钮 -->
       <button
         type="button"
-        class="w-12 h-12 rounded-xl bg-surface-elevated text-[var(--color-text)] font-bold shadow-lg hover:bg-surface-hover transition-[transform,background-color,box-shadow] border border-[var(--color-border)] hover:scale-105 active:scale-95 flex items-center justify-center backdrop-blur-sm cursor-pointer"
+        class="chat-fab-surface w-12 h-12 rounded-xl font-bold shadow-lg transition-[transform,background-color,box-shadow] border border-[var(--color-border)] hover:scale-105 active:scale-95 flex items-center justify-center backdrop-blur-sm cursor-pointer"
         :aria-label="isPlaying && !audioPaused ? '暂停播放' : '播放'"
         @click="handlePlayClick"
       >
@@ -313,12 +308,11 @@ defineExpose({ getRect: getTtsFabRect, setTtsTopPx: setTopPxFromSeparation })
             ref="queueBtnTopRef"
             type="button"
             class="tts-top-bar-btn tts-top-bar-btn--queue"
-            :aria-label="isDownloading ? '停止下载' : '打开 TTS 队列'"
+            aria-label="打开 TTS 队列"
             @click="handleTopQueueClick"
           >
             <span class="tts-top-bar-btn__glow tts-top-bar-btn__glow--queue" aria-hidden="true" />
             <svg
-              v-if="!isDownloading"
               class="tts-top-bar-btn__icon"
               viewBox="0 0 24 24"
               fill="none"
@@ -332,10 +326,7 @@ defineExpose({ getRect: getTtsFabRect, setTtsTopPx: setTopPxFromSeparation })
               <polyline points="7 10 12 15 17 10" />
               <line x1="12" y1="15" x2="12" y2="3" />
             </svg>
-            <svg v-else class="tts-top-bar-btn__icon tts-icon--fill" viewBox="0 0 24 24" aria-hidden="true">
-              <rect x="6" y="6" width="12" height="12" rx="1.5" />
-            </svg>
-            <span class="tts-top-bar-btn__label">{{ isDownloading ? '停止' : '队列' }}</span>
+            <span class="tts-top-bar-btn__label">队列</span>
           </button>
           <button
             type="button"
@@ -367,34 +358,51 @@ defineExpose({ getRect: getTtsFabRect, setTtsTopPx: setTopPxFromSeparation })
         <div
           v-if="queuePanelOpen"
           ref="panelRef"
-          class="tts-queue-panel fixed z-[11] rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface-elevated)] shadow-lg backdrop-blur-sm max-h-[min(40vh,280px)] flex flex-col overflow-hidden"
+          class="tts-queue-panel chat-fab-panel fixed z-[11] rounded-xl shadow-lg backdrop-blur-sm max-h-[min(40vh,280px)] flex flex-col overflow-hidden"
           :style="panelStyle"
           role="region"
           aria-label="TTS 队列"
         >
-          <div class="tts-queue-panel__inner max-h-[min(40vh,280px)] overflow-y-auto px-2 py-2">
-            <p
-              v-if="queueItems.length === 0"
-              class="text-xs text-[var(--color-text-secondary)] px-1 py-2 text-center"
+          <div
+            class="tts-queue-panel__inner max-h-[min(40vh,280px)] flex flex-col overflow-hidden px-2 py-2"
+          >
+            <div
+              v-if="isDownloading"
+              class="flex items-center justify-end gap-2 pb-2 mb-1 border-b border-[var(--color-border)] shrink-0"
             >
-              队列为空
-            </p>
-            <ul v-else class="flex flex-col gap-1.5 list-none m-0 p-0">
-              <li
-                v-for="(item, idx) in queueItems"
-                :key="`${item.messageId}-${idx}-${item.status}`"
-                class="flex items-center justify-between gap-2 min-h-[1.75rem] px-1.5 py-1 rounded-lg bg-[var(--color-surface-overlay)]/40"
+              <button
+                type="button"
+                class="chat-fab-surface text-xs font-semibold px-2 py-1.5 rounded-lg border border-[var(--color-border)] transition-[transform,background-color,box-shadow] cursor-pointer"
+                aria-label="终止传输"
+                @click.stop="handleAbortInPanel"
               >
-                <span class="text-xs text-[var(--color-text)] truncate flex-1 min-w-0">
-                  {{ item.previewLabel || '…' }}
-                </span>
-                <span
-                  class="shrink-0 w-2 h-2 rounded-full"
-                  :class="statusDotClass(item.status)"
-                  aria-hidden="true"
-                />
-              </li>
-            </ul>
+                终止传输
+              </button>
+            </div>
+            <div class="min-h-0 flex-1 overflow-y-auto">
+              <p
+                v-if="queueItems.length === 0"
+                class="text-xs text-muted px-1 py-2 text-center"
+              >
+                队列为空
+              </p>
+              <ul v-else class="flex flex-col gap-1.5 list-none m-0 p-0">
+                <li
+                  v-for="(item, idx) in queueItems"
+                  :key="`${item.messageId}-${idx}-${item.status}`"
+                  class="flex items-center justify-between gap-2 min-h-[1.75rem] px-1.5 py-1 rounded-lg bg-surface-muted"
+                >
+                  <span class="text-xs text-[var(--color-text)] truncate flex-1 min-w-0">
+                    {{ item.previewLabel || '…' }}
+                  </span>
+                  <span
+                    class="shrink-0 w-2 h-2 rounded-full"
+                    :class="statusDotClass(item.status)"
+                    aria-hidden="true"
+                  />
+                </li>
+              </ul>
+            </div>
           </div>
         </div>
       </Transition>
