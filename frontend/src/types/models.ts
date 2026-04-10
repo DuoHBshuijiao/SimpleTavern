@@ -104,6 +104,14 @@ export interface ChatOverrides {
   draftHelp?: DraftHelpSettings
   memberSettings?: Record<string, GroupMemberSettings>
   tts?: TtsSessionConfig | null
+  /** 每隔若干条主会话消息后自动触发助手总结；未设置或 0 表示关闭 */
+  autoMemorySummaryEveryN?: number | null
+  /** 上次自动总结成功时锚定的主会话最后一条消息 ID */
+  lastAutoMemorySummaryAfterMessageId?: string | null
+  /** 为 true 时不弹窗直接触发 */
+  autoMemorySummarySilent?: boolean
+  /** 非静默下拒绝确认后的倍数，下次在 n*tier 条时再问 */
+  autoMemorySummaryNextAskTier?: number
 }
 
 export type AutoReadScope = 'off' | 'assistant_only' | 'user_only' | 'all'
@@ -400,6 +408,7 @@ export interface ChatMessage {
   role: ChatRole
   content: string
   images?: ChatImageAttachment[]
+  attachments?: AssistantAttachment[]
   characterId?: string | null
   senderPersonaId?: string | null
   senderName?: string | null
@@ -424,6 +433,20 @@ export interface ChatImageAttachment {
   size?: number | null
   width?: number | null
   height?: number | null
+  originalName?: string | null
+}
+
+export type AssistantAttachmentKind = 'image' | 'text'
+export type AssistantAttachmentStorageScope = 'assistant_chat' | 'workspace_session'
+
+export interface AssistantAttachment {
+  id: string
+  kind: AssistantAttachmentKind
+  storageScope: AssistantAttachmentStorageScope
+  storageKey: string
+  filename: string
+  mimeType: string
+  size: number
   originalName?: string | null
 }
 
