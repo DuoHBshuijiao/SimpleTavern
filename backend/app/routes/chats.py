@@ -45,6 +45,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from app.attachment_policy import ASSISTANT_IMAGE_ATTACHMENT_MAX_BYTES, is_image_mime_type
 from app.placeholders import replace_placeholders_in_text
 from app.schemas import (
     AppendMessageRequest,
@@ -160,6 +161,15 @@ def _merge_overrides(existing: Chat, incoming: UpdateChatRequest) -> None:
             existing.overrides.draftHelp.context_message_limit = ov.draftHelp.context_message_limit
     if "tts" in ov.model_fields_set:
         existing.overrides.tts = ov.tts.model_copy(deep=True) if ov.tts is not None else None
+
+    if "autoMemorySummaryEveryN" in ov.model_fields_set:
+        existing.overrides.autoMemorySummaryEveryN = ov.autoMemorySummaryEveryN
+    if "lastAutoMemorySummaryAfterMessageId" in ov.model_fields_set:
+        existing.overrides.lastAutoMemorySummaryAfterMessageId = ov.lastAutoMemorySummaryAfterMessageId
+    if "autoMemorySummarySilent" in ov.model_fields_set:
+        existing.overrides.autoMemorySummarySilent = ov.autoMemorySummarySilent
+    if "autoMemorySummaryNextAskTier" in ov.model_fields_set:
+        existing.overrides.autoMemorySummaryNextAskTier = ov.autoMemorySummaryNextAskTier
 
     for key in ("model", "temperature", "top_p", "max_tokens", "context_size"):
         val = getattr(ov.params, key, None)
@@ -683,7 +693,10 @@ def remove_chat(chat_id: str) -> dict:
 
 @router.post("/chats/{chat_id}/images", response_model=UploadChatImagesResponse)
 def upload_chat_images(chat_id: str, req: UploadChatImagesRequest) -> UploadChatImagesResponse:
-    """上传会话图片，返回附件元数据。"""
+    """上传会话图片，返回附件元数据。
+
+    主聊天当前仅支持图片，且单文件上限与助手图片附件保持一致为 100MB。
+    """
     try:
         chat = load_chat(chat_id)
     except FileNotFoundError:
@@ -699,6 +712,10 @@ def upload_chat_images(chat_id: str, req: UploadChatImagesRequest) -> UploadChat
             data = base64.b64decode(raw)
         except Exception:
             raise HTTPException(status_code=400, detail="invalid imageData")
+        if not is_image_mime_type(item.mimeType):
+            raise HTTPException(status_code=400, detail="main chat only supports image uploads")
+        if len(data) > ASSISTANT_IMAGE_ATTACHMENT_MAX_BYTES:
+            raise HTTPException(status_code=400, detail="image too large")
         attachment = save_chat_image(
             chat=chat,
             data=data,
