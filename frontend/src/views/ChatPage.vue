@@ -64,7 +64,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useCharactersStore, useChatsStore, useSettingsStore, useUiStore } from '../stores'
 import type { SettingsDrawerTab } from '../stores/ui'
-import type { ApiPreset, CharacterCard, ChatImageAttachment, ChatMessage, ExtraFirstMessageEntry, GroupMemberSettings, Chat, TtsSessionConfig, WorldBook } from '../types/models'
+import type { ApiPreset, AssistantAttachment, CharacterCard, ChatImageAttachment, ChatMessage, ExtraFirstMessageEntry, GroupMemberSettings, Chat, TtsSessionConfig, WorldBook } from '../types/models'
 
 // Composables
 import { 
@@ -107,8 +107,10 @@ import { Users, Settings, Sparkles, Loader2, X, MoreHorizontal, GripVertical, Ch
 import { postAndConsumeSse } from '../api/sse'
 import { apiPost, apiGet, apiPut } from '../api/http'
 import { useErrorStack } from '../composables/useErrorStack'
-import { notifyMessage } from '../composables/useNotify'
+import { notifyConfirm, notifyMessage } from '../composables/useNotify'
 import { isTtsApiPreset, resolveTtsProvider } from '../utils/apiPresetKind'
+import { validateFilesForTarget } from '../utils/attachmentPolicy'
+import { resolveRichPaste } from '../utils/richPaste'
 import { formatApiError } from '../utils/worldBookValidation'
 import {
   HEADER_EXPAND_MS,
@@ -158,6 +160,8 @@ interface AvatarCropSavePayload {
   focusY?: number
 }
 const draftImages = ref<DraftImageItem[]>([])
+const workspaceAssistantTextareaRef = ref<HTMLTextAreaElement | null>(null)
+const isWorkspaceAssistantDragOver = ref(false)
 const showSettings = ref(false)
 const showGroupSettings = ref(false)
 const showExportModal = ref(false)
@@ -604,7 +608,9 @@ async function enqueueMessageReadAloud(message: ChatMessage, mode: 'manual' | 'a
       autoReadFingerprint = fp
     }
 
-    const previewLabel = [...originalText].slice(0, 5).join('')
+    const chars = [...originalText]
+    const previewLabel =
+      chars.length > 8 ? `${chars.slice(0, 8).join('')}...` : chars.join('')
 
     const existingAssetId = canReuseTtsCache(live, originalText)
       ? (live.ttsAudioAssetId?.trim() ?? undefined)
@@ -721,6 +727,16 @@ async function flushAutoReadTtsAfterChatReload() {
   await runAutoReadTtsForNewMessages()
 }
 
+/** 自动记忆总结：防抖调度（在 useAssistant 初始化后赋值） */
+let scheduleMaybeTriggerAutoMemorySummary: (chatId: string) => void = () => {}
+const autoMemorySummaryInFlight = ref(false)
+let memSummaryDebounceTimer: ReturnType<typeof setTimeout> | null = null
+
+async function afterChatReload(chatId: string) {
+  await flushAutoReadTtsAfterChatReload()
+  scheduleMaybeTriggerAutoMemorySummary(chatId)
+}
+
 /** 遍历 pendingTtsBinds，按内容指纹匹配当前消息并调用 bind-message 写回 TTS 字段 */
 async function flushPendingTtsBinds() {
   const chat = activeChat.value
@@ -821,11 +837,93 @@ const assistant = useAssistant({
   streamEnabled: isStreamEnabled,
   onChatMemoryUpdated: (chat) => chats.applyChatPayload(chat),
   onChatOverridesUpdated: (p) => {
-    if (p.chatId && p.chatId === chats.activeChatId) {
-      void chats.load(p.chatId)
+    const id = p.chatId
+    if (id && id === chats.activeChatId) {
+      void chats.load(id).then(async () => {
+        await afterChatReload(id)
+      })
     }
   },
 })
+
+async function maybeTriggerAutoMemorySummary(chatId: string) {
+  if (chatId !== activeChat.value?.id) return
+  if (isGenerating.value) return
+  if (assistant.isAssistantGenerating.value) return
+  if (autoMemorySummaryInFlight.value) return
+
+  const chat = activeChat.value
+  if (!chat) return
+
+  const rawN = chat.overrides?.autoMemorySummaryEveryN
+  const effectiveN =
+    typeof rawN === 'number' && Number.isFinite(rawN) && rawN >= 1 ? Math.floor(rawN) : 0
+  if (effectiveN < 1) return
+
+  const silent = chat.overrides?.autoMemorySummarySilent === true
+  let tier = chat.overrides?.autoMemorySummaryNextAskTier
+  if (typeof tier !== 'number' || !Number.isFinite(tier) || tier < 1) tier = 1
+  if (silent) tier = 1
+
+  const anchorId = chat.overrides?.lastAutoMemorySummaryAfterMessageId ?? null
+  const messages = chat.messages ?? []
+  let anchorIdx = -1
+  if (anchorId) {
+    anchorIdx = messages.findIndex((m) => m.id === anchorId)
+  }
+  const count = anchorIdx >= 0 ? messages.length - anchorIdx - 1 : messages.length
+  const threshold = effectiveN * tier
+
+  if (count < threshold) return
+
+  if (!silent) {
+    const ok = await notifyConfirm({
+      title: '自动总结长期记忆',
+      message: '未总结消息已达阈值，是否现在让助手阅读近期对话并写入长期记忆？',
+    })
+    if (!ok) {
+      await chats.updateOverrides(
+        chatId,
+        {
+          ...chat.overrides,
+          autoMemorySummaryNextAskTier: tier + 1,
+        },
+        { skipLoadList: true },
+      )
+      return
+    }
+  }
+
+  const lastMsgId = messages[messages.length - 1]?.id
+  if (!lastMsgId) return
+
+  autoMemorySummaryInFlight.value = true
+  try {
+    const ok = await assistant.runAutoMemorySummaryPrompt()
+    if (!ok) return
+    const chatAfter = activeChat.value
+    if (!chatAfter || chatAfter.id !== chatId) return
+    await chats.updateOverrides(
+      chatId,
+      {
+        ...chatAfter.overrides,
+        lastAutoMemorySummaryAfterMessageId: lastMsgId,
+        autoMemorySummaryNextAskTier: 1,
+      },
+      { skipLoadList: true },
+    )
+  } finally {
+    autoMemorySummaryInFlight.value = false
+  }
+}
+
+scheduleMaybeTriggerAutoMemorySummary = (chatId: string) => {
+  if (memSummaryDebounceTimer) clearTimeout(memSummaryDebounceTimer)
+  memSummaryDebounceTimer = setTimeout(() => {
+    memSummaryDebounceTimer = null
+    void maybeTriggerAutoMemorySummary(chatId)
+  }, 80)
+}
 
 async function setAssistantWriteMemoryEnabled(checked: boolean) {
   await assistant.setAllowWriteMemory(checked)
@@ -1173,6 +1271,114 @@ async function uploadDraftImages(chatId: string, images: DraftImageItem[]): Prom
   })))
   const res = await apiPost<{ images: ChatImageAttachment[] }>(`/api/chats/${chatId}/images`, { images: payloadImages })
   return res.images || []
+}
+
+function getAssistantAttachmentLabel(attachment: AssistantAttachment): string {
+  return attachment.originalName || attachment.filename
+}
+
+function getAssistantAttachmentExt(attachment: AssistantAttachment): string {
+  const label = getAssistantAttachmentLabel(attachment)
+  const index = label.lastIndexOf('.')
+  if (index < 0) return attachment.kind === 'text' ? 'txt' : 'img'
+  return label.slice(index + 1).toLowerCase() || (attachment.kind === 'text' ? 'txt' : 'img')
+}
+
+function buildAssistantAttachmentUrl(scope: 'chat' | 'workspace', attachment: AssistantAttachment): string {
+  const params = new URLSearchParams({ scope })
+  if (scope === 'chat' && activeChat.value?.id) {
+    params.set('chatId', activeChat.value.id)
+  }
+  params.set('storageScope', attachment.storageScope)
+  params.set('storageKey', attachment.storageKey)
+  params.set('filename', attachment.filename)
+  params.set('mimeType', attachment.mimeType)
+  params.set('kind', attachment.kind)
+  return `/api/assistant/attachments/${encodeURIComponent(attachment.id)}?${params.toString()}`
+}
+
+async function notifyMainChatAttachmentRejections() {
+  await notifyMessage('主聊天暂仅支持图片。', { title: '提示' })
+}
+
+async function notifyAssistantAttachmentRejections(
+  rejected: Array<{ file: File; reason: 'unsupported' | 'too-large'; kind?: 'image' | 'text' | null }>,
+) {
+  const tooLargeImages = rejected.filter((item) => item.reason === 'too-large' && item.kind === 'image').length
+  const tooLargeTexts = rejected.filter((item) => item.reason === 'too-large' && item.kind === 'text').length
+  if (!tooLargeImages && !tooLargeTexts) return
+  const parts: string[] = []
+  if (tooLargeTexts) parts.push(`文本附件单文件不能超过 2MB（已拒绝 ${tooLargeTexts} 个）`)
+  if (tooLargeImages) parts.push(`图片附件单文件不能超过 100MB（已拒绝 ${tooLargeImages} 个）`)
+  await notifyMessage(parts.join('；'), { title: '附件过大' })
+}
+
+async function handleAssistantDraftFiles(scope: 'chat' | 'workspace', files: File[]) {
+  if (!files.length) return
+  const { accepted, rejected } = validateFilesForTarget(files, 'assistant')
+  await notifyAssistantAttachmentRejections(rejected)
+  if (!accepted.length) return
+  try {
+    await assistant.ingestDraftFiles(scope, accepted.map((item) => item.file))
+  } catch (error) {
+    await notifyMessage(error instanceof Error ? error.message : '附件导入失败', { title: '附件导入失败' })
+  }
+}
+
+function insertWorkspaceAssistantTextAtCursor(text: string) {
+  const el = workspaceAssistantTextareaRef.value
+  if (!el) {
+    assistant.workspaceAssistantDraft.value += text
+    return
+  }
+  const start = el.selectionStart
+  const end = el.selectionEnd
+  const current = assistant.workspaceAssistantDraft.value
+  assistant.workspaceAssistantDraft.value = current.slice(0, start) + text + current.slice(end)
+  nextTick(() => {
+    const pos = start + text.length
+    el.setSelectionRange(pos, pos)
+    el.focus()
+  })
+}
+
+async function handleWorkspaceAssistantPaste(event: ClipboardEvent) {
+  const resolved = await resolveRichPaste(event.clipboardData)
+  if (!resolved) return
+  if (resolved.files.length > 0 || resolved.text) {
+    event.preventDefault()
+  }
+  if (resolved.files.length > 0) {
+    await handleAssistantDraftFiles('workspace', resolved.files)
+  }
+  if (resolved.text) {
+    insertWorkspaceAssistantTextAtCursor(resolved.text)
+  }
+}
+
+function handleWorkspaceAssistantDragEnter(event: DragEvent) {
+  if (!event.dataTransfer?.types.includes('Files')) return
+  isWorkspaceAssistantDragOver.value = true
+}
+
+function handleWorkspaceAssistantDragLeave(event: DragEvent) {
+  const nextTarget = event.relatedTarget as Node | null
+  if (nextTarget && (event.currentTarget as HTMLElement | null)?.contains(nextTarget)) return
+  isWorkspaceAssistantDragOver.value = false
+}
+
+function handleWorkspaceAssistantDragOver(event: DragEvent) {
+  if (!event.dataTransfer?.types.includes('Files')) return
+  event.preventDefault()
+  isWorkspaceAssistantDragOver.value = true
+}
+
+async function handleWorkspaceAssistantDrop(event: DragEvent) {
+  const files = Array.from(event.dataTransfer?.files || [])
+  isWorkspaceAssistantDragOver.value = false
+  if (!files.length) return
+  event.preventDefault()
+  await handleAssistantDraftFiles('workspace', files)
 }
 
 function clearDraftImages() {
@@ -2141,15 +2347,20 @@ watch(chatSearchQuery, () => {
   }, 180)
 })
 
+async function cleanupCharacterEditorAssistantContext() {
+  await assistant.cleanupWorkspaceSession()
+  await assistant.deleteWorkspaceChat()
+  if (assistant.isAssistantPanelOpen.value) await assistant.loadState('chat')
+}
+
 /**
  * 监听角色编辑弹窗状态
  *
  * 当角色编辑弹窗关闭时，删除工作区助手聊天，如果助手面板打开则加载聊天作用域状态。
  */
 watch(actions.showCharacterEditor, (next, prev) => {
-  if (!next && prev && actions.editingCharacter.value) {
-    void assistant.deleteWorkspaceChat()
-    if (assistant.isAssistantPanelOpen.value) void assistant.loadState('chat')
+  if (!next && prev) {
+    void cleanupCharacterEditorAssistantContext()
     actions.editingCharacter.value = null
     actions.isNewCharacter.value = false
     characterEditorWbDraggingIdx.value = null
@@ -2322,9 +2533,15 @@ async function runGroupGeneration(
   group.showContinueButton.value = false
 }
 
-function handleSelectImages(files: File[]) {
-  const accepted = files.filter((f) => f.type.startsWith('image/'))
-  for (const file of accepted) {
+async function handleSelectImages(files: File[]) {
+  const { accepted, rejected } = validateFilesForTarget(files, 'main-chat')
+  if (rejected.some((item) => item.reason === 'unsupported')) {
+    await notifyMainChatAttachmentRejections()
+  }
+  if (rejected.some((item) => item.reason === 'too-large')) {
+    await notifyMessage('主聊天图片单文件不能超过 100MB。', { title: '附件过大' })
+  }
+  for (const { file } of accepted) {
     const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
     draftImages.value.push({
       id,
@@ -2397,7 +2614,7 @@ async function sendUserMessage() {
         senderAvatar: userRole === 'user' ? (selectedPersona.value?.avatar ?? null) : null,
       })
       await chats.load(chatId)
-      await flushAutoReadTtsAfterChatReload()
+      await afterChatReload(chatId)
     } catch (e: any) {
       streamError.value = e?.message ?? String(e)
     }
@@ -2562,7 +2779,7 @@ async function sendUserMessage() {
           imageFallbackDialog.value.visible = false
           if (isGroup) {
             await chats.load(chatId)
-            await flushAutoReadTtsAfterChatReload()
+            await afterChatReload(chatId)
           } else {
             const localAssistantId = `local_assistant_retry_${Date.now()}`
             chats.addLocalMessage({ version: 1, id: localAssistantId, role: 'assistant', content: '', ts: new Date().toISOString() })
@@ -2602,7 +2819,7 @@ async function sendUserMessage() {
               void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
             }
             await chats.load(chatId)
-            await flushAutoReadTtsAfterChatReload()
+            await afterChatReload(chatId)
           }
         })
       } else {
@@ -2617,7 +2834,7 @@ async function sendUserMessage() {
       stopStreamingHold.value = false
     } else {
       await chats.load(chatId)
-      await flushAutoReadTtsAfterChatReload()
+      await afterChatReload(chatId)
     }
     await settings.load()
   }
@@ -2665,7 +2882,7 @@ async function continueGroupChat() {
       group.pendingMembers.value = []
       if (!skippedReload) {
         await chats.load(chatId)
-        await flushAutoReadTtsAfterChatReload()
+        await afterChatReload(chatId)
         await settings.load()
       } else {
         await settings.load()
@@ -2720,7 +2937,7 @@ async function startNextRound() {
     if (!group.isPaused.value) {
       if (!skippedReload) {
         await chats.load(chatId)
-        await flushAutoReadTtsAfterChatReload()
+        await afterChatReload(chatId)
       }
       await settings.load()
     }
@@ -2836,7 +3053,7 @@ async function triggerInterject(characterId: string) {
       stopStreamingHold.value = false
     } else {
       await chats.load(chatId)
-      await flushAutoReadTtsAfterChatReload()
+      await afterChatReload(chatId)
     }
   }
 }
@@ -2890,7 +3107,7 @@ async function persistLocalStreamingMessages(chatId: string) {
     serverMessages = updatedChat.messages
   }
   await chats.load(chatId)
-  await flushAutoReadTtsAfterChatReload()
+  await afterChatReload(chatId)
 }
 
 /**
@@ -3200,7 +3417,7 @@ async function handleRewriteMessage(m: ChatMessage) {
       stopStreamingHold.value = false
     } else {
       await chats.load(chatId)
-      await flushAutoReadTtsAfterChatReload()
+      await afterChatReload(chatId)
     }
     await settings.load()
     
@@ -3292,6 +3509,7 @@ async function deleteChat(chatId: string) {
  */
 async function selectChat(chat: Chat) {
   await chats.load(chat.id)
+  await afterChatReload(chat.id)
 }
 
 async function handleJanitorImported(payload: { chatId: string; characterId: string | null; openAfterImport: boolean }) {
@@ -3307,6 +3525,7 @@ async function handleJanitorImported(payload: { chatId: string; characterId: str
     await chats.loadList(payload.characterId)
   }
   await chats.load(payload.chatId)
+  await afterChatReload(payload.chatId)
 }
 
 /**
@@ -3445,8 +3664,6 @@ async function saveCharacter() {
   if (id) {
     selectedCharacterId.value = id
   }
-  await assistant.deleteWorkspaceChat()
-  if (assistant.isAssistantPanelOpen.value) await assistant.loadState('chat')
 }
 
 /**
@@ -3459,8 +3676,6 @@ async function saveCharacter() {
  * @returns {Promise<void>} 完成时返回
  */
 async function cancelCharacterEdit() {
-  await assistant.deleteWorkspaceChat()
-  if (assistant.isAssistantPanelOpen.value) await assistant.loadState('chat')
   actions.cancelCharacterEdit()
 }
 
@@ -3614,7 +3829,7 @@ async function handleSaveAndSend() {
     group.showInterject()
     try {
       await chats.load(chatId)
-      await flushAutoReadTtsAfterChatReload()
+      await afterChatReload(chatId)
     } catch {
       /* ignore */
     }
@@ -3709,7 +3924,7 @@ async function handleSaveAndSend() {
       stopStreamingHold.value = false
     } else {
       await chats.load(chatId)
-      await flushAutoReadTtsAfterChatReload()
+      await afterChatReload(chatId)
     }
     await settings.load()
   }
@@ -4141,6 +4356,8 @@ const editingPersonaAvatarUrl = computed(() => {
       :is-open="assistant.isAssistantPanelOpen.value"
       :messages="assistant.assistantMessages.value"
       :draft="assistant.assistantDraft.value"
+      :draft-attachments="assistant.assistantDraftAttachments.value"
+      :chat-id="activeChat?.id ?? null"
       :is-generating="assistant.isAssistantGenerating.value"
       :stream-error="assistant.assistantStreamError.value"
       :streaming-content="assistant.assistantStreamingContent.value"
@@ -4152,6 +4369,8 @@ const editingPersonaAvatarUrl = computed(() => {
       :model-options="chatModelOptions"
       @update:is-open="assistant.isAssistantPanelOpen.value = $event"
       @update:draft="assistant.assistantDraft.value = $event"
+      @attach-files="handleAssistantDraftFiles('chat', $event)"
+      @remove-attachment="assistant.removeDraftAttachment('chat', $event)"
       @toggle-write-memory="assistant.toggleAllowWriteMemory"
       @toggle-destructive="assistant.toggleAllowDestructiveTools"
       @send="assistant.sendMessage('chat')"
@@ -4522,12 +4741,20 @@ const editingPersonaAvatarUrl = computed(() => {
               <AssistantThread
                 :messages="assistant.workspaceAssistantMessages.value"
                 :is-generating="assistant.isWorkspaceAssistantGenerating.value"
+                :attachment-scope="'workspace'"
                 :streaming-content="assistant.workspaceStreamingContent.value"
                 :streaming-reasoning="assistant.workspaceStreamingReasoning.value"
                 :show-message-actions="false"
               />
             </div>
-            <div class="pt-4 border-t border-[var(--color-border-subtle)]">
+            <div
+              class="pt-4 border-t border-[var(--color-border-subtle)] transition-colors"
+              :class="isWorkspaceAssistantDragOver ? 'rounded-xl border border-brand-a30 bg-brand-a10 px-3 pb-3' : ''"
+              @dragenter.prevent="handleWorkspaceAssistantDragEnter"
+              @dragover.prevent="handleWorkspaceAssistantDragOver"
+              @dragleave="handleWorkspaceAssistantDragLeave"
+              @drop.prevent="handleWorkspaceAssistantDrop"
+            >
               <div class="flex flex-wrap gap-2 mb-2 items-center">
                 <button
                   type="button"
@@ -4549,11 +4776,40 @@ const editingPersonaAvatarUrl = computed(() => {
                 </button>
                 <span class="text-[10px] text-[var(--color-text-muted)]">工作区不写长期记忆</span>
               </div>
+              <div v-if="assistant.workspaceAssistantDraftAttachments.value.length" class="mb-3 flex flex-wrap gap-2">
+                <template v-for="attachment in assistant.workspaceAssistantDraftAttachments.value" :key="attachment.id">
+                  <div
+                    v-if="attachment.kind === 'image'"
+                    class="relative h-20 w-20 overflow-hidden rounded-lg border border-[var(--color-border)] bg-surface-muted"
+                  >
+                    <img :src="buildAssistantAttachmentUrl('workspace', attachment)" :alt="getAssistantAttachmentLabel(attachment)" class="h-full w-full object-cover" />
+                    <button
+                      type="button"
+                      class="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white"
+                      @click="assistant.removeDraftAttachment('workspace', attachment.id)"
+                    >
+                      <X class="h-3 w-3" />
+                    </button>
+                  </div>
+                  <button
+                    v-else
+                    type="button"
+                    class="group relative flex max-w-[220px] items-start gap-2 rounded-xl border border-[var(--color-border)] bg-surface-muted px-3 py-2 text-left"
+                    @click="assistant.removeDraftAttachment('workspace', attachment.id)"
+                  >
+                    <span class="rounded bg-black/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-[var(--color-text-secondary)]">{{ getAssistantAttachmentExt(attachment) }}</span>
+                    <span class="truncate text-xs text-[var(--color-text)]">{{ getAssistantAttachmentLabel(attachment) }}</span>
+                    <X class="ml-auto mt-0.5 h-3 w-3 shrink-0 text-[var(--color-text-muted)] transition-colors group-hover:text-[var(--color-text)]" />
+                  </button>
+                </template>
+              </div>
               <textarea
+                ref="workspaceAssistantTextareaRef"
                 v-model="assistant.workspaceAssistantDraft.value"
                 class="input textarea h-24"
                 placeholder="输入建议或要求 (Ctrl + Enter)..."
                 :disabled="assistant.isWorkspaceAssistantGenerating.value"
+                @paste="handleWorkspaceAssistantPaste"
                 @keydown.ctrl.enter="assistant.sendMessage('workspace', true, actions.applyAssistantCard)"
               ></textarea>
               <div class="flex items-center justify-between mt-3 gap-3">
@@ -4571,7 +4827,7 @@ const editingPersonaAvatarUrl = computed(() => {
                 />
                 <button 
                   class="btn btn-primary px-6" 
-                  :disabled="!assistant.workspaceAssistantDraft.value.trim() || assistant.isWorkspaceAssistantGenerating.value" 
+                  :disabled="(!assistant.workspaceAssistantDraft.value.trim() && !assistant.workspaceAssistantDraftAttachments.value.length) || assistant.isWorkspaceAssistantGenerating.value" 
                   @click="assistant.sendMessage('workspace', true, actions.applyAssistantCard)"
                 >
                   <Loader2 v-if="assistant.isWorkspaceAssistantGenerating.value" class="animate-spin w-4 h-4 mr-2" />
