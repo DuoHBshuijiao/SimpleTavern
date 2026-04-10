@@ -48,7 +48,8 @@ import portalocker
 
 from datetime import datetime
 
-from app.schemas import AssistantChat, AssistantSettings, Chat, ChatImageAttachment, ChatMessage, CharacterCard, Settings, WorldBook
+from app.attachment_policy import normalize_mime_type
+from app.schemas import AssistantAttachment, AssistantChat, AssistantSettings, Chat, ChatImageAttachment, ChatMessage, CharacterCard, Settings, WorldBook
 
 
 def _repo_root() -> Path:
@@ -111,6 +112,18 @@ def _ai_workspace_dir() -> Path:
         Path: data/ai_workspace目录的Path对象
     """
     return _data_dir() / "ai_workspace"
+
+
+def _assistant_ingest_dir() -> Path:
+    return _ai_workspace_dir() / "ingest"
+
+
+def _assistant_chat_ingest_root() -> Path:
+    return _assistant_ingest_dir() / "assistant_chat"
+
+
+def _workspace_session_ingest_root() -> Path:
+    return _assistant_ingest_dir() / "workspace_session"
 
 
 def _fonts_dir() -> Path:
@@ -272,6 +285,7 @@ def ensure_data_initialized() -> None:
     _fonts_dir().mkdir(parents=True, exist_ok=True)
     _page_backgrounds_dir().mkdir(parents=True, exist_ok=True)
     _ai_workspace_dir().mkdir(parents=True, exist_ok=True)
+    _assistant_ingest_dir().mkdir(parents=True, exist_ok=True)
     _worldbooks_dir().mkdir(parents=True, exist_ok=True)
     _tts_cache_dir().mkdir(parents=True, exist_ok=True)
     get_huggingface_data_dir().mkdir(parents=True, exist_ok=True)
@@ -543,6 +557,43 @@ def ai_workspace_dir() -> Path:
     return _ai_workspace_dir()
 
 
+def assistant_ingest_dir() -> Path:
+    """返回 data/ai_workspace/ingest 目录。"""
+    return _assistant_ingest_dir()
+
+
+def assistant_chat_ingest_dir(chat_id: str) -> Path:
+    """返回聊天助手附件目录 data/ai_workspace/ingest/assistant_chat/{chat_id}。"""
+    return _assistant_chat_ingest_root() / _normalize_attachment_storage_key(chat_id)
+
+
+def workspace_session_ingest_dir(session_id: str) -> Path:
+    """返回工作区临时附件目录 data/ai_workspace/ingest/workspace_session/{session_id}。"""
+    return _workspace_session_ingest_root() / _normalize_attachment_storage_key(session_id)
+
+
+def _normalize_attachment_storage_key(value: str) -> str:
+    key = (value or "").strip()
+    if not key or any(token in key for token in ("..", "/", "\\")):
+        raise ValueError("invalid attachment storage key")
+    return key
+
+
+def _assistant_attachment_dir(storage_scope: str, storage_key: str) -> Path:
+    if storage_scope == "assistant_chat":
+        return assistant_chat_ingest_dir(storage_key)
+    if storage_scope == "workspace_session":
+        return workspace_session_ingest_dir(storage_key)
+    raise ValueError("invalid attachment storage scope")
+
+
+def _safe_attachment_ext(mime_type: str | None, original_name: str | None = None) -> str:
+    original_suffix = Path(original_name or "").suffix.strip()
+    if original_suffix:
+        return original_suffix if original_suffix.startswith(".") else f".{original_suffix}"
+    return _safe_image_ext_from_mime(mime_type)
+
+
 def workspace_character_card_path() -> Path:
     """
     工作区角色卡草稿文件路径（与 GET /assistant/workspace/character-card 一致）
@@ -799,6 +850,94 @@ def save_chat_image(
         height=height,
         originalName=original_name,
     )
+
+
+def save_assistant_attachment(
+    *,
+    data: bytes,
+    kind: str,
+    storage_scope: str,
+    storage_key: str,
+    mime_type: str,
+    original_name: str | None = None,
+) -> AssistantAttachment:
+    """保存助手附件到 ai_workspace/ingest 子树并返回元数据。"""
+    attachment_id = uuid4().hex
+    ext = _safe_attachment_ext(mime_type, original_name)
+    filename = f"{attachment_id}{ext}"
+    target = _assistant_attachment_dir(storage_scope, storage_key) / filename
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(data)
+    return AssistantAttachment(
+        id=attachment_id,
+        kind=kind,
+        storageScope=storage_scope,
+        storageKey=_normalize_attachment_storage_key(storage_key),
+        filename=filename,
+        mimeType=normalize_mime_type(mime_type) or "application/octet-stream",
+        size=len(data),
+        originalName=original_name,
+    )
+
+
+def assistant_attachment_path(attachment: AssistantAttachment) -> Path:
+    """返回助手附件完整路径。"""
+    if Path(attachment.filename).name != attachment.filename:
+        raise ValueError("invalid attachment filename")
+    return _assistant_attachment_dir(attachment.storageScope, attachment.storageKey) / attachment.filename
+
+
+def load_assistant_attachment_bytes(attachment: AssistantAttachment) -> bytes:
+    """读取助手附件二进制。"""
+    path = assistant_attachment_path(attachment)
+    if not path.exists():
+        raise FileNotFoundError(str(path))
+    return path.read_bytes()
+
+
+def delete_assistant_attachment_file(attachment: AssistantAttachment) -> None:
+    """删除单个助手附件文件。"""
+    path = assistant_attachment_path(attachment)
+    if path.exists():
+        path.unlink(missing_ok=True)
+
+
+def prune_assistant_chat_attachments(chat_id: str, messages: list[ChatMessage]) -> None:
+    """按当前助手聊天消息引用清理聊天作用域下未被使用的附件文件。"""
+    base = assistant_chat_ingest_dir(chat_id)
+    if not base.exists():
+        return
+    keep: set[str] = set()
+    for message in messages:
+        for attachment in getattr(message, "attachments", []) or []:
+            if getattr(attachment, "storageScope", None) != "assistant_chat":
+                continue
+            if getattr(attachment, "storageKey", None) != chat_id:
+                continue
+            filename = getattr(attachment, "filename", None)
+            if filename:
+                keep.add(filename)
+    for path in base.iterdir():
+        if not path.is_file():
+            continue
+        if path.name not in keep:
+            path.unlink(missing_ok=True)
+    if not any(base.iterdir()):
+        base.rmdir()
+
+
+def clear_assistant_chat_attachments(chat_id: str | None = None) -> None:
+    """删除聊天助手 ingest 目录；chat_id 为空时清空整棵 assistant_chat 子树。"""
+    target = _assistant_chat_ingest_root() if not chat_id else assistant_chat_ingest_dir(chat_id)
+    if target.exists():
+        shutil.rmtree(target, ignore_errors=True)
+
+
+def clear_workspace_session_attachments(session_id: str) -> None:
+    """删除指定 workspace_session 附件目录。"""
+    target = workspace_session_ingest_dir(session_id)
+    if target.exists():
+        shutil.rmtree(target, ignore_errors=True)
 
 
 def chat_image_path(character_id: str, chat_id: str, image_filename: str) -> Path:
@@ -1557,6 +1696,7 @@ def save_assistant_chat_for_chat(chat_id: str, chat: AssistantChat) -> Assistant
     """
     path = assistant_chat_path_for_chat(chat_id)
     write_json(path, chat.model_dump(mode="json"))
+    prune_assistant_chat_attachments(chat_id, chat.messages)
     return chat
 
 
@@ -1568,6 +1708,7 @@ def clear_assistant_chat() -> None:
     """
     chat = AssistantChat()
     write_json(_assistant_chat_path(), chat.model_dump(mode="json"))
+    clear_assistant_chat_attachments()
 
 
 def clear_assistant_workspace_chat() -> None:
@@ -1605,6 +1746,7 @@ def clear_assistant_chat_for_chat(chat_id: str) -> None:
     chat = AssistantChat()
     path = assistant_chat_path_for_chat(chat_id)
     write_json(path, chat.model_dump(mode="json"))
+    clear_assistant_chat_attachments(chat_id)
 
 
 def clear_ai_workspace() -> None:
