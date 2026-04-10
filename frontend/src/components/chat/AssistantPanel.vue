@@ -43,11 +43,13 @@
  *    - 位置：组件层，提供聊天助手面板功能
  */
 import type { AssistantMessage } from '../../composables/useAssistant'
+import type { AssistantAttachment } from '../../types/models'
 import ModernSelect from '../ModernSelect.vue'
 import AssistantThread from './AssistantThread.vue'
 import ConfirmPopover from '../../components/ConfirmPopover.vue'
 import { Sparkles, Loader2, MoreHorizontal, X } from 'lucide-vue-next'
 import { ref, watch, nextTick } from 'vue'
+import { resolveRichPaste } from '../../utils/richPaste'
 
 interface ModelOption {
   label: string
@@ -66,11 +68,13 @@ const props = defineProps<{
   isOpen: boolean
   messages: AssistantMessage[]
   draft: string
+  draftAttachments: AssistantAttachment[]
   isGenerating: boolean
   streamError: string | null
   currentModel: string
   currentPresetId?: string | null
   modelOptions: ModelOptions
+  chatId?: string | null
   /** 当前正在流式接收的正文（用于打字机效果） */
   streamingContent?: string
   /** 当前正在流式接收的思考内容 */
@@ -85,6 +89,8 @@ const emit = defineEmits<{
   'update:isOpen': [value: boolean]
   'update:draft': [value: string]
   'send': []
+  'attach-files': [files: File[]]
+  'remove-attachment': [attachmentId: string]
   'reset': []
   'open-settings': []
   'select-model': [option: { value: string; presetId?: string | null }]
@@ -94,6 +100,9 @@ const emit = defineEmits<{
   'toggle-write-memory': []
   'toggle-destructive': []
 }>()
+
+const textareaRef = ref<HTMLTextAreaElement | null>(null)
+const isDragOverComposer = ref(false)
 
 /**
  * 处理键盘事件
@@ -106,6 +115,85 @@ function handleKeydown(e: KeyboardEvent) {
   if (e.ctrlKey && e.key === 'Enter') {
     emit('send')
   }
+}
+
+function buildAttachmentUrl(attachment: AssistantAttachment): string {
+  const params = new URLSearchParams({ scope: 'chat' })
+  if (props.chatId) params.set('chatId', props.chatId)
+  params.set('storageScope', attachment.storageScope)
+  params.set('storageKey', attachment.storageKey)
+  params.set('filename', attachment.filename)
+  params.set('mimeType', attachment.mimeType)
+  params.set('kind', attachment.kind)
+  return `/api/assistant/attachments/${encodeURIComponent(attachment.id)}?${params.toString()}`
+}
+
+function getAttachmentLabel(attachment: AssistantAttachment): string {
+  return attachment.originalName || attachment.filename
+}
+
+function getAttachmentExt(attachment: AssistantAttachment): string {
+  const label = getAttachmentLabel(attachment)
+  const index = label.lastIndexOf('.')
+  if (index < 0) return attachment.kind === 'text' ? 'txt' : 'img'
+  return label.slice(index + 1).toLowerCase() || (attachment.kind === 'text' ? 'txt' : 'img')
+}
+
+function insertTextAtCursor(text: string) {
+  const el = textareaRef.value
+  if (!el) {
+    emit('update:draft', props.draft + text)
+    return
+  }
+  const start = el.selectionStart
+  const end = el.selectionEnd
+  const current = props.draft
+  const nextValue = current.slice(0, start) + text + current.slice(end)
+  emit('update:draft', nextValue)
+  setTimeout(() => {
+    const pos = start + text.length
+    el.setSelectionRange(pos, pos)
+    el.focus()
+  }, 0)
+}
+
+async function handlePaste(e: ClipboardEvent) {
+  const resolved = await resolveRichPaste(e.clipboardData)
+  if (!resolved) return
+  if (resolved.files.length > 0 || resolved.text) {
+    e.preventDefault()
+  }
+  if (resolved.files.length > 0) {
+    emit('attach-files', resolved.files)
+  }
+  if (resolved.text) {
+    insertTextAtCursor(resolved.text)
+  }
+}
+
+function handleDragEnter(e: DragEvent) {
+  if (!e.dataTransfer?.types.includes('Files')) return
+  isDragOverComposer.value = true
+}
+
+function handleDragLeave(e: DragEvent) {
+  const nextTarget = e.relatedTarget as Node | null
+  if (nextTarget && (e.currentTarget as HTMLElement | null)?.contains(nextTarget)) return
+  isDragOverComposer.value = false
+}
+
+function handleDragOver(e: DragEvent) {
+  if (!e.dataTransfer?.types.includes('Files')) return
+  e.preventDefault()
+  isDragOverComposer.value = true
+}
+
+function handleDrop(e: DragEvent) {
+  const files = Array.from(e.dataTransfer?.files || [])
+  isDragOverComposer.value = false
+  if (!files.length) return
+  e.preventDefault()
+  emit('attach-files', files)
 }
 
 const confirmState = ref<{
@@ -238,6 +326,8 @@ watch(
       <AssistantThread
         :messages="messages"
         :is-generating="isGenerating"
+        :attachment-scope="'chat'"
+        :chat-id="chatId ?? null"
         :streaming-content="streamingContent"
         :streaming-reasoning="streamingReasoning"
         @edit-message="emit('edit-message', $event)"
@@ -277,11 +367,45 @@ watch(
     <!-- 输入区域 -->
     <div
       class="shrink-0 pt-4 pb-4 px-4 border-t border-white/5 bg-black/10 backdrop-blur-sm shadow-[0_-12px_32px_-8px_rgba(0,0,0,0.35)] relative z-10"
+      :class="isDragOverComposer ? 'bg-brand-a10 border-brand-a30' : ''"
+      @dragenter.prevent="handleDragEnter"
+      @dragover.prevent="handleDragOver"
+      @dragleave="handleDragLeave"
+      @drop.prevent="handleDrop"
     >
+      <div v-if="draftAttachments.length" class="mb-3 flex flex-wrap gap-2">
+        <template v-for="attachment in draftAttachments" :key="attachment.id">
+          <div
+            v-if="attachment.kind === 'image'"
+            class="relative h-20 w-20 overflow-hidden rounded-lg border border-white/10 bg-white/5"
+          >
+            <img :src="buildAttachmentUrl(attachment)" :alt="getAttachmentLabel(attachment)" class="h-full w-full object-cover" />
+            <button
+              type="button"
+              class="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white"
+              @click="emit('remove-attachment', attachment.id)"
+            >
+              <X class="h-3 w-3" />
+            </button>
+          </div>
+          <button
+            v-else
+            type="button"
+            class="group relative flex max-w-[220px] items-start gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-left"
+            @click="emit('remove-attachment', attachment.id)"
+          >
+            <span class="rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-gray-300">{{ getAttachmentExt(attachment) }}</span>
+            <span class="truncate text-xs text-gray-200">{{ getAttachmentLabel(attachment) }}</span>
+            <X class="ml-auto mt-0.5 h-3 w-3 shrink-0 text-gray-500 transition-colors group-hover:text-white" />
+          </button>
+        </template>
+      </div>
       <div class="relative">
         <textarea
+          ref="textareaRef"
           :value="draft"
           @input="emit('update:draft', ($event.target as HTMLTextAreaElement).value)"
+          @paste="handlePaste"
           class="input textarea h-24 !bg-white/5 !border-white/10 focus:!border-brand-a40 focus:!bg-white/10 backdrop-blur-md"
           placeholder="输入建议或要求 (Ctrl + Enter)..."
           :disabled="isGenerating"
@@ -305,7 +429,7 @@ watch(
           <button class="btn btn-sm btn-secondary" :disabled="isGenerating" @click="confirmReset($event)">清空</button>
           <button 
             class="btn btn-sm btn-primary px-6" 
-            :disabled="!draft.trim() || isGenerating" 
+            :disabled="(!draft.trim() && !draftAttachments.length) || isGenerating" 
             @click="emit('send')"
           >
             <Loader2 v-if="isGenerating" class="animate-spin w-3 h-3 mr-2" />
