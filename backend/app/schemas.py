@@ -469,6 +469,25 @@ class AssistantChat(BaseModel):
     messages: list[ChatMessage] = Field(default_factory=list)
 
 
+AssistantAttachmentKind = Literal["image", "text"]
+AssistantAttachmentStorageScope = Literal["assistant_chat", "workspace_session"]
+
+
+class AssistantAttachment(BaseModel):
+    """助手消息中的附件元数据。"""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    kind: AssistantAttachmentKind
+    storageScope: AssistantAttachmentStorageScope
+    storageKey: str
+    filename: str
+    mimeType: str
+    size: int
+    originalName: str | None = None
+
+
 class ExtraFirstMessageEntry(BaseModel):
     """额外首句条目：chip 为 True 时在编辑界面显示为矩形 chip。"""
 
@@ -595,6 +614,7 @@ class ChatMessage(BaseModel):
     role: ChatRole
     content: str
     images: list["ChatImageAttachment"] = Field(default_factory=list)
+    attachments: list["AssistantAttachment"] = Field(default_factory=list)
     characterId: str | None = None
     senderPersonaId: str | None = None
     senderName: str | None = None
@@ -711,6 +731,23 @@ class ChatOverrides(BaseModel):
     params: GenerationParams = Field(default_factory=GenerationParams)
     draftHelp: DraftHelpSettings = Field(default_factory=DraftHelpSettings)
     tts: "TtsSessionConfig | None" = Field(default=None, description="会话级 TTS 配置")
+    autoMemorySummaryEveryN: int | None = Field(
+        default=None,
+        description="每隔若干条主会话消息后自动触发助手总结并写入长期记忆；None 或 0 表示关闭",
+    )
+    lastAutoMemorySummaryAfterMessageId: str | None = Field(
+        default=None,
+        description="上次自动总结成功时锚定的主会话最后一条消息 ID",
+    )
+    autoMemorySummarySilent: bool = Field(
+        default=False,
+        description="为 True 时不弹窗直接触发；为 False 时先 notify 确认",
+    )
+    autoMemorySummaryNextAskTier: int = Field(
+        default=1,
+        ge=1,
+        description="非静默下用户拒绝确认后的倍数（下次在 n*tier 条时再问）",
+    )
 
     @model_validator(mode="after")
     def _sync_worldbook_attachments(self):
