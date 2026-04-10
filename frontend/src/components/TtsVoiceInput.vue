@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ChevronDown } from 'lucide-vue-next'
+import { ChevronDown, X } from 'lucide-vue-next'
 import type { ApiPresetVoice } from '../types/models'
 
 /** 与模板中 gap 一致：top-[calc(100%+0.375rem)] */
@@ -108,6 +108,11 @@ function onInput(e: Event) {
   emit('update:modelValue', t.value)
 }
 
+function clearInput() {
+  if (props.disabled) return
+  emit('update:modelValue', '')
+}
+
 onMounted(() => {
   document.addEventListener('pointerdown', handleDocumentPointerDown)
 })
@@ -134,19 +139,31 @@ watch(dropdownOpen, (open) => {
     <input
       :value="modelValue"
       type="text"
-      class="input input-sm w-full pr-10"
+      class="input input-sm w-full pr-20"
       :placeholder="placeholder"
       :disabled="disabled"
       @input="onInput"
     />
-    <button
-      type="button"
-      class="absolute inset-y-1 right-1 inline-flex w-8 items-center justify-center rounded-md text-[var(--color-text-muted)] transition-colors hover:bg-surface-hover hover:text-[var(--color-text-secondary)]"
-      :disabled="disabled"
-      @click="toggleDropdown"
-    >
-      <ChevronDown class="h-4 w-4" :class="dropdownOpen ? 'rotate-180' : ''" />
-    </button>
+    <div class="absolute inset-y-1 right-1 flex items-center gap-0.5">
+      <button
+        type="button"
+        class="inline-flex h-full min-h-0 w-8 shrink-0 items-center justify-center rounded-md text-[var(--color-text-muted)] transition-colors hover:bg-surface-hover hover:text-[var(--color-text-secondary)] disabled:pointer-events-none disabled:opacity-40"
+        :disabled="disabled || !modelValue.trim()"
+        aria-label="清空"
+        @click.stop="clearInput"
+      >
+        <X class="h-4 w-4" stroke-width="2.5" />
+      </button>
+      <button
+        type="button"
+        class="inline-flex h-full min-h-0 w-8 shrink-0 items-center justify-center rounded-md text-[var(--color-text-muted)] transition-colors hover:bg-surface-hover hover:text-[var(--color-text-secondary)]"
+        :disabled="disabled"
+        aria-label="展开音色列表"
+        @click="toggleDropdown"
+      >
+        <ChevronDown class="h-4 w-4" :class="dropdownOpen ? 'rotate-180' : ''" />
+      </button>
+    </div>
 
     <div
       v-if="dropdownOpen"

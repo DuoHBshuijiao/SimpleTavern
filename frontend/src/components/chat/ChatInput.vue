@@ -53,7 +53,7 @@
  */
 import { computed, ref } from 'vue'
 import { useAssistantFabPosition } from '../../composables/useAssistantFabPosition'
-import { apiPost } from '../../api/http'
+import { notifyMessage } from '../../composables/useNotify'
 import {
   MAIN_LAYOUT_TRANSITION_MS,
   HEADER_LIFT_EASE,
@@ -61,6 +61,8 @@ import {
   type HeaderMorphPhase,
 } from '../../constants/chatHeaderMorph'
 import type { CharacterCard, GroupMemberSettings } from '../../types/models'
+import { validateFilesForTarget } from '../../utils/attachmentPolicy'
+import { resolveRichPaste } from '../../utils/richPaste'
 import ModernAvatar from '../ModernAvatar.vue'
 import ModernSelect from '../ModernSelect.vue'
 import { ImagePlus, MessageSquare, PenSquare, RefreshCw, X } from 'lucide-vue-next'
@@ -287,9 +289,22 @@ function handleImageInputChange(e: Event) {
   const input = e.target as HTMLInputElement
   const files = Array.from(input.files || [])
   if (files.length) {
-    emit('select-images', files)
+    void handleIncomingMainChatFiles(files)
   }
   input.value = ''
+}
+
+async function handleIncomingMainChatFiles(files: File[]) {
+  const { accepted, rejected } = validateFilesForTarget(files, 'main-chat')
+  if (rejected.some((item) => item.reason === 'unsupported')) {
+    await notifyMessage('主聊天暂仅支持图片。', { title: '提示' })
+  }
+  if (rejected.some((item) => item.reason === 'too-large')) {
+    await notifyMessage('主聊天图片单文件不能超过 100MB。', { title: '附件过大' })
+  }
+  if (accepted.length) {
+    emit('select-images', accepted.map((item) => item.file))
+  }
 }
 
 /**
@@ -315,102 +330,20 @@ function insertTextAtCursor(text: string) {
 }
 
 /**
- * 从 HTML 字符串中提取 data URL 图片，转为 File 对象（富文本复制时图片常内嵌在 HTML 里）。
- * 注意：部分应用（如 QQ）会写入 file:// 链接，浏览器无法读取本地路径，此类图片无法提取。
- */
-function extractImageFilesFromHtml(html: string): File[] {
-  const files: File[] = []
-  const dataUrlRe = /<img[^>]+src\s*=\s*["'](data:image\/(\w+);base64,([^"']+))["']/gi
-  let m: RegExpExecArray | null
-  while ((m = dataUrlRe.exec(html)) !== null) {
-    const mimeSubtype = m[2]
-    const base64 = m[3]
-    if (mimeSubtype === undefined || base64 === undefined) continue
-    const sub = mimeSubtype.toLowerCase()
-    const mime = `image/${sub}`
-    try {
-      const bin = atob(base64)
-      const bytes = new Uint8Array(bin.length)
-      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
-      const blob = new Blob([bytes], { type: mime })
-      const ext = sub === 'png' ? 'png' : sub === 'jpeg' || sub === 'jpg' ? 'jpg' : sub
-      files.push(new File([blob], `pasted.${ext}`, { type: mime }))
-    } catch {
-      // 忽略单张解析失败
-    }
-  }
-  return files
-}
-
-/** 从 HTML 中提取纯文本（用作无 text/plain 时的后备） */
-function stripHtmlToText(html: string): string {
-  const doc = new DOMParser().parseFromString(html, 'text/html')
-  return (doc.body?.textContent ?? '').trim()
-}
-
-/** 将后端返回的 base64 图片转为 File，供 select-images 使用 */
-function base64ToFile(b64: string, mimeType: string, name: string): File {
-  const bin = atob(b64)
-  const bytes = new Uint8Array(bin.length)
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
-  return new File([bytes], name || 'pasted.png', { type: mimeType })
-}
-
-/**
  * 处理粘贴：支持从剪贴板粘贴图片，以及图片+文字混排一次性粘贴。
- * 纯图片来自 clipboardData.files；data URL 从 HTML 解析；file:// 由后端 /api/clipboard/resolve-rich-paste 解析。
+ * 解析逻辑已抽到 shared richPaste util；主聊天这里额外套一层图片白名单。
  */
 async function handlePaste(e: ClipboardEvent) {
-  const dt = e.clipboardData
-  if (!dt) return
-
-  const imageFiles: File[] = []
-  let hasHtml = false
-
-  for (const item of Array.from(dt.items)) {
-    if (item.kind === 'file' && item.type.startsWith('image/')) {
-      const file = item.getAsFile()
-      if (file) imageFiles.push(file)
-    }
-    if (item.kind === 'string' && item.type === 'text/html') {
-      hasHtml = true
-    }
-  }
-
-  const plainText = dt.getData('text/plain')
-  const htmlText = dt.getData('text/html')
-
-  const finishPaste = (extraImages: File[], text: string) => {
-    const allImages = [...imageFiles, ...extraImages]
-    if (allImages.length > 0) emit('select-images', allImages)
-    if (text) insertTextAtCursor(text)
-  }
-
-  if (imageFiles.length > 0) {
+  const resolved = await resolveRichPaste(e.clipboardData)
+  if (!resolved) return
+  if (resolved.files.length > 0 || resolved.text) {
     e.preventDefault()
-    finishPaste([], plainText)
-    return
   }
-
-  if (hasHtml) {
-    e.preventDefault()
-    const hasFileUrls = /file:\/\//i.test(htmlText || '')
-    if (hasFileUrls) {
-      try {
-        const res = await apiPost<{ text: string; images: { base64: string; mimeType: string; name: string }[] }>(
-          '/api/clipboard/resolve-rich-paste',
-          { text: plainText, html: htmlText }
-        )
-        const files = (res.images || []).map((img) => base64ToFile(img.base64, img.mimeType, img.name))
-        finishPaste(files, res.text || plainText || stripHtmlToText(htmlText || ''))
-        return
-      } catch {
-        // 接口失败时回退为仅解析 data URL + 文本
-      }
-    }
-    const fromHtml = htmlText ? extractImageFilesFromHtml(htmlText) : []
-    const finalText = plainText || (htmlText ? stripHtmlToText(htmlText) : '')
-    finishPaste(fromHtml, finalText)
+  if (resolved.files.length > 0) {
+    await handleIncomingMainChatFiles(resolved.files)
+  }
+  if (resolved.text) {
+    insertTextAtCursor(resolved.text)
   }
 }
 
@@ -715,7 +648,7 @@ defineExpose({ getAssistantFabRect, setAssistantTopPx: setAssistantTopPxFromSepa
     <button
       ref="assistantFabButtonRef"
       type="button"
-      class="assistant-button w-12 h-12 rounded-xl bg-assistant text-on-brand font-bold shadow-lg shadow-assistant/30 hover:bg-assistant/80 transition-[transform,background-color,box-shadow] border border-[var(--color-border)] hover:scale-105 active:scale-95 flex items-center justify-center backdrop-blur-sm cursor-grab active:cursor-grabbing"
+      class="chat-fab-surface w-12 h-12 rounded-xl font-bold shadow-lg transition-[transform,background-color,box-shadow] border border-[var(--color-border)] hover:scale-105 active:scale-95 flex items-center justify-center backdrop-blur-sm cursor-grab active:cursor-grabbing"
       :style="fabStyle"
       @pointerdown="assistantFabPointerDown"
       @pointermove="assistantFabPointerMove"
@@ -814,9 +747,5 @@ defineExpose({ getAssistantFabRect, setAssistantTopPx: setAssistantTopPxFromSepa
 .draft-helper-menu {
   backdrop-filter: blur(var(--blur-light));
   -webkit-backdrop-filter: blur(var(--blur-light));
-}
-
-.assistant-button {
-  background-color: var(--color-border-subtle);
 }
 </style>

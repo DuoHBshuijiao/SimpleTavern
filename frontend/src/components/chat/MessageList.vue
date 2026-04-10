@@ -860,14 +860,19 @@ onBeforeUnmount(() => {
           <!-- 思考链气泡：在角色名下方、正文上方，小圆角，默认折叠 80px；点击气泡或图标展开，展开时点击图标收起；多轮回复按 messageId 显示对应思考内容 -->
           <div
             v-if="m.role === 'assistant' && getReasoningForMessage(m)"
-            class="reasoning-bubble-surface w-full max-w-full rounded-lg text-xs leading-relaxed relative transition-[max-height] duration-300 mb-2"
-            :class="isReasoningExpanded(m.id) ? 'max-h-[80vh] overflow-y-auto' : 'max-h-[80px] overflow-hidden cursor-pointer'"
+            class="reasoning-bubble-surface w-full max-w-full rounded-lg text-xs leading-relaxed relative transition-[max-height] duration-300 ease-in-out mb-2"
+            :class="isReasoningExpanded(m.id) ? 'max-h-[80vh] overflow-hidden' : 'max-h-[80px] overflow-hidden cursor-pointer'"
             @click="expandReasoning(m.id, $event)"
           >
-            <div class="pr-8 py-2.5 pl-3 whitespace-pre-wrap break-words">{{ getReasoningForMessage(m) }}</div>
+            <div
+              class="pr-8 py-2.5 pl-3 whitespace-pre-wrap break-words transition-[max-height] duration-300 ease-in-out"
+              :class="isReasoningExpanded(m.id) ? 'max-h-[80vh] overflow-y-auto' : 'max-h-[80px] overflow-hidden'"
+            >
+              {{ getReasoningForMessage(m) }}
+            </div>
             <button
               type="button"
-              class="reasoning-toggle-icon absolute top-2 right-2 w-6 h-6 flex items-center justify-center rounded hover:bg-white/10 transition-transform duration-200"
+              class="reasoning-toggle-icon absolute top-2 right-2 z-10 w-6 h-6 flex items-center justify-center rounded hover:bg-white/10 transition-transform duration-200"
               :class="isReasoningExpanded(m.id) ? 'rotate-90' : ''"
               :aria-label="isReasoningExpanded(m.id) ? '收起思考' : '展开思考'"
               @click="toggleReasoning(m.id, $event)"
