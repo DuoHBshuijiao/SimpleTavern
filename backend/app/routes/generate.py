@@ -22,7 +22,6 @@
 
 from __future__ import annotations
 
-import base64
 import json
 import re
 from datetime import datetime
@@ -44,6 +43,7 @@ from app.schemas import (
     GroupGenerateRequest,
     SingleInterjectRequest,
 )
+from app.services.user_message_content import build_user_message_content
 from app.storage import load_character, load_chat, load_chat_image_bytes, load_settings, save_chat, save_settings
 from app.storage import list_worldbooks
 from app.tokenizer_service import count_tokens, count_tokens_for_messages, trim_messages_to_context
@@ -181,38 +181,25 @@ def _resolve_and_append_global_prefill(
     return resolved
 
 
-def _build_data_url(image_bytes: bytes, mime_type: str) -> str:
-    return f"data:{mime_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
-
-
 def _message_to_openai_content(
     chat,
     msg: ChatMessage,
     *,
     image_fallback_mode: bool,
 ) -> str | list[dict[str, Any]]:
-    text = msg.content or ""
     images = getattr(msg, "images", []) or []
-    if not images:
-        return text
-    if image_fallback_mode:
-        suffix = "\n".join("[image]" for _ in images)
-        return f"{text}\n{suffix}".strip()
-    parts: list[dict[str, Any]] = []
-    if text.strip():
-        parts.append({"type": "text", "text": text})
+    image_items: list[tuple[bytes, str]] = []
     for img in images:
         try:
             b = load_chat_image_bytes(chat, img)
-            parts.append({
-                "type": "image_url",
-                "image_url": {"url": _build_data_url(b, img.mimeType or "image/png")},
-            })
+            image_items.append((b, img.mimeType or "image/png"))
         except FileNotFoundError:
-            parts.append({"type": "text", "text": "[image]"})
-    if not parts:
-        return ""
-    return parts
+            continue
+    return build_user_message_content(
+        msg.content or "",
+        image_items=image_items,
+        image_fallback_mode=image_fallback_mode,
+    )
 
 
 def _resolve_char_name_for_history_message(
