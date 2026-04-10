@@ -39,13 +39,15 @@ import { ref } from 'vue'
 import type { ComputedRef } from 'vue'
 import { apiGet, apiPost, apiPut, apiDelete } from '../api/http'
 import { postAndConsumeSse } from '../api/sse'
-import { notifyConfirm } from './useNotify'
+import { notifyConfirm, notifyMessage } from './useNotify'
+import type { AssistantAttachment } from '../types/models'
 
 export type AssistantMessage = {
   id: string
   role: 'user' | 'assistant' | 'system' | 'tool' | 'reasoning'
   content: string
   ts: string
+  attachments?: AssistantAttachment[]
   /** 持久化助手消息上的推理/思考链（与后端 reasoningContent 对齐；仅 assistant 从 API 恢复时可能有） */
   reasoningContent?: string | null
   /** OpenAI 对齐：对应 assistant.tool_calls[].id */
@@ -55,6 +57,25 @@ export type AssistantMessage = {
 }
 
 export type AssistantScope = 'chat' | 'workspace'
+
+type AssistantIngestResponse = {
+  attachments: AssistantAttachment[]
+  workspaceSessionId?: string | null
+}
+
+/** 程序化发送助手消息时的选项（如自动记忆总结） */
+export type SendAssistantMessageOptions = {
+  /** 覆盖输入框草稿的正文 */
+  userMessageOverride?: string
+  /** 仅本次请求覆盖「记忆写入」开关（聊天作用域） */
+  allowWriteMemoryOverride?: boolean
+  /** 仅本次请求覆盖「破坏性工具」开关 */
+  allowDestructiveToolsOverride?: boolean
+}
+
+/** 自动触发记忆总结时注入助手会话的 user 正文 */
+export const AUTO_MEMORY_SUMMARY_USER_MESSAGE =
+  '[这是一条自动消息]：用户要求你现在阅读最近的聊天内容，然后总结故事发展，关键人物，承诺，物品，情绪变化等，追加到长期记忆中。'
 
 export interface AssistantSettings {
   temperature: number | null
@@ -93,6 +114,7 @@ export function useAssistant(options: UseAssistantOptions) {
   // Chat scope 状态
   const assistantMessages = ref<AssistantMessage[]>([])
   const assistantDraft = ref('')
+  const assistantDraftAttachments = ref<AssistantAttachment[]>([])
   const isAssistantGenerating = ref(false)
   const assistantStreamError = ref<string | null>(null)
   /** 当前正在流式接收的正文（仅 chat 作用域），用于实时打字机效果 */
@@ -103,6 +125,8 @@ export function useAssistant(options: UseAssistantOptions) {
   // Workspace scope 状态
   const workspaceAssistantMessages = ref<AssistantMessage[]>([])
   const workspaceAssistantDraft = ref('')
+  const workspaceAssistantDraftAttachments = ref<AssistantAttachment[]>([])
+  const workspaceSessionId = ref<string | null>(null)
   const isWorkspaceAssistantGenerating = ref(false)
   const workspaceAssistantStreamError = ref<string | null>(null)
   const workspaceStreamingContent = ref('')
@@ -238,6 +262,70 @@ export function useAssistant(options: UseAssistantOptions) {
     }
   }
 
+  function getDraftAttachmentsRef(scope: AssistantScope) {
+    return scope === 'workspace' ? workspaceAssistantDraftAttachments : assistantDraftAttachments
+  }
+
+  function clearDraftAttachments(scope: AssistantScope) {
+    getDraftAttachmentsRef(scope).value = []
+  }
+
+  function removeDraftAttachment(scope: AssistantScope, attachmentId: string) {
+    const draftAttachments = getDraftAttachmentsRef(scope)
+    draftAttachments.value = draftAttachments.value.filter((attachment) => attachment.id !== attachmentId)
+  }
+
+  function fileToDataUrl(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result || ''))
+      reader.onerror = () => reject(new Error(`failed to read file: ${file.name}`))
+      reader.readAsDataURL(file)
+    })
+  }
+
+  async function ingestDraftFiles(scope: AssistantScope, files: File[]) {
+    if (!files.length) return
+    if (scope === 'chat' && !chatId.value) {
+      await notifyMessage('当前没有激活会话，无法添加助手附件。', { title: '提示' })
+      return
+    }
+    const payloadFiles = await Promise.all(
+      files.map(async (file) => ({
+        fileData: await fileToDataUrl(file),
+        mimeType: file.type || 'application/octet-stream',
+        originalName: file.name,
+      })),
+    )
+    const res = await apiPost<AssistantIngestResponse>('/api/assistant/attachments/ingest', {
+      scope,
+      chatId: scope === 'chat' ? chatId.value : null,
+      workspaceSessionId: scope === 'workspace' ? workspaceSessionId.value : null,
+      files: payloadFiles,
+    })
+    if (scope === 'workspace' && res.workspaceSessionId) {
+      workspaceSessionId.value = res.workspaceSessionId
+    }
+    if (!res.attachments?.length) return
+    const draftAttachments = getDraftAttachmentsRef(scope)
+    const existingIds = new Set(draftAttachments.value.map((attachment) => attachment.id))
+    draftAttachments.value = [
+      ...draftAttachments.value,
+      ...res.attachments.filter((attachment) => !existingIds.has(attachment.id)),
+    ]
+  }
+
+  async function cleanupWorkspaceSession() {
+    const sessionId = workspaceSessionId.value
+    if (!sessionId) return
+    try {
+      await apiPost('/api/assistant/workspace/session/cleanup', { sessionId })
+    } finally {
+      workspaceSessionId.value = null
+      workspaceAssistantDraftAttachments.value = []
+    }
+  }
+
   /**
    * 构建助手API路径
    *
@@ -292,6 +380,9 @@ export function useAssistant(options: UseAssistantOptions) {
           role: m.role as 'user' | 'assistant' | 'system' | 'tool',
           content: m.content ?? '',
           ts: m.ts ?? new Date().toISOString(),
+          attachments: Array.isArray((m as { attachments?: unknown }).attachments)
+            ? ((m as { attachments: AssistantAttachment[] }).attachments)
+            : undefined,
           reasoningContent: rc && rc.trim() ? rc : undefined,
           tool_call_id:
             typeof (m as { tool_call_id?: unknown }).tool_call_id === 'string'
@@ -491,6 +582,7 @@ export function useAssistant(options: UseAssistantOptions) {
     }
     assistantMessages.value = []
     assistantDraft.value = ''
+    assistantDraftAttachments.value = []
     assistantStreamError.value = null
   }
 
@@ -506,6 +598,7 @@ export function useAssistant(options: UseAssistantOptions) {
     await apiPost('/api/assistant/reset?scope=workspace', {})
     workspaceAssistantMessages.value = []
     workspaceAssistantDraft.value = ''
+    workspaceAssistantDraftAttachments.value = []
     workspaceAssistantStreamError.value = null
   }
 
@@ -519,6 +612,9 @@ export function useAssistant(options: UseAssistantOptions) {
    */
   async function deleteWorkspaceChat() {
     await apiPost('/api/assistant/workspace/chat/delete', {})
+    workspaceAssistantMessages.value = []
+    workspaceAssistantDraft.value = ''
+    workspaceAssistantDraftAttachments.value = []
   }
 
   /**
@@ -690,20 +786,28 @@ export function useAssistant(options: UseAssistantOptions) {
    * @param {AssistantScope} scope - 作用域（'chat'或'workspace'）
    * @param {boolean | Event} appendUserMessage - 是否追加用户消息到消息列表
    * @param {(card: unknown) => void} [onCardReceived] - 接收角色卡的回调函数（可选）
+   * @param {SendAssistantMessageOptions} [sendOptions] - 程序化发送选项（覆盖草稿与本次请求的权限）
    * @returns {Promise<void>} 完成时返回
    */
   async function sendMessage(
     scope: AssistantScope, 
     appendUserMessage: boolean | Event = true,
-    onCardReceived?: (card: unknown) => void
+    onCardReceived?: (card: unknown) => void,
+    sendOptions?: SendAssistantMessageOptions,
   ) {
     const state = getState(scope)
     const shouldAppend = typeof appendUserMessage === 'boolean' ? appendUserMessage : true
-    const text = state.draft.value.trim()
-    if (shouldAppend && !text) return
+    const draftAttachments = shouldAppend && !sendOptions?.userMessageOverride
+      ? [...getDraftAttachmentsRef(scope).value]
+      : []
+    const text = (sendOptions?.userMessageOverride ?? state.draft.value).trim()
+    if (shouldAppend && !text && draftAttachments.length === 0) return
     if (state.isGenerating.value) return
     
-    if (shouldAppend) state.draft.value = ''
+    if (shouldAppend && !sendOptions?.userMessageOverride) {
+      state.draft.value = ''
+      clearDraftAttachments(scope)
+    }
     state.streamError.value = null
 
     const now = new Date().toISOString()
@@ -714,6 +818,7 @@ export function useAssistant(options: UseAssistantOptions) {
         id: `assistant_user_${Date.now()}`,
         role: 'user',
         content: text,
+        attachments: draftAttachments,
         ts: now,
       })
     }
@@ -725,15 +830,26 @@ export function useAssistant(options: UseAssistantOptions) {
     assistantAborters[scope] = new AbortController()
 
     const useStream = streamEnabled?.value !== false
+    const allowWriteMemory =
+      scope === 'chat'
+        ? sendOptions?.allowWriteMemoryOverride !== undefined
+          ? sendOptions.allowWriteMemoryOverride
+          : allowWriteMemoryEnabled.value
+        : false
+    const allowDestructiveTools =
+      sendOptions?.allowDestructiveToolsOverride !== undefined
+        ? sendOptions.allowDestructiveToolsOverride
+        : allowDestructiveToolsEnabled.value
     const body = {
       userMessage: text,
       model: assistantSettings.value.model,
       temperature: assistantSettings.value.temperature,
       appendUserMessage: shouldAppend,
       chatId: scope === 'chat' ? chatId.value : null,
-      allowWriteMemory: scope === 'chat' ? allowWriteMemoryEnabled.value : false,
-      allowDestructiveTools: allowDestructiveToolsEnabled.value,
+      allowWriteMemory,
+      allowDestructiveTools,
       scope,
+      attachments: draftAttachments,
     }
 
     let aborted = false
@@ -977,10 +1093,26 @@ export function useAssistant(options: UseAssistantOptions) {
     await saveSettings()
   }
 
+  /**
+   * 以 user 身份发送自动记忆总结提示并流式完成（本次请求强制允许写入长期记忆、禁止破坏性工具）。
+   * @returns 是否未出现 stream 错误
+   */
+  async function runAutoMemorySummaryPrompt(): Promise<boolean> {
+    const state = getState('chat')
+    state.streamError.value = null
+    await sendMessage('chat', true, undefined, {
+      userMessageOverride: AUTO_MEMORY_SUMMARY_USER_MESSAGE,
+      allowWriteMemoryOverride: true,
+      allowDestructiveToolsOverride: false,
+    })
+    return !state.streamError.value
+  }
+
   return {
     // Chat scope 状态
     assistantMessages,
     assistantDraft,
+    assistantDraftAttachments,
     isAssistantGenerating,
     assistantStreamError,
     assistantStreamingContent,
@@ -989,6 +1121,8 @@ export function useAssistant(options: UseAssistantOptions) {
     // Workspace scope 状态
     workspaceAssistantMessages,
     workspaceAssistantDraft,
+    workspaceAssistantDraftAttachments,
+    workspaceSessionId,
     isWorkspaceAssistantGenerating,
     workspaceAssistantStreamError,
     workspaceStreamingContent,
@@ -1021,6 +1155,10 @@ export function useAssistant(options: UseAssistantOptions) {
     resetChat,
     resetWorkspaceChat,
     deleteWorkspaceChat,
+    ingestDraftFiles,
+    removeDraftAttachment,
+    clearDraftAttachments,
+    cleanupWorkspaceSession,
     openEditMessage,
     closeEditMessage,
     saveEditedMessage,
@@ -1028,6 +1166,7 @@ export function useAssistant(options: UseAssistantOptions) {
     deleteMessage,
     rewriteMessage,
     sendMessage,
+    runAutoMemorySummaryPrompt,
     handleModelSelect,
   }
 }

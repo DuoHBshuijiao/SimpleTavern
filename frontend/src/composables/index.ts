@@ -26,13 +26,15 @@ export { useGroupChat } from './useGroupChat'
 export type { UseGroupChat, GroupChatDeps } from './useGroupChat'
 
 export { useAssistant } from './useAssistant'
-export type { 
-  UseAssistant, 
-  AssistantMessage, 
-  AssistantScope, 
+export type {
+  UseAssistant,
+  AssistantMessage,
+  AssistantScope,
   AssistantSettings,
-  UseAssistantOptions 
+  UseAssistantOptions,
+  SendAssistantMessageOptions,
 } from './useAssistant'
+export { AUTO_MEMORY_SUMMARY_USER_MESSAGE } from './useAssistant'
 
 export { useChatActions } from './useChatActions'
 export type { UseChatActions, ChatActionsDeps } from './useChatActions'
