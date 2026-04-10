@@ -34,7 +34,7 @@
  *    - 依赖：依赖vue、stores、api/http.ts
  *    - 位置：组件层，提供设置管理功能
  */
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useChatsStore, useCharactersStore, useSettingsStore } from '../stores'
 import {
   normalizeReasoningEffort,
@@ -512,6 +512,20 @@ function ensureOverrides(v?: Partial<ChatOverrides> | null): ChatOverrides {
     },
     memberSettings: v?.memberSettings ? { ...v.memberSettings } : undefined,
     tts: ensureTtsSessionConfig(v?.tts),
+    autoMemorySummaryEveryN:
+      typeof v?.autoMemorySummaryEveryN === 'number' &&
+      Number.isFinite(v.autoMemorySummaryEveryN) &&
+      v.autoMemorySummaryEveryN >= 1
+        ? Math.floor(v.autoMemorySummaryEveryN)
+        : null,
+    lastAutoMemorySummaryAfterMessageId: v?.lastAutoMemorySummaryAfterMessageId ?? null,
+    autoMemorySummarySilent: v?.autoMemorySummarySilent === true,
+    autoMemorySummaryNextAskTier:
+      typeof v?.autoMemorySummaryNextAskTier === 'number' &&
+      Number.isFinite(v.autoMemorySummaryNextAskTier) &&
+      v.autoMemorySummaryNextAskTier >= 1
+        ? Math.floor(v.autoMemorySummaryNextAskTier)
+        : 1,
   }
 }
 
@@ -1209,6 +1223,107 @@ function handleWorldBookOrderDragEnd() {
   worldBookOrderDraggingIdx.value = null
 }
 
+const apiPresetOrderDraggingIdx = ref<number | null>(null)
+
+function handleApiPresetOrderDragStart(idx: number) {
+  if (!globalDraft.value) return
+  apiPresetOrderDraggingIdx.value = idx
+}
+
+function handleApiPresetOrderDragOver(e: DragEvent, idx: number) {
+  e.preventDefault()
+  if (!globalDraft.value) return
+  const from = apiPresetOrderDraggingIdx.value
+  if (from === null || from === idx) return
+  const arr = [...globalDraft.value.apiPresets]
+  const item = arr.splice(from, 1)[0]
+  if (item) {
+    arr.splice(idx, 0, item)
+    globalDraft.value.apiPresets = arr
+    apiPresetOrderDraggingIdx.value = idx
+  }
+}
+
+function handleApiPresetOrderDragEnd() {
+  apiPresetOrderDraggingIdx.value = null
+}
+
+const drawerScrollRef = ref<HTMLElement | null>(null)
+const presetListHeaderRef = ref<HTMLElement | null>(null)
+const presetListMaxHeightPx = ref<number | null>(null)
+
+const PRESET_LIST_SCROLL_GAP_PX = 4
+const PRESET_LIST_MIN_HEIGHT_PX = 120
+
+let presetListHeightRaf = 0
+function schedulePresetListMaxHeight() {
+  if (presetListHeightRaf) cancelAnimationFrame(presetListHeightRaf)
+  presetListHeightRaf = requestAnimationFrame(() => {
+    presetListHeightRaf = 0
+    updatePresetListMaxHeight()
+  })
+}
+
+function updatePresetListMaxHeight() {
+  if (!props.show || tab.value !== 'presets' || !preloaded.value) {
+    presetListMaxHeightPx.value = null
+    return
+  }
+  const scroll = drawerScrollRef.value
+  const header = presetListHeaderRef.value
+  if (!scroll || !header) {
+    presetListMaxHeightPx.value = null
+    return
+  }
+  const scrollRect = scroll.getBoundingClientRect()
+  const headerRect = header.getBoundingClientRect()
+  if (scrollRect.height <= 0 || headerRect.height <= 0) {
+    presetListMaxHeightPx.value = null
+    return
+  }
+  const h = scrollRect.bottom - headerRect.bottom - PRESET_LIST_SCROLL_GAP_PX
+  presetListMaxHeightPx.value = Math.max(PRESET_LIST_MIN_HEIGHT_PX, Math.floor(h))
+}
+
+let presetListResizeObserver: ResizeObserver | null = null
+
+function teardownPresetListHeightObservers() {
+  if (presetListResizeObserver) {
+    presetListResizeObserver.disconnect()
+    presetListResizeObserver = null
+  }
+  const el = drawerScrollRef.value
+  if (el) {
+    el.removeEventListener('scroll', schedulePresetListMaxHeight)
+  }
+  window.removeEventListener('resize', schedulePresetListMaxHeight)
+}
+
+function setupPresetListHeightObservers() {
+  teardownPresetListHeightObservers()
+  if (!props.show || tab.value !== 'presets' || !preloaded.value) return
+  const el = drawerScrollRef.value
+  if (!el) return
+  presetListResizeObserver = new ResizeObserver(() => schedulePresetListMaxHeight())
+  presetListResizeObserver.observe(el)
+  el.addEventListener('scroll', schedulePresetListMaxHeight, { passive: true })
+  window.addEventListener('resize', schedulePresetListMaxHeight)
+  nextTick(() => schedulePresetListMaxHeight())
+}
+
+watch([() => props.show, tab, preloaded], () => {
+  if (!props.show || tab.value !== 'presets' || !preloaded.value) {
+    teardownPresetListHeightObservers()
+    presetListMaxHeightPx.value = null
+    return
+  }
+  nextTick(() => setupPresetListHeightObservers())
+}, { flush: 'post' })
+
+onUnmounted(() => {
+  teardownPresetListHeightObservers()
+})
+
 function worldBookName(worldbookId: string): string {
   return worldbooks.value.find((b) => b.id === worldbookId)?.name || worldbookId
 }
@@ -1559,16 +1674,12 @@ const currentChatCharacterVoiceRows = computed(() => {
 })
 
 const currentChatPersonaVoiceRows = computed(() => {
+  const chat = props.chat
+  if (!chat?.userPersonaId) return [] as Array<{ id: string; name: string }>
+  const personaId = chat.userPersonaId
   const personas = globalDraft.value?.userPersonas || []
-  const ids = new Set<string>()
-  for (const persona of personas) ids.add(persona.id)
-  if (props.chat?.userPersonaId) ids.add(props.chat.userPersonaId)
-  if (globalDraft.value?.selectedPersonaId) ids.add(globalDraft.value.selectedPersonaId)
-  return [...ids].map((id) => ({
-    id,
-    name: personas.find((persona) => persona.id === id)?.name || id,
-    current: props.chat?.userPersonaId === id,
-  }))
+  const name = personas.find((p) => p.id === personaId)?.name || personaId
+  return [{ id: personaId, name }]
 })
 
 const editingPresetVoiceCatalog = computed(() => normalizeVoiceCatalog(editingPreset.value?.voiceCatalog))
@@ -2120,6 +2231,10 @@ interface ComparableChatOverrides {
     context_message_limit: number | null
   }
   tts: ComparableTtsConfig | null
+  autoMemorySummaryEveryN: number | null
+  lastAutoMemorySummaryAfterMessageId: string | null
+  autoMemorySummarySilent: boolean
+  autoMemorySummaryNextAskTier: number
 }
 
 function normalizeWorldBookGlobalExclusions(ids: string[] | undefined): string[] {
@@ -2153,6 +2268,20 @@ function normalizeComparableChatOverrides(source?: Partial<ChatOverrides> | null
       context_message_limit: normalizePositiveInteger(draftHelp.context_message_limit),
     },
     tts: normalizeComparableTtsConfig(overrides.tts),
+    autoMemorySummaryEveryN:
+      typeof overrides.autoMemorySummaryEveryN === 'number' &&
+      Number.isFinite(overrides.autoMemorySummaryEveryN) &&
+      overrides.autoMemorySummaryEveryN >= 1
+        ? Math.floor(overrides.autoMemorySummaryEveryN)
+        : null,
+    lastAutoMemorySummaryAfterMessageId: overrides.lastAutoMemorySummaryAfterMessageId ?? null,
+    autoMemorySummarySilent: overrides.autoMemorySummarySilent === true,
+    autoMemorySummaryNextAskTier:
+      typeof overrides.autoMemorySummaryNextAskTier === 'number' &&
+      Number.isFinite(overrides.autoMemorySummaryNextAskTier) &&
+      overrides.autoMemorySummaryNextAskTier >= 1
+        ? Math.floor(overrides.autoMemorySummaryNextAskTier)
+        : 1,
   }
 }
 
@@ -2192,6 +2321,10 @@ function applyNormalizedComparableToDraft(source: ComparableChatOverrides) {
   chatDraft.value.draftHelp = { ...source.draftHelp }
   // 与 ensureOverrides 一致：Comparable 里「全默认」时 tts 为 null，但会话草稿必须始终持有 TtsSessionConfig，避免模板访问 chatDraft.tts.model 崩溃。
   chatDraft.value.tts = ensureTtsSessionConfig(source.tts)
+  chatDraft.value.autoMemorySummaryEveryN = source.autoMemorySummaryEveryN
+  chatDraft.value.lastAutoMemorySummaryAfterMessageId = source.lastAutoMemorySummaryAfterMessageId
+  chatDraft.value.autoMemorySummarySilent = source.autoMemorySummarySilent
+  chatDraft.value.autoMemorySummaryNextAskTier = source.autoMemorySummaryNextAskTier
 }
 
 async function ensureCharactersLoadedForSave() {
@@ -2216,6 +2349,31 @@ function handleGlobalDraftHelpLimitInput(e: Event) {
     globalDraft.value!.draftHelpDefaults = ensureDraftHelpDefaults(globalDraft.value!.draftHelpDefaults)
     globalDraft.value!.draftHelpDefaults.context_message_limit = value
   }, input)
+}
+
+function setAutoMemorySummarySilent(v: boolean) {
+  if (!chatDraft.value) return
+  chatDraft.value.autoMemorySummarySilent = v
+}
+
+function onAutoMemorySummaryEveryNInput(e: Event) {
+  const input = e.target as HTMLInputElement | null
+  if (!chatDraft.value) return
+  const raw = (input?.value ?? '').trim()
+  if (raw === '') {
+    chatDraft.value.autoMemorySummaryEveryN = null
+    chatDraft.value.autoMemorySummaryNextAskTier = 1
+    return
+  }
+  const n = Number.parseInt(raw, 10)
+  if (!Number.isFinite(n) || n < 1) {
+    chatDraft.value.autoMemorySummaryEveryN = null
+    chatDraft.value.autoMemorySummaryNextAskTier = 1
+    return
+  }
+  const prev = chatDraft.value.autoMemorySummaryEveryN
+  chatDraft.value.autoMemorySummaryEveryN = n
+  if (prev !== n) chatDraft.value.autoMemorySummaryNextAskTier = 1
 }
 
 function handleChatDraftHelpLimitInput(e: Event) {
@@ -2554,7 +2712,10 @@ async function checkUpdate() {
         </div>
 
         <!-- Content -->
-        <div class="drawer-scroll flex-1 min-h-0 overflow-y-auto p-6 custom-scrollbar bg-transparent">
+        <div
+          ref="drawerScrollRef"
+          class="drawer-scroll flex-1 min-h-0 overflow-y-auto p-6 custom-scrollbar bg-transparent"
+        >
           <!-- Global Settings -->
           <div v-if="preloaded" v-show="tab === 'global'" class="space-y-6">
             <div v-if="!globalDraft" class="text-center text-[var(--color-text-muted)] py-8">加载中...</div>
@@ -3197,7 +3358,7 @@ async function checkUpdate() {
                   <div
                     class="sticky top-0 z-10 flex min-w-0 flex-[0_0_min(11rem,34%)] flex-col self-start border-r border-[var(--color-border-subtle)] pr-3"
                   >
-                      <div class="mb-2 flex items-center justify-between gap-1.5">
+                      <div ref="presetListHeaderRef" class="mb-2 flex items-center justify-between gap-1.5">
                           <span class="shrink-0 text-xs font-bold text-[var(--color-text-secondary)] sm:text-sm">预设列表</span>
                           <button
                             type="button"
@@ -3207,23 +3368,39 @@ async function checkUpdate() {
                             + 新建
                           </button>
                       </div>
-                      <div class="drawer-scroll max-h-[min(55vh,22rem)] space-y-1 overflow-y-auto custom-scrollbar">
-                          <div 
-                              v-for="p in globalDraft.apiPresets" 
+                      <div
+                        class="drawer-scroll space-y-1 overflow-y-auto custom-scrollbar"
+                        :style="
+                          presetListMaxHeightPx != null
+                            ? { maxHeight: `${presetListMaxHeightPx}px` }
+                            : { maxHeight: 'min(55vh, 22rem)' }
+                        "
+                      >
+                          <div
+                              v-for="(p, idx) in globalDraft.apiPresets"
                               :key="p.id"
-                              class="group relative flex min-h-10 cursor-pointer items-center rounded-lg py-1.5 pl-2 pr-1 text-sm transition-colors"
-                              :class="editingPresetId === p.id ? 'bg-brand-a10 text-brand' : 'text-[var(--color-text-secondary)] hover:bg-surface-muted'"
+                              draggable="true"
+                              class="group relative flex min-h-10 cursor-grab items-center rounded-lg py-1.5 pl-2 pr-1 text-sm transition-colors active:cursor-grabbing"
+                              :class="[
+                                editingPresetId === p.id ? 'bg-brand-a10 text-brand' : 'text-[var(--color-text-secondary)] hover:bg-surface-muted',
+                                apiPresetOrderDraggingIdx === idx ? 'opacity-50 ring-1 ring-brand-a50' : '',
+                              ]"
                               @click="editingPresetId = p.id"
+                              @dragstart="handleApiPresetOrderDragStart(idx)"
+                              @dragover="handleApiPresetOrderDragOver($event, idx)"
+                              @dragend="handleApiPresetOrderDragEnd"
                           >
                               <span class="min-w-0 max-w-full truncate pr-7">{{ p.name }}</span>
                               <span
                                 v-if="isTtsPreset(p)"
+                                draggable="false"
                                 class="absolute right-8 top-1.5 text-[11px] font-semibold leading-none text-brand"
                                 aria-label="TTS 预设"
                                 title="TTS 预设"
                               >t</span>
                               <button
                                 type="button"
+                                draggable="false"
                                 class="absolute right-0.5 top-1/2 inline-flex min-h-8 min-w-8 -translate-y-1/2 items-center justify-center rounded-md text-[var(--color-text-muted)] opacity-0 pointer-events-none touch-manipulation hover:text-error group-hover:pointer-events-auto group-hover:opacity-100"
                                 @click.stop="deletePreset(p.id)"
                               >
@@ -3787,6 +3964,30 @@ async function checkUpdate() {
                   placeholder="会插入系统提示词，留空则不启用"
                   class="input textarea w-full resize-y"
                 ></textarea>
+                <div class="flex flex-wrap items-end gap-3 pt-1">
+                  <div class="space-y-1 min-w-[12rem] flex-1">
+                    <label class="block text-xs font-medium text-[var(--color-text-secondary)]">每隔几条消息自动总结</label>
+                    <input
+                      :value="chatDraft.autoMemorySummaryEveryN ?? ''"
+                      type="number"
+                      min="1"
+                      step="1"
+                      placeholder="关闭"
+                      class="input w-full"
+                      @input="onAutoMemorySummaryEveryNInput"
+                    />
+                  </div>
+                  <label class="flex items-center gap-2 cursor-pointer select-none pb-1.5 shrink-0">
+                    <ThemedCheckbox
+                      :checked="chatDraft.autoMemorySummarySilent === true"
+                      @update:checked="setAutoMemorySummarySilent"
+                    />
+                    <span class="text-sm text-[var(--color-text-secondary)]">静默总结</span>
+                  </label>
+                </div>
+                <p class="text-xs text-[var(--color-text-muted)]">
+                  关闭「静默总结」时，达到阈值会先询问；若拒绝则下次在 n×2、n×3… 条时再问。达到条件时若主聊仍在生成回复，会等生成结束后再判断。
+                </p>
               </div>
 
                <div class="space-y-1.5">
@@ -3975,15 +4176,15 @@ async function checkUpdate() {
                     @dragover="handleWorldBookOrderDragOver($event, idx)"
                     @dragend="handleWorldBookOrderDragEnd"
                   >
-                    <div class="flex min-w-0 flex-1 flex-col gap-0.5">
-                      <div class="flex items-center gap-1.5">
-                        <span class="shrink-0 cursor-grab text-[var(--color-text-muted)] active:cursor-grabbing" aria-hidden="true">
-                          <GripVertical class="w-4 h-4" />
-                        </span>
+                    <div class="flex min-w-0 flex-1 items-center gap-1.5">
+                      <span class="shrink-0 cursor-grab text-[var(--color-text-muted)] active:cursor-grabbing" aria-hidden="true">
+                        <GripVertical class="w-4 h-4" />
+                      </span>
+                      <div class="flex min-w-0 flex-1 flex-col gap-0.5">
                         <span class="truncate text-xs text-[var(--color-text)]">{{ idx + 1 }}. {{ worldBookName(att.worldBookId) }}</span>
-                      </div>
-                      <div class="text-[10px] text-[var(--color-text-muted)] pl-6">
-                        扫描：{{ scanDepthDisplay(att.scanDepth) }}　深度：{{ att.insertDepth ?? 5 }}
+                        <div class="text-[10px] text-[var(--color-text-muted)] leading-tight">
+                          扫描：{{ scanDepthDisplay(att.scanDepth) }}　深度：{{ att.insertDepth ?? 5 }}
+                        </div>
                       </div>
                     </div>
                     <div class="flex shrink-0 flex-wrap items-center gap-1 justify-end">
@@ -4142,10 +4343,7 @@ async function checkUpdate() {
                         :key="row.id"
                         class="grid items-center gap-2 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay px-3 py-2 md:grid-cols-[minmax(0,11rem)_1fr]"
                       >
-                        <div class="flex min-h-8 items-center text-xs text-[var(--color-text-secondary)]">
-                          {{ row.name }}
-                          <span v-if="row.current" class="ml-1 text-brand">当前</span>
-                        </div>
+                        <div class="flex min-h-8 items-center text-xs text-[var(--color-text-secondary)]">{{ row.name }}</div>
                         <TtsVoiceInput
                           :model-value="getPersonaVoiceValue(row.id)"
                           :voices="availableTtsVoices"
@@ -4153,6 +4351,12 @@ async function checkUpdate() {
                           @update:model-value="updatePersonaVoiceValue(row.id, $event)"
                         />
                       </div>
+                    </div>
+                    <div
+                      v-else-if="chat && !chat.userPersonaId"
+                      class="text-xs text-[var(--color-text-muted)]"
+                    >
+                      当前会话未绑定用户身份，请先在侧栏选择用户身份后再配置音色。
                     </div>
                     <div v-else class="text-xs text-[var(--color-text-muted)]">当前没有可用的用户身份音色入口。</div>
                     <p v-if="availableTtsVoices.length === 0" class="text-xs text-[var(--color-text-muted)]">
