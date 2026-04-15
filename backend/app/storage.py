@@ -146,6 +146,16 @@ def _page_backgrounds_dir() -> Path:
     return _data_dir() / "page_backgrounds"
 
 
+def _shader_presets_dir() -> Path:
+    """
+    获取 WebGPU 着色器预设目录路径
+
+    Returns:
+        Path: data/shader_presets 目录的Path对象
+    """
+    return _data_dir() / "shader_presets"
+
+
 def _worldbooks_dir() -> Path:
     """
     获取世界书目录路径
@@ -284,6 +294,7 @@ def ensure_data_initialized() -> None:
     _avatars_dir().mkdir(parents=True, exist_ok=True)
     _fonts_dir().mkdir(parents=True, exist_ok=True)
     _page_backgrounds_dir().mkdir(parents=True, exist_ok=True)
+    _shader_presets_dir().mkdir(parents=True, exist_ok=True)
     _ai_workspace_dir().mkdir(parents=True, exist_ok=True)
     _assistant_ingest_dir().mkdir(parents=True, exist_ok=True)
     _worldbooks_dir().mkdir(parents=True, exist_ok=True)
@@ -1507,6 +1518,73 @@ def delete_page_background(filename: str) -> None:
     if not filename:
         return
     p = page_background_path(filename)
+    if p.exists():
+        p.unlink(missing_ok=True)
+
+
+def shader_presets_dir() -> Path:
+    """
+    获取 WebGPU 着色器预设目录路径（公开接口）
+
+    Returns:
+        Path: data/shader_presets 目录路径
+    """
+    return _shader_presets_dir()
+
+
+def shader_preset_path(filename: str) -> Path:
+    """
+    获取 WebGPU 着色器预设文件路径
+
+    Args:
+        filename: 着色器文件名
+
+    Returns:
+        Path: 着色器文件完整路径
+    """
+    return _shader_presets_dir() / filename
+
+
+def save_shader_preset(filename: str, source: str) -> str:
+    """
+    保存 WebGPU 着色器预设源码到 data/shader_presets。
+
+    Args:
+        filename: 着色器文件名（需为安全文件名）
+        source: WGSL 源码
+
+    Returns:
+        str: 保存后的文件名
+    """
+    p = shader_preset_path(filename)
+    p.write_text(source, encoding="utf-8")
+    return filename
+
+
+def load_shader_preset(filename: str) -> str:
+    """
+    读取 WebGPU 着色器预设源码。
+
+    Args:
+        filename: 着色器文件名
+
+    Returns:
+        str: WGSL 源码
+    """
+    p = shader_preset_path(filename)
+    return p.read_text(encoding="utf-8")
+
+
+def delete_shader_preset(filename: str) -> None:
+    """
+    删除 WebGPU 着色器预设文件
+
+    Args:
+        filename: 着色器文件名
+    """
+    if not filename:
+        return
+    p = shader_preset_path(filename)
     if p.exists():
         p.unlink(missing_ok=True)
 
