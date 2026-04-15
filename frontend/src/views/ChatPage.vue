@@ -76,6 +76,8 @@ import {
   useSettingsImport,
 } from '../composables'
 import { usePageBackground } from '../composables/usePageBackground'
+import { useWebGpuBackground } from '../composables/useWebGpuBackground'
+import { useWebGpuBackgroundRuntime } from '../composables/useWebGpuBackgroundRuntime'
 
 // 子组件
 import { ChatSidebar, MessageList, ChatInput, AssistantPanel, AssistantThread } from '../components/chat'
@@ -130,7 +132,25 @@ const route = useRoute()
 const router = useRouter()
 const { refreshDataAfterImport } = useSettingsImport()
 const pageBackground = usePageBackground(() => settings.settings)
-
+const webgpuCanvasRef = ref<HTMLCanvasElement | null>(null)
+const { runtimeState: webgpuRuntimeState } = useWebGpuBackgroundRuntime()
+const persistedWebgpuEnabled = computed(() => settings.settings?.webgpuBackgroundEnabled === true)
+const persistedWebgpuActivePresetId = computed(() => settings.settings?.webgpuBackgroundActivePresetId ?? null)
+const effectiveWebgpuEnabled = computed(() =>
+  webgpuRuntimeState.hasOverride ? webgpuRuntimeState.enabled : persistedWebgpuEnabled.value,
+)
+const effectiveWebgpuActivePresetId = computed(() =>
+  webgpuRuntimeState.hasOverride
+    ? webgpuRuntimeState.activePresetId
+    : persistedWebgpuActivePresetId.value,
+)
+const effectiveWebgpuShaderFilename = computed(() => {
+  const presets = settings.settings?.webgpuBackgroundPresets || []
+  const activeId = effectiveWebgpuActivePresetId.value
+  if (!activeId) return null
+  const active = presets.find((item) => item.id === activeId)
+  return active?.wgslFile?.trim() || null
+})
 // ========== TTS 播放队列 / 主聊天错误栈（TTS 失败亦入栈）==========
 const ttsQueue = useTtsPlaybackQueue()
 const ttsIsDownloading = computed(() => ttsQueue.isDownloading.value)
@@ -217,6 +237,30 @@ function syncContentAreaLeftDuringLayoutTransition() {
 }
 /** 顶栏变形：inset 悬浮条 → lifting 仅上移贴顶 → full 拉满宽并直角 */
 const headerMorphPhase = ref<'inset' | 'lifting' | 'full'>('inset')
+let webgpuUnavailablePrompted = false
+const webgpuBackground = useWebGpuBackground({
+  canvasRef: webgpuCanvasRef,
+  enabled: effectiveWebgpuEnabled,
+  shaderFilename: effectiveWebgpuShaderFilename,
+  headerMorphPhase,
+  onUnavailable: (detail) => {
+    if (webgpuUnavailablePrompted) return
+    webgpuUnavailablePrompted = true
+    void notifyMessage(`${detail.message} 已回退到图片背景（如已设置）或主题底色。`, {
+      title: 'WebGPU 不可用',
+    })
+  },
+})
+watch(effectiveWebgpuEnabled, (on) => {
+  if (!on) webgpuUnavailablePrompted = false
+})
+
+/** WebGPU 已确认可用且可绘制时，隐藏图片层避免叠在错误层上 */
+const webgpuPaintVisible = computed(
+  () => effectiveWebgpuEnabled.value && webgpuBackground.isSupported.value === true,
+)
+const showImageLayer = computed(() => pageBackground.hasImage.value && !webgpuPaintVisible.value)
+
 /** 展开侧栏时恢复原状用较短过渡（ms） */
 const headerEasingMs = ref(320)
 
@@ -3954,7 +3998,13 @@ const editingPersonaAvatarUrl = computed(() => {
 <template>
   <div class="relative h-screen w-full overflow-hidden font-sans text-[var(--color-text)]">
     <div class="absolute inset-0 theme-page-bg"></div>
-    <div v-if="pageBackground.hasImage.value" class="pointer-events-none absolute inset-0 z-[1] overflow-hidden">
+    <canvas
+      v-if="effectiveWebgpuEnabled"
+      ref="webgpuCanvasRef"
+      class="pointer-events-none absolute inset-0 z-[1] h-full w-full"
+      aria-hidden="true"
+    ></canvas>
+    <div v-if="showImageLayer" class="pointer-events-none absolute inset-0 z-[1] overflow-hidden">
       <img
         :src="pageBackground.imageUrl.value || ''"
         alt=""
