@@ -330,6 +330,16 @@ export interface Settings {
   pageBackgroundOpacity?: number | null
   /** 页面背景图模糊半径(px)，空值表示按 0 处理 */
   pageBackgroundBlurPx?: number | null
+  /** 是否启用 WebGPU 着色器背景（仅保存开关，不代表运行时设备一定可用） */
+  webgpuBackgroundEnabled?: boolean
+  /** WebGPU 背景预设元数据，WGSL 文件内容保存在 data/shader_presets */
+  webgpuBackgroundPresets?: Array<{
+    id: string
+    name: string
+    wgslFile: string
+  }>
+  /** 当前活动的 WebGPU 预设 ID（保存后用于默认运行） */
+  webgpuBackgroundActivePresetId?: string | null
   /** 聊天窗口内消息文字字号（仅作用于消息气泡内容），不指定则不覆盖 */
   messageFontSize?: number | null
   /** TTS 总开关，默认关闭 */
