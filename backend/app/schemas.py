@@ -314,6 +314,18 @@ class UserPersona(BaseModel):
     updatedAt: str = Field(default_factory=_now_iso)
 
 
+class WebGpuBackgroundPreset(BaseModel):
+    """
+    WebGPU 背景预设元数据。
+
+    仅保存元数据，WGSL 源文件本体存于 data/shader_presets。
+    """
+
+    id: str = Field(default_factory=lambda: uuid4().hex)
+    name: str = "新建 WebGPU 预设"
+    wgslFile: str
+
+
 class Settings(BaseModel):
     """
     全局设置模型
@@ -351,6 +363,9 @@ class Settings(BaseModel):
     pageBackgroundImage: str | None = None  # 页面背景图文件名，存于 data/page_backgrounds
     pageBackgroundOpacity: float | None = Field(default=None, ge=0.0, le=1.0)  # 背景图透明度；None 表示前端按 1 处理
     pageBackgroundBlurPx: float | None = Field(default=None, ge=0.0, le=64.0)  # 背景图模糊半径(px)；None 表示前端按 0 处理
+    webgpuBackgroundEnabled: bool = False
+    webgpuBackgroundPresets: list[WebGpuBackgroundPreset] = Field(default_factory=list)
+    webgpuBackgroundActivePresetId: str | None = None
     messageFontSize: int | None = None  # 聊天窗口内消息文字字号（仅作用于消息气泡内容）
     ttsEnabled: bool = False
     ttsAudioCacheLimitMb: int = Field(default=200, ge=10, le=10000)
