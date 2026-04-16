@@ -326,6 +326,28 @@ class WebGpuBackgroundPreset(BaseModel):
     wgslFile: str
 
 
+class ShaderPresetDiagnosticItem(BaseModel):
+    """WGSL 诊断条目（与前端 WgslDiagnostic 对齐；服务端无编译器时通常为空列表）。"""
+
+    severity: Literal["error", "warning", "info"] = "error"
+    message: str
+    line: int | None = None
+    column: int | None = None
+    length: int | None = None
+
+
+class ShaderPresetMutationResponse(BaseModel):
+    """创建/保存着色器预设后的统一响应（含可扩展 diagnostics 占位）。"""
+
+    ok: bool = True
+    filename: str
+    normalized: bool = True
+    diagnostics: list[ShaderPresetDiagnosticItem] = Field(default_factory=list)
+    note: str | None = Field(
+        default="服务端仅做规范化与存储校验，WGSL 语法编译诊断以浏览器 WebGPU 为准。",
+    )
+
+
 class Settings(BaseModel):
     """
     全局设置模型
@@ -366,6 +388,7 @@ class Settings(BaseModel):
     webgpuBackgroundEnabled: bool = False
     webgpuBackgroundPresets: list[WebGpuBackgroundPreset] = Field(default_factory=list)
     webgpuBackgroundActivePresetId: str | None = None
+    webgpuBackgroundTargetFps: int = Field(default=60, ge=12, le=120)  # WebGPU 背景着色器目标帧率
     messageFontSize: int | None = None  # 聊天窗口内消息文字字号（仅作用于消息气泡内容）
     ttsEnabled: bool = False
     ttsAudioCacheLimitMb: int = Field(default=200, ge=10, le=10000)
