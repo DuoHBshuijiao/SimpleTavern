@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import mimetypes
 from dataclasses import dataclass
@@ -431,7 +432,9 @@ def load_settings() -> Settings:
     """
     raw = read_json(_settings_path())
     settings = Settings.model_validate(raw)
-    if isinstance(raw, dict) and "worldBookEntryScanDepthDefault" not in raw:
+    needs_migration = isinstance(raw, dict) and "worldBookEntryScanDepthDefault" not in raw
+    pruned = prune_webgpu_shader_presets(settings)
+    if needs_migration or pruned:
         save_settings(settings)
     return settings
 
@@ -448,6 +451,7 @@ def save_settings(settings: Settings) -> Settings:
     Returns:
         Settings: 保存后的设置对象
     """
+    prune_webgpu_shader_presets(settings)
     settings.updatedAt = datetime.now().astimezone().isoformat()
     if getattr(settings, "worldBookEntryScanDepthDefault", None) is None:
         settings.worldBookEntryScanDepthDefault = 2
@@ -1545,6 +1549,21 @@ def shader_preset_path(filename: str) -> Path:
     return _shader_presets_dir() / filename
 
 
+# 须与 frontend/src/utils/normalizeWgslSource.ts 行为一致
+_WGSL_SPACE_LIKE_RE = re.compile(r"[\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]")
+
+
+def normalize_wgsl_source(source: str) -> str:
+    """
+    规范化 WGSL 源码：去 BOM、CRLF→LF、类空格 Unicode→ASCII 空格。
+    """
+    if source.startswith("\ufeff"):
+        source = source[1:]
+    source = source.replace("\r\n", "\n")
+    source = _WGSL_SPACE_LIKE_RE.sub(" ", source)
+    return source
+
+
 def save_shader_preset(filename: str, source: str) -> str:
     """
     保存 WebGPU 着色器预设源码到 data/shader_presets。
@@ -1557,7 +1576,7 @@ def save_shader_preset(filename: str, source: str) -> str:
         str: 保存后的文件名
     """
     p = shader_preset_path(filename)
-    p.write_text(source, encoding="utf-8")
+    p.write_text(normalize_wgsl_source(source), encoding="utf-8")
     return filename
 
 
@@ -1572,7 +1591,7 @@ def load_shader_preset(filename: str) -> str:
         str: WGSL 源码
     """
     p = shader_preset_path(filename)
-    return p.read_text(encoding="utf-8")
+    return normalize_wgsl_source(p.read_text(encoding="utf-8"))
 
 
 def delete_shader_preset(filename: str) -> None:
@@ -1587,6 +1606,44 @@ def delete_shader_preset(filename: str) -> None:
     p = shader_preset_path(filename)
     if p.exists():
         p.unlink(missing_ok=True)
+
+
+_WGSL_SHADER_PRESET_FILENAME_RE = re.compile(r"^[a-zA-Z0-9_.\-]+$")
+
+
+def _is_safe_shader_preset_wgsl_filename(wgsl_file: str) -> bool:
+    """与 shader_presets 路由一致：仅允许安全 basename 的 .wgsl 文件名。"""
+    if not wgsl_file:
+        return False
+    p = Path(wgsl_file)
+    if p.name != wgsl_file:
+        return False
+    if p.suffix.lower() != ".wgsl":
+        return False
+    return bool(_WGSL_SHADER_PRESET_FILENAME_RE.match(p.name))
+
+
+def prune_webgpu_shader_presets(settings: Settings) -> bool:
+    """
+    移除指向缺失或非法 WGSL 文件的预设元数据；修正活动预设 ID。
+
+    Returns:
+        bool: 若 settings 被修改则 True
+    """
+    before = list(settings.webgpuBackgroundPresets)
+    kept = []
+    for p in before:
+        if not _is_safe_shader_preset_wgsl_filename(p.wgslFile):
+            continue
+        if shader_preset_path(Path(p.wgslFile).name).exists():
+            kept.append(p)
+    changed = len(kept) != len(before)
+    settings.webgpuBackgroundPresets = kept
+    active = settings.webgpuBackgroundActivePresetId
+    if active and not any(p.id == active for p in kept):
+        settings.webgpuBackgroundActivePresetId = kept[0].id if kept else None
+        changed = True
+    return changed
 
 
 def _assistant_chat_has_missing_ids(raw: Any) -> bool:
