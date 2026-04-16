@@ -67,11 +67,18 @@ import {
 } from '../composables/useWebGpuBackgroundRuntime'
 import { X, Eye, EyeOff, Check, Loader2, GripVertical, ChevronDown } from 'lucide-vue-next'
 import WorldBookEditorModal from './modals/WorldBookEditorModal.vue'
+import WebGpuShaderEditorModal from './modals/WebGpuShaderEditorModal.vue'
 import WorldBookSessionAttachModal from './modals/WorldBookSessionAttachModal.vue'
 import { isTtsApiPreset, resolveTtsProvider } from '../utils/apiPresetKind'
 import { getWebGpuUnavailableMessage, probeWebGpuAdapter } from '../utils/webgpuProbe'
 import type { WebGpuUnavailableReason } from '../utils/webgpuProbe'
 import { concatEnabledWorldBookContents, countTokensForText } from '../utils/tokenEstimate'
+import { normalizeWgslSource } from '../utils/normalizeWgslSource'
+import {
+  compilationMessagesToDiagnostics,
+  filterDiagnosticsBySeverity,
+  type WgslDiagnostic,
+} from '../utils/wgslCompilation'
 import { notifyConfirm, notifyMessage } from '../composables/useNotify'
 
 const { applyFont } = useAppFont()
@@ -109,12 +116,14 @@ const { setRuntime: setWebGpuRuntime, clearRuntime: clearWebGpuRuntime, runtimeS
   useWebGpuBackgroundRuntime()
 const webgpuPresetEditorSource = ref('')
 const webgpuPresetSourceDirty = ref(false)
-const webgpuPresetCompileError = ref<string | null>(null)
+const webgpuPresetCompileDiagnostics = ref<WgslDiagnostic[]>([])
+const webgpuPresetCompileMessage = ref<string | null>(null)
 const webgpuPresetCompiledHash = ref<string | null>(null)
 const webgpuPresetCompileBusy = ref(false)
 const webgpuPresetSaveBusy = ref(false)
 const webgpuPresetCreateBusy = ref(false)
 const webgpuPresetDeleteBusy = ref(false)
+const showWebGpuShaderEditorModal = ref(false)
 const webgpuAvailability = ref<'unknown' | 'available' | 'unavailable'>('unknown')
 const webgpuLastProbeMessage = ref<string | null>(null)
 
@@ -842,6 +851,29 @@ const activeWebgpuPreset = computed(() => {
   if (!id) return null
   return webgpuPresets.value.find((item) => item.id === id) || null
 })
+
+const WEBGPU_TARGET_FPS_LIST = [12, 24, 30, 45, 60, 90, 120] as const
+const WEBGPU_TARGET_FPS_SET = new Set<number>(WEBGPU_TARGET_FPS_LIST)
+const webgpuTargetFpsOptions = WEBGPU_TARGET_FPS_LIST.map((n) => ({
+  label: `${n} 帧`,
+  value: String(n),
+}))
+
+function normalizeWebgpuTargetFpsValue(v: unknown): number {
+  if (v == null || typeof v !== 'number' || Number.isNaN(v)) return 60
+  const rounded = Math.round(v)
+  return WEBGPU_TARGET_FPS_SET.has(rounded) ? rounded : 60
+}
+
+const webgpuTargetFpsModel = computed({
+  get: () => String(normalizeWebgpuTargetFpsValue(globalDraft.value?.webgpuBackgroundTargetFps)),
+  set: (raw: string) => {
+    if (!globalDraft.value) return
+    const n = Number(raw)
+    globalDraft.value.webgpuBackgroundTargetFps = normalizeWebgpuTargetFpsValue(Number.isFinite(n) ? n : 60)
+  },
+})
+
 const webgpuCanRunFromEditor = computed(() => {
   const preset = activeWebgpuPreset.value
   if (!preset) return false
@@ -865,10 +897,16 @@ function ensureWebgpuSettingsShape(target: Settings) {
     const exists = target.webgpuBackgroundPresets.some((item) => item.id === target.webgpuBackgroundActivePresetId)
     if (!exists) target.webgpuBackgroundActivePresetId = null
   }
+  target.webgpuBackgroundTargetFps = normalizeWebgpuTargetFpsValue(target.webgpuBackgroundTargetFps ?? null)
 }
 
 function buildSourceHash(filename: string, source: string): string {
   return `${filename}:${source.length}:${source.slice(0, 32)}:${source.slice(-32)}`
+}
+
+function clearWebgpuCompileUi() {
+  webgpuPresetCompileDiagnostics.value = []
+  webgpuPresetCompileMessage.value = null
 }
 
 async function ensureWebGpuAvailability() {
@@ -889,7 +927,7 @@ async function loadWebGpuPresetSource(presetId: string | null) {
   if (!presetId) {
     webgpuPresetEditorSource.value = ''
     webgpuPresetSourceDirty.value = false
-    webgpuPresetCompileError.value = null
+    clearWebgpuCompileUi()
     webgpuPresetCompiledHash.value = null
     return
   }
@@ -897,9 +935,13 @@ async function loadWebGpuPresetSource(presetId: string | null) {
   if (!preset) return
   const cached = readWebGpuDraftSource(preset.id)
   if (cached != null) {
-    webgpuPresetEditorSource.value = cached
+    const normalized = normalizeWgslSource(cached)
+    if (normalized !== cached) {
+      writeWebGpuDraftSource(preset.id, normalized)
+    }
+    webgpuPresetEditorSource.value = normalized
     webgpuPresetSourceDirty.value = true
-    webgpuPresetCompileError.value = null
+    clearWebgpuCompileUi()
     webgpuPresetCompiledHash.value = null
     return
   }
@@ -909,15 +951,16 @@ async function loadWebGpuPresetSource(presetId: string | null) {
       headers: { Accept: 'text/plain' },
     })
     if (!response.ok) throw new Error(await response.text())
-    const source = await response.text()
+    const source = normalizeWgslSource(await response.text())
     webgpuPresetEditorSource.value = source
     webgpuPresetSourceDirty.value = false
-    webgpuPresetCompileError.value = null
+    clearWebgpuCompileUi()
     webgpuPresetCompiledHash.value = null
   } catch (error) {
     webgpuPresetEditorSource.value = ''
     webgpuPresetSourceDirty.value = false
-    webgpuPresetCompileError.value = error instanceof Error ? error.message : String(error)
+    webgpuPresetCompileDiagnostics.value = []
+    webgpuPresetCompileMessage.value = error instanceof Error ? error.message : String(error)
   }
 }
 
@@ -926,13 +969,30 @@ function onWebGpuEditorInput(value: string) {
   const preset = activeWebgpuPreset.value
   if (!preset) return
   webgpuPresetSourceDirty.value = true
-  webgpuPresetCompileError.value = null
+  clearWebgpuCompileUi()
   webgpuPresetCompiledHash.value = null
   writeWebGpuDraftSource(preset.id, value)
 }
 
-function onWebGpuEditorInputEvent(event: Event) {
-  onWebGpuEditorInput((event.target as HTMLTextAreaElement).value)
+function ensureWebGpuPresetNameInDraft(presetId: string) {
+  if (!globalDraft.value?.webgpuBackgroundPresets) return
+  const list = globalDraft.value.webgpuBackgroundPresets
+  const idx = list.findIndex((p) => p.id === presetId)
+  if (idx < 0) return
+  const cur = list[idx]
+  if (!cur) return
+  if (String(cur.name ?? '').trim()) return
+  list[idx] = {
+    id: cur.id,
+    wgslFile: cur.wgslFile,
+    name: `WebGPU 预设 ${idx + 1}`,
+  }
+}
+
+function openWebGpuShaderEditorForPreset(presetId: string) {
+  activeWebgpuPresetId.value = presetId
+  ensureWebGpuPresetNameInDraft(presetId)
+  showWebGpuShaderEditorModal.value = true
 }
 
 async function saveWebGpuPresetSource() {
@@ -940,12 +1000,17 @@ async function saveWebGpuPresetSource() {
   if (!preset) return
   webgpuPresetSaveBusy.value = true
   try {
+    const normalized = normalizeWgslSource(webgpuPresetEditorSource.value)
     const response = await fetch(`/api/shader-presets/${encodeURIComponent(preset.wgslFile)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ source: webgpuPresetEditorSource.value }),
+      body: JSON.stringify({ source: normalized }),
     })
     if (!response.ok) throw new Error(await response.text())
+    if (response.status !== 204) {
+      await response.json().catch(() => null)
+    }
+    webgpuPresetEditorSource.value = normalized
     webgpuPresetSourceDirty.value = false
     writeWebGpuDraftSource(preset.id, null)
     webgpuPresetCompiledHash.value = null
@@ -962,29 +1027,39 @@ async function compileWebGpuPreset() {
   if (!preset) return
   await ensureWebGpuAvailability()
   if (webgpuAvailability.value !== 'available') {
-    webgpuPresetCompileError.value =
+    clearWebgpuCompileUi()
+    webgpuPresetCompileMessage.value =
       webgpuLastProbeMessage.value ?? getWebGpuUnavailableMessage('unknown')
     return
   }
   webgpuPresetCompileBusy.value = true
-  webgpuPresetCompileError.value = null
+  clearWebgpuCompileUi()
   try {
     const gpu = navigator.gpu
     if (!gpu) throw new Error('WebGPU unavailable')
     const adapter = await gpu.requestAdapter()
     if (!adapter) throw new Error('WebGPU adapter unavailable')
     const device = await adapter.requestDevice()
-    const module = device.createShaderModule({ code: webgpuPresetEditorSource.value })
+    const code = normalizeWgslSource(webgpuPresetEditorSource.value)
+    const module = device.createShaderModule({ code })
     const info = await module.getCompilationInfo()
-    const errors = info.messages.filter((item: any) => item.type === 'error')
+    const all = compilationMessagesToDiagnostics(info.messages)
+    const errors = filterDiagnosticsBySeverity(all, 'error')
     if (errors.length > 0) {
-      throw new Error(errors.map((item: any) => item.message).join('\n'))
+      webgpuPresetCompileDiagnostics.value = all
+      webgpuPresetCompiledHash.value = null
+      return
     }
-    webgpuPresetCompiledHash.value = buildSourceHash(preset.wgslFile, webgpuPresetEditorSource.value)
-    await notifyMessage('编译通过，可点击「运行（仅本次）」应用。')
+    webgpuPresetEditorSource.value = code
+    if (webgpuPresetSourceDirty.value) {
+      writeWebGpuDraftSource(preset.id, code)
+    }
+    webgpuPresetCompiledHash.value = buildSourceHash(preset.wgslFile, code)
+    await notifyMessage('编译通过，可在编辑窗口内点击「运行（仅本次）」应用。')
   } catch (error) {
     webgpuPresetCompiledHash.value = null
-    webgpuPresetCompileError.value = error instanceof Error ? error.message : String(error)
+    webgpuPresetCompileDiagnostics.value = []
+    webgpuPresetCompileMessage.value = error instanceof Error ? error.message : String(error)
   } finally {
     webgpuPresetCompileBusy.value = false
   }
@@ -1000,9 +1075,27 @@ function runWebGpuPresetInRuntime() {
   void notifyMessage('已应用到主界面（仅运行态，未写入后端）。')
 }
 
-function stopWebGpuRuntime() {
-  clearWebGpuRuntime()
-  void notifyMessage('已退出 WebGPU 运行态，主界面恢复使用已保存设置。')
+/** 预设列表：将当前活动预设的已保存 WGSL 应用到主界面（不依赖编辑器内先编译） */
+function runWebGpuPresetFromList() {
+  const preset = activeWebgpuPreset.value
+  if (!preset) return
+  setWebGpuRuntime({
+    enabled: globalDraft.value?.webgpuBackgroundEnabled === true,
+    activePresetId: preset.id,
+  })
+  void notifyMessage('已应用到主界面（仅运行态，未写入后端）。')
+}
+
+/** 同步原始字符串；不在每次 input 时 trim 或回填默认名，否则会打断中文输入法且无法清空 */
+function onWebGpuPresetNameInput(value: string) {
+  const preset = activeWebgpuPreset.value
+  if (!preset || !globalDraft.value?.webgpuBackgroundPresets) return
+  const list = globalDraft.value.webgpuBackgroundPresets
+  const idx = list.findIndex((p) => p.id === preset.id)
+  if (idx < 0) return
+  const cur = list[idx]
+  if (!cur) return
+  list[idx] = { id: cur.id, wgslFile: cur.wgslFile, name: value }
 }
 
 async function createWebGpuPreset() {
@@ -1040,7 +1133,11 @@ async function deleteActiveWebGpuPreset() {
   if (!ok) return
   webgpuPresetDeleteBusy.value = true
   try {
-    await apiDelete(`/api/shader-presets/${encodeURIComponent(preset.wgslFile)}`)
+    const delUrl = `/api/shader-presets/${encodeURIComponent(preset.wgslFile)}`
+    const delRes = await fetch(delUrl, { method: 'DELETE' })
+    if (!delRes.ok && delRes.status !== 404) {
+      throw new Error(await delRes.text())
+    }
     globalDraft.value.webgpuBackgroundPresets = globalDraft.value.webgpuBackgroundPresets!.filter(
       (item) => item.id !== preset.id,
     )
@@ -2445,6 +2542,9 @@ async function saveGlobal() {
   globalDraft.value.webgpuBackgroundPresets = settingsStore.settings?.webgpuBackgroundPresets || draft.webgpuBackgroundPresets
   globalDraft.value.webgpuBackgroundActivePresetId =
     settingsStore.settings?.webgpuBackgroundActivePresetId ?? draft.webgpuBackgroundActivePresetId
+  globalDraft.value.webgpuBackgroundTargetFps = normalizeWebgpuTargetFpsValue(
+    settingsStore.settings?.webgpuBackgroundTargetFps ?? draft.webgpuBackgroundTargetFps,
+  )
   markSavedPageBackground(globalDraft.value.pageBackgroundImage ?? null)
   await deletePendingPageBackgrounds(globalDraft.value.pageBackgroundImage ?? null)
   clearWebGpuRuntime()
@@ -3364,115 +3464,119 @@ async function checkUpdate() {
                   </div>
 
                   <div class="space-y-3 rounded-xl border border-[var(--color-border-subtle)] bg-surface-overlay/35 p-3.5">
-                    <div class="flex items-start justify-between gap-3">
-                      <div class="min-w-0 space-y-1">
-                        <div class="text-sm font-medium text-[var(--color-text-secondary)]">WebGPU 着色器背景</div>
-                        <p class="text-xs leading-relaxed text-[var(--color-text-muted)]">
-                          运行态可先编译并应用，不会自动写入后端；仅「保存设置」才持久化。
-                        </p>
-                      </div>
+                    <div class="space-y-2">
+                      <div class="text-sm font-medium text-[var(--color-text-secondary)]">WebGPU 着色器背景</div>
+                      <p class="text-xs leading-relaxed text-[var(--color-text-muted)]">
+                        运行态可先编译并应用，不会自动写入后端；仅「保存设置」才持久化。
+                      </p>
+                      <label class="block text-sm font-medium text-[var(--color-text-secondary)]">启用着色器背景</label>
                       <button
                         type="button"
-                        class="flex min-h-10 items-center gap-2 rounded-lg border border-[var(--color-border-subtle)] px-3 py-1.5 text-xs transition-colors hover:bg-surface-hover/30"
+                        class="flex min-h-11 w-full cursor-pointer items-center gap-3 py-1 text-left group"
                         @click="globalDraft!.webgpuBackgroundEnabled = !globalDraft!.webgpuBackgroundEnabled"
                       >
-                        <span
-                          class="inline-block h-2.5 w-2.5 rounded-full"
-                          :class="globalDraft!.webgpuBackgroundEnabled ? 'bg-emerald-400' : 'bg-[var(--color-text-muted)]'"
-                        ></span>
-                        <span>{{ globalDraft!.webgpuBackgroundEnabled ? '已启用' : '已关闭' }}</span>
+                        <div
+                          class="relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200 ease-out"
+                          :class="globalDraft!.webgpuBackgroundEnabled ? 'bg-brand' : 'bg-[var(--color-track)]'"
+                        >
+                          <div
+                            class="absolute left-1 top-1 h-4 w-4 rounded-full bg-[var(--color-on-brand)]"
+                            :style="{
+                              transform: globalDraft!.webgpuBackgroundEnabled ? 'translateX(1.25rem)' : 'translateX(0)',
+                              transition: 'transform 200ms ease-out',
+                            }"
+                          ></div>
+                        </div>
+                        <span class="text-xs text-[var(--color-text-secondary)]">
+                          {{ globalDraft!.webgpuBackgroundEnabled ? '已启用' : '已关闭' }}
+                        </span>
                       </button>
                     </div>
 
-                    <div class="flex flex-wrap items-center gap-2 text-xs">
+                    <div class="flex flex-wrap gap-2">
                       <button
                         type="button"
-                        class="min-h-9 rounded-lg bg-surface-muted px-3 py-1.5 transition-colors hover:bg-surface-hover disabled:opacity-50"
+                        class="min-h-9 rounded-lg bg-surface-muted px-3 py-1.5 text-xs transition-colors hover:bg-surface-hover disabled:opacity-50"
                         :disabled="webgpuPresetCreateBusy"
                         @click="createWebGpuPreset"
                       >
                         新建预设
                       </button>
-                      <button
-                        type="button"
-                        class="min-h-9 rounded-lg border border-[var(--color-border-subtle)] px-3 py-1.5 transition-colors hover:bg-surface-hover/30 disabled:opacity-50"
-                        :disabled="!activeWebgpuPreset || webgpuPresetSaveBusy || !webgpuPresetSourceDirty"
-                        @click="saveWebGpuPresetSource"
-                      >
-                        保存源码
-                      </button>
-                      <button
-                        type="button"
-                        class="min-h-9 rounded-lg border border-[var(--color-border-subtle)] px-3 py-1.5 transition-colors hover:bg-surface-hover/30 disabled:opacity-50"
-                        :disabled="!activeWebgpuPreset || webgpuPresetCompileBusy"
-                        @click="compileWebGpuPreset"
-                      >
-                        编译
-                      </button>
-                      <button
-                        type="button"
-                        class="min-h-9 rounded-lg bg-brand-a20 px-3 py-1.5 text-brand transition-colors hover:bg-brand-a30 disabled:opacity-50"
-                        :disabled="!webgpuCanRunFromEditor"
-                        @click="runWebGpuPresetInRuntime"
-                      >
-                        运行（仅本次）
-                      </button>
-                      <button
-                        type="button"
-                        class="min-h-9 rounded-lg border border-[var(--color-border-subtle)] px-3 py-1.5 transition-colors hover:bg-surface-hover/30"
-                        @click="stopWebGpuRuntime"
-                      >
-                        停止运行态
-                      </button>
-                      <button
-                        type="button"
-                        class="min-h-9 rounded-lg border border-red-500/40 px-3 py-1.5 text-red-300 transition-colors hover:bg-red-500/10 disabled:opacity-50"
-                        :disabled="!activeWebgpuPreset || webgpuPresetDeleteBusy"
-                        @click="deleteActiveWebGpuPreset"
-                      >
-                        删除
-                      </button>
                     </div>
 
-                    <div class="grid gap-3 md:grid-cols-[minmax(11rem,14rem)_1fr]">
-                      <div class="space-y-2">
-                        <label class="text-xs text-[var(--color-text-secondary)]">活动预设</label>
-                        <div class="space-y-1 rounded-lg border border-[var(--color-border-subtle)] bg-surface-muted/35 p-2">
-                          <button
-                            v-for="item in webgpuPresets"
-                            :key="item.id"
-                            type="button"
-                            class="flex min-h-9 w-full items-center justify-between rounded-md px-2 py-1 text-left text-xs transition-colors"
-                            :class="item.id === activeWebgpuPresetId ? 'bg-brand-a20 text-brand' : 'hover:bg-surface-hover/40'"
-                            @click="activeWebgpuPresetId = item.id"
-                          >
-                            <span class="truncate">{{ item.name }}</span>
-                          </button>
-                          <div v-if="webgpuPresets.length === 0" class="px-2 py-2 text-xs text-[var(--color-text-muted)]">
-                            暂无预设
-                          </div>
+                    <div class="space-y-2">
+                      <div class="flex items-center justify-between gap-3">
+                        <span class="text-xs text-[var(--color-text-secondary)]">活动预设</span>
+                        <div class="flex items-center gap-1.5 shrink-0">
+                          <span class="text-[11px] text-[var(--color-text-muted)] whitespace-nowrap">渲染性能</span>
+                          <ModernSelect
+                            v-model="webgpuTargetFpsModel"
+                            :options="webgpuTargetFpsOptions"
+                            placement="top"
+                            class="w-[96px] min-w-0"
+                          />
                         </div>
                       </div>
-
-                      <div class="space-y-2">
-                        <div class="flex flex-wrap items-center gap-2 text-xs text-[var(--color-text-muted)]">
-                          <span>适配器状态：{{ webgpuAvailability === 'available' ? '可用' : webgpuAvailability === 'unavailable' ? '不可用' : '检测中' }}</span>
-                          <span v-if="webgpuRuntimeState.hasOverride">· 运行态覆盖已启用</span>
-                          <span v-if="webgpuPresetSourceDirty">· 当前源码含未保存改动</span>
+                      <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-snug text-[var(--color-text-muted)]">
+                        <span>适配器：{{ webgpuAvailability === 'available' ? '可用' : webgpuAvailability === 'unavailable' ? '不可用' : '检测中' }}</span>
+                        <span v-if="webgpuRuntimeState.hasOverride">· 运行态覆盖</span>
+                        <span v-if="webgpuPresetSourceDirty">· 未保存</span>
+                      </div>
+                      <p
+                        v-if="webgpuPresetCompileDiagnostics.length > 0 || webgpuPresetCompileMessage"
+                        class="text-xs text-[var(--color-error-text)]"
+                      >
+                        编译失败，请使用对应预设行的「编辑」查看详情。
+                      </p>
+                      <div class="space-y-2 rounded-lg border border-[var(--color-border-subtle)] bg-surface-muted/35 p-2">
+                        <template v-for="item in webgpuPresets" :key="item.id">
+                          <div
+                            class="flex w-full min-h-9 flex-wrap items-center gap-1.5 rounded-md px-1 py-0.5 text-xs transition-colors outline-none focus-visible:ring-2 focus-visible:ring-brand-a40"
+                            :class="
+                              item.id === activeWebgpuPresetId
+                                ? 'cursor-pointer bg-brand-a20 text-brand ring-1 ring-brand-a30'
+                                : 'cursor-pointer hover:bg-surface-hover/40'
+                            "
+                            tabindex="0"
+                            @click="activeWebgpuPresetId = item.id"
+                            @keydown.enter.prevent="activeWebgpuPresetId = item.id"
+                            @keydown.space.prevent="activeWebgpuPresetId = item.id"
+                          >
+                            <div class="flex min-h-9 min-w-0 flex-1 basis-[min(100%,10rem)] items-center px-2 py-1">
+                              <span class="truncate">{{ item.name }}</span>
+                            </div>
+                            <div class="flex flex-wrap items-center gap-1.5" @click.stop>
+                              <button
+                                type="button"
+                                class="shrink-0 min-h-8 rounded-md border border-[var(--color-border-subtle)] px-2 py-1 text-[11px] text-[var(--color-text-secondary)] transition-colors hover:bg-surface-hover/40 hover:text-[var(--color-text)]"
+                                :class="item.id === activeWebgpuPresetId ? 'border-[var(--color-border-subtle)]/80' : ''"
+                                @click="openWebGpuShaderEditorForPreset(item.id)"
+                              >
+                                编辑
+                              </button>
+                              <template v-if="item.id === activeWebgpuPresetId">
+                                <button
+                                  type="button"
+                                  class="shrink-0 min-h-8 rounded-md border border-[var(--color-border-subtle)] px-2 py-1 text-[11px] transition-colors hover:bg-surface-hover/30"
+                                  @click="runWebGpuPresetFromList"
+                                >
+                                  运行
+                                </button>
+                                <button
+                                  type="button"
+                                  class="shrink-0 min-h-8 rounded-md border border-red-500/40 px-2 py-1 text-[11px] text-red-300 transition-colors hover:bg-red-500/10 disabled:opacity-50"
+                                  :disabled="webgpuPresetDeleteBusy"
+                                  @click="deleteActiveWebGpuPreset"
+                                >
+                                  删除
+                                </button>
+                              </template>
+                            </div>
+                          </div>
+                        </template>
+                        <div v-if="webgpuPresets.length === 0" class="px-2 py-2 text-xs text-[var(--color-text-muted)]">
+                          暂无预设
                         </div>
-                        <textarea
-                          :value="webgpuPresetEditorSource"
-                          class="input min-h-[14rem] w-full font-mono text-xs leading-relaxed"
-                          :disabled="!activeWebgpuPreset"
-                          placeholder="请选择或新建 WebGPU 预设后编辑 WGSL"
-                          @input="onWebGpuEditorInputEvent"
-                        ></textarea>
-                        <p v-if="webgpuPresetCompileError" class="rounded-lg border border-red-500/35 bg-red-500/10 px-2.5 py-2 text-xs text-red-200 whitespace-pre-wrap">
-                          {{ webgpuPresetCompileError }}
-                        </p>
-                        <p v-else class="text-xs text-[var(--color-text-muted)]">
-                          Uniform 约定：`time`、`immersive`、`dpr`、`deltaTime`、`resolutionCss`、`resolutionPhysical`；主界面隐藏标签页时降频绘制。
-                        </p>
                       </div>
                     </div>
                   </div>
@@ -4910,6 +5014,28 @@ async function checkUpdate() {
       </div>
     </div>
   </Teleport>
+
+  <WebGpuShaderEditorModal
+    :show="showWebGpuShaderEditorModal"
+    :model-value="webgpuPresetEditorSource"
+    :preset-id="activeWebgpuPreset?.id ?? null"
+    :preset-name="activeWebgpuPreset?.name ?? ''"
+    :disabled="!activeWebgpuPreset"
+    :adapter-status="webgpuAvailability"
+    :has-runtime-override="webgpuRuntimeState.hasOverride"
+    :source-dirty="webgpuPresetSourceDirty"
+    :compile-diagnostics="webgpuPresetCompileDiagnostics"
+    :compile-message="webgpuPresetCompileMessage"
+    :save-disabled="webgpuPresetSaveBusy || !webgpuPresetSourceDirty"
+    :compile-disabled="webgpuPresetCompileBusy"
+    :run-disabled="!webgpuCanRunFromEditor"
+    @update:show="(v) => (showWebGpuShaderEditorModal = v)"
+    @update:model-value="onWebGpuEditorInput"
+    @update:preset-name="onWebGpuPresetNameInput"
+    @compile="compileWebGpuPreset"
+    @save="saveWebGpuPresetSource"
+    @run="runWebGpuPresetInRuntime"
+  />
 
   <WorldBookEditorModal
     :show="showWorldBookEditor"
