@@ -136,6 +136,12 @@ const webgpuCanvasRef = ref<HTMLCanvasElement | null>(null)
 const { runtimeState: webgpuRuntimeState } = useWebGpuBackgroundRuntime()
 const persistedWebgpuEnabled = computed(() => settings.settings?.webgpuBackgroundEnabled === true)
 const persistedWebgpuActivePresetId = computed(() => settings.settings?.webgpuBackgroundActivePresetId ?? null)
+const persistedWebgpuTargetFps = computed(() => {
+  const v = settings.settings?.webgpuBackgroundTargetFps
+  const allowed = new Set([12, 24, 30, 45, 60, 90, 120])
+  if (v != null && allowed.has(v)) return v
+  return 60
+})
 const effectiveWebgpuEnabled = computed(() =>
   webgpuRuntimeState.hasOverride ? webgpuRuntimeState.enabled : persistedWebgpuEnabled.value,
 )
@@ -243,6 +249,7 @@ const webgpuBackground = useWebGpuBackground({
   enabled: effectiveWebgpuEnabled,
   shaderFilename: effectiveWebgpuShaderFilename,
   headerMorphPhase,
+  targetFps: persistedWebgpuTargetFps,
   onUnavailable: (detail) => {
     if (webgpuUnavailablePrompted) return
     webgpuUnavailablePrompted = true
