@@ -4,6 +4,13 @@ import {
   getWebGpuUnavailableMessage,
   type WebGpuUnavailableReason,
 } from '../utils/webgpuProbe'
+import { normalizeWgslSource } from '../utils/normalizeWgslSource'
+import {
+  compilationMessagesToDiagnostics,
+  filterDiagnosticsBySeverity,
+  formatDiagnosticsAsText,
+  type WgslCompilationMessageLike,
+} from '../utils/wgslCompilation'
 
 type HeaderMorphPhase = 'inset' | 'lifting' | 'full'
 
@@ -17,6 +24,8 @@ export interface WebGpuBackgroundOptions {
   enabled: Ref<boolean>
   shaderFilename: Ref<string | null>
   headerMorphPhase: Ref<HeaderMorphPhase>
+  /** 目标帧率（与设置中的白名单一致），实际受显示器刷新率约束 */
+  targetFps: Ref<number>
   /** 仅在确认无法使用 WebGPU 时调用（不会因画布尚未挂载而误报） */
   onUnavailable?: (detail: WebGpuUnavailableDetail) => void
 }
@@ -25,8 +34,10 @@ export interface WebGpuBackgroundOptions {
  * Uniform 约定（MVP）：
  * - tail 默认填 0，未来字段追加时保持尾部扩展兼容
  * - 同时提供 CSS 与物理像素分辨率（resolutionCss/resolutionPhysical）
+ * - 尾部含 frameCounter、对齐槽、mouseNorm、immersiveBlend（见 WEBGPU_UNIFORM_CONTRACT.md）
+ * - WGSL struct Uniforms 在 immersiveBlend 后按 8 字节对齐，实际 56 字节；索引 13 为 WGSL 尾部 padding，恒 0
  */
-const UNIFORM_FLOAT_COUNT = 12
+const UNIFORM_FLOAT_COUNT = 14
 const UNIFORM_BYTE_SIZE = UNIFORM_FLOAT_COUNT * 4
 const hiddenTabFrameIntervalMs = 1000
 /** 等待 canvas 挂载的最大帧数（约 2s @60fps） */
@@ -47,6 +58,9 @@ export function useWebGpuBackground(options: WebGpuBackgroundOptions) {
   let context: GPUCanvasContext | null = null
   let pipeline: GPURenderPipeline | null = null
   let bindGroup: GPUBindGroup | null = null
+  /** 固定 @group(0) @binding(0) uniform，避免 layout:auto 在 uniform 被优化剔除后得到空布局 */
+  let uniformBindGroupLayout: ReturnType<GPUDevice['createBindGroupLayout']> | null = null
+  let webGpuBgPipelineLayout: ReturnType<GPUDevice['createPipelineLayout']> | null = null
   let uniformBuffer: GPUBuffer | null = null
   let shaderModule: GPUShaderModule | null = null
   let currentShaderFilename: string | null = null
@@ -58,6 +72,13 @@ export function useWebGpuBackground(options: WebGpuBackgroundOptions) {
   let unavailableNotified = false
   /** ensureDevice 最后一次失败原因（供回调使用，避免启发式误判） */
   let lastEnsureFailureReason: WebGpuUnavailableReason = 'unknown'
+
+  /** 相对画布 CSS 盒的归一化坐标 [0,1]，指针未移动过时为画布中心 */
+  let lastMouseNormX = 0.5
+  let lastMouseNormY = 0.5
+  let pointerMoveHandler: ((ev: PointerEvent) => void) | null = null
+  /** 向 immersive 目标平滑，供着色器做缓动（与 WEBGPU_UNIFORM_CONTRACT.md 一致） */
+  let immersiveBlendSmooth = 0
 
   const uniformFloats = new Float32Array(UNIFORM_FLOAT_COUNT)
 
@@ -73,6 +94,10 @@ export function useWebGpuBackground(options: WebGpuBackgroundOptions) {
 
   function clearGpuState() {
     stopLoop()
+    if (pointerMoveHandler) {
+      window.removeEventListener('pointermove', pointerMoveHandler)
+      pointerMoveHandler = null
+    }
     if (lostHandler && device) {
       device.removeEventListener('uncapturederror', lostHandler as EventListener)
     }
@@ -80,6 +105,8 @@ export function useWebGpuBackground(options: WebGpuBackgroundOptions) {
     shaderModule = null
     bindGroup = null
     pipeline = null
+    uniformBindGroupLayout = null
+    webGpuBgPipelineLayout = null
     if (uniformBuffer) {
       uniformBuffer.destroy()
       uniformBuffer = null
@@ -95,6 +122,23 @@ export function useWebGpuBackground(options: WebGpuBackgroundOptions) {
     adapter = null
     context = null
     currentShaderFilename = null
+    immersiveBlendSmooth = 0
+  }
+
+  function attachPointerTracking() {
+    if (pointerMoveHandler) return
+    pointerMoveHandler = (ev: PointerEvent) => {
+      const canvas = options.canvasRef.value
+      if (!canvas) return
+      const rect = canvas.getBoundingClientRect()
+      const w = Math.max(1, rect.width)
+      const h = Math.max(1, rect.height)
+      const nx = (ev.clientX - rect.left) / w
+      const ny = (ev.clientY - rect.top) / h
+      lastMouseNormX = Math.min(1, Math.max(0, nx))
+      lastMouseNormY = Math.min(1, Math.max(0, ny))
+    }
+    window.addEventListener('pointermove', pointerMoveHandler)
   }
 
   function resizeCanvas() {
@@ -111,7 +155,7 @@ export function useWebGpuBackground(options: WebGpuBackgroundOptions) {
       context.configure({
         device,
         format: preferredCanvasFormat(),
-        alphaMode: 'premultiplied',
+        alphaMode: 'opaque',
       })
     }
   }
@@ -185,12 +229,27 @@ export function useWebGpuBackground(options: WebGpuBackgroundOptions) {
     context.configure({
       device,
       format: preferredCanvasFormat(),
-      alphaMode: 'premultiplied',
+      alphaMode: 'opaque',
     })
     uniformBuffer = device.createBuffer({
       label: 'webgpu-bg-uniforms',
       size: UNIFORM_BYTE_SIZE,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    })
+    uniformBindGroupLayout = device.createBindGroupLayout({
+      label: 'webgpu-bg-uniform-bgl',
+      entries: [
+        {
+          binding: 0,
+          // GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT
+          visibility: 3,
+          buffer: { type: 'uniform', hasDynamicOffset: false, minBindingSize: UNIFORM_BYTE_SIZE },
+        },
+      ],
+    })
+    webGpuBgPipelineLayout = device.createPipelineLayout({
+      label: 'webgpu-bg-pipeline-layout',
+      bindGroupLayouts: [uniformBindGroupLayout],
     })
     lostHandler = (event: GPUUncapturedErrorEvent) => {
       runtimeError.value = event.error?.message || 'WebGPU runtime error'
@@ -212,20 +271,24 @@ export function useWebGpuBackground(options: WebGpuBackgroundOptions) {
   }
 
   async function buildPipeline(shaderFilename: string) {
-    if (!device || !uniformBuffer) return
-    const source = await fetchShaderSource(shaderFilename)
+    if (!device || !uniformBuffer || !uniformBindGroupLayout || !webGpuBgPipelineLayout) return
+    const source = normalizeWgslSource(await fetchShaderSource(shaderFilename))
     shaderModule = device.createShaderModule({
       code: source,
       label: `webgpu-bg-${shaderFilename}`,
     })
     const info = await shaderModule.getCompilationInfo()
-    const errors = info.messages.filter((item: any) => item.type === 'error')
+    const errors = info.messages.filter(
+      (item: WgslCompilationMessageLike) => item.type === 'error',
+    )
     if (errors.length > 0) {
-      throw new Error(errors.map((item: any) => item.message).join('\n'))
+      const diags = compilationMessagesToDiagnostics(errors)
+      const onlyErr = filterDiagnosticsBySeverity(diags, 'error')
+      throw new Error(formatDiagnosticsAsText(onlyErr))
     }
     pipeline = device.createRenderPipeline({
       label: 'webgpu-background-pipeline',
-      layout: 'auto',
+      layout: webGpuBgPipelineLayout,
       vertex: { module: shaderModule, entryPoint: 'vs_main' },
       fragment: {
         module: shaderModule,
@@ -235,7 +298,7 @@ export function useWebGpuBackground(options: WebGpuBackgroundOptions) {
       primitive: { topology: 'triangle-list' },
     })
     bindGroup = device.createBindGroup({
-      layout: pipeline.getBindGroupLayout(0),
+      layout: uniformBindGroupLayout,
       entries: [{ binding: 0, resource: { buffer: uniformBuffer } }],
     })
     currentShaderFilename = shaderFilename
@@ -245,6 +308,11 @@ export function useWebGpuBackground(options: WebGpuBackgroundOptions) {
     if (!device || !context || !uniformBuffer) return
     animationFrameId = requestAnimationFrame(drawFrame)
     if (document.hidden && lastFrameMs > 0 && nowMs - lastFrameMs < hiddenTabFrameIntervalMs) {
+      return
+    }
+    const fps = Math.max(1, options.targetFps.value)
+    const minFrameMs = 1000 / fps
+    if (lastFrameMs > 0 && nowMs - lastFrameMs < minFrameMs - 0.25) {
       return
     }
     const deltaMs = lastFrameMs > 0 ? nowMs - lastFrameMs : 16.67
@@ -260,16 +328,29 @@ export function useWebGpuBackground(options: WebGpuBackgroundOptions) {
     const physicalWidth = Math.max(1, Math.floor(cssWidth * dpr))
     const physicalHeight = Math.max(1, Math.floor(cssHeight * dpr))
 
+    const deltaSec = Math.max(0.001, deltaMs * 0.001)
+    const immersiveTarget = immersive01.value
+    const k = 6.0
+    immersiveBlendSmooth +=
+      (immersiveTarget - immersiveBlendSmooth) * (1 - Math.exp(-k * deltaSec))
+    if (immersiveTarget === 1 && immersiveBlendSmooth > 0.9995) immersiveBlendSmooth = 1
+    if (immersiveTarget === 0 && immersiveBlendSmooth < 0.0005) immersiveBlendSmooth = 0
+
     uniformFloats.fill(0)
     uniformFloats[0] = nowMs * 0.001
-    uniformFloats[1] = immersive01.value
+    uniformFloats[1] = immersiveTarget
     uniformFloats[2] = dpr
-    uniformFloats[3] = Math.max(0.001, deltaMs * 0.001)
+    uniformFloats[3] = deltaSec
     uniformFloats[4] = cssWidth
     uniformFloats[5] = cssHeight
     uniformFloats[6] = physicalWidth
     uniformFloats[7] = physicalHeight
     uniformFloats[8] = frameCounter
+    uniformFloats[9] = 0
+    uniformFloats[10] = lastMouseNormX
+    uniformFloats[11] = lastMouseNormY
+    uniformFloats[12] = immersiveBlendSmooth
+    uniformFloats[13] = 0 // WGSL struct 末尾对齐，与 minBindingSize 一致
     device.queue.writeBuffer(uniformBuffer, 0, uniformFloats)
 
     const encoder = device.createCommandEncoder({ label: 'webgpu-background-pass' })
@@ -334,6 +415,10 @@ export function useWebGpuBackground(options: WebGpuBackgroundOptions) {
     if (!animationFrameId) {
       lastFrameMs = 0
       frameCounter = 0
+      lastMouseNormX = 0.5
+      lastMouseNormY = 0.5
+      immersiveBlendSmooth = immersive01.value
+      attachPointerTracking()
       animationFrameId = requestAnimationFrame(drawFrame)
       isRunning.value = true
     }
@@ -345,6 +430,7 @@ export function useWebGpuBackground(options: WebGpuBackgroundOptions) {
       options.shaderFilename.value,
       options.canvasRef.value,
       options.headerMorphPhase.value,
+      options.targetFps.value,
     ],
     () => {
       void startIfNeeded()
