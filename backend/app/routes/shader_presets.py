@@ -63,47 +63,15 @@ struct VsOut {
   @location(0) uv: vec2<f32>,
 };
 
-// φ=(1+√5)/2，顶点在单位球面上；a=1/√(1+φ²)，b=φ/√(1+φ²)
-const IC_A: f32 = 0.5257311121191336;
-const IC_B: f32 = 0.8506508083520399;
-
-const VERTS: array<vec3<f32>, 12> = array<vec3<f32>, 12>(
-  vec3<f32>(0.0, IC_A, IC_B),
-  vec3<f32>(0.0, -IC_A, IC_B),
-  vec3<f32>(0.0, IC_A, -IC_B),
-  vec3<f32>(0.0, -IC_A, -IC_B),
-  vec3<f32>(IC_A, IC_B, 0.0),
-  vec3<f32>(-IC_A, IC_B, 0.0),
-  vec3<f32>(IC_A, -IC_B, 0.0),
-  vec3<f32>(-IC_A, -IC_B, 0.0),
-  vec3<f32>(IC_B, 0.0, IC_A),
-  vec3<f32>(-IC_B, 0.0, IC_A),
-  vec3<f32>(IC_B, 0.0, -IC_A),
-  vec3<f32>(-IC_B, 0.0, -IC_A)
-);
-
-const EDGES: array<vec2<u32>, 30> = array<vec2<u32>, 30>(
-  vec2<u32>(0u, 1u), vec2<u32>(0u, 4u), vec2<u32>(0u, 5u), vec2<u32>(0u, 8u), vec2<u32>(0u, 9u),
-  vec2<u32>(1u, 6u), vec2<u32>(1u, 7u), vec2<u32>(1u, 8u), vec2<u32>(1u, 9u),
-  vec2<u32>(2u, 3u), vec2<u32>(2u, 4u), vec2<u32>(2u, 5u), vec2<u32>(2u, 10u), vec2<u32>(2u, 11u),
-  vec2<u32>(3u, 6u), vec2<u32>(3u, 7u), vec2<u32>(3u, 10u), vec2<u32>(3u, 11u),
-  vec2<u32>(4u, 5u), vec2<u32>(4u, 8u), vec2<u32>(4u, 10u),
-  vec2<u32>(5u, 9u), vec2<u32>(5u, 11u),
-  vec2<u32>(6u, 7u), vec2<u32>(6u, 8u), vec2<u32>(6u, 10u),
-  vec2<u32>(7u, 9u), vec2<u32>(7u, 11u),
-  vec2<u32>(8u, 10u), vec2<u32>(9u, 11u)
-);
-
-fn hash11(p: vec2<f32>) -> f32 {
-  return fract(sin(dot(p, vec2<f32>(127.1, 311.7))) * 43758.5453);
-}
-
-fn seg_dist(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
-  let pa = p - a;
-  let ba = b - a;
-  let len2 = max(dot(ba, ba), 1e-8);
-  let h = clamp(dot(pa, ba) / len2, 0.0, 1.0);
-  return length(pa - ba * h);
+// ── 基础数学与旋转 ──────────────────────────────────────────────────────────
+fn rot_x(a: f32) -> mat3x3<f32> {
+  let c = cos(a);
+  let s = sin(a);
+  return mat3x3<f32>(
+    vec3<f32>(1.0, 0.0, 0.0),
+    vec3<f32>(0.0, c, s),
+    vec3<f32>(0.0, -s, c)
+  );
 }
 
 fn rot_y(a: f32) -> mat3x3<f32> {
@@ -116,25 +84,126 @@ fn rot_y(a: f32) -> mat3x3<f32> {
   );
 }
 
-fn rot_x(a: f32) -> mat3x3<f32> {
-  let c = cos(a);
-  let s = sin(a);
-  return mat3x3<f32>(
-    vec3<f32>(1.0, 0.0, 0.0),
-    vec3<f32>(0.0, c, s),
-    vec3<f32>(0.0, -s, c)
-  );
+// ── 3D 噪声函数 (用于吸积盘流体细节) ───────────────────────────────────────
+fn hash31(p3_in: vec3<f32>) -> f32 {
+  var p3 = fract(p3_in * 0.1031);
+  p3 += dot(p3, p3.zyx + 31.32);
+  return fract((p3.x + p3.y) * p3.z);
 }
 
-fn hue_rgb(h: f32) -> vec3<f32> {
-  let t = fract(h) * 6.28318;
-  return vec3<f32>(
-    0.5 + 0.5 * cos(t),
-    0.5 + 0.5 * cos(t + 2.094395),
-    0.5 + 0.5 * cos(t + 4.18879)
-  );
+fn noise3(x: vec3<f32>) -> f32 {
+  let p = floor(x);
+  let f = fract(x);
+  let f_m = f * f * (3.0 - 2.0 * f);
+
+  let n000 = hash31(p + vec3<f32>(0.0, 0.0, 0.0));
+  let n100 = hash31(p + vec3<f32>(1.0, 0.0, 0.0));
+  let n010 = hash31(p + vec3<f32>(0.0, 1.0, 0.0));
+  let n110 = hash31(p + vec3<f32>(1.0, 1.0, 0.0));
+  let n001 = hash31(p + vec3<f32>(0.0, 0.0, 1.0));
+  let n101 = hash31(p + vec3<f32>(1.0, 0.0, 1.0));
+  let n011 = hash31(p + vec3<f32>(0.0, 1.0, 1.0));
+  let n111 = hash31(p + vec3<f32>(1.0, 1.0, 1.0));
+
+  let nx00 = mix(n000, n100, f_m.x);
+  let nx10 = mix(n010, n110, f_m.x);
+  let nx01 = mix(n001, n101, f_m.x);
+  let nx11 = mix(n011, n111, f_m.x);
+
+  let nxy0 = mix(nx00, nx10, f_m.y);
+  let nxy1 = mix(nx01, nx11, f_m.y);
+
+  return mix(nxy0, nxy1, f_m.z);
 }
 
+fn fbm(p_in: vec3<f32>) -> f32 {
+  var f = 0.0;
+  var amp = 0.5;
+  var p = p_in;
+  for(var i = 0u; i < 4u; i = i + 1u) {
+    f += amp * noise3(p);
+    p = p * 2.03;
+    amp *= 0.5;
+  }
+  return f;
+}
+
+// ── ACES 电影级色调映射 ──────────────────────────────────────────────────────
+fn aces_tonemap(color: vec3<f32>) -> vec3<f32> {
+  let a = 2.51;
+  let b = 0.03;
+  let c = 2.43;
+  let d = 0.59;
+  let e = 0.14;
+  return clamp((color * (a * color + b)) / (color * (c * color + d) + e), vec3<f32>(0.0), vec3<f32>(1.0));
+}
+
+// ── 宇宙背景 (受引力透镜扭曲) ───────────────────────────────────────────────
+fn stars_field(rd: vec3<f32>) -> vec3<f32> {
+  var col = vec3<f32>(0.0);
+
+  // 两层不同密度的星场
+  for (var layer = 0u; layer < 2u; layer = layer + 1u) {
+    let scale = select(80.0, 200.0, layer == 1u);
+    let brightness = select(6.0, 3.0, layer == 1u);
+    let threshold = select(0.96, 0.98, layer == 1u);
+
+    // 将方向向量投影到球面网格
+    let p = rd * scale;
+    let cell = floor(p);
+    let f = fract(p);
+
+    var min_dist = 1.0;
+    var star_rand = 0.0;
+
+    // 检查周围 3x3x3 邻域（确保跨单元边界连续）
+    for (var dz = -1; dz <= 1; dz = dz + 1) {
+      for (var dy = -1; dy <= 1; dy = dy + 1) {
+        for (var dx = -1; dx <= 1; dx = dx + 1) {
+          let offset = vec3<f32>(f32(dx), f32(dy), f32(dz));
+          let neighbor = cell + offset;
+
+          // 该单元格内星的随机位置
+          let h = fract(sin(dot(neighbor, vec3<f32>(127.1, 311.7, 74.7))) * 43758.5453);
+          let h2 = fract(sin(dot(neighbor, vec3<f32>(269.5, 183.3, 246.1))) * 43758.5453);
+          let h3 = fract(sin(dot(neighbor, vec3<f32>(113.5, 271.9, 124.6))) * 43758.5453);
+
+          let star_pos = offset + vec3<f32>(h, h2, h3) - f;
+          let d = length(star_pos);
+
+          if (d < min_dist) {
+            min_dist = d;
+            star_rand = h;
+          }
+        }
+      }
+    }
+
+    // 只有少数单元格实际产生可见星
+    if (star_rand > threshold) {
+      let star_bright = pow(1.0 - min_dist, 12.0) * brightness;
+      let temp = fract(star_rand * 17.3);
+      let star_col = mix(
+        vec3<f32>(0.7, 0.8, 1.0),  // 蓝白
+        vec3<f32>(1.0, 0.85, 0.6), // 暖黄
+        temp
+      );
+      col += star_col * star_bright;
+    }
+  }
+
+  return col;
+}
+
+fn get_background(rd: vec3<f32>) -> vec3<f32> {
+  let band = pow(max(1.0 - abs(rd.y) * 2.5, 0.0), 4.0);
+  let noise_bg = fbm(rd * 12.0);
+  let milky = vec3<f32>(0.05, 0.1, 0.2) * band * noise_bg;
+
+  return milky + stars_field(rd);
+}
+
+// ── 顶点着色器 ─────────────────────────────────────────────────────────────
 @vertex
 fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> VsOut {
   var pos = array<vec2<f32>, 3>(
@@ -151,110 +220,127 @@ fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> VsOut {
   return out;
 }
 
+// ── 片元着色器 (核心光追逻辑) ──────────────────────────────────────────────
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
   let uv = in.uv;
   let aspect = u.resolutionCss.x / max(u.resolutionCss.y, 1.0);
   let p_ndc = vec2<f32>((uv.x - 0.5) * aspect, 0.5 - uv.y);
 
+  // 1. 相机控制与沉浸式过渡
   let blend01 = clamp(u.immersiveBlend, 0.0, 1.0);
-  // smoothstep：进/出两端导数连续，避免 ease_out 在 t→0 时过陡与阶跃 immersive 叠加产生「跳入」感
-  let t_cam = blend01 * blend01 * (3.0 - 2.0 * blend01);
-  let cam_offset_rest = vec2<f32>(0.10, -0.08);
-  let p_cam = p_ndc - mix(cam_offset_rest, vec2<f32>(0.0, 0.0), t_cam);
+  let cam_dist = mix(9.0, 4.5, smoothstep(0.0, 1.0, blend01)); // 沉浸模式推进镜头
 
-  let mx = (u.mouseNorm.x - 0.5) * 0.65;
-  let my = (u.mouseNorm.y - 0.5) * 0.65;
-  let rot_speed = 0.18;
-  let ry = my + u.time * rot_speed;
-  let rx = mx + u.time * rot_speed * 0.4;
-  let rot = rot_x(rx) * rot_y(ry);
+  var ro = vec3<f32>(0.0, 0.8, cam_dist);
+  var rd = normalize(vec3<f32>(p_ndc, -1.0));
 
-  let scale = 0.55;
-  // 线宽/粒子仅随 immersiveBlend 变化，勿混用阶跃 u.immersive，否则进入沉浸瞬间会跳变
-  let line_w = (0.00175 / max(u.dpr, 1.0)) * (1.0 + 0.8 * blend01);
-  let px = 1.0 / max(u.resolutionPhysical.y, 1.0);
-  let eps = max(px * 0.5, 1e-5);
+  // 鼠标与自动旋转
+  let mx = (u.mouseNorm.x - 0.5) * 1.256;
+  let my = (u.mouseNorm.y - 0.5) * 2.0;
+  let rx = rot_x(my - 0.25);
+  let ry = rot_y(mx + u.time * 0.08); // 缓慢自转
 
-  var edge_acc = 0.0;
-  var z_acc = 0.0;
-  var col_edge = vec3<f32>(0.0, 0.0, 0.0);
-  let hue_base = fract(u.time * 0.03);
+  ro = ry * rx * ro;
+  rd = ry * rx * rd;
 
-  for (var ei = 0u; ei < 30u; ei = ei + 1u) {
-    let e = EDGES[ei];
-    let va = rot * (VERTS[e.x] * scale);
-    let vb = rot * (VERTS[e.y] * scale);
-    let a2 = vec2<f32>(va.x, va.y);
-    let b2 = vec2<f32>(vb.x, vb.y);
-    let d = seg_dist(p_cam, a2, b2);
-    let mid_z = 0.5 * (va.z + vb.z);
-    let contrib = line_w / max(d, eps);
-    edge_acc += contrib;
-    z_acc += mid_z * contrib;
-    let ec = hue_rgb(hue_base + f32(ei) / 30.0);
-    let e_local = 1.0 - exp(-contrib * 0.42);
-    col_edge += ec * e_local;
-  }
+  // 2. 物理光线追踪 (Raymarching) 初始化
+  var col = vec3<f32>(0.0);
+  var transmittance = 1.0;
+  let max_steps = 350u;
+  var hit_bh = false;
 
-  let edge_intensity = 1.0 - exp(-edge_acc * 0.38);
-  let z_acc_denom = max(edge_acc, 1e-4);
-  let z_norm = z_acc / z_acc_denom;
-  let cool = clamp(0.5 - z_norm * 0.35, 0.0, 1.0);
-  let warm = clamp(0.5 + z_norm * 0.35, 0.0, 1.0);
+  let rs = 1.0; // 黑洞史瓦西半径
+  let disk_inner = 1.35 * rs;
+  let disk_outer = 7.0 * rs;
 
-  // 粒子：每条棱用该棱色相 ec；初速 0，仅重力下落；竖直速度有上限；每棱 6 个 → 总 180
-  // cycle_speed 必须与 tau 绑定：age 在 [0,1) 走完一整周期 = PARTICLE_LIFE_SEC 秒，否则 tau 与 d(age)/dt 错配会像「速度累积」
-  let PARTICLE_LIFE_SEC = 2.4;
-  let GRAVITY_NDC = 0.95;
-  let PARTICLE_V_MAX = 0.42;
-  let cycle_speed = 1.0 / PARTICLE_LIFE_SEC;
-  var p_glow = 0.0;
-  var p_col = vec3<f32>(0.0, 0.0, 0.0);
-  let part_kernel = max(eps * 1.1, px * 1.4);
-  let t_cap = PARTICLE_V_MAX / max(GRAVITY_NDC, 1e-5);
+  for(var i = 0u; i < max_steps; i = i + 1u) {
+    let r = length(ro);
 
-  for (var ei = 0u; ei < 30u; ei = ei + 1u) {
-    let e = EDGES[ei];
-    let va = rot * (VERTS[e.x] * scale);
-    let vb = rot * (VERTS[e.y] * scale);
-    let va2 = vec2<f32>(va.x, va.y);
-    let vb2 = vec2<f32>(vb.x, vb.y);
-    let ec = hue_rgb(hue_base + f32(ei) / 30.0);
-
-    for (var pj = 0u; pj < 6u; pj = pj + 1u) {
-      let pid = vec2<f32>(f32(ei), f32(pj));
-      let spawn_t = hash11(pid * 1.731 + vec2<f32>(23.1, 17.9));
-      let ph = hash11(pid + vec2<f32>(4.2, 0.0));
-      let age = fract(u.time * cycle_speed + ph * 17.0);
-      let tau = age / max(cycle_speed, 1e-5);
-      let fall = select(
-        0.5 * GRAVITY_NDC * tau * tau,
-        0.5 * GRAVITY_NDC * t_cap * t_cap + PARTICLE_V_MAX * (tau - t_cap),
-        tau > t_cap
-      );
-      // 与棱顶点同一 2D 空间：此处 y 增大朝向屏幕下方（与 p_ndc 的「上正」相反），故下落为 +fall
-      let dy = fall;
-      let base = mix(va2, vb2, spawn_t);
-      let ppos = base + vec2<f32>(0.0, dy);
-      let pd = length(p_cam - ppos);
-      let fade = pow(1.0 - age, 1.35);
-      let pk = 0.48 + 0.32 * blend01;
-      let contrib = fade * pk / max(pd, part_kernel);
-      p_glow += contrib;
-      p_col += ec * contrib;
+    // 跌入事件视界
+    if (r < rs * 0.98) {
+      hit_bh = true;
+      break;
     }
+    // 飞出感兴趣区域，终止计算
+    if (r > 20.0) {
+      break;
+    }
+
+    // 自适应步长：靠近黑洞时步长极小，以精确模拟引力透镜
+    let dt = min(0.04, r * 0.025);
+
+    // 引力透镜效应：光线向质量中心弯曲 (近似广义相对论光子轨道)
+    let r3 = r * r * r;
+    let force = 1.5 * rs / max(r3, 0.01);
+    rd = normalize(rd - ro * force * dt);
+
+    // 3. 吸积盘体积渲染
+    let dist_to_plane = abs(ro.y);
+    if (dist_to_plane < 1.2 && r > disk_inner && r < disk_outer) {
+
+      // 吸积盘密度分布 (径向和垂直衰减)
+      let rad_falloff = smoothstep(disk_inner, disk_inner + 0.8, r) * smoothstep(disk_outer, disk_outer - 3.0, r);
+      let height_falloff = exp(-dist_to_plane * (12.0 - r * 0.5));
+      let base_density = rad_falloff * height_falloff;
+
+      if (base_density > 0.005) {
+        // 开普勒运动：内圈转速极快，外圈慢
+        let vel_mag = 2.5 / max(pow(r, 1.5), 0.1);
+        let angle = atan2(ro.z, ro.x) - u.time * vel_mag;
+        let r_xz = length(ro.xz);
+        let pos_rot = vec3<f32>(cos(angle)*r_xz, ro.y, sin(angle)*r_xz);
+
+        // 使用 FBM 注入流体细节
+        let n = fbm(pos_rot * 3.5 + vec3<f32>(0.0, u.time * 0.4, u.time * 0.2));
+        let density = base_density * smoothstep(0.1, 0.9, n) * 2.5;
+
+        if (density > 0.0) {
+          // 相对论多普勒效应 (Relativistic Beaming)
+          // 盘体围绕 Y 轴逆时针旋转，计算该点速度方向
+          let flow_dir = normalize(vec3<f32>(-ro.z, 0.0, ro.x));
+          let doppler = dot(rd, flow_dir);
+          let shift = max(1.0 + doppler * 0.75, 0.1); // >1为接近(蓝移变亮), <1为远离(红移变暗)
+
+          // 温度映射：内圈极高温(偏白蓝/紫)，外圈降温(橙红)
+          let temp_norm = smoothstep(disk_outer, disk_inner, r);
+          var heat_col = mix(vec3<f32>(0.8, 0.15, 0.02), vec3<f32>(0.6, 0.85, 1.0), temp_norm);
+
+          // 应用多普勒频移：极大地增强亮度对比并发生色彩偏移
+          let shifted_col = heat_col * vec3<f32>(pow(shift, 0.5), shift, pow(shift, 1.8));
+          let emission = shifted_col * density * dt * 15.0 * pow(shift, 2.5);
+
+          // 光线吸收与累加
+          let alpha = 1.0 - exp(-density * dt * 4.0);
+          col += transmittance * emission;
+          transmittance *= (1.0 - alpha);
+        }
+      }
+    }
+
+    // 如果光线已被完全遮挡，提早退出
+    if (transmittance < 0.01) {
+      break;
+    }
+
+    ro += rd * dt;
   }
 
-  let p_w = min(p_glow * 1.15, 1.0);
-  let p_mix = p_col / max(p_glow, 1e-4);
-  var col = col_edge * (0.24 + 0.22 * warm);
-  col += vec3<f32>(0.65, 0.78, 1.0) * cool * edge_intensity * 0.32;
-  col += vec3<f32>(1.0, 0.55, 0.25) * warm * edge_intensity * 0.18;
-  col += vec3<f32>(1.0, 0.98, 0.92) * (edge_intensity * edge_intensity) * 0.14;
-  col += p_mix * p_w * 1.22;
+  // 4. 背景与光环混合
+  if (!hit_bh && transmittance > 0.01) {
+    // 逃逸的光线最终打在宇宙背景上
+    let bg = get_background(rd);
+    col += transmittance * bg;
+  }
 
-  let boot = smoothstep(0.0, 1.0, min(u.frameCounter / 50.0, 1.0));
+  // 5. 辉光与后处理 (电影级调色)
+  col = aces_tonemap(col * 1.2); // 曝光提升后进行ACES压限
+
+  // 边缘暗角 (Vignette)
+  let vignette = clamp(1.0 - length(p_ndc) * 0.6, 0.0, 1.0);
+  col *= pow(vignette, 0.4);
+
+  // 启动淡入动画
+  let boot = smoothstep(0.0, 1.0, min(u.frameCounter / 80.0, 1.0));
   col *= boot;
 
   return vec4<f32>(clamp(col, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
