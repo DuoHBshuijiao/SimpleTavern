@@ -340,6 +340,8 @@ export interface Settings {
   }>
   /** 当前活动的 WebGPU 预设 ID（保存后用于默认运行） */
   webgpuBackgroundActivePresetId?: string | null
+  /** WebGPU 背景着色器目标帧率（12–120），未设置时前端按 60 处理 */
+  webgpuBackgroundTargetFps?: number | null
   /** 聊天窗口内消息文字字号（仅作用于消息气泡内容），不指定则不覆盖 */
   messageFontSize?: number | null
   /** TTS 总开关，默认关闭 */
