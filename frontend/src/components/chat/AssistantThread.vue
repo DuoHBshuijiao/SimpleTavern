@@ -4,6 +4,7 @@ import { onBeforeUnmount, ref } from 'vue'
 import type { AssistantMessage } from '../../composables/useAssistant'
 import type { AssistantAttachment } from '../../types/models'
 import ConfirmPopover from '../ConfirmPopover.vue'
+import ReasoningBubble from './ReasoningBubble.vue'
 
 const STREAMING_REASONING_ID = '_streaming_pending'
 
@@ -13,6 +14,8 @@ const props = withDefaults(defineProps<{
   reasoningBlocks?: Array<{ messageId: string; content: string }>
   streamingContent?: string
   streamingReasoning?: string
+  /** 首条正文 delta 前为 true；与 useAssistant reasoning*StreamPhaseActive 对齐 */
+  reasoningStreamPhaseActive: boolean
   showMessageActions?: boolean
   attachmentScope?: 'chat' | 'workspace'
   chatId?: string | null
@@ -137,15 +140,6 @@ function hasAnyAttachment(message: AssistantMessage): boolean {
   return getMessageAttachments(message).length > 0
 }
 
-function expandReasoning(messageId: string, e: MouseEvent) {
-  if ((e.target as HTMLElement).closest('.reasoning-toggle-icon')) return
-  expandedReasoningMessageId.value = messageId
-}
-
-function toggleReasoning(messageId: string, e: MouseEvent) {
-  e.stopPropagation()
-  expandedReasoningMessageId.value = expandedReasoningMessageId.value === messageId ? null : messageId
-}
 
 /** 从 API 恢复的 assistant 上的 reasoningContent，或旧版 reasoningBlocks */
 function getPersistedReasoningForAssistant(m: AssistantMessage): string | undefined {
@@ -386,29 +380,14 @@ onBeforeUnmount(() => {
   >
     <!-- 独立思考段（流式提交后的 role=reasoning） -->
     <template v-if="message.role === 'reasoning'">
-      <div
-        class="reasoning-bubble-surface w-full min-w-0 max-w-[90%] rounded-lg text-xs leading-relaxed relative transition-[max-height] duration-300 ease-in-out"
-        :class="isReasoningExpanded(message.id) ? 'max-h-[80vh] overflow-hidden' : 'max-h-[100px] overflow-hidden cursor-pointer'"
-        @click="expandReasoning(message.id, $event)"
-      >
-        <div
-          class="pr-8 py-2.5 pl-3 whitespace-pre-wrap break-words transition-[max-height] duration-300 ease-in-out"
-          :class="isReasoningExpanded(message.id) ? 'max-h-[80vh] overflow-y-auto' : 'max-h-[100px] overflow-hidden'"
-        >
-          {{ message.content }}
-        </div>
-        <button
-          type="button"
-          class="reasoning-toggle-icon absolute top-2 right-2 z-10 w-6 h-6 flex items-center justify-center rounded hover:bg-white/10 transition-transform duration-200"
-          :class="isReasoningExpanded(message.id) ? 'rotate-90' : ''"
-          :aria-label="isReasoningExpanded(message.id) ? '收起思考' : '展开思考'"
-          @click="toggleReasoning(message.id, $event)"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="15 18 9 12 15 6" />
-          </svg>
-        </button>
-      </div>
+      <ReasoningBubble
+        class="max-w-[90%]"
+        :content="message.content"
+        :is-streaming="false"
+        :duration-sec="typeof message.reasoningDurationSec === 'number' ? message.reasoningDurationSec : null"
+        :expanded="isReasoningExpanded(message.id)"
+        @update:expanded="(v) => (expandedReasoningMessageId = v ? message.id : null)"
+      />
     </template>
 
     <template v-else-if="message.role === 'tool'">
@@ -438,30 +417,15 @@ onBeforeUnmount(() => {
     </template>
 
     <template v-else>
-      <div
+      <ReasoningBubble
         v-if="message.role === 'assistant' && getPersistedReasoningForAssistant(message)"
-        class="reasoning-bubble-surface w-full min-w-0 max-w-[90%] rounded-lg text-xs leading-relaxed relative transition-[max-height] duration-300 ease-in-out"
-        :class="isReasoningExpanded(message.id) ? 'max-h-[80vh] overflow-hidden' : 'max-h-[100px] overflow-hidden cursor-pointer'"
-        @click="expandReasoning(message.id, $event)"
-      >
-        <div
-          class="pr-8 py-2.5 pl-3 whitespace-pre-wrap break-words transition-[max-height] duration-300 ease-in-out"
-          :class="isReasoningExpanded(message.id) ? 'max-h-[80vh] overflow-y-auto' : 'max-h-[100px] overflow-hidden'"
-        >
-          {{ getPersistedReasoningForAssistant(message) }}
-        </div>
-        <button
-          type="button"
-          class="reasoning-toggle-icon absolute top-2 right-2 z-10 w-6 h-6 flex items-center justify-center rounded hover:bg-white/10 transition-transform duration-200"
-          :class="isReasoningExpanded(message.id) ? 'rotate-90' : ''"
-          :aria-label="isReasoningExpanded(message.id) ? '收起思考' : '展开思考'"
-          @click="toggleReasoning(message.id, $event)"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="15 18 9 12 15 6" />
-          </svg>
-        </button>
-      </div>
+        class="max-w-[90%]"
+        :content="getPersistedReasoningForAssistant(message) || ''"
+        :is-streaming="false"
+        :duration-sec="typeof message.reasoningDurationSec === 'number' ? message.reasoningDurationSec : null"
+        :expanded="isReasoningExpanded(message.id)"
+        @update:expanded="(v) => (expandedReasoningMessageId = v ? message.id : null)"
+      />
       <div
         v-if="showMainBubble(message)"
         class="min-w-0 max-w-[90%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed shadow-sm border transition-colors"
@@ -552,30 +516,15 @@ onBeforeUnmount(() => {
     v-if="showStreamingOverlay()"
     class="flex w-full min-w-0 flex-col gap-1 items-start"
   >
-    <div
+    <ReasoningBubble
       v-if="(streamingReasoning ?? '').trim()"
-      class="reasoning-bubble-surface w-full min-w-0 max-w-[90%] rounded-lg text-xs leading-relaxed relative transition-[max-height] duration-300 ease-in-out"
-      :class="isReasoningExpanded(STREAMING_REASONING_ID) ? 'max-h-[80vh] overflow-hidden' : 'max-h-[100px] overflow-hidden cursor-pointer'"
-      @click="expandReasoning(STREAMING_REASONING_ID, $event)"
-    >
-      <div
-        class="pr-8 py-2.5 pl-3 whitespace-pre-wrap break-words transition-[max-height] duration-300 ease-in-out"
-        :class="isReasoningExpanded(STREAMING_REASONING_ID) ? 'max-h-[80vh] overflow-y-auto' : 'max-h-[100px] overflow-hidden'"
-      >
-        {{ (streamingReasoning ?? '').trim() }}
-      </div>
-      <button
-        type="button"
-        class="reasoning-toggle-icon absolute top-2 right-2 z-10 w-6 h-6 flex items-center justify-center rounded hover:bg-white/10 transition-transform duration-200"
-        :class="isReasoningExpanded(STREAMING_REASONING_ID) ? 'rotate-90' : ''"
-        :aria-label="isReasoningExpanded(STREAMING_REASONING_ID) ? '收起思考' : '展开思考'"
-        @click="toggleReasoning(STREAMING_REASONING_ID, $event)"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="15 18 9 12 15 6" />
-        </svg>
-      </button>
-    </div>
+      class="max-w-[90%]"
+      :content="(streamingReasoning ?? '').trim()"
+      :is-streaming="reasoningStreamPhaseActive"
+      :duration-sec="null"
+      :expanded="isReasoningExpanded(STREAMING_REASONING_ID)"
+      @update:expanded="(v) => (expandedReasoningMessageId = v ? STREAMING_REASONING_ID : null)"
+    />
     <div
       v-if="(streamingContent ?? '') !== ''"
       class="min-w-0 max-w-[90%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed shadow-sm border transition-colors bg-white/5 backdrop-blur-md border-white/10 text-gray-200 rounded-tl-sm"
