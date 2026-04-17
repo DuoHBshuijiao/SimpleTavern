@@ -56,6 +56,7 @@ import type { ChatMessage, CharacterCard, UserPersona } from '../../types/models
 import { useSettingsStore } from '../../stores'
 import ModernAvatar from '../ModernAvatar.vue'
 import ConfirmPopover from '../ConfirmPopover.vue'
+import ReasoningBubble from './ReasoningBubble.vue'
 import MarkdownIt from 'markdown-it'
 import { Settings, ChevronLeft, ChevronRight, ChevronDown, X } from 'lucide-vue-next'
 
@@ -86,6 +87,8 @@ const props = defineProps<{
   reasoningMessageId?: string | null
   /** 思考链内容（当前正在流式接收的一条） */
   reasoningContent?: string
+  /** 是否仍处于「思考流式」阶段（首条正文 delta 前为 true；与 chatReasoningStreamActive 对齐） */
+  reasoningStreamActive: boolean
   /** 多轮思考链块：每项为 { messageId, content }，仅前端临时展示 */
   reasoningBlocks?: Array<{ messageId: string; content: string }>
   // 版本相关
@@ -166,17 +169,6 @@ let previewWindowZSeed = 1200
 
 function isReasoningExpanded(messageId: string) {
   return expandedReasoningMessageId.value === messageId
-}
-
-function expandReasoning(messageId: string, e: MouseEvent) {
-  if ((e.target as HTMLElement).closest('.reasoning-toggle-icon')) return
-  expandedReasoningMessageId.value = messageId
-}
-
-function toggleReasoning(messageId: string, e: MouseEvent) {
-  e.stopPropagation()
-  expandedReasoningMessageId.value =
-    expandedReasoningMessageId.value === messageId ? null : messageId
 }
 
 function openImagePreview(src: string, alt: string) {
@@ -310,10 +302,9 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', updateViewport)
 })
 
-/** 获取某条助手消息对应的思考链内容：优先版本绑定的思考，再当前流式内容，否则从 reasoningBlocks 按 messageId 取 */
+/** 获取某条助手消息对应的思考链内容：优先版本绑定的思考，再当前流式内容，否则从 reasoningBlocks 按 messageId 取，最后回退到磁盘快照 */
 function getReasoningForMessage(m: ChatMessage): string | undefined {
   if (m.role !== 'assistant') return undefined
-  // 多版本时优先使用当前版本绑定的思考内容
   if (props.getDisplayReasoning) {
     const versioned = props.getDisplayReasoning(m)
     if (versioned) return versioned
@@ -325,9 +316,23 @@ function getReasoningForMessage(m: ChatMessage): string | undefined {
   if (Array.isArray(blocks)) {
     const block = blocks.find((b) => b.messageId === m.id)
     const content = block?.content?.trim()
-    return content || undefined
+    if (content) return content
   }
-  return undefined
+  const persisted = typeof m.reasoningContent === 'string' ? m.reasoningContent.trim() : ''
+  return persisted || undefined
+}
+
+/** 当前消息是否正在接收思考流式内容（控制 ReasoningBubble 的 streaming 模式） */
+function isMessageReasoningStreaming(m: ChatMessage): boolean {
+  if (!props.isGenerating && !props.isInterjecting) return false
+  if (m.id !== props.reasoningMessageId) return false
+  return props.reasoningStreamActive
+}
+
+/** 当前消息思考耗时（秒）；未持久化时返回 null */
+function getReasoningDurationForMessage(m: ChatMessage): number | null {
+  const d = typeof m.reasoningDurationSec === 'number' ? m.reasoningDurationSec : null
+  return d != null && Number.isFinite(d) ? d : null
 }
 
 // Markdown 渲染器
@@ -849,7 +854,7 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- 消息体 -->
-        <div class="flex flex-col max-w-[85%] min-w-0" :class="m.role === 'user' ? 'items-end' : 'items-start'">
+        <div class="flex flex-1 min-w-0 flex-col max-w-[85%]" :class="m.role === 'user' ? 'items-end' : 'items-start'">
           <div class="flex items-center gap-2 mb-1 px-1">
             <span class="text-xs font-bold" :class="m.role === 'user' ? 'text-brand-fg-soft' : 'text-[var(--color-text-muted)]'">
               {{ getMessageLabel(m) }}
@@ -857,31 +862,16 @@ onBeforeUnmount(() => {
             <span v-if="m.role === 'system'" class="text-[10px] bg-yellow-500/10 text-yellow-500 px-1.5 py-0.5 rounded">SYSTEM</span>
           </div>
 
-          <!-- 思考链气泡：在角色名下方、正文上方，小圆角，默认折叠 80px；点击气泡或图标展开，展开时点击图标收起；多轮回复按 messageId 显示对应思考内容 -->
-          <div
+          <!-- 思考链气泡：流式中为固定高度滚动窗，结束后收起为"已思考 x.x 秒"小卡片 -->
+          <ReasoningBubble
             v-if="m.role === 'assistant' && getReasoningForMessage(m)"
-            class="reasoning-bubble-surface w-full max-w-full rounded-lg text-xs leading-relaxed relative transition-[max-height] duration-300 ease-in-out mb-2"
-            :class="isReasoningExpanded(m.id) ? 'max-h-[80vh] overflow-hidden' : 'max-h-[80px] overflow-hidden cursor-pointer'"
-            @click="expandReasoning(m.id, $event)"
-          >
-            <div
-              class="pr-8 py-2.5 pl-3 whitespace-pre-wrap break-words transition-[max-height] duration-300 ease-in-out"
-              :class="isReasoningExpanded(m.id) ? 'max-h-[80vh] overflow-y-auto' : 'max-h-[80px] overflow-hidden'"
-            >
-              {{ getReasoningForMessage(m) }}
-            </div>
-            <button
-              type="button"
-              class="reasoning-toggle-icon absolute top-2 right-2 z-10 w-6 h-6 flex items-center justify-center rounded hover:bg-white/10 transition-transform duration-200"
-              :class="isReasoningExpanded(m.id) ? 'rotate-90' : ''"
-              :aria-label="isReasoningExpanded(m.id) ? '收起思考' : '展开思考'"
-              @click="toggleReasoning(m.id, $event)"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="15 18 9 12 15 6" />
-              </svg>
-            </button>
-          </div>
+            class="mb-2"
+            :content="getReasoningForMessage(m) || ''"
+            :is-streaming="isMessageReasoningStreaming(m)"
+            :duration-sec="getReasoningDurationForMessage(m)"
+            :expanded="isReasoningExpanded(m.id)"
+            @update:expanded="(v) => (expandedReasoningMessageId = v ? m.id : null)"
+          />
 
           <!-- 气泡 -->
           <div 
