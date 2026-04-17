@@ -96,10 +96,13 @@ export function useMessageVersions() {
   function getDisplayReasoning(message: ChatMessage): string | undefined {
     const messageId = getOriginalMessageId(message.id)
     const reasonings = messageReasoningVersions.value.get(messageId)
-    if (!reasonings || reasonings.length === 0) return undefined
-    const currentIndex = messageVersionIndex.value.get(messageId) ?? 0
-    const content = reasonings[currentIndex]?.trim()
-    return content || undefined
+    if (reasonings && reasonings.length > 0) {
+      const currentIndex = messageVersionIndex.value.get(messageId) ?? 0
+      const content = reasonings[currentIndex]?.trim()
+      if (content) return content
+    }
+    const persisted = (message.reasoningContent ?? '').trim()
+    return persisted || undefined
   }
 
   /**
