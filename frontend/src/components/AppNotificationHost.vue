@@ -5,6 +5,12 @@
  */
 import { computed } from 'vue'
 import { useNotifyHost } from '../composables/useNotify'
+import { useSettingsStore } from '../stores'
+import { normalizeThemeId } from '../types/models'
+
+const settingsStore = useSettingsStore()
+/** Teleport 到 body 后与 #app 同级，显式绑定 data-theme，保证语义色与 App 根一致 */
+const appThemeId = computed(() => normalizeThemeId(settingsStore.settings?.themeId))
 
 const { current, dismissAlert, confirmYes, confirmNo } = useNotifyHost()
 
@@ -28,6 +34,7 @@ function onBackdropClick() {
     <div
       v-if="current"
       class="app-notify-host fixed inset-0 z-notification flex justify-center items-start px-4 pointer-events-auto"
+      :data-theme="appThemeId"
     >
       <div
         class="app-notify-backdrop absolute inset-0"
