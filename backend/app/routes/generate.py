@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from datetime import datetime
 from typing import Any, AsyncIterator
 
@@ -834,6 +835,9 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
 
     async def event_iter() -> AsyncIterator[str]:
         full_text: list[str] = []
+        full_reasoning: list[str] = []
+        reasoning_start: float | None = None
+        reasoning_end: float | None = None
         try:
             async for chunk in stream_chat_completions(
                 base_url=base_url,
@@ -846,6 +850,11 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
                 extra_body=extra_body,
             ):
                 if chunk.kind == "reasoning":
+                    now = time.monotonic()
+                    if reasoning_start is None:
+                        reasoning_start = now
+                    reasoning_end = now
+                    full_reasoning.append(chunk.text)
                     yield _sse("reasoning", {"text": chunk.text})
                 else:
                     full_text.append(chunk.text)
@@ -853,8 +862,17 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
 
             streamed = "".join(full_text)
             assistant_content = streamed.strip()
+            reasoning_text = "".join(full_reasoning).strip() or None
+            duration_sec: float | None = None
+            if reasoning_start is not None and reasoning_end is not None:
+                duration_sec = round(max(0.0, reasoning_end - reasoning_start), 1)
             if assistant_content:
-                assistant_msg = ChatMessage(role="assistant", content=assistant_content)
+                assistant_msg = ChatMessage(
+                    role="assistant",
+                    content=assistant_content,
+                    reasoningContent=reasoning_text,
+                    reasoningDurationSec=duration_sec if reasoning_text else None,
+                )
                 chat.messages.append(assistant_msg)
                 chat.updatedAt = _now_iso()
                 save_chat(chat)
@@ -863,7 +881,16 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
                     settings.llm.usedModels = settings.llm.usedModels[:20]
                     settings.updatedAt = _now_iso()
                     save_settings(settings)
-                yield _sse("done", {"ok": True, "chatId": chat.id, "assistantMessageId": assistant_msg.id})
+                done_payload: dict[str, Any] = {
+                    "ok": True,
+                    "chatId": chat.id,
+                    "assistantMessageId": assistant_msg.id,
+                }
+                if reasoning_text:
+                    done_payload["reasoningContent"] = reasoning_text
+                if duration_sec is not None and reasoning_text:
+                    done_payload["reasoningDurationSec"] = duration_sec
+                yield _sse("done", done_payload)
             else:
                 yield _sse("done", {"ok": True, "chatId": chat.id})
         except Exception as e:
@@ -871,6 +898,7 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
 
     if not settings.streamEnabled:
         try:
+            req_start = time.monotonic()
             if thinking_enabled:
                 resp = await chat_completions_message(
                     base_url=base_url,
@@ -883,7 +911,7 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
                     extra_body=extra_body,
                 )
                 assistant_content = (resp.content or "").strip()
-                reasoning_content = resp.reasoning_content or None
+                reasoning_content = (resp.reasoning_content or None)
             else:
                 result = await chat_completions(
                     base_url=base_url,
@@ -897,9 +925,15 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
                 )
                 assistant_content = result.text.strip()
                 reasoning_content = None
+            req_duration = round(max(0.0, time.monotonic() - req_start), 1) if reasoning_content else None
             assistant_msg = None
             if assistant_content:
-                assistant_msg = ChatMessage(role="assistant", content=assistant_content)
+                assistant_msg = ChatMessage(
+                    role="assistant",
+                    content=assistant_content,
+                    reasoningContent=(reasoning_content.strip() if isinstance(reasoning_content, str) and reasoning_content.strip() else None),
+                    reasoningDurationSec=req_duration,
+                )
                 chat.messages.append(assistant_msg)
                 chat.updatedAt = _now_iso()
                 save_chat(chat)
@@ -917,6 +951,8 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
             }
             if reasoning_content is not None:
                 payload["reasoningContent"] = reasoning_content
+            if req_duration is not None:
+                payload["reasoningDurationSec"] = req_duration
             return JSONResponse(payload)
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
@@ -1346,6 +1382,9 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
 
     async def event_iter():
         full_text: list[str] = []
+        full_reasoning: list[str] = []
+        reasoning_start: float | None = None
+        reasoning_end: float | None = None
         try:
             async for chunk in stream_chat_completions(
                 base_url=base_url,
@@ -1358,6 +1397,11 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
                 extra_body=extra_body,
             ):
                 if chunk.kind == "reasoning":
+                    now = time.monotonic()
+                    if reasoning_start is None:
+                        reasoning_start = now
+                    reasoning_end = now
+                    full_reasoning.append(chunk.text)
                     yield _sse("reasoning", {"text": chunk.text})
                 else:
                     full_text.append(chunk.text)
@@ -1365,16 +1409,32 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
 
             streamed = "".join(full_text)
             assistant_content = streamed.strip()
+            reasoning_text = "".join(full_reasoning).strip() or None
+            duration_sec: float | None = None
+            if reasoning_start is not None and reasoning_end is not None:
+                duration_sec = round(max(0.0, reasoning_end - reasoning_start), 1)
             if assistant_content:
                 assistant_msg = ChatMessage(
                     role="assistant",
                     content=assistant_content,
-                    characterId=req.characterId
+                    characterId=req.characterId,
+                    reasoningContent=reasoning_text,
+                    reasoningDurationSec=duration_sec if reasoning_text else None,
                 )
                 chat.messages.append(assistant_msg)
                 chat.updatedAt = _now_iso()
                 save_chat(chat)
-                yield _sse("done", {"ok": True, "chatId": chat.id, "assistantMessageId": assistant_msg.id, "characterId": req.characterId})
+                done_payload: dict[str, Any] = {
+                    "ok": True,
+                    "chatId": chat.id,
+                    "assistantMessageId": assistant_msg.id,
+                    "characterId": req.characterId,
+                }
+                if reasoning_text:
+                    done_payload["reasoningContent"] = reasoning_text
+                if duration_sec is not None and reasoning_text:
+                    done_payload["reasoningDurationSec"] = duration_sec
+                yield _sse("done", done_payload)
             else:
                 yield _sse("done", {"ok": True, "chatId": chat.id, "characterId": req.characterId})
         except Exception as e:
@@ -1382,6 +1442,7 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
 
     if not settings.streamEnabled:
         try:
+            req_start = time.monotonic()
             if thinking_enabled:
                 resp = await chat_completions_message(
                     base_url=base_url,
@@ -1408,12 +1469,15 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
                 )
                 assistant_content = result.text.strip()
                 reasoning_content = None
+            req_duration = round(max(0.0, time.monotonic() - req_start), 1) if reasoning_content else None
             assistant_msg = None
             if assistant_content:
                 assistant_msg = ChatMessage(
                     role="assistant",
                     content=assistant_content,
-                    characterId=req.characterId
+                    characterId=req.characterId,
+                    reasoningContent=(reasoning_content.strip() if isinstance(reasoning_content, str) and reasoning_content.strip() else None),
+                    reasoningDurationSec=req_duration,
                 )
                 chat.messages.append(assistant_msg)
                 chat.updatedAt = _now_iso()
@@ -1428,6 +1492,8 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
             }
             if reasoning_content is not None:
                 payload["reasoningContent"] = reasoning_content
+            if req_duration is not None:
+                payload["reasoningDurationSec"] = req_duration
             return JSONResponse(payload)
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
@@ -1722,6 +1788,9 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
 
     async def event_iter():
         full_text: list[str] = []
+        full_reasoning: list[str] = []
+        reasoning_start: float | None = None
+        reasoning_end: float | None = None
         try:
             async for chunk in stream_chat_completions(
                 base_url=base_url,
@@ -1734,6 +1803,11 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
                 extra_body=extra_body,
             ):
                 if chunk.kind == "reasoning":
+                    now = time.monotonic()
+                    if reasoning_start is None:
+                        reasoning_start = now
+                    reasoning_end = now
+                    full_reasoning.append(chunk.text)
                     yield _sse("reasoning", {"text": chunk.text})
                 else:
                     full_text.append(chunk.text)
@@ -1741,16 +1815,33 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
 
             streamed = "".join(full_text)
             assistant_content = streamed.strip()
+            reasoning_text = "".join(full_reasoning).strip() or None
+            duration_sec: float | None = None
+            if reasoning_start is not None and reasoning_end is not None:
+                duration_sec = round(max(0.0, reasoning_end - reasoning_start), 1)
             if assistant_content:
                 assistant_msg = ChatMessage(
                     role="assistant",
                     content=assistant_content,
-                    characterId=req.characterId
+                    characterId=req.characterId,
+                    reasoningContent=reasoning_text,
+                    reasoningDurationSec=duration_sec if reasoning_text else None,
                 )
                 chat.messages.append(assistant_msg)
                 chat.updatedAt = _now_iso()
                 save_chat(chat)
-                yield _sse("done", {"ok": True, "chatId": chat.id, "assistantMessageId": assistant_msg.id, "characterId": req.characterId, "isInterject": True})
+                done_payload: dict[str, Any] = {
+                    "ok": True,
+                    "chatId": chat.id,
+                    "assistantMessageId": assistant_msg.id,
+                    "characterId": req.characterId,
+                    "isInterject": True,
+                }
+                if reasoning_text:
+                    done_payload["reasoningContent"] = reasoning_text
+                if duration_sec is not None and reasoning_text:
+                    done_payload["reasoningDurationSec"] = duration_sec
+                yield _sse("done", done_payload)
             else:
                 yield _sse("done", {"ok": True, "chatId": chat.id, "characterId": req.characterId, "isInterject": True})
         except Exception as e:
@@ -1758,6 +1849,7 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
 
     if not settings.streamEnabled:
         try:
+            req_start = time.monotonic()
             if thinking_enabled:
                 resp = await chat_completions_message(
                     base_url=base_url,
@@ -1784,12 +1876,15 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
                 )
                 assistant_content = result.text.strip()
                 reasoning_content = None
+            req_duration = round(max(0.0, time.monotonic() - req_start), 1) if reasoning_content else None
             assistant_msg = None
             if assistant_content:
                 assistant_msg = ChatMessage(
                     role="assistant",
                     content=assistant_content,
-                    characterId=req.characterId
+                    characterId=req.characterId,
+                    reasoningContent=(reasoning_content.strip() if isinstance(reasoning_content, str) and reasoning_content.strip() else None),
+                    reasoningDurationSec=req_duration,
                 )
                 chat.messages.append(assistant_msg)
                 chat.updatedAt = _now_iso()
@@ -1805,6 +1900,8 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
             }
             if reasoning_content is not None:
                 payload["reasoningContent"] = reasoning_content
+            if req_duration is not None:
+                payload["reasoningDurationSec"] = req_duration
             return JSONResponse(payload)
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
