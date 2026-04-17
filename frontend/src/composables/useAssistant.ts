@@ -50,6 +50,8 @@ export type AssistantMessage = {
   attachments?: AssistantAttachment[]
   /** 持久化助手消息上的推理/思考链（与后端 reasoningContent 对齐；仅 assistant 从 API 恢复时可能有） */
   reasoningContent?: string | null
+  /** 推理/思考耗时（秒，浮点，前端展示一位小数） */
+  reasoningDurationSec?: number | null
   /** OpenAI 对齐：对应 assistant.tool_calls[].id */
   tool_call_id?: string
   /** 结构化工具调用记录（与后端 ChatMessage.toolRecord 对齐；SSE 工具步骤或历史 system 摘要） */
@@ -131,6 +133,10 @@ export function useAssistant(options: UseAssistantOptions) {
   const workspaceAssistantStreamError = ref<string | null>(null)
   const workspaceStreamingContent = ref('')
   const workspaceStreamingReasoning = ref('')
+  /** 首条正文 delta 前为 true（chat 作用域，供 ReasoningBubble 流式态） */
+  const assistantReasoningStreamPhaseActive = ref(false)
+  /** 首条正文 delta 前为 true（workspace 作用域） */
+  const workspaceReasoningStreamPhaseActive = ref(false)
 
   // 公共状态
   const showAssistantSettings = ref(false)
@@ -826,6 +832,11 @@ export function useAssistant(options: UseAssistantOptions) {
     state.streamingContent.value = ''
     state.streamingReasoning.value = ''
     state.isGenerating.value = true
+    if (scope === 'workspace') {
+      workspaceReasoningStreamPhaseActive.value = true
+    } else {
+      assistantReasoningStreamPhaseActive.value = true
+    }
     assistantAborters[scope]?.abort()
     assistantAborters[scope] = new AbortController()
 
@@ -895,6 +906,11 @@ export function useAssistant(options: UseAssistantOptions) {
           body,
           (evt) => {
             if (evt.event === 'delta') {
+              if (scope === 'workspace') {
+                workspaceReasoningStreamPhaseActive.value = false
+              } else {
+                assistantReasoningStreamPhaseActive.value = false
+              }
               const data = evt.data as { text?: string } | undefined
               const t = data?.text
               if (typeof t === 'string') {
@@ -917,6 +933,11 @@ export function useAssistant(options: UseAssistantOptions) {
                 state.streamingReasoning.value += t
               }
             } else if (evt.event === 'done') {
+              if (scope === 'workspace') {
+                workspaceReasoningStreamPhaseActive.value = false
+              } else {
+                assistantReasoningStreamPhaseActive.value = false
+              }
               state.streamingContent.value = ''
               state.streamingReasoning.value = ''
               if (reasoningBuffer.trim()) {
@@ -972,6 +993,11 @@ export function useAssistant(options: UseAssistantOptions) {
               const data = evt.data as { chatId?: string } | undefined
               onChatOverridesUpdated?.(data ?? {})
             } else if (evt.event === 'error') {
+              if (scope === 'workspace') {
+                workspaceReasoningStreamPhaseActive.value = false
+              } else {
+                assistantReasoningStreamPhaseActive.value = false
+              }
               const data = evt.data as { message?: string } | undefined
               state.streamError.value = String(data?.message ?? 'unknown error')
             }
@@ -1050,6 +1076,11 @@ export function useAssistant(options: UseAssistantOptions) {
     } finally {
       state.streamingContent.value = ''
       state.streamingReasoning.value = ''
+      if (scope === 'workspace') {
+        workspaceReasoningStreamPhaseActive.value = false
+      } else {
+        assistantReasoningStreamPhaseActive.value = false
+      }
       state.isGenerating.value = false
       if (aborted) {
         const msgs = state.messages.value
@@ -1117,6 +1148,7 @@ export function useAssistant(options: UseAssistantOptions) {
     assistantStreamError,
     assistantStreamingContent,
     assistantStreamingReasoning,
+    assistantReasoningStreamPhaseActive,
 
     // Workspace scope 状态
     workspaceAssistantMessages,
@@ -1127,6 +1159,7 @@ export function useAssistant(options: UseAssistantOptions) {
     workspaceAssistantStreamError,
     workspaceStreamingContent,
     workspaceStreamingReasoning,
+    workspaceReasoningStreamPhaseActive,
 
     // 公共状态
     showAssistantSettings,
