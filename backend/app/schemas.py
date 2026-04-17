@@ -677,6 +677,10 @@ class ChatMessage(BaseModel):
         default=None,
         description="推理/思考链文本（与上游 reasoning_content 对应，持久化用）",
     )
+    reasoningDurationSec: float | None = Field(
+        default=None,
+        description="推理/思考耗时（秒，浮点，前端展示为一位小数）；流式路径取首到末 reasoning chunk 的墙钟时间差",
+    )
     ttsAudioAssetId: str | None = Field(
         default=None,
         description="已合成的 TTS 音频文件 UUID（对应 data/tts_cache/{uuid}.mp3）",
