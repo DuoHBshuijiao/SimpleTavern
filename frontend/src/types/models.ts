@@ -436,6 +436,10 @@ export interface ChatMessage {
   ttsAudioAssetId?: string | null
   /** 实际送入 TTS 合成的文本（含后处理/翻译后的朗读稿） */
   ttsAudioSourceText?: string | null
+  /** 推理/思考链持久化文本（与后端 reasoningContent 对齐） */
+  reasoningContent?: string | null
+  /** 推理/思考耗时（秒，浮点，前端展示一位小数） */
+  reasoningDurationSec?: number | null
 }
 
 export interface ChatImageAttachment {
