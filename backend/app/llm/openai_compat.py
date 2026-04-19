@@ -37,6 +37,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Literal
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
@@ -100,26 +101,24 @@ async def _raise_stream_http_error(r: httpx.Response) -> None:
 def _normalize_base_url(base_url: str) -> str:
     """
     规范化API基础URL（用于拼接 /models、/chat/completions 等路径）。
-    
-    处理用户输入的各种URL格式：补全协议、统一末尾斜杠、补全 /v1。
-    支持以下格式：
-    - 完整URL（带 /v1 或不带）
-    - 末尾有无 "/" 均可（如 api/v1 或 api/v1/）
-    - 仅域名（自动添加 https:// 和 /v1）
-    
-    Args:
-        base_url: 原始基础URL
-    
-    Returns:
-        str: 规范化后的 base，确保以 /v1 结尾且无末尾斜杠
+
+    - 仅主机、无 path（或 path 仅为 /）时自动补 ``/v1``（兼容仅填域名或 ``api.openai.com``）。
+    - 若已含任意非空 path（如 ``/v1beta/openai``、``/api/paas/v4``、``/compatible-mode/v1``），
+      则保持原样，不再追加 ``/v1``，以免破坏 Google AI Studio、智谱等非标准路径。
+
+    支持末尾有无 ``/``；无协议时补 ``https://``。
     """
     base = base_url.strip()
-    if base and not (base.startswith("http://") or base.startswith("https://")):
+    if not base:
+        return base
+    if not (base.startswith("http://") or base.startswith("https://")):
         base = "https://" + base
     base = base.rstrip("/")
-    if base.endswith("/v1"):
-        return base
-    return base + "/v1"
+    parts = urlsplit(base)
+    path = parts.path or ""
+    if not path or path == "/":
+        return urlunsplit((parts.scheme, parts.netloc, "/v1", parts.query, parts.fragment))
+    return base
 
 
 _CHAT_COMPLETIONS_SUFFIX = "/chat/completions"
