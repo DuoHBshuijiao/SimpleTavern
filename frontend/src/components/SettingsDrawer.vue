@@ -55,6 +55,7 @@ import {
 import ModernSelect from './ModernSelect.vue'
 import ThemedCheckbox from './ThemedCheckbox.vue'
 import TtsVoiceInput from './TtsVoiceInput.vue'
+import LlmPresetNameCombobox from './LlmPresetNameCombobox.vue'
 import { apiDelete, apiGet, apiPost, apiPostFormData, apiPut } from '../api/http'
 import { downloadUpdate, getManualUpdateCheck, runUpdate } from '../api/update'
 import { useAppFont } from '../composables/useAppFont'
@@ -80,6 +81,7 @@ import {
   type WgslDiagnostic,
 } from '../utils/wgslCompilation'
 import { notifyConfirm, notifyMessage } from '../composables/useNotify'
+import type { LlmProviderPreset } from '../constants/llmProviderPresets'
 
 const { applyFont } = useAppFont()
 
@@ -668,6 +670,12 @@ function updatePersonaVoiceValue(personaId: string, rawValue: string) {
 
 function isTtsPreset(preset?: ApiPreset | null): boolean {
   return isTtsApiPreset(preset)
+}
+
+function onLlmPresetSelect(p: LlmProviderPreset) {
+  const ep = editingPreset.value
+  if (!ep) return
+  ep.baseUrl = p.baseUrl
 }
 
 function normalizePresetDraft(preset: ApiPreset): ApiPreset {
@@ -3909,10 +3917,18 @@ async function checkUpdate() {
                                   <span>作为 TTS 服务</span>
                                 </button>
                               </div>
-                              <input 
-                                  v-model="editingPreset.name" 
-                                  type="text" 
-                                  class="input input-sm w-full"
+                              <LlmPresetNameCombobox
+                                v-if="!isTtsPreset(editingPreset)"
+                                v-model="editingPreset.name"
+                                class="block"
+                                placeholder="输入或下拉选择供应商/预设名称"
+                                @select="onLlmPresetSelect"
+                              />
+                              <input
+                                v-else
+                                v-model="editingPreset.name"
+                                type="text"
+                                class="input input-sm w-full"
                               />
                               <div v-if="isTtsPreset(editingPreset)" class="space-y-1.5">
                                 <label class="block text-[11px] font-medium text-[var(--color-text-muted)]">TTS 提供商</label>
