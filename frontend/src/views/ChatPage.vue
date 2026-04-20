@@ -187,6 +187,8 @@ interface AvatarCropSavePayload {
 }
 const draftImages = ref<DraftImageItem[]>([])
 const workspaceAssistantTextareaRef = ref<HTMLTextAreaElement | null>(null)
+/** 角色编辑页内嵌助手消息列表滚动容器（与侧栏 AssistantPanel 分离） */
+const workspaceAssistantMessagesListRef = ref<HTMLElement | null>(null)
 const isWorkspaceAssistantDragOver = ref(false)
 const showSettings = ref(false)
 const showGroupSettings = ref(false)
@@ -379,7 +381,7 @@ watch(() => uiStore.settingsDrawerRequestNonce, (nonce) => {
 })
 
 function shouldIgnoreStreamingEventWhileStopping(eventName: string): boolean {
-  return stopRequested.value && (eventName === 'delta' || eventName === 'reasoning')
+  return stopRequested.value && eventName === 'delta'
 }
 
 /** 将当前思考内容写入 blocks 并清空当前（在 stream done 或非流响应后调用，便于多轮保留） */
@@ -2234,6 +2236,24 @@ watch(assistant.isAssistantPanelOpen, (next) => {
   if (next) void assistant.loadState('chat')
 })
 
+function scrollWorkspaceAssistantListToBottom() {
+  const run = () => {
+    const el = workspaceAssistantMessagesListRef.value
+    if (el) el.scrollTop = el.scrollHeight
+  }
+  nextTick(() => {
+    run()
+    requestAnimationFrame(run)
+  })
+}
+
+watch(
+  () => assistant.isWorkspaceAssistantGenerating.value,
+  (next, prev) => {
+    if (next && !prev) scrollWorkspaceAssistantListToBottom()
+  },
+)
+
 /**
  * 监听选中角色ID变化
  *
@@ -3143,33 +3163,79 @@ function stopStreaming() {
 async function persistLocalStreamingMessages(chatId: string) {
   const chat = activeChat.value
   if (!chat?.messages?.length) return
+
+  const capturedReasoningMessageId = chatReasoningMessageId.value
+  const capturedReasoningContent = chatReasoningContent.value.trim()
+
   const localAssistantMessages = chat.messages
     .filter((m) => m.role === 'assistant' && m.id.startsWith('local_'))
     .map((m) => ({
+      localId: m.id,
       content: (m.content || '').trim(),
       characterId: m.characterId ?? null,
     }))
-    .filter((m) => !!m.content)
+    .filter((m) => {
+      if (m.content) return true
+      return (
+        !!capturedReasoningMessageId &&
+        m.localId === capturedReasoningMessageId &&
+        !!capturedReasoningContent
+      )
+    })
 
   await chats.load(chatId)
   let serverMessages = activeChat.value?.messages ?? []
 
-  const hasEquivalentServerMessage = (candidate: { content: string; characterId: string | null }) => {
+  const normReasoning = (s: string | null | undefined) =>
+    typeof s === 'string' ? s.trim() : ''
+
+  const hasEquivalentServerMessage = (candidate: {
+    content: string
+    characterId: string | null
+    reasoningContent?: string | null
+  }) => {
+    const cReason = normReasoning(candidate.reasoningContent ?? null)
     return serverMessages.some((m) => {
       if (m.id.startsWith('local_')) return false
       if (m.role !== 'assistant') return false
       if ((m.characterId ?? null) !== candidate.characterId) return false
-      return (m.content || '').trim() === candidate.content
+      if ((m.content || '').trim() !== candidate.content) return false
+      if (normReasoning(m.reasoningContent) !== cReason) return false
+      return true
     })
   }
 
   for (const candidate of localAssistantMessages) {
-    if (hasEquivalentServerMessage(candidate)) continue
-    const updatedChat = await chats.appendMessage(chatId, 'assistant', candidate.content, {
-      characterId: candidate.characterId ?? undefined,
-    })
+    const reasoningForThis =
+      capturedReasoningMessageId === candidate.localId && capturedReasoningContent
+        ? capturedReasoningContent
+        : null
+    if (
+      hasEquivalentServerMessage({
+        content: candidate.content,
+        characterId: candidate.characterId,
+        reasoningContent: reasoningForThis,
+      })
+    ) {
+      continue
+    }
+    const appendOpts: {
+      characterId?: string
+      reasoningContent?: string | null
+    } = {}
+    if (candidate.characterId != null) appendOpts.characterId = candidate.characterId
+    if (reasoningForThis) appendOpts.reasoningContent = reasoningForThis
+    const updatedChat = await chats.appendMessage(
+      chatId,
+      'assistant',
+      candidate.content,
+      Object.keys(appendOpts).length ? appendOpts : undefined,
+    )
     serverMessages = updatedChat.messages
   }
+  chatReasoningContent.value = ''
+  chatReasoningMessageId.value = null
+  chatReasoningStreamActive.value = false
   await chats.load(chatId)
   await afterChatReload(chatId)
 }
@@ -3899,6 +3965,7 @@ async function handleSaveAndSend() {
     try {
       await chats.load(chatId)
       await afterChatReload(chatId)
+      scrollToBottom(true, true)
     } catch {
       /* ignore */
     }
@@ -3916,7 +3983,7 @@ async function handleSaveAndSend() {
       chatReasoningContent.value = ''
       chatReasoningStreamActive.value = true
       chats.addLocalMessage({ version: 1, id: localAssistantId, role: 'assistant', content: '', ts: now })
-      scrollToBottom()
+      scrollToBottom(true, true)
 
       if (useStream) {
         stream.registerStreamMessage(localAssistantId)
@@ -4811,7 +4878,10 @@ const editingPersonaAvatarUrl = computed(() => {
                 <MoreHorizontal class="w-4 h-4" />
               </button>
             </div>
-            <div class="min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-auto custom-scrollbar space-y-4 pr-2 mb-4">
+            <div
+              ref="workspaceAssistantMessagesListRef"
+              class="min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-auto custom-scrollbar space-y-4 pr-2 mb-4"
+            >
               <div v-if="assistant.workspaceAssistantMessages.value.length === 0" class="text-xs text-[var(--color-text-muted)] text-center py-12 flex flex-col items-center gap-3">
                 <div class="w-12 h-12 rounded-full bg-surface-muted flex items-center justify-center text-xl">
                     <Sparkles class="w-6 h-6 text-[var(--color-warning)]" />
