@@ -926,6 +926,14 @@ class AppendMessageRequest(BaseModel):
     senderPersonaId: str | None = None
     senderName: str | None = None
     senderAvatar: str | None = None
+    reasoningContent: str | None = Field(
+        default=None,
+        description="推理/思考链（流式中断落库等场景；通常仅 assistant）",
+    )
+    reasoningDurationSec: float | None = Field(
+        default=None,
+        description="思考耗时（秒）；可选",
+    )
 
 
 class UpdateMessageRequest(BaseModel):
