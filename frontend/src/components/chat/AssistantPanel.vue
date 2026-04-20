@@ -273,6 +273,14 @@ watch(
   },
   { deep: false }
 )
+
+// 「保存并发送」等路径下 sendMessage(..., false) 可能不改变 messages 长度，生成开始时仍贴底
+watch(
+  () => props.isGenerating,
+  (next, prev) => {
+    if (next && !prev && props.isOpen) scrollToBottom()
+  },
+)
 </script>
 
 <template>
