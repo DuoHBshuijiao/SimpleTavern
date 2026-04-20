@@ -67,6 +67,42 @@ export function useStreamOutput(
   let chunkSeq = 0
 
   /**
+   * 选取流式 chunk 应挂载的 DOM 节点。
+   * 禁止对整棵子树使用 `p:last-child`（会误匹配 blockquote/list 等内层段落，导致文字出现在版面中段）。
+   * 仅根据 `.stream-markdown` 的最后一个顶层块决定：顶层末段 P、或进入 blockquote/列表末项内的末段 P，否则回退为容器根节点。
+   */
+  function getStreamAppendTarget(markdownEl: HTMLElement): HTMLElement {
+    const lastTop = markdownEl.lastElementChild as HTMLElement | null
+    if (!lastTop) return markdownEl
+
+    if (lastTop.tagName === 'P') return lastTop
+
+    if (lastTop.tagName === 'BLOCKQUOTE') {
+      const directPs = Array.from(lastTop.children).filter((c) => c.tagName === 'P') as HTMLElement[]
+      if (directPs.length > 0) return directPs[directPs.length - 1]!
+      const innerLast = lastTop.lastElementChild as HTMLElement | null
+      if (innerLast?.tagName === 'P') return innerLast
+      return markdownEl
+    }
+
+    if (lastTop.tagName === 'UL' || lastTop.tagName === 'OL') {
+      const lastLi = lastTop.lastElementChild as HTMLElement | null
+      if (lastLi?.tagName === 'LI') {
+        const liPs = Array.from(lastLi.children).filter((c) => c.tagName === 'P') as HTMLElement[]
+        if (liPs.length > 0) return liPs[liPs.length - 1]!
+      }
+      return markdownEl
+    }
+
+    for (let i = markdownEl.children.length - 1; i >= 0; i--) {
+      const c = markdownEl.children[i] as HTMLElement
+      if (c.tagName === 'P') return c
+    }
+
+    return markdownEl
+  }
+
+  /**
    * 注册一个消息ID为流式消息
    *
    * 将消息ID添加到活跃消息集合中，标记该消息正在进行流式输出。
@@ -144,8 +180,8 @@ export function useStreamOutput(
   /**
    * 将文本块追加到DOM
    *
-   * 在消息内容的markdown容器中，找到最后一个段落或容器本身，
-   * 创建一个span元素，添加stream-append类，并追加到目标元素。
+   * 在消息内容的 markdown 容器中，由 getStreamAppendTarget 选取挂载点，
+   * 创建一个 span 元素，添加 stream-append 类，并追加到目标元素。
    * 使用nextTick确保DOM已更新。
    *
    * @param {string} messageId - 消息ID
@@ -157,8 +193,7 @@ export function useStreamOutput(
       if (!root) return
       const markdownEl = root.querySelector('.stream-markdown') as HTMLElement | null
       if (!markdownEl) return
-      const paragraph = markdownEl.querySelector('p:last-child') as HTMLElement | null
-      const target = paragraph ?? markdownEl
+      const target = getStreamAppendTarget(markdownEl)
       const span = document.createElement('span')
       span.className = 'stream-append'
       span.textContent = entry.text
