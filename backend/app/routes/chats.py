@@ -578,6 +578,8 @@ def append_message(chat_id: str, req: AppendMessageRequest) -> Chat:
         senderPersonaId=getattr(req, "senderPersonaId", None),
         senderName=getattr(req, "senderName", None),
         senderAvatar=getattr(req, "senderAvatar", None),
+        reasoningContent=req.reasoningContent,
+        reasoningDurationSec=req.reasoningDurationSec,
     ))
     chat.updatedAt = _now_iso()
     return save_chat(chat)
