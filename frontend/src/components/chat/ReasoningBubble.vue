@@ -3,13 +3,13 @@
  * ReasoningBubble - 思考链气泡（单聊 + 群聊 + 助手工作区复用）
  *
  * 模式：
- *   streaming  (isStreaming && !expanded): 固定高度滚动窗，宽度 min 100px 随内容增至 max 全宽
+ *   streaming  (isStreaming && !expanded): 宽随内容；max-w 继承父级；内层 max-h = streamingWindowHeight（默认 100px），可与 streamingMaxHeightPx 取更小值；超出内层滚动
  *   collapsed  (!isStreaming && !expanded): 高度 smallCardHeight，宽度不小于 smallCardWidth，按「已思考 x.x 秒」文案测量
- *   expanded   (expanded): 打开完整正文，height = min(contentHeight, 60vh)，全宽可滚动
+ *   expanded   (expanded): height = min(contentHeight, 视口×expandedMaxVhRatio)，全宽可滚动；高度下界见 computeExpandedHeight
  *
  * 尺寸动画策略：
- *   - 外层 height/width 由 JS 与 class 控制，CSS 对 height、width 做 transition
- *   - 展开/收起时在 nextTick 测量 scrollHeight，得到目标像素再过渡
+ *   - 收起/展开：外层 height/width 由 JS 写像素，CSS transition
+ *   - 流式未展开：外层高度由内容决定（不写死像素），结束收小卡时切回像素高度
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
@@ -18,13 +18,19 @@ const props = withDefaults(
     content: string
     isStreaming?: boolean
     durationSec?: number | null
-    /** 流式窗固定高度（px） */
+    /**
+     * 流式未展开时内层滚动区 max-height（px），默认 100；与 expanded 态上限无关。
+     */
     streamingWindowHeight?: number
+    /**
+     * 可选：与 streamingWindowHeight 取 min，作为更严的流式未展开高度上限（px）。
+     */
+    streamingMaxHeightPx?: number | null
     /** 收起小卡片高度（px） */
     smallCardHeight?: number
     /** 收起态最小宽度（px）；实际宽度按文案测量，不小于该值 */
     smallCardWidth?: number
-    /** 展开时的最大高度比例（视口高度的百分比） */
+    /** 展开时的最大高度比例（相对视口高度）；流式未展开限高见 streamingWindowHeight */
     expandedMaxVhRatio?: number
     /** 由外部控制展开；若未传入则使用组件内部 state */
     expanded?: boolean
@@ -33,6 +39,7 @@ const props = withDefaults(
     isStreaming: false,
     durationSec: null,
     streamingWindowHeight: 100,
+    streamingMaxHeightPx: null,
     smallCardHeight: 35,
     smallCardWidth: 100,
     expandedMaxVhRatio: 0.6,
@@ -57,6 +64,9 @@ const isExpanded = computed<boolean>({
 /** 是否展示为「已思考 x.x 秒」小卡片：仅在未流式且未展开时 */
 const showSmallCard = computed(() => !props.isStreaming && !isExpanded.value)
 
+/** 流式且未展开：内容撑开外层，内层 max-height 封顶 + 超出滚动 */
+const useStreamingIntrinsicLayout = computed(() => props.isStreaming && !isExpanded.value)
+
 const formattedDuration = computed(() => {
   const v = props.durationSec
   if (typeof v !== 'number' || !Number.isFinite(v)) return null
@@ -67,9 +77,18 @@ const scrollRef = ref<HTMLElement | null>(null)
 const smallCardMeasureRef = ref<HTMLElement | null>(null)
 /** 收起态测量层宽度（px）；未测量前为 null，外层用 smallCardWidth */
 const collapsedMeasuredWidth = ref<number | null>(null)
-const currentHeight = ref<number>(props.streamingWindowHeight)
+const currentHeight = ref<number>(props.smallCardHeight)
 const topMaskVisible = ref(false)
 const bottomMaskVisible = ref(false)
+
+const streamingIntrinsicMaxHeightPx = computed(() => {
+  let h = props.streamingWindowHeight
+  const extra = props.streamingMaxHeightPx
+  if (typeof extra === 'number' && Number.isFinite(extra) && extra > 0) {
+    h = Math.min(h, extra)
+  }
+  return h
+})
 
 const rootLayoutClass = computed(() => {
   if (showSmallCard.value) {
@@ -78,7 +97,7 @@ const rootLayoutClass = computed(() => {
   if (isExpanded.value) {
     return 'w-full min-w-0 max-w-full'
   }
-  return 'w-fit min-w-[100px] max-w-full self-start'
+  return 'w-fit min-w-0 max-w-full self-start'
 })
 
 const collapsedOuterWidthPx = computed(() => {
@@ -87,14 +106,21 @@ const collapsedOuterWidthPx = computed(() => {
 })
 
 const rootInlineStyle = computed(() => {
-  const h = `${currentHeight.value}px`
   if (showSmallCard.value) {
     return {
-      height: h,
+      height: `${currentHeight.value}px`,
       width: `${collapsedOuterWidthPx.value}px`,
     }
   }
-  return { height: h }
+  if (useStreamingIntrinsicLayout.value) {
+    return {}
+  }
+  return { height: `${currentHeight.value}px` }
+})
+
+const streamingScrollInlineStyle = computed(() => {
+  if (!useStreamingIntrinsicLayout.value) return {}
+  return { maxHeight: `${streamingIntrinsicMaxHeightPx.value}px` }
 })
 
 let resizeObserver: ResizeObserver | null = null
@@ -109,7 +135,6 @@ function teardownSmallCardMeasureObserver() {
 function measureCollapsedSmallCardWidth() {
   const el = smallCardMeasureRef.value
   if (!el) return
-  // +1：避免亚像素/边框与测量层差异导致可用宽度略窄而出现换行
   const w = Math.ceil(el.getBoundingClientRect().width) + 1
   if (w > 0) collapsedMeasuredWidth.value = w
 }
@@ -139,19 +164,26 @@ function updateMaskVisibility() {
     return
   }
   topMaskVisible.value = el.scrollTop > 2
-  const maxScroll = el.scrollHeight - el.clientHeight
+  const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight)
   bottomMaskVisible.value = el.scrollTop < maxScroll - 2
 }
 
-/** 流式期间：让视口底部位于"最新字符之下约 1 行高度"处，使最新字符被裁切在视口外 */
+/**
+ * 流式未展开且内层已溢出：视口底部停在「可滚动下限之上约一行高」，配合 smooth。
+ */
 function scheduleAutoScroll() {
+  if (!useStreamingIntrinsicLayout.value) return
   if (autoScrollRaf != null) cancelAnimationFrame(autoScrollRaf)
   autoScrollRaf = requestAnimationFrame(() => {
     autoScrollRaf = null
     const el = scrollRef.value
     if (!el) return
-    const lineHeight = getLineHeightPx(el)
     const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight)
+    if (maxScroll <= 0) {
+      updateMaskVisibility()
+      return
+    }
+    const lineHeight = getLineHeightPx(el)
     const target = Math.max(0, maxScroll - lineHeight)
     try {
       el.scrollTo({ top: target, behavior: 'smooth' })
@@ -162,12 +194,29 @@ function scheduleAutoScroll() {
   })
 }
 
+/** 从展开折回流式未展开 intrinsic 后，待布局稳定再跟滚 */
+function scheduleStreamingFollowAfterCollapse() {
+  if (!props.isStreaming || isExpanded.value) return
+  nextTick(() => {
+    requestAnimationFrame(() => {
+      scheduleAutoScroll()
+      requestAnimationFrame(() => {
+        scheduleAutoScroll()
+      })
+    })
+  })
+}
+
+function expandedHeightFloorPx(): number {
+  return Math.max(props.smallCardHeight, props.streamingWindowHeight)
+}
+
 function computeExpandedHeight(): number {
   const vh = typeof window !== 'undefined' ? window.innerHeight : 800
   const maxPx = vh * props.expandedMaxVhRatio
   const el = scrollRef.value
-  const contentHeight = el ? el.scrollHeight : props.streamingWindowHeight
-  return Math.max(props.streamingWindowHeight, Math.min(contentHeight, maxPx))
+  const contentHeight = el ? el.scrollHeight : expandedHeightFloorPx()
+  return Math.max(expandedHeightFloorPx(), Math.min(contentHeight, maxPx))
 }
 
 function applyHeightForMode() {
@@ -178,8 +227,6 @@ function applyHeightForMode() {
     })
   } else if (!props.isStreaming) {
     currentHeight.value = props.smallCardHeight
-  } else {
-    currentHeight.value = props.streamingWindowHeight
   }
 }
 
@@ -200,6 +247,9 @@ watch(
   () => {
     if (props.isStreaming && !isExpanded.value) {
       scheduleAutoScroll()
+      nextTick(() => {
+        updateMaskVisibility()
+      })
     } else if (isExpanded.value) {
       nextTick(() => {
         currentHeight.value = computeExpandedHeight()
@@ -217,19 +267,27 @@ watch(
         currentHeight.value = props.smallCardHeight
       }
     } else if (streaming && !isExpanded.value) {
-      currentHeight.value = props.streamingWindowHeight
       scheduleAutoScroll()
+      nextTick(updateMaskVisibility)
     }
   },
 )
 
 watch(isExpanded, () => {
   applyHeightForMode()
-  if (props.isStreaming && !isExpanded.value) scheduleAutoScroll()
+  if (props.isStreaming && !isExpanded.value) {
+    scheduleStreamingFollowAfterCollapse()
+  }
 })
 
 watch(
-  () => [props.streamingWindowHeight, props.smallCardHeight] as const,
+  () =>
+    [
+      props.streamingMaxHeightPx,
+      props.smallCardHeight,
+      props.expandedMaxVhRatio,
+      props.streamingWindowHeight,
+    ] as const,
   () => applyHeightForMode(),
 )
 
@@ -255,7 +313,10 @@ watch(
 
 onMounted(() => {
   applyHeightForMode()
-  if (props.isStreaming && !isExpanded.value) scheduleAutoScroll()
+  if (props.isStreaming && !isExpanded.value) {
+    scheduleAutoScroll()
+    nextTick(updateMaskVisibility)
+  }
   if (typeof ResizeObserver !== 'undefined' && scrollRef.value) {
     resizeObserver = new ResizeObserver(() => {
       if (isExpanded.value) {
@@ -307,8 +368,12 @@ function onWindowResize() {
     </div>
 
     <div
-      class="reasoning-scroll absolute inset-0 overflow-y-auto overflow-x-hidden pl-3 pr-8 py-2.5 whitespace-pre-wrap break-words transition-opacity duration-200"
-      :class="showSmallCard ? 'opacity-0 pointer-events-none' : 'opacity-100'"
+      class="reasoning-scroll overflow-y-auto overflow-x-hidden pl-3 pr-8 py-2.5 whitespace-pre-wrap break-words transition-opacity duration-200"
+      :class="[
+        useStreamingIntrinsicLayout ? 'relative min-h-0 reasoning-scroll--streaming-intrinsic' : 'absolute inset-0',
+        showSmallCard ? 'opacity-0 pointer-events-none' : 'opacity-100',
+      ]"
+      :style="streamingScrollInlineStyle"
       ref="scrollRef"
       @scroll="updateMaskVisibility"
     >
@@ -340,7 +405,7 @@ function onWindowResize() {
     <div
       v-if="!showSmallCard"
       class="reasoning-mask reasoning-mask-bottom"
-      :class="(bottomMaskVisible || (props.isStreaming && !isExpanded)) ? 'opacity-100' : 'opacity-0'"
+      :class="bottomMaskVisible ? 'opacity-100' : 'opacity-0'"
       aria-hidden="true"
     />
 
@@ -370,6 +435,9 @@ function onWindowResize() {
 }
 .reasoning-scroll {
   scroll-behavior: smooth;
+}
+.reasoning-scroll--streaming-intrinsic {
+  scroll-behavior: auto;
 }
 .reasoning-scroll::-webkit-scrollbar {
   width: 4px;
