@@ -368,17 +368,27 @@ export const useChatsStore = defineStore('chats', {
      * @param {string} chatId - 聊天ID
      * @param {'system' | 'user' | 'assistant'} role - 消息角色
      * @param {string} content - 消息内容
-     * @param {{ characterId?: string }} [options] - 可选，群聊时传 characterId
+     * @param {{ characterId?: string; reasoningContent?: string | null; reasoningDurationSec?: number | null }} [options] - 可选
      * @returns {Promise<Chat>} 更新后的聊天会话
      */
     async appendMessage(
       chatId: string,
       role: MainChatRole,
       content: string,
-      options?: { characterId?: string }
+      options?: {
+        characterId?: string
+        reasoningContent?: string | null
+        reasoningDurationSec?: number | null
+      }
     ) {
       const body: Record<string, unknown> = { role, content }
       if (options?.characterId != null) body.characterId = options.characterId
+      if (options?.reasoningContent != null && String(options.reasoningContent).trim()) {
+        body.reasoningContent = String(options.reasoningContent).trim()
+      }
+      if (options?.reasoningDurationSec != null && Number.isFinite(options.reasoningDurationSec)) {
+        body.reasoningDurationSec = options.reasoningDurationSec
+      }
       const chat = await apiPost<Chat>(`/api/chats/${chatId}/messages`, body)
       this.activeChat = chat
       if (this.characterId) await this.loadList(this.characterId)
