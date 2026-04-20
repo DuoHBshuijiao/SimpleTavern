@@ -660,6 +660,8 @@ class AppendAssistantMessageRequest(BaseModel):
     """追加助手消息请求"""
     role: MainChatRole = "assistant"
     content: str = ""
+    reasoningContent: str | None = None
+    reasoningDurationSec: float | None = None
 
 
 @router.post("/assistant/chat/messages", response_model=AssistantChat)
@@ -672,7 +674,14 @@ def append_assistant_message(
     向助手聊天追加一条消息（用于流式中断时保存截断内容）。
     """
     chat = _resolve_assistant_chat_by_scope(scope, chatId)
-    chat.messages.append(ChatMessage(role=req.role, content=req.content))
+    chat.messages.append(
+        ChatMessage(
+            role=req.role,
+            content=req.content,
+            reasoningContent=req.reasoningContent,
+            reasoningDurationSec=req.reasoningDurationSec,
+        )
+    )
     return _save_assistant_chat_by_scope(scope, chatId, chat)
 
 
