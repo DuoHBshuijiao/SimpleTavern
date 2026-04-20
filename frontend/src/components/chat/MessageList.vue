@@ -366,6 +366,52 @@ function renderMarkdown(text: string) {
   return md.render(normalizeMarkdownInput(text))
 }
 
+/** 流式助手气泡：rAF 合并 md.render，减少短窗口内反复全量解析导致的布局抖动 */
+const streamingAssistantMarkdownHtml = ref('')
+let streamMdRafId: number | null = null
+
+function isAssistantStreamingBubble(m: ChatMessage): boolean {
+  return (
+    m.role === 'assistant' &&
+    m.id === props.reasoningMessageId &&
+    (props.isGenerating || !!props.isInterjecting)
+  )
+}
+
+function markdownHtmlForMessage(m: ChatMessage): string {
+  if (isAssistantStreamingBubble(m)) {
+    const cached = streamingAssistantMarkdownHtml.value
+    if (cached) return cached
+    return renderMarkdown(props.getDisplayContent(m))
+  }
+  return renderMarkdown(props.getDisplayContent(m))
+}
+
+watch(
+  () => {
+    const id = props.reasoningMessageId
+    if (!id || (!props.isGenerating && !props.isInterjecting)) return null
+    const msg = props.messages.find((x) => x.id === id)
+    if (!msg || msg.role !== 'assistant') return null
+    return props.getDisplayContent(msg)
+  },
+  (raw) => {
+    if (streamMdRafId != null) {
+      cancelAnimationFrame(streamMdRafId)
+      streamMdRafId = null
+    }
+    if (raw == null) {
+      streamingAssistantMarkdownHtml.value = ''
+      return
+    }
+    streamMdRafId = requestAnimationFrame(() => {
+      streamMdRafId = null
+      streamingAssistantMarkdownHtml.value = renderMarkdown(raw)
+    })
+  },
+  { flush: 'post', immediate: true },
+)
+
 /**
  * 获取角色信息
  *
@@ -795,6 +841,10 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  if (streamMdRafId != null) {
+    cancelAnimationFrame(streamMdRafId)
+    streamMdRafId = null
+  }
   cancelPendingBottomSnap()
   window.removeEventListener('resize', updateViewport)
   if (contentResizeObserver) {
@@ -862,7 +912,7 @@ onBeforeUnmount(() => {
             <span v-if="m.role === 'system'" class="text-[10px] bg-yellow-500/10 text-yellow-500 px-1.5 py-0.5 rounded">SYSTEM</span>
           </div>
 
-          <!-- 思考链气泡：流式中为固定高度滚动窗，结束后收起为"已思考 x.x 秒"小卡片 -->
+          <!-- 思考链气泡：流式未展开默认 100px 限高（streamingWindowHeight），超出内层滚动；结束后收起为「已思考 x.x 秒」小卡片 -->
           <ReasoningBubble
             v-if="m.role === 'assistant' && getReasoningForMessage(m)"
             class="mb-2"
@@ -889,7 +939,7 @@ onBeforeUnmount(() => {
               :style="messageContentFontSizeStyle"
               :ref="(el) => setContentRef(m.id, el)"
             >
-              <div class="stream-markdown" v-html="renderMarkdown(getDisplayContent(m))"></div>
+              <div class="stream-markdown" v-html="markdownHtmlForMessage(m)"></div>
             </div>
             <div v-if="m.images?.length" class="mt-3 grid grid-cols-2 md:grid-cols-3 gap-2">
               <button
