@@ -1083,6 +1083,7 @@ export function useAssistant(options: UseAssistantOptions) {
       }
       state.isGenerating.value = false
       if (aborted) {
+        const reasoningPersist = reasoningBuffer.trim()
         const msgs = state.messages.value
         const parts: string[] = []
         for (let i = msgs.length - 1; i >= 0; i--) {
@@ -1094,11 +1095,12 @@ export function useAssistant(options: UseAssistantOptions) {
           }
         }
         const merged = parts.join('\n\n')
-        if (merged.trim()) {
+        if (merged.trim() || reasoningPersist) {
           try {
             await apiPost(buildPath('/api/assistant/chat/messages', scope), {
               role: 'assistant',
               content: merged,
+              ...(reasoningPersist ? { reasoningContent: reasoningPersist } : {}),
             })
           } catch (_) {
             // 持久化失败时仍重新加载，避免本地与服务器不一致
