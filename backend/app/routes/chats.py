@@ -634,6 +634,10 @@ def update_message(chat_id: str, message_id: str, req: UpdateMessageRequest) -> 
             req_dump = req.model_dump(exclude_unset=True)
             if "greetingVariantIndex" in req_dump:
                 m.greetingVariantIndex = req_dump["greetingVariantIndex"]
+            if "reasoningContent" in req_dump:
+                m.reasoningContent = req_dump["reasoningContent"]
+            if "reasoningDurationSec" in req_dump:
+                m.reasoningDurationSec = req_dump["reasoningDurationSec"]
             if content_changed:
                 m.ttsAudioAssetId = None
                 m.ttsAudioSourceText = None
