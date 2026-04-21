@@ -50,24 +50,18 @@
     animation: stream-chunk-fade 0.35s ease;
   }
 
-  @keyframes stream-append-fade {
-    from { opacity: 0; }
-    to { opacity: 1; }
-  }
-
-  .stream-append {
+  /**
+   * 尾部渐变：由 MessageList 通过 DOM 操作按位置写入内联 opacity，
+   * 最老 -> 最新 从 1.0 渐降到 0.30；此处仅做 compositing 提示。
+   */
+  .stream-tail-char {
     display: inline;
-    opacity: 0;
-    animation: stream-append-fade 0.35s ease forwards;
+    will-change: opacity;
   }
 
-  .stream-append--done {
-    opacity: 1;
-    animation: none;
-  }
-
+  /* 块级容器：display:inline 会把块级 KaTeX/段落压进行高，导致公式上下被裁切 */
   .stream-markdown {
-    display: inline;
+    display: block;
   }
 
   /* ========== 淡入动画 ========== */
