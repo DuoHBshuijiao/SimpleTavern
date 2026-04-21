@@ -439,11 +439,15 @@ watch(
         <div class="flex items-center gap-2">
           <button class="btn btn-sm btn-secondary" :disabled="isGenerating" @click="confirmReset($event)">清空</button>
           <button 
-            class="btn btn-sm btn-primary px-6" 
+            class="btn btn-sm btn-primary relative px-6" 
             :disabled="(!draft.trim() && !draftAttachments.length) || isGenerating" 
+            :aria-busy="isGenerating"
             @click="emit('send')"
           >
-            <Loader2 v-if="isGenerating" class="animate-spin w-3 h-3 mr-2" />
+            <Loader2
+              v-if="isGenerating"
+              class="pointer-events-none absolute left-3 top-1/2 h-3 w-3 -translate-y-1/2 animate-spin"
+            />
             发送
           </button>
         </div>
