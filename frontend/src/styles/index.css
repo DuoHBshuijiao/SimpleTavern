@@ -52,6 +52,8 @@
 /* 2. 主题变量（必须在 Tailwind 之后，其他样式之前） */
 @import './variables.css';
 
+/* KaTeX 样式由 <st-math-island> Shadow 内 link 加载，避免与 Tailwind preflight 冲突 */
+
 /* 3. 基础样式 */
 @import './base.css';
 
