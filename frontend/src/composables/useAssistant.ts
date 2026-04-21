@@ -35,7 +35,7 @@
  *    - 依赖：依赖vue、api/http.ts、api/sse.ts
  *    - 位置：Composables层，提供聊天助手逻辑
  */
-import { ref } from 'vue'
+import { nextTick, ref } from 'vue'
 import type { ComputedRef } from 'vue'
 import { apiGet, apiPost, apiPut, apiDelete } from '../api/http'
 import { postAndConsumeSse } from '../api/sse'
@@ -1074,13 +1074,23 @@ export function useAssistant(options: UseAssistantOptions) {
         state.streamError.value = String(e)
       }
     } finally {
-      state.streamingContent.value = ''
-      state.streamingReasoning.value = ''
+      const hadStreamingSurface =
+        (state.streamingReasoning.value ?? '').trim() !== '' || (state.streamingContent.value ?? '').trim() !== ''
       if (scope === 'workspace') {
         workspaceReasoningStreamPhaseActive.value = false
       } else {
         assistantReasoningStreamPhaseActive.value = false
       }
+      if (aborted || hadStreamingSurface) {
+        await nextTick()
+        await new Promise<void>((resolve) => {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => resolve())
+          })
+        })
+      }
+      state.streamingContent.value = ''
+      state.streamingReasoning.value = ''
       state.isGenerating.value = false
       if (aborted) {
         const reasoningPersist = reasoningBuffer.trim()
