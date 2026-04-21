@@ -416,17 +416,33 @@ export const useChatsStore = defineStore('chats', {
       role: MainChatRole,
       content: string,
       characterId?: string | null,
-      opts?: { greetingVariantIndex?: number | null },
+      opts?: {
+        greetingVariantIndex?: number | null
+        reasoningContent?: string | null
+        reasoningDurationSec?: number | null
+      },
     ) {
       const body: {
         role: string
         content: string
         characterId?: string | null
         greetingVariantIndex?: number | null
+        reasoningContent?: string | null
+        reasoningDurationSec?: number | null
       } = { role, content }
       if (characterId !== undefined) body.characterId = characterId
       if (opts && typeof opts.greetingVariantIndex === 'number') {
         body.greetingVariantIndex = opts.greetingVariantIndex
+      }
+      if (opts && opts.reasoningContent != null && String(opts.reasoningContent).trim()) {
+        body.reasoningContent = String(opts.reasoningContent).trim()
+      }
+      if (
+        opts &&
+        opts.reasoningDurationSec != null &&
+        Number.isFinite(opts.reasoningDurationSec)
+      ) {
+        body.reasoningDurationSec = opts.reasoningDurationSec
       }
       const chat = await apiPut<Chat>(`/api/chats/${chatId}/messages/${messageId}`, body)
       this.activeChat = chat
