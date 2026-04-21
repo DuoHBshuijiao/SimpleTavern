@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import MarkdownIt from 'markdown-it'
 import { onBeforeUnmount, ref } from 'vue'
+import { renderChatMarkdown } from '../../utils/markdownIt'
 import type { AssistantMessage } from '../../composables/useAssistant'
 import type { AssistantAttachment } from '../../types/models'
 import ConfirmPopover from '../ConfirmPopover.vue'
+import AnimatedClipHeight from './AnimatedClipHeight.vue'
 import ReasoningBubble from './ReasoningBubble.vue'
 
 const STREAMING_REASONING_ID = '_streaming_pending'
@@ -30,14 +31,8 @@ const emit = defineEmits<{
   'rewrite-message': [m: AssistantMessage]
 }>()
 
-const md = new MarkdownIt({
-  html: false,
-  linkify: true,
-  breaks: true,
-})
-
 function renderMarkdown(text: string) {
-  return md.render(text ?? '')
+  return renderChatMarkdown(text ?? '')
 }
 
 const confirmState = ref<{
@@ -363,7 +358,10 @@ function getToolDetailContent(message: AssistantMessage): string {
 }
 
 const showStreamingOverlay = () =>
-  props.isGenerating && ((props.streamingReasoning ?? '').trim() !== '' || (props.streamingContent ?? '') !== '')
+  props.isGenerating &&
+  ((props.streamingReasoning ?? '').trim() !== '' ||
+    (props.streamingContent ?? '').trim() !== '' ||
+    props.reasoningStreamPhaseActive)
 
 onBeforeUnmount(() => {
   removePreviewDragListeners()
@@ -380,14 +378,19 @@ onBeforeUnmount(() => {
   >
     <!-- 独立思考段（流式提交后的 role=reasoning） -->
     <template v-if="message.role === 'reasoning'">
-      <ReasoningBubble
-        class="max-w-[90%]"
-        :content="message.content"
-        :is-streaming="false"
-        :duration-sec="typeof message.reasoningDurationSec === 'number' ? message.reasoningDurationSec : null"
-        :expanded="isReasoningExpanded(message.id)"
-        @update:expanded="(v) => (expandedReasoningMessageId = v ? message.id : null)"
-      />
+      <div
+        class="flex w-full min-w-0 max-w-[90%] flex-col gap-1 self-start"
+        data-chat-bubble-column
+      >
+        <ReasoningBubble
+          class="w-full max-w-full"
+          :content="message.content"
+          :is-streaming="false"
+          :duration-sec="typeof message.reasoningDurationSec === 'number' ? message.reasoningDurationSec : null"
+          :expanded="isReasoningExpanded(message.id)"
+          @update:expanded="(v) => (expandedReasoningMessageId = v ? message.id : null)"
+        />
+      </div>
     </template>
 
     <template v-else-if="message.role === 'tool'">
@@ -417,9 +420,14 @@ onBeforeUnmount(() => {
     </template>
 
     <template v-else>
+      <div
+        class="flex w-full min-w-0 max-w-[90%] flex-col gap-1"
+        data-chat-bubble-column
+        :class="message.role === 'user' ? 'self-end' : 'self-start'"
+      >
       <ReasoningBubble
         v-if="message.role === 'assistant' && getPersistedReasoningForAssistant(message)"
-        class="max-w-[90%]"
+        class="w-full max-w-full"
         :content="getPersistedReasoningForAssistant(message) || ''"
         :is-streaming="false"
         :duration-sec="typeof message.reasoningDurationSec === 'number' ? message.reasoningDurationSec : null"
@@ -428,57 +436,107 @@ onBeforeUnmount(() => {
       />
       <div
         v-if="showMainBubble(message)"
-        class="min-w-0 max-w-[90%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed shadow-sm border transition-colors"
+        data-chat-bubble-shell
+        class="w-fit max-w-full min-w-0 px-4 py-2.5 rounded-2xl text-sm leading-relaxed shadow-sm border transition-colors"
         :class="message.role === 'user'
           ? 'bg-brand-a20 backdrop-blur-sm border-brand-a20 text-gray-100 rounded-tr-sm'
           : (message.role === 'system'
             ? 'bg-yellow-500/10 border-yellow-500/20 text-gray-300 rounded-lg text-xs'
             : 'bg-white/5 backdrop-blur-md border-white/10 text-gray-200 rounded-tl-sm')"
       >
-        <div
-          v-if="(message.content ?? '').trim()"
-          class="prose prose-invert prose-sm max-w-none"
-          v-html="renderMarkdown(message.content ?? '')"
-        ></div>
-        <div v-if="getTextAttachments(message).length" class="mt-3 flex flex-wrap gap-2">
-          <button
-            v-for="attachment in getTextAttachments(message)"
-            :key="attachment.id"
-            type="button"
-            class="group relative flex max-w-[220px] items-start gap-2 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-left"
-            @click="toggleTextAttachment(attachment)"
-          >
-            <span class="absolute right-2 top-1.5 rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-gray-300">{{ getAttachmentExt(attachment) }}</span>
-            <span class="truncate pr-10 text-xs text-gray-100">{{ getAttachmentLabel(attachment) }}</span>
-          </button>
-        </div>
-        <div
-          v-if="expandedTextAttachmentId && getTextAttachments(message).some((attachment) => attachment.id === expandedTextAttachmentId)"
-          class="mt-3 h-48 overflow-auto rounded-xl border border-white/10 bg-black/25 p-3 text-xs leading-relaxed text-gray-200"
-        >
-          <div v-if="loadingTextAttachmentIds[expandedTextAttachmentId]">读取中...</div>
-          <div v-else-if="textAttachmentError[expandedTextAttachmentId]" class="text-amber-200">
-            {{ textAttachmentError[expandedTextAttachmentId] }}
+        <AnimatedClipHeight mode="intrinsic-fullColumn">
+          <div class="w-fit max-w-full min-w-0">
+            <div
+              v-if="(message.content ?? '').trim()"
+              class="prose prose-invert prose-sm max-w-none"
+              v-html="renderMarkdown(message.content ?? '')"
+            ></div>
+            <div v-if="getTextAttachments(message).length" class="mt-3 flex flex-wrap gap-2">
+              <button
+                v-for="attachment in getTextAttachments(message)"
+                :key="attachment.id"
+                type="button"
+                class="group relative flex max-w-[220px] items-start gap-2 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-left"
+                @click="toggleTextAttachment(attachment)"
+              >
+                <span class="absolute right-2 top-1.5 rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-gray-300">{{ getAttachmentExt(attachment) }}</span>
+                <span class="truncate pr-10 text-xs text-gray-100">{{ getAttachmentLabel(attachment) }}</span>
+              </button>
+            </div>
+            <div
+              v-if="expandedTextAttachmentId && getTextAttachments(message).some((attachment) => attachment.id === expandedTextAttachmentId)"
+              class="mt-3 h-48 overflow-auto rounded-xl border border-white/10 bg-black/25 p-3 text-xs leading-relaxed text-gray-200"
+            >
+              <div v-if="loadingTextAttachmentIds[expandedTextAttachmentId]">读取中...</div>
+              <div v-else-if="textAttachmentError[expandedTextAttachmentId]" class="text-amber-200">
+                {{ textAttachmentError[expandedTextAttachmentId] }}
+              </div>
+              <pre v-else class="whitespace-pre-wrap break-words">{{ textAttachmentContent[expandedTextAttachmentId] }}</pre>
+            </div>
+            <div v-if="getImageAttachments(message).length" class="mt-3 grid grid-cols-2 gap-2">
+              <button
+                v-for="attachment in getImageAttachments(message)"
+                :key="attachment.id"
+                type="button"
+                class="block overflow-hidden rounded-lg border border-white/10 bg-black/20"
+                @click="openImagePreview(buildAttachmentUrl(attachment), getAttachmentLabel(attachment))"
+              >
+                <img
+                  :src="buildAttachmentUrl(attachment)"
+                  :alt="getAttachmentLabel(attachment)"
+                  class="h-24 w-full object-cover"
+                  loading="lazy"
+                  draggable="false"
+                />
+              </button>
+            </div>
           </div>
-          <pre v-else class="whitespace-pre-wrap break-words">{{ textAttachmentContent[expandedTextAttachmentId] }}</pre>
-        </div>
-        <div v-if="getImageAttachments(message).length" class="mt-3 grid grid-cols-2 gap-2">
-          <button
-            v-for="attachment in getImageAttachments(message)"
-            :key="attachment.id"
-            type="button"
-            class="block overflow-hidden rounded-lg border border-white/10 bg-black/20"
-            @click="openImagePreview(buildAttachmentUrl(attachment), getAttachmentLabel(attachment))"
-          >
-            <img
-              :src="buildAttachmentUrl(attachment)"
-              :alt="getAttachmentLabel(attachment)"
-              class="h-24 w-full object-cover"
-              loading="lazy"
-              draggable="false"
-            />
-          </button>
-        </div>
+          <template #measure>
+            <div class="w-fit max-w-full min-w-0">
+              <div
+                v-if="(message.content ?? '').trim()"
+                class="prose prose-invert prose-sm max-w-none"
+                v-html="renderMarkdown(message.content ?? '')"
+              ></div>
+              <div v-if="getTextAttachments(message).length" class="mt-3 flex flex-wrap gap-2">
+                <div
+                  v-for="attachment in getTextAttachments(message)"
+                  :key="attachment.id"
+                  class="group relative flex max-w-[220px] items-start gap-2 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-left"
+                >
+                  <span class="absolute right-2 top-1.5 rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-gray-300">{{ getAttachmentExt(attachment) }}</span>
+                  <span class="truncate pr-10 text-xs text-gray-100">{{ getAttachmentLabel(attachment) }}</span>
+                </div>
+              </div>
+              <div
+                v-if="expandedTextAttachmentId && getTextAttachments(message).some((attachment) => attachment.id === expandedTextAttachmentId)"
+                class="mt-3 h-48 overflow-auto rounded-xl border border-white/10 bg-black/25 p-3 text-xs leading-relaxed text-gray-200"
+              >
+                <div v-if="loadingTextAttachmentIds[expandedTextAttachmentId]">读取中...</div>
+                <div v-else-if="textAttachmentError[expandedTextAttachmentId]" class="text-amber-200">
+                  {{ textAttachmentError[expandedTextAttachmentId] }}
+                </div>
+                <pre v-else class="whitespace-pre-wrap break-words">{{ textAttachmentContent[expandedTextAttachmentId] }}</pre>
+              </div>
+              <div v-if="getImageAttachments(message).length" class="mt-3 grid grid-cols-2 gap-2">
+                <div
+                  v-for="attachment in getImageAttachments(message)"
+                  :key="attachment.id"
+                  class="block overflow-hidden rounded-lg border border-white/10 bg-black/20"
+                >
+                  <img
+                    :src="buildAttachmentUrl(attachment)"
+                    :alt="getAttachmentLabel(attachment)"
+                    class="h-24 w-full object-cover"
+                    loading="lazy"
+                    draggable="false"
+                  />
+                </div>
+              </div>
+            </div>
+          </template>
+        </AnimatedClipHeight>
+      </div>
       </div>
     </template>
 
@@ -514,11 +572,12 @@ onBeforeUnmount(() => {
   <!-- 当前轮次尚未提交到 messages 的流式思考 / 正文（顺序：思考在上） -->
   <div
     v-if="showStreamingOverlay()"
-    class="flex w-full min-w-0 flex-col gap-1 items-start"
+    class="flex w-full min-w-0 max-w-[90%] flex-col gap-1 items-start"
+    data-chat-bubble-column
   >
     <ReasoningBubble
       v-if="(streamingReasoning ?? '').trim()"
-      class="max-w-[90%]"
+      class="w-full max-w-full"
       :content="(streamingReasoning ?? '').trim()"
       :is-streaming="reasoningStreamPhaseActive"
       :duration-sec="null"
@@ -527,12 +586,25 @@ onBeforeUnmount(() => {
     />
     <div
       v-if="(streamingContent ?? '') !== ''"
-      class="min-w-0 max-w-[90%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed shadow-sm border transition-colors bg-white/5 backdrop-blur-md border-white/10 text-gray-200 rounded-tl-sm"
+      data-chat-bubble-shell
+      class="w-fit max-w-full min-w-0 px-4 py-2.5 rounded-2xl text-sm leading-relaxed shadow-sm border transition-colors bg-white/5 backdrop-blur-md border-white/10 text-gray-200 rounded-tl-sm"
     >
-      <div
-        class="prose prose-invert prose-sm max-w-none"
-        v-html="renderMarkdown(streamingContent ?? '')"
-      ></div>
+      <AnimatedClipHeight mode="intrinsic-fullColumn" :relax-height-dead-zone="true">
+        <div class="w-fit max-w-full min-w-0">
+          <div
+            class="prose prose-invert prose-sm max-w-none"
+            v-html="renderMarkdown(streamingContent ?? '')"
+          ></div>
+        </div>
+        <template #measure>
+          <div class="w-fit max-w-full min-w-0">
+            <div
+              class="prose prose-invert prose-sm max-w-none"
+              v-html="renderMarkdown(streamingContent ?? '')"
+            ></div>
+          </div>
+        </template>
+      </AnimatedClipHeight>
     </div>
   </div>
 
