@@ -2452,7 +2452,9 @@ watch(
     props.show
       ? (globalDraft.value?.selectedFont ?? null)
       : (settingsStore.settings?.selectedFont ?? null),
-  (v) => applyFont(v ?? null),
+  (v) => {
+    void applyFont(v ?? null).catch(() => {})
+  },
   { immediate: true }
 )
 
@@ -2924,7 +2926,7 @@ async function handleFontImport(e: Event) {
     fontList.value = await apiGet<string[]>('/api/fonts')
     if (globalDraft.value) {
       globalDraft.value.selectedFont = filename
-      applyFont(filename)
+      void applyFont(filename).catch(() => {})
     }
   } catch (err) {
     await notifyMessage('导入字体失败: ' + String(err))
@@ -3045,7 +3047,7 @@ async function checkUpdate() {
     >
         <!-- Header -->
         <div class="flex items-center justify-between px-6 py-4 border-b border-[var(--color-border-subtle)] bg-[var(--color-border-subtle)] rounded-t-2xl">
-          <h2 class="text-lg font-bold text-[var(--color-text)]">设置</h2>
+          <h2 class="text-lg text-[var(--color-text)]">设置</h2>
           <button
             type="button"
             class="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text)] touch-manipulation"
@@ -3101,7 +3103,7 @@ async function checkUpdate() {
               <div class="rounded-xl border border-[var(--color-border-subtle)] bg-surface-muted/40 overflow-hidden">
                 <button
                   type="button"
-                  class="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3.5 text-left text-sm font-semibold text-[var(--color-text-secondary)] select-none hover:bg-surface-hover/40"
+                  class="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3.5 text-left text-sm text-[var(--color-text-secondary)] select-none hover:bg-surface-hover/40"
                   :aria-expanded="globalAccordionOpen.connection"
                   @click="globalAccordionOpen.connection = !globalAccordionOpen.connection"
                 >
@@ -3230,7 +3232,7 @@ async function checkUpdate() {
               <div class="rounded-xl border border-[var(--color-border-subtle)] bg-surface-muted/40 overflow-hidden">
                 <button
                   type="button"
-                  class="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3.5 text-left text-sm font-semibold text-[var(--color-text-secondary)] select-none hover:bg-surface-hover/40"
+                  class="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3.5 text-left text-sm text-[var(--color-text-secondary)] select-none hover:bg-surface-hover/40"
                   :aria-expanded="globalAccordionOpen.prompts"
                   @click="globalAccordionOpen.prompts = !globalAccordionOpen.prompts"
                 >
@@ -3366,7 +3368,7 @@ async function checkUpdate() {
               <div class="rounded-xl border border-[var(--color-border-subtle)] bg-surface-muted/40 overflow-hidden">
                 <button
                   type="button"
-                  class="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3.5 text-left text-sm font-semibold text-[var(--color-text-secondary)] select-none hover:bg-surface-hover/40"
+                  class="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3.5 text-left text-sm text-[var(--color-text-secondary)] select-none hover:bg-surface-hover/40"
                   :aria-expanded="globalAccordionOpen.appearance"
                   @click="globalAccordionOpen.appearance = !globalAccordionOpen.appearance"
                 >
@@ -3714,7 +3716,7 @@ async function checkUpdate() {
               <div class="rounded-xl border border-[var(--color-border-subtle)] bg-surface-muted/40 overflow-hidden">
                 <button
                   type="button"
-                  class="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3.5 text-left text-sm font-semibold text-[var(--color-text-secondary)] select-none hover:bg-surface-hover/40"
+                  class="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3.5 text-left text-sm text-[var(--color-text-secondary)] select-none hover:bg-surface-hover/40"
                   :aria-expanded="globalAccordionOpen.tts"
                   @click="globalAccordionOpen.tts = !globalAccordionOpen.tts"
                 >
@@ -3801,7 +3803,7 @@ async function checkUpdate() {
               <div class="rounded-xl border border-[var(--color-border-subtle)] bg-surface-muted/40 overflow-hidden">
                 <button
                   type="button"
-                  class="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3.5 text-left text-sm font-semibold text-[var(--color-text-secondary)] select-none hover:bg-surface-hover/40"
+                  class="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3.5 text-left text-sm text-[var(--color-text-secondary)] select-none hover:bg-surface-hover/40"
                   :aria-expanded="globalAccordionOpen.app"
                   @click="globalAccordionOpen.app = !globalAccordionOpen.app"
                 >
@@ -3850,7 +3852,7 @@ async function checkUpdate() {
                     class="sticky top-0 z-10 flex min-w-0 flex-[0_0_min(11rem,34%)] flex-col self-start border-r border-[var(--color-border-subtle)] pr-3"
                   >
                       <div ref="presetListHeaderRef" class="mb-2 flex items-center justify-between gap-1.5">
-                          <span class="shrink-0 text-xs font-bold text-[var(--color-text-secondary)] sm:text-sm">预设列表</span>
+                          <span class="shrink-0 text-xs text-[var(--color-text-secondary)] sm:text-sm">预设列表</span>
                           <button
                             type="button"
                             class="inline-flex min-h-8 shrink-0 items-center rounded-md bg-brand-a20 px-2 py-0.5 text-[11px] font-medium leading-tight text-brand transition-colors hover:bg-brand-a30 touch-manipulation sm:px-2.5 sm:text-xs"
@@ -3885,7 +3887,7 @@ async function checkUpdate() {
                               <span
                                 v-if="isTtsPreset(p)"
                                 draggable="false"
-                                class="absolute right-8 top-1.5 text-[11px] font-semibold leading-none text-brand"
+                                class="absolute right-8 top-1.5 text-[11px] leading-none text-brand"
                                 aria-label="TTS 预设"
                                 title="TTS 预设"
                               >t</span>
@@ -4502,7 +4504,7 @@ async function checkUpdate() {
                 />
                 <div v-if="chatDraft?.presetId" class="text-xs text-brand mt-1 flex items-center gap-1">
                     <span>🔗 已关联 API 预设:</span>
-                    <span class="font-bold">{{ globalDraft?.apiPresets.find(p => p.id === chatDraft?.presetId)?.name || '未知预设' }}</span>
+                    <span>{{ globalDraft?.apiPresets.find(p => p.id === chatDraft?.presetId)?.name || '未知预设' }}</span>
                 </div>
               </div>
 
@@ -4901,7 +4903,7 @@ async function checkUpdate() {
       <!-- Modal -->
       <div class="relative w-full max-w-lg min-w-[400px] glass-panel rounded-2xl shadow-2xl flex flex-col max-h-[85vh] m-4">
       <div class="p-4 border-b border-[var(--color-border)] flex justify-between items-center bg-surface-muted rounded-t-2xl">
-        <h3 class="font-bold text-[var(--color-text)]">选择模型</h3>
+        <h3 class="text-[var(--color-text)]">选择模型</h3>
         <button
           type="button"
           class="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg text-[var(--color-text-muted)] touch-manipulation hover:text-[var(--color-text)]"
@@ -4959,7 +4961,7 @@ async function checkUpdate() {
 
       <div class="relative m-4 flex max-h-[85vh] min-h-0 w-full max-w-lg min-w-[400px] flex-col rounded-2xl glass-panel shadow-2xl">
         <div class="flex items-center justify-between rounded-t-2xl border-b border-[var(--color-border)] bg-surface-muted p-4">
-          <h3 class="font-bold text-[var(--color-text)]">选择音色</h3>
+          <h3 class="text-[var(--color-text)]">选择音色</h3>
           <button
             type="button"
             class="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg text-[var(--color-text-muted)] touch-manipulation hover:text-[var(--color-text)]"
