@@ -121,6 +121,19 @@
   }
 
   /* ========== Prose / Markdown 内容样式 ========== */
+  /**
+   * :root 使用 font-synthesis: none；无 Italic 面的字体在 em 上需合成斜体才可见。
+   * 默认在 .prose 内允许合成斜体（style）。自定义字体经检测为单字重时 useAppFont 会设置
+   * data-custom-font-single-weight="true"，下一条规则覆盖为 weight style，同时兜底粗体。
+   */
+  .prose {
+    font-synthesis: style;
+  }
+
+  :root[data-custom-font-single-weight='true'] .prose {
+    font-synthesis: weight style;
+  }
+
   .prose p {
     margin-bottom: 0.75em;
   }
@@ -203,5 +216,89 @@
   .prose th {
     background-color: var(--color-dark-surface);
     font-weight: 600;
+  }
+
+  /* 列表：全局 ul/ol 已 reset，在 prose 内恢复 */
+  .prose ul,
+  .prose ol {
+    list-style-position: outside;
+    margin-top: 0.5em;
+    margin-bottom: 0.5em;
+    padding-left: 1.25em;
+  }
+
+  .prose ul {
+    list-style-type: disc;
+  }
+
+  .prose ol {
+    list-style-type: decimal;
+  }
+
+  .prose li {
+    margin: 0.25em 0;
+  }
+
+  .prose ul ul,
+  .prose ol ol,
+  .prose ul ol,
+  .prose ol ul {
+    margin-top: 0.25em;
+    margin-bottom: 0.25em;
+  }
+
+  .prose ul ul {
+    list-style-type: circle;
+  }
+
+  .prose ul ul ul {
+    list-style-type: square;
+  }
+
+  /* 脚注 markdown-it-footnote */
+  .prose .footnote-ref a {
+    color: var(--color-brand);
+    text-decoration: none;
+    font-size: 0.85em;
+  }
+
+  .prose .footnote-ref a:hover {
+    text-decoration: underline;
+  }
+
+  .prose hr.footnotes-sep {
+    margin: 1.25em 0;
+    border: none;
+    border-top: 1px solid var(--color-border-default);
+  }
+
+  .prose section.footnotes {
+    font-size: 0.875em;
+    color: var(--color-text-secondary);
+  }
+
+  .prose ol.footnotes-list {
+    list-style-type: decimal;
+    padding-left: 1.35em;
+    margin: 0.5em 0 0;
+  }
+
+  .prose .footnote-item {
+    margin: 0.35em 0;
+  }
+
+  .prose .footnote-backref {
+    color: var(--color-brand);
+    text-decoration: none;
+    margin-left: 0.25em;
+  }
+
+  .prose .footnote-backref:hover {
+    text-decoration: underline;
+  }
+
+  /* 公式在 Shadow 内渲染；光 DOM 仅宿主配色继承 */
+  .prose st-math-island {
+    color: var(--color-text-primary);
   }
 }
