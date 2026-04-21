@@ -40,6 +40,8 @@
 import { ref, computed } from 'vue'
 import { notifyMessage } from './useNotify'
 import type { Ref, ComputedRef } from 'vue'
+import { useCharacterSidebarRecencyStore } from '../stores/characterSidebarRecency'
+import { resolveBumpCharacterId } from '../utils/characterSidebarBump'
 import type { 
   Chat, 
   ChatMessage, 
@@ -58,6 +60,8 @@ export interface ChatActionsDeps {
   isGenerating: Ref<boolean>
   selectedPersona: ComputedRef<UserPersona | null>
   userName: ComputedRef<string>
+  /** 侧栏当前选中的角色（群聊 bump 用） */
+  selectedCharacterId: Ref<string | null>
   chatsStore: {
     updateMessage: (
       chatId: string,
@@ -104,6 +108,7 @@ export function useChatActions(deps: ChatActionsDeps) {
     isGenerating, 
     selectedPersona,
     userName,
+    selectedCharacterId,
     chatsStore, 
     settingsStore, 
     charactersStore 
@@ -170,6 +175,9 @@ export function useChatActions(deps: ChatActionsDeps) {
       editingMessageRole.value,
       editingMessageContent.value,
       editingMessageCharacterId.value,
+    )
+    useCharacterSidebarRecencyStore().bump(
+      resolveBumpCharacterId(activeChat.value, selectedCharacterId.value),
     )
     closeEditMessage()
   }
