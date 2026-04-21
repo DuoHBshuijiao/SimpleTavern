@@ -37,7 +37,6 @@
  * - rewrite-message: 重写消息
  * - switch-previous-version: 切换到上一个版本
  * - switch-next-version: 切换到下一个版本
- * - set-content-ref: 设置消息内容的DOM引用（用于流式输出，传递给composables/useStreamOutput.ts）
  *
  * 使用的Composables：
  * 无（通过props接收函数）
@@ -47,17 +46,18 @@
  *
  * 文件关系：
  *    - 被导入：被views/ChatPage.vue使用
- *    - 导入：导入vue的ref和nextTick、types/models.ts的类型、components/ModernAvatar.vue、markdown-it库
- *    - 依赖：依赖vue、markdown-it
+ *    - 导入：导入vue的ref和nextTick、types/models.ts的类型、components/ModernAvatar.vue、utils/markdownIt
+ *    - 依赖：依赖vue、markdown-it（经 markdownIt 工具封装）
  *    - 位置：组件层，提供消息列表显示功能
  */
-import { ref, nextTick, computed, onBeforeUnmount, onMounted, watch } from 'vue'
+import { ref, nextTick, computed, onBeforeUnmount, onMounted, onBeforeUpdate, onUpdated, watch } from 'vue'
 import type { ChatMessage, CharacterCard, UserPersona } from '../../types/models'
 import { useSettingsStore } from '../../stores'
 import ModernAvatar from '../ModernAvatar.vue'
 import ConfirmPopover from '../ConfirmPopover.vue'
 import ReasoningBubble from './ReasoningBubble.vue'
-import MarkdownIt from 'markdown-it'
+import AnimatedClipHeight from './AnimatedClipHeight.vue'
+import { renderChatMarkdown, renderChatMarkdownStreaming } from '../../utils/markdownIt'
 import { Settings, ChevronLeft, ChevronRight, ChevronDown, X } from 'lucide-vue-next'
 
 const settingsStore = useSettingsStore()
@@ -91,6 +91,8 @@ const props = defineProps<{
   reasoningStreamActive: boolean
   /** 多轮思考链块：每项为 { messageId, content }，仅前端临时展示 */
   reasoningBlocks?: Array<{ messageId: string; content: string }>
+  /** 思考阶段结束时前端估算的秒数（1 位小数），直至消息持久化带 reasoningDurationSec */
+  reasoningDurationSecOverride?: number | null
   // 版本相关
   getDisplayContent: (m: ChatMessage) => string
   /** 获取当前显示版本对应的思考内容（多版本时随版本切换） */
@@ -102,6 +104,10 @@ const props = defineProps<{
   headerInsetPx: number
   /** 侧栏是否折叠；用于侧栏宽度动画结束后合并重排补偿，降低抖动 */
   sidebarCollapsed?: boolean
+  /** 本次发送的用户消息 id：播放一次性自下而上入场动画（纯 AI 模式为 system 角色） */
+  entrancingUserMessageId?: string | null
+  /** 重写/保存并发送等插入的助手占位行 id：弱化整行挂载跳变 */
+  entrancingAssistantMessageId?: string | null
 }>()
 
 function getChatImageUrl(imageId: string): string {
@@ -115,12 +121,13 @@ const emit = defineEmits<{
   'rewrite-message': [m: ChatMessage]
   'switch-previous-version': [m: ChatMessage]
   'switch-next-version': [m: ChatMessage]
-  'set-content-ref': [messageId: string, el: HTMLElement | null]
 }>()
 
 // 滚动容器引用
 const scrollRef = ref<HTMLElement | null>(null)
 const contentRef = ref<HTMLElement | null>(null)
+const rowEls = new Map<string, HTMLElement>()
+let prevRowRects = new Map<string, DOMRect>()
 const scrollTop = ref(0)
 const viewportHeight = ref(0)
 const realDistanceFromBottom = ref(0)
@@ -287,8 +294,17 @@ function normalizeElement(el: unknown): HTMLElement | null {
   return maybe instanceof HTMLElement ? maybe : null
 }
 
+/** 每条消息气泡的内容根元素（含 .stream-markdown 子节点），供流式末尾包裹使用 */
+const contentEls = new Map<string, HTMLElement>()
+
 function setContentRef(messageId: string, el: unknown) {
-  emit('set-content-ref', messageId, normalizeElement(el))
+  const normalized = normalizeElement(el)
+  if (normalized) {
+    contentEls.set(messageId, normalized)
+  } else {
+    contentEls.delete(messageId)
+    tailQueues.delete(messageId)
+  }
 }
 
 function openAvatarPreview(m: ChatMessage) {
@@ -300,6 +316,11 @@ function openAvatarPreview(m: ChatMessage) {
 onBeforeUnmount(() => {
   removePreviewDragListeners()
   window.removeEventListener('resize', updateViewport)
+  if (tailRafId != null) {
+    cancelAnimationFrame(tailRafId)
+    tailRafId = null
+  }
+  tailQueues.clear()
 })
 
 /** 获取某条助手消息对应的思考链内容：优先版本绑定的思考，再当前流式内容，否则从 reasoningBlocks 按 messageId 取，最后回退到磁盘快照 */
@@ -322,6 +343,26 @@ function getReasoningForMessage(m: ChatMessage): string | undefined {
   return persisted || undefined
 }
 
+/** 思考内容尚未到达时也挂载 ReasoningBubble，避免首包 reasoning 时整块突然出现 */
+function shouldShowReasoningPlaceholder(m: ChatMessage): boolean {
+  if (m.role !== 'assistant') return false
+  const rid = props.reasoningMessageId
+  if (rid == null || m.id !== rid) return false
+  return !!(props.isGenerating || props.isInterjecting || props.reasoningStreamActive)
+}
+
+function isUserSendEntering(m: ChatMessage): boolean {
+  const id = props.entrancingUserMessageId
+  if (id == null || m.id !== id) return false
+  return m.role === 'user' || m.role === 'system'
+}
+
+function isAssistantRowEntering(m: ChatMessage): boolean {
+  const id = props.entrancingAssistantMessageId
+  if (id == null || m.id !== id) return false
+  return m.role === 'assistant'
+}
+
 /** 当前消息是否正在接收思考流式内容（控制 ReasoningBubble 的 streaming 模式） */
 function isMessageReasoningStreaming(m: ChatMessage): boolean {
   if (!props.isGenerating && !props.isInterjecting) return false
@@ -329,87 +370,268 @@ function isMessageReasoningStreaming(m: ChatMessage): boolean {
   return props.reasoningStreamActive
 }
 
-/** 当前消息思考耗时（秒）；未持久化时返回 null */
+/** 当前消息思考耗时（秒）；持久化字段优先，否则本条流式结束前可用 reasoningDurationSecOverride */
 function getReasoningDurationForMessage(m: ChatMessage): number | null {
-  const d = typeof m.reasoningDurationSec === 'number' ? m.reasoningDurationSec : null
-  return d != null && Number.isFinite(d) ? d : null
-}
-
-// Markdown 渲染器
-const md = new MarkdownIt({
-  html: false,
-  linkify: true,
-  breaks: true,
-})
-
-/**
- * 规范化Markdown输入
- *
- * 将Markdown中的引用语法（[name]:）中的冒号替换为中文冒号，避免被解析为链接定义。
- *
- * @param {string} text - Markdown文本
- * @returns {string} 规范化后的文本
- */
-function normalizeMarkdownInput(text: string) {
-  return (text ?? '').replace(/(^|\n)\[([^\]\n]+)\]:(\s*)/g, (_m, p1, name, sp) => `${p1}[${name}]：${sp}`)
-}
-
-/**
- * 渲染Markdown
- *
- * 使用MarkdownIt渲染Markdown文本为HTML。
- *
- * @param {string} text - Markdown文本
- * @returns {string} 渲染后的HTML
- */
-function renderMarkdown(text: string) {
-  return md.render(normalizeMarkdownInput(text))
-}
-
-/** 流式助手气泡：rAF 合并 md.render，减少短窗口内反复全量解析导致的布局抖动 */
-const streamingAssistantMarkdownHtml = ref('')
-let streamMdRafId: number | null = null
-
-function isAssistantStreamingBubble(m: ChatMessage): boolean {
-  return (
-    m.role === 'assistant' &&
+  const persisted = typeof m.reasoningDurationSec === 'number' ? m.reasoningDurationSec : null
+  if (persisted != null && Number.isFinite(persisted)) return persisted
+  if (
     m.id === props.reasoningMessageId &&
-    (props.isGenerating || !!props.isInterjecting)
-  )
+    typeof props.reasoningDurationSecOverride === 'number' &&
+    Number.isFinite(props.reasoningDurationSecOverride)
+  ) {
+    return props.reasoningDurationSecOverride
+  }
+  return null
 }
 
-function markdownHtmlForMessage(m: ChatMessage): string {
-  if (isAssistantStreamingBubble(m)) {
-    const cached = streamingAssistantMarkdownHtml.value
-    if (cached) return cached
-    return renderMarkdown(props.getDisplayContent(m))
+/**
+ * 渲染 Markdown；当前正在流式输出的那条助手消息走「补虚闭合」版本，
+ * 其它消息用稳定版本，避免为非流式消息付出不必要的补齐成本 / 潜在误判。
+ */
+function renderMarkdown(m: ChatMessage) {
+  const text = props.getDisplayContent(m)
+  const isStreaming =
+    (props.isGenerating || props.isInterjecting) && m.id === props.reasoningMessageId
+  return isStreaming ? renderChatMarkdownStreaming(text) : renderChatMarkdown(text)
+}
+
+function shouldRenderMainBubble(m: ChatMessage): boolean {
+  const text = props.getDisplayContent(m).trim()
+  if (text) return true
+  return Array.isArray(m.images) && m.images.length > 0
+}
+
+/**
+ * 流式尾部渐变：队列记录最近到达字符的时间戳，双上限出队后按位置上色。
+ *
+ *   - 长度上限：≤ TAIL_MAX_LEN（16）
+ *   - 时间上限：队头最早字符年龄 ≤ TAIL_MAX_AGE_MS（240ms）
+ *
+ * 快吐词稳定保持 16 字渐变；慢/暂停时尾部被时间上限压缩到最新 1~2 字。
+ * opacity 从「最旧（靠左）1.0」到「最新（靠右）TAIL_OPACITY_MIN」线性插值。
+ *
+ * 仅影响内联叶子文本节点；遇到 pre/code/.katex-display/.katex 等原子块即止。
+ */
+const TAIL_MAX_LEN = 16
+const TAIL_MAX_AGE_MS = 240
+const TAIL_OPACITY_MIN = 0.15
+const TAIL_OPACITY_MAX = 1.0
+const TAIL_ATOMIC_SELECTOR = 'pre, code, st-math-island, .katex, .katex-display'
+
+type TailQueue = { chars: number[]; prevLen: number }
+const tailQueues = new Map<string, TailQueue>()
+let tailRafId: number | null = null
+
+function resetTailForMessage(id: string) {
+  tailQueues.delete(id)
+  const host = contentEls.get(id)
+  if (!host) return
+  const el = host.querySelector('.stream-markdown') as HTMLElement | null
+  if (el) restoreTailSpans(el)
+}
+
+function restoreTailSpans(root: HTMLElement) {
+  const spans = root.querySelectorAll<HTMLSpanElement>('span.stream-tail-char')
+  if (spans.length === 0) return
+  spans.forEach((span) => {
+    const parent = span.parentNode
+    if (!parent) return
+    const text = span.textContent ?? ''
+    const next = document.createTextNode(text)
+    parent.replaceChild(next, span)
+  })
+  // 合并兄弟文本节点，避免渐进累积碎片
+  root.normalize()
+}
+
+/**
+ * 从末尾向前采集 `tailLen` 个字符所在的文本节点片段，每字单独包裹成
+ * <span class="stream-tail-char" style="opacity:...">；遇到原子块即止。
+ */
+function decorateStreamTail(root: HTMLElement, tailLen: number) {
+  restoreTailSpans(root)
+  if (tailLen <= 0) return
+
+  const textNodes = collectInlineTextNodes(root)
+  if (textNodes.length === 0) return
+
+  // 从末尾向前切出恰好 tailLen 个字符的 Text 节点段
+  type TailSegment = { node: Text; start: number; end: number }
+  const segments: TailSegment[] = []
+  let remaining = tailLen
+  for (let i = textNodes.length - 1; i >= 0 && remaining > 0; i--) {
+    const tn = textNodes[i]!
+    const len = tn.data.length
+    if (len === 0) continue
+    if (len <= remaining) {
+      segments.push({ node: tn, start: 0, end: len })
+      remaining -= len
+    } else {
+      segments.push({ node: tn, start: len - remaining, end: len })
+      remaining = 0
+    }
   }
-  return renderMarkdown(props.getDisplayContent(m))
+  if (segments.length === 0) return
+
+  // 按从旧到新（DOM 正向）排序，用于计算 opacity
+  segments.reverse()
+
+  // 总尾长（可能不足 tailLen，若可用文本不够）
+  let total = 0
+  for (const s of segments) total += s.end - s.start
+  if (total === 0) return
+
+  const span = TAIL_OPACITY_MAX - TAIL_OPACITY_MIN
+  let idx = 0
+  for (const seg of segments) {
+    const { node, start, end } = seg
+    // 先把目标片段切分为独立 Text 节点（保留前后部分）
+    let target: Text = node
+    if (start > 0) target = target.splitText(start)
+    // 现在 target.data.length === end - start
+    if (target.data.length > (end - start)) {
+      target.splitText(end - start)
+    }
+
+    const parent = target.parentNode
+    if (!parent) {
+      idx += end - start
+      continue
+    }
+
+    // 逐字符切分并包裹
+    const pieces = Array.from(target.data)
+    const frag = document.createDocumentFragment()
+    for (let j = 0; j < pieces.length; j++) {
+      const ch = pieces[j]!
+      const wrap = document.createElement('span')
+      wrap.className = 'stream-tail-char'
+      const ratio = total <= 1 ? 0 : idx / (total - 1)
+      // idx=0 -> 最旧 -> TAIL_OPACITY_MAX；idx=total-1 -> 最新 -> TAIL_OPACITY_MIN
+      const opacity = TAIL_OPACITY_MAX - span * ratio
+      wrap.style.opacity = opacity.toFixed(3)
+      wrap.textContent = ch
+      frag.appendChild(wrap)
+      idx += 1
+    }
+    parent.replaceChild(frag, target)
+  }
+}
+
+/**
+ * 采集流式容器下可参与尾部渐变的内联文本节点：跳过 pre/code/katex 等原子块及其子树。
+ */
+function collectInlineTextNodes(root: HTMLElement): Text[] {
+  const out: Text[] = []
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        if ((node as Element).matches(TAIL_ATOMIC_SELECTOR)) return NodeFilter.FILTER_REJECT
+        return NodeFilter.FILTER_SKIP
+      }
+      return NodeFilter.FILTER_ACCEPT
+    },
+  })
+  let n: Node | null
+  while ((n = walker.nextNode())) {
+    out.push(n as Text)
+  }
+  return out
+}
+
+function advanceTailQueueFromTime(queue: TailQueue): boolean {
+  const now = performance.now()
+  let changed = false
+  while (queue.chars.length > 0 && now - queue.chars[0]! > TAIL_MAX_AGE_MS) {
+    queue.chars.shift()
+    changed = true
+  }
+  return changed
+}
+
+function enforceLengthCap(queue: TailQueue) {
+  while (queue.chars.length > TAIL_MAX_LEN) {
+    queue.chars.shift()
+  }
+}
+
+/** 对当前正在流式的消息刷新尾部装饰（不触发 Markdown 重解析，仅 DOM 操作）。 */
+function applyTailForCurrentStreaming() {
+  const id = props.reasoningMessageId
+  if (!id) return
+  if (!props.isGenerating && !props.isInterjecting) return
+  const queue = tailQueues.get(id)
+  if (!queue) return
+  const host = contentEls.get(id)
+  if (!host) return
+  const el = host.querySelector('.stream-markdown') as HTMLElement | null
+  if (!el) return
+  decorateStreamTail(el, queue.chars.length)
+}
+
+function scheduleTailRaf() {
+  if (tailRafId != null) return
+  tailRafId = requestAnimationFrame(() => {
+    tailRafId = null
+    const id = props.reasoningMessageId
+    if (!id) return
+    const active = props.isGenerating || props.isInterjecting
+    if (!active) return
+    const queue = tailQueues.get(id)
+    if (!queue) return
+    const before = queue.chars.length
+    advanceTailQueueFromTime(queue)
+    if (queue.chars.length !== before) {
+      applyTailForCurrentStreaming()
+    }
+    if (queue.chars.length > 0) scheduleTailRaf()
+  })
 }
 
 watch(
   () => {
     const id = props.reasoningMessageId
-    if (!id || (!props.isGenerating && !props.isInterjecting)) return null
+    if (!id) return null
+    if (!props.isGenerating && !props.isInterjecting) return null
     const msg = props.messages.find((x) => x.id === id)
     if (!msg || msg.role !== 'assistant') return null
-    return props.getDisplayContent(msg)
+    return { id, content: props.getDisplayContent(msg) }
   },
-  (raw) => {
-    if (streamMdRafId != null) {
-      cancelAnimationFrame(streamMdRafId)
-      streamMdRafId = null
+  (cur, prev) => {
+    // 流式结束（cur=null）或换到其它消息：把上一个 id 的尾部渐变还原为纯文本
+    if (prev && (!cur || cur.id !== prev.id)) {
+      resetTailForMessage(prev.id)
     }
-    if (raw == null) {
-      streamingAssistantMarkdownHtml.value = ''
-      return
+    if (!cur) return
+    const host = contentEls.get(cur.id)
+    if (!host) return
+    const el = host.querySelector('.stream-markdown') as HTMLElement | null
+    if (!el) return
+
+    // 注意：textContent 包含 .stream-tail-char 的内容；在本次重新计算前 v-html 已替换完毕，
+    // 上一次渲染的 tail span 已不存在，这里直接基于纯文本长度计算 delta。
+    const curLen = el.textContent?.length ?? 0
+    let queue = tailQueues.get(cur.id)
+    if (!queue) {
+      queue = { chars: [], prevLen: curLen }
+      tailQueues.set(cur.id, queue)
     }
-    streamMdRafId = requestAnimationFrame(() => {
-      streamMdRafId = null
-      streamingAssistantMarkdownHtml.value = renderMarkdown(raw)
-    })
+    const now = performance.now()
+    const delta = curLen - queue.prevLen
+    if (delta > 0) {
+      for (let i = 0; i < delta; i++) queue.chars.push(now)
+    } else if (delta < 0) {
+      // 补闭合使渲染文本长度波动，让队列保守收缩而不是清零
+      const drop = Math.min(queue.chars.length, -delta)
+      queue.chars.splice(0, drop)
+    }
+    queue.prevLen = curLen
+    advanceTailQueueFromTime(queue)
+    enforceLengthCap(queue)
+    decorateStreamTail(el, queue.chars.length)
+    if (queue.chars.length > 0) scheduleTailRaf()
   },
-  { flush: 'post', immediate: true },
+  { flush: 'post' },
 )
 
 /**
@@ -760,11 +982,48 @@ const visibleMessages = computed(() => {
 
 function setMessageRowRefById(messageId: string, el: unknown) {
   const domEl = normalizeElement(el)
-  if (!domEl) return
+  if (!domEl) {
+    rowEls.delete(messageId)
+    return
+  }
+  rowEls.set(messageId, domEl)
   const measured = Math.ceil(domEl.getBoundingClientRect().height)
   const rowHeight = (measured > 0 ? measured : DEFAULT_ROW_HEIGHT - MESSAGE_ROW_GAP) + MESSAGE_ROW_GAP
   if ((measuredHeights.value[messageId] ?? DEFAULT_ROW_HEIGHT) !== rowHeight) {
     measuredHeights.value = { ...measuredHeights.value, [messageId]: rowHeight }
+  }
+}
+
+function snapshotRowRects() {
+  prevRowRects = new Map()
+  for (const [messageId, el] of rowEls.entries()) {
+    prevRowRects.set(messageId, el.getBoundingClientRect())
+  }
+}
+
+function shouldSkipRowFlip(messageId: string): boolean {
+  return messageId === props.entrancingUserMessageId || messageId === props.entrancingAssistantMessageId
+}
+
+function playRowFlip() {
+  for (const [messageId, el] of rowEls.entries()) {
+    if (shouldSkipRowFlip(messageId)) continue
+    const prev = prevRowRects.get(messageId)
+    if (!prev) continue
+    const next = el.getBoundingClientRect()
+    const dx = prev.left - next.left
+    const dy = prev.top - next.top
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) continue
+    el.style.transition = 'none'
+    el.style.transform = `translate(${dx}px, ${dy}px)`
+    requestAnimationFrame(() => {
+      el.style.transition = 'transform 420ms cubic-bezier(0.16, 1, 0.3, 1)'
+      el.style.transform = ''
+      const cleanup = () => {
+        el.style.transition = ''
+      }
+      el.addEventListener('transitionend', cleanup, { once: true })
+    })
   }
 }
 
@@ -816,6 +1075,14 @@ watch(
   },
 )
 
+onBeforeUpdate(() => {
+  snapshotRowRects()
+})
+
+onUpdated(() => {
+  playRowFlip()
+})
+
 // 暴露滚动方法
 defineExpose({ scrollToBottom, scrollToMessage, scrollRef })
 
@@ -830,6 +1097,13 @@ onMounted(() => {
       const outputPhase = props.isGenerating || props.isInterjecting
       if (outputPhase && canFollow) {
         alignToBottom(el, true)
+        requestAnimationFrame(() => {
+          const e2 = scrollRef.value
+          if (!e2) return
+          if (!(props.isGenerating || props.isInterjecting)) return
+          if (!effectiveCanFollow(e2)) return
+          alignToBottom(e2, true)
+        })
       } else {
         syncScrollMetrics(el)
       }
@@ -841,9 +1115,11 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  if (streamMdRafId != null) {
-    cancelAnimationFrame(streamMdRafId)
-    streamMdRafId = null
+  contentEls.clear()
+  tailQueues.clear()
+  if (tailRafId != null) {
+    cancelAnimationFrame(tailRafId)
+    tailRafId = null
   }
   cancelPendingBottomSnap()
   window.removeEventListener('resize', updateViewport)
@@ -875,7 +1151,10 @@ onBeforeUnmount(() => {
         :key="m.id" 
         :ref="(el) => setMessageRowRefById(m.id, el)"
         class="flex gap-4 group mb-8" 
-        :class="m.role === 'user' ? 'flex-row-reverse' : 'flex-row'"
+        :class="[
+          m.role === 'user' ? 'flex-row-reverse' : 'flex-row',
+          isAssistantRowEntering(m) ? 'message-row--assistant-enter' : '',
+        ]"
       >
         <!-- 头像 -->
         <div class="flex-shrink-0 mt-1">
@@ -904,7 +1183,11 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- 消息体 -->
-        <div class="flex flex-1 min-w-0 flex-col max-w-[85%]" :class="m.role === 'user' ? 'items-end' : 'items-start'">
+        <div
+          class="flex flex-1 min-w-0 flex-col max-w-[85%]"
+          data-chat-bubble-column
+          :class="m.role === 'user' ? 'items-end' : 'items-start'"
+        >
           <div class="flex items-center gap-2 mb-1 px-1">
             <span class="text-xs font-bold" :class="m.role === 'user' ? 'text-brand-fg-soft' : 'text-[var(--color-text-muted)]'">
               {{ getMessageLabel(m) }}
@@ -914,7 +1197,7 @@ onBeforeUnmount(() => {
 
           <!-- 思考链气泡：流式未展开默认 100px 限高（streamingWindowHeight），超出内层滚动；结束后收起为「已思考 x.x 秒」小卡片 -->
           <ReasoningBubble
-            v-if="m.role === 'assistant' && getReasoningForMessage(m)"
+            v-if="m.role === 'assistant' && (getReasoningForMessage(m) || shouldShowReasoningPlaceholder(m))"
             class="mb-2"
             :content="getReasoningForMessage(m) || ''"
             :is-streaming="isMessageReasoningStreaming(m)"
@@ -924,40 +1207,77 @@ onBeforeUnmount(() => {
           />
 
           <!-- 气泡 -->
-          <div 
-            class="message-bubble relative px-5 py-3.5 rounded-2xl text-[15px] leading-7 shadow-sm transition-[background-color,border-color,box-shadow] duration-200 border max-w-full min-w-0"
+          <div
+            v-if="shouldRenderMainBubble(m)"
+            data-chat-bubble-shell
+            class="message-bubble relative w-fit max-w-full min-w-0 px-5 py-3.5 rounded-2xl text-[15px] leading-7 shadow-sm transition-[background-color,border-color,box-shadow] duration-200 border"
             :class="[
               m.role === 'user' 
                 ? 'bg-brand-a20 backdrop-blur-sm border-brand-a20 text-gray-100 rounded-tr-sm hover:border-brand-a30' 
                 : m.role === 'assistant'
                   ? 'bg-white/5 backdrop-blur-md border-white/10 text-gray-200 rounded-tl-sm hover:bg-white/10'
                   : 'bg-yellow-500/10 border-yellow-500/20 text-gray-300',
+              isUserSendEntering(m) ? 'message-bubble--user-send-enter' : '',
             ]"
           >
-            <div
-              class="md prose prose-invert prose-sm max-w-none prose-p:my-1 prose-headings:my-2 prose-pre:bg-black/30 prose-pre:border prose-pre:border-white/5"
-              :style="messageContentFontSizeStyle"
-              :ref="(el) => setContentRef(m.id, el)"
+            <AnimatedClipHeight
+              mode="intrinsic-fullColumn"
+              :relax-height-dead-zone="
+                (isGenerating || isInterjecting) && m.role === 'assistant' && m.id.startsWith('local_')
+              "
             >
-              <div class="stream-markdown" v-html="markdownHtmlForMessage(m)"></div>
-            </div>
-            <div v-if="m.images?.length" class="mt-3 grid grid-cols-2 md:grid-cols-3 gap-2">
-              <button
-                v-for="img in m.images"
-                :key="img.id"
-                type="button"
-                class="block rounded-lg overflow-hidden border border-[var(--color-border)] bg-black/20"
-                @click="openImagePreview(getChatImageUrl(img.id), img.originalName || 'chat-image')"
-              >
-                <img
-                  :src="getChatImageUrl(img.id)"
-                  :alt="img.originalName || 'chat-image'"
-                  class="w-full h-24 object-cover"
-                  loading="lazy"
-                  draggable="false"
-                />
-              </button>
-            </div>
+              <div class="w-fit max-w-full min-w-0">
+                <div
+                  class="md prose prose-invert prose-sm max-w-none prose-p:my-1 prose-headings:my-2 prose-pre:bg-black/30 prose-pre:border prose-pre:border-white/5"
+                  :style="messageContentFontSizeStyle"
+                  :ref="(el) => setContentRef(m.id, el)"
+                >
+                  <div class="stream-markdown" v-html="renderMarkdown(m)"></div>
+                </div>
+                <div v-if="m.images?.length" class="mt-3 grid grid-cols-2 md:grid-cols-3 gap-2">
+                  <button
+                    v-for="img in m.images"
+                    :key="img.id"
+                    type="button"
+                    class="block rounded-lg overflow-hidden border border-[var(--color-border)] bg-black/20"
+                    @click="openImagePreview(getChatImageUrl(img.id), img.originalName || 'chat-image')"
+                  >
+                    <img
+                      :src="getChatImageUrl(img.id)"
+                      :alt="img.originalName || 'chat-image'"
+                      class="w-full h-24 object-cover"
+                      loading="lazy"
+                      draggable="false"
+                    />
+                  </button>
+                </div>
+              </div>
+              <template #measure>
+                <div class="w-fit max-w-full min-w-0">
+                  <div
+                    class="md prose prose-invert prose-sm max-w-none prose-p:my-1 prose-headings:my-2 prose-pre:bg-black/30 prose-pre:border prose-pre:border-white/5"
+                    :style="messageContentFontSizeStyle"
+                  >
+                    <div class="stream-markdown" v-html="renderMarkdown(m)"></div>
+                  </div>
+                  <div v-if="m.images?.length" class="mt-3 grid grid-cols-2 md:grid-cols-3 gap-2">
+                    <div
+                      v-for="img in m.images"
+                      :key="img.id"
+                      class="block rounded-lg overflow-hidden border border-[var(--color-border)] bg-black/20"
+                    >
+                      <img
+                        :src="getChatImageUrl(img.id)"
+                        :alt="img.originalName || 'chat-image'"
+                        class="w-full h-24 object-cover"
+                        loading="lazy"
+                        draggable="false"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </AnimatedClipHeight>
             <!-- 长期记忆已保存标记：不受消息字体大小设置影响 -->
             <div
               v-if="m.memoryUpdatedAfterThis"
@@ -1139,8 +1459,13 @@ onBeforeUnmount(() => {
   width: 100%;
 }
 .message-bubble .md .stream-markdown {
-  overflow: hidden;
+  /* 勿用 hidden/auto 形成内层滚动区；块级 KaTeX 需完整铺开（宽公式由外层列宽与页面滚动处理） */
+  overflow: visible;
   word-wrap: break-word;
+}
+/* 首块常为标题：prose-headings:my-2 会留顶距，与仅 p:first-child 置零不一致，导致顶隙并可能诱发 frame 高度少算 */
+.message-bubble .md .stream-markdown > :first-child {
+  margin-top: 0;
 }
 .message-bubble .md :deep(pre) {
   overflow-x: auto;
@@ -1229,5 +1554,42 @@ onBeforeUnmount(() => {
 .image-preview-fade-enter-from,
 .image-preview-fade-leave-to {
   opacity: 0;
+}
+
+@keyframes message-bubble-user-send-enter {
+  from {
+    opacity: 0.65;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.message-bubble--user-send-enter {
+  animation: message-bubble-user-send-enter 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes message-row-assistant-enter {
+  from {
+    opacity: 0.55;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.message-row--assistant-enter {
+  animation: message-row-assistant-enter 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .message-bubble--user-send-enter,
+  .message-row--assistant-enter {
+    animation: none;
+  }
 }
 </style>
