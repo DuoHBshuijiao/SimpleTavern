@@ -316,7 +316,7 @@ function confirmDelete() {
       <!-- 用户身份区域 (头部)：滚动区全宽使滚动条贴侧栏右缘，内容用 px-4 与标题对齐 -->
       <div class="bg-surface-overlay border-b border-[var(--color-border-subtle)] shrink-0">
         <div class="flex items-center justify-between mb-3 px-4 pt-4">
-          <span class="text-xs font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">我的身份</span>
+          <span class="text-xs text-[var(--color-text-secondary)] uppercase tracking-wider">我的身份</span>
           <button 
             class="text-xs text-brand hover:text-brand-hover transition-colors px-2 py-0.5 rounded hover:bg-brand-a10" 
             @click="emit('create-persona')"
@@ -337,7 +337,7 @@ function confirmDelete() {
             >
               <ModernAvatar :src="p.avatar ? `/api/avatars/${p.avatar}` : null" :name="p.name" :size="36" aspect="1" />
               <div class="flex-1 min-w-0">
-                <div class="font-medium text-sm truncate" :class="selectedPersonaId === p.id ? 'text-brand' : 'text-[var(--color-text-secondary)]'">{{ p.name }}</div>
+                <div class="text-sm truncate" :class="selectedPersonaId === p.id ? 'text-brand' : 'text-[var(--color-text-secondary)]'">{{ p.name }}</div>
               </div>
               <div class="opacity-0 group-hover:opacity-100 flex gap-1 transition-opacity ml-auto bg-surface-overlay rounded-lg backdrop-blur-sm p-0.5">
                 <button class="p-1 hover:text-[var(--color-text)] text-[var(--color-text-muted)] transition-colors" @click.stop="emit('edit-persona', p)">
@@ -359,7 +359,7 @@ function confirmDelete() {
       <!-- 角色列表区域 (中间，弹性伸缩) -->
       <div ref="characterListScrollRef" class="flex-1 overflow-y-auto min-h-0 custom-scrollbar p-3">
         <div class="flex items-center justify-between mb-2 px-1">
-          <span class="text-xs font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">角色列表</span>
+          <span class="text-xs text-[var(--color-text-secondary)] uppercase tracking-wider">角色列表</span>
           <button 
             class="text-xs text-brand hover:text-brand-hover transition-colors px-2 py-0.5 rounded hover:bg-brand-a10" 
             @click="emit('create-character')"
@@ -391,7 +391,7 @@ function confirmDelete() {
             
             <div class="flex-1 min-w-0 flex flex-col h-[74px]">
               <div class="flex justify-between items-start">
-                <div class="font-bold text-sm truncate" :class="selectedCharacterId === c.id ? 'text-brand' : 'text-[var(--color-text)]'">{{ c.name }}</div>
+                <div class="text-sm truncate" :class="selectedCharacterId === c.id ? 'text-brand' : 'text-[var(--color-text)]'">{{ c.name }}</div>
               </div>
               <div class="text-xs text-[var(--color-text-muted)] line-clamp-3 mt-1 leading-relaxed">{{ c.description || '暂无简介' }}</div>
             </div>
@@ -411,7 +411,7 @@ function confirmDelete() {
       <!-- 会话列表区域 (底部) -->
       <div class="h-1/3 min-h-[150px] border-t border-[var(--color-border-subtle)] bg-surface-overlay flex flex-col">
         <div class="p-3 pb-1 shrink-0 flex items-center justify-between">
-          <span class="text-xs font-bold text-[var(--color-text-secondary)] uppercase tracking-wider">历史会话</span>
+          <span class="text-xs text-[var(--color-text-secondary)] uppercase tracking-wider">历史会话</span>
           <div class="flex gap-2">
             <button 
               class="text-xs bg-[var(--color-purple-bg)] hover:opacity-90 text-[var(--color-purple)] px-2 py-1 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed" 
