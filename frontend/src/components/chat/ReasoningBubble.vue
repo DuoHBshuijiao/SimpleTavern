@@ -1,38 +1,27 @@
 <script setup lang="ts">
 /**
- * ReasoningBubble - 思考链气泡（单聊 + 群聊 + 助手工作区复用）
+ * ReasoningBubble - 思考链气泡
  *
- * 模式：
- *   streaming  (isStreaming && !expanded): 宽随内容；max-w 继承父级；内层 max-h = streamingWindowHeight（默认 100px），可与 streamingMaxHeightPx 取更小值；超出内层滚动
- *   collapsed  (!isStreaming && !expanded): 高度 smallCardHeight，宽度不小于 smallCardWidth，按「已思考 x.x 秒」文案测量
- *   expanded   (expanded): height = min(contentHeight, 视口×expandedMaxVhRatio)，全宽可滚动；高度下界见 computeExpandedHeight
- *
- * 尺寸动画策略：
- *   - 收起/展开：外层 height/width 由 JS 写像素，CSS transition
- *   - 流式未展开：外层高度由内容决定（不写死像素），结束收小卡时切回像素高度
+ * 关键原则：
+ * - 全文内容层始终挂载，不在展开/收起中途卸载
+ * - 使用单一动画壳（AnimatedClipHeight）做 width/height 同步过渡
+ * - 收起时允许 overflow 裁剪，待壳收缩结束后再展示小卡层
+ * - 流式跟滚：不贴绝对底部，而是 scrollTop ≈ maxScroll − 一行高，把正在生成的那一行藏在视口底缘外；半截字等视觉问题可后续由 UI 调整
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import AnimatedClipHeight from './AnimatedClipHeight.vue'
+import { getLatestReasoningHighlight } from '../../utils/reasoningHighlights'
 
 const props = withDefaults(
   defineProps<{
     content: string
     isStreaming?: boolean
     durationSec?: number | null
-    /**
-     * 流式未展开时内层滚动区 max-height（px），默认 100；与 expanded 态上限无关。
-     */
     streamingWindowHeight?: number
-    /**
-     * 可选：与 streamingWindowHeight 取 min，作为更严的流式未展开高度上限（px）。
-     */
     streamingMaxHeightPx?: number | null
-    /** 收起小卡片高度（px） */
     smallCardHeight?: number
-    /** 收起态最小宽度（px）；实际宽度按文案测量，不小于该值 */
     smallCardWidth?: number
-    /** 展开时的最大高度比例（相对视口高度）；流式未展开限高见 streamingWindowHeight */
     expandedMaxVhRatio?: number
-    /** 由外部控制展开；若未传入则使用组件内部 state */
     expanded?: boolean
   }>(),
   {
@@ -48,7 +37,6 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   'update:expanded': [v: boolean]
-  /** 点击气泡体（非按钮）时触发；父组件可用于驱动 expandedReasoningMessageId */
   'expand-request': []
 }>()
 
@@ -61,10 +49,7 @@ const isExpanded = computed<boolean>({
   },
 })
 
-/** 是否展示为「已思考 x.x 秒」小卡片：仅在未流式且未展开时 */
 const showSmallCard = computed(() => !props.isStreaming && !isExpanded.value)
-
-/** 流式且未展开：内容撑开外层，内层 max-height 封顶 + 超出滚动 */
 const useStreamingIntrinsicLayout = computed(() => props.isStreaming && !isExpanded.value)
 
 const formattedDuration = computed(() => {
@@ -74,12 +59,16 @@ const formattedDuration = computed(() => {
 })
 
 const scrollRef = ref<HTMLElement | null>(null)
+const reasoningTextRef = ref<HTMLElement | null>(null)
 const smallCardMeasureRef = ref<HTMLElement | null>(null)
-/** 收起态测量层宽度（px）；未测量前为 null，外层用 smallCardWidth */
 const collapsedMeasuredWidth = ref<number | null>(null)
-const currentHeight = ref<number>(props.smallCardHeight)
 const topMaskVisible = ref(false)
 const bottomMaskVisible = ref(false)
+const smallCardVisualVisible = ref(showSmallCard.value)
+
+let resizeObserver: ResizeObserver | null = null
+let smallCardMeasureObserver: ResizeObserver | null = null
+let autoScrollRaf: number | null = null
 
 const streamingIntrinsicMaxHeightPx = computed(() => {
   let h = props.streamingWindowHeight
@@ -91,13 +80,9 @@ const streamingIntrinsicMaxHeightPx = computed(() => {
 })
 
 const rootLayoutClass = computed(() => {
-  if (showSmallCard.value) {
-    return 'min-w-0 max-w-full'
-  }
-  if (isExpanded.value) {
-    return 'w-full min-w-0 max-w-full'
-  }
-  return 'w-fit min-w-0 max-w-full self-start'
+  if (showSmallCard.value) return 'w-fit min-w-0 max-w-full self-start'
+  if (useStreamingIntrinsicLayout.value) return 'w-fit min-w-0 max-w-full self-start'
+  return 'w-full min-w-0 max-w-full self-start'
 })
 
 const collapsedOuterWidthPx = computed(() => {
@@ -105,27 +90,60 @@ const collapsedOuterWidthPx = computed(() => {
   return Math.max(props.smallCardWidth, m ?? props.smallCardWidth)
 })
 
-const rootInlineStyle = computed(() => {
-  if (showSmallCard.value) {
-    return {
-      height: `${currentHeight.value}px`,
-      width: `${collapsedOuterWidthPx.value}px`,
-    }
-  }
+const frameMode = computed<'intrinsic' | 'intrinsic-fullColumn' | 'fullWidth' | 'fixed'>(() => {
+  if (showSmallCard.value) return 'fixed'
+  if (isExpanded.value) return 'fullWidth'
+  if (useStreamingIntrinsicLayout.value) return 'intrinsic'
+  return 'intrinsic-fullColumn'
+})
+
+const scrollInlineStyle = computed(() => {
   if (useStreamingIntrinsicLayout.value) {
-    return {}
+    return { maxHeight: `${streamingIntrinsicMaxHeightPx.value}px` }
   }
-  return { height: `${currentHeight.value}px` }
+  if (isExpanded.value) {
+    // 底部留白已移出滚动区；扣除与 .reasoning-bubble --reasoning-tail-slot-h 一致
+    return { maxHeight: `calc(${props.expandedMaxVhRatio * 100}vh - var(--reasoning-tail-slot-h))` }
+  }
+  return {}
 })
 
-const streamingScrollInlineStyle = computed(() => {
-  if (!useStreamingIntrinsicLayout.value) return {}
-  return { maxHeight: `${streamingIntrinsicMaxHeightPx.value}px` }
+const scrollLayoutClass = computed(() => {
+  if (useStreamingIntrinsicLayout.value) {
+    return 'relative min-h-0 reasoning-scroll--streaming-intrinsic'
+  }
+  if (isExpanded.value) {
+    return 'relative min-h-0 reasoning-scroll--expanded'
+  }
+  return 'relative min-h-0'
 })
 
-let resizeObserver: ResizeObserver | null = null
-let smallCardMeasureObserver: ResizeObserver | null = null
-let autoScrollRaf: number | null = null
+/** 展开时置于底部遮罩区，便于滚到底后顺手收起；流式未展开仍用右上角 */
+const toggleIconPositionClass = computed(() => {
+  if (smallCardVisualVisible.value) {
+    return 'right-1 top-1/2 h-5 w-5 -translate-y-1/2'
+  }
+  if (isExpanded.value) {
+    return 'rotate-90 bottom-1 right-2 top-auto h-6 w-6'
+  }
+  return 'top-2 right-2 h-6 w-6'
+})
+
+/** 收起为小卡时始终隐藏全文层（含收壳过渡），避免未 settled 前露出正文 */
+const hideFullContent = computed(() => showSmallCard.value)
+
+/** 小卡稳定后隐藏；流式/展开/收壳过渡中仍显示（与 hideFullContent 解耦） */
+const showGradientMasks = computed(() => !showSmallCard.value || !smallCardVisualVisible.value)
+
+const latestReasoningHighlight = computed(() =>
+  getLatestReasoningHighlight(String(props.content ?? ''), { isStreaming: props.isStreaming }),
+)
+
+/** 有摘要文案（小卡态不展示思考区，故不启用）；流式/展开均在滚动区下方兄弟节点挂载尾槽 */
+const hasReasoningHighlight = computed(() => {
+  const t = latestReasoningHighlight.value
+  return t != null && t.length > 0 && !showSmallCard.value
+})
 
 function teardownSmallCardMeasureObserver() {
   smallCardMeasureObserver?.disconnect()
@@ -168,66 +186,30 @@ function updateMaskVisibility() {
   bottomMaskVisible.value = el.scrollTop < maxScroll - 2
 }
 
-/**
- * 流式未展开且内层已溢出：视口底部停在「可滚动下限之上约一行高」，配合 smooth。
- */
-function scheduleAutoScroll() {
-  if (!useStreamingIntrinsicLayout.value) return
+/** 流式阶段：跟滚但故意留一行不露出（隐藏正在生成行），平滑滚动 */
+function scheduleStreamingFollowScroll() {
+  if (!props.isStreaming) return
   if (autoScrollRaf != null) cancelAnimationFrame(autoScrollRaf)
   autoScrollRaf = requestAnimationFrame(() => {
     autoScrollRaf = null
-    const el = scrollRef.value
-    if (!el) return
-    const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight)
-    if (maxScroll <= 0) {
-      updateMaskVisibility()
-      return
-    }
-    const lineHeight = getLineHeightPx(el)
-    const target = Math.max(0, maxScroll - lineHeight)
-    try {
-      el.scrollTo({ top: target, behavior: 'smooth' })
-    } catch {
-      el.scrollTop = target
-    }
-    requestAnimationFrame(updateMaskVisibility)
-  })
-}
-
-/** 从展开折回流式未展开 intrinsic 后，待布局稳定再跟滚 */
-function scheduleStreamingFollowAfterCollapse() {
-  if (!props.isStreaming || isExpanded.value) return
-  nextTick(() => {
     requestAnimationFrame(() => {
-      scheduleAutoScroll()
-      requestAnimationFrame(() => {
-        scheduleAutoScroll()
-      })
+      const el = scrollRef.value
+      if (!el) return
+      const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight)
+      if (maxScroll <= 0) {
+        updateMaskVisibility()
+        return
+      }
+      const lh = getLineHeightPx(reasoningTextRef.value || el)
+      const target = Math.max(0, maxScroll - lh)
+      try {
+        el.scrollTo({ top: target, behavior: 'smooth' })
+      } catch {
+        el.scrollTop = target
+      }
+      requestAnimationFrame(updateMaskVisibility)
     })
   })
-}
-
-function expandedHeightFloorPx(): number {
-  return Math.max(props.smallCardHeight, props.streamingWindowHeight)
-}
-
-function computeExpandedHeight(): number {
-  const vh = typeof window !== 'undefined' ? window.innerHeight : 800
-  const maxPx = vh * props.expandedMaxVhRatio
-  const el = scrollRef.value
-  const contentHeight = el ? el.scrollHeight : expandedHeightFloorPx()
-  return Math.max(expandedHeightFloorPx(), Math.min(contentHeight, maxPx))
-}
-
-function applyHeightForMode() {
-  if (isExpanded.value) {
-    nextTick(() => {
-      currentHeight.value = computeExpandedHeight()
-      nextTick(updateMaskVisibility)
-    })
-  } else if (!props.isStreaming) {
-    currentHeight.value = props.smallCardHeight
-  }
 }
 
 function onRootClick(e: MouseEvent) {
@@ -243,62 +225,52 @@ function toggleExpanded(e: MouseEvent) {
 }
 
 watch(
+  () => showSmallCard.value,
+  (collapsed, prev) => {
+    if (!collapsed) {
+      smallCardVisualVisible.value = false
+      return
+    }
+    if (prev === false || prev === undefined) {
+      smallCardVisualVisible.value = false
+      return
+    }
+    smallCardVisualVisible.value = true
+  },
+  { immediate: true },
+)
+
+function handleFrameSettled() {
+  if (showSmallCard.value) {
+    smallCardVisualVisible.value = true
+  }
+}
+
+watch(
   () => props.content,
   () => {
-    if (props.isStreaming && !isExpanded.value) {
-      scheduleAutoScroll()
-      nextTick(() => {
-        updateMaskVisibility()
-      })
+    if (props.isStreaming) {
+      scheduleStreamingFollowScroll()
+      nextTick(updateMaskVisibility)
     } else if (isExpanded.value) {
-      nextTick(() => {
-        currentHeight.value = computeExpandedHeight()
-        updateMaskVisibility()
-      })
+      nextTick(updateMaskVisibility)
     }
   },
 )
 
 watch(
   () => props.isStreaming,
-  (streaming, prev) => {
-    if (!streaming && prev) {
-      if (!isExpanded.value) {
-        currentHeight.value = props.smallCardHeight
-      }
-    } else if (streaming && !isExpanded.value) {
-      scheduleAutoScroll()
+  (streaming) => {
+    if (streaming) {
+      scheduleStreamingFollowScroll()
       nextTick(updateMaskVisibility)
     }
   },
 )
 
-watch(isExpanded, () => {
-  applyHeightForMode()
-  if (props.isStreaming && !isExpanded.value) {
-    scheduleStreamingFollowAfterCollapse()
-  }
-})
-
-watch(
-  () =>
-    [
-      props.streamingMaxHeightPx,
-      props.smallCardHeight,
-      props.expandedMaxVhRatio,
-      props.streamingWindowHeight,
-    ] as const,
-  () => applyHeightForMode(),
-)
-
 watch(
   () => [showSmallCard.value, formattedDuration.value] as const,
   async () => {
-    if (!showSmallCard.value) {
-      teardownSmallCardMeasureObserver()
-      collapsedMeasuredWidth.value = null
-      return
-    }
     await nextTick()
     teardownSmallCardMeasureObserver()
     const el = smallCardMeasureRef.value
@@ -312,21 +284,17 @@ watch(
 )
 
 onMounted(() => {
-  applyHeightForMode()
-  if (props.isStreaming && !isExpanded.value) {
-    scheduleAutoScroll()
-    nextTick(updateMaskVisibility)
+  if (props.isStreaming) {
+    scheduleStreamingFollowScroll()
   }
+  nextTick(updateMaskVisibility)
   if (typeof ResizeObserver !== 'undefined' && scrollRef.value) {
     resizeObserver = new ResizeObserver(() => {
-      if (isExpanded.value) {
-        currentHeight.value = computeExpandedHeight()
-      }
+      if (props.isStreaming) scheduleStreamingFollowScroll()
       updateMaskVisibility()
     })
     resizeObserver.observe(scrollRef.value)
   }
-  window.addEventListener('resize', onWindowResize)
 })
 
 onBeforeUnmount(() => {
@@ -334,25 +302,20 @@ onBeforeUnmount(() => {
   resizeObserver?.disconnect()
   resizeObserver = null
   teardownSmallCardMeasureObserver()
-  window.removeEventListener('resize', onWindowResize)
 })
-
-function onWindowResize() {
-  if (isExpanded.value) currentHeight.value = computeExpandedHeight()
-  if (showSmallCard.value) measureCollapsedSmallCardWidth()
-  updateMaskVisibility()
-}
 </script>
 
 <template>
-  <div
-    class="reasoning-bubble reasoning-bubble-surface rounded-lg text-xs leading-relaxed relative overflow-hidden"
-    :class="[rootLayoutClass, showSmallCard ? 'cursor-pointer' : (isExpanded ? '' : 'cursor-pointer')]"
-    :style="rootInlineStyle"
-    @click="onRootClick"
-  >
     <div
-      v-if="showSmallCard"
+      class="reasoning-bubble reasoning-bubble-surface rounded-lg text-xs leading-relaxed relative overflow-hidden"
+      :class="[
+        rootLayoutClass,
+        showSmallCard ? '' : (isExpanded ? '' : 'cursor-pointer'),
+        !hasReasoningHighlight ? 'reasoning-bubble--tail-collapsed' : '',
+      ]"
+      @click="onRootClick"
+    >
+    <div
       ref="smallCardMeasureRef"
       class="reasoning-small-card-measure absolute left-0 top-0 z-[-1] flex items-center gap-1 pl-2 pr-7 whitespace-nowrap opacity-0 pointer-events-none select-none"
       aria-hidden="true"
@@ -367,24 +330,84 @@ function onWindowResize() {
       </span>
     </div>
 
-    <div
-      class="reasoning-scroll overflow-y-auto overflow-x-hidden pl-3 pr-8 py-2.5 whitespace-pre-wrap break-words transition-opacity duration-200"
-      :class="[
-        useStreamingIntrinsicLayout ? 'relative min-h-0 reasoning-scroll--streaming-intrinsic' : 'absolute inset-0',
-        showSmallCard ? 'opacity-0 pointer-events-none' : 'opacity-100',
-      ]"
-      :style="streamingScrollInlineStyle"
-      ref="scrollRef"
-      @scroll="updateMaskVisibility"
+    <AnimatedClipHeight
+      class="reasoning-frame"
+      :mode="frameMode"
+      :fixed-width-px="collapsedOuterWidthPx"
+      :fixed-height-px="props.smallCardHeight"
+      :relax-height-dead-zone="props.isStreaming"
+      @settled="handleFrameSettled"
     >
-      <div class="reasoning-text">{{ content }}</div>
-      <div class="reasoning-tail-padding" aria-hidden="true" />
-    </div>
+      <div class="reasoning-clip-stack flex min-h-0 min-w-0 flex-col">
+        <div
+          ref="scrollRef"
+          class="reasoning-scroll overflow-y-auto overflow-x-hidden px-3 py-2.5 whitespace-pre-wrap break-words transition-opacity duration-200"
+          :class="[scrollLayoutClass, hideFullContent ? 'opacity-0 pointer-events-none' : 'opacity-100']"
+          :style="scrollInlineStyle"
+          @scroll="updateMaskVisibility"
+        >
+          <div
+            ref="reasoningTextRef"
+            class="reasoning-text"
+            :class="props.isStreaming && !String(props.content || '').trim() ? 'reasoning-text--streaming-empty' : ''"
+          >
+            {{ content }}
+          </div>
+        </div>
+        <div
+          v-if="hasReasoningHighlight"
+          class="reasoning-tail-slot"
+          aria-label="思考要点"
+        >
+          <Transition name="reasoning-tail-fade" mode="out-in">
+            <p
+              v-if="latestReasoningHighlight != null"
+              :key="latestReasoningHighlight"
+              class="reasoning-tail-caption"
+            >
+              {{ latestReasoningHighlight }}
+            </p>
+          </Transition>
+        </div>
+      </div>
+
+      <template #measure>
+        <div class="reasoning-clip-stack flex min-h-0 min-w-0 flex-col">
+          <div
+            class="reasoning-scroll reasoning-scroll--measure overflow-y-auto overflow-x-hidden px-3 py-2.5 whitespace-pre-wrap break-words"
+            :class="[scrollLayoutClass]"
+            :style="scrollInlineStyle"
+          >
+            <div
+              class="reasoning-text"
+              :class="props.isStreaming && !String(props.content || '').trim() ? 'reasoning-text--streaming-empty' : ''"
+            >
+              {{ content }}
+            </div>
+          </div>
+          <div
+            v-if="hasReasoningHighlight"
+            class="reasoning-tail-slot"
+            aria-label="思考要点"
+          >
+            <Transition name="reasoning-tail-fade" mode="out-in">
+              <p
+                v-if="latestReasoningHighlight != null"
+                :key="latestReasoningHighlight"
+                class="reasoning-tail-caption"
+              >
+                {{ latestReasoningHighlight }}
+              </p>
+            </Transition>
+          </div>
+        </div>
+      </template>
+    </AnimatedClipHeight>
 
     <div
       class="reasoning-small-card absolute inset-0 flex items-center gap-1 whitespace-nowrap pl-2 pr-7 transition-opacity duration-200"
-      :class="showSmallCard ? 'opacity-100' : 'opacity-0 pointer-events-none'"
-      :aria-hidden="!showSmallCard"
+      :class="smallCardVisualVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'"
+      :aria-hidden="!smallCardVisualVisible"
     >
       <span class="inline-flex shrink-0 items-center gap-1 text-[var(--color-text-muted)]">
         <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="shrink-0">
@@ -397,13 +420,13 @@ function onWindowResize() {
     </div>
 
     <div
-      v-if="!showSmallCard"
+      v-if="showGradientMasks"
       class="reasoning-mask reasoning-mask-top"
       :class="topMaskVisible ? 'opacity-100' : 'opacity-0'"
       aria-hidden="true"
     />
     <div
-      v-if="!showSmallCard"
+      v-if="showGradientMasks"
       class="reasoning-mask reasoning-mask-bottom"
       :class="bottomMaskVisible ? 'opacity-100' : 'opacity-0'"
       aria-hidden="true"
@@ -411,11 +434,8 @@ function onWindowResize() {
 
     <button
       type="button"
-      class="reasoning-toggle-icon absolute z-10 flex items-center justify-center rounded hover:bg-white/10 transition-all duration-200"
-      :class="[
-        isExpanded ? 'rotate-90' : '',
-        showSmallCard ? 'right-1 top-1/2 h-5 w-5 -translate-y-1/2' : 'top-2 right-2 h-6 w-6',
-      ]"
+      class="reasoning-toggle-icon absolute z-[11] flex items-center justify-center rounded transition-all duration-200"
+      :class="toggleIconPositionClass"
       :aria-label="isExpanded ? '收起思考' : '展开思考'"
       @click="toggleExpanded"
     >
@@ -428,16 +448,35 @@ function onWindowResize() {
 
 <style scoped>
 .reasoning-bubble {
-  transition:
-    height 320ms cubic-bezier(0.4, 0, 0.2, 1),
-    width 320ms cubic-bezier(0.4, 0, 0.2, 1);
-  will-change: height, width;
+  will-change: width, height;
+  /* 与收起按钮 bottom-1 + h-6 对齐尾槽垂直中心，供外部尾槽与底遮罩共用 */
+  --reasoning-tail-slot-h: calc(0.5rem + 1.5rem);
+  --reasoning-mask-bottom: var(--reasoning-tail-slot-h);
+}
+.reasoning-bubble--tail-collapsed {
+  --reasoning-tail-slot-h: 0px;
+  --reasoning-mask-bottom: 0px;
+}
+.reasoning-frame {
+  max-width: 100%;
 }
 .reasoning-scroll {
   scroll-behavior: smooth;
 }
 .reasoning-scroll--streaming-intrinsic {
   scroll-behavior: auto;
+}
+.reasoning-scroll--expanded {
+  scroll-behavior: smooth;
+}
+.reasoning-scroll--measure {
+  transition: none !important;
+}
+.reasoning-toggle-icon {
+  background: color-mix(in srgb, var(--color-reasoning-bubble-bg, rgba(30, 30, 30, 0.5)) 88%, transparent);
+}
+.reasoning-toggle-icon:hover {
+  background: color-mix(in srgb, var(--color-text, #fff) 12%, transparent);
 }
 .reasoning-scroll::-webkit-scrollbar {
   width: 4px;
@@ -446,8 +485,50 @@ function onWindowResize() {
   background-color: color-mix(in srgb, var(--color-text-muted, #9ca3af) 24%, transparent);
   border-radius: 4px;
 }
-.reasoning-tail-padding {
-  height: 1.5em;
+.reasoning-tail-slot {
+  flex-shrink: 0;
+  height: var(--reasoning-tail-slot-h);
+  min-height: var(--reasoning-tail-slot-h);
+  box-sizing: border-box;
+  padding-left: 0.75rem;
+  padding-right: 2rem;
+  display: grid;
+  grid-template-rows: 1fr;
+  align-items: center;
+  justify-items: start;
+  min-width: 0;
+  position: relative;
+  z-index: 1;
+  background-color: var(--color-reasoning-bubble-bg, rgba(30, 30, 30, 0.5));
+  border-top: 1px solid var(--color-reasoning-bubble-border, transparent);
+}
+.reasoning-tail-caption {
+  margin: 0;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  font-weight: 400;
+  font-size: 0.875rem;
+  line-height: 1.25;
+  color: color-mix(in srgb, var(--color-text-muted, #9ca3af) 88%, var(--color-primary, #6366f1) 12%);
+}
+.reasoning-tail-fade-enter-active,
+.reasoning-tail-fade-leave-active {
+  transition: opacity 200ms ease;
+}
+.reasoning-tail-fade-enter-from,
+.reasoning-tail-fade-leave-to {
+  opacity: 0;
+}
+.reasoning-text {
+  overflow-wrap: anywhere;
+}
+.reasoning-text--streaming-empty {
+  min-height: 1.25rem;
 }
 .reasoning-mask {
   position: absolute;
@@ -469,7 +550,8 @@ function onWindowResize() {
   box-shadow: inset 0 10px 14px -10px color-mix(in srgb, var(--color-primary, #6366f1) 32%, transparent);
 }
 .reasoning-mask-bottom {
-  bottom: 0;
+  /* 底缘与尾槽顶对齐（兄弟尾槽在滚动区下） */
+  bottom: var(--reasoning-mask-bottom);
   height: 32px;
   background: linear-gradient(
     to top,
