@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import MarkdownIt from 'markdown-it'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { renderChatMarkdown } from '../utils/markdownIt'
 import type { StartupUpdateCheckResponse } from '../api/update'
 import { getStartupUpdateCheck, setIgnoredUpdateTag } from '../api/update'
 import { useUiStore } from '../stores'
@@ -10,15 +10,9 @@ const startupUpdate = ref<StartupUpdateCheckResponse | null>(null)
 const ignoring = ref(false)
 const checking = ref(false)
 
-const md = new MarkdownIt({
-  html: false,
-  linkify: true,
-  breaks: true,
-})
-
 const renderedNotes = computed(() => {
   const notes = startupUpdate.value?.releaseNotes?.trim()
-  return md.render(notes || '本次 release 暂无可展示的更新说明。')
+  return renderChatMarkdown(notes || '本次 release 暂无可展示的更新说明。')
 })
 
 let startupTimerId: number | null = null
@@ -88,7 +82,10 @@ onBeforeUnmount(() => {
           </div>
         </header>
 
-        <div class="px-4 py-3 flex-1 min-h-0 overflow-y-auto overscroll-contain startup-update-markdown" v-html="renderedNotes"></div>
+        <div
+          class="px-4 py-3 flex-1 min-h-0 overflow-y-auto overscroll-contain startup-update-markdown prose prose-invert prose-sm max-w-none"
+          v-html="renderedNotes"
+        ></div>
 
         <footer class="px-4 py-3 border-t border-[var(--color-border-subtle)] shrink-0 flex items-center justify-end gap-2">
           <button type="button" class="btn btn-sm btn-secondary" :disabled="ignoring" @click="ignoreRelease">
