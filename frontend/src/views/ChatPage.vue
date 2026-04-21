@@ -373,6 +373,28 @@ const chatReasoningContent = ref('')
 const chatReasoningBlocks = ref<Array<{ messageId: string; content: string }>>([])
 /** 首条正文 delta 之前为 true；收到 delta 或 done/清空后为 false（用于 ReasoningBubble 流式态） */
 const chatReasoningStreamActive = ref(false)
+/** 本条流式思考阶段开始时间（ms），用于收起小卡时显示「已思考 x.x 秒」 */
+const reasoningPhaseStartedAt = ref<number | null>(null)
+/** 思考阶段结束时写入的秒数（1 位小数），供 MessageList 覆盖直至消息持久化带 reasoningDurationSec */
+const chatReasoningElapsedSec = ref<number | null>(null)
+
+function markReasoningStreamPhaseStart() {
+  reasoningPhaseStartedAt.value = Date.now()
+  chatReasoningElapsedSec.value = null
+}
+
+function clearReasoningPhaseTiming() {
+  reasoningPhaseStartedAt.value = null
+  chatReasoningElapsedSec.value = null
+}
+
+/** 首条正文 delta：结束思考流式阶段并写入已用时长（秒） */
+function onAssistantContentDeltaStarted() {
+  if (chatReasoningStreamActive.value && reasoningPhaseStartedAt.value != null) {
+    chatReasoningElapsedSec.value = Math.round((Date.now() - reasoningPhaseStartedAt.value) / 100) / 10
+  }
+  chatReasoningStreamActive.value = false
+}
 
 watch(() => uiStore.settingsDrawerRequestNonce, (nonce) => {
   if (!nonce) return
@@ -385,15 +407,40 @@ function shouldIgnoreStreamingEventWhileStopping(eventName: string): boolean {
 }
 
 /** 将当前思考内容写入 blocks 并清空当前（在 stream done 或非流响应后调用，便于多轮保留） */
-function pushCurrentReasoningToBlocks(finalMessageId?: string | null) {
-  const id = finalMessageId ?? chatReasoningMessageId.value
+function pushCurrentReasoningToBlocks(finalMessageId?: string | null, localAliasId?: string | null) {
+  const primary = finalMessageId ?? chatReasoningMessageId.value
   const content = chatReasoningContent.value.trim()
-  if (id && content) {
-    chatReasoningBlocks.value = [...chatReasoningBlocks.value, { messageId: id, content }]
+  const ids = new Set<string>()
+  if (primary) ids.add(primary)
+  if (localAliasId && localAliasId !== primary) ids.add(localAliasId)
+
+  const elapsed = chatReasoningElapsedSec.value
+  if (typeof elapsed === 'number' && Number.isFinite(elapsed) && chats.activeChat && ids.size > 0) {
+    for (const messageId of ids) {
+      const msg = chats.activeChat.messages.find((m) => m.id === messageId)
+      if (msg && msg.role === 'assistant') {
+        msg.reasoningDurationSec = elapsed
+      }
+    }
+  }
+
+  if (content && ids.size > 0 && chats.activeChat) {
+    for (const messageId of ids) {
+      const msg = chats.activeChat.messages.find((m) => m.id === messageId)
+      if (msg && msg.role === 'assistant') {
+        msg.reasoningContent = content
+      }
+    }
+    let blocks = chatReasoningBlocks.value
+    for (const messageId of ids) {
+      blocks = [...blocks, { messageId, content }]
+    }
+    chatReasoningBlocks.value = blocks
   }
   chatReasoningContent.value = ''
   chatReasoningMessageId.value = null
   chatReasoningStreamActive.value = false
+  clearReasoningPhaseTiming()
 }
 
 /** 根据消息 ID 获取当前关联的思考内容（流式当前条或 blocks 中已保存的） */
@@ -842,7 +889,7 @@ watch(
 // 流式输出
 const stream = useStreamOutput(
   { appendLocalMessageContent: chats.appendLocalMessageContent },
-  scrollToBottom
+  () => scrollToBottom(true, true),
 )
 
 // 消息版本
@@ -1276,6 +1323,7 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  clearMessageListEnterAnimations()
   draftHelperAborter.value?.abort()
   clearDraftImages()
   errorStack.clearAll()
@@ -1992,6 +2040,55 @@ async function handleModelSelect(option: any) {
  */
 const messageListRef = ref<InstanceType<typeof MessageList> | null>(null)
 
+/** 本次发送的用户消息 id，供 MessageList 播放一次性入场动画 */
+const entrancingUserMessageId = ref<string | null>(null)
+let entrancingUserClearTimer: ReturnType<typeof setTimeout> | null = null
+const USER_BUBBLE_ENTER_ANIM_MS = 480
+
+function armUserMessageEnterAnimation(messageId: string) {
+  entrancingUserMessageId.value = messageId
+  if (entrancingUserClearTimer != null) clearTimeout(entrancingUserClearTimer)
+  entrancingUserClearTimer = setTimeout(() => {
+    entrancingUserClearTimer = null
+    if (entrancingUserMessageId.value === messageId) entrancingUserMessageId.value = null
+  }, USER_BUBBLE_ENTER_ANIM_MS)
+}
+
+function clearUserMessageEnterAnimation() {
+  if (entrancingUserClearTimer != null) {
+    clearTimeout(entrancingUserClearTimer)
+    entrancingUserClearTimer = null
+  }
+  entrancingUserMessageId.value = null
+}
+
+/** 重写 / 保存并发送等路径插入的助手占位行，弱化整行挂载跳变 */
+const entrancingAssistantMessageId = ref<string | null>(null)
+let entrancingAssistantClearTimer: ReturnType<typeof setTimeout> | null = null
+const ASSISTANT_ROW_ENTER_ANIM_MS = 480
+
+function armAssistantRowEnterAnimation(messageId: string) {
+  entrancingAssistantMessageId.value = messageId
+  if (entrancingAssistantClearTimer != null) clearTimeout(entrancingAssistantClearTimer)
+  entrancingAssistantClearTimer = setTimeout(() => {
+    entrancingAssistantClearTimer = null
+    if (entrancingAssistantMessageId.value === messageId) entrancingAssistantMessageId.value = null
+  }, ASSISTANT_ROW_ENTER_ANIM_MS)
+}
+
+function clearAssistantRowEnterAnimation() {
+  if (entrancingAssistantClearTimer != null) {
+    clearTimeout(entrancingAssistantClearTimer)
+    entrancingAssistantClearTimer = null
+  }
+  entrancingAssistantMessageId.value = null
+}
+
+function clearMessageListEnterAnimations() {
+  clearUserMessageEnterAnimation()
+  clearAssistantRowEnterAnimation()
+}
+
 function scrollToBottom(instant = false, force = false) {
   nextTick(() => {
     messageListRef.value?.scrollToBottom(instant, force)
@@ -2376,10 +2473,12 @@ watch(
       scrollToBottom(true, true)
     }
     if (prev != null && next !== prev) {
+      clearMessageListEnterAnimations()
       chatReasoningBlocks.value = []
       chatReasoningContent.value = ''
       chatReasoningMessageId.value = null
       chatReasoningStreamActive.value = false
+      clearReasoningPhaseTiming()
       versions.clearAll()
     }
     // 切换会话时自动关闭搜索面板并重置搜索状态
@@ -2521,17 +2620,18 @@ async function runGroupGeneration(
     chatReasoningMessageId.value = localAssistantId
     chatReasoningContent.value = ''
     chatReasoningStreamActive.value = true
-    const localMsg = { 
-      version: 1, 
-      id: localAssistantId, 
-      role: 'assistant' as const, 
-      content: '', 
+    markReasoningStreamPhaseStart()
+    const localMsg = {
+      version: 1,
+      id: localAssistantId,
+      role: 'assistant' as const,
+      content: '',
       characterId,
-      ts: new Date().toISOString() 
+      ts: new Date().toISOString()
     }
     chats.addLocalMessage(localMsg)
     scrollToBottom()
-    
+
     if (useStream) {
       stream.registerStreamMessage(localAssistantId)
       let sseError: string | null = null
@@ -2540,7 +2640,7 @@ async function runGroupGeneration(
           '/api/generate/group',
           { chatId, characterId, imageFallbackMode },
           (evt) => {
-            if (evt.event === 'delta') chatReasoningStreamActive.value = false
+            if (evt.event === 'delta') onAssistantContentDeltaStarted()
             if (shouldIgnoreStreamingEventWhileStopping(evt.event)) return
             if (evt.event === 'delta') {
               const data = evt.data as { text?: string } | undefined
@@ -2560,9 +2660,10 @@ async function runGroupGeneration(
               if (serverId && chatReasoningContent.value) {
                 chatReasoningMessageId.value = serverId
               }
-              pushCurrentReasoningToBlocks(serverId ?? undefined)
+              pushCurrentReasoningToBlocks(serverId ?? undefined, localAssistantId)
             } else if (evt.event === 'error') {
               chatReasoningStreamActive.value = false
+              clearReasoningPhaseTiming()
               const data = evt.data as { message?: string } | undefined
               sseError = String(data?.message ?? 'unknown error')
             }
@@ -2592,7 +2693,7 @@ async function runGroupGeneration(
         if (typeof res.reasoningContent === 'string') {
           chatReasoningContent.value = res.reasoningContent
         }
-        pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined)
+        pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined, localAssistantId)
         chats.appendLocalMessageContent(localAssistantId, res.content || '')
         scrollToBottom()
         void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
@@ -2668,6 +2769,7 @@ async function sendUserMessage() {
   // 处理暂停状态下的插话
   if (isGroup && group.showContinueButton.value) {
     const localUserId = `local_user_${Date.now()}`
+    armUserMessageEnterAnimation(localUserId)
     chats.addLocalMessage({
       version: 1,
       id: localUserId,
@@ -2721,6 +2823,7 @@ async function sendUserMessage() {
     uploadedImages = await uploadDraftImages(chatId, pendingDraftImages)
     if (isGroup) {
       const localUserId = `local_user_${Date.now()}`
+      armUserMessageEnterAnimation(localUserId)
       chats.addLocalMessage({
         version: 1,
         id: localUserId,
@@ -2752,7 +2855,9 @@ async function sendUserMessage() {
       chatReasoningMessageId.value = localAssistantId
       chatReasoningContent.value = ''
       chatReasoningStreamActive.value = true
+      markReasoningStreamPhaseStart()
 
+      armUserMessageEnterAnimation(localUserId)
       chats.addLocalMessage({
         version: 1,
         id: localUserId,
@@ -2784,7 +2889,7 @@ async function sendUserMessage() {
               userPersona: selectedPersona.value ?? null,
             },
             (evt) => {
-              if (evt.event === 'delta') chatReasoningStreamActive.value = false
+              if (evt.event === 'delta') onAssistantContentDeltaStarted()
               if (shouldIgnoreStreamingEventWhileStopping(evt.event)) return
               if (evt.event === 'delta') {
                 const data = evt.data as { text?: string } | undefined
@@ -2804,9 +2909,10 @@ async function sendUserMessage() {
                 if (serverId && chatReasoningContent.value) {
                   chatReasoningMessageId.value = serverId
                 }
-                pushCurrentReasoningToBlocks(serverId ?? undefined)
+                pushCurrentReasoningToBlocks(serverId ?? undefined, localAssistantId)
               } else if (evt.event === 'error') {
                 chatReasoningStreamActive.value = false
+                clearReasoningPhaseTiming()
                 const data = evt.data as { message?: string } | undefined
                 sseError = String(data?.message ?? 'unknown error')
               }
@@ -2843,7 +2949,7 @@ async function sendUserMessage() {
           if (typeof res.reasoningContent === 'string') {
             chatReasoningContent.value = res.reasoningContent
           }
-          pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined)
+          pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined, localAssistantId)
           chats.appendLocalMessageContent(localAssistantId, res.content || '')
           scrollToBottom()
           void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
@@ -3050,6 +3156,7 @@ async function triggerInterject(characterId: string) {
   chatReasoningMessageId.value = localAssistantId
   chatReasoningContent.value = ''
   chatReasoningStreamActive.value = true
+  markReasoningStreamPhaseStart()
   const localMsg = { 
     version: 1, 
     id: localAssistantId, 
@@ -3069,7 +3176,7 @@ async function triggerInterject(characterId: string) {
           '/api/generate/interject',
           { chatId, characterId },
           (evt) => {
-            if (evt.event === 'delta') chatReasoningStreamActive.value = false
+            if (evt.event === 'delta') onAssistantContentDeltaStarted()
             if (shouldIgnoreStreamingEventWhileStopping(evt.event)) return
             if (evt.event === 'delta') {
               const data = evt.data as { text?: string } | undefined
@@ -3089,9 +3196,10 @@ async function triggerInterject(characterId: string) {
               if (serverId && chatReasoningContent.value) {
                 chatReasoningMessageId.value = serverId
               }
-              pushCurrentReasoningToBlocks(serverId ?? undefined)
+              pushCurrentReasoningToBlocks(serverId ?? undefined, localAssistantId)
             } else if (evt.event === 'error') {
               chatReasoningStreamActive.value = false
+              clearReasoningPhaseTiming()
               const data = evt.data as { message?: string } | undefined
               streamError.value = String(data?.message ?? 'unknown error')
             }
@@ -3118,7 +3226,7 @@ async function triggerInterject(characterId: string) {
         if (typeof res.reasoningContent === 'string') {
           chatReasoningContent.value = res.reasoningContent
         }
-        pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined)
+        pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined, localAssistantId)
         chats.appendLocalMessageContent(localAssistantId, res.content || '')
         scrollToBottom()
         void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
@@ -3154,6 +3262,19 @@ function stopStreaming() {
   stopStreamingHold.value = true
   aborter.value.abort()
   stream.flushAll()
+  /** 与首条正文 delta 一致：在 isGenerating 仍为 true 时结束思考阶段，便于 ReasoningBubble 闭合过渡 */
+  if (chatReasoningStreamActive.value && reasoningPhaseStartedAt.value != null) {
+    chatReasoningElapsedSec.value = Math.round((Date.now() - reasoningPhaseStartedAt.value) / 100) / 10
+  }
+  const rid = chatReasoningMessageId.value
+  const sec = chatReasoningElapsedSec.value
+  if (rid && typeof sec === 'number' && Number.isFinite(sec) && chats.activeChat) {
+    const msg = chats.activeChat.messages.find((m) => m.id === rid)
+    if (msg && msg.role === 'assistant') {
+      msg.reasoningDurationSec = sec
+    }
+  }
+  chatReasoningStreamActive.value = false
 }
 
 /**
@@ -3165,7 +3286,33 @@ async function persistLocalStreamingMessages(chatId: string) {
   if (!chat?.messages?.length) return
 
   const capturedReasoningMessageId = chatReasoningMessageId.value
-  const capturedReasoningContent = chatReasoningContent.value.trim()
+  const capturedReasoningFromRef = chatReasoningContent.value.trim()
+  const blocksSnapshot = [...chatReasoningBlocks.value]
+  const capturedElapsed = chatReasoningElapsedSec.value
+
+  const reasoningTextForLocalId = (localId: string): string => {
+    if (capturedReasoningMessageId === localId && capturedReasoningFromRef) {
+      return capturedReasoningFromRef
+    }
+    const fromBlock = blocksSnapshot.find((b) => b.messageId === localId)?.content?.trim()
+    return fromBlock || ''
+  }
+
+  const durationSecForLocalId = (localId: string): number | null => {
+    if (capturedReasoningMessageId !== localId) return null
+    const lm = chat.messages.find((x) => x.id === localId)
+    if (
+      lm &&
+      typeof lm.reasoningDurationSec === 'number' &&
+      Number.isFinite(lm.reasoningDurationSec)
+    ) {
+      return lm.reasoningDurationSec
+    }
+    if (typeof capturedElapsed === 'number' && Number.isFinite(capturedElapsed)) {
+      return capturedElapsed
+    }
+    return null
+  }
 
   const localAssistantMessages = chat.messages
     .filter((m) => m.role === 'assistant' && m.id.startsWith('local_'))
@@ -3176,11 +3323,7 @@ async function persistLocalStreamingMessages(chatId: string) {
     }))
     .filter((m) => {
       if (m.content) return true
-      return (
-        !!capturedReasoningMessageId &&
-        m.localId === capturedReasoningMessageId &&
-        !!capturedReasoningContent
-      )
+      return !!reasoningTextForLocalId(m.localId)
     })
 
   await chats.load(chatId)
@@ -3189,42 +3332,76 @@ async function persistLocalStreamingMessages(chatId: string) {
   const normReasoning = (s: string | null | undefined) =>
     typeof s === 'string' ? s.trim() : ''
 
-  const hasEquivalentServerMessage = (candidate: {
-    content: string
-    characterId: string | null
-    reasoningContent?: string | null
-  }) => {
-    const cReason = normReasoning(candidate.reasoningContent ?? null)
-    return serverMessages.some((m) => {
-      if (m.id.startsWith('local_')) return false
-      if (m.role !== 'assistant') return false
-      if ((m.characterId ?? null) !== candidate.characterId) return false
-      if ((m.content || '').trim() !== candidate.content) return false
-      if (normReasoning(m.reasoningContent) !== cReason) return false
-      return true
-    })
+  const durationMatches = (serverSec: unknown, localSec: number | null) => {
+    if (localSec == null || !Number.isFinite(localSec)) return true
+    return (
+      typeof serverSec === 'number' &&
+      Number.isFinite(serverSec) &&
+      Math.abs(serverSec - localSec) < 0.05
+    )
   }
 
   for (const candidate of localAssistantMessages) {
-    const reasoningForThis =
-      capturedReasoningMessageId === candidate.localId && capturedReasoningContent
-        ? capturedReasoningContent
-        : null
+    const reasoningForThis = reasoningTextForLocalId(candidate.localId) || null
+    const durationForThis = durationSecForLocalId(candidate.localId)
+
+    const serverAssistantsSameBody = serverMessages.filter(
+      (m) =>
+        !m.id.startsWith('local_') &&
+        m.role === 'assistant' &&
+        (m.characterId ?? null) === candidate.characterId &&
+        (m.content || '').trim() === candidate.content,
+    )
+
     if (
-      hasEquivalentServerMessage({
-        content: candidate.content,
-        characterId: candidate.characterId,
-        reasoningContent: reasoningForThis,
-      })
+      serverAssistantsSameBody.some(
+        (m) =>
+          normReasoning(m.reasoningContent) === normReasoning(reasoningForThis) &&
+          durationMatches(m.reasoningDurationSec, durationForThis),
+      )
     ) {
       continue
     }
+
+    const serverMatch = serverAssistantsSameBody[0]
+
+    if (serverMatch) {
+      const needReason =
+        !!reasoningForThis &&
+        normReasoning(serverMatch.reasoningContent) !== normReasoning(reasoningForThis)
+      const needDur =
+        typeof durationForThis === 'number' &&
+        Number.isFinite(durationForThis) &&
+        (typeof serverMatch.reasoningDurationSec !== 'number' ||
+          !Number.isFinite(serverMatch.reasoningDurationSec))
+
+      if (needReason || needDur) {
+        const updatedChat = await chats.updateMessage(
+          chatId,
+          serverMatch.id,
+          'assistant',
+          serverMatch.content,
+          serverMatch.characterId ?? undefined,
+          {
+            ...(needReason ? { reasoningContent: reasoningForThis } : {}),
+            ...(needDur ? { reasoningDurationSec: durationForThis } : {}),
+          },
+        )
+        serverMessages = updatedChat.messages
+      }
+      continue
+    }
+
     const appendOpts: {
       characterId?: string
       reasoningContent?: string | null
+      reasoningDurationSec?: number | null
     } = {}
     if (candidate.characterId != null) appendOpts.characterId = candidate.characterId
     if (reasoningForThis) appendOpts.reasoningContent = reasoningForThis
+    if (typeof durationForThis === 'number' && Number.isFinite(durationForThis)) {
+      appendOpts.reasoningDurationSec = durationForThis
+    }
     const updatedChat = await chats.appendMessage(
       chatId,
       'assistant',
@@ -3236,6 +3413,7 @@ async function persistLocalStreamingMessages(chatId: string) {
   chatReasoningContent.value = ''
   chatReasoningMessageId.value = null
   chatReasoningStreamActive.value = false
+  clearReasoningPhaseTiming()
   await chats.load(chatId)
   await afterChatReload(chatId)
 }
@@ -3373,6 +3551,10 @@ async function handleRewriteMessage(m: ChatMessage) {
     }
   }
 
+  const listElBeforeLoad = messageListRef.value?.scrollRef ?? null
+  const oldListScrollHeight = listElBeforeLoad?.scrollHeight ?? 0
+  const oldListScrollTop = listElBeforeLoad?.scrollTop ?? 0
+
   await chats.load(chatId)
 
   isGenerating.value = true
@@ -3389,6 +3571,7 @@ async function handleRewriteMessage(m: ChatMessage) {
     chatReasoningMessageId.value = localAssistantId
     chatReasoningContent.value = ''
     chatReasoningStreamActive.value = true
+    markReasoningStreamPhaseStart()
     const localMsg = {
       version: 1,
       id: localAssistantId,
@@ -3397,8 +3580,15 @@ async function handleRewriteMessage(m: ChatMessage) {
       characterId,
       ts: new Date().toISOString()
     }
+    armAssistantRowEnterAnimation(localAssistantId)
     chats.addLocalMessage(localMsg)
-    scrollToBottom()
+    await nextTick()
+    const listElAfter = messageListRef.value?.scrollRef ?? null
+    if (listElAfter && oldListScrollHeight > 0) {
+      const delta = listElAfter.scrollHeight - oldListScrollHeight
+      listElAfter.scrollTop = Math.max(0, oldListScrollTop + delta)
+    }
+    scrollToBottom(false, true)
 
     if (isGroup) {
       if (useStream) {
@@ -3408,7 +3598,7 @@ async function handleRewriteMessage(m: ChatMessage) {
             '/api/generate/group',
             { chatId, characterId },
             (evt) => {
-              if (evt.event === 'delta') chatReasoningStreamActive.value = false
+              if (evt.event === 'delta') onAssistantContentDeltaStarted()
               if (shouldIgnoreStreamingEventWhileStopping(evt.event)) return
               if (evt.event === 'delta') {
                 const data = evt.data as { text?: string } | undefined
@@ -3428,9 +3618,10 @@ async function handleRewriteMessage(m: ChatMessage) {
                 if (serverId && chatReasoningContent.value) {
                   chatReasoningMessageId.value = serverId
                 }
-                pushCurrentReasoningToBlocks(serverId ?? undefined)
+                pushCurrentReasoningToBlocks(serverId ?? undefined, localAssistantId)
               } else if (evt.event === 'error') {
                 chatReasoningStreamActive.value = false
+                clearReasoningPhaseTiming()
                 const data = evt.data as { message?: string } | undefined
                 streamError.value = String(data?.message ?? 'unknown error')
               }
@@ -3455,7 +3646,7 @@ async function handleRewriteMessage(m: ChatMessage) {
           if (typeof res.reasoningContent === 'string') {
             chatReasoningContent.value = res.reasoningContent
           }
-          pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined)
+          pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined, localAssistantId)
           chats.appendLocalMessageContent(localAssistantId, res.content || '')
           scrollToBottom()
           void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
@@ -3479,7 +3670,7 @@ async function handleRewriteMessage(m: ChatMessage) {
               userPersona: selectedPersona.value ?? null,
             },
             (evt) => {
-              if (evt.event === 'delta') chatReasoningStreamActive.value = false
+              if (evt.event === 'delta') onAssistantContentDeltaStarted()
               if (shouldIgnoreStreamingEventWhileStopping(evt.event)) return
               if (evt.event === 'delta') {
                 const data = evt.data as { text?: string } | undefined
@@ -3499,9 +3690,10 @@ async function handleRewriteMessage(m: ChatMessage) {
                 if (serverId && chatReasoningContent.value) {
                   chatReasoningMessageId.value = serverId
                 }
-                pushCurrentReasoningToBlocks(serverId ?? undefined)
+                pushCurrentReasoningToBlocks(serverId ?? undefined, localAssistantId)
               } else if (evt.event === 'error') {
                 chatReasoningStreamActive.value = false
+                clearReasoningPhaseTiming()
                 const data = evt.data as { message?: string } | undefined
                 streamError.value = String(data?.message ?? 'unknown error')
               }
@@ -3531,7 +3723,7 @@ async function handleRewriteMessage(m: ChatMessage) {
           if (typeof res.reasoningContent === 'string') {
             chatReasoningContent.value = res.reasoningContent
           }
-          pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined)
+          pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined, localAssistantId)
           chats.appendLocalMessageContent(localAssistantId, res.content || '')
           scrollToBottom()
           void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
@@ -3979,13 +4171,15 @@ async function handleSaveAndSend() {
 
   try {
     const localAssistantId = `local_assistant_${Date.now()}`
-      chatReasoningMessageId.value = localAssistantId
-      chatReasoningContent.value = ''
-      chatReasoningStreamActive.value = true
-      chats.addLocalMessage({ version: 1, id: localAssistantId, role: 'assistant', content: '', ts: now })
-      scrollToBottom(true, true)
+    chatReasoningMessageId.value = localAssistantId
+    chatReasoningContent.value = ''
+    chatReasoningStreamActive.value = true
+    markReasoningStreamPhaseStart()
+    armAssistantRowEnterAnimation(localAssistantId)
+    chats.addLocalMessage({ version: 1, id: localAssistantId, role: 'assistant', content: '', ts: now })
+    scrollToBottom(false, true)
 
-      if (useStream) {
+    if (useStream) {
         stream.registerStreamMessage(localAssistantId)
         try {
           await postAndConsumeSse(
@@ -3997,7 +4191,7 @@ async function handleSaveAndSend() {
               userPersona: selectedPersona.value ?? null,
             },
             (evt) => {
-              if (evt.event === 'delta') chatReasoningStreamActive.value = false
+              if (evt.event === 'delta') onAssistantContentDeltaStarted()
               if (shouldIgnoreStreamingEventWhileStopping(evt.event)) return
               if (evt.event === 'delta') {
                 const data = evt.data as { text?: string } | undefined
@@ -4017,9 +4211,10 @@ async function handleSaveAndSend() {
                 if (serverId && chatReasoningContent.value) {
                   chatReasoningMessageId.value = serverId
                 }
-                pushCurrentReasoningToBlocks(serverId ?? undefined)
+                pushCurrentReasoningToBlocks(serverId ?? undefined, localAssistantId)
               } else if (evt.event === 'error') {
                 chatReasoningStreamActive.value = false
+                clearReasoningPhaseTiming()
                 const data = evt.data as { message?: string } | undefined
                 streamError.value = String(data?.message ?? 'unknown error')
               }
@@ -4043,7 +4238,7 @@ async function handleSaveAndSend() {
           if (typeof res.reasoningContent === 'string') {
             chatReasoningContent.value = res.reasoningContent
           }
-          pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined)
+          pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined, localAssistantId)
           chats.appendLocalMessageContent(localAssistantId, res.content || '')
           scrollToBottom()
           void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
@@ -4389,6 +4584,7 @@ const editingPersonaAvatarUrl = computed(() => {
             :reasoning-message-id="chatReasoningMessageId"
             :reasoning-content="chatReasoningContent"
             :reasoning-stream-active="chatReasoningStreamActive"
+            :reasoning-duration-sec-override="chatReasoningElapsedSec"
             :reasoning-blocks="chatReasoningBlocks"
             :get-display-content="versions.getDisplayContent"
             :get-display-reasoning="versions.getDisplayReasoning"
@@ -4397,13 +4593,14 @@ const editingPersonaAvatarUrl = computed(() => {
             :get-version-count="versions.getVersionCount"
             :header-inset-px="chatHeaderHeightPx"
             :sidebar-collapsed="sidebarCollapsed"
+            :entrancing-user-message-id="entrancingUserMessageId"
+            :entrancing-assistant-message-id="entrancingAssistantMessageId"
             @edit-message="(m) => actions.openEditMessage(m, versions.getDisplayContent(m))"
             @delete-message="actions.deleteMessage"
             @read-aloud-message="handleReadAloudMessage"
             @rewrite-message="handleRewriteMessage"
             @switch-previous-version="handleSwitchPreviousVersion"
             @switch-next-version="handleSwitchNextVersion"
-            @set-content-ref="stream.setMessageContentRef"
           />
 
           <!-- 输入区域 -->
@@ -4977,11 +5174,15 @@ const editingPersonaAvatarUrl = computed(() => {
                   @select="assistant.handleModelSelect"
                 />
                 <button 
-                  class="btn btn-primary px-6" 
+                  class="btn btn-primary relative px-6" 
                   :disabled="(!assistant.workspaceAssistantDraft.value.trim() && !assistant.workspaceAssistantDraftAttachments.value.length) || assistant.isWorkspaceAssistantGenerating.value" 
+                  :aria-busy="assistant.isWorkspaceAssistantGenerating.value"
                   @click="assistant.sendMessage('workspace', true, actions.applyAssistantCard)"
                 >
-                  <Loader2 v-if="assistant.isWorkspaceAssistantGenerating.value" class="animate-spin w-4 h-4 mr-2" />
+                  <Loader2
+                    v-if="assistant.isWorkspaceAssistantGenerating.value"
+                    class="pointer-events-none absolute left-3 top-1/2 h-3 w-3 -translate-y-1/2 animate-spin"
+                  />
                   发送
                 </button>
               </div>
