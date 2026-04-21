@@ -25,6 +25,9 @@ import { createPinia } from 'pinia'
 import './styles/index.css'
 import App from './App.vue'
 import { router } from './router'
+import { registerStMathIsland } from './webcomponents/stMathIsland'
+
+registerStMathIsland()
 
 /**
  * 创建Vue应用实例并配置插件
