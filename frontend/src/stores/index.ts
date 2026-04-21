@@ -19,5 +19,6 @@ export { useSettingsStore } from './settings'
 export { useCharactersStore } from './characters'
 export { useChatsStore } from './chats'
 export { useUiStore } from './ui'
+export { useCharacterSidebarRecencyStore } from './characterSidebarRecency'
 
 
