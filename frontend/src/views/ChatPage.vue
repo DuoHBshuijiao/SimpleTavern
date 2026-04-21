@@ -62,7 +62,7 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useCharactersStore, useChatsStore, useSettingsStore, useUiStore } from '../stores'
+import { useCharacterSidebarRecencyStore, useCharactersStore, useChatsStore, useSettingsStore, useUiStore } from '../stores'
 import type { SettingsDrawerTab } from '../stores/ui'
 import type { ApiPreset, AssistantAttachment, CharacterCard, ChatImageAttachment, ChatMessage, ExtraFirstMessageEntry, GroupMemberSettings, Chat, TtsSessionConfig, WorldBook } from '../types/models'
 
@@ -114,6 +114,7 @@ import { isTtsApiPreset, resolveTtsProvider } from '../utils/apiPresetKind'
 import { validateFilesForTarget } from '../utils/attachmentPolicy'
 import { resolveRichPaste } from '../utils/richPaste'
 import { formatApiError } from '../utils/worldBookValidation'
+import { resolveBumpCharacterId } from '../utils/characterSidebarBump'
 import {
   HEADER_EXPAND_MS,
   HEADER_LIFT_EASE,
@@ -127,6 +128,7 @@ import {
 const settings = useSettingsStore()
 const characters = useCharactersStore()
 const chats = useChatsStore()
+const characterSidebarRecency = useCharacterSidebarRecencyStore()
 const uiStore = useUiStore()
 const route = useRoute()
 const router = useRouter()
@@ -468,6 +470,17 @@ const selectedCharacter = computed(() => {
  * 从chatsStore获取当前激活的聊天会话。
  */
 const activeChat = computed(() => chats.activeChat)
+
+/** 侧栏角色列表：按会话活跃度置顶（与 characters.list 内容一致，仅顺序不同） */
+const sidebarCharacters = computed(() => {
+  void characterSidebarRecency.lastActiveAt
+  return characterSidebarRecency.sortedList(characters.list)
+})
+
+function bumpSidebarForActiveChat() {
+  characterSidebarRecency.bump(resolveBumpCharacterId(activeChat.value, selectedCharacterId.value))
+}
+
 let observedTtsChatId: string | null = null
 let observedTtsMessageIds = new Set<string>()
 
@@ -607,6 +620,10 @@ function rememberTtsAsset(messageId: string, assetId: string, spokenText: string
   }
   // 合成完成往往晚于 chats.load 触发的 flushPendingTtsBinds，需在 pending 写入后立即再尝试补绑
   void flushPendingTtsBinds()
+  // TTS 成功绑定到当前会话即视为会话更新（含新合成与缓存复用后的落库）
+  if (message || (contentFingerprint && messageId.startsWith('local_'))) {
+    bumpSidebarForActiveChat()
+  }
 }
 
 function clearTtsAsset(message?: ChatMessage | null) {
@@ -1680,6 +1697,7 @@ const actions = useChatActions({
   isGenerating,
   selectedPersona,
   userName,
+  selectedCharacterId,
   chatsStore: chats as any,
   settingsStore: settings as any,
   charactersStore: characters as any,
@@ -2795,6 +2813,7 @@ async function sendUserMessage() {
       })
       await chats.load(chatId)
       await afterChatReload(chatId)
+      bumpSidebarForActiveChat()
     } catch (e: any) {
       streamError.value = e?.message ?? String(e)
     }
@@ -2846,6 +2865,7 @@ async function sendUserMessage() {
         senderName: userRole === 'user' ? (selectedPersona.value?.name ?? userName.value) : null,
         senderAvatar: userRole === 'user' ? (selectedPersona.value?.avatar ?? null) : null,
       })
+      bumpSidebarForActiveChat()
 
       group.showInterject()
     } else {
@@ -3022,6 +3042,7 @@ async function sendUserMessage() {
     } else {
       await chats.load(chatId)
       await afterChatReload(chatId)
+      if (!isGroup && !streamError.value) bumpSidebarForActiveChat()
     }
     await settings.load()
   }
@@ -3070,6 +3091,7 @@ async function continueGroupChat() {
       if (!skippedReload) {
         await chats.load(chatId)
         await afterChatReload(chatId)
+        if (!streamError.value) bumpSidebarForActiveChat()
         await settings.load()
       } else {
         await settings.load()
@@ -3125,6 +3147,7 @@ async function startNextRound() {
       if (!skippedReload) {
         await chats.load(chatId)
         await afterChatReload(chatId)
+        if (!streamError.value) bumpSidebarForActiveChat()
       }
       await settings.load()
     }
@@ -3246,6 +3269,7 @@ async function triggerInterject(characterId: string) {
     } else {
       await chats.load(chatId)
       await afterChatReload(chatId)
+      if (!streamError.value) bumpSidebarForActiveChat()
     }
   }
 }
@@ -3471,6 +3495,7 @@ async function handleSwitchPreviousVersion(m: ChatMessage) {
         await chats.updateMessage(activeChat.value.id, m.id, m.role, newContent, m.characterId, {
           greetingVariantIndex: idx,
         })
+        bumpSidebarForActiveChat()
       } catch (e) {
         console.error(e)
       }
@@ -3501,6 +3526,7 @@ async function handleSwitchNextVersion(m: ChatMessage) {
         await chats.updateMessage(activeChat.value.id, m.id, m.role, newContent, m.characterId, {
           greetingVariantIndex: idx,
         })
+        bumpSidebarForActiveChat()
       } catch (e) {
         console.error(e)
       }
@@ -3556,6 +3582,7 @@ async function handleRewriteMessage(m: ChatMessage) {
   const oldListScrollTop = listElBeforeLoad?.scrollTop ?? 0
 
   await chats.load(chatId)
+  bumpSidebarForActiveChat()
 
   isGenerating.value = true
   streamError.value = null
@@ -3784,7 +3811,9 @@ function startEditTitle(chatId: string, currentTitle: string) {
  */
 async function saveTitle() {
   if (!editingChatId.value || !editingTitle.value.trim()) return
-  await chats.rename(editingChatId.value, editingTitle.value.trim())
+  const renamedId = editingChatId.value
+  await chats.rename(renamedId, editingTitle.value.trim())
+  if (renamedId === activeChat.value?.id) bumpSidebarForActiveChat()
   editingChatId.value = null
   editingTitle.value = ''
 }
@@ -4137,6 +4166,7 @@ async function handleSaveAndSend() {
   if (!originalMessage) return
 
   await chats.updateMessage(chatId, messageId, editedRole, editedContent, originalMessage.characterId)
+  bumpSidebarForActiveChat()
 
   const messagesToDelete = activeChat.value.messages.slice(messageIndex + 1)
   for (const msgToDelete of messagesToDelete) {
@@ -4311,7 +4341,7 @@ const editingPersonaAvatarUrl = computed(() => {
       :personas="settings.settings?.userPersonas || []"
       :selected-persona-id="effectiveSelectedPersonaId"
       :effective-pure-ai-mode="group.effectivePureAiMode.value"
-      :characters="characters.list"
+      :characters="sidebarCharacters"
       :selected-character-id="selectedCharacterId"
       :chat-list="chats.list"
       :group-list="chats.groupList"
