@@ -958,6 +958,14 @@ class UpdateMessageRequest(BaseModel):
     senderName: str | None = None
     senderAvatar: str | None = None
     greetingVariantIndex: int | None = None
+    reasoningContent: str | None = Field(
+        default=None,
+        description="补写或修正推理/思考链文本（如流式中断后落库）",
+    )
+    reasoningDurationSec: float | None = Field(
+        default=None,
+        description="补写思考耗时（秒）",
+    )
 
 
 class UpdateChatRequest(BaseModel):
