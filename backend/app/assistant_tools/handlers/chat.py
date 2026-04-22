@@ -7,12 +7,18 @@ from typing import Any
 
 from app.assistant_tools.context import AssistantToolContext
 from app.assistant_tools import result as R
+from app.chat_transcript import (
+    build_jsonl_header_dict,
+    build_transcript_rows_from_messages,
+    slice_messages_since_memory_marker,
+)
 from app.routes.generate import collect_active_worldbooks
 from app.schemas import Chat, ChatOverrides, WorldBookAttachment
 from app.storage import (
     load_chat,
     load_chat_memory,
     load_character,
+    load_settings,
     load_worldbook,
     mark_last_message_memory_updated,
     save_chat,
@@ -68,21 +74,57 @@ def handle_chat_read_conversation(ctx: AssistantToolContext, args: dict[str, Any
     chat = _load_chat_ctx(chat_id)
     if chat is None:
         return R.err(R.NOT_FOUND, "chat not found", tool="chat_read_conversation", details={"chatId": chat_id})
-    raw_range = args.get("range")
-    rng = "full" if raw_range is None or raw_range == "" else str(raw_range)
+
+    raw = args.get("range")
+    rng = str(raw).strip() if raw is not None and str(raw).strip() != "" else "transcript"
+
+    read_meta: dict[str, Any] = {}
+    if rng == "full":
+        rng = "transcript"
+        read_meta["deprecated"] = {
+            "range": "full",
+            "useInstead": "transcript",
+            "message": "range=full 已弃用，已按 transcript 返回与 JSONL 导出一致的精简正文。",
+        }
+
+    if rng not in ("transcript", "since_memory_marker", "debug"):
+        return R.err(
+            R.VALIDATION_ERROR,
+            "range must be transcript, since_memory_marker, debug, or (deprecated) full",
+            tool="chat_read_conversation",
+        )
+
+    if rng in ("transcript", "since_memory_marker"):
+        settings = load_settings()
+        src_messages = list(chat.messages)
+        if rng == "since_memory_marker":
+            src_messages = slice_messages_since_memory_marker(src_messages)
+        rows = build_transcript_rows_from_messages(src_messages, settings)
+        max_msg = getattr(ctx.assistant_settings, "tool_read_max_messages", None)
+        if isinstance(max_msg, int) and max_msg >= 1 and len(rows) > max_msg:
+            rows = rows[-max_msg:]
+
+        max_tok = getattr(ctx.assistant_settings, "tool_read_max_tokens", None)
+        if isinstance(max_tok, int) and max_tok >= 1:
+            rows, tw = trim_dict_messages_to_token_budget(rows, max_tok)
+            if tw:
+                merged = list(read_meta.get("warnings", [])) if read_meta.get("warnings") else []
+                merged.extend(tw)
+                read_meta["warnings"] = merged
+
+        data: dict[str, Any] = {
+            "mode": "transcript",
+            "format": "simpletavern_chat_jsonl",
+            "header": build_jsonl_header_dict(chat),
+            "messages": rows,
+        }
+        if read_meta:
+            data["readMeta"] = read_meta
+        return R.ok(data, tool="chat_read_conversation")
+
+    # range=debug：完整会话 JSON（含 TTS/附件等全部持久化字段），非必要勿用
     payload = chat.model_dump(mode="json")
     messages = list(payload.get("messages") or [])
-    if rng == "since_memory_marker":
-        start_index = 0
-        for i, m in enumerate(messages):
-            if isinstance(m, dict) and m.get("memoryUpdatedAfterThis") is True:
-                start_index = i
-                break
-        messages = messages[start_index:]
-    elif rng == "full":
-        pass
-    else:
-        return R.err(R.VALIDATION_ERROR, "range must be since_memory_marker or full", tool="chat_read_conversation")
 
     max_msg = getattr(ctx.assistant_settings, "tool_read_max_messages", None)
     if isinstance(max_msg, int) and max_msg >= 1 and len(messages) > max_msg:
@@ -90,18 +132,18 @@ def handle_chat_read_conversation(ctx: AssistantToolContext, args: dict[str, Any
 
     messages = _sanitize_chat_payload_messages(messages)
 
-    read_meta: dict[str, Any] = {}
+    debug_meta: dict[str, Any] = {}
     max_tok = getattr(ctx.assistant_settings, "tool_read_max_tokens", None)
     if isinstance(max_tok, int) and max_tok >= 1:
         messages, tw = trim_dict_messages_to_token_budget(messages, max_tok)
         if tw:
-            read_meta["warnings"] = tw
+            debug_meta["warnings"] = tw
 
     payload["messages"] = messages
-    data: dict[str, Any] = {"chat": payload}
-    if read_meta:
-        data["readMeta"] = read_meta
-    return R.ok(data, tool="chat_read_conversation")
+    out: dict[str, Any] = {"mode": "debug", "chat": payload}
+    if debug_meta:
+        out["readMeta"] = debug_meta
+    return R.ok(out, tool="chat_read_conversation")
 
 
 def handle_chat_read_long_term_memory(ctx: AssistantToolContext, _args: dict[str, Any]) -> dict[str, Any]:
