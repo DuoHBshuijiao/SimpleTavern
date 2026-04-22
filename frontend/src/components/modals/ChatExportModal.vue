@@ -6,14 +6,14 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'update:show', value: boolean): void
-  (e: 'export', format: 'txt' | 'json' | 'character' | 'character_with_worldbooks'): void
+  (e: 'export', format: 'txt' | 'json' | 'jsonl' | 'character' | 'character_with_worldbooks'): void
 }>()
 
 function close() {
   emit('update:show', false)
 }
 
-function handleExport(format: 'txt' | 'json' | 'character' | 'character_with_worldbooks') {
+function handleExport(format: 'txt' | 'json' | 'jsonl' | 'character' | 'character_with_worldbooks') {
   if (props.disabled) return
   emit('export', format)
 }
@@ -47,6 +47,12 @@ function handleExport(format: 'txt' | 'json' | 'character' | 'character_with_wor
               @click="handleExport('json')"
             >
               导出 JSON
+            </button>
+            <button
+              class="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-overlay)] px-4 py-3 text-left text-[var(--color-text)] transition-colors hover:bg-[var(--color-surface-hover)]"
+              @click="handleExport('jsonl')"
+            >
+              导出 JSONL（精简）
             </button>
             <button
               class="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-overlay)] px-4 py-3 text-left text-[var(--color-text)] transition-colors hover:bg-[var(--color-surface-hover)]"
