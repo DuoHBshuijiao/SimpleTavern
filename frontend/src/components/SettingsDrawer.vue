@@ -30,7 +30,7 @@
  *
  * 文件关系：
  *    - 被导入：被views/ChatPage.vue使用
- *    - 导入：导入vue的computed、ref、watch、stores/index.ts的Store、types/models.ts的类型、components/ModernSelect.vue、components/ModelSelectorModal.vue、api/http.ts的apiPost
+ *    - 导入：见 script 顶部 import（含 ModernSelect、LlmPresetNameCombobox、世界书/WebGPU 等 modal、api/http 与 update、若干 composables 与 utils）；API 预设「选择模型」多选弹窗在模板内以 Teleport 实现，非独立子组件
  *    - 依赖：依赖vue、stores、api/http.ts
  *    - 位置：组件层，提供设置管理功能
  */
@@ -3699,7 +3699,7 @@ async function checkUpdate() {
                         ref="importInputRef"
                         type="file"
                         class="hidden"
-                        accept=".txt,.json,.zip"
+                        accept=".txt,.json,.jsonl,.zip"
                         @change="handleImportChange"
                       />
                     </div>
