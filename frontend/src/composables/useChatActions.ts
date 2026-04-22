@@ -657,7 +657,7 @@ export function useChatActions(deps: ChatActionsDeps) {
    * @param {'txt' | 'json'} format - 导出格式
    * @returns {Promise<void>} 完成时返回
    */
-  async function exportChat(format: 'txt' | 'json') {
+  async function exportChat(format: 'txt' | 'json' | 'jsonl') {
     if (!activeChat.value) return
     const r = await fetch(`/api/chats/${activeChat.value.id}/export?format=${format}`)
     if (!r.ok) {
