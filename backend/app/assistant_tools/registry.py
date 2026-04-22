@@ -186,14 +186,26 @@ def _all_registered() -> list[RegisteredTool]:
         ),
         _fn(
             "chat_read_conversation",
-            "读取主会话消息：默认 range=full 为完整历史；since_memory_marker 为自记忆标记起。图片以占位符表示。",
+            (
+                "读取主会话。默认/推荐：range=transcript 或与导出 JSONL 相同的精简结构（"
+                "header + messages，每条仅 role/name/content，无 TTS 与多余元数据，省 token）。"
+                "自记忆更新标记起用 since_memory_marker。"
+                "range=debug 时返回整段会话的完整 JSON（与磁盘 chat 结构一致、体积大），"
+                "仅排障或确需全字段时使用；非必要不要选。"
+                "已弃用：full 等同于 transcript，将在 readMeta 中提示。"
+            ),
             {
                 "type": "object",
                 "properties": {
                     "range": {
                         "type": "string",
-                        "enum": ["since_memory_marker", "full"],
-                        "description": "可选；省略时默认为 full",
+                        "enum": ["transcript", "since_memory_marker", "debug", "full"],
+                        "description": (
+                            "transcript=精简正文（默认，省略时同此）；"
+                            "since_memory_marker=自记忆已更新标记起的精简正文；"
+                            "debug=完整会话对象 JSON（大，非必要勿用）；"
+                            "full=已弃用，与 transcript 相同"
+                        ),
                     }
                 },
                 "additionalProperties": False,
