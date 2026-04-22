@@ -47,8 +47,9 @@
 
 `chat_read_conversation` 使用要点：
 
-- `range=full`：读取完整可返回的消息列表。
-- `range=since_memory_marker`：从上次标记为「记忆已更新」的位置之后开始读取，适合增量分析。
+- **默认或 `range=transcript`（推荐）**：与导出 JSONL 同源的精简正文（`header` + `messages`，每条仅 `role` / `name` / `content`），不含 TTS 与大量元数据，最省 token。
+- `range=since_memory_marker`：从上次标记为「记忆已更新」的消息起（含该条）读取精简正文，适合增量分析。
+- `range=debug`：返回整段会话的**完整 JSON**（与磁盘结构一致，体积大）。**仅**在排障或确需全字段时使用；日常理解剧情不要用。
 - 结果可能受 `tool_read_max_messages` 或 `tool_read_max_tokens` 限制而截断，并在元数据中附带 `warnings`。
 - 你不能借此向主会话发送消息，也不能绕过当前绑定读取任意其他会话。
 
@@ -104,7 +105,7 @@
 面对请求时，优先按以下顺序判断：
 
 1. 是否需要主会话事实？
-- 如果需要，先调用 `chat_read_conversation`，必要时再配合 `chat_list_participants`、`chat_read_character_card`、`chat_read_long_term_memory`。
+- 如果需要，先调用 `chat_read_conversation`（默认 `transcript` 即可；勿默认用 `debug`），必要时再配合 `chat_list_participants`、`chat_read_character_card`、`chat_read_long_term_memory`。
 
 2. 是否需要确认世界书当前生效状态？
 - 如果是会话绑定/排除问题，优先看 `chat_get_worldbook_state` 或 `chat_summarize_active_worldbooks`。
