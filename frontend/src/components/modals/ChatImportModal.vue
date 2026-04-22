@@ -316,7 +316,7 @@ async function confirmJanitorImport() {
               <div class="mt-3 flex flex-wrap gap-2">
                 <button class="btn btn-sm btn-secondary" @click="triggerImport">选择文件导入</button>
                 <button class="btn btn-sm btn-secondary" @click="triggerStImport">导入 SillyTavern 数据</button>
-                <input ref="importInputRef" type="file" class="hidden" accept=".txt,.json,.zip" @change="handleImportChange" />
+                <input ref="importInputRef" type="file" class="hidden" accept=".txt,.json,.jsonl,.zip" @change="handleImportChange" />
                 <input ref="stImportInputRef" type="file" class="hidden" accept=".png,.json" @change="handleStImportChange" />
               </div>
             </section>
