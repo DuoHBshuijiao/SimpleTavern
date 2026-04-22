@@ -7,7 +7,7 @@ ASSISTANT_IMAGE_ATTACHMENT_MAX_BYTES = 100 * 1024 * 1024
 
 MAIN_CHAT_IMAGES_ONLY = True
 
-_ASSISTANT_TEXT_EXTENSIONS = {".txt", ".json", ".xml"}
+_ASSISTANT_TEXT_EXTENSIONS = {".txt", ".json", ".jsonl", ".xml"}
 _ASSISTANT_TEXT_MIME_TYPES = {
     "text/plain",
     "text/json",
