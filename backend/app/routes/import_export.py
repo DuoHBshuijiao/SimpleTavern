@@ -42,12 +42,18 @@ from fastapi import APIRouter, Body, File, HTTPException, Query, Request, Upload
 from fastapi.responses import Response
 from pydantic import BaseModel
 
+from app.chat_transcript import (
+    build_jsonl_header_dict,
+    build_transcript_rows_from_messages,
+    format_chat_as_jsonl_string,
+)
 from app.schemas import Chat, ChatMessage, CharacterCard, Settings, WorldBook
 from app.storage import (
     avatar_path,
     avatars_dir,
     characters_dir,
     chats_dir,
+    list_characters,
     load_character,
     load_chat,
     load_settings,
@@ -653,63 +659,172 @@ def _chat_export_participants(chat: Chat) -> str:
     return "、".join(names) or "群聊"
 
 
-def _format_message_block(m: ChatMessage) -> list[str]:
+def _build_chat_from_transcript_rows(
+    *,
+    chat_id: str | None,
+    title: str,
+    is_group: bool,
+    participants: list[str],
+    rows: list[tuple[str, str, str]],
+    settings: Settings,
+) -> tuple[Chat, list[str]]:
     """
-    格式化消息块为文本格式
-    
-    Args:
-        m: 消息对象
-    
-    Returns:
-        list[str]: 格式化后的文本行列表
+    由「会话头参与者名 + (role, name, content) 行」构建 Chat，与 JSONL 导入同源。
     """
-    lines = ["[Message]"]
-    lines.append(f"id={m.id}")
-    lines.append(f"ts={m.ts}")
-    lines.append(f"role={m.role}")
-    lines.append(f"characterId={m.characterId or ''}")
-    lines.append(f"senderName={m.senderName or ''}")
-    lines.append(f"senderAvatar={m.senderAvatar or ''}")
-    lines.append("content:")
-    lines.append("<<<")
-    lines.extend((m.content or "").splitlines() or [""])
-    lines.append(">>>")
-    return lines
+    name_to_char_id: dict[str, str] = {}
+    for card in list_characters():
+        if card.name and card.id:
+            name_to_char_id[card.name] = card.id
+
+    primary_char_id: str | None = None
+    member_ids: list[str] = []
+    if participants:
+        for pname in participants:
+            cid = name_to_char_id.get(pname)
+            if cid:
+                member_ids.append(cid)
+        if member_ids:
+            primary_char_id = member_ids[0]
+
+    if not primary_char_id:
+        raise HTTPException(
+            status_code=400,
+            detail=f"none of the participants {participants!r} matched a local character card",
+        )
+
+    name_to_persona: dict[str, Any] = {}
+    for p in settings.userPersonas or []:
+        if p.name:
+            name_to_persona[p.name] = p
+
+    warnings: list[str] = []
+    messages: list[ChatMessage] = []
+    for i, (role, name, content) in enumerate(rows, start=1):
+        if role not in ("user", "assistant", "system"):
+            warnings.append(f"row {i}: skipped (unknown role {role!r})")
+            continue
+        msg_kwargs: dict[str, Any] = {"role": role, "content": content}
+        if role == "assistant":
+            cid = name_to_char_id.get(name) if name else None
+            msg_kwargs["characterId"] = cid or (primary_char_id if not is_group else None)
+            msg_kwargs["senderName"] = name or None
+        elif role == "user":
+            persona = name_to_persona.get(name) if name else None
+            if persona:
+                msg_kwargs["senderPersonaId"] = persona.id
+                msg_kwargs["senderName"] = persona.name or name or None
+            else:
+                msg_kwargs["senderName"] = name or None
+        try:
+            messages.append(ChatMessage.model_validate(msg_kwargs))
+        except Exception as exc:
+            warnings.append(f"row {i}: skipped ({exc})")
+            continue
+
+    resolved_id = chat_id or uuid4().hex
+    chat = Chat(
+        id=resolved_id,
+        characterId=primary_char_id,
+        title=title or "导入会话",
+        isGroup=is_group,
+        memberIds=member_ids if is_group else [],
+        messages=messages,
+    )
+    return chat, warnings
 
 
-def _export_chat_text(chat: Chat, system_prompt: str, last_speaker_id: str | None) -> str:
+def _export_chat_text(chat: Chat, system_prompt: str, settings: Settings) -> str:
     """
-    导出聊天为文本格式
-    
-    Args:
-        chat: 聊天对象
-        system_prompt: 系统提示词
-        last_speaker_id: 群聊时的主角色ID
-    
-    Returns:
-        str: 导出的文本内容
+    导出聊天为文本格式（Version 2）：头部 Participants 为角色显示名（与 JSONL 同源），
+    每条消息仅 role / name / content；跳过 tool 与 toolTrace，正文内联图已替换为 [image]。
     """
-    lines: list[str] = []
-    lines.append("SimpleTavern Chat Export")
-    lines.append("Version: 1")
-    lines.append(f"ChatId: {chat.id}")
-    lines.append(f"Title: {chat.title}")
-    lines.append(f"CharacterId: {chat.characterId}")
-    lines.append(f"IsGroup: {'true' if chat.isGroup else 'false'}")
-    if chat.memberIds:
-        lines.append(f"MemberIds: {','.join(chat.memberIds)}")
-    lines.append(f"GroupDelay: {chat.groupDelay}")
-    if last_speaker_id:
-        lines.append(f"LastSpeakerId: {last_speaker_id}")
-    lines.append("SystemPrompt:")
-    lines.append("<<<")
+    hdr = build_jsonl_header_dict(chat)
+    participants = hdr.get("participants") or []
+    lines: list[str] = [
+        "SimpleTavern Chat Export",
+        "Version: 2",
+        f"ChatId: {hdr['chatId']}",
+        f"Title: {hdr['title']}",
+        f"IsGroup: {'true' if hdr['isGroup'] else 'false'}",
+        f"Participants: {','.join(participants)}",
+        "SystemPrompt:",
+        "<<<",
+    ]
     lines.extend(system_prompt.splitlines() or [""])
-    lines.append(">>>")
-    lines.append("")
-    for m in chat.messages:
-        lines.extend(_format_message_block(m))
+    lines.extend([">>>", ""])
+    for row in build_transcript_rows_from_messages(chat.messages, settings):
+        lines.append("[Message]")
+        lines.append(f"role={row['role']}")
+        if row.get("name"):
+            lines.append(f"name={row['name']}")
+        lines.append("content:")
+        lines.append("<<<")
+        lines.extend((row["content"] or "").splitlines() or [""])
+        lines.append(">>>")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _export_chat_jsonl(chat: Chat, settings: Settings) -> str:
+    """
+    将聊天会话序列化为精简 JSONL 格式。
+
+    第 1 行：会话头（type/version/chatId/title/isGroup/participants/ts）
+    第 2 行起：每条消息仅含 role/name/content，跳过 tool 消息，清除内联 base64 图片。
+    与 app.chat_transcript 同源。
+    """
+    return format_chat_as_jsonl_string(chat, settings)
+
+
+def _import_from_jsonl(text: str) -> dict[str, Any]:
+    """
+    从精简 JSONL 格式导入聊天会话。
+
+    第 1 行须含 type="simpletavern_chat_jsonl"；后续每行含 role/name/content。
+    按 name 反查本地角色卡 / persona 映射以还原 characterId / senderPersonaId。
+    """
+    raw_lines = [ln for ln in text.splitlines() if ln.strip()]
+    if not raw_lines:
+        raise HTTPException(status_code=400, detail="empty jsonl file")
+
+    try:
+        header = json.loads(raw_lines[0])
+    except Exception:
+        raise HTTPException(status_code=400, detail="jsonl: first line is not valid json")
+
+    if not isinstance(header, dict) or header.get("type") != "simpletavern_chat_jsonl":
+        raise HTTPException(status_code=400, detail="jsonl: unrecognized type in first line")
+
+    participants: list[str] = header.get("participants") or []
+    is_group: bool = bool(header.get("isGroup", False))
+    settings = load_settings()
+    rows: list[tuple[str, str, str]] = []
+    warnings: list[str] = []
+    for i, ln in enumerate(raw_lines[1:], start=2):
+        try:
+            obj = json.loads(ln)
+        except Exception:
+            warnings.append(f"line {i}: skipped (invalid json)")
+            continue
+        if not isinstance(obj, dict):
+            warnings.append(f"line {i}: skipped (not an object)")
+            continue
+        role = str(obj.get("role", ""))
+        name: str = obj.get("name") or ""
+        content: str = obj.get("content") or ""
+        rows.append((role, name, content))
+
+    chat, map_warnings = _build_chat_from_transcript_rows(
+        chat_id=header.get("chatId"),
+        title=str(header.get("title") or "导入会话"),
+        is_group=is_group,
+        participants=participants,
+        rows=rows,
+        settings=settings,
+    )
+    warnings.extend(map_warnings)
+    save_chat(chat)
+    return {"imported": ["chat"], "warnings": warnings}
 
 
 @router.get("/chats/{chat_id}/export")
@@ -717,11 +832,14 @@ def export_chat(chat_id: str, format: str = Query("txt")) -> Response:
     """
     导出聊天会话
     
-    支持txt和json两种格式。txt格式包含完整的系统提示词和消息内容，json格式包含完整的聊天对象。
+    支持 txt、json、jsonl 三种格式。
+    - txt: 系统提示词 + 精简消息（Version 2：头部 Participants 为角色名，消息仅 role/name/content，与 JSONL 名映射一致）
+    - json: 完整聊天对象（indent=2）
+    - jsonl: 精简 NDJSON，每条消息一行，仅含 role/name/content，体积最小
     
     Args:
         chat_id: 聊天会话ID
-        format: 导出格式（txt或json），默认为txt
+        format: 导出格式（txt/json/jsonl），默认为txt
     
     Returns:
         Response: 文件下载响应
@@ -735,11 +853,20 @@ def export_chat(chat_id: str, format: str = Query("txt")) -> Response:
         raise HTTPException(status_code=404, detail="chat not found")
 
     settings = load_settings()
-    system_prompt, last_speaker_id = _build_system_prompt_for_chat(chat, settings)
     participants = _chat_export_participants(chat)
     export_date = datetime.now().astimezone()
     date_str = f"{export_date.year}/{export_date.month}/{export_date.day}"
     base_name = _sanitize_filename(f"{participants} - {date_str}", "chat")
+
+    if format.lower() == "jsonl":
+        content = _export_chat_jsonl(chat, settings)
+        return Response(
+            content=content,
+            media_type="text/plain; charset=utf-8",
+            headers={"Content-Disposition": _content_disposition(f"{base_name}.jsonl")},
+        )
+
+    system_prompt, last_speaker_id = _build_system_prompt_for_chat(chat, settings)
 
     if format.lower() == "json":
         export_obj = {
@@ -759,7 +886,7 @@ def export_chat(chat_id: str, format: str = Query("txt")) -> Response:
     if format.lower() != "txt":
         raise HTTPException(status_code=400, detail="unsupported format")
 
-    content = _export_chat_text(chat, system_prompt, last_speaker_id)
+    content = _export_chat_text(chat, system_prompt, settings)
     return Response(
         content=content,
         media_type="text/plain; charset=utf-8",
@@ -922,23 +1049,16 @@ def _parse_character_text(content: str) -> CharacterCard:
 
 def _parse_chat_text(content: str) -> Chat:
     """
-    解析文本格式的聊天导出
-    
-    解析SimpleTavern Chat Export格式的文本文件。
-    
-    Args:
-        content: 聊天导出文本内容
-    
-    Returns:
-        Chat: 解析后的聊天对象
-    
-    Raises:
-        HTTPException: 缺少CharacterId时抛出400错误
+    解析 SimpleTavern Chat Export 文本。
+
+    - Version 2：头部含 Participants（角色显示名），消息为 role/name/content；按名匹配本地角色卡与 persona（与 JSONL 同源）。
+    - Version 1 或未标 Version：保留 CharacterId、MemberIds 等，消息为旧版 k=v 字段。
     """
     lines = content.splitlines()
     idx = 0
     header: dict[str, Any] = {}
     messages: list[ChatMessage] = []
+    transcript_rows: list[tuple[str, str, str]] = []
     system_prompt = ""
 
     def read_block(start_index: int) -> tuple[str, int]:
@@ -960,7 +1080,7 @@ def _parse_chat_text(content: str) -> Chat:
             header["systemPrompt"] = system_prompt
             continue
         if line == "[Message]":
-            msg_data: dict[str, Any] = {}
+            msg_data: dict[str, str] = {}
             idx += 1
             while idx < len(lines):
                 msg_line = lines[idx].strip()
@@ -970,15 +1090,38 @@ def _parse_chat_text(content: str) -> Chat:
                     break
                 if "=" in msg_line:
                     k, v = msg_line.split("=", 1)
-                    msg_data[k] = v
+                    msg_data[k.strip()] = v.strip()
                 idx += 1
-            messages.append(ChatMessage.model_validate(msg_data))
+            if header.get("Version") == "2":
+                transcript_rows.append(
+                    (
+                        msg_data.get("role", ""),
+                        msg_data.get("name", ""),
+                        msg_data.get("content", ""),
+                    )
+                )
+            else:
+                messages.append(ChatMessage.model_validate(msg_data))
             idx += 1
             continue
         if ":" in line:
             k, v = line.split(":", 1)
             header[k.strip()] = v.strip()
         idx += 1
+
+    if header.get("Version") == "2":
+        participants_str = header.get("Participants") or ""
+        participants = [p.strip() for p in participants_str.split(",") if p.strip()]
+        settings = load_settings()
+        chat, _warnings = _build_chat_from_transcript_rows(
+            chat_id=header.get("ChatId"),
+            title=header.get("Title") or "新对话",
+            is_group=header.get("IsGroup", "false").lower() == "true",
+            participants=participants,
+            rows=transcript_rows,
+            settings=settings,
+        )
+        return chat
 
     if not header.get("CharacterId"):
         raise HTTPException(status_code=400, detail="missing CharacterId in text import")
@@ -1483,6 +1626,9 @@ async def import_data(file: UploadFile = File(...)) -> dict:
             avatar_filename = f"{uuid4().hex}.png"
             save_avatar(avatar_filename, payload)
             return {"ok": True, **_import_sillytavern_card(st_raw, avatar_filename=avatar_filename)}
+        if filename.endswith(".jsonl") or (file.content_type and "jsonl" in file.content_type):
+            result = _import_from_jsonl(payload.decode("utf-8"))
+            return {"ok": True, **result}
         if filename.endswith(".json") or (file.content_type and "json" in file.content_type):
             raw = json.loads(payload.decode("utf-8"))
             result = _import_from_json(raw)
