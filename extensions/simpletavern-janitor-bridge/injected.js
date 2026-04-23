@@ -58,4 +58,49 @@
     }
     return resp;
   };
+
+  function extractJaiCharacterFromMbxM() {
+    try {
+      const arr = window.mbxM;
+      if (!Array.isArray(arr)) return null;
+      for (let i = 0; i < arr.length; i += 1) {
+        const entry = arr[i];
+        if (!entry || typeof entry !== 'object') continue;
+        const storeKey = Object.keys(entry).find((k) => k.endsWith('characterStore'));
+        if (!storeKey) continue;
+        const ch = entry[storeKey] && entry[storeKey].character;
+        if (ch && typeof ch === 'object' && (ch.first_message || (ch.first_messages && ch.first_messages.length))) {
+          return ch;
+        }
+      }
+    } catch (_e) {
+      // noop
+    }
+    return null;
+  }
+
+  function postCharJson(charObj) {
+    if (!charObj) return;
+    try {
+      window.postMessage({ source: CHANNEL, type: 'char-json', data: charObj }, '*');
+    } catch (_e) {
+      // noop
+    }
+  }
+
+  function tryEmitCharJson() {
+    const ch = extractJaiCharacterFromMbxM();
+    if (ch) postCharJson(ch);
+  }
+
+  if (document.readyState === 'complete') {
+    tryEmitCharJson();
+  } else {
+    window.addEventListener('load', function onJaiLoad() {
+      tryEmitCharJson();
+    });
+  }
+  setTimeout(tryEmitCharJson, 0);
+  setTimeout(tryEmitCharJson, 500);
+  setTimeout(tryEmitCharJson, 2000);
 })();
