@@ -6,10 +6,13 @@
   const DEFAULT_API_BASE = 'http://127.0.0.1:9091';
   const DEFAULT_APP_BASE = 'http://127.0.0.1:9081';
   const CHAR_HTML_PARAM = '_st_char_html';
+  const CHAR_JSON_FALLBACK_MS = 5000;
+
   const state = {
     sent: false,
     sending: false,
     lastSignature: '',
+    charHtmlFallbackTimer: 0,
     chatActivated: false,
     charHtmlActivated: false,
     appBaseHint: '',
@@ -196,6 +199,68 @@
     }
   }
 
+  async function sendCharacterJson(charJson) {
+    if (!state.charHtmlActivated) return;
+    if (state.sent || state.sending) return;
+    state.sending = true;
+    try {
+      const { apiBaseUrl, appBaseUrl } = await getConfig();
+      const openBase = (state.appBaseHint || appBaseUrl || DEFAULT_APP_BASE).replace(/\/+$/, '');
+      logInfo('waiting for character card (img.avatar-image), up to', `${MAX_CHARACTER_AVATAR_WAIT_MS / 1000}s`);
+      const avatarUrl = await waitForCharacterAvatarReady(MAX_CHARACTER_AVATAR_WAIT_MS);
+      if (avatarUrl) {
+        logInfo('resolved avatar from img.avatar-image');
+      } else {
+        logWarn('timeout: no img.avatar-image with valid src — posting charJson anyway');
+      }
+      const payload = { charJson };
+      if (avatarUrl) payload.avatarUrl = avatarUrl;
+      logInfo('posting JAI character JSON to', `${apiBaseUrl}/api/import/janitor/character-json`);
+      const resp = await fetch(`${apiBaseUrl}/api/import/janitor/character-json`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!resp.ok) {
+        throw new Error(await resp.text());
+      }
+      const result = await resp.json();
+      const characterId = result?.characterId;
+      const characterName = result?.characterName || '';
+      const warnings = Array.isArray(result?.warnings) ? result.warnings : [];
+      state.sent = true;
+      state.charHtmlActivated = false;
+      if (state.charHtmlFallbackTimer) {
+        window.clearTimeout(state.charHtmlFallbackTimer);
+        state.charHtmlFallbackTimer = 0;
+      }
+      const q = new URLSearchParams();
+      q.set('janitorCharImport', '1');
+      if (characterId) q.set('janitorCharId', String(characterId));
+      if (characterName) q.set('janitorCharName', characterName);
+      if (warnings.length) {
+        try {
+          q.set('janitorCharWarnings', JSON.stringify(warnings));
+        } catch (_) {
+          // ignore
+        }
+      }
+      const targetUrl = `${openBase}/chat?${q.toString()}`;
+      chrome.runtime.sendMessage({ type: 'open-simpletavern', url: targetUrl }, () => {
+        if (chrome.runtime.lastError) {
+          logWarn('open-simpletavern message failed', chrome.runtime.lastError.message);
+          return;
+        }
+        logInfo('character imported (JSON), requested app open');
+      });
+    } catch (err) {
+      state.sent = false;
+      logWarn('send character json failed', err);
+    } finally {
+      state.sending = false;
+    }
+  }
+
   async function sendCharacterHtml() {
     if (!state.charHtmlActivated) return;
     if (state.sent || state.sending) return;
@@ -260,23 +325,40 @@
 
   function scheduleCharacterHtmlCapture() {
     if (!state.charHtmlActivated) return;
+    if (state.charHtmlFallbackTimer) {
+      window.clearTimeout(state.charHtmlFallbackTimer);
+      state.charHtmlFallbackTimer = 0;
+    }
     const run = () => {
       void sendCharacterHtml();
     };
-    const afterLoad = () => {
-      window.setTimeout(run, 0);
-    };
-    if (document.readyState === 'complete') {
-      afterLoad();
-    } else {
-      window.addEventListener('load', afterLoad, { once: true });
-    }
+    state.charHtmlFallbackTimer = window.setTimeout(() => {
+      state.charHtmlFallbackTimer = 0;
+      if (!state.charHtmlActivated || state.sent) return;
+      logWarn('char-json not received, falling back to character-html');
+      const afterLoad = () => {
+        window.setTimeout(run, 0);
+      };
+      if (document.readyState === 'complete') {
+        afterLoad();
+      } else {
+        window.addEventListener('load', afterLoad, { once: true });
+      }
+    }, CHAR_JSON_FALLBACK_MS);
   }
 
   window.addEventListener('message', (event) => {
-    if (!state.chatActivated) return;
     const data = event.data;
     if (!data || data.source !== CHANNEL) return;
+    if (data.type === 'char-json' && state.charHtmlActivated) {
+      const obj = data.data;
+      if (!obj || typeof obj !== 'object') return;
+      if (!obj.first_message && !(obj.first_messages && obj.first_messages.length)) return;
+      logInfo('JAI mbxM character object captured');
+      void sendCharacterJson(obj);
+      return;
+    }
+    if (!state.chatActivated) return;
     const payload = parseCandidate(data.data);
     if (!isValidPayload(payload)) return;
     const signature = payloadSignature(payload);
@@ -287,7 +369,7 @@
   });
 
   resolveActivation();
-  if (state.chatActivated) {
+  if (state.chatActivated || state.charHtmlActivated) {
     injectScript();
   }
   if (state.charHtmlActivated) {
