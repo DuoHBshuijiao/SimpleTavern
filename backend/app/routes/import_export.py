@@ -11,6 +11,7 @@
     - GET /import/janitor/pending/{pending_id}: 获取Janitor待导入预览
     - POST /import/janitor/confirm: 确认导入Janitor聊天到本地会话
     - POST /import/janitor/character-html: 从JAI角色页HTML导入角色卡（multipart 文件或 JSON 体 {"html": "..."}）
+    - POST /import/janitor/character-json: 从 JAI window.mbxM 中的角色对象导入（JSON 体 {"charJson": {...}, "avatarUrl"?: "..."}）
 
 主要函数：
     - export_chat: 导出聊天会话
@@ -47,7 +48,7 @@ from app.chat_transcript import (
     build_transcript_rows_from_messages,
     format_chat_as_jsonl_string,
 )
-from app.schemas import Chat, ChatMessage, CharacterCard, Settings, WorldBook
+from app.schemas import Chat, ChatMessage, CharacterCard, ExtraFirstMessageEntry, Settings, WorldBook
 from app.storage import (
     avatar_path,
     avatars_dir,
@@ -351,10 +352,241 @@ def _resolve_character_avatar_url(html: str, avatar_url_hint: str | None) -> str
     return ""
 
 
-def _parse_character_from_html(html: str, avatar_url_hint: str | None = None) -> tuple[CharacterCard, list[str]]:
+def _janitor_jai_avatar_cdn_url(avatar: str) -> str:
+    a = (avatar or "").strip()
+    if not a:
+        return ""
+    if a.startswith(("http://", "https://")):
+        return a
+    return f"https://ella.janitorai.com/bot-avatars/{a.lstrip('/')}"
+
+
+_JANITOR_TOKEN_TITLE_SUFFIX = re.compile(r"\s*\(\s*\d+\s*tokens?\s*\)\s*$", re.I)
+_JANITOR_MSG_NAV = re.compile(
+    r'<div[^>]*\bclass="[^"]*messageNavigation[^"]*"[^>]*>[\s\S]*?</div>',
+    re.I,
+)
+_JANITOR_MSG_COUNTER = re.compile(
+    r'class="[^"]*messageCounter[^"]*"[^>]*>\s*(\d+)\s*/\s*(\d+)',
+    re.I,
+)
+
+
+def _janitor_char_json_has_greetings(char: dict[str, Any]) -> bool:
+    fms = char.get("first_messages")
+    if isinstance(fms, list) and any(str(x).strip() for x in fms):
+        return True
+    fm = char.get("first_message")
+    return isinstance(fm, str) and fm.strip() != ""
+
+
+def _janitor_js_decode_double_quoted_string_body(html: str, start: int) -> tuple[str, int | None]:
+    out: list[str] = []
+    i = start
+    n = len(html)
+    while i < n:
+        c = html[i]
+        if c == '"':
+            return ("".join(out), i + 1)
+        if c == "\\" and i + 1 < n:
+            esc = html[i + 1]
+            if esc == "n":
+                out.append("\n")
+            elif esc == "r":
+                out.append("\r")
+            elif esc == "t":
+                out.append("\t")
+            elif esc in '"\\/':
+                out.append(esc)
+            elif esc == "u" and i + 5 < n:
+                try:
+                    out.append(chr(int(html[i + 2 : i + 6], 16)))
+                except (ValueError, OverflowError):
+                    out.append(esc)
+                i += 4
+            else:
+                out.append(esc)
+            i += 2
+            continue
+        out.append(c)
+        i += 1
+    return ("".join(out), None)
+
+
+def _extract_janitor_character_from_mbxm_html(html: str) -> dict[str, Any] | None:
+    marker = "window.mbxM.push(JSON.parse("
+    idx = html.find(marker)
+    if idx < 0:
+        return None
+    j = idx + len(marker)
+    while j < len(html) and html[j] in " \t\n\r":
+        j += 1
+    if j >= len(html) or html[j] != '"':
+        return None
+    j += 1
+    body, end = _janitor_js_decode_double_quoted_string_body(html, j)
+    if end is None:
+        return None
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    for k, v in payload.items():
+        if isinstance(k, str) and k.endswith("characterStore") and isinstance(v, dict):
+            ch = v.get("character")
+            if isinstance(ch, dict):
+                return ch
+    return None
+
+
+def _strip_janitor_token_label_suffix(raw: str) -> str:
+    t = (raw or "").strip()
+    return _JANITOR_TOKEN_TITLE_SUFFIX.sub("", t).strip()
+
+
+def _janitor_map_accordion_field(norm: str) -> str | None:
+    t = norm.lower()
+    if "example" in t and "dialog" in t:
+        return "example_dialogs"
+    if "personality" in t or t.strip() in ("性格",):
+        return "personality"
+    if "scenario" in t or "场景" in t:
+        return "scenario"
+    if (
+        ("first" in t and "message" in t)
+        or ("initial" in t and "message" in t)
+        or "开场" in t
+    ):
+        return "first_message"
+    if "description" in t or "bio" in t or "简介" in t or ("character" in t and "bio" in t):
+        return "description"
+    if "name" in t and "character" in t:
+        return "name"
+    return None
+
+
+def _extract_inner_html_of_div_with_id_panel(html: str, panel_n: int) -> str:
+    panel_id = f"panel-info-{panel_n}"
+    m2 = re.search(
+        r'<div[^>]*\bid=(["\'])' + re.escape(panel_id) + r'\1[^>]*>',
+        html,
+        flags=re.I,
+    )
+    if not m2:
+        return ""
+    open_end = m2.end()
+    # depth: inside panel div, count <div> / </div> until this panel closes
+    depth = 1
+    for tm in re.finditer(r"</?div\b[^>]*>", html[open_end:], flags=re.I):
+        tag = tm.group(0)
+        if tag.lower().startswith("</div"):
+            depth -= 1
+            if depth == 0:
+                return html[open_end : open_end + tm.start()]
+        else:
+            depth += 1
+    return ""
+
+
+def _janitor_find_accordion_title_for_panel_n(html: str, panel_n: int) -> str:
+    pat = re.compile(
+        r'id="info-' + str(int(panel_n)) + r'"[^>]*>[\s\S]*?'
+        r'<span[^>]*\b[^"]*characterInfoAccordionTitleText[^>]*>([^<]+)</span>',
+        re.I,
+    )
+    m = pat.search(html)
+    return m.group(1).strip() if m else ""
+
+
+def _janitor_list_panel_info_indices(html: str) -> list[int]:
+    found = re.findall(r'\bid="panel-info-(\d+)"', html, flags=re.I)
+    if not found:
+        return []
+    return sorted({int(x) for x in found}, key=int)
+
+
+def _parse_character_from_janitor_accordion(
+    html: str, avatar_url_hint: str | None, warnings: list[str]
+) -> CharacterCard:
+    all_labels = [
+        "Character Name",
+        "Character Bio",
+        "Bio",
+        "Personality",
+        "Scenario",
+        "First Message",
+        "First message",
+    ]
+    name = _extract_meta_content(html, ["og:title"]) or ""
+    if not name:
+        title_match = re.search(r"<title[^>]*>(.*?)</title>", html, flags=re.I | re.S)
+        if title_match:
+            name = re.sub(r"\s+", " ", title_match.group(1)).strip()
+    if not name:
+        text_probe = _strip_html(html)
+        name = _extract_labeled_block(text_probe, ["Character Name", "Name", "角色名称"], all_labels)
+    if not name:
+        name = "新角色"
+        warnings.append("未识别到角色名称，已使用默认名称")
+
+    fields: dict[str, str] = {
+        "description": "",
+        "personality": "",
+        "scenario": "",
+        "first_message": "",
+        "example_dialogs": "",
+    }
+    for n in _janitor_list_panel_info_indices(html):
+        title_raw = _janitor_find_accordion_title_for_panel_n(html, n)
+        norm = _strip_janitor_token_label_suffix(title_raw)
+        fkey = _janitor_map_accordion_field(norm) if norm else None
+        if not fkey or fkey == "name":
+            continue
+        panel_h = _extract_inner_html_of_div_with_id_panel(html, n)
+        if not panel_h and fkey:
+            continue
+        pnav = _JANITOR_MSG_NAV.sub("\n", panel_h)
+        msg_warn = _JANITOR_MSG_COUNTER.search(panel_h)
+        if fkey == "first_message" and msg_warn and int(msg_warn.group(2)) > 1:
+            warnings.append(
+                f"Initial Messages：共 {msg_warn.group(2)} 条，"
+                f"当前 DOM 仅第 {msg_warn.group(1)} 条，已只导入该条；"
+                f"完整多条请用扩展 mbxM 路径或含 window.mbxM.push 的 HTML。"
+            )
+        text_content = _strip_html(pnav).strip()
+        if fkey in fields:
+            if fields[fkey] and text_content and fields[fkey] != text_content:
+                warnings.append(
+                    f"JAI 手风琴中「{fkey}」出现多块，已使用最后一次块内容。",
+                )
+            fields[fkey] = text_content
+
+    if not any(fields.values()):
+        raise ValueError("accordion_empty")
+    return CharacterCard(
+        name=name,
+        description=fields["description"],
+        personality=fields["personality"],
+        scenario=fields["scenario"],
+        firstMessage=fields["first_message"],
+        exampleDialogue=fields["example_dialogs"],
+    )
+
+
+def _parse_character_from_html_flat_legacy(html: str, avatar_url_hint: str | None) -> tuple[CharacterCard, list[str]]:
     warnings: list[str] = []
     text = _strip_html(html)
-    all_labels = ["Character Name", "Character Bio", "Bio", "Personality", "Scenario", "First Message", "First message"]
+    all_labels = [
+        "Character Name",
+        "Character Bio",
+        "Bio",
+        "Personality",
+        "Scenario",
+        "First Message",
+        "First message",
+    ]
 
     name = _extract_meta_content(html, ["og:title"]) or ""
     if not name:
@@ -393,6 +625,82 @@ def _parse_character_from_html(html: str, avatar_url_hint: str | None = None) ->
     else:
         warnings.append("未识别到角色图片链接")
     return card, warnings
+
+
+def _parse_character_from_json(char: dict[str, Any], avatar_url_hint: str | None = None) -> tuple[CharacterCard, list[str]]:
+    warnings: list[str] = []
+    name = (str(char.get("name") or char.get("chat_name") or "")).strip() or "新角色"
+    personality = (str(char.get("personality") or "")).strip()
+    scenario = (str(char.get("scenario") or "")).strip()
+    example_dial = (str(char.get("example_dialogs") or "")).strip()
+    description = _strip_html(str(char.get("description") or ""))
+
+    fms = char.get("first_messages")
+    all_messages: list[str] = []
+    if isinstance(fms, list):
+        all_messages = [str(x).strip() for x in fms if str(x).strip()]
+    if not all_messages and isinstance(char.get("first_message"), str) and (char.get("first_message") or "").strip():
+        all_messages = [str(char.get("first_message") or "").strip()]
+
+    first_msg = all_messages[0] if all_messages else ""
+    extras: list[ExtraFirstMessageEntry] = [
+        ExtraFirstMessageEntry(text=m, chip=True) for m in all_messages[1:]
+    ]
+
+    avatar_url = _normalize_avatar_url_hint(avatar_url_hint)
+    if not avatar_url:
+        raw_av = (str(char.get("raw_avatar") or char.get("avatar") or "")).strip()
+        if raw_av:
+            avatar_url = _janitor_jai_avatar_cdn_url(raw_av)
+
+    card = CharacterCard(
+        name=name,
+        description=description,
+        personality=personality,
+        scenario=scenario,
+        firstMessage=first_msg,
+        exampleDialogue=example_dial,
+        extraFirstMessageEntries=extras,
+    )
+    if avatar_url:
+        try:
+            card.avatar = _download_avatar_from_url(avatar_url)
+        except Exception as e:
+            detail = str(e).strip() or type(e).__name__
+            if len(detail) > 120:
+                detail = detail[:117] + "..."
+            warnings.append(f"角色图片下载失败，已跳过头像（{detail}）")
+    else:
+        warnings.append("未识别到角色图片链接")
+    return card, warnings
+
+
+def _parse_character_from_html(html: str, avatar_url_hint: str | None = None) -> tuple[CharacterCard, list[str]]:
+    ch = _extract_janitor_character_from_mbxm_html(html)
+    if ch and _janitor_char_json_has_greetings(ch):
+        return _parse_character_from_json(ch, avatar_url_hint=avatar_url_hint)
+    if re.search(r'characterInfoAccordionItem_|\bid="info-\d+"', html):
+        w_acc: list[str] = []
+        try:
+            card = _parse_character_from_janitor_accordion(html, avatar_url_hint, w_acc)
+            avatar_url = _resolve_character_avatar_url(html, avatar_url_hint)
+            if avatar_url:
+                try:
+                    card.avatar = _download_avatar_from_url(avatar_url)
+                except Exception as e:
+                    detail = str(e).strip() or type(e).__name__
+                    if len(detail) > 120:
+                        detail = detail[:117] + "..."
+                    w_acc.append(f"角色图片下载失败，已跳过头像（{detail}）")
+            else:
+                w_acc.append("未识别到角色图片链接")
+            return card, w_acc
+        except ValueError as e:
+            if str(e) == "accordion_empty":
+                pass
+            else:
+                raise
+    return _parse_character_from_html_flat_legacy(html, avatar_url_hint)
 
 
 def _content_disposition(filename: str) -> str:
@@ -1559,6 +1867,41 @@ def _import_character_from_html_string(html: str, avatar_url_hint: str | None = 
         "characterId": saved.id,
         "characterName": saved.name,
     }
+
+
+def _import_character_from_janitor_json_dict(char: dict[str, Any], avatar_url_hint: str | None = None) -> dict[str, Any]:
+    if not _janitor_char_json_has_greetings(char):
+        raise HTTPException(status_code=400, detail="charJson must include first_message or first_messages")
+    card, warnings = _parse_character_from_json(char, avatar_url_hint=avatar_url_hint)
+    saved = save_character(card)
+    return {
+        "ok": True,
+        "imported": ["character"],
+        "warnings": warnings,
+        "characterId": saved.id,
+        "characterName": saved.name,
+    }
+
+
+@router.post("/import/janitor/character-json")
+async def import_janitor_character_json(request: Request) -> dict[str, Any]:
+    try:
+        body = await request.json()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"invalid json: {e}") from e
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="json body must be an object")
+    char = body.get("charJson")
+    if not isinstance(char, dict):
+        raise HTTPException(status_code=400, detail="charJson is required and must be an object")
+    raw_hint = body.get("avatarUrl")
+    avatar_url_hint = raw_hint.strip() if isinstance(raw_hint, str) and raw_hint.strip() else None
+    try:
+        return _import_character_from_janitor_json_dict(char, avatar_url_hint=avatar_url_hint)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.post("/import/janitor/character-html")
