@@ -25,7 +25,7 @@
 ### 1. 准备环境
 
 确保你的电脑已经安装了 **Python 3.10+** 和 **Node.js 16+**（安装时记得勾选 **Add to PATH**）。  
-装好后，打开终端(例如按Win + R，输入cmd后回车)验证一下：
+装好后，打开终端（例如按Win + R，输入cmd后回车）验证一下：
 
 ```bash
 python --version   # 应显示 Python 3.10.x 或更高
