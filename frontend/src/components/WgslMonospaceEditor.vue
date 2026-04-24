@@ -29,6 +29,8 @@ const scrollHostRef = ref<HTMLElement | null>(null)
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const mirrorInnerRef = ref<HTMLElement | null>(null)
 const textareaScrollHeight = ref(0)
+/** 与 scrollHost scrollHeight 同步，行号区全高背景（inset-0 在 flex 流中易被内容高度限制为视口） */
+const gutterBackdropHeightPx = ref(0)
 const lineHeightPx = ref(18)
 const textareaFontFamily = ref('monospace')
 const textareaFontSize = ref('12px')
@@ -136,6 +138,11 @@ function scheduleRemeasure() {
     void nextTick(() => {
       requestAnimationFrame(() => {
         measureLineHeightsFromMirror()
+        const host = scrollHostRef.value
+        gutterBackdropHeightPx.value = Math.max(
+          host?.scrollHeight ?? 0,
+          textareaScrollHeight.value,
+        )
       })
     })
   })
@@ -233,19 +240,14 @@ defineExpose({ scrollToLogicalLine })
       class="relative flex min-h-0 w-full min-w-0 max-h-full flex-1 flex-row items-start overflow-y-auto overflow-x-hidden resize-y"
       :class="minHeightClass"
     >
-      <!-- 独立行号区背景：高度与 textarea 内容一致，不依赖 flex 子项拉伸，避免中途断层 -->
       <div
-        class="pointer-events-none absolute left-0 top-0 z-0 rounded-l-lg border-r border-[var(--color-border-subtle)] bg-[var(--color-surface-muted)]"
-        :style="{
-          width: '3.25rem',
-          height: `${textareaScrollHeight || 0}px`,
-        }"
+        class="pointer-events-none absolute left-0 top-0 z-0 w-[3.25rem] rounded-l-lg border-r border-[var(--color-border-subtle)] bg-[var(--color-surface-muted)]"
+        :style="{ height: `${gutterBackdropHeightPx}px` }"
         aria-hidden="true"
       />
-      <!-- 行号列：每个逻辑行一行，高度与镜像层测量的行块一致（背景由上层绝对定位条提供） -->
+      <!-- 行号列：背景用上层全高条；行高仍由镜像测量，不改动对齐逻辑 -->
       <div
-        class="relative z-[1] flex min-h-0 shrink-0 select-none flex-col bg-transparent text-[var(--color-text-muted)]"
-        :style="{ width: '3.25rem' }"
+        class="relative z-[1] flex min-h-0 w-[3.25rem] shrink-0 select-none flex-col bg-transparent text-[var(--color-text-muted)]"
       >
         <div
           class="flex min-h-0 min-w-0 flex-col px-1.5"
