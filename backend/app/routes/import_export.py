@@ -48,6 +48,7 @@ from app.chat_transcript import (
     build_transcript_rows_from_messages,
     format_chat_as_jsonl_string,
 )
+from app.placeholders import replace_placeholders_in_text
 from app.schemas import Chat, ChatMessage, CharacterCard, ExtraFirstMessageEntry, Settings, WorldBook
 from app.storage import (
     avatar_path,
@@ -757,13 +758,14 @@ def _resolve_selected_persona(settings: Settings, chat: Chat) -> Any | None:
     return next((p for p in settings.userPersonas if p.id == persona_id), None)
 
 
-def _build_user_persona_prompt(settings: Settings, chat: Chat) -> str | None:
+def _build_user_persona_prompt(settings: Settings, chat: Chat, *, char_name: str) -> str | None:
     """
     构建用户Persona提示词
     
     Args:
         settings: 全局设置
         chat: 聊天对象
+        char_name: 用于替换 {{char}} 的角色名
     
     Returns:
         str | None: Persona提示词，不存在返回None
@@ -771,11 +773,21 @@ def _build_user_persona_prompt(settings: Settings, chat: Chat) -> str | None:
     selected = _resolve_selected_persona(settings, chat)
     if not selected:
         return None
+    runtime_user_name = (selected.name or "").strip() or "用户"
     parts: list[str] = []
     if selected.name and selected.name.strip():
-        parts.append(f"user姓名：{selected.name.strip()}")
+        parts.append(
+            f"user姓名：{replace_placeholders_in_text(selected.name.strip(), char_name=char_name, user_name=runtime_user_name)}"
+        )
     if selected.description and selected.description.strip():
-        parts.append(f"User简介：\n{selected.description.strip()}")
+        parts.append(
+            "User简介：\n"
+            + replace_placeholders_in_text(
+                selected.description.strip(),
+                char_name=char_name,
+                user_name=runtime_user_name,
+            )
+        )
     return "\n".join(parts) if parts else None
 
 
@@ -802,37 +814,72 @@ def _build_single_system_prompt(chat: Chat, settings: Settings) -> str:
     Returns:
         str: 系统提示词
     """
+    pure = _resolve_pure_ai_mode(settings, chat)
+    character = None
+    try:
+        character = load_character(chat.characterId)
+    except FileNotFoundError:
+        pass
+
+    ph_char = (character.name or "角色") if character else "角色"
+    selected = None if pure else _resolve_selected_persona(settings, chat)
+    ph_user = selected.name.strip() if selected and selected.name else "用户"
+
     prompt_parts: list[str] = []
     if _should_include_global_system_prompt(chat, settings):
-        prompt_parts.append(settings.prompts.globalSystem)
+        gs = settings.prompts.globalSystem
+        if isinstance(gs, str) and gs.strip():
+            prompt_parts.append(replace_placeholders_in_text(gs.strip(), char_name=ph_char, user_name=ph_user))
 
-    if not _resolve_pure_ai_mode(settings, chat):
-        persona_prompt = _build_user_persona_prompt(settings, chat)
+    if not pure:
+        persona_prompt = _build_user_persona_prompt(settings, chat, char_name=ph_char)
         if persona_prompt:
             prompt_parts.append(persona_prompt)
 
-    try:
-        character = load_character(chat.characterId)
+    if character:
         character_parts: list[str] = []
         if character.name and character.name.strip():
             character_parts.append(f"char姓名：{character.name.strip()}")
         if character.personality and character.personality.strip():
-            character_parts.append(f"Personality：\n{character.personality.strip()}")
+            character_parts.append(
+                "Personality：\n"
+                + replace_placeholders_in_text(
+                    character.personality.strip(),
+                    char_name=ph_char,
+                    user_name=ph_user,
+                )
+            )
         if character.scenario and character.scenario.strip():
-            character_parts.append(f"Scenario：\n{character.scenario.strip()}")
+            character_parts.append(
+                "Scenario：\n"
+                + replace_placeholders_in_text(
+                    character.scenario.strip(),
+                    char_name=ph_char,
+                    user_name=ph_user,
+                )
+            )
         if character.systemPrompt and character.systemPrompt.strip():
-            character_parts.append(character.systemPrompt.strip())
+            character_parts.append(
+                replace_placeholders_in_text(
+                    character.systemPrompt.strip(),
+                    char_name=ph_char,
+                    user_name=ph_user,
+                )
+            )
         if character_parts:
             prompt_parts.append("\n\n".join(character_parts))
-    except FileNotFoundError:
-        pass
 
     long_term_memory = getattr(chat.overrides, "longTermMemory", None)
     if long_term_memory and long_term_memory.strip():
-        prompt_parts.append(f"LongTermMemory：\n{long_term_memory.strip()}")
+        prompt_parts.append(
+            "LongTermMemory：\n"
+            + replace_placeholders_in_text(long_term_memory.strip(), char_name=ph_char, user_name=ph_user)
+        )
 
-    if chat.overrides.prompt:
-        prompt_parts.append(chat.overrides.prompt)
+    if chat.overrides.prompt and str(chat.overrides.prompt).strip():
+        prompt_parts.append(
+            replace_placeholders_in_text(str(chat.overrides.prompt).strip(), char_name=ph_char, user_name=ph_user)
+        )
 
     return "\n\n".join([p for p in prompt_parts if p.strip()])
 
@@ -872,12 +919,25 @@ def _build_group_system_prompt(chat: Chat, settings: Settings, character_id: str
     Returns:
         str: 系统提示词
     """
+    pure = _resolve_pure_ai_mode(settings, chat)
+    character = None
+    try:
+        character = load_character(character_id)
+    except FileNotFoundError:
+        pass
+
+    ph_char = (character.name or "角色") if character else "角色"
+    selected = None if pure else _resolve_selected_persona(settings, chat)
+    ph_user = selected.name.strip() if selected and selected.name else "用户"
+
     prompt_parts: list[str] = []
     if _should_include_global_system_prompt(chat, settings):
-        prompt_parts.append(settings.prompts.globalSystem)
+        gs = settings.prompts.globalSystem
+        if isinstance(gs, str) and gs.strip():
+            prompt_parts.append(replace_placeholders_in_text(gs.strip(), char_name=ph_char, user_name=ph_user))
 
-    if not _resolve_pure_ai_mode(settings, chat):
-        persona_prompt = _build_user_persona_prompt(settings, chat)
+    if not pure:
+        persona_prompt = _build_user_persona_prompt(settings, chat, char_name=ph_char)
         if persona_prompt:
             prompt_parts.append(persona_prompt)
 
@@ -898,27 +958,49 @@ def _build_group_system_prompt(chat: Chat, settings: Settings, character_id: str
     include_personality = True if member_settings is None else bool(getattr(member_settings, "includePersonality", True))
     include_scenario = True if member_settings is None else bool(getattr(member_settings, "includeScenario", True))
 
-    try:
-        character = load_character(character_id)
+    if character:
         character_parts: list[str] = []
         character_parts.append(f"你现在扮演的角色是：{character.name}")
         if include_personality and character.personality and character.personality.strip():
-            character_parts.append(f"Personality：\n{character.personality.strip()}")
+            character_parts.append(
+                "Personality：\n"
+                + replace_placeholders_in_text(
+                    character.personality.strip(),
+                    char_name=ph_char,
+                    user_name=ph_user,
+                )
+            )
         if include_scenario and character.scenario and character.scenario.strip():
-            character_parts.append(f"Scenario：\n{character.scenario.strip()}")
+            character_parts.append(
+                "Scenario：\n"
+                + replace_placeholders_in_text(
+                    character.scenario.strip(),
+                    char_name=ph_char,
+                    user_name=ph_user,
+                )
+            )
         if character.systemPrompt and character.systemPrompt.strip():
-            character_parts.append(character.systemPrompt.strip())
+            character_parts.append(
+                replace_placeholders_in_text(
+                    character.systemPrompt.strip(),
+                    char_name=ph_char,
+                    user_name=ph_user,
+                )
+            )
         if character_parts:
             prompt_parts.append("\n\n".join(character_parts))
-    except FileNotFoundError:
-        pass
 
     long_term_memory = getattr(chat.overrides, "longTermMemory", None)
     if long_term_memory and long_term_memory.strip():
-        prompt_parts.append(f"LongTermMemory：\n{long_term_memory.strip()}")
+        prompt_parts.append(
+            "LongTermMemory：\n"
+            + replace_placeholders_in_text(long_term_memory.strip(), char_name=ph_char, user_name=ph_user)
+        )
 
-    if chat.overrides.prompt:
-        prompt_parts.append(chat.overrides.prompt)
+    if chat.overrides.prompt and str(chat.overrides.prompt).strip():
+        prompt_parts.append(
+            replace_placeholders_in_text(str(chat.overrides.prompt).strip(), char_name=ph_char, user_name=ph_user)
+        )
 
     return "\n\n".join([p for p in prompt_parts if p.strip()])
 
