@@ -69,7 +69,12 @@ export interface ChatActionsDeps {
       role: string,
       content: string,
       characterId?: string | null,
-      opts?: { greetingVariantIndex?: number | null },
+      opts?: {
+        greetingVariantIndex?: number | null
+        greetingVariants?: string[] | null
+        greetingVariantReasoningContents?: string[] | null
+        reasoningContent?: string | null
+      },
     ) => Promise<void>
     deleteMessage: (chatId: string, messageId: string) => Promise<void>
     load: (chatId: string) => Promise<void>
