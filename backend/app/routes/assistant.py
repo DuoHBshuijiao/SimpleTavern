@@ -294,18 +294,6 @@ def _normalize_assistant_chat_for_save(chat: AssistantChat) -> None:
     chat.messages = normalized
 
 
-def _clear_reasoning_content(messages: list[dict[str, Any]]) -> None:
-    """
-    清除消息中的reasoning_content字段
-    
-    Args:
-        messages: 消息列表（会被修改）
-    """
-    for msg in messages:
-        if "reasoning_content" in msg:
-            msg.pop("reasoning_content", None)
-
-
 def _ensure_system_prompt(messages: list[dict[str, Any]], prompt: str) -> None:
     """
     确保消息列表中有system prompt
@@ -802,7 +790,7 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
     reasoning_cfg = build_reasoning_request_config(settings)
     thinking_enabled = reasoning_cfg["thinking_enabled"]
     temperature = req.temperature if req.temperature is not None else assistant_settings.temperature
-    if model == "deepseek-reasoner" or thinking_enabled:
+    if thinking_enabled:
         temperature = None
 
     base_url = settings.llm.baseUrl
@@ -853,9 +841,6 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
     if participants_prompt:
         llm_msgs.append({"role": "system", "content": participants_prompt})
     llm_msgs.extend(conversation)
-
-    if model == "deepseek-reasoner" or thinking_enabled:
-        _clear_reasoning_content(llm_msgs)
 
     allow_write_memory = bool(req.allowWriteMemory) if req.allowWriteMemory is not None else False
     if scope == "workspace":
