@@ -590,6 +590,20 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
         user_role = "system" if pure_ai_mode else "user"
         user_display_name = getattr(req, "senderName", None) or (getattr(req, "userPersona", None).name if getattr(req, "userPersona", None) else "用户")
         char_name_for_user_input = character.name or "角色"
+        # 与 chats.append_message 一致：在追加新用户条目前清除已有 assistant 上的多版本元数据
+        for m0 in chat.messages:
+            if m0.role != "assistant":
+                continue
+            if not (
+                getattr(m0, "greetingVariants", None)
+                or getattr(m0, "greetingVariantIndex", None) is not None
+                or getattr(m0, "greetingVariantReasoningContents", None)
+            ):
+                continue
+            m0.greetingVariants = None
+            m0.greetingVariantIndex = None
+            if hasattr(m0, "greetingVariantReasoningContents"):
+                m0.greetingVariantReasoningContents = None
         replaced_user_message = replace_placeholders_in_text(
             req.userMessage,
             char_name=char_name_for_user_input,
@@ -607,10 +621,7 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
         save_chat(chat)
 
     runtime = req.runtimeOverrides
-    prompt_parts: list[str] = []
-    if _should_include_global_system_prompt(settings, chat, runtime):
-        prompt_parts.append(settings.prompts.globalSystem)
-    
+
     # 用户 persona：优先使用请求体中的 userPersona（保证首条消息等场景下即使用户未保存设置也能带上正确身份）
     persona_for_prompt = None
     if not pure_ai_mode:
@@ -619,6 +630,16 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
             persona_for_prompt = req_persona
         if persona_for_prompt is None:
             persona_for_prompt = _resolve_selected_persona(settings, chat, pure_ai_mode)
+
+    ph_char = character.name or "角色"
+    ph_user = persona_for_prompt.name.strip() if persona_for_prompt and persona_for_prompt.name else "用户"
+
+    prompt_parts: list[str] = []
+    if _should_include_global_system_prompt(settings, chat, runtime):
+        gs = settings.prompts.globalSystem
+        if isinstance(gs, str) and gs.strip():
+            prompt_parts.append(replace_placeholders_in_text(gs.strip(), char_name=ph_char, user_name=ph_user))
+
     if persona_for_prompt:
         user_persona_parts: list[str] = []
         runtime_user_name = (persona_for_prompt.name or "").strip() or "用户"
@@ -641,22 +662,13 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
     character_parts: list[str] = []
     if character.name and character.name.strip():
         character_parts.append(f"char姓名：{character.name.strip()}")
-    if character.description and character.description.strip():
-        character_parts.append(
-            "Description：\n"
-            + replace_placeholders_in_text(
-                character.description.strip(),
-                char_name=character.name or "角色",
-                user_name=(persona_for_prompt.name.strip() if persona_for_prompt and persona_for_prompt.name else "用户"),
-            )
-        )
     if character.personality and character.personality.strip():
         character_parts.append(
             "Personality：\n"
             + replace_placeholders_in_text(
                 character.personality.strip(),
-                char_name=character.name or "角色",
-                user_name=(persona_for_prompt.name.strip() if persona_for_prompt and persona_for_prompt.name else "用户"),
+                char_name=ph_char,
+                user_name=ph_user,
             )
         )
     if character.scenario and character.scenario.strip():
@@ -664,8 +676,8 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
             "Scenario：\n"
             + replace_placeholders_in_text(
                 character.scenario.strip(),
-                char_name=character.name or "角色",
-                user_name=(persona_for_prompt.name.strip() if persona_for_prompt and persona_for_prompt.name else "用户"),
+                char_name=ph_char,
+                user_name=ph_user,
             )
         )
     if character.exampleDialogue and character.exampleDialogue.strip():
@@ -673,30 +685,37 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
             "ExampleDialogue：\n"
             + replace_placeholders_in_text(
                 character.exampleDialogue.strip(),
-                char_name=character.name or "角色",
-                user_name=(persona_for_prompt.name.strip() if persona_for_prompt and persona_for_prompt.name else "用户"),
+                char_name=ph_char,
+                user_name=ph_user,
             )
         )
     if character.systemPrompt and character.systemPrompt.strip():
         character_parts.append(
             replace_placeholders_in_text(
                 character.systemPrompt.strip(),
-                char_name=character.name or "角色",
-                user_name=(persona_for_prompt.name.strip() if persona_for_prompt and persona_for_prompt.name else "用户"),
+                char_name=ph_char,
+                user_name=ph_user,
             )
         )
-    
+
     if character_parts:
         prompt_parts.append("\n\n".join(character_parts))
-    
+
     long_term_memory = getattr(chat.overrides, "longTermMemory", None)
     if long_term_memory and long_term_memory.strip():
-        prompt_parts.append(f"LongTermMemory：\n{long_term_memory.strip()}")
+        prompt_parts.append(
+            "LongTermMemory：\n"
+            + replace_placeholders_in_text(long_term_memory.strip(), char_name=ph_char, user_name=ph_user)
+        )
 
-    if chat.overrides.prompt:
-        prompt_parts.append(chat.overrides.prompt)
-    if runtime and runtime.prompt:
-        prompt_parts.append(runtime.prompt)
+    if chat.overrides.prompt and str(chat.overrides.prompt).strip():
+        prompt_parts.append(
+            replace_placeholders_in_text(str(chat.overrides.prompt).strip(), char_name=ph_char, user_name=ph_user)
+        )
+    if runtime and runtime.prompt and str(runtime.prompt).strip():
+        prompt_parts.append(
+            replace_placeholders_in_text(str(runtime.prompt).strip(), char_name=ph_char, user_name=ph_user)
+        )
     system_prompt = "\n\n".join([p for p in prompt_parts if p.strip()])
 
     def pick_param(name: str):
@@ -830,7 +849,7 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
     reasoning_cfg = build_reasoning_request_config(settings)
     thinking_enabled = reasoning_cfg["thinking_enabled"]
     extra_body = filter_reasoning_extra_body_for_upstream(model, reasoning_cfg["extra_body"])
-    if model == "deepseek-reasoner" or thinking_enabled:
+    if thinking_enabled:
         temperature = None
 
     async def event_iter() -> AsyncIterator[str]:
@@ -1039,7 +1058,7 @@ async def generate_draft_help(req: DraftHelpRequest) -> StreamingResponse:
     reasoning_cfg = build_reasoning_request_config(settings)
     thinking_enabled = reasoning_cfg["thinking_enabled"]
     extra_body = filter_reasoning_extra_body_for_upstream(model, reasoning_cfg["extra_body"])
-    if model == "deepseek-reasoner" or thinking_enabled:
+    if thinking_enabled:
         temperature = None
 
     async def event_iter() -> AsyncIterator[str]:
@@ -1133,12 +1152,17 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
         raise HTTPException(status_code=404, detail="character not found")
 
     runtime = req.runtimeOverrides
-    prompt_parts: list[str] = []
-    if _should_include_global_system_prompt(settings, chat, runtime):
-        prompt_parts.append(settings.prompts.globalSystem)
-    
     selected_persona = _resolve_selected_persona(settings, chat, pure_ai_mode)
     runtime_user_name = selected_persona.name.strip() if selected_persona and selected_persona.name else "用户"
+    ph_char = character.name or "角色"
+    ph_user = runtime_user_name
+
+    prompt_parts: list[str] = []
+    if _should_include_global_system_prompt(settings, chat, runtime):
+        gs = settings.prompts.globalSystem
+        if isinstance(gs, str) and gs.strip():
+            prompt_parts.append(replace_placeholders_in_text(gs.strip(), char_name=ph_char, user_name=ph_user))
+
     if selected_persona:
         user_persona_parts: list[str] = []
         if selected_persona.name and selected_persona.name.strip():
@@ -1176,15 +1200,6 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
 
     character_parts: list[str] = []
     character_parts.append(f"你现在扮演的角色是：{character.name}")
-    if character.description and character.description.strip():
-        character_parts.append(
-            "Description：\n"
-            + replace_placeholders_in_text(
-                character.description.strip(),
-                char_name=character.name or "角色",
-                user_name=runtime_user_name,
-            )
-        )
     if include_personality and character.personality and character.personality.strip():
         character_parts.append(
             "Personality：\n"
@@ -1214,15 +1229,22 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
     
     if character_parts:
         prompt_parts.append("\n\n".join(character_parts))
-    
+
     long_term_memory = getattr(chat.overrides, "longTermMemory", None)
     if long_term_memory and long_term_memory.strip():
-        prompt_parts.append(f"LongTermMemory：\n{long_term_memory.strip()}")
+        prompt_parts.append(
+            "LongTermMemory：\n"
+            + replace_placeholders_in_text(long_term_memory.strip(), char_name=ph_char, user_name=ph_user)
+        )
 
-    if chat.overrides.prompt:
-        prompt_parts.append(chat.overrides.prompt)
-    if runtime and runtime.prompt:
-        prompt_parts.append(runtime.prompt)
+    if chat.overrides.prompt and str(chat.overrides.prompt).strip():
+        prompt_parts.append(
+            replace_placeholders_in_text(str(chat.overrides.prompt).strip(), char_name=ph_char, user_name=ph_user)
+        )
+    if runtime and runtime.prompt and str(runtime.prompt).strip():
+        prompt_parts.append(
+            replace_placeholders_in_text(str(runtime.prompt).strip(), char_name=ph_char, user_name=ph_user)
+        )
     system_prompt = "\n\n".join([p for p in prompt_parts if p.strip()])
 
     def pick_param(name: str):
@@ -1377,7 +1399,7 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
     reasoning_cfg = build_reasoning_request_config(settings)
     thinking_enabled = reasoning_cfg["thinking_enabled"]
     extra_body = filter_reasoning_extra_body_for_upstream(model, reasoning_cfg["extra_body"])
-    if model == "deepseek-reasoner" or thinking_enabled:
+    if thinking_enabled:
         temperature = None
 
     async def event_iter():
@@ -1544,12 +1566,17 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="character not found")
 
-    prompt_parts: list[str] = []
-    if _should_include_global_system_prompt(settings, chat, None):
-        prompt_parts.append(settings.prompts.globalSystem)
-    
     selected_persona = _resolve_selected_persona(settings, chat, pure_ai_mode)
     runtime_user_name = selected_persona.name.strip() if selected_persona and selected_persona.name else "用户"
+    ph_char = character.name or "角色"
+    ph_user = runtime_user_name
+
+    prompt_parts: list[str] = []
+    if _should_include_global_system_prompt(settings, chat, None):
+        gs = settings.prompts.globalSystem
+        if isinstance(gs, str) and gs.strip():
+            prompt_parts.append(replace_placeholders_in_text(gs.strip(), char_name=ph_char, user_name=ph_user))
+
     if selected_persona:
         user_persona_parts: list[str] = []
         if selected_persona.name and selected_persona.name.strip():
@@ -1575,12 +1602,12 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
             all_characters.append(member_char)
         except FileNotFoundError:
             continue
-    
+
     group_context_parts = ["这是一个群聊场景，参与者包括："]
     for i, char in enumerate(all_characters):
         group_context_parts.append(f"{i+1}. {char.name}")
     prompt_parts.append("\n".join(group_context_parts))
-    
+
     member_settings = chat.memberSettings.get(req.characterId)
     include_personality = True if member_settings is None else bool(getattr(member_settings, "includePersonality", True))
     include_scenario = True if member_settings is None else bool(getattr(member_settings, "includeScenario", True))
@@ -1588,15 +1615,6 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
     character_parts: list[str] = []
     character_parts.append(f"你现在扮演的角色是：{character.name}")
     character_parts.append("请根据当前对话内容进行回复（这是一次额外的插话机会）。")
-    if character.description and character.description.strip():
-        character_parts.append(
-            "Description：\n"
-            + replace_placeholders_in_text(
-                character.description.strip(),
-                char_name=character.name or "角色",
-                user_name=runtime_user_name,
-            )
-        )
     if include_personality and character.personality and character.personality.strip():
         character_parts.append(
             "Personality：\n"
@@ -1626,13 +1644,18 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
     
     if character_parts:
         prompt_parts.append("\n\n".join(character_parts))
-    
+
     long_term_memory = getattr(chat.overrides, "longTermMemory", None)
     if long_term_memory and long_term_memory.strip():
-        prompt_parts.append(f"LongTermMemory：\n{long_term_memory.strip()}")
+        prompt_parts.append(
+            "LongTermMemory：\n"
+            + replace_placeholders_in_text(long_term_memory.strip(), char_name=ph_char, user_name=ph_user)
+        )
 
-    if chat.overrides.prompt:
-        prompt_parts.append(chat.overrides.prompt)
+    if chat.overrides.prompt and str(chat.overrides.prompt).strip():
+        prompt_parts.append(
+            replace_placeholders_in_text(str(chat.overrides.prompt).strip(), char_name=ph_char, user_name=ph_user)
+        )
     system_prompt = "\n\n".join([p for p in prompt_parts if p.strip()])
 
     def pick_param(name: str):
@@ -1783,7 +1806,7 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
     reasoning_cfg = build_reasoning_request_config(settings)
     thinking_enabled = reasoning_cfg["thinking_enabled"]
     extra_body = filter_reasoning_extra_body_for_upstream(model, reasoning_cfg["extra_body"])
-    if model == "deepseek-reasoner" or thinking_enabled:
+    if thinking_enabled:
         temperature = None
 
     async def event_iter():
