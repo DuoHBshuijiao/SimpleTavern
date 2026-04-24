@@ -40,6 +40,7 @@ from app.routes.clipboard import router as clipboard_router
 from app.routes.data_integrity import router as data_integrity_router
 from app.routes.font import router as font_router
 from app.routes.generate import router as generate_router
+from app.routes.http_log import router as http_log_router
 from app.routes.import_export import router as import_export_router
 from app.routes.page_backgrounds import router as page_backgrounds_router
 from app.routes.shader_presets import router as shader_presets_router
@@ -52,6 +53,7 @@ from app.routes.worldbooks import router as worldbooks_router
 from app.routes.tts import router as tts_router
 from app.services.data_integrity import data_integrity_service
 from app.services.glm_local_tts_process import stop as stop_glm_local_tts
+from app.services.http_log_sweeper import http_log_sweeper
 from app.services.omnivoice_local_tts_process import stop as stop_omnivoice_local_tts
 from app.services.qwen3_local_tts_process import stop as stop_qwen3_local_tts
 from app.services.tts_cache import tts_cache_patrol
@@ -70,9 +72,11 @@ async def lifespan(app: FastAPI):
     warmup_tokenizer()
     integrity_scan_task = asyncio.create_task(data_integrity_service.run_startup_scan())
     await tts_cache_patrol.start()
+    await http_log_sweeper.start()
     try:
         yield
     finally:
+        await http_log_sweeper.stop()
         await tts_cache_patrol.stop()
         stop_glm_local_tts()
         stop_omnivoice_local_tts()
@@ -117,6 +121,7 @@ app.include_router(llm_router, prefix="/api")
 app.include_router(generate_router, prefix="/api")
 app.include_router(avatars_router, prefix="/api")
 app.include_router(font_router, prefix="/api")
+app.include_router(http_log_router, prefix="/api")
 app.include_router(page_backgrounds_router, prefix="/api")
 app.include_router(shader_presets_router, prefix="/api")
 app.include_router(import_export_router, prefix="/api")
