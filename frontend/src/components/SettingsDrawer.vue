@@ -70,6 +70,7 @@ import { X, Eye, EyeOff, Check, Loader2, GripVertical, ChevronDown } from 'lucid
 import WorldBookEditorModal from './modals/WorldBookEditorModal.vue'
 import WebGpuShaderEditorModal from './modals/WebGpuShaderEditorModal.vue'
 import WorldBookSessionAttachModal from './modals/WorldBookSessionAttachModal.vue'
+import HttpLogViewerModal from './modals/HttpLogViewerModal.vue'
 import { isTtsApiPreset, resolveTtsProvider } from '../utils/apiPresetKind'
 import { getWebGpuUnavailableMessage, probeWebGpuAdapter } from '../utils/webgpuProbe'
 import type { WebGpuUnavailableReason } from '../utils/webgpuProbe'
@@ -407,6 +408,9 @@ watch(
 // 检查更新
 const checkUpdateLoading = ref(false)
 const checkUpdateMessage = ref('')
+
+// HTTP 请求查看
+const showHttpLogViewer = ref(false)
 const fontList = ref<string[]>([])
 const fontInputRef = ref<HTMLInputElement | null>(null)
 
@@ -3823,6 +3827,16 @@ async function checkUpdate() {
                         <button
                           type="button"
                           class="min-h-10 rounded-lg bg-surface-muted px-4 py-2 text-sm text-[var(--color-text)] transition-colors whitespace-nowrap hover:bg-surface-hover"
+                          @click="showHttpLogViewer = true"
+                        >
+                          查看 HTTP 请求
+                        </button>
+                        <span class="text-xs text-[var(--color-text-muted)]">最近 30 分钟云端请求</span>
+                      </div>
+                      <div class="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          class="min-h-10 rounded-lg bg-surface-muted px-4 py-2 text-sm text-[var(--color-text)] transition-colors whitespace-nowrap hover:bg-surface-hover"
                           :disabled="checkUpdateLoading"
                           @click="checkUpdate"
                         >
@@ -5071,6 +5085,11 @@ async function checkUpdate() {
     :scan-depth-default="globalDraft?.worldBookEntryScanDepthDefault ?? null"
     @update:show="(v) => (sessionAttachModalShow = v)"
     @save="onSessionAttachSave"
+  />
+
+  <HttpLogViewerModal
+    :show="showHttpLogViewer"
+    @update:show="(v) => (showHttpLogViewer = v)"
   />
   </div>
 </template>
