@@ -64,7 +64,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useCharacterSidebarRecencyStore, useCharactersStore, useChatsStore, useSettingsStore, useUiStore } from '../stores'
 import type { SettingsDrawerTab } from '../stores/ui'
-import type { ApiPreset, AssistantAttachment, CharacterCard, ChatImageAttachment, ChatMessage, ExtraFirstMessageEntry, GroupMemberSettings, Chat, TtsSessionConfig, WorldBook } from '../types/models'
+import type { ApiPreset, AssistantAttachment, CharacterCard, ChatImageAttachment, ChatMessage, ExtraFirstMessageEntry, GroupMemberSettings, Chat, MainChatRole, TtsSessionConfig, WorldBook } from '../types/models'
 
 // Composables
 import { 
@@ -2113,6 +2113,17 @@ function scrollToBottom(instant = false, force = false) {
   })
 }
 
+/**
+ * 仅用于「用户发送消息」时对齐到底部：MessageList 内以 rAF 驱动一段 ~420ms 的平滑滚动，
+ * 与气泡入场关键帧同步，让新消息从视口下方抬入视野。流式 / 重写 / 切聊天等其它场景
+ * 继续使用原有的 scrollToBottom，避免干扰既有稳定体验。
+ */
+function scrollToBottomAnimated() {
+  nextTick(() => {
+    messageListRef.value?.scrollToBottomAnimated?.()
+  })
+}
+
 function jumpToMessageIndex(index: number) {
   nextTick(() => {
     messageListRef.value?.scrollToMessage(index)
@@ -2513,21 +2524,35 @@ watch(
 )
 
 watch(
-  () =>
-    [
-      activeChat.value?.id,
-      activeChat.value?.isGroup,
-      activeChat.value?.messages?.[0]?.id,
-      activeChat.value?.messages?.[0]?.greetingVariants?.length,
-    ] as const,
+  () => {
+    const c = activeChat.value
+    if (!c) return ''
+    return [
+      c.id,
+      c.messages
+        .filter((m) => m.role === 'assistant' && m.greetingVariants && m.greetingVariants.length > 1)
+        .map(
+          (m) =>
+            `${m.id}:${(m.greetingVariantIndex ?? '')}:${(m.greetingVariants ?? []).join('\u001f')}:${m.content}`,
+        )
+        .join('|'),
+    ].join('::')
+  },
   () => {
     const chat = activeChat.value
-    if (!chat || chat.isGroup) return
-    const first = chat.messages[0]
-    if (!first || first.role !== 'assistant') return
-    const gv = first.greetingVariants
-    if (!gv || gv.length <= 1) return
-    versions.hydrateGreetingVariants(first.id, gv, first.content, first.greetingVariantIndex ?? null)
+    if (!chat) return
+    for (const p of chat.messages) {
+      if (p.role !== 'assistant') continue
+      const gv = p.greetingVariants
+      if (!gv || gv.length <= 1) continue
+      versions.hydrateGreetingVariants(
+        p.id,
+        gv,
+        p.content,
+        p.greetingVariantIndex ?? null,
+        p.greetingVariantReasoningContents ?? null,
+      )
+    }
   },
 )
 
@@ -2799,7 +2824,7 @@ async function sendUserMessage() {
       senderAvatar: userRole === 'user' ? (selectedPersona.value?.avatar ?? null) : null,
       ts: now,
     })
-    scrollToBottom(true, true)
+    scrollToBottomAnimated()
     void tryAutoReadUserMessage(localUserId)
 
     try {
@@ -2820,12 +2845,41 @@ async function sendUserMessage() {
     return
   }
 
-  // 清理版本历史
+  // 清理版本历史（含持久化：清 greetingVariants，仅保留当前选中正文与推理）
   if (activeChat.value) {
     for (const msg of activeChat.value.messages) {
-      if (msg.role === 'assistant' && versions.hasMultipleVersions(msg)) {
+      if (msg.role !== 'assistant') continue
+      if (
+        Array.isArray(msg.greetingVariants) &&
+        msg.greetingVariants.length > 1 &&
+        !versions.hasMultipleVersions(msg)
+      ) {
+        versions.hydrateGreetingVariants(
+          msg.id,
+          msg.greetingVariants,
+          msg.content,
+          msg.greetingVariantIndex ?? null,
+          msg.greetingVariantReasoningContents ?? null,
+        )
+      }
+      if (
+        versions.hasMultipleVersions(msg) ||
+        (Array.isArray(msg.greetingVariants) && msg.greetingVariants.length > 1)
+      ) {
         const content = versions.cleanupVersions(msg)
-        await chats.updateMessage(activeChat.value.id, msg.id, msg.role, content, msg.characterId)
+        const r =
+          (versions.getDisplayReasoning(msg) || msg.reasoningContent || '').trim() || null
+        try {
+          await chats.updateMessage(activeChat.value.id, msg.id, msg.role as MainChatRole, content, msg.characterId, {
+            greetingVariants: null,
+            greetingVariantReasoningContents: null,
+            reasoningContent: r,
+          })
+        } catch (e) {
+          console.error(e)
+        }
+        msg.content = content
+        msg.reasoningContent = r
       }
     }
   }
@@ -2854,7 +2908,7 @@ async function sendUserMessage() {
         senderAvatar: userRole === 'user' ? (selectedPersona.value?.avatar ?? null) : null,
         ts: now,
       })
-      scrollToBottom(true, true)
+      scrollToBottomAnimated()
       void tryAutoReadUserMessage(localUserId)
 
       await apiPost(`/api/chats/${chatId}/messages`, {
@@ -2891,7 +2945,7 @@ async function sendUserMessage() {
       })
       void tryAutoReadUserMessage(localUserId)
       chats.addLocalMessage({ version: 1, id: localAssistantId, role: 'assistant', content: '', ts: now })
-      scrollToBottom(true, true)
+      scrollToBottomAnimated()
 
       if (useStream) {
         stream.registerStreamMessage(localAssistantId)
@@ -3488,13 +3542,30 @@ async function handleSwitchPreviousVersion(m: ChatMessage) {
       invalidateTtsCacheIfTextChanged(msg, previousContent, newContent)
       msg.content = newContent
     }
-    const gv = msg?.greetingVariants
-    if (gv && gv.length > 1 && !m.id.startsWith('local_') && activeChat.value && m.role !== 'tool') {
+    const needPersist =
+      !m.id.startsWith('local_') &&
+      activeChat.value &&
+      m.role !== 'tool' &&
+      (versions.hasMultipleVersions(m) || (Array.isArray(msg?.greetingVariants) && msg.greetingVariants.length > 1))
+    if (needPersist) {
       const idx = versions.getCurrentVersionIndex(m)
+      const snap = versions.getVariantArraysForMessage(m)
+      const reason =
+        (versions.getDisplayReasoning(m) || msg?.reasoningContent || '').trim() || null
       try {
-        await chats.updateMessage(activeChat.value.id, m.id, m.role, newContent, m.characterId, {
-          greetingVariantIndex: idx,
-        })
+        if (snap) {
+          await chats.updateMessage(activeChat.value.id, m.id, m.role as MainChatRole, newContent, m.characterId, {
+            greetingVariantIndex: idx,
+            greetingVariants: snap.contents,
+            greetingVariantReasoningContents: snap.reasonings,
+            reasoningContent: reason,
+          })
+        } else {
+          await chats.updateMessage(activeChat.value.id, m.id, m.role as MainChatRole, newContent, m.characterId, {
+            greetingVariantIndex: idx,
+            reasoningContent: reason,
+          })
+        }
         bumpSidebarForActiveChat()
       } catch (e) {
         console.error(e)
@@ -3519,13 +3590,30 @@ async function handleSwitchNextVersion(m: ChatMessage) {
       invalidateTtsCacheIfTextChanged(msg, previousContent, newContent)
       msg.content = newContent
     }
-    const gv = msg?.greetingVariants
-    if (gv && gv.length > 1 && !m.id.startsWith('local_') && activeChat.value && m.role !== 'tool') {
+    const needPersist =
+      !m.id.startsWith('local_') &&
+      activeChat.value &&
+      m.role !== 'tool' &&
+      (versions.hasMultipleVersions(m) || (Array.isArray(msg?.greetingVariants) && msg.greetingVariants.length > 1))
+    if (needPersist) {
       const idx = versions.getCurrentVersionIndex(m)
+      const snap = versions.getVariantArraysForMessage(m)
+      const reason =
+        (versions.getDisplayReasoning(m) || msg?.reasoningContent || '').trim() || null
       try {
-        await chats.updateMessage(activeChat.value.id, m.id, m.role, newContent, m.characterId, {
-          greetingVariantIndex: idx,
-        })
+        if (snap) {
+          await chats.updateMessage(activeChat.value.id, m.id, m.role as MainChatRole, newContent, m.characterId, {
+            greetingVariantIndex: idx,
+            greetingVariants: snap.contents,
+            greetingVariantReasoningContents: snap.reasonings,
+            reasoningContent: reason,
+          })
+        } else {
+          await chats.updateMessage(activeChat.value.id, m.id, m.role as MainChatRole, newContent, m.characterId, {
+            greetingVariantIndex: idx,
+            reasoningContent: reason,
+          })
+        }
         bumpSidebarForActiveChat()
       } catch (e) {
         console.error(e)
@@ -3783,6 +3871,26 @@ async function handleRewriteMessage(m: ChatMessage) {
       if (newMsg) {
         const newReasoning = getReasoningForMessageId(newMsg.id)
         versions.addNewVersion(originalMessageId, newMsg.id, newMsg.content, newReasoning)
+        if (!newMsg.id.startsWith('local_')) {
+          const snap = versions.getVariantArraysForMessage(newMsg)
+          if (snap) {
+            const idx = versions.getCurrentVersionIndex(newMsg)
+            const reason =
+              (versions.getDisplayReasoning(newMsg) || newMsg.reasoningContent || '').trim() || null
+            const display = versions.getDisplayContent(newMsg) || newMsg.content
+            try {
+              await chats.updateMessage(chatId, newMsg.id, 'assistant', display, newMsg.characterId, {
+                greetingVariantIndex: idx,
+                greetingVariants: snap.contents,
+                greetingVariantReasoningContents: snap.reasonings,
+                reasoningContent: reason,
+              })
+              bumpSidebarForActiveChat()
+            } catch (e) {
+              console.error(e)
+            }
+          }
+        }
       }
     }
   }
