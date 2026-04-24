@@ -257,14 +257,16 @@ export function useMessageVersions() {
   }
 
   /**
-   * 从服务端持久化的 greetingVariants 恢复多版本状态（单聊开场白）
+   * 从服务端持久化的 greetingVariants 恢复多版本状态（开场白 / 重写多版）
    * @param preferredIndex 服务端保存的下标，避免与 content 重复时 indexOf 恒为 0
+   * @param persistedReasonings 与变体下标对齐的持久化思考文（可短于变体时尾部当空串）
    */
   function hydrateGreetingVariants(
     messageId: string,
     variants: string[],
     currentContent: string,
     preferredIndex?: number | null,
+    persistedReasonings?: (string | null)[] | null,
   ) {
     const cleaned = variants
       .map((v) => (v == null ? '' : String(v)).trim())
@@ -272,10 +274,18 @@ export function useMessageVersions() {
     if (cleaned.length <= 1) return
     const originalId = getOriginalMessageId(messageId)
     messageVersions.value.set(originalId, [...cleaned])
-    messageReasoningVersions.value.set(
-      originalId,
-      cleaned.map(() => ''),
-    )
+    const rsrc = Array.isArray(persistedReasonings) ? persistedReasonings : null
+    if (rsrc) {
+      const rarr = cleaned.map(
+        (_v, i) => (rsrc[i] == null ? '' : String(rsrc[i]).trim()),
+      )
+      messageReasoningVersions.value.set(originalId, rarr)
+    } else {
+      messageReasoningVersions.value.set(
+        originalId,
+        cleaned.map(() => ''),
+      )
+    }
     let idx: number
     if (
       typeof preferredIndex === 'number' &&
@@ -362,6 +372,20 @@ export function useMessageVersions() {
     messageIdMap.value.clear()
   }
 
+  /**
+   * 为持久化到服务端准备当前多条候选（正文 + 与内容等长的思考文），仅当变体数 > 1 时返回
+   */
+  function getVariantArraysForMessage(
+    message: ChatMessage,
+  ): { contents: string[]; reasonings: string[] } | null {
+    const messageId = getOriginalMessageId(message.id)
+    const contents = messageVersions.value.get(messageId)
+    if (!contents || contents.length <= 1) return null
+    const rs0 = messageReasoningVersions.value.get(messageId) || []
+    const reasonings = contents.map((_, i) => (i < rs0.length && rs0[i] != null ? String(rs0[i]) : ''))
+    return { contents: [...contents], reasonings }
+  }
+
   return {
     // 状态
     messageVersions,
@@ -385,6 +409,7 @@ export function useMessageVersions() {
     clearAll,
     updateCurrentVersionContent,
     hydrateGreetingVariants,
+    getVariantArraysForMessage,
   }
 }
 
