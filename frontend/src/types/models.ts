@@ -428,10 +428,15 @@ export interface ChatMessage {
   ts: string
   /** 长期记忆在上一条保存后、本条消息之后被更新；仅最新一条带此标记的消息存在 */
   memoryUpdatedAfterThis?: boolean
-  /** 单聊开场白多版本（占位符已替换）；开始对话后由服务端清除 */
+  /**
+   * 多候选 assistant 正文（与开场/重写多版共用，占位符已替换）；
+   * 新一条用户发言前由客户端 PUT 与 generate 落库时清除元数据
+   */
   greetingVariants?: string[] | null
-  /** 当前选中的开场变体下标（与 greetingVariants 对齐） */
+  /** 当前选中的变体下标（与 greetingVariants 对齐） */
   greetingVariantIndex?: number | null
+  /** 与 greetingVariants 各下标一一对应的思考/推理文（可短于列表则视为空串） */
+  greetingVariantReasoningContents?: string[] | null
   /** 已合成的 TTS 音频文件 UUID */
   ttsAudioAssetId?: string | null
   /** 实际送入 TTS 合成的文本（含后处理/翻译后的朗读稿） */
