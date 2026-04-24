@@ -87,6 +87,71 @@ def _now_iso() -> str:
     return datetime.now().astimezone().isoformat()
 
 
+def _clear_greeting_multivariant_on_other_assistants(chat: Chat, keep_message_id: str) -> None:
+    """同一会话中仅保留一条 assistant 的多版本元数据，清除其他条上遗留的变体信息。"""
+    for msg in chat.messages:
+        if msg.id == keep_message_id or msg.role != "assistant":
+            continue
+        if getattr(msg, "greetingVariants", None) is None and getattr(
+            msg, "greetingVariantIndex", None
+        ) is None and getattr(msg, "greetingVariantReasoningContents", None) is None:
+            continue
+        msg.greetingVariants = None
+        msg.greetingVariantIndex = None
+        if hasattr(msg, "greetingVariantReasoningContents"):
+            msg.greetingVariantReasoningContents = None
+
+
+def _apply_greeting_variants_on_update(
+    m: ChatMessage, req: UpdateMessageRequest, req_dump: dict, chat: Chat
+) -> None:
+    if "greetingVariants" not in req_dump:
+        return
+    raw = req.greetingVariants
+    if raw is None or (isinstance(raw, list) and len(raw) == 0):
+        m.greetingVariants = None
+        m.greetingVariantIndex = None
+        if hasattr(m, "greetingVariantReasoningContents"):
+            m.greetingVariantReasoningContents = None
+        return
+
+    cleaned = [str(x).strip() for x in raw if x is not None and str(x).strip()]
+    if len(cleaned) >= 2:
+        m.greetingVariants = cleaned
+        idx: int
+        gvi = req.greetingVariantIndex
+        if "greetingVariantIndex" in req_dump and isinstance(gvi, int) and 0 <= gvi < len(cleaned):
+            idx = gvi
+        else:
+            cur = (m.content or "").strip()
+            idx = cleaned.index(cur) if cur in cleaned else 0
+        m.greetingVariantIndex = idx
+        m.content = cleaned[idx]
+
+        if "greetingVariantReasoningContents" in req_dump and req.greetingVariantReasoningContents is not None:
+            src = [str(x) if x is not None else "" for x in req.greetingVariantReasoningContents]
+            while len(src) < len(cleaned):
+                src.append("")
+            m.greetingVariantReasoningContents = src[: len(cleaned)]
+            r_one = m.greetingVariantReasoningContents[idx].strip() if 0 <= idx < len(
+                m.greetingVariantReasoningContents
+            ) else ""
+            m.reasoningContent = r_one if r_one else None
+        else:
+            m.greetingVariantReasoningContents = None
+
+        _clear_greeting_multivariant_on_other_assistants(chat, m.id)
+    elif len(cleaned) == 1:
+        m.greetingVariants = None
+        m.greetingVariantIndex = None
+        m.greetingVariantReasoningContents = None
+        m.content = cleaned[0]
+    else:
+        m.greetingVariants = None
+        m.greetingVariantIndex = None
+        m.greetingVariantReasoningContents = None
+
+
 def _single_chat_greeting_variants(character, user_name: str) -> list[str]:
     """
     单聊开场候选：主首句（非空）在前，其后为 extraFirstMessageEntries 中非空 text，均已替换占位符。
@@ -566,9 +631,18 @@ def append_message(chat_id: str, req: AppendMessageRequest) -> Chat:
     # 用户（或纯 AI 模式下首条 system）开始发言后，锁定开场白，去掉多版本元数据
     if req.role in ("user", "system"):
         for m in chat.messages:
-            if m.role == "assistant" and getattr(m, "greetingVariants", None):
-                m.greetingVariants = None
-                m.greetingVariantIndex = None
+            if m.role != "assistant":
+                continue
+            if not (
+                getattr(m, "greetingVariants", None)
+                or getattr(m, "greetingVariantIndex", None) is not None
+                or getattr(m, "greetingVariantReasoningContents", None)
+            ):
+                continue
+            m.greetingVariants = None
+            m.greetingVariantIndex = None
+            if hasattr(m, "greetingVariantReasoningContents"):
+                m.greetingVariantReasoningContents = None
 
     chat.messages.append(ChatMessage(
         role=req.role,
@@ -612,7 +686,7 @@ def update_message(chat_id: str, message_id: str, req: UpdateMessageRequest) -> 
     for m in chat.messages:
         if m.id == message_id:
             old_images = list(getattr(m, "images", []) or [])
-            content_changed = m.content != req.content
+            stored_content = m.content
             m.role = req.role
             m.content = req.content
             if getattr(req, "images", None) is not None:
@@ -632,13 +706,27 @@ def update_message(chat_id: str, message_id: str, req: UpdateMessageRequest) -> 
             if getattr(req, "senderAvatar", None) is not None:
                 m.senderAvatar = req.senderAvatar
             req_dump = req.model_dump(exclude_unset=True)
-            if "greetingVariantIndex" in req_dump:
+            if "greetingVariants" in req_dump:
+                _apply_greeting_variants_on_update(m, req, req_dump, chat)
+            elif "greetingVariantIndex" in req_dump:
                 m.greetingVariantIndex = req_dump["greetingVariantIndex"]
+                gv = getattr(m, "greetingVariants", None)
+                if (
+                    isinstance(gv, list)
+                    and len(gv) >= 2
+                    and isinstance(m.greetingVariantIndex, int)
+                    and 0 <= m.greetingVariantIndex < len(gv)
+                ):
+                    m.content = gv[m.greetingVariantIndex]
+                    gvr = getattr(m, "greetingVariantReasoningContents", None)
+                    if gvr and isinstance(gvr, list) and 0 <= m.greetingVariantIndex < len(gvr):
+                        r0 = (gvr[m.greetingVariantIndex] or "").strip()
+                        m.reasoningContent = r0 if r0 else None
             if "reasoningContent" in req_dump:
                 m.reasoningContent = req_dump["reasoningContent"]
             if "reasoningDurationSec" in req_dump:
                 m.reasoningDurationSec = req_dump["reasoningDurationSec"]
-            if content_changed:
+            if m.content != stored_content:
                 m.ttsAudioAssetId = None
                 m.ttsAudioSourceText = None
             chat.updatedAt = _now_iso()
