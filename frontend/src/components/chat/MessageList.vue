@@ -141,8 +141,15 @@ const SCROLL_BOTTOM_SHOW_THRESHOLD = 200
 const SCROLL_BOTTOM_NEAR_THRESHOLD = 24
 const AUTO_FOLLOW_DISTANCE_THRESHOLD = 300
 const SCROLL_TO_BOTTOM_SETTLE_MS = 140
+/** 用户发送消息时的动画滚动时长（与气泡入场关键帧时长对齐，产生「视口下移带入气泡 + 落地上浮」的一体化过渡） */
+const USER_SEND_SCROLL_ANIM_MS = 420
+/** 动画滚动的最大补偿距离；超过则直接瞬移兜底，避免从顶部发送时出现长时间滚动 */
+const USER_SEND_SCROLL_MAX_DISTANCE = 2400
 /** 用户曾用滚轮向上或拖动滚动条解除跟底；回到贴底带内或强制滚底时清除 */
 const userDismissedAutoFollow = ref(false)
+/** 正在播放「用户发送动画滚动」；期间 ResizeObserver 不做 instant 贴底，避免抢占平滑过渡 */
+const userSendScrollActive = ref(false)
+let userSendScrollRaf: number | null = null
 let contentResizeObserver: ResizeObserver | null = null
 let pendingBottomSnapToken = 0
 let pendingBottomSnapTimer: ReturnType<typeof setTimeout> | null = null
@@ -418,7 +425,8 @@ const TAIL_OPACITY_MIN = 0.15
 const TAIL_OPACITY_MAX = 1.0
 const TAIL_ATOMIC_SELECTOR = 'pre, code, st-math-island, .katex, .katex-display'
 
-type TailQueue = { chars: number[]; prevLen: number }
+/** prevDecorLen：与 collectInlineTextNodes 一致的可装饰内联字符数（不含 pre/code 等原子块内文本） */
+type TailQueue = { chars: number[]; prevDecorLen: number }
 const tailQueues = new Map<string, TailQueue>()
 let tailRafId: number | null = null
 
@@ -539,6 +547,12 @@ function collectInlineTextNodes(root: HTMLElement): Text[] {
   return out
 }
 
+function getDecoratableTextLength(root: HTMLElement): number {
+  let n = 0
+  for (const tn of collectInlineTextNodes(root)) n += tn.data.length
+  return n
+}
+
 function advanceTailQueueFromTime(queue: TailQueue): boolean {
   const now = performance.now()
   let changed = false
@@ -608,24 +622,23 @@ watch(
     const el = host.querySelector('.stream-markdown') as HTMLElement | null
     if (!el) return
 
-    // 注意：textContent 包含 .stream-tail-char 的内容；在本次重新计算前 v-html 已替换完毕，
-    // 上一次渲染的 tail span 已不存在，这里直接基于纯文本长度计算 delta。
-    const curLen = el.textContent?.length ?? 0
+    // v-html 已替换完毕，tail span 不存在；队列增量仅统计可装饰内联文本，避免 pre 内流式增长误灌队列。
+    const decorLen = getDecoratableTextLength(el)
     let queue = tailQueues.get(cur.id)
     if (!queue) {
-      queue = { chars: [], prevLen: curLen }
+      queue = { chars: [], prevDecorLen: decorLen }
       tailQueues.set(cur.id, queue)
     }
     const now = performance.now()
-    const delta = curLen - queue.prevLen
+    const delta = decorLen - queue.prevDecorLen
     if (delta > 0) {
       for (let i = 0; i < delta; i++) queue.chars.push(now)
     } else if (delta < 0) {
-      // 补闭合使渲染文本长度波动，让队列保守收缩而不是清零
+      // 结构变化使内联长度波动时，从队首保守收缩而不是清零
       const drop = Math.min(queue.chars.length, -delta)
       queue.chars.splice(0, drop)
     }
-    queue.prevLen = curLen
+    queue.prevDecorLen = decorLen
     advanceTailQueueFromTime(queue)
     enforceLengthCap(queue)
     decorateStreamTail(el, queue.chars.length)
@@ -940,6 +953,91 @@ function scrollToBottom(instant = false, force = false) {
   })
 }
 
+function prefersReducedMotionForSend(): boolean {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false
+  try {
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  } catch {
+    return false
+  }
+}
+
+function cancelUserSendScrollAnim() {
+  if (userSendScrollRaf != null) {
+    cancelAnimationFrame(userSendScrollRaf)
+    userSendScrollRaf = null
+  }
+  userSendScrollActive.value = false
+}
+
+/**
+ * 用户发送消息时的动画滚动：rAF 驱动，cubic ease-out，固定时长（~420ms），
+ * 让视口平滑下移带入新气泡，取代以往的瞬移 + 气泡内短 24px 上滑所产生的突变感。
+ * 距离过大（滚到顶部发送等场景）或系统「减少动效」偏好开启时退化为 instant，
+ * 保持发送反馈即时。
+ */
+function scrollToBottomAnimated(duration: number = USER_SEND_SCROLL_ANIM_MS) {
+  nextTick(() => {
+    const el = scrollRef.value
+    if (!el) return
+    userDismissedAutoFollow.value = false
+    cancelPendingBottomSnap()
+    cancelUserSendScrollAnim()
+
+    const startTop = el.scrollTop
+    const targetTop = Math.max(0, el.scrollHeight - el.clientHeight)
+    const delta = targetTop - startTop
+    if (Math.abs(delta) < 1) {
+      syncScrollMetrics(el)
+      return
+    }
+    if (Math.abs(delta) > USER_SEND_SCROLL_MAX_DISTANCE || prefersReducedMotionForSend()) {
+      alignToBottom(el, true)
+      requestAnimationFrame(() => {
+        const latest = scrollRef.value
+        if (!latest) return
+        alignToBottom(latest, true)
+      })
+      return
+    }
+
+    userSendScrollActive.value = true
+    const prevBehavior = el.style.scrollBehavior
+    el.style.scrollBehavior = 'auto'
+    const startTs = performance.now()
+    const durMs = Math.max(1, duration)
+
+    const step = (now: number) => {
+      const current = scrollRef.value
+      if (!current || current !== el) {
+        userSendScrollRaf = null
+        userSendScrollActive.value = false
+        el.style.scrollBehavior = prevBehavior
+        return
+      }
+      const t = Math.min(1, (now - startTs) / durMs)
+      // cubic ease-out: 与气泡入场 cubic-bezier(0.16, 1, 0.3, 1) 观感接近
+      const eased = 1 - Math.pow(1 - t, 3)
+      const liveTarget = Math.max(0, current.scrollHeight - current.clientHeight)
+      current.scrollTop = startTop + (liveTarget - startTop) * eased
+      if (t < 1) {
+        userSendScrollRaf = requestAnimationFrame(step)
+      } else {
+        userSendScrollRaf = null
+        userSendScrollActive.value = false
+        current.style.scrollBehavior = prevBehavior
+        alignToBottom(current, true)
+        requestAnimationFrame(() => {
+          const latest = scrollRef.value
+          if (!latest) return
+          alignToBottom(latest, true)
+        })
+      }
+    }
+    userSendScrollRaf = requestAnimationFrame(step)
+  })
+}
+
 function handleScroll() {
   const el = scrollRef.value
   if (!el) return
@@ -1084,7 +1182,7 @@ onUpdated(() => {
 })
 
 // 暴露滚动方法
-defineExpose({ scrollToBottom, scrollToMessage, scrollRef })
+defineExpose({ scrollToBottom, scrollToBottomAnimated, scrollToMessage, scrollRef })
 
 onMounted(() => {
   updateViewport()
@@ -1093,6 +1191,12 @@ onMounted(() => {
     contentResizeObserver = new ResizeObserver(() => {
       const el = scrollRef.value
       if (!el) return
+      // 「用户发送动画滚动」期间只同步度量，不做 instant 贴底，
+      // 避免 isGenerating=true 激活的 outputPhase 把 rAF 平滑滚动抢回瞬移。
+      if (userSendScrollActive.value) {
+        syncScrollMetrics(el)
+        return
+      }
       const canFollow = effectiveCanFollow(el)
       const outputPhase = props.isGenerating || props.isInterjecting
       if (outputPhase && canFollow) {
@@ -1122,6 +1226,7 @@ onBeforeUnmount(() => {
     tailRafId = null
   }
   cancelPendingBottomSnap()
+  cancelUserSendScrollAnim()
   window.removeEventListener('resize', updateViewport)
   if (contentResizeObserver) {
     contentResizeObserver.disconnect()
@@ -1558,8 +1663,8 @@ onBeforeUnmount(() => {
 
 @keyframes message-bubble-user-send-enter {
   from {
-    opacity: 0.65;
-    transform: translateY(24px);
+    opacity: 0.6;
+    transform: translateY(10px);
   }
   to {
     opacity: 1;
@@ -1567,6 +1672,10 @@ onBeforeUnmount(() => {
   }
 }
 
+/*
+ * 与 scrollToBottomAnimated 搭配：视口平滑下移把气泡从下方卷入视野，
+ * 气泡自身再做 ~10px 的细微落地上浮 + 透明度收束，形成一体化过渡。
+ */
 .message-bubble--user-send-enter {
   animation: message-bubble-user-send-enter 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
