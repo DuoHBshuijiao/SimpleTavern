@@ -19,6 +19,7 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from app.services.http_log import log_outbound_sync
 from app.storage import get_repo_root, get_update_dir, load_update_ignore, save_update_ignore
 from app.version import APP_VERSION
 
@@ -51,12 +52,20 @@ def _is_newer(latest_tag: str, current: str) -> bool:
 
 
 def _fetch_latest_release() -> dict[str, Any]:
-    r = httpx.get(GITHUB_API_LATEST, timeout=10.0)
-    r.raise_for_status()
-    data = r.json()
-    if not isinstance(data, dict):
-        raise ValueError("GitHub releases/latest 返回格式异常")
-    return data
+    with log_outbound_sync(
+        source="update",
+        method="GET",
+        url=GITHUB_API_LATEST,
+        request_headers={"Accept": "application/vnd.github+json"},
+    ) as _log:
+        r = httpx.get(GITHUB_API_LATEST, timeout=10.0)
+        _log.set_response(status=r.status_code, headers=dict(r.headers), text=r.text)
+        r.raise_for_status()
+        data = r.json()
+        _log.set_response(body=data)
+        if not isinstance(data, dict):
+            raise ValueError("GitHub releases/latest 返回格式异常")
+        return data
 
 
 def _sanitize_release_notes(value: Any) -> str | None:
@@ -173,11 +182,21 @@ def download_update(body: dict) -> dict:
     update_dir.mkdir(parents=True, exist_ok=True)
     zip_path = update_dir / "update.zip"
     try:
-        with httpx.stream("GET", zip_url, timeout=60.0, follow_redirects=True) as resp:
-            resp.raise_for_status()
-            with open(zip_path, "wb") as f:
-                for chunk in resp.iter_bytes(chunk_size=65536):
-                    f.write(chunk)
+        total_bytes = 0
+        with log_outbound_sync(
+            source="update",
+            method="GET",
+            url=zip_url,
+            streaming=True,
+        ) as _log:
+            with httpx.stream("GET", zip_url, timeout=60.0, follow_redirects=True) as resp:
+                _log.set_response(status=resp.status_code, headers=dict(resp.headers))
+                resp.raise_for_status()
+                with open(zip_path, "wb") as f:
+                    for chunk in resp.iter_bytes(chunk_size=65536):
+                        f.write(chunk)
+                        total_bytes += len(chunk)
+            _log.set_response(body={"_downloaded": True, "bytes": total_bytes, "path": str(zip_path)})
         return {"ok": True, "path": str(zip_path)}
     except Exception as e:
         if zip_path.exists():
