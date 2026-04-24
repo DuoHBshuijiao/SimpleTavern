@@ -418,6 +418,8 @@ export const useChatsStore = defineStore('chats', {
       characterId?: string | null,
       opts?: {
         greetingVariantIndex?: number | null
+        greetingVariants?: string[] | null
+        greetingVariantReasoningContents?: string[] | null
         reasoningContent?: string | null
         reasoningDurationSec?: number | null
       },
@@ -427,6 +429,8 @@ export const useChatsStore = defineStore('chats', {
         content: string
         characterId?: string | null
         greetingVariantIndex?: number | null
+        greetingVariants?: string[] | null
+        greetingVariantReasoningContents?: string[] | null
         reasoningContent?: string | null
         reasoningDurationSec?: number | null
       } = { role, content }
@@ -434,8 +438,19 @@ export const useChatsStore = defineStore('chats', {
       if (opts && typeof opts.greetingVariantIndex === 'number') {
         body.greetingVariantIndex = opts.greetingVariantIndex
       }
-      if (opts && opts.reasoningContent != null && String(opts.reasoningContent).trim()) {
-        body.reasoningContent = String(opts.reasoningContent).trim()
+      if (opts && 'greetingVariants' in opts) {
+        body.greetingVariants = opts.greetingVariants
+      }
+      if (opts && 'greetingVariantReasoningContents' in opts) {
+        body.greetingVariantReasoningContents = opts.greetingVariantReasoningContents
+      }
+      if (opts && 'reasoningContent' in opts) {
+        if (opts.reasoningContent == null) {
+          body.reasoningContent = null
+        } else {
+          const t = String(opts.reasoningContent).trim()
+          body.reasoningContent = t || null
+        }
       }
       if (
         opts &&
