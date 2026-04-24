@@ -41,6 +41,8 @@ from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
+from app.services.http_log import log_outbound
+
 # 上游 4xx/5xx 响应体最大展示长度（避免日志/UI 被巨页吞没）
 _MAX_ERROR_BODY_CHARS = 12000
 
@@ -381,16 +383,26 @@ async def chat_completions(
         extra_body=extra_body,
     )
 
-    async with httpx.AsyncClient(timeout=120) as client:
-        r = await client.post(url, headers=headers, json=payload)
-        _raise_http_error(r)
-        data = r.json()
-        choices = data.get("choices") or []
-        if not choices:
-            return ChatCompletionResult(text="")
-        message = choices[0].get("message") or {}
-        content = message.get("content") or ""
-        return ChatCompletionResult(text=content)
+    async with log_outbound(
+        source="llm",
+        method="POST",
+        url=url,
+        request_headers=headers,
+        request_body=payload,
+        streaming=False,
+    ) as _log:
+        async with httpx.AsyncClient(timeout=120) as client:
+            r = await client.post(url, headers=headers, json=payload)
+            _log.set_response(status=r.status_code, headers=dict(r.headers), text=r.text)
+            _raise_http_error(r)
+            data = r.json()
+            _log.set_response(body=data)
+            choices = data.get("choices") or []
+            if not choices:
+                return ChatCompletionResult(text="")
+            message = choices[0].get("message") or {}
+            content = message.get("content") or ""
+            return ChatCompletionResult(text=content)
 
 
 async def chat_completions_message(
@@ -443,22 +455,32 @@ async def chat_completions_message(
         tools=tools,
         extra_body=extra_body,
     )
-    async with httpx.AsyncClient(timeout=120) as client:
-        r = await client.post(url, headers=headers, json=payload)
-        _raise_http_error(r)
-        data = r.json()
-        choices = data.get("choices") or []
-        if not choices:
-            return ChatCompletionMessage(role=None, content=None, reasoning_content=None, tool_calls=None)
-        message = choices[0].get("message") or {}
-        # 支持 reasoning_content（OpenAI）与 reasoning（如 Gemini/OpenRouter）两种字段名
-        reasoning_content = message.get("reasoning_content") or message.get("reasoning")
-        return ChatCompletionMessage(
-            role=message.get("role"),
-            content=message.get("content"),
-            reasoning_content=reasoning_content,
-            tool_calls=message.get("tool_calls"),
-        )
+    async with log_outbound(
+        source="llm",
+        method="POST",
+        url=url,
+        request_headers=headers,
+        request_body=payload,
+        streaming=False,
+    ) as _log:
+        async with httpx.AsyncClient(timeout=120) as client:
+            r = await client.post(url, headers=headers, json=payload)
+            _log.set_response(status=r.status_code, headers=dict(r.headers), text=r.text)
+            _raise_http_error(r)
+            data = r.json()
+            _log.set_response(body=data)
+            choices = data.get("choices") or []
+            if not choices:
+                return ChatCompletionMessage(role=None, content=None, reasoning_content=None, tool_calls=None)
+            message = choices[0].get("message") or {}
+            # 支持 reasoning_content（OpenAI）与 reasoning（如 Gemini/OpenRouter）两种字段名
+            reasoning_content = message.get("reasoning_content") or message.get("reasoning")
+            return ChatCompletionMessage(
+                role=message.get("role"),
+                content=message.get("content"),
+                reasoning_content=reasoning_content,
+                tool_calls=message.get("tool_calls"),
+            )
 
 
 async def stream_chat_completions(
@@ -503,51 +525,75 @@ async def stream_chat_completions(
     # 流式响应中 tool_calls 按 index 分片到达，按 index 合并为完整列表
     tool_calls_by_index: dict[int, dict[str, Any]] = {}
 
-    async with httpx.AsyncClient(timeout=None) as client:
-        async with client.stream("POST", url, headers=headers, json=payload) as r:
-            await _raise_stream_http_error(r)
-            async for line in r.aiter_lines():
-                if not line:
-                    continue
-                if not line.startswith("data:"):
-                    continue
-                data_str = line[len("data:") :].strip()
-                if data_str == "[DONE]":
-                    break
-                try:
-                    obj = json.loads(data_str)
-                except Exception:
-                    continue
-
-                choices = obj.get("choices") or []
-                if not choices:
-                    continue
-                delta = (choices[0] or {}).get("delta") or {}
-                # 支持 reasoning_content（OpenAI）与 reasoning（如 Gemini/OpenRouter）两种字段名
-                reasoning_text = delta.get("reasoning_content") or delta.get("reasoning")
-                if isinstance(reasoning_text, str) and reasoning_text:
-                    for i in range(0, len(reasoning_text), STREAM_TEXT_CHUNK_SIZE):
-                        yield StreamChunk(kind="reasoning", text=reasoning_text[i : i + STREAM_TEXT_CHUNK_SIZE])
-                content_text = delta.get("content")
-                if isinstance(content_text, str) and content_text:
-                    for i in range(0, len(content_text), STREAM_TEXT_CHUNK_SIZE):
-                        yield StreamChunk(kind="content", text=content_text[i : i + STREAM_TEXT_CHUNK_SIZE])
-                # 收集流式 tool_calls（OpenAI 格式：delta.tool_calls 为按 index 的增量）
-                for tc in delta.get("tool_calls") or []:
-                    idx = tc.get("index")
-                    if idx is None:
+    async with log_outbound(
+        source="llm",
+        method="POST",
+        url=url,
+        request_headers=headers,
+        request_body=payload,
+        streaming=True,
+    ) as _log:
+        aggregated_content: list[str] = []
+        aggregated_reasoning: list[str] = []
+        async with httpx.AsyncClient(timeout=None) as client:
+            async with client.stream("POST", url, headers=headers, json=payload) as r:
+                _log.set_response(status=r.status_code, headers=dict(r.headers))
+                await _raise_stream_http_error(r)
+                async for line in r.aiter_lines():
+                    if not line:
                         continue
-                    if idx not in tool_calls_by_index:
-                        tool_calls_by_index[idx] = {"id": "", "type": "function", "function": {"name": "", "arguments": ""}}
-                    cur = tool_calls_by_index[idx]
-                    if tc.get("id") is not None:
-                        cur["id"] = (cur.get("id") or "") + tc["id"]
-                    fn = tc.get("function")
-                    if isinstance(fn, dict):
-                        if fn.get("name") is not None:
-                            cur["function"]["name"] = (cur["function"].get("name") or "") + fn["name"]
-                        if fn.get("arguments") is not None:
-                            cur["function"]["arguments"] = (cur["function"].get("arguments") or "") + fn["arguments"]
-            # 流结束：产出 finish，便于调用方判断是否有 tool_calls 并继续多轮
-            sorted_tool_calls = [tool_calls_by_index[i] for i in sorted(tool_calls_by_index.keys())] if tool_calls_by_index else None
-            yield StreamChunk(kind="finish", tool_calls=sorted_tool_calls)
+                    if not line.startswith("data:"):
+                        continue
+                    data_str = line[len("data:") :].strip()
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        obj = json.loads(data_str)
+                    except Exception:
+                        continue
+
+                    choices = obj.get("choices") or []
+                    if not choices:
+                        continue
+                    delta = (choices[0] or {}).get("delta") or {}
+                    # 支持 reasoning_content（OpenAI）与 reasoning（如 Gemini/OpenRouter）两种字段名
+                    reasoning_text = delta.get("reasoning_content") or delta.get("reasoning")
+                    if isinstance(reasoning_text, str) and reasoning_text:
+                        aggregated_reasoning.append(reasoning_text)
+                        for i in range(0, len(reasoning_text), STREAM_TEXT_CHUNK_SIZE):
+                            yield StreamChunk(kind="reasoning", text=reasoning_text[i : i + STREAM_TEXT_CHUNK_SIZE])
+                    content_text = delta.get("content")
+                    if isinstance(content_text, str) and content_text:
+                        aggregated_content.append(content_text)
+                        _log.append_stream_text(content_text)
+                        for i in range(0, len(content_text), STREAM_TEXT_CHUNK_SIZE):
+                            yield StreamChunk(kind="content", text=content_text[i : i + STREAM_TEXT_CHUNK_SIZE])
+                    # 收集流式 tool_calls（OpenAI 格式：delta.tool_calls 为按 index 的增量）
+                    for tc in delta.get("tool_calls") or []:
+                        idx = tc.get("index")
+                        if idx is None:
+                            continue
+                        if idx not in tool_calls_by_index:
+                            tool_calls_by_index[idx] = {"id": "", "type": "function", "function": {"name": "", "arguments": ""}}
+                        cur = tool_calls_by_index[idx]
+                        if tc.get("id") is not None:
+                            cur["id"] = (cur.get("id") or "") + tc["id"]
+                        fn = tc.get("function")
+                        if isinstance(fn, dict):
+                            if fn.get("name") is not None:
+                                cur["function"]["name"] = (cur["function"].get("name") or "") + fn["name"]
+                            if fn.get("arguments") is not None:
+                                cur["function"]["arguments"] = (cur["function"].get("arguments") or "") + fn["arguments"]
+                # 流结束：产出 finish，便于调用方判断是否有 tool_calls 并继续多轮
+                sorted_tool_calls = [tool_calls_by_index[i] for i in sorted(tool_calls_by_index.keys())] if tool_calls_by_index else None
+                # 把聚合的流式正文写入日志，便于后续查看
+                aggregated_body: dict[str, Any] = {
+                    "_aggregated": True,
+                    "content": "".join(aggregated_content),
+                }
+                if aggregated_reasoning:
+                    aggregated_body["reasoning_content"] = "".join(aggregated_reasoning)
+                if sorted_tool_calls:
+                    aggregated_body["tool_calls"] = sorted_tool_calls
+                _log.set_response(body=aggregated_body)
+                yield StreamChunk(kind="finish", tool_calls=sorted_tool_calls)
