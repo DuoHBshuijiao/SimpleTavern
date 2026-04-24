@@ -1048,10 +1048,19 @@ def _sanitize_chat_greeting_variants(chat: Chat) -> None:
     for m in chat.messages:
         gv = getattr(m, "greetingVariants", None)
         if not gv:
+            if getattr(m, "greetingVariantReasoningContents", None):
+                m.greetingVariantReasoningContents = None
             continue
         cleaned = [str(x).strip() for x in gv if x is not None and str(x).strip()]
         if len(cleaned) >= 2:
             m.greetingVariants = cleaned
+            gvr = getattr(m, "greetingVariantReasoningContents", None) or None
+            if gvr and isinstance(gvr, list) and len(gvr) < len(cleaned):
+                while len(gvr) < len(cleaned):
+                    gvr.append("")
+                m.greetingVariantReasoningContents = gvr[: len(cleaned)]
+            elif gvr and isinstance(gvr, list) and len(gvr) > len(cleaned):
+                m.greetingVariantReasoningContents = gvr[: len(cleaned)]
             cur = (m.content or "").strip()
             idx = getattr(m, "greetingVariantIndex", None)
             if isinstance(idx, int) and 0 <= idx < len(cleaned) and cleaned[idx] == cur:
@@ -1064,6 +1073,8 @@ def _sanitize_chat_greeting_variants(chat: Chat) -> None:
             continue
         m.greetingVariants = None
         m.greetingVariantIndex = None
+        if hasattr(m, "greetingVariantReasoningContents"):
+            m.greetingVariantReasoningContents = None
         if len(cleaned) == 1:
             m.content = cleaned[0]
 
