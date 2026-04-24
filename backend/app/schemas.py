@@ -661,7 +661,11 @@ class ChatMessage(BaseModel):
     greetingVariants: list[str] | None = None
     greetingVariantIndex: int | None = Field(
         default=None,
-        description="当前选中的开场变体下标（与 greetingVariants 对齐）；避免仅靠 content 反推在重复文案时错位",
+        description="当前选中的开场/候选正文变体下标（与 greetingVariants 对齐）；避免仅靠 content 反推在重复文案时错位",
+    )
+    greetingVariantReasoningContents: list[str] | None = Field(
+        default=None,
+        description="与各 greetingVariants 下标一一对应的思考/推理原文（可短于列表时视为尾部为空串）",
     )
     toolTrace: bool = False
     toolRecord: dict[str, Any] | None = None
@@ -958,6 +962,14 @@ class UpdateMessageRequest(BaseModel):
     senderName: str | None = None
     senderAvatar: str | None = None
     greetingVariantIndex: int | None = None
+    greetingVariants: list[str] | None = Field(
+        default=None,
+        description="多候选正文列表；不发送则不修改。显式 null 或空列表则清除多版本元数据",
+    )
+    greetingVariantReasoningContents: list[str] | None = Field(
+        default=None,
+        description="与 greetingVariants 等长的每候选思考文；不发送则不修改。随 clearing 时一并可清",
+    )
     reasoningContent: str | None = Field(
         default=None,
         description="补写或修正推理/思考链文本（如流式中断后落库）",
