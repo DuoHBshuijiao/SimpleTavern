@@ -20,6 +20,60 @@
 
 ---
 
+## 环境要求
+
+在开始之前，请确认本机已安装下表中的软件。若某一步在命令行里**没有任何输出、窗口一闪就关掉**，或提示「不是内部或外部命令」，多数情况是**未安装对应程序**，或**未加入系统环境变量 PATH**（装好后需重新打开终端或注销登录后再试）。
+
+| 项目 | 版本或说明 |
+| --- | --- |
+| Python（必须） | 3.10+ 与 pip。安装时请务必勾选 **Add Python to PATH**（将 Python 加入环境变量），否则在命令行输入 `python` 可能无反应。装好后在终端执行 `python --version` 应能显示版本号。 |
+| Node.js（必须） | 16+ 与 npm。安装后执行 `node -v`、`npm -v` 可确认。 |
+| Git（非必须） | 克隆仓库时使用；也可从 Releases 下载源码包，不强制需要 Git。 |
+
+---
+
+## 获取与运行
+
+### 自 Releases 安装（推荐）
+
+1. 在 [GitHub Releases](https://github.com/DuoHBshuijiao/SimpleTavern/releases) 下载源码压缩包并解压，**进入解压后的项目根目录**（能看到 `deploy.py`、`frontend`、`backend` 等文件夹）。
+
+2. 按系统选择一种方式启动：
+
+| 系统 | 建议方式 |
+| --- | --- |
+| **Windows** | 双击根目录的 **`deploy.bat`**，即可在命令行窗口中执行与 `python deploy.py` 相同的安装与启动流程；窗口结束前会**暂停**（`pause`），方便看清报错。若习惯自己敲命令，可在该目录打开 PowerShell 或「命令提示符」，执行 `python deploy.py`（与 `.bat` 效果一致）。 |
+| Linux / macOS | 在终端进入项目根目录，执行 `python3 deploy.py`；或 `chmod +x deploy.sh` 后执行 `./deploy.sh`。 |
+
+3. 脚本会检查环境、创建 `venv/`、安装前后端依赖、构建前端，并启动后端（默认 **9091**）与前端预览（默认 **9081**），多数情况下会尝试打开浏览器。需要停止时，在运行脚本的窗口里按 **Ctrl+C**。
+
+根目录还提供 `deploy.sh`；手动分步说明见下文「手动部署（简要）」。
+
+### 命令行没反应、看不懂报错时（给初学者）
+
+- **输入 `python` 后没有任何反应或提示找不到命令**：先确认本机已安装 Python，并检查是否已加入 **PATH**（Windows 安装器里的「Add Python to PATH」；装好后**新开**一个终端再试）。也可尝试用 **`py` 启动器**（部分 Windows 环境）：`py deploy.py`。
+- **窗口一闪就关闭**：用 **`deploy.bat`** 或在已打开的终端里执行命令，这样窗口会保留，能看到具体错误信息。
+- **需要 Node 却未安装**：脚本依赖 `npm` 构建前端，请先安装 [Node.js](https://nodejs.org/)（LTS 即可），再重新运行部署脚本。
+
+### 安卓 Termux
+
+勿将项目放在 **`/sdcard` 共享存储** 下运行：权限与挂载限制易导致 `python -m venv` 失败。请把仓库放在 Termux 私有目录（如 `$HOME`），用 `pkg` 安装 `python`、`nodejs`、`git` 等后再执行 `python deploy.py`。若使用 zip 包，同样在 `$HOME` 下解压。
+
+### 本地开发（前后端分离调试）
+
+| 步骤 | 目录 | 命令 |
+| --- | --- | --- |
+| 后端 | `backend` | 激活虚拟环境后：`python -m uvicorn app.main:app --reload --port 9091`（局域网可访问可加 `--host 0.0.0.0`） |
+| 前端 | `frontend` | `npm install` 后：`npm run dev`（通过 Vite 代理访问 `/api`，开发服务器默认监听 **9081**，见 `vite.config.ts`） |
+
+生产形态可先 `npm run build`，再用 `npm run preview -- --port 9081 --host` 提供静态资源，行为与一键部署脚本中的前端启动方式一致。
+
+### 手动部署（简要）
+
+在仓库根目录创建并激活 `venv`，于 `backend` 执行 `pip install -r requirements.txt`；于 `frontend` 执行 `npm install` 与 `npm run build`。启动顺序：先后端再前端预览。若 PowerShell 禁止脚本，可对当前用户执行 `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser`，或使用 `venv\Scripts\activate.bat`。
+
+---
+
 ## 技术栈概览
 
 | 层级 | 主要技术 | 说明 |
@@ -60,50 +114,6 @@
 
 ---
 
-## 环境要求
-
-| 项目 | 版本或说明 |
-| --- | --- |
-| Python | 3.10+ 与 pip（建议使用当前仍受支持的 3.x 版本） |
-| Node.js | 16+ 与 npm |
-| Git | 克隆仓库时使用；也可从 Releases 下载源码包 |
-
----
-
-## 获取与运行
-
-### 自 Releases 安装（推荐）
-
-在 [GitHub Releases](https://github.com/DuoHBshuijiao/SimpleTavern/releases) 下载源码压缩包，解压进入目录后执行：
-
-| 系统 | 命令 |
-| --- | --- |
-| Windows | `python deploy.py` |
-| Linux / macOS | `python3 deploy.py` 或 `chmod +x deploy.sh` 后 `./deploy.sh` |
-
-脚本将检查环境、创建 `venv/`、安装前后端依赖、构建前端，并启动后端（默认 **9091**）与前端预览（默认 **9081**），通常会尝试打开浏览器。停止服务：`Ctrl+C`。
-
-根目录还提供 `deploy.sh`、`deploy.bat`；手动分步说明见下文。
-
-### 安卓 Termux
-
-勿将项目放在 **`/sdcard` 共享存储** 下运行：权限与挂载限制易导致 `python -m venv` 失败。请把仓库放在 Termux 私有目录（如 `$HOME`），用 `pkg` 安装 `python`、`nodejs`、`git` 等后再执行 `python deploy.py`。若使用 zip 包，同样在 `$HOME` 下解压。
-
-### 本地开发（前后端分离调试）
-
-| 步骤 | 目录 | 命令 |
-| --- | --- | --- |
-| 后端 | `backend` | 激活虚拟环境后：`python -m uvicorn app.main:app --reload --port 9091`（局域网可访问可加 `--host 0.0.0.0`） |
-| 前端 | `frontend` | `npm install` 后：`npm run dev`（通过 Vite 代理访问 `/api`，开发服务器默认监听 **9081**，见 `vite.config.ts`） |
-
-生产形态可先 `npm run build`，再用 `npm run preview -- --port 9081 --host` 提供静态资源，行为与一键部署脚本中的前端启动方式一致。
-
-### 手动部署（简要）
-
-在仓库根目录创建并激活 `venv`，于 `backend` 执行 `pip install -r requirements.txt`；于 `frontend` 执行 `npm install` 与 `npm run build`。启动顺序：先后端再前端预览。若 PowerShell 禁止脚本，可对当前用户执行 `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser`，或使用 `venv\Scripts\activate.bat`。
-
----
-
 ## 模型与凭据（OpenAI 兼容）
 
 在应用内「设置」中配置 **Base URL**、**API Key**、**Model** 等。密钥与连接信息会写入 `data/settings.json`（**明文存储**），请仅在可信本机环境使用并做好文件权限与备份策略。
@@ -125,7 +135,7 @@
 | CORS | 后端默认 `allow_origins=["*"]`，便于本地开发；若将服务暴露于不可信网络，需自行收紧策略。 | `backend/app/main.py` |
 | 部署脚本（Windows） | 脚本内对 Windows 命令行、引号等有特殊处理，避免嵌套 `cmd` 引号问题。 | `deploy.py` |
 
-**运维常见问题**（非代码缺陷）：9091 / 9081 端口占用时可改 `uvicorn` 与 `vite preview` 的端口参数；系统找不到 `python` / `npm` 时请安装或改用 `py`、`python3` 等。
+**运维常见问题**（非代码缺陷）：9091 / 9081 端口占用时可改 `uvicorn` 与 `vite preview` 的端口参数。命令行里找不到 `python` / `npm`、无输出或环境异常时，见上文 **「环境要求」** 与 **「命令行没反应、看不懂报错时（给初学者）」**；Windows 可双击 `deploy.bat` 保留窗口便于查看错误。
 
 ---
 
