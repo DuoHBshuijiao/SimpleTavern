@@ -138,6 +138,8 @@ export const useChatsStore = defineStore('chats', {
      * @param {string | null} [firstMessageCharacterId] - 首句发言角色ID（可选）
      * @param {Record<string, GroupMemberSettings> | null} [memberSettings] - 成员设置（可选）
      * @param {string | null} [userPersonaId] - 用户身份ID（可选）
+     * @param {number} [groupSystemInjectDepth] - 整段 system 深度插入（可选）
+     * @param {boolean} [groupSystemAlwaysAtBottom] - 为 true 时 system 在首条，不启深度（可选）
      * @returns {Promise<Chat>} 创建后的群聊会话
      */
     async createGroup(
@@ -148,6 +150,8 @@ export const useChatsStore = defineStore('chats', {
       firstMessageCharacterId?: string | null,
       memberSettings?: Record<string, GroupMemberSettings> | null,
       userPersonaId?: string | null,
+      groupSystemInjectDepth?: number,
+      groupSystemAlwaysAtBottom?: boolean,
     ) {
       const chat = await apiPost<Chat>('/api/chats', { 
         characterId, 
@@ -158,6 +162,8 @@ export const useChatsStore = defineStore('chats', {
         firstMessageCharacterId: firstMessageCharacterId ?? null,
         memberSettings: memberSettings ?? null,
         userPersonaId: userPersonaId ?? null,
+        groupSystemInjectDepth: groupSystemInjectDepth ?? null,
+        groupSystemAlwaysAtBottom: groupSystemAlwaysAtBottom ?? null,
       })
       await this.loadGroupList()
       this.activeChatId = chat.id
@@ -175,6 +181,8 @@ export const useChatsStore = defineStore('chats', {
         pureAiMode?: boolean
         memberSettings?: Record<string, GroupMemberSettings> | null
         userPersonaId?: string | null
+        groupSystemInjectDepth?: number | null
+        groupSystemAlwaysAtBottom?: boolean | null
       },
     ) {
       const chat = await apiPost<Chat>(
@@ -185,6 +193,8 @@ export const useChatsStore = defineStore('chats', {
           pureAiMode: opts.pureAiMode,
           memberSettings: opts.memberSettings ?? null,
           userPersonaId: opts.userPersonaId ?? null,
+          groupSystemInjectDepth: opts.groupSystemInjectDepth ?? null,
+          groupSystemAlwaysAtBottom: opts.groupSystemAlwaysAtBottom ?? null,
         },
       )
       await this.loadGroupList()
@@ -317,6 +327,28 @@ export const useChatsStore = defineStore('chats', {
      */
     async updateGroupDelay(chatId: string, groupDelay: number) {
       const chat = await apiPut<Chat>(`/api/chats/${chatId}`, { groupDelay })
+      this.activeChat = chat
+      await this.loadGroupList()
+      return chat
+    },
+    /**
+     * 一次更新群聊成员顺序、发言延迟与 system 插入选项
+     */
+    async updateGroupSettings(
+      chatId: string,
+      body: {
+        memberIds: string[]
+        groupDelay: number
+        groupSystemInjectDepth: number
+        groupSystemAlwaysAtBottom: boolean
+      },
+    ) {
+      const chat = await apiPut<Chat>(`/api/chats/${chatId}`, {
+        memberIds: body.memberIds,
+        groupDelay: body.groupDelay,
+        groupSystemInjectDepth: body.groupSystemInjectDepth,
+        groupSystemAlwaysAtBottom: body.groupSystemAlwaysAtBottom,
+      })
       this.activeChat = chat
       await this.loadGroupList()
       return chat
