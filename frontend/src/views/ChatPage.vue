@@ -37,8 +37,7 @@
  *    - saveCharacter: 保存角色
  *    - deleteCharacter: 删除角色
  *    - handleCreateGroup: 处理群聊创建
- *    - handleUpdateMemberIds: 处理成员ID更新
- *    - handleUpdateGroupDelay: 处理群聊延迟更新
+ *    - handleGroupSettingsApply: 群聊设置弹窗一次保存（顺序、延迟、system 插入）
  *    - handleModelSelect: 处理模型选择
  *    - scrollToBottom: 滚动到底部
  *
@@ -1910,25 +1909,15 @@ function handleCharacterEditorWbDragEnd() {
  * @param {string[]} memberIds - 新的成员ID顺序列表
  * @returns {Promise<void>} 完成时返回
  */
-async function handleUpdateMemberIds(memberIds: string[]) {
-  if (activeChat.value) {
-    await chats.updateMemberOrder(activeChat.value.id, memberIds)
-  }
-}
-
-/**
- * 处理群聊延迟更新
- *
- * 更新群聊中角色发言之间的延迟时间。
- * 使用chatsStore.updateGroupDelay（来自stores/chats.ts）更新。
- *
- * @param {number} delay - 延迟时间（毫秒）
- * @returns {Promise<void>} 完成时返回
- */
-async function handleUpdateGroupDelay(delay: number) {
-  if (activeChat.value) {
-    await chats.updateGroupDelay(activeChat.value.id, delay)
-  }
+async function handleGroupSettingsApply(payload: {
+  memberIds: string[]
+  groupDelay: number
+  groupSystemInjectDepth: number
+  groupSystemAlwaysAtBottom: boolean
+}) {
+  if (!activeChat.value) return
+  await chats.updateGroupSettings(activeChat.value.id, payload)
+  showGroupSettings.value = false
 }
 
 interface ModelOption {
@@ -4027,6 +4016,8 @@ async function handleCreateGroup(data: {
   pureAiMode: boolean
   firstMessageCharacterId: string | null
   memberInclusions: Record<string, { includePersonality: boolean; includeScenario: boolean }>
+  groupSystemInjectDepth: number
+  groupSystemAlwaysAtBottom: boolean
 }) {
   const firstMember = data.memberIds[0]
   if (!firstMember) return
@@ -4054,6 +4045,8 @@ async function handleCreateGroup(data: {
       pureAiMode: data.pureAiMode,
       memberSettings,
       userPersonaId: personaId ?? null,
+      groupSystemInjectDepth: data.groupSystemInjectDepth,
+      groupSystemAlwaysAtBottom: data.groupSystemAlwaysAtBottom,
     })
     promoteSourceChat.value = null
     return
@@ -4067,6 +4060,8 @@ async function handleCreateGroup(data: {
     data.firstMessageCharacterId,
     memberSettings,
     personaId ?? null,
+    data.groupSystemInjectDepth,
+    data.groupSystemAlwaysAtBottom,
   )
 }
 
@@ -4971,10 +4966,8 @@ const editingPersonaAvatarUrl = computed(() => {
       v-model:show="showGroupSettings"
       :chat="activeChat"
       :characters="characters.list"
-      @update:member-ids="handleUpdateMemberIds"
-      @update:group-delay="handleUpdateGroupDelay"
+      @apply="handleGroupSettingsApply"
       @open-member-settings="actions.openMemberSettingsEditor"
-      @save="showGroupSettings = false"
     />
 
     <MemberSettingsModal
