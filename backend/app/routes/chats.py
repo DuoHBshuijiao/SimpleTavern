@@ -335,7 +335,12 @@ def create_chat(req: CreateChatRequest) -> Chat:
     if is_group and req.memberSettings:
         for member_id, s in req.memberSettings.items():
             chat.memberSettings[member_id] = s
-    
+    if is_group:
+        if req.groupSystemInjectDepth is not None:
+            chat.groupSystemInjectDepth = int(req.groupSystemInjectDepth)
+        if req.groupSystemAlwaysAtBottom is not None:
+            chat.groupSystemAlwaysAtBottom = bool(req.groupSystemAlwaysAtBottom)
+
     chat.createdAt = _now_iso()
     chat.updatedAt = _now_iso()
     
@@ -460,6 +465,10 @@ def promote_to_group(source_chat_id: str, req: PromoteToGroupRequest) -> Chat:
     if req.memberSettings:
         for member_id, s in req.memberSettings.items():
             new_chat.memberSettings[member_id] = s
+    if req.groupSystemInjectDepth is not None:
+        new_chat.groupSystemInjectDepth = int(req.groupSystemInjectDepth)
+    if req.groupSystemAlwaysAtBottom is not None:
+        new_chat.groupSystemAlwaysAtBottom = bool(req.groupSystemAlwaysAtBottom)
 
     if pure_ai_mode:
         new_chat.userPersonaId = None
@@ -583,6 +592,10 @@ def update_chat(chat_id: str, req: UpdateChatRequest) -> Chat:
         chat.title = req.title
     if req.groupDelay is not None:
         chat.groupDelay = req.groupDelay
+    if "groupSystemInjectDepth" in req.model_fields_set and req.groupSystemInjectDepth is not None:
+        chat.groupSystemInjectDepth = max(0, int(req.groupSystemInjectDepth))
+    if "groupSystemAlwaysAtBottom" in req.model_fields_set and req.groupSystemAlwaysAtBottom is not None:
+        chat.groupSystemAlwaysAtBottom = bool(req.groupSystemAlwaysAtBottom)
     if req.memberIds is not None:
         if not chat.isGroup:
             raise HTTPException(status_code=400, detail="memberIds can only be updated for group chats")
