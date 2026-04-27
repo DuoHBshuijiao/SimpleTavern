@@ -853,6 +853,8 @@ class Chat(BaseModel):
         memberIds: 群成员角色ID列表（群聊时使用）
         memberSettings: 成员独立设置字典，key为characterId
         groupDelay: 群聊角色间延迟时间（毫秒）
+        groupSystemInjectDepth: 群聊整段 system 按深度插入时，在最后 N 条消息之前插入（仅当 groupSystemAlwaysAtBottom 为 False）
+        groupSystemAlwaysAtBottom: 为 True（默认）时不做深度插入，整段 system 在 messages 最前，与旧版一致
         createdAt: 创建时间
         updatedAt: 更新时间
     """
@@ -869,6 +871,8 @@ class Chat(BaseModel):
     memberIds: list[str] = Field(default_factory=list)
     memberSettings: dict[str, GroupMemberSettings] = Field(default_factory=dict)
     groupDelay: int = 1500
+    groupSystemInjectDepth: int = Field(default=5, ge=0)
+    groupSystemAlwaysAtBottom: bool = True
     createdAt: str = Field(default_factory=_now_iso)
     updatedAt: str = Field(default_factory=_now_iso)
 
@@ -888,6 +892,8 @@ class CreateChatRequest(BaseModel):
         pureAiMode: 是否启用纯AI模式
         memberSettings: 群成员设置字典
         firstMessageCharacterId: 群聊时选择启用哪个成员的首条消息作为开场
+        groupSystemInjectDepth: 群聊 system 深度插入（可选，默认由服务端为 5）
+        groupSystemAlwaysAtBottom: 为 True 时整段 system 在首条，不启深度（可选，默认 True）
     """
     characterId: str
     title: str | None = None
@@ -897,6 +903,8 @@ class CreateChatRequest(BaseModel):
     pureAiMode: bool | None = None
     memberSettings: dict[str, GroupMemberSettings] | None = None
     firstMessageCharacterId: str | None = None
+    groupSystemInjectDepth: int | None = Field(default=None, ge=0)
+    groupSystemAlwaysAtBottom: bool | None = None
 
 
 class PromoteToGroupRequest(BaseModel):
@@ -907,6 +915,8 @@ class PromoteToGroupRequest(BaseModel):
     pureAiMode: bool | None = None
     userPersonaId: str | None = None
     memberSettings: dict[str, GroupMemberSettings] | None = None
+    groupSystemInjectDepth: int | None = Field(default=None, ge=0)
+    groupSystemAlwaysAtBottom: bool | None = None
 
 
 class AppendMessageRequest(BaseModel):
@@ -993,6 +1003,8 @@ class UpdateChatRequest(BaseModel):
         memberSettings: 成员独立设置字典
         memberIds: 群成员顺序列表（用于拖拽排序）
         userPersonaId: 用户Persona ID
+        groupSystemInjectDepth: 群聊整段 system 深度插入
+        groupSystemAlwaysAtBottom: 整段 system 是否固定在 messages 最前
     """
     title: str | None = None
     overrides: ChatOverrides | None = None
@@ -1000,6 +1012,8 @@ class UpdateChatRequest(BaseModel):
     memberSettings: dict[str, GroupMemberSettings] | None = None
     memberIds: list[str] | None = None
     userPersonaId: str | None = None
+    groupSystemInjectDepth: int | None = Field(default=None, ge=0)
+    groupSystemAlwaysAtBottom: bool | None = None
 
 
 class GenerateStreamRequest(BaseModel):
