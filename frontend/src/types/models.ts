@@ -512,6 +512,8 @@ export interface GroupMemberSettings {
  *    - memberIds: 群聊成员ID列表（仅群聊使用）
  *    - memberSettings: 群聊成员设置映射（characterId -> settings，仅群聊使用）
  *    - groupDelay: 群聊角色间延迟时间（毫秒，仅群聊使用）
+ *    - groupSystemInjectDepth: 整段 system 按深度插入时在最后 N 条之前（仅 groupSystemAlwaysAtBottom 为 false 时）
+ *    - groupSystemAlwaysAtBottom: 为 true（默认）时整段 system 在首条，不启深度插入
  *    - createdAt: 创建时间（ISO格式）
  *    - updatedAt: 更新时间（ISO格式）
  */
@@ -527,6 +529,8 @@ export interface Chat {
   memberIds: string[]
   memberSettings: Record<string, GroupMemberSettings>
   groupDelay: number
+  groupSystemInjectDepth?: number
+  groupSystemAlwaysAtBottom?: boolean
   createdAt: string
   updatedAt: string
 }
