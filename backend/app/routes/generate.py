@@ -33,6 +33,14 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.llm.openai_compat import chat_completions, chat_completions_message, stream_chat_completions
 from app.placeholders import replace_placeholders_in_text
+from app.prompt_xml import (
+    wrap_acting_as,
+    wrap_after_placeholders,
+    wrap_char_name,
+    wrap_group_roster,
+    wrap_interject_hint,
+    wrap_user_name,
+)
 from app.regex_compat import compile_user_regex
 from app.schemas import (
     build_reasoning_request_config,
@@ -127,6 +135,48 @@ def _resolve_user_name_for_message(msg: ChatMessage, fallback_user_name: str) ->
 def _build_group_identity_guardrail(char_name: str | None) -> str:
     resolved = (char_name or "").strip() or "角色"
     return f"[仅允许使用{resolved}的身份输出下一条回复。]"
+
+
+def _build_group_api_messages(
+    *,
+    system_prompt: str,
+    conversation: list[dict[str, Any]],
+    chat: Any,
+    character_name: str | None,
+    runtime_user_name: str,
+    settings: Any,
+) -> list[dict[str, Any]]:
+    """
+    群聊：整段 system 放在 messages 最前（groupSystemAlwaysAtBottom=True，默认），与旧版一致；
+    为 False 时在世界书已合并的 conversation 上按深度插入同一段 system。
+    """
+    always_first = bool(getattr(chat, "groupSystemAlwaysAtBottom", True))
+    raw_d = getattr(chat, "groupSystemInjectDepth", 5)
+    try:
+        depth = max(0, int(raw_d))
+    except (TypeError, ValueError):
+        depth = 5
+
+    conv: list[dict[str, Any]] = [dict(x) for x in conversation]
+    if system_prompt and not always_first:
+        idx = max(0, len(conv) - depth)
+        conv.insert(idx, {"role": "system", "content": system_prompt})
+
+    messages: list[dict[str, Any]] = []
+    if system_prompt and always_first:
+        messages.append({"role": "system", "content": system_prompt})
+    for c in conv:
+        c = dict(c)
+        c.pop("_message_id", None)
+        messages.append(c)
+    messages.append({"role": "user", "content": _build_group_identity_guardrail(character_name)})
+    _resolve_and_append_global_prefill(
+        messages,
+        settings,
+        char_name=character_name or "角色",
+        user_name=runtime_user_name,
+    )
+    return messages
 
 
 def _resolve_session_system_prompt_mode(chat: Any, runtime: Any | None = None) -> str:
@@ -532,7 +582,7 @@ def _build_draft_help_prompt(
         template = template.replace("（此处自动添加用户当前Persona内容）", persona_text or "（无）")
         prompt = replace_placeholders_in_text(template, char_name=char_name, user_name=user_name)
         if long_term_memory and long_term_memory.strip():
-            prompt = f"{prompt}\n\nLongTermMemory：\n{long_term_memory.strip()}"
+            prompt = f"{prompt}\n\n{wrap_after_placeholders('LongTermMemory', long_term_memory.strip(), char_name=char_name, user_name=user_name)}"
         return prompt
     template = (
         "#增强消息\n"
@@ -550,7 +600,7 @@ def _build_draft_help_prompt(
     template = template.replace("（此处自动添加用户输入文本框内的文字。）", draft or "")
     prompt = replace_placeholders_in_text(template, char_name=char_name, user_name=user_name)
     if long_term_memory and long_term_memory.strip():
-        prompt = f"{prompt}\n\nLongTermMemory：\n{long_term_memory.strip()}"
+        prompt = f"{prompt}\n\n{wrap_after_placeholders('LongTermMemory', long_term_memory.strip(), char_name=char_name, user_name=user_name)}"
     return prompt
 
 
@@ -645,12 +695,16 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
         runtime_user_name = (persona_for_prompt.name or "").strip() or "用户"
         if persona_for_prompt.name and persona_for_prompt.name.strip():
             user_persona_parts.append(
-                f"user姓名：{replace_placeholders_in_text(persona_for_prompt.name.strip(), char_name=character.name or '角色', user_name=runtime_user_name)}"
+                wrap_user_name(
+                    raw=persona_for_prompt.name.strip(),
+                    char_name=character.name or "角色",
+                    user_name=runtime_user_name,
+                )
             )
         if persona_for_prompt.description and persona_for_prompt.description.strip():
             user_persona_parts.append(
-                "User简介：\n"
-                + replace_placeholders_in_text(
+                wrap_after_placeholders(
+                    "UserBio",
                     persona_for_prompt.description.strip(),
                     char_name=character.name or "角色",
                     user_name=runtime_user_name,
@@ -661,33 +715,18 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
     
     character_parts: list[str] = []
     if character.name and character.name.strip():
-        character_parts.append(f"char姓名：{character.name.strip()}")
+        character_parts.append(wrap_char_name(raw=character.name.strip()))
     if character.personality and character.personality.strip():
         character_parts.append(
-            "Personality：\n"
-            + replace_placeholders_in_text(
-                character.personality.strip(),
-                char_name=ph_char,
-                user_name=ph_user,
-            )
+            wrap_after_placeholders("Personality", character.personality.strip(), char_name=ph_char, user_name=ph_user)
         )
     if character.scenario and character.scenario.strip():
         character_parts.append(
-            "Scenario：\n"
-            + replace_placeholders_in_text(
-                character.scenario.strip(),
-                char_name=ph_char,
-                user_name=ph_user,
-            )
+            wrap_after_placeholders("Scenario", character.scenario.strip(), char_name=ph_char, user_name=ph_user)
         )
     if character.exampleDialogue and character.exampleDialogue.strip():
         character_parts.append(
-            "ExampleDialogue：\n"
-            + replace_placeholders_in_text(
-                character.exampleDialogue.strip(),
-                char_name=ph_char,
-                user_name=ph_user,
-            )
+            wrap_after_placeholders("ExampleDialogue", character.exampleDialogue.strip(), char_name=ph_char, user_name=ph_user)
         )
     if character.systemPrompt and character.systemPrompt.strip():
         character_parts.append(
@@ -704,8 +743,7 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
     long_term_memory = getattr(chat.overrides, "longTermMemory", None)
     if long_term_memory and long_term_memory.strip():
         prompt_parts.append(
-            "LongTermMemory：\n"
-            + replace_placeholders_in_text(long_term_memory.strip(), char_name=ph_char, user_name=ph_user)
+            wrap_after_placeholders("LongTermMemory", long_term_memory.strip(), char_name=ph_char, user_name=ph_user)
         )
 
     if chat.overrides.prompt and str(chat.overrides.prompt).strip():
@@ -1167,12 +1205,16 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
         user_persona_parts: list[str] = []
         if selected_persona.name and selected_persona.name.strip():
             user_persona_parts.append(
-                f"user姓名：{replace_placeholders_in_text(selected_persona.name.strip(), char_name=character.name or '角色', user_name=runtime_user_name)}"
+                wrap_user_name(
+                    raw=selected_persona.name.strip(),
+                    char_name=character.name or "角色",
+                    user_name=runtime_user_name,
+                )
             )
         if selected_persona.description and selected_persona.description.strip():
             user_persona_parts.append(
-                "User简介：\n"
-                + replace_placeholders_in_text(
+                wrap_after_placeholders(
+                    "UserBio",
                     selected_persona.description.strip(),
                     char_name=character.name or "角色",
                     user_name=runtime_user_name,
@@ -1188,22 +1230,35 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
             all_characters.append(member_char)
         except FileNotFoundError:
             continue
-    
+
     group_context_parts = ["这是一个群聊场景，参与者包括："]
     for i, char in enumerate(all_characters):
         group_context_parts.append(f"{i+1}. {char.name}")
-    prompt_parts.append("\n".join(group_context_parts))
-    
+    prompt_parts.append(
+        wrap_group_roster(
+            lines=group_context_parts,
+            char_name=ph_char,
+            user_name=ph_user,
+        )
+    )
+
     member_settings = chat.memberSettings.get(req.characterId)
     include_personality = True if member_settings is None else bool(getattr(member_settings, "includePersonality", True))
     include_scenario = True if member_settings is None else bool(getattr(member_settings, "includeScenario", True))
 
     character_parts: list[str] = []
-    character_parts.append(f"你现在扮演的角色是：{character.name}")
+    if character.name and str(character.name).strip():
+        character_parts.append(
+            wrap_acting_as(
+                raw=str(character.name).strip(),
+                char_name=character.name or "角色",
+                user_name=runtime_user_name,
+            )
+        )
     if include_personality and character.personality and character.personality.strip():
         character_parts.append(
-            "Personality：\n"
-            + replace_placeholders_in_text(
+            wrap_after_placeholders(
+                "Personality",
                 character.personality.strip(),
                 char_name=character.name or "角色",
                 user_name=runtime_user_name,
@@ -1211,8 +1266,8 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
         )
     if include_scenario and character.scenario and character.scenario.strip():
         character_parts.append(
-            "Scenario：\n"
-            + replace_placeholders_in_text(
+            wrap_after_placeholders(
+                "Scenario",
                 character.scenario.strip(),
                 char_name=character.name or "角色",
                 user_name=runtime_user_name,
@@ -1226,15 +1281,14 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
                 user_name=runtime_user_name,
             )
         )
-    
+
     if character_parts:
         prompt_parts.append("\n\n".join(character_parts))
 
     long_term_memory = getattr(chat.overrides, "longTermMemory", None)
     if long_term_memory and long_term_memory.strip():
         prompt_parts.append(
-            "LongTermMemory：\n"
-            + replace_placeholders_in_text(long_term_memory.strip(), char_name=ph_char, user_name=ph_user)
+            wrap_after_placeholders("LongTermMemory", long_term_memory.strip(), char_name=ph_char, user_name=ph_user)
         )
 
     if chat.overrides.prompt and str(chat.overrides.prompt).strip():
@@ -1381,19 +1435,13 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
         final_injections.extend(build_worldbook_injections(book, entries, len(conversation), ins_dep))
     conversation = insert_injections_into_conversation(conversation, final_injections)
 
-    messages: list[dict] = []
-    if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
-    for c in conversation:
-        c = dict(c)
-        c.pop("_message_id", None)
-        messages.append(c)
-    messages.append({"role": "user", "content": _build_group_identity_guardrail(character.name)})
-    _resolve_and_append_global_prefill(
-        messages,
-        settings,
-        char_name=character.name or "角色",
-        user_name=runtime_user_name,
+    messages: list[dict] = _build_group_api_messages(
+        system_prompt=system_prompt,
+        conversation=conversation,
+        chat=chat,
+        character_name=character.name,
+        runtime_user_name=runtime_user_name,
+        settings=settings,
     )
 
     reasoning_cfg = build_reasoning_request_config(settings)
@@ -1581,12 +1629,16 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
         user_persona_parts: list[str] = []
         if selected_persona.name and selected_persona.name.strip():
             user_persona_parts.append(
-                f"user姓名：{replace_placeholders_in_text(selected_persona.name.strip(), char_name=character.name or '角色', user_name=runtime_user_name)}"
+                wrap_user_name(
+                    raw=selected_persona.name.strip(),
+                    char_name=character.name or "角色",
+                    user_name=runtime_user_name,
+                )
             )
         if selected_persona.description and selected_persona.description.strip():
             user_persona_parts.append(
-                "User简介：\n"
-                + replace_placeholders_in_text(
+                wrap_after_placeholders(
+                    "UserBio",
                     selected_persona.description.strip(),
                     char_name=character.name or "角色",
                     user_name=runtime_user_name,
@@ -1606,19 +1658,32 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
     group_context_parts = ["这是一个群聊场景，参与者包括："]
     for i, char in enumerate(all_characters):
         group_context_parts.append(f"{i+1}. {char.name}")
-    prompt_parts.append("\n".join(group_context_parts))
+    prompt_parts.append(
+        wrap_group_roster(
+            lines=group_context_parts,
+            char_name=ph_char,
+            user_name=ph_user,
+        )
+    )
 
     member_settings = chat.memberSettings.get(req.characterId)
     include_personality = True if member_settings is None else bool(getattr(member_settings, "includePersonality", True))
     include_scenario = True if member_settings is None else bool(getattr(member_settings, "includeScenario", True))
 
     character_parts: list[str] = []
-    character_parts.append(f"你现在扮演的角色是：{character.name}")
-    character_parts.append("请根据当前对话内容进行回复（这是一次额外的插话机会）。")
+    if character.name and str(character.name).strip():
+        character_parts.append(
+            wrap_acting_as(
+                raw=str(character.name).strip(),
+                char_name=character.name or "角色",
+                user_name=runtime_user_name,
+            )
+        )
+    character_parts.append(wrap_interject_hint())
     if include_personality and character.personality and character.personality.strip():
         character_parts.append(
-            "Personality：\n"
-            + replace_placeholders_in_text(
+            wrap_after_placeholders(
+                "Personality",
                 character.personality.strip(),
                 char_name=character.name or "角色",
                 user_name=runtime_user_name,
@@ -1626,8 +1691,8 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
         )
     if include_scenario and character.scenario and character.scenario.strip():
         character_parts.append(
-            "Scenario：\n"
-            + replace_placeholders_in_text(
+            wrap_after_placeholders(
+                "Scenario",
                 character.scenario.strip(),
                 char_name=character.name or "角色",
                 user_name=runtime_user_name,
@@ -1641,15 +1706,14 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
                 user_name=runtime_user_name,
             )
         )
-    
+
     if character_parts:
         prompt_parts.append("\n\n".join(character_parts))
 
     long_term_memory = getattr(chat.overrides, "longTermMemory", None)
     if long_term_memory and long_term_memory.strip():
         prompt_parts.append(
-            "LongTermMemory：\n"
-            + replace_placeholders_in_text(long_term_memory.strip(), char_name=ph_char, user_name=ph_user)
+            wrap_after_placeholders("LongTermMemory", long_term_memory.strip(), char_name=ph_char, user_name=ph_user)
         )
 
     if chat.overrides.prompt and str(chat.overrides.prompt).strip():
@@ -1788,19 +1852,13 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
         final_injections.extend(build_worldbook_injections(book, entries, len(conversation), ins_dep))
     conversation = insert_injections_into_conversation(conversation, final_injections)
 
-    messages: list[dict] = []
-    if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
-    for c in conversation:
-        c = dict(c)
-        c.pop("_message_id", None)
-        messages.append(c)
-    messages.append({"role": "user", "content": _build_group_identity_guardrail(character.name)})
-    _resolve_and_append_global_prefill(
-        messages,
-        settings,
-        char_name=character.name or "角色",
-        user_name=runtime_user_name,
+    messages: list[dict] = _build_group_api_messages(
+        system_prompt=system_prompt,
+        conversation=conversation,
+        chat=chat,
+        character_name=character.name,
+        runtime_user_name=runtime_user_name,
+        settings=settings,
     )
 
     reasoning_cfg = build_reasoning_request_config(settings)
