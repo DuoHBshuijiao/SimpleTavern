@@ -53,6 +53,8 @@ const emit = defineEmits<{
     pureAiMode: boolean
     firstMessageCharacterId: string | null
     memberInclusions: Record<string, { includePersonality: boolean; includeScenario: boolean }>
+    groupSystemInjectDepth: number
+    groupSystemAlwaysAtBottom: boolean
   }]
 }>()
 
@@ -63,6 +65,8 @@ const groupPureAiMode = ref(false)
 const groupFirstMessageEnabled = ref(true)
 const groupFirstMessageCharacterId = ref<string | null>(null)
 const groupMemberInclusions = ref<Record<string, { includePersonality: boolean; includeScenario: boolean }>>({})
+const groupSystemInjectDepth = ref(5)
+const groupSystemAlwaysAtBottom = ref(true)
 
 const isMigrateMode = computed(() => !!(props.migrateFromChatId && (props.initialMemberIds?.length ?? 0) > 0))
 
@@ -80,6 +84,8 @@ watch(() => props.show, (newVal) => {
     for (const id of ids) {
       groupMemberInclusions.value[id] = { includePersonality: true, includeScenario: true }
     }
+    groupSystemInjectDepth.value = 5
+    groupSystemAlwaysAtBottom.value = true
     return
   }
   selectedMemberIds.value = []
@@ -88,6 +94,8 @@ watch(() => props.show, (newVal) => {
   groupFirstMessageEnabled.value = true
   groupFirstMessageCharacterId.value = null
   groupMemberInclusions.value = {}
+  groupSystemInjectDepth.value = 5
+  groupSystemAlwaysAtBottom.value = true
 })
 
 /**
@@ -155,6 +163,8 @@ function handleCreate() {
     pureAiMode: groupPureAiMode.value,
     firstMessageCharacterId: groupFirstMessageEnabled.value ? groupFirstMessageCharacterId.value : null,
     memberInclusions: groupMemberInclusions.value,
+    groupSystemInjectDepth: Math.max(0, Number(groupSystemInjectDepth.value) || 0),
+    groupSystemAlwaysAtBottom: groupSystemAlwaysAtBottom.value,
   })
   emit('update:show', false)
 }
@@ -182,29 +192,56 @@ function handleCreate() {
 
             <div class="bg-white/5 border border-white/10 rounded-xl p-3">
               <div class="text-sm text-gray-300 font-medium mb-2">本次聊天设置</div>
-              <div class="flex items-center justify-between">
-                <div class="text-sm text-gray-400">纯 AI 模式（不注入 Persona，用户发言将以 system 影响世界）</div>
+              <div class="flex items-center justify-between gap-3">
+                <div class="min-w-0 flex-1 text-sm text-gray-400">纯 AI 模式（不注入 Persona，用户发言将以 system 影响世界）</div>
                 <button
-                  class="flex items-center gap-2"
+                  type="button"
+                  class="flex shrink-0 items-center gap-2"
                   @click="groupPureAiMode = !groupPureAiMode"
                 >
                   <div class="w-10 h-5 rounded-full relative transition-colors duration-200" :class="groupPureAiMode ? 'bg-brand' : 'bg-gray-700'">
                     <div class="absolute top-1 w-3 h-3 rounded-full bg-white transition-transform duration-200" :class="groupPureAiMode ? 'left-6' : 'left-1'"></div>
                   </div>
-                  <span class="text-xs text-gray-400">{{ groupPureAiMode ? '开启' : '关闭' }}</span>
+                  <span class="min-w-[2.5rem] text-center text-xs text-gray-400">{{ groupPureAiMode ? '开启' : '关闭' }}</span>
                 </button>
+              </div>
+              <div class="mt-3 space-y-3 pt-2 border-t border-white/5">
+                <div class="flex items-center justify-between gap-3">
+                  <div class="min-w-0 flex-1 text-sm text-gray-400">永远在底部（默认）</div>
+                  <button
+                    type="button"
+                    class="flex shrink-0 items-center gap-2"
+                    @click="groupSystemAlwaysAtBottom = !groupSystemAlwaysAtBottom"
+                  >
+                    <div class="w-10 h-5 rounded-full relative transition-colors duration-200" :class="groupSystemAlwaysAtBottom ? 'bg-brand' : 'bg-gray-700'">
+                      <div class="absolute top-1 w-3 h-3 rounded-full bg-white transition-transform duration-200" :class="groupSystemAlwaysAtBottom ? 'left-6' : 'left-1'"></div>
+                    </div>
+                    <span class="min-w-[2.5rem] text-center text-xs text-gray-400">{{ groupSystemAlwaysAtBottom ? '开启' : '关闭' }}</span>
+                  </button>
+                </div>
+                <p class="text-xs text-gray-500">开启时整段 system 在首条，与旧版一致；关闭后可用下方「注入深度」将整段 system 插入历史。</p>
+                <div :class="{ 'opacity-50 pointer-events-none': groupSystemAlwaysAtBottom }">
+                  <label class="text-xs text-gray-500">系统提示词注入深度</label>
+                  <input
+                    v-model.number="groupSystemInjectDepth"
+                    type="number"
+                    min="0"
+                    class="input mt-1 w-full bg-black/20 border-white/10 focus:border-brand-a50"
+                    step="1"
+                  />
+                </div>
               </div>
             </div>
 
             <div v-if="!isMigrateMode" class="bg-white/5 border border-white/10 rounded-xl p-3">
               <div class="text-sm text-gray-300 font-medium mb-2">群聊首句（故事背景）</div>
-              <div class="flex items-center justify-between mb-2">
-                <div class="text-sm text-gray-400">启用某角色的 First Message 作为开场</div>
-                <button class="flex items-center gap-2" @click="groupFirstMessageEnabled = !groupFirstMessageEnabled">
+              <div class="flex items-center justify-between gap-3 mb-2">
+                <div class="min-w-0 flex-1 text-sm text-gray-400">启用某角色的 First Message 作为开场</div>
+                <button type="button" class="flex shrink-0 items-center gap-2" @click="groupFirstMessageEnabled = !groupFirstMessageEnabled">
                   <div class="w-10 h-5 rounded-full relative transition-colors duration-200" :class="groupFirstMessageEnabled ? 'bg-brand' : 'bg-gray-700'">
                     <div class="absolute top-1 w-3 h-3 rounded-full bg-white transition-transform duration-200" :class="groupFirstMessageEnabled ? 'left-6' : 'left-1'"></div>
                   </div>
-                  <span class="text-xs text-gray-400">{{ groupFirstMessageEnabled ? '启用' : '关闭' }}</span>
+                  <span class="min-w-[2.5rem] text-center text-xs text-gray-400">{{ groupFirstMessageEnabled ? '启用' : '关闭' }}</span>
                 </button>
               </div>
               <div v-if="groupFirstMessageEnabled" class="flex items-center gap-2">
