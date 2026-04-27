@@ -3824,6 +3824,16 @@ async function checkUpdate() {
                   <div class="min-h-0 overflow-hidden">
                     <div class="space-y-3 border-t border-[var(--color-border-subtle)] px-4 pb-4 pt-4">
                       <div class="flex flex-wrap items-center gap-2">
+                        <a
+                          href="https://duohbshuijiao.github.io/SumOrNot/"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          class="min-h-10 inline-flex items-center rounded-lg bg-surface-muted px-4 py-2 text-sm text-[var(--color-text)] transition-colors whitespace-nowrap hover:bg-surface-hover"
+                        >
+                          成本计算器
+                        </a>
+                      </div>
+                      <div class="flex flex-wrap items-center gap-2">
                         <button
                           type="button"
                           class="min-h-10 rounded-lg bg-surface-muted px-4 py-2 text-sm text-[var(--color-text)] transition-colors whitespace-nowrap hover:bg-surface-hover"
