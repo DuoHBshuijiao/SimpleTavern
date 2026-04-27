@@ -49,6 +49,13 @@ from app.chat_transcript import (
     format_chat_as_jsonl_string,
 )
 from app.placeholders import replace_placeholders_in_text
+from app.prompt_xml import (
+    wrap_acting_as,
+    wrap_after_placeholders,
+    wrap_char_name,
+    wrap_group_roster,
+    wrap_user_name,
+)
 from app.schemas import Chat, ChatMessage, CharacterCard, ExtraFirstMessageEntry, Settings, WorldBook
 from app.storage import (
     avatar_path,
@@ -777,12 +784,16 @@ def _build_user_persona_prompt(settings: Settings, chat: Chat, *, char_name: str
     parts: list[str] = []
     if selected.name and selected.name.strip():
         parts.append(
-            f"user姓名：{replace_placeholders_in_text(selected.name.strip(), char_name=char_name, user_name=runtime_user_name)}"
+            wrap_user_name(
+                raw=selected.name.strip(),
+                char_name=char_name,
+                user_name=runtime_user_name,
+            )
         )
     if selected.description and selected.description.strip():
         parts.append(
-            "User简介：\n"
-            + replace_placeholders_in_text(
+            wrap_after_placeholders(
+                "UserBio",
                 selected.description.strip(),
                 char_name=char_name,
                 user_name=runtime_user_name,
@@ -839,24 +850,14 @@ def _build_single_system_prompt(chat: Chat, settings: Settings) -> str:
     if character:
         character_parts: list[str] = []
         if character.name and character.name.strip():
-            character_parts.append(f"char姓名：{character.name.strip()}")
+            character_parts.append(wrap_char_name(raw=character.name.strip()))
         if character.personality and character.personality.strip():
             character_parts.append(
-                "Personality：\n"
-                + replace_placeholders_in_text(
-                    character.personality.strip(),
-                    char_name=ph_char,
-                    user_name=ph_user,
-                )
+                wrap_after_placeholders("Personality", character.personality.strip(), char_name=ph_char, user_name=ph_user)
             )
         if character.scenario and character.scenario.strip():
             character_parts.append(
-                "Scenario：\n"
-                + replace_placeholders_in_text(
-                    character.scenario.strip(),
-                    char_name=ph_char,
-                    user_name=ph_user,
-                )
+                wrap_after_placeholders("Scenario", character.scenario.strip(), char_name=ph_char, user_name=ph_user)
             )
         if character.systemPrompt and character.systemPrompt.strip():
             character_parts.append(
@@ -872,8 +873,7 @@ def _build_single_system_prompt(chat: Chat, settings: Settings) -> str:
     long_term_memory = getattr(chat.overrides, "longTermMemory", None)
     if long_term_memory and long_term_memory.strip():
         prompt_parts.append(
-            "LongTermMemory：\n"
-            + replace_placeholders_in_text(long_term_memory.strip(), char_name=ph_char, user_name=ph_user)
+            wrap_after_placeholders("LongTermMemory", long_term_memory.strip(), char_name=ph_char, user_name=ph_user)
         )
 
     if chat.overrides.prompt and str(chat.overrides.prompt).strip():
@@ -952,7 +952,13 @@ def _build_group_system_prompt(chat: Chat, settings: Settings, character_id: str
     group_context_parts = ["这是一个群聊场景，参与者包括："]
     for i, char in enumerate(all_characters):
         group_context_parts.append(f"{i+1}. {char.name}")
-    prompt_parts.append("\n".join(group_context_parts))
+    prompt_parts.append(
+        wrap_group_roster(
+            lines=group_context_parts,
+            char_name=ph_char,
+            user_name=ph_user,
+        )
+    )
 
     member_settings = chat.memberSettings.get(character_id)
     include_personality = True if member_settings is None else bool(getattr(member_settings, "includePersonality", True))
@@ -960,11 +966,18 @@ def _build_group_system_prompt(chat: Chat, settings: Settings, character_id: str
 
     if character:
         character_parts: list[str] = []
-        character_parts.append(f"你现在扮演的角色是：{character.name}")
+        if character.name and str(character.name).strip():
+            character_parts.append(
+                wrap_acting_as(
+                    raw=str(character.name).strip(),
+                    char_name=ph_char,
+                    user_name=ph_user,
+                )
+            )
         if include_personality and character.personality and character.personality.strip():
             character_parts.append(
-                "Personality：\n"
-                + replace_placeholders_in_text(
+                wrap_after_placeholders(
+                    "Personality",
                     character.personality.strip(),
                     char_name=ph_char,
                     user_name=ph_user,
@@ -972,8 +985,8 @@ def _build_group_system_prompt(chat: Chat, settings: Settings, character_id: str
             )
         if include_scenario and character.scenario and character.scenario.strip():
             character_parts.append(
-                "Scenario：\n"
-                + replace_placeholders_in_text(
+                wrap_after_placeholders(
+                    "Scenario",
                     character.scenario.strip(),
                     char_name=ph_char,
                     user_name=ph_user,
@@ -993,8 +1006,7 @@ def _build_group_system_prompt(chat: Chat, settings: Settings, character_id: str
     long_term_memory = getattr(chat.overrides, "longTermMemory", None)
     if long_term_memory and long_term_memory.strip():
         prompt_parts.append(
-            "LongTermMemory：\n"
-            + replace_placeholders_in_text(long_term_memory.strip(), char_name=ph_char, user_name=ph_user)
+            wrap_after_placeholders("LongTermMemory", long_term_memory.strip(), char_name=ph_char, user_name=ph_user)
         )
 
     if chat.overrides.prompt and str(chat.overrides.prompt).strip():
@@ -1516,7 +1528,9 @@ def _parse_chat_text(content: str) -> Chat:
     if not header.get("CharacterId"):
         raise HTTPException(status_code=400, detail="missing CharacterId in text import")
 
-    chat_data = {
+    gsd_h = header.get("GroupSystemInjectDepth")
+    gsb_h = header.get("GroupSystemAlwaysAtBottom")
+    chat_data: dict[str, Any] = {
         "title": header.get("Title") or "新对话",
         "characterId": header.get("CharacterId"),
         "isGroup": header.get("IsGroup", "false").lower() == "true",
@@ -1524,6 +1538,10 @@ def _parse_chat_text(content: str) -> Chat:
         "groupDelay": int(header.get("GroupDelay") or 1500),
         "messages": [m.model_dump(mode="json") for m in messages],
     }
+    if gsd_h is not None and str(gsd_h).strip() != "":
+        chat_data["groupSystemInjectDepth"] = max(0, int(gsd_h))
+    if gsb_h is not None and str(gsb_h).strip() != "":
+        chat_data["groupSystemAlwaysAtBottom"] = str(gsb_h).lower() == "true"
     if header.get("ChatId"):
         chat_data["id"] = header.get("ChatId")
     return Chat.model_validate(chat_data)
