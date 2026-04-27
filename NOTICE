@@ -1,0 +1,65 @@
+SimpleTavern — Third-Party Notices
+====================================
+
+This project includes or depends on third-party open source software. The
+license in the `LICENSE` file at this repository root applies to SimpleTavern’s
+own code only, not to these third parties.
+
+The complete license text and copyright for each package is included with that
+package (for example under `frontend/node_modules/<package>/` after install, or
+in installed Python package metadata for the backend). Where the Apache
+License, Version 2.0 requires it, you must also retain any `NOTICE` file
+shipped with that component.
+
+The following is a non-exhaustive list of components whose license (per
+package metadata) is not a single “MIT”- or “ISC”-style identifier (versions change with lockfiles;
+run your own audit before releases):
+
+-------------------------------------------------------------------------------
+Frontend (npm; development and production dependency tree)
+-------------------------------------------------------------------------------
+
+Apache-2.0
+  - baseline-browser-mapping
+  - detect-libc
+  - expect-type
+  - typescript
+
+CC-BY-4.0
+  - caniuse-lite  (data; see package for attribution terms)
+
+MPL-2.0
+  - lightningcss
+  - lightningcss-win32-x64-msvc  (or other platform-specific `lightningcss-*`
+    packages resolved on your system)
+
+Python-2.0
+  - argparse  (as bundled for Node; see package `LICENSE`)
+
+
+-------------------------------------------------------------------------------
+Backend (Python; see `backend/requirements.txt` and installed transitive deps)
+-------------------------------------------------------------------------------
+
+Commonly present licenses in a typical install include, among others:
+
+Apache-2.0
+  - python-multipart
+  - tokenizers
+  - huggingface-hub  (pulled in with tokenizers / Hugging Face tooling)
+
+MPL-2.0
+  - certifi
+
+Additional permissive licenses (e.g. MIT, BSD-3-Clause, “Unlicense” for some
+small utilities) apply to other dependencies. Their notices appear in each
+package’s `METADATA` or `LICENSE` file.
+
+-------------------------------------------------------------------------------
+MIT / BSD / ISC and similar
+-------------------------------------------------------------------------------
+
+Numerous other dependencies are under MIT, BSD, ISC, or other permissive terms.
+You must still preserve their copyright and permission notices as required by
+each license, usually by not stripping those files from distributed artifacts.
+
