@@ -16,10 +16,8 @@
  *
  * Emits说明：
  * - update:show: 更新显示状态（v-model:show）
- * - update:member-ids: 更新成员ID列表（拖拽排序后）
- * - update:group-delay: 更新群聊延迟时间
+ * - apply: 一次提交成员顺序、发言延迟、system 插入选项
  * - open-member-settings: 打开成员设置编辑，传递成员ID
- * - save: 保存设置
  *
  * 使用的Composables：
  * 无
@@ -46,20 +44,28 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:show': [value: boolean]
-  'update:member-ids': [memberIds: string[]]
-  'update:group-delay': [delay: number]
+  apply: [payload: {
+    memberIds: string[]
+    groupDelay: number
+    groupSystemInjectDepth: number
+    groupSystemAlwaysAtBottom: boolean
+  }]
   'open-member-settings': [memberId: string]
-  'save': []
 }>()
 
 const memberIdsDraft = ref<string[]>([])
 const groupDelayDraft = ref<number>(1500)
+const groupSystemInjectDepthDraft = ref<number>(5)
+const groupSystemAlwaysAtBottomDraft = ref<boolean>(true)
 const draggingIdx = ref<number | null>(null)
 
 watch(() => props.show, (val) => {
   if (val && props.chat) {
     memberIdsDraft.value = [...props.chat.memberIds]
     groupDelayDraft.value = props.chat.groupDelay || 1500
+    groupSystemInjectDepthDraft.value =
+      typeof props.chat.groupSystemInjectDepth === 'number' ? props.chat.groupSystemInjectDepth : 5
+    groupSystemAlwaysAtBottomDraft.value = props.chat.groupSystemAlwaysAtBottom !== false
   }
 })
 
@@ -127,14 +133,15 @@ function close() {
 }
 
 /**
- * 保存设置
- *
- * 触发update:member-ids和update:group-delay事件，然后触发save事件。
+ * 保存设置：一次 apply，由父级调用 API
  */
 function save() {
-  emit('update:member-ids', memberIdsDraft.value)
-  emit('update:group-delay', groupDelayDraft.value)
-  emit('save')
+  emit('apply', {
+    memberIds: memberIdsDraft.value,
+    groupDelay: groupDelayDraft.value,
+    groupSystemInjectDepth: Math.max(0, Number(groupSystemInjectDepthDraft.value) || 0),
+    groupSystemAlwaysAtBottom: groupSystemAlwaysAtBottomDraft.value,
+  })
 }
 </script>
 
@@ -162,6 +169,42 @@ function save() {
               min="0"
             />
             <div class="form-hint">角色连续发言之间的间隔时间</div>
+          </div>
+
+          <div class="form-group">
+            <label class="label text-brand-light">永远在底部（默认）</label>
+            <div class="flex items-start justify-between gap-3">
+              <p class="min-w-0 flex-1 text-xs text-gray-500">
+                开启时整段 system 在消息最前，与旧版一致；关闭后按下方深度将整段 system 插入历史，利于部分 KV 命中。
+              </p>
+              <button
+                type="button"
+                class="flex shrink-0 items-center gap-2"
+                @click="groupSystemAlwaysAtBottomDraft = !groupSystemAlwaysAtBottomDraft"
+              >
+                <div
+                  class="w-10 h-5 rounded-full relative transition-colors duration-200"
+                  :class="groupSystemAlwaysAtBottomDraft ? 'bg-brand' : 'bg-gray-700'"
+                >
+                  <div
+                    class="absolute top-1 w-3 h-3 rounded-full bg-white transition-transform duration-200"
+                    :class="groupSystemAlwaysAtBottomDraft ? 'left-6' : 'left-1'"
+                  />
+                </div>
+                <span class="min-w-[2.5rem] text-center text-xs text-gray-400">{{ groupSystemAlwaysAtBottomDraft ? '开启' : '关闭' }}</span>
+              </button>
+            </div>
+          </div>
+          <div class="form-group" :class="{ 'opacity-50 pointer-events-none': groupSystemAlwaysAtBottomDraft }">
+            <label class="label text-brand-light">系统提示词注入深度</label>
+            <input
+              v-model.number="groupSystemInjectDepthDraft"
+              type="number"
+              class="input bg-white/5 border-white/10 focus:border-brand-a50"
+              min="0"
+              step="1"
+            />
+            <div class="form-hint">整段 system 将插在倒数第 N 条消息（含世界书产生条目）之前；仅关闭「永远在底部」时生效。</div>
           </div>
 
           <!-- 成员列表与排序 -->
