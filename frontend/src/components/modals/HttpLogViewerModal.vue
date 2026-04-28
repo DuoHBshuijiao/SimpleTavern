@@ -4,10 +4,12 @@
  *
  * 入口：设置抽屉 → 应用与更新 → 查看 HTTP 请求
  *
- * 左栏：时间线列表（从旧到新）
+ * 左栏：时间线列表（从新到旧，最新在上）
  * 右栏：详情（Pretty / Raw 切换；详情区再分 Request / Response）
  *  - Pretty：走 HttpRecordPreview（身份卡 + 工具卡 + 图像原图 + 文件截断）
  *  - Raw：走 CodeViewer，JSON 按层级自动折叠，防止数千行一打开就爆炸
+ *
+ * 窄竖屏：单栏列表 + 仅选中行显示「查看」，点击后在行下方展开详情（手风琴）
  */
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { RefreshCw, Trash2, Copy, X, Clock, Radio } from 'lucide-vue-next'
@@ -18,8 +20,8 @@ import {
   type HttpLogDetail,
   type HttpLogListItem,
 } from '../../api/httpLog'
-import CodeViewer from '../common/CodeViewer.vue'
-import HttpRecordPreview from '../http-log/HttpRecordPreview.vue'
+import { useViewportNarrowPortrait } from '../../composables/useViewportNarrowPortrait'
+import HttpLogDetailPane from '../http-log/HttpLogDetailPane.vue'
 
 const props = defineProps<{
   show: boolean
@@ -28,6 +30,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'update:show', v: boolean): void
 }>()
+
+const { isNarrowPortrait } = useViewportNarrowPortrait()
 
 const items = ref<HttpLogListItem[]>([])
 const listLoading = ref(false)
@@ -38,6 +42,9 @@ const selectedId = ref<string | null>(null)
 const detail = ref<HttpLogDetail | null>(null)
 const detailLoading = ref(false)
 const detailError = ref('')
+
+/** 窄屏下手风琴：是否展开当前选中项的详情 */
+const detailPanelOpen = ref(false)
 
 const viewMode = ref<'pretty' | 'raw'>('pretty')
 const rawSection = ref<'request' | 'response'>('request')
@@ -56,9 +63,9 @@ async function loadList(keepSelection = true) {
     items.value = res.items
     listRetentionMinutes.value = res.retentionMinutes
     if (!keepSelection || !selectedId.value) {
-      const last = res.items[res.items.length - 1]
-      if (last) {
-        selectedId.value = last.id
+      const newest = res.items[0]
+      if (newest) {
+        selectedId.value = newest.id
       }
     } else if (selectedId.value && !res.items.some((it) => it.id === selectedId.value)) {
       detail.value = null
@@ -89,8 +96,17 @@ watch(
   (id) => {
     if (id) void loadDetail(id)
     else detail.value = null
+    if (isNarrowPortrait.value) {
+      detailPanelOpen.value = false
+    }
   },
 )
+
+watch(isNarrowPortrait, (narrow) => {
+  if (narrow) {
+    detailPanelOpen.value = false
+  }
+})
 
 watch(
   () => props.show,
@@ -107,6 +123,7 @@ watch(
         window.clearInterval(refreshTimer)
         refreshTimer = null
       }
+      detailPanelOpen.value = false
     }
   },
   { immediate: true },
@@ -126,6 +143,7 @@ async function onClear() {
     items.value = []
     detail.value = null
     selectedId.value = null
+    detailPanelOpen.value = false
   } catch (e) {
     alert('清空失败：' + String(e))
   }
@@ -222,6 +240,14 @@ function truncateUrl(u: string, max = 60): string {
   if (u.length <= max) return u
   return u.slice(0, max - 1) + '…'
 }
+
+function toggleDetailPanel() {
+  detailPanelOpen.value = !detailPanelOpen.value
+}
+
+function detailEmbedId(itemId: string) {
+  return `http-log-detail-${itemId}`
+}
 </script>
 
 <template>
@@ -232,9 +258,31 @@ function truncateUrl(u: string, max = 60): string {
         class="modal-content chat-modal-width-1200-90 glass-panel theme-panel-bg backdrop-blur-[var(--blur-heavy)] backdrop-saturate-[1.8] border border-[var(--color-border)] flex flex-col min-h-0"
         style="max-height: 88vh"
       >
-        <div class="modal-header border-b border-[var(--color-border-subtle)] shrink-0">
-          <h3 class="modal-title text-[var(--color-text)]">HTTP 请求查看</h3>
-          <div class="ml-auto flex items-center gap-2">
+        <div
+          class="modal-header border-b border-[var(--color-border-subtle)] shrink-0"
+          :class="isNarrowPortrait ? '!flex-col !items-stretch gap-2' : ''"
+        >
+          <div
+            class="flex min-w-0 items-center gap-2"
+            :class="
+              isNarrowPortrait ? 'w-full justify-between' : 'min-w-0 flex-1'
+            "
+          >
+            <h3 class="modal-title min-w-0 truncate text-[var(--color-text)]">HTTP 请求查看</h3>
+            <button
+              v-if="isNarrowPortrait"
+              type="button"
+              class="modal-close inline-flex min-h-9 min-w-9 shrink-0 items-center justify-center rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)] touch-manipulation"
+              aria-label="关闭"
+              @click="close"
+            >
+              <X class="h-4 w-4" />
+            </button>
+          </div>
+          <div
+            class="flex items-center gap-2"
+            :class="isNarrowPortrait ? 'flex-wrap' : 'ml-auto shrink-0'"
+          >
             <button
               type="button"
               class="inline-flex min-h-9 items-center gap-1 rounded-lg bg-surface-muted px-2.5 py-1.5 text-xs text-[var(--color-text)] transition-colors hover:bg-surface-hover disabled:opacity-50"
@@ -261,6 +309,7 @@ function truncateUrl(u: string, max = 60): string {
               清空
             </button>
             <button
+              v-if="!isNarrowPortrait"
               type="button"
               class="modal-close inline-flex min-h-9 min-w-9 items-center justify-center rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)] touch-manipulation"
               aria-label="关闭"
@@ -271,10 +320,18 @@ function truncateUrl(u: string, max = 60): string {
           </div>
         </div>
 
-        <div class="modal-body flex min-h-0 min-w-0 flex-1 flex-row gap-3 overflow-hidden !p-0">
+        <div
+          class="modal-body flex min-h-0 min-w-0 flex-1 gap-3 overflow-hidden !p-0"
+          :class="isNarrowPortrait ? 'flex-col' : 'flex-row'"
+        >
           <!-- 左栏：列表 -->
           <aside
-            class="flex min-h-0 w-[280px] shrink-0 flex-col border-r border-[var(--color-border-subtle)] bg-[var(--color-surface-muted)]/30"
+            :class="[
+              'flex min-h-0 flex-col bg-[var(--color-surface-muted)]/30',
+              isNarrowPortrait
+                ? 'w-full min-h-0 flex-1 border-b border-[var(--color-border-subtle)]'
+                : 'w-[280px] shrink-0 border-r border-[var(--color-border-subtle)]',
+            ]"
           >
             <div class="flex items-center justify-between gap-2 border-b border-[var(--color-border-subtle)] px-3 py-2">
               <span class="flex items-center gap-1 text-xs text-[var(--color-text-secondary)]">
@@ -287,103 +344,146 @@ function truncateUrl(u: string, max = 60): string {
             <div v-else-if="items.length === 0 && !listLoading" class="flex flex-1 items-center justify-center px-3 text-center text-xs text-[var(--color-text-muted)]">
               暂无记录。发起一次云端请求（对话 / 检查更新）后刷新即可看到。
             </div>
-            <div class="min-h-0 flex-1 overflow-y-auto">
-              <button
-                v-for="it in items"
-                :key="it.id"
-                type="button"
-                class="flex w-full flex-col gap-1 border-b border-[var(--color-border-subtle)]/60 px-3 py-2 text-left transition-colors hover:bg-[var(--color-surface-hover)]"
-                :class="selectedId === it.id ? 'bg-[var(--color-surface-hover)]' : ''"
-                @click="selectedId = it.id"
-              >
-                <div class="flex items-center gap-1.5">
-                  <span :class="sourceBadgeClass(it.source)">{{ sourceLabel(it.source) }}</span>
-                  <span class="font-mono text-[10px] text-[var(--color-text-muted)]">{{ it.method }}</span>
-                  <span :class="['ml-auto font-mono text-[10px]', statusClass(it)]">
-                    <template v-if="it.error">ERR</template>
-                    <template v-else-if="it.responseStatus != null">{{ it.responseStatus }}</template>
-                    <template v-else>—</template>
-                  </span>
+            <div v-else class="min-h-0 flex-1 overflow-y-auto">
+              <!-- 宽屏：整行可选中 -->
+              <template v-if="!isNarrowPortrait">
+                <button
+                  v-for="it in items"
+                  :key="it.id"
+                  type="button"
+                  class="flex w-full flex-col gap-1 border-b border-[var(--color-border-subtle)]/60 px-3 py-2 text-left transition-colors hover:bg-[var(--color-surface-hover)]"
+                  :class="selectedId === it.id ? 'bg-[var(--color-surface-hover)]' : ''"
+                  @click="selectedId = it.id"
+                >
+                  <div class="flex items-center gap-1.5">
+                    <span :class="sourceBadgeClass(it.source)">{{ sourceLabel(it.source) }}</span>
+                    <span class="font-mono text-[10px] text-[var(--color-text-muted)]">{{ it.method }}</span>
+                    <span :class="['ml-auto font-mono text-[10px]', statusClass(it)]">
+                      <template v-if="it.error">ERR</template>
+                      <template v-else-if="it.responseStatus != null">{{ it.responseStatus }}</template>
+                      <template v-else>—</template>
+                    </span>
+                  </div>
+                  <div class="truncate font-mono text-[10px] text-[var(--color-text-secondary)]" :title="it.url">
+                    {{ truncateUrl(it.url, 60) }}
+                  </div>
+                  <div class="flex items-center gap-1.5 text-[10px] text-[var(--color-text-muted)]">
+                    <span>{{ formatTime(it.ts) }}</span>
+                    <Radio v-if="it.streaming" class="h-2.5 w-2.5" />
+                    <span v-if="it.streaming">stream</span>
+                    <span class="ml-auto">{{ it.durationMs }}ms</span>
+                  </div>
+                </button>
+              </template>
+
+              <!-- 窄屏：主区选中 + 仅选中行「查看」+ 手风琴详情 -->
+              <template v-else>
+                <div
+                  v-for="it in items"
+                  :key="it.id"
+                  class="border-b border-[var(--color-border-subtle)]/60"
+                >
+                  <div class="flex items-stretch">
+                    <button
+                      type="button"
+                      class="flex min-w-0 flex-1 flex-col gap-1 px-3 py-2 text-left transition-colors hover:bg-[var(--color-surface-hover)]"
+                      :class="selectedId === it.id ? 'bg-[var(--color-surface-hover)]' : ''"
+                      @click="selectedId = it.id"
+                    >
+                      <div class="flex items-center gap-1.5">
+                        <span :class="sourceBadgeClass(it.source)">{{ sourceLabel(it.source) }}</span>
+                        <span class="font-mono text-[10px] text-[var(--color-text-muted)]">{{ it.method }}</span>
+                        <span :class="['ml-auto font-mono text-[10px]', statusClass(it)]">
+                          <template v-if="it.error">ERR</template>
+                          <template v-else-if="it.responseStatus != null">{{ it.responseStatus }}</template>
+                          <template v-else>—</template>
+                        </span>
+                      </div>
+                      <div class="truncate font-mono text-[10px] text-[var(--color-text-secondary)]" :title="it.url">
+                        {{ truncateUrl(it.url, 60) }}
+                      </div>
+                      <div class="flex items-center gap-1.5 text-[10px] text-[var(--color-text-muted)]">
+                        <span>{{ formatTime(it.ts) }}</span>
+                        <Radio v-if="it.streaming" class="h-2.5 w-2.5" />
+                        <span v-if="it.streaming">stream</span>
+                        <span class="ml-auto">{{ it.durationMs }}ms</span>
+                      </div>
+                    </button>
+                    <button
+                      v-if="selectedId === it.id"
+                      type="button"
+                      class="shrink-0 self-stretch border-l border-[var(--color-border-subtle)]/60 px-2.5 text-xs text-[var(--color-brand)] transition-colors hover:bg-[var(--color-surface-hover)] touch-manipulation"
+                      :aria-expanded="detailPanelOpen"
+                      :aria-controls="detailEmbedId(it.id)"
+                      @click.stop="toggleDetailPanel"
+                    >
+                      {{ detailPanelOpen ? '收起' : '查看' }}
+                    </button>
+                  </div>
+                  <Transition name="http-log-accordion">
+                    <div
+                      v-if="selectedId === it.id && detailPanelOpen"
+                      :id="detailEmbedId(it.id)"
+                      class="max-h-[min(58vh,520px)] min-h-0 overflow-y-auto border-t border-[var(--color-border-subtle)] bg-[var(--color-surface-muted)]/25"
+                    >
+                      <HttpLogDetailPane
+                        :selected-id="selectedId"
+                        :detail="detail"
+                        :detail-loading="detailLoading"
+                        :detail-error="detailError"
+                        :view-mode="viewMode"
+                        :raw-section="rawSection"
+                        :raw-text="rawText"
+                        content-max-height-class="max-h-[42vh]"
+                        empty-hint="请选择一条记录"
+                        stack-detail-header
+                        @update:view-mode="viewMode = $event"
+                        @update:raw-section="rawSection = $event"
+                      />
+                    </div>
+                  </Transition>
                 </div>
-                <div class="truncate font-mono text-[10px] text-[var(--color-text-secondary)]" :title="it.url">
-                  {{ truncateUrl(it.url, 60) }}
-                </div>
-                <div class="flex items-center gap-1.5 text-[10px] text-[var(--color-text-muted)]">
-                  <span>{{ formatTime(it.ts) }}</span>
-                  <Radio v-if="it.streaming" class="h-2.5 w-2.5" />
-                  <span v-if="it.streaming">stream</span>
-                  <span class="ml-auto">{{ it.durationMs }}ms</span>
-                </div>
-              </button>
+              </template>
             </div>
           </aside>
 
-          <!-- 右栏：详情 -->
-          <section class="flex min-h-0 min-w-0 flex-1 flex-col">
-            <div class="flex shrink-0 flex-wrap items-center gap-2 border-b border-[var(--color-border-subtle)] bg-[var(--color-surface-muted)]/20 px-3 py-2">
-              <div class="inline-flex overflow-hidden rounded-lg border border-[var(--color-border-subtle)]">
-                <button
-                  type="button"
-                  class="px-3 py-1 text-xs transition-colors"
-                  :class="viewMode === 'pretty' ? 'bg-brand-a20 text-[var(--color-brand)]' : 'text-[var(--color-text-secondary)] hover:bg-surface-hover'"
-                  @click="viewMode = 'pretty'"
-                >Pretty</button>
-                <button
-                  type="button"
-                  class="px-3 py-1 text-xs transition-colors"
-                  :class="viewMode === 'raw' ? 'bg-brand-a20 text-[var(--color-brand)]' : 'text-[var(--color-text-secondary)] hover:bg-surface-hover'"
-                  @click="viewMode = 'raw'"
-                >Raw JSON</button>
-              </div>
-              <div
-                v-if="viewMode === 'raw'"
-                class="inline-flex overflow-hidden rounded-lg border border-[var(--color-border-subtle)]"
-              >
-                <button
-                  type="button"
-                  class="px-3 py-1 text-xs transition-colors"
-                  :class="rawSection === 'request' ? 'bg-[var(--color-surface-hover)] text-[var(--color-text)]' : 'text-[var(--color-text-secondary)] hover:bg-surface-hover'"
-                  @click="rawSection = 'request'"
-                >Request</button>
-                <button
-                  type="button"
-                  class="px-3 py-1 text-xs transition-colors"
-                  :class="rawSection === 'response' ? 'bg-[var(--color-surface-hover)] text-[var(--color-text)]' : 'text-[var(--color-text-secondary)] hover:bg-surface-hover'"
-                  @click="rawSection = 'response'"
-                >Response</button>
-              </div>
-              <div v-if="detail" class="ml-auto flex flex-wrap items-center gap-2 text-[11px] text-[var(--color-text-muted)]">
-                <span class="font-mono">{{ detail.method }}</span>
-                <span class="max-w-[50vw] truncate" :title="detail.url">{{ detail.url }}</span>
-              </div>
-            </div>
-
-            <div class="min-h-0 flex-1 overflow-auto px-3 py-3">
-              <div v-if="!selectedId" class="flex h-full items-center justify-center text-xs text-[var(--color-text-muted)]">
-                请从左侧选择一条记录查看
-              </div>
-              <div v-else-if="detailLoading" class="flex h-full items-center justify-center text-xs text-[var(--color-text-muted)]">
-                加载中…
-              </div>
-              <div v-else-if="detailError" class="text-xs text-rose-300">{{ detailError }}</div>
-              <template v-else-if="detail">
-                <HttpRecordPreview v-if="viewMode === 'pretty'" :record="detail" />
-                <CodeViewer
-                  v-else
-                  :model-value="rawText"
-                  language="json"
-                  :fold-level="2"
-                  max-height-class="max-h-[72vh]"
-                />
-              </template>
-            </div>
-
-            <div class="shrink-0 border-t border-[var(--color-border-subtle)] bg-[var(--color-surface-muted)]/20 px-3 py-1.5 text-center text-[10px] text-[var(--color-text-muted)]">
-              仅保留最近 30 分钟，每 30s 自动清理一次；API Key 与文件内容已脱敏。
-            </div>
+          <!-- 右栏：详情（仅宽屏） -->
+          <section v-if="!isNarrowPortrait" class="flex min-h-0 min-w-0 flex-1 flex-col">
+            <HttpLogDetailPane
+              :selected-id="selectedId"
+              :detail="detail"
+              :detail-loading="detailLoading"
+              :detail-error="detailError"
+              :view-mode="viewMode"
+              :raw-section="rawSection"
+              :raw-text="rawText"
+              content-max-height-class="max-h-[72vh]"
+              @update:view-mode="viewMode = $event"
+              @update:raw-section="rawSection = $event"
+            />
           </section>
         </div>
       </div>
     </div>
   </Transition>
 </template>
+
+<style scoped>
+.http-log-accordion-enter-active,
+.http-log-accordion-leave-active {
+  transition:
+    opacity 0.22s ease,
+    max-height 0.28s ease;
+  overflow: hidden;
+}
+.http-log-accordion-enter-from,
+.http-log-accordion-leave-to {
+  opacity: 0;
+  max-height: 0;
+}
+.http-log-accordion-enter-to,
+.http-log-accordion-leave-from {
+  opacity: 1;
+  max-height: min(58vh, 520px);
+}
+</style>
