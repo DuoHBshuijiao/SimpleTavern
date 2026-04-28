@@ -378,7 +378,6 @@ watch(
     <!-- 输入区域 -->
     <div
       class="shrink-0 pt-4 pb-4 px-4 border-t border-white/5 bg-black/10 backdrop-blur-sm shadow-[0_-12px_32px_-8px_rgba(0,0,0,0.35)] relative z-10"
-      :class="isDragOverComposer ? 'bg-brand-a10 border-brand-a30' : ''"
       @dragenter.prevent="handleDragEnter"
       @dragover.prevent="handleDragOver"
       @dragleave="handleDragLeave"
@@ -452,6 +451,11 @@ watch(
           </button>
         </div>
       </div>
+      <div
+        v-show="isDragOverComposer"
+        class="pointer-events-none absolute inset-0 z-[21] bg-white/25 backdrop-blur-[2px] ring-1 ring-inset ring-white/40 transition-opacity duration-150"
+        aria-hidden="true"
+      />
     </div>
 
     <ConfirmPopover
