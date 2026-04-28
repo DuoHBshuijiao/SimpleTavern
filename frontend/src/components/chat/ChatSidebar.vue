@@ -56,12 +56,19 @@
  */
 import type { CharacterCard, UserPersona, Chat } from '../../types/models'
 import { computed, nextTick, ref, watch } from 'vue'
+
+import { MAIN_LAYOUT_TRANSITION_MS } from '../../constants/chatHeaderMorph'
+import { usePreferHoverChrome } from '../../composables/usePreferHoverChrome'
 import ModernAvatar from '../ModernAvatar.vue'
 import ConfirmPopover from '../ConfirmPopover.vue'
 
 import { Pencil, Trash2, Users, Check, X, ChevronRight, ChevronLeft, ArrowUp } from 'lucide-vue-next'
 
+const { preferHoverChrome } = usePreferHoverChrome()
+
 const props = defineProps<{
+  /** 与 useViewportNarrowPortrait 一致（约 &lt; 10/16）：侧栏 fixed overlay，不靠 flex 占位挤压主区 */
+  isNarrowPortrait?: boolean
   collapsed: boolean
   // 身份相关
   personas: UserPersona[]
@@ -102,6 +109,49 @@ const emit = defineEmits<{
   'delete-chat': [chatId: string]
   'promote-to-group': [chat: Chat]
 }>()
+
+function asidePresetClass(collapsed: boolean) {
+  if (props.isNarrowPortrait) {
+    return collapsed
+      ? '-translate-x-[calc(100%+1rem)] opacity-0 pointer-events-none'
+      : 'translate-x-0 opacity-100'
+  }
+  return collapsed
+    ? '-ml-[21rem] w-80 opacity-0 pointer-events-none'
+    : 'ml-4 w-80 opacity-100'
+}
+
+const asideBaseClass = computed(() => {
+  const shared =
+    'flex flex-col theme-panel-bg backdrop-blur-xl backdrop-saturate-[1.8] border border-[var(--color-border)] shadow-glass-panel rounded-2xl'
+  if (props.isNarrowPortrait) {
+    return [
+      shared,
+      'fixed left-4 top-[0.75rem] bottom-4 z-[40] w-80 h-[calc(100vh-1.75rem)]',
+      'transition-[transform,opacity] ease-in-out',
+      asidePresetClass(props.collapsed),
+    ].join(' ')
+  }
+  return [
+    shared,
+    'relative flex-shrink-0 mt-3 mb-4 h-[calc(100vh-1.75rem)] transition-[margin-left,opacity] duration-300',
+    asidePresetClass(props.collapsed),
+  ].join(' ')
+})
+
+const asideStyle = computed(() => {
+  if (props.isNarrowPortrait) {
+    return {
+      contain: 'layout' as const,
+      willChange: 'transform, opacity',
+      transitionDuration: `${MAIN_LAYOUT_TRANSITION_MS}ms`,
+    }
+  }
+  return {
+    contain: 'content' as const,
+    willChange: 'margin-left, opacity',
+  }
+})
 
 /**
  * 获取角色信息
@@ -306,11 +356,7 @@ function confirmDelete() {
 </script>
 
 <template>
-  <aside 
-    class="flex flex-col theme-panel-bg backdrop-blur-xl backdrop-saturate-[1.8] border border-[var(--color-border)] shadow-glass-panel rounded-2xl transition-[margin-left,opacity] duration-300 relative flex-shrink-0 mt-3 mb-4 h-[calc(100vh-1.75rem)]"
-    :class="collapsed ? '-ml-[21rem] w-80 opacity-0 pointer-events-none' : 'ml-4 w-80 opacity-100'"
-    style="contain: content; will-change: margin-left, opacity;"
-  >
+  <aside :class="asideBaseClass" :style="asideStyle">
     <div class="flex flex-col h-full overflow-hidden rounded-2xl">
       
       <!-- 用户身份区域 (头部)：滚动区全宽使滚动条贴侧栏右缘，内容用 px-4 与标题对齐 -->
@@ -339,7 +385,14 @@ function confirmDelete() {
               <div class="flex-1 min-w-0">
                 <div class="text-sm truncate" :class="selectedPersonaId === p.id ? 'text-brand' : 'text-[var(--color-text-secondary)]'">{{ p.name }}</div>
               </div>
-              <div class="opacity-0 group-hover:opacity-100 flex gap-1 transition-opacity ml-auto bg-surface-overlay rounded-lg backdrop-blur-sm p-0.5">
+              <div
+                class="flex gap-1 transition-opacity ml-auto bg-surface-overlay rounded-lg backdrop-blur-sm p-0.5"
+                :class="
+                  !preferHoverChrome && selectedPersonaId === p.id
+                    ? 'opacity-100'
+                    : 'opacity-0 group-hover:opacity-100'
+                "
+              >
                 <button class="p-1 hover:text-[var(--color-text)] text-[var(--color-text-muted)] transition-colors" @click.stop="emit('edit-persona', p)">
                   <Pencil class="w-3.5 h-3.5" />
                 </button>
@@ -396,7 +449,14 @@ function confirmDelete() {
               <div class="text-xs text-[var(--color-text-muted)] line-clamp-3 mt-1 leading-relaxed">{{ c.description || '暂无简介' }}</div>
             </div>
 
-            <div class="absolute top-3 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-surface-overlay rounded-lg backdrop-blur-sm p-0.5 flex gap-1">
+            <div
+              class="absolute top-3 right-2 transition-opacity bg-surface-overlay rounded-lg backdrop-blur-sm p-0.5 flex gap-1"
+              :class="
+                !preferHoverChrome && selectedCharacterId === c.id
+                  ? 'opacity-100'
+                  : 'opacity-0 group-hover:opacity-100'
+              "
+            >
               <button class="p-1.5 hover:text-[var(--color-text)] text-[var(--color-text-muted)] transition-colors" @click.stop="emit('edit-character', c)">
                 <Pencil class="w-4 h-4" />
               </button>
@@ -480,7 +540,15 @@ function confirmDelete() {
                 <span class="text-[10px] text-[var(--color-text-muted)] shrink-0">({{ c.memberIds.length }}人)</span>
               </div>
               
-              <div v-if="editingChatId !== c.id" class="flex gap-1 shrink-0 ml-auto bg-surface-overlay rounded-md backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity">
+              <div
+                v-if="editingChatId !== c.id"
+                class="flex gap-1 shrink-0 ml-auto bg-surface-overlay rounded-md backdrop-blur-sm transition-opacity"
+                :class="
+                  !preferHoverChrome && activeChatId === c.id
+                    ? 'opacity-100'
+                    : 'opacity-0 group-hover:opacity-100'
+                "
+              >
                 <button class="p-1 hover:text-[var(--color-text)] text-[var(--color-text-secondary)] transition-colors" @click.stop="emit('start-edit-title', c.id, c.title)">
                   <Pencil class="w-3.5 h-3.5" />
                 </button>
@@ -539,7 +607,15 @@ function confirmDelete() {
                 </div>
               </div>
               
-              <div v-if="editingChatId !== c.id" class="flex gap-1 shrink-0 ml-auto bg-surface-overlay rounded-md backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity">
+              <div
+                v-if="editingChatId !== c.id"
+                class="flex gap-1 shrink-0 ml-auto bg-surface-overlay rounded-md backdrop-blur-sm transition-opacity"
+                :class="
+                  !preferHoverChrome && activeChatId === c.id
+                    ? 'opacity-100'
+                    : 'opacity-0 group-hover:opacity-100'
+                "
+              >
                 <button
                   class="p-1 hover:text-brand text-[var(--color-text-secondary)] transition-colors"
                   title="创建副本改为群聊"
