@@ -254,6 +254,8 @@ function attach() {
   ro.observe(v)
   ro.observe(m)
   ro.observe(h)
+  const col = h.closest(CHAT_BUBBLE_COLUMN)
+  if (col) ro.observe(col)
   nextTick(sync)
 }
 
