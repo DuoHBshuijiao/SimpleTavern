@@ -77,6 +77,7 @@ import {
 import { usePageBackground } from '../composables/usePageBackground'
 import { useWebGpuBackground } from '../composables/useWebGpuBackground'
 import { useWebGpuBackgroundRuntime } from '../composables/useWebGpuBackgroundRuntime'
+import { useViewportNarrowPortrait } from '../composables/useViewportNarrowPortrait'
 
 // 子组件
 import { ChatSidebar, MessageList, ChatInput, AssistantPanel, AssistantThread } from '../components/chat'
@@ -203,6 +204,7 @@ const settingsTab = ref<SettingsDrawerTab>('global')
 const isGenerating = ref(false)
 const streamError = ref<string | null>(null)
 const sidebarCollapsed = ref(false)
+const { isNarrowPortrait } = useViewportNarrowPortrait()
 /** 主内容区左缘（用于助手 FAB 左贴边），随侧栏折叠与窗口变化测量 */
 const chatMainRef = ref<HTMLElement | null>(null)
 const contentAreaLeftPx = ref(0)
@@ -313,11 +315,17 @@ watch(sidebarCollapsed, () => {
   })
 })
 
+watch(isNarrowPortrait, () => {
+  nextTick(() => scheduleContentAreaLeft())
+})
+
 const chatHeaderStyle = computed(() => {
   const phase = headerMorphPhase.value
   const collapsed = sidebarCollapsed.value
   const ms = headerEasingMs.value
-  const insetLeft = collapsed ? 'calc(1rem + 0.75rem)' : 'calc(21rem + 0.75rem)'
+  /** 竖屏 overlay：顶栏 left 用收起态量级；宽屏且侧栏展开仍用 21rem 与流式侧栏对齐 */
+  const insetLeft =
+    collapsed || isNarrowPortrait.value ? 'calc(1rem + 0.75rem)' : 'calc(21rem + 0.75rem)'
   const insetRight = '0.75rem'
   const insetTop = '0.75rem'
   const radiusOpen = 'var(--radius-2xl)'
@@ -1415,10 +1423,6 @@ function buildAssistantAttachmentUrl(scope: 'chat' | 'workspace', attachment: As
   params.set('mimeType', attachment.mimeType)
   params.set('kind', attachment.kind)
   return `/api/assistant/attachments/${encodeURIComponent(attachment.id)}?${params.toString()}`
-}
-
-async function notifyMainChatAttachmentRejections() {
-  await notifyMessage('主聊天暂仅支持图片。', { title: '提示' })
 }
 
 async function notifyAssistantAttachmentRejections(
@@ -2744,15 +2748,9 @@ async function runGroupGeneration(
   group.showContinueButton.value = false
 }
 
-async function handleSelectImages(files: File[]) {
-  const { accepted, rejected } = validateFilesForTarget(files, 'main-chat')
-  if (rejected.some((item) => item.reason === 'unsupported')) {
-    await notifyMainChatAttachmentRejections()
-  }
-  if (rejected.some((item) => item.reason === 'too-large')) {
-    await notifyMessage('主聊天图片单文件不能超过 100MB。', { title: '附件过大' })
-  }
-  for (const { file } of accepted) {
+function handleSelectImages(files: File[]) {
+  // 仅由 ChatInput 在 validateFilesForTarget 通过后发出，此处不再重复校验与弹窗
+  for (const file of files) {
     const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
     draftImages.value.push({
       id,
@@ -4440,6 +4438,7 @@ const editingPersonaAvatarUrl = computed(() => {
 
     <!-- 左侧侧边栏 -->
     <ChatSidebar
+      :is-narrow-portrait="isNarrowPortrait"
       :collapsed="sidebarCollapsed"
       :personas="settings.settings?.userPersonas || []"
       :selected-persona-id="effectiveSelectedPersonaId"
@@ -4472,8 +4471,15 @@ const editingPersonaAvatarUrl = computed(() => {
       @delete-chat="deleteChat"
     />
 
-    <!-- 右侧主区域 + 助手面板（侧栏折叠时保留与展开时 ml-4 一致的左侧留白） -->
-    <div class="flex-1 flex min-w-0 relative transition-[padding] duration-300" :class="{ 'pl-4': sidebarCollapsed }">
+    <!-- 右侧主区域 + 助手面板（侧栏折叠时保留与展开时 ml-4 一致的左侧留白；竖屏 overlay 时不再 pl-4 以免与 translate 重叠） -->
+    <div class="flex-1 flex min-w-0 relative min-h-0 flex-col">
+      <div
+        class="flex-1 flex min-w-0 min-h-0 transition-[padding,transform] duration-300 ease-in-out overflow-x-hidden"
+        :class="{ 'pl-4': sidebarCollapsed && !isNarrowPortrait }"
+        :style="
+          isNarrowPortrait && !sidebarCollapsed ? { transform: 'translateX(21rem)' } : {}
+        "
+      >
       <main ref="chatMainRef" class="flex-1 flex flex-col relative min-w-0 bg-transparent">
       
         <!-- 聊天内容区 -->
@@ -4526,28 +4532,35 @@ const editingPersonaAvatarUrl = computed(() => {
                   <button
                     v-if="!showChatSearch && !holdSearchChipUntilSearchPanelClosed"
                     key="hdr-search-trigger"
-                    class="header-action-chip"
+                    :class="['header-action-chip', { 'header-action-chip--icon': isNarrowPortrait }]"
                     :disabled="!activeChat"
                     title="搜索当前会话（Ctrl+F）"
                     @click="openChatSearchBar"
                   >
                     <Search class="w-3.5 h-3.5" />
-                    <span>搜索</span>
-                    <span class="header-action-shortcut">Ctrl+F</span>
+                    <span v-if="isNarrowPortrait" class="sr-only">搜索当前会话，快捷键 Ctrl+F</span>
+                    <span v-if="!isNarrowPortrait">搜索</span>
+                    <span v-if="!isNarrowPortrait" class="header-action-shortcut">Ctrl+F</span>
                   </button>
                 </Transition>
                 <button
                   v-if="activeChat.isGroup"
-                  class="header-action-chip"
+                  :class="['header-action-chip', { 'header-action-chip--icon': isNarrowPortrait }]"
                   title="群聊设置"
                   @click="showGroupSettings = true"
                 >
                   <Settings class="w-3.5 h-3.5" />
-                  <span>群聊</span>
+                  <span v-if="isNarrowPortrait" class="sr-only">群聊设置</span>
+                  <span v-if="!isNarrowPortrait">群聊</span>
                 </button>
-                <button class="header-action-chip" @click="settingsTab = 'global'; showSettings = true">
+                <button
+                  :class="['header-action-chip', { 'header-action-chip--icon': isNarrowPortrait }]"
+                  :title="isNarrowPortrait ? '设置' : undefined"
+                  @click="settingsTab = 'global'; showSettings = true"
+                >
                   <Settings class="w-3.5 h-3.5" />
-                  <span>设置</span>
+                  <span v-if="isNarrowPortrait" class="sr-only">设置</span>
+                  <span v-if="!isNarrowPortrait">设置</span>
                 </button>
                 <div class="relative">
                   <button
@@ -4741,6 +4754,7 @@ const editingPersonaAvatarUrl = computed(() => {
             ref="chatInputRef"
             v-model="draftMessage"
             :sidebar-collapsed="sidebarCollapsed"
+            :is-narrow-portrait="isNarrowPortrait"
             :header-morph-phase="headerMorphPhase"
             :content-area-left-px="contentAreaLeftPx"
             :assistant-fab-min-top-px="chatAssistantFabMinTopPx"
@@ -4825,6 +4839,7 @@ const editingPersonaAvatarUrl = computed(() => {
           </div>
         </div>
       </main>
+      </div>
 
     <!-- 聊天助手面板 -->
     <AssistantPanel
@@ -4858,6 +4873,8 @@ const editingPersonaAvatarUrl = computed(() => {
       @delete-message="(m) => assistant.deleteMessage(m, 'chat')"
       @rewrite-message="(m) => assistant.rewriteMessage(m, 'chat')"
     />
+
+    </div>
 
     <ErrorModal
       v-for="(item, index) in errorStack.items.value"
@@ -4982,7 +4999,6 @@ const editingPersonaAvatarUrl = computed(() => {
     />
     </div>
   </div>
-</div>
 
 <!-- 角色编辑弹窗 -->
   <div v-if="actions.showCharacterEditor.value" class="modal">
@@ -4994,9 +5010,23 @@ const editingPersonaAvatarUrl = computed(() => {
             <X class="w-5 h-5" />
         </button>
       </div>
-      <div class="modal-body">
-        <div v-if="actions.editingCharacter.value" class="flex min-h-0 min-w-0 gap-6 h-[70vh]">
-          <div class="min-h-0 min-w-[min(50%,18rem)] flex-1 basis-0 overflow-y-auto pr-2 custom-scrollbar">
+      <div
+        class="modal-body"
+        :class="isNarrowPortrait ? 'max-h-[min(90dvh,800px)] min-h-0 overflow-x-hidden overflow-y-auto' : ''"
+      >
+        <div
+          v-if="actions.editingCharacter.value"
+          class="flex min-h-0 min-w-0"
+          :class="isNarrowPortrait ? 'flex-col gap-4' : 'gap-6 h-[70vh]'"
+        >
+          <div
+            class="min-h-0 min-w-0 pr-2 custom-scrollbar"
+            :class="
+              isNarrowPortrait
+                ? 'shrink-0'
+                : 'min-w-[min(50%,18rem)] flex-1 basis-0 overflow-y-auto'
+            "
+          >
             <div class="space-y-6">
               <div class="flex gap-6">
                 <div class="flex flex-col items-center gap-3">
@@ -5196,7 +5226,14 @@ const editingPersonaAvatarUrl = computed(() => {
           </div>
 
           <!-- 角色编辑助手 -->
-          <div class="flex min-h-0 min-w-0 max-w-[50%] flex-[0.66] basis-0 flex-col glass-panel rounded-2xl p-4 shadow-inner">
+          <div
+            class="flex min-h-0 min-w-0 flex-col glass-panel rounded-2xl p-4 shadow-inner"
+            :class="
+              isNarrowPortrait
+                ? 'min-h-[28rem] h-[min(36rem,72vh)] shrink-0 max-h-[min(576px,72vh)]'
+                : 'max-w-[50%] flex-[0.66] basis-0'
+            "
+          >
             <div class="flex items-center justify-between mb-4 px-1">
               <span class="text-sm font-bold text-[var(--color-text-secondary)] uppercase tracking-widest flex items-center gap-2">
                 <span class="w-2 h-2 rounded-full bg-brand animate-pulse"></span>
@@ -5227,8 +5264,7 @@ const editingPersonaAvatarUrl = computed(() => {
               />
             </div>
             <div
-              class="pt-4 border-t border-[var(--color-border-subtle)] transition-colors"
-              :class="isWorkspaceAssistantDragOver ? 'rounded-xl border border-brand-a30 bg-brand-a10 px-3 pb-3' : ''"
+              class="relative pt-4 border-t border-[var(--color-border-subtle)] transition-colors"
               @dragenter.prevent="handleWorkspaceAssistantDragEnter"
               @dragover.prevent="handleWorkspaceAssistantDragOver"
               @dragleave="handleWorkspaceAssistantDragLeave"
@@ -5317,6 +5353,11 @@ const editingPersonaAvatarUrl = computed(() => {
                   发送
                 </button>
               </div>
+              <div
+                v-show="isWorkspaceAssistantDragOver"
+                class="pointer-events-none absolute inset-0 z-[21] rounded-xl bg-white/25 backdrop-blur-[2px] ring-1 ring-inset ring-white/40 transition-opacity duration-150"
+                aria-hidden="true"
+              />
             </div>
           </div>
         </div>
