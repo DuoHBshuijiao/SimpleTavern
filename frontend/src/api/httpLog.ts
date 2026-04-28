@@ -2,7 +2,7 @@
  * 出站 HTTP 请求日志查看 API 客户端
  *
  * 与后端 /api/http-log 对接：
- *  - getHttpLog 列表（最近 30 分钟元数据，从旧到新）
+ *  - getHttpLog 列表（最近 30 分钟元数据，从新到旧）
  *  - getHttpLogDetail 单条完整记录
  *  - clearHttpLog 手动清空
  */
