@@ -39,6 +39,12 @@
  */
 import { computed, ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { Check, Loader2, ChevronDown } from 'lucide-vue-next'
+import { useViewportNarrowPortrait } from '../composables/useViewportNarrowPortrait'
+
+/** 窄竖屏下下拉横向铺满视口左右留白（与站内 calc(100vw - 2rem) 一类间距对齐） */
+const NARROW_SELECT_GUTTER = '1rem'
+
+const { isNarrowPortrait } = useViewportNarrowPortrait()
 
 interface Option {
   label: string
@@ -201,7 +207,10 @@ function toggle() {
 }
 
 /**
- * 计算并更新下拉框的 fixed 定位样式（用于 Teleport 到 body 时脱离父级 overflow 裁剪）
+ * 计算并更新下拉框的 fixed 定位样式（用于 Teleport 到 body 时脱离父级 overflow 裁剪）。
+ * 窄竖屏（isNarrowPortrait）：横向左右固定留白、宽度自动铺满，不再按触发器右对齐固定像素宽，
+ * 避免窄屏下列表挤在一侧；纵向仍锚定触发器上下方。
+ * （LlmPresetNameCombobox / TtsVoiceInput 等为输入框内 absolute，不走此 Teleport 逻辑，无需同步改 props。）
  */
 function updateDropdownPosition() {
   const trigger = triggerRef.value
@@ -215,7 +224,11 @@ function updateDropdownPosition() {
     style.top = `${rect.bottom + 4}px`
     style.bottom = 'auto'
   }
-  if (props.dropdownWidth) {
+  if (isNarrowPortrait.value) {
+    style.left = NARROW_SELECT_GUTTER
+    style.right = NARROW_SELECT_GUTTER
+    style.width = 'auto'
+  } else if (props.dropdownWidth) {
     const raw = props.dropdownWidth
     const w = typeof raw === 'number' ? `${raw}px` : (/^\d+$/.test(String(raw)) ? `${raw}px` : String(raw))
     style.width = w
