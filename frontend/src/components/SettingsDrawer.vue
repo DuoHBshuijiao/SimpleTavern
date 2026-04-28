@@ -59,6 +59,7 @@ import LlmPresetNameCombobox from './LlmPresetNameCombobox.vue'
 import { apiDelete, apiGet, apiPost, apiPostFormData, apiPut } from '../api/http'
 import { downloadUpdate, getManualUpdateCheck, runUpdate } from '../api/update'
 import { useAppFont } from '../composables/useAppFont'
+import { useViewportNarrowPortrait } from '../composables/useViewportNarrowPortrait'
 import { usePageBackground } from '../composables/usePageBackground'
 import { useSettingsImport } from '../composables/useSettingsImport'
 import {
@@ -85,6 +86,7 @@ import { notifyConfirm, notifyMessage } from '../composables/useNotify'
 import type { LlmProviderPreset } from '../constants/llmProviderPresets'
 
 const { applyFont } = useAppFont()
+const { isNarrowPortrait } = useViewportNarrowPortrait()
 
 /** 当前应用版本，从后端 /api/update/version 获取 */
 const appVersion = ref<string>('')
@@ -3610,8 +3612,16 @@ async function checkUpdate() {
                   <!-- 字体自定义 -->
                   <div class="space-y-3">
                     <div class="text-sm font-medium text-[var(--color-text-secondary)]">字体</div>
-                    <div class="flex flex-wrap gap-2 items-center">
-                      <div class="relative group flex-1 min-w-0 max-w-[172px]">
+                    <div
+                      class="gap-2"
+                      :class="isNarrowPortrait ? 'flex flex-col' : 'flex flex-wrap items-center'"
+                    >
+                      <div
+                        class="relative group min-w-0"
+                        :class="
+                          isNarrowPortrait ? 'w-full' : 'max-w-[172px] flex-1'
+                        "
+                      >
                         <ModernSelect
                           v-model="fontModel"
                           :options="fontOptions"
@@ -3621,46 +3631,51 @@ async function checkUpdate() {
                           class="w-full min-w-0"
                         />
                       </div>
-                      <div class="flex h-10 items-center gap-0.5 rounded-lg border border-[var(--color-border)] bg-surface-muted px-1 py-0.5">
+                      <div
+                        class="flex flex-wrap items-center gap-2"
+                        :class="isNarrowPortrait ? 'w-full' : ''"
+                      >
+                        <div class="flex h-10 items-center gap-0.5 rounded-lg border border-[var(--color-border)] bg-surface-muted px-1 py-0.5">
+                          <button
+                            type="button"
+                            class="flex min-h-9 min-w-9 items-center justify-center rounded-md p-2 text-[var(--color-text-muted)] transition-colors hover:bg-surface-hover hover:text-[var(--color-text)]"
+                            aria-label="减小字号"
+                            @click="stepMessageFontSize(-1)"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                          </button>
+                          <input
+                            v-model.number="messageFontSizeModel"
+                            type="number"
+                            min="8"
+                            max="72"
+                            placeholder=""
+                            class="w-10 bg-transparent border-0 text-center text-sm text-[var(--color-text)] focus:outline-none focus:ring-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          />
+                          <button
+                            type="button"
+                            class="flex min-h-9 min-w-9 items-center justify-center rounded-md p-2 text-[var(--color-text-muted)] transition-colors hover:bg-surface-hover hover:text-[var(--color-text)]"
+                            aria-label="增大字号"
+                            @click="stepMessageFontSize(1)"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                          </button>
+                        </div>
                         <button
                           type="button"
-                          class="flex min-h-9 min-w-9 items-center justify-center rounded-md p-2 text-[var(--color-text-muted)] transition-colors hover:bg-surface-hover hover:text-[var(--color-text)]"
-                          aria-label="减小字号"
-                          @click="stepMessageFontSize(-1)"
+                          class="min-h-10 rounded-lg bg-surface-muted px-4 py-2 text-sm text-[var(--color-text)] transition-colors whitespace-nowrap hover:bg-surface-hover"
+                          @click="triggerFontImport"
                         >
-                          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                          导入字体
                         </button>
                         <input
-                          v-model.number="messageFontSizeModel"
-                          type="number"
-                          min="8"
-                          max="72"
-                          placeholder=""
-                          class="w-10 bg-transparent border-0 text-center text-sm text-[var(--color-text)] focus:outline-none focus:ring-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          ref="fontInputRef"
+                          type="file"
+                          class="hidden"
+                          accept=".ttf,.otf,.woff,.woff2"
+                          @change="handleFontImport"
                         />
-                        <button
-                          type="button"
-                          class="flex min-h-9 min-w-9 items-center justify-center rounded-md p-2 text-[var(--color-text-muted)] transition-colors hover:bg-surface-hover hover:text-[var(--color-text)]"
-                          aria-label="增大字号"
-                          @click="stepMessageFontSize(1)"
-                        >
-                          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                        </button>
                       </div>
-                      <button
-                        type="button"
-                        class="min-h-10 rounded-lg bg-surface-muted px-4 py-2 text-sm text-[var(--color-text)] transition-colors whitespace-nowrap hover:bg-surface-hover"
-                        @click="triggerFontImport"
-                      >
-                        导入字体
-                      </button>
-                      <input
-                        ref="fontInputRef"
-                        type="file"
-                        class="hidden"
-                        accept=".ttf,.otf,.woff,.woff2"
-                        @change="handleFontImport"
-                      />
                     </div>
                   </div>
 
