@@ -204,6 +204,19 @@ export const useChatsStore = defineStore('chats', {
       return chat
     },
     /**
+     * 创建分支：复制当前单聊或群聊为新会话（服务端追加标题「-新分支」）。
+     */
+    async branchChat(sourceChatId: string) {
+      const chat = await apiPost<Chat>(
+        `/api/chats/${encodeURIComponent(sourceChatId)}/branch`,
+      )
+      await this.loadGroupList()
+      await this.loadList(chat.characterId)
+      this.activeChatId = chat.id
+      this.activeChat = chat
+      return chat
+    },
+    /**
      * 加载群聊列表
      *
      * 加载所有群聊会话列表。
