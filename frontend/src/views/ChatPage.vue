@@ -3949,6 +3949,15 @@ async function deleteChat(chatId: string) {
   await chats.remove(chatId)
 }
 
+async function handleBranchChat(chat: Chat) {
+  try {
+    const br = await chats.branchChat(chat.id)
+    await afterChatReload(br.id)
+  } catch (e: unknown) {
+    await notifyMessage(e instanceof Error ? e.message : String(e), { title: '创建分支失败' })
+  }
+}
+
 /**
  * 选择聊天
  *
@@ -4465,6 +4474,7 @@ const editingPersonaAvatarUrl = computed(() => {
       @create-chat="createChat"
       @create-group="showGroupCreator = true"
       @promote-to-group="openPromoteToGroup"
+      @branch-chat="handleBranchChat"
       @start-edit-title="startEditTitle"
       @save-title="saveTitle"
       @cancel-edit-title="cancelEditTitle"
