@@ -509,6 +509,85 @@ def promote_to_group(source_chat_id: str, req: PromoteToGroupRequest) -> Chat:
     return new_chat
 
 
+@router.post("/chats/{source_chat_id}/branch", response_model=Chat)
+def branch_chat(source_chat_id: str) -> Chat:
+    """
+    将单聊或群聊复制为新会话（种类不变）：复制消息与图片；
+    标题在原名后追加「-新分支」；不复制 assistant_chat.json。
+    """
+    try:
+        source = load_chat(source_chat_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="chat not found") from None
+
+    base_title = (source.title or "").strip()
+    if not base_title:
+        base_title = "新群聊" if source.isGroup else "新对话"
+    br_title = f"{base_title}-新分支"
+
+    migrated: list[ChatMessage] = []
+    cid = source.characterId
+    for m in source.messages:
+        d = m.model_dump(mode="json")
+        if m.role == "assistant":
+            d["characterId"] = m.characterId or cid
+        migrated.append(ChatMessage.model_validate(d))
+
+    if source.isGroup:
+        member_ids = list(source.memberIds)
+        if len(member_ids) < 2:
+            raise HTTPException(status_code=400, detail="group chat has fewer than 2 members")
+        for mid in member_ids:
+            try:
+                load_character(mid)
+            except FileNotFoundError:
+                raise HTTPException(status_code=404, detail=f"character not found: {mid}") from None
+
+        new_chat = Chat(
+            characterId=cid,
+            title=br_title,
+            isGroup=True,
+            memberIds=list(member_ids),
+        )
+        new_chat.overrides = source.overrides.model_copy(deep=True)
+        new_chat.userPersonaId = source.userPersonaId
+        new_chat.groupDelay = source.groupDelay
+        new_chat.groupSystemInjectDepth = source.groupSystemInjectDepth
+        new_chat.groupSystemAlwaysAtBottom = source.groupSystemAlwaysAtBottom
+        for mid, s in source.memberSettings.items():
+            new_chat.memberSettings[mid] = s.model_copy(deep=True)
+    else:
+        new_chat = Chat(
+            characterId=cid,
+            title=br_title,
+            isGroup=False,
+        )
+        new_chat.overrides = source.overrides.model_copy(deep=True)
+        new_chat.userPersonaId = source.userPersonaId
+
+    new_chat.createdAt = _now_iso()
+    new_chat.updatedAt = _now_iso()
+    new_chat.messages = migrated
+
+    try:
+        save_chat(new_chat)
+        copy_chat_images_for_promote(
+            source.characterId,
+            source.id,
+            new_chat.messages,
+            new_chat.characterId,
+            new_chat.id,
+        )
+    except Exception:
+        try:
+            delete_chat(new_chat.id)
+        except Exception:
+            pass
+        raise
+
+    return new_chat
+
+
 @router.get("/chats/{chat_id}", response_model=Chat)
 def get_chat(chat_id: str) -> Chat:
     """
