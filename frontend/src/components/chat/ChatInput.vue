@@ -98,6 +98,8 @@ const props = withDefaults(
   onAssistantFabSnapEnd?: () => void
   /** 侧栏是否收起（与顶栏 morph 联动） */
   sidebarCollapsed?: boolean
+  /** 与 useViewportNarrowPortrait 一致（约 &lt; 10/16）：工具行压缩，模型下拉可 shrink */
+  isNarrowPortrait?: boolean
   /** 顶栏变形阶段：与 ChatPage headerMorphPhase 一致 */
   headerMorphPhase?: HeaderMorphPhase
   // 输入状态
@@ -133,6 +135,7 @@ const props = withDefaults(
   }>(),
   {
     sidebarCollapsed: false,
+    isNarrowPortrait: false,
     headerMorphPhase: 'inset',
   }
 )
@@ -158,6 +161,7 @@ const emit = defineEmits<{
 const imageInputRef = ref<HTMLInputElement | null>(null)
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const showDraftHelperMenu = ref(false)
+const isDragOverComposer = ref(false)
 /** 碰撞检测用真实视口矩形（与 CSS 过渡中的 topPx 解耦） */
 const assistantFabButtonRef = ref<HTMLElement | null>(null)
 
@@ -347,6 +351,35 @@ async function handlePaste(e: ClipboardEvent) {
   }
 }
 
+function handleDragEnter(event: DragEvent) {
+  if (inputDisabled.value) return
+  if (!event.dataTransfer?.types.includes('Files')) return
+  isDragOverComposer.value = true
+}
+
+function handleDragLeave(event: DragEvent) {
+  const nextTarget = event.relatedTarget as Node | null
+  if (nextTarget && (event.currentTarget as HTMLElement | null)?.contains(nextTarget)) return
+  isDragOverComposer.value = false
+}
+
+function handleDragOver(event: DragEvent) {
+  if (!event.dataTransfer?.types.includes('Files')) return
+  event.preventDefault()
+  if (!inputDisabled.value) {
+    isDragOverComposer.value = true
+  }
+}
+
+async function handleDrop(event: DragEvent) {
+  const files = Array.from(event.dataTransfer?.files || [])
+  isDragOverComposer.value = false
+  if (!files.length) return
+  event.preventDefault()
+  if (inputDisabled.value) return
+  await handleIncomingMainChatFiles(files)
+}
+
 function handleInput(e: Event) {
   const target = e.target as HTMLTextAreaElement | null
   emit('update:modelValue', target?.value ?? '')
@@ -462,6 +495,10 @@ defineExpose({ getAssistantFabRect, setAssistantTopPx: setAssistantTopPxFromSepa
       class="chat-input-card-morph relative z-10 bg-surface-overlay backdrop-blur-xl border border-[var(--color-border)] rounded-2xl shadow-xl p-3 flex flex-col gap-2 focus-within:border-brand-a40 focus-within:ring-1 focus-within:ring-brand-a20 focus-within:bg-surface-overlay"
       :class="{ 'chat-input-card--sink': sinkMorphed }"
       style="opacity: 1;"
+      @dragenter.prevent="handleDragEnter"
+      @dragover.prevent="handleDragOver"
+      @dragleave="handleDragLeave"
+      @drop.prevent="handleDrop"
     >
       <div v-if="draftHelperStatus" class="flex items-center justify-between gap-3 px-3 py-2 rounded-lg bg-[var(--color-border-subtle)] border border-[var(--color-border)]">
         <div class="text-xs text-[var(--color-text-secondary)] min-w-0">{{ draftHelperStatusText }}</div>
@@ -519,7 +556,7 @@ defineExpose({ getAssistantFabRect, setAssistantTopPx: setAssistantTopPxFromSepa
         </div>
       </div>
       
-      <div class="flex items-center justify-between gap-2 pt-2 border-t border-[var(--color-border-subtle)]">
+      <div class="flex min-w-0 items-center justify-between gap-2 pt-2 border-t border-[var(--color-border-subtle)]">
           <div class="flex-1 min-w-0 h-8 flex items-center gap-2 overflow-x-auto">
             <!-- 轮次 / 输出中：状态条 -->
             <template v-if="groupShowsRoundStatus">
@@ -574,7 +611,8 @@ defineExpose({ getAssistantFabRect, setAssistantTopPx: setAssistantTopPxFromSepa
             </template>
           </div>
           
-          <div class="flex items-center gap-3 shrink-0">
+          <div class="flex min-w-0 shrink items-center gap-3">
+          <div class="flex items-center gap-0 shrink-0">
           <div class="relative">
             <button
               class="chat-action-button chat-action-button--secondary shadow-lg transition-all active:scale-95"
@@ -604,6 +642,7 @@ defineExpose({ getAssistantFabRect, setAssistantTopPx: setAssistantTopPxFromSepa
           >
             <ImagePlus class="w-4 h-4" />
           </button>
+          </div>
           <input
             ref="imageInputRef"
             type="file"
@@ -612,18 +651,20 @@ defineExpose({ getAssistantFabRect, setAssistantTopPx: setAssistantTopPxFromSepa
             class="hidden"
             @change="handleImageInputChange"
           />
+          <div class="min-w-0 max-w-[200px] shrink flex-1">
           <ModernSelect
             :model-value="currentModel"
             :selected-preset-id="currentPresetId ?? null"
             :options="modelOptions"
             placement="top"
             placeholder="选择模型 (自动关联预设)..."
-            class="!w-[200px] !text-xs"
+            class="!text-xs min-w-[7rem] w-full max-w-[200px]"
             dropdown-width="410"
             searchable
             allow-create
             @select="emit('select-model', $event)"
           />
+          </div>
           <button 
             class="chat-action-button shadow-lg transition-all active:scale-95"
             :class="[primaryActionClass, primaryActionDisabled ? 'opacity-50 cursor-not-allowed' : 'hover:shadow-brand hover:-translate-y-0.5']"
@@ -634,6 +675,11 @@ defineExpose({ getAssistantFabRect, setAssistantTopPx: setAssistantTopPxFromSepa
           </button>
           </div>
       </div>
+      <div
+        v-show="isDragOverComposer"
+        class="pointer-events-none absolute inset-0 z-[21] rounded-2xl bg-white/25 backdrop-blur-[2px] ring-1 ring-inset ring-white/40 transition-opacity duration-150"
+        aria-hidden="true"
+      />
     </div>
 
     <div
