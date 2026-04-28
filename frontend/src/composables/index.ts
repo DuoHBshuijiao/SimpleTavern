@@ -41,6 +41,8 @@ export type { UseChatActions, ChatActionsDeps } from './useChatActions'
 
 export { useAppFont, applyFont } from './useAppFont'
 export { useSettingsImport } from './useSettingsImport'
+export { useViewportNarrowPortrait } from './useViewportNarrowPortrait'
+export { usePreferHoverChrome } from './usePreferHoverChrome'
 export type { SettingsImportResult } from './useSettingsImport'
 
 export { useNotify, notifyMessage, notifyConfirm } from './useNotify'
