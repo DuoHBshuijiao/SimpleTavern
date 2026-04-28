@@ -41,6 +41,7 @@
  * - cancel-edit-title: 取消编辑标题
  * - delete-chat: 删除聊天
  * - promote-to-group: 将单聊复制为群聊（打开群聊创建）
+ * - branch-chat: 将单聊或群聊复制为新会话（标题追加「-新分支」）
  *
  * 使用的Composables：
  * 无
@@ -62,7 +63,17 @@ import { usePreferHoverChrome } from '../../composables/usePreferHoverChrome'
 import ModernAvatar from '../ModernAvatar.vue'
 import ConfirmPopover from '../ConfirmPopover.vue'
 
-import { Pencil, Trash2, Users, Check, X, ChevronRight, ChevronLeft, ArrowUp } from 'lucide-vue-next'
+import {
+  ArrowUp,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Copy,
+  Pencil,
+  Trash2,
+  Users,
+  X,
+} from 'lucide-vue-next'
 
 const { preferHoverChrome } = usePreferHoverChrome()
 
@@ -108,6 +119,7 @@ const emit = defineEmits<{
   'cancel-edit-title': []
   'delete-chat': [chatId: string]
   'promote-to-group': [chat: Chat]
+  'branch-chat': [chat: Chat]
 }>()
 
 function asidePresetClass(collapsed: boolean) {
@@ -549,6 +561,13 @@ function confirmDelete() {
                     : 'opacity-0 group-hover:opacity-100'
                 "
               >
+                <button
+                  class="p-1 hover:text-[var(--color-purple)] text-[var(--color-text-secondary)] transition-colors"
+                  title="创建分支"
+                  @click.stop="emit('branch-chat', c)"
+                >
+                  <Copy class="w-3.5 h-3.5" />
+                </button>
                 <button class="p-1 hover:text-[var(--color-text)] text-[var(--color-text-secondary)] transition-colors" @click.stop="emit('start-edit-title', c.id, c.title)">
                   <Pencil class="w-3.5 h-3.5" />
                 </button>
@@ -622,6 +641,13 @@ function confirmDelete() {
                   @click.stop="emit('promote-to-group', c)"
                 >
                   <ArrowUp class="w-3.5 h-3.5" />
+                </button>
+                <button
+                  class="p-1 hover:text-brand text-[var(--color-text-secondary)] transition-colors"
+                  title="创建分支"
+                  @click.stop="emit('branch-chat', c)"
+                >
+                  <Copy class="w-3.5 h-3.5" />
                 </button>
                 <button class="p-1 hover:text-[var(--color-text)] text-[var(--color-text-secondary)] transition-colors" @click.stop="emit('start-edit-title', c.id, c.title)">
                   <Pencil class="w-3.5 h-3.5" />
