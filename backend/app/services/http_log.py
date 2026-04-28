@@ -334,7 +334,7 @@ def _record_meta(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def list_recent(since_minutes: int = RETENTION_MINUTES, limit: int = 500) -> list[dict[str, Any]]:
-    """从旧到新返回最近 N 分钟的元数据列表。"""
+    """从新到旧返回最近 N 分钟的元数据列表。"""
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=since_minutes)
     cutoff_ms = int(cutoff.timestamp() * 1000)
     rows: list[dict[str, Any]] = []
@@ -355,9 +355,9 @@ def list_recent(since_minutes: int = RETENTION_MINUTES, limit: int = 500) -> lis
                     rows.append(_record_meta(rec))
         except Exception:
             logger.exception("[http_log] failed to read shard %s", shard)
-    rows.sort(key=lambda r: (r.get("ts") or ""))
+    rows.sort(key=lambda r: (r.get("ts") or ""), reverse=True)
     if len(rows) > limit:
-        rows = rows[-limit:]
+        rows = rows[:limit]
     return rows
 
 
