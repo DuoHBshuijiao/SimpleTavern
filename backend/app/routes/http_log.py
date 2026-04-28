@@ -1,7 +1,7 @@
 """
 出站 HTTP 请求日志查看 API
 
-- GET  /api/http-log          列表（默认最近 30 分钟元数据，从旧到新）
+- GET  /api/http-log          列表（默认最近 30 分钟元数据，从新到旧）
 - GET  /api/http-log/{id}     单条完整记录
 - DELETE /api/http-log        清空全部日志
 
@@ -27,7 +27,7 @@ def get_http_log_list(
     minutes: int = Query(default=RETENTION_MINUTES, ge=1, le=RETENTION_MINUTES),
     limit: int = Query(default=500, ge=1, le=2000),
 ) -> dict:
-    """返回最近 N 分钟的记录元数据；从旧到新排序，便于前端自然追加。"""
+    """返回最近 N 分钟的记录元数据；从新到旧排序（最新在上）。"""
     rows = list_recent(since_minutes=minutes, limit=limit)
     return {
         "retentionMinutes": RETENTION_MINUTES,
