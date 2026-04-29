@@ -410,6 +410,13 @@ export function useChatActions(deps: ChatActionsDeps) {
         ? cardObj.attachedWorldBookIds.filter((id): id is string => typeof id === 'string')
         : (Array.isArray(current.attachedWorldBookIds) ? [...current.attachedWorldBookIds] : []),
       extraFirstMessageEntries: mergedEntries,
+      mvuEnabled:
+        (typeof cardObj.mvuEnabled === 'boolean' ? cardObj.mvuEnabled : undefined)
+        ?? current.mvuEnabled
+        ?? false,
+      contentRegexRules: Array.isArray(cardObj.contentRegexRules)
+        ? cardObj.contentRegexRules as CharacterCard['contentRegexRules']
+        : (Array.isArray(current.contentRegexRules) ? [...current.contentRegexRules] : []),
     }
   }
 
