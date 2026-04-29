@@ -484,6 +484,11 @@ const sidebarCharacters = computed(() => {
   return characterSidebarRecency.sortedList(characters.list)
 })
 
+function pickLatestChatByUpdatedAt(list: Chat[]): Chat | null {
+  if (!list.length) return null
+  return [...list].sort((a, b) => Date.parse(b.updatedAt || '') - Date.parse(a.updatedAt || ''))[0] ?? null
+}
+
 function bumpSidebarForActiveChat() {
   characterSidebarRecency.bump(resolveBumpCharacterId(activeChat.value, selectedCharacterId.value))
 }
@@ -1809,6 +1814,8 @@ async function confirmImportEmbeddedCard() {
       exampleDialogue: incoming.exampleDialogue,
       systemPrompt: incoming.systemPrompt,
       extraFirstMessageEntries: Array.isArray(incoming.extraFirstMessageEntries) ? incoming.extraFirstMessageEntries : [],
+      mvuEnabled: incoming.mvuEnabled === true,
+      contentRegexRules: Array.isArray(incoming.contentRegexRules) ? incoming.contentRegexRules : [],
       attachedWorldBookIds,
       avatar: current.avatar || incoming.avatar,
       avatarFocusX: current.avatarFocusX ?? incoming.avatarFocusX ?? null,
@@ -1835,6 +1842,38 @@ function ensureCharacterAttachedWbIds() {
   const c = actions.editingCharacter.value
   if (!c) return
   if (!Array.isArray(c.attachedWorldBookIds)) c.attachedWorldBookIds = []
+}
+
+function ensureCharacterRegexRules() {
+  const c = actions.editingCharacter.value
+  if (!c) return
+  if (!Array.isArray(c.contentRegexRules)) c.contentRegexRules = []
+}
+
+function addCharacterRegexRule() {
+  const c = actions.editingCharacter.value
+  if (!c) return
+  ensureCharacterRegexRules()
+  c.contentRegexRules!.push({
+    id: crypto.randomUUID(),
+    name: '',
+    enabled: true,
+    order: c.contentRegexRules!.length,
+    pattern: '',
+    action: 'remove',
+    replacement: '',
+    matchMode: 'global',
+    extractSource: 'whole_match',
+    extractGroupIndex: null,
+    scanDepthOverride: null,
+  })
+}
+
+function removeCharacterRegexRule(index: number) {
+  const c = actions.editingCharacter.value
+  if (!c?.contentRegexRules) return
+  c.contentRegexRules.splice(index, 1)
+  c.contentRegexRules = c.contentRegexRules.map((rule, i) => ({ ...rule, order: i }))
 }
 
 function characterEditorWorldBookName(id: string) {
@@ -2324,7 +2363,7 @@ onMounted(async () => {
   window.addEventListener('pointerdown', handleHeaderPointerdown)
 
   if (!selectedCharacterId.value) {
-    const first = characters.list[0]
+    const first = sidebarCharacters.value[0]
     if (first) selectedCharacterId.value = first.id
   }
   nextTick(() => {
@@ -2449,9 +2488,9 @@ watch(
     if (ac?.isGroup && ac.memberIds?.includes(cid)) {
       return
     }
-    const first = chats.list[0]
-    if (first) {
-      await chats.load(first.id)
+    const latest = pickLatestChatByUpdatedAt(chats.list)
+    if (latest) {
+      await chats.load(latest.id)
     } else {
       chats.activeChatId = null
       chats.activeChat = null
@@ -5088,6 +5127,61 @@ const editingPersonaAvatarUrl = computed(() => {
                   <span class="opacity-60 text-xs ml-2 text-brand">该项参与对话</span>
                 </label>
                 <textarea v-model="actions.editingCharacter.value.systemPrompt" class="input textarea h-32" placeholder="回复格式要求..."></textarea>
+              </div>
+
+              <div class="form-group rounded-xl border border-[var(--color-border-subtle)] bg-surface-overlay/80 p-4 space-y-3">
+                <label class="label">
+                  <span>MVU 能力</span>
+                </label>
+                <label class="inline-flex items-center gap-2 text-sm text-[var(--color-text-secondary)]">
+                  <input v-model="actions.editingCharacter.value.mvuEnabled" type="checkbox" />
+                  <span>启用 MVU 管线</span>
+                </label>
+                <div class="flex items-center justify-between">
+                  <div class="text-xs text-[var(--color-text-muted)]">角色自带正文正则（新建会话时注入）</div>
+                  <button type="button" class="btn btn-xs btn-secondary" @click="addCharacterRegexRule">新建规则</button>
+                </div>
+                <div class="space-y-2">
+                  <div
+                    v-for="(rule, idx) in (actions.editingCharacter.value.contentRegexRules || [])"
+                    :key="rule.id || idx"
+                    class="rounded-lg border border-[var(--color-border-subtle)] bg-surface-muted p-2 space-y-2"
+                  >
+                    <div class="flex items-center gap-2">
+                      <input v-model="rule.name" class="input flex-1" placeholder="规则名称（可选）" />
+                      <label class="inline-flex items-center gap-1 text-xs">
+                        <input v-model="rule.enabled" type="checkbox" />
+                        启用
+                      </label>
+                      <button type="button" class="btn btn-xs btn-secondary" @click="removeCharacterRegexRule(idx)">删除</button>
+                    </div>
+                    <textarea v-model="rule.pattern" class="input textarea h-20" placeholder="pattern"></textarea>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
+                      <select v-model="rule.action" class="input">
+                        <option value="remove">remove</option>
+                        <option value="replace">replace</option>
+                        <option value="extract">extract</option>
+                        <option value="extract_and_replace">extract_and_replace</option>
+                      </select>
+                      <select v-model="rule.matchMode" class="input">
+                        <option value="global">global</option>
+                        <option value="first">first</option>
+                      </select>
+                      <input v-model.number="rule.scanDepthOverride" type="number" min="1" class="input" placeholder="覆盖深度(可选)" />
+                    </div>
+                    <textarea v-if="rule.action === 'replace' || rule.action === 'extract_and_replace'" v-model="rule.replacement" class="input textarea h-16" placeholder="replacement"></textarea>
+                    <div v-if="rule.action === 'extract' || rule.action === 'extract_and_replace'" class="grid grid-cols-1 md:grid-cols-2 gap-2">
+                      <select v-model="rule.extractSource" class="input">
+                        <option value="whole_match">whole_match</option>
+                        <option value="capture_group">capture_group</option>
+                      </select>
+                      <input v-if="rule.extractSource === 'capture_group'" v-model.number="rule.extractGroupIndex" type="number" min="0" class="input" placeholder="提取分组下标" />
+                    </div>
+                  </div>
+                  <div v-if="!(actions.editingCharacter.value.contentRegexRules || []).length" class="text-xs text-[var(--color-text-muted)] border border-dashed border-[var(--color-border-subtle)] rounded-lg px-3 py-2">
+                    暂无规则。
+                  </div>
+                </div>
               </div>
 
               <div class="form-group">
