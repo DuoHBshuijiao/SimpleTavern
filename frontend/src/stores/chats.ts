@@ -209,6 +209,7 @@ export const useChatsStore = defineStore('chats', {
     async branchChat(sourceChatId: string) {
       const chat = await apiPost<Chat>(
         `/api/chats/${encodeURIComponent(sourceChatId)}/branch`,
+        {},
       )
       await this.loadGroupList()
       await this.loadList(chat.characterId)
