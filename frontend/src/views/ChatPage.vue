@@ -5133,8 +5133,11 @@ const editingPersonaAvatarUrl = computed(() => {
                 <label class="label">
                   <span>MVU 能力</span>
                 </label>
-                <label class="inline-flex items-center gap-2 text-sm text-[var(--color-text-secondary)]">
-                  <input v-model="actions.editingCharacter.value.mvuEnabled" type="checkbox" />
+                <label class="inline-flex items-center gap-2 text-sm text-[var(--color-text-secondary)] cursor-pointer select-none">
+                  <ThemedCheckbox
+                    :checked="actions.editingCharacter.value.mvuEnabled === true"
+                    @update:checked="(v) => (actions.editingCharacter.value!.mvuEnabled = v)"
+                  />
                   <span>启用 MVU 管线</span>
                 </label>
                 <div class="flex items-center justify-between">
@@ -5149,32 +5152,50 @@ const editingPersonaAvatarUrl = computed(() => {
                   >
                     <div class="flex items-center gap-2">
                       <input v-model="rule.name" class="input flex-1" placeholder="规则名称（可选）" />
-                      <label class="inline-flex items-center gap-1 text-xs">
-                        <input v-model="rule.enabled" type="checkbox" />
-                        启用
+                      <label class="inline-flex items-center gap-1 text-xs cursor-pointer select-none">
+                        <ThemedCheckbox
+                          :checked="rule.enabled"
+                          @update:checked="(v) => (rule.enabled = v)"
+                        />
+                        <span>启用</span>
                       </label>
                       <button type="button" class="btn btn-xs btn-secondary" @click="removeCharacterRegexRule(idx)">删除</button>
                     </div>
                     <textarea v-model="rule.pattern" class="input textarea h-20" placeholder="pattern"></textarea>
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
-                      <select v-model="rule.action" class="input">
-                        <option value="remove">remove</option>
-                        <option value="replace">replace</option>
-                        <option value="extract">extract</option>
-                        <option value="extract_and_replace">extract_and_replace</option>
-                      </select>
-                      <select v-model="rule.matchMode" class="input">
-                        <option value="global">global</option>
-                        <option value="first">first</option>
-                      </select>
+                      <ModernSelect
+                        v-model="rule.action"
+                        :options="[
+                          { label: '删除', value: 'remove' },
+                          { label: '替换', value: 'replace' },
+                          { label: '提取', value: 'extract' },
+                          { label: '提取并替换显示', value: 'extract_and_replace' },
+                        ]"
+                        placeholder="选择处理动作..."
+                        dropdown-width="auto"
+                      />
+                      <ModernSelect
+                        v-model="rule.matchMode"
+                        :options="[
+                          { label: '全局命中', value: 'global' },
+                          { label: '首个命中', value: 'first' },
+                        ]"
+                        placeholder="选择匹配模式..."
+                        dropdown-width="auto"
+                      />
                       <input v-model.number="rule.scanDepthOverride" type="number" min="1" class="input" placeholder="覆盖深度(可选)" />
                     </div>
                     <textarea v-if="rule.action === 'replace' || rule.action === 'extract_and_replace'" v-model="rule.replacement" class="input textarea h-16" placeholder="replacement"></textarea>
                     <div v-if="rule.action === 'extract' || rule.action === 'extract_and_replace'" class="grid grid-cols-1 md:grid-cols-2 gap-2">
-                      <select v-model="rule.extractSource" class="input">
-                        <option value="whole_match">whole_match</option>
-                        <option value="capture_group">capture_group</option>
-                      </select>
+                      <ModernSelect
+                        v-model="rule.extractSource"
+                        :options="[
+                          { label: '整段匹配', value: 'whole_match' },
+                          { label: '捕获分组', value: 'capture_group' },
+                        ]"
+                        placeholder="选择提取来源..."
+                        dropdown-width="auto"
+                      />
                       <input v-if="rule.extractSource === 'capture_group'" v-model.number="rule.extractGroupIndex" type="number" min="0" class="input" placeholder="提取分组下标" />
                     </div>
                   </div>
