@@ -396,14 +396,14 @@ function getReasoningDurationForMessage(m: ChatMessage): number | null {
  * 其它消息用稳定版本，避免为非流式消息付出不必要的补齐成本 / 潜在误判。
  */
 function renderMarkdown(m: ChatMessage) {
-  const text = props.getDisplayContent(m)
+  const text = (m.contentDisplay ?? props.getDisplayContent(m))
   const isStreaming =
     (props.isGenerating || props.isInterjecting) && m.id === props.reasoningMessageId
   return isStreaming ? renderChatMarkdownStreaming(text) : renderChatMarkdown(text)
 }
 
 function shouldRenderMainBubble(m: ChatMessage): boolean {
-  const text = props.getDisplayContent(m).trim()
+  const text = (m.contentDisplay ?? props.getDisplayContent(m)).trim()
   if (text) return true
   return Array.isArray(m.images) && m.images.length > 0
 }
