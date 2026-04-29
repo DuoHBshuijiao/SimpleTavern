@@ -45,6 +45,7 @@ import {
   type ApiPreset,
   type ApiPresetVoice,
   type Chat,
+  type ChatContentRegexRule,
   type ChatOverrides,
   type Settings,
   type TtsProvider,
@@ -54,6 +55,7 @@ import {
 } from '../types/models'
 import ModernSelect from './ModernSelect.vue'
 import ThemedCheckbox from './ThemedCheckbox.vue'
+import ThemedRadioTags from './ThemedRadioTags.vue'
 import TtsVoiceInput from './TtsVoiceInput.vue'
 import LlmPresetNameCombobox from './LlmPresetNameCombobox.vue'
 import { apiDelete, apiGet, apiPost, apiPostFormData, apiPut } from '../api/http'
@@ -155,6 +157,23 @@ const globalAccordionOpen = reactive({
 const globalDraft = ref<Settings | null>(null)
 const chatDraft = ref<ChatOverrides | null>(null)
 const isSaving = ref(false)
+const regexEditorOpen = ref(false)
+const regexEditorIndex = ref<number | null>(null)
+const regexEditorDraft = ref<ChatContentRegexRule | null>(null)
+const chatRegexAccordionOpen = ref(false)
+const regexTrialSourceMode = ref<'manual' | 'latest_assistant'>('manual')
+const regexTrialSourceOptions = [
+  { label: '手动输入', value: 'manual' },
+  { label: '最近一条 assistant', value: 'latest_assistant' },
+] as const
+const regexTrialManualText = ref('')
+const regexTrialResult = ref<{
+  beforeText: string
+  afterText: string
+  displayText: string
+  changed: boolean
+  extractedItems: Array<{ value: string; matchedText: string; ruleId: string }>
+} | null>(null)
 
 const showApiKey = ref(false)
 const editingPresetId = ref<string | null>(null)
@@ -507,6 +526,53 @@ function clone<T>(v: T): T {
   return JSON.parse(JSON.stringify(v)) as T
 }
 
+function normalizeRegexRuleName(name: string | null | undefined, pattern: string): string {
+  const trimmed = (name || '').trim()
+  if (trimmed) return trimmed
+  return (pattern || '').trim().slice(0, 50)
+}
+
+function normalizeRegexRule(
+  source?: Partial<ChatContentRegexRule> | null,
+  fallbackOrder = 0,
+): ChatContentRegexRule {
+  const pattern = String(source?.pattern || '')
+  return {
+    id: String(source?.id || crypto.randomUUID()),
+    name: normalizeRegexRuleName(source?.name ?? null, pattern) || null,
+    enabled: source?.enabled !== false,
+    order: Number.isFinite(source?.order as number) ? Number(source!.order) : fallbackOrder,
+    pattern,
+    action:
+      source?.action === 'replace' ||
+      source?.action === 'extract' ||
+      source?.action === 'extract_and_replace'
+        ? source.action
+        : 'remove',
+    replacement: source?.replacement ?? null,
+    matchMode: source?.matchMode === 'first' ? 'first' : 'global',
+    extractSource: source?.extractSource === 'capture_group' ? 'capture_group' : 'whole_match',
+    extractGroupIndex:
+      typeof source?.extractGroupIndex === 'number' &&
+      Number.isFinite(source.extractGroupIndex) &&
+      source.extractGroupIndex >= 0
+        ? Math.floor(source.extractGroupIndex)
+        : null,
+    scanDepthOverride:
+      typeof source?.scanDepthOverride === 'number' &&
+      Number.isFinite(source.scanDepthOverride) &&
+      source.scanDepthOverride >= 1
+        ? Math.floor(source.scanDepthOverride)
+        : null,
+  }
+}
+
+function normalizeRegexRules(
+  rules?: Array<Partial<ChatContentRegexRule> | null> | null,
+): ChatContentRegexRule[] {
+  return (rules || []).map((rule, index) => normalizeRegexRule(rule || {}, index))
+}
+
 /**
  * 确保覆盖设置格式正确
  *
@@ -531,11 +597,20 @@ function ensureOverrides(v?: Partial<ChatOverrides> | null): ChatOverrides {
     sessionSystemPromptMode: v?.sessionSystemPromptMode === 'override' ? 'override' : 'append',
     longTermMemory: v?.longTermMemory ?? null,
     contextStartMessageId: v?.contextStartMessageId ?? null,
+    contextStartKeepBeforeMessages: normalizePositiveInteger(v?.contextStartKeepBeforeMessages),
     presetId: v?.presetId ?? null,
     pureAiMode: v?.pureAiMode ?? null,
     worldBookIds,
     worldBookAttachments: attachments,
     worldBookGlobalExclusions: [...(v?.worldBookGlobalExclusions || [])],
+    contentRegexScanDepthDefault:
+      typeof v?.contentRegexScanDepthDefault === 'number' &&
+      Number.isFinite(v.contentRegexScanDepthDefault) &&
+      v.contentRegexScanDepthDefault >= 1
+        ? Math.floor(v.contentRegexScanDepthDefault)
+        : 50,
+    contentRegexRules: normalizeRegexRules(v?.contentRegexRules as Array<Partial<ChatContentRegexRule> | null>),
+    contentRegexEnabledByRuleId: { ...(v?.contentRegexEnabledByRuleId || {}) },
     params: {
       model: v?.params?.model ?? null,
       temperature: v?.params?.temperature ?? null,
@@ -1388,6 +1463,7 @@ watch(
       ;(s as Settings).themeId = normalizeThemeId((s as Settings).themeId as string)
     }
     if (!s.apiPresets) s.apiPresets = []
+    if (!(s as Settings).contentRegexRuleLibrary) (s as Settings).contentRegexRuleLibrary = []
     s.apiPresets = s.apiPresets.map((preset) => normalizePresetDraft(preset))
     if (!(s as Settings).draftHelpDefaults) (s as Settings).draftHelpDefaults = ensureDraftHelpDefaults()
     if (s.selectedFont === undefined) (s as Settings).selectedFont = null
@@ -2593,6 +2669,7 @@ interface ComparableChatOverrides {
   sessionSystemPromptMode: 'append' | 'override'
   longTermMemory: string | null
   contextStartMessageId: string | null
+  contextStartKeepBeforeMessages: number | null
   presetId: string | null
   pureAiMode: boolean | null
   worldBookAttachments: Array<{
@@ -2601,6 +2678,9 @@ interface ComparableChatOverrides {
     insertDepth: number
   }>
   worldBookGlobalExclusions: string[]
+  contentRegexScanDepthDefault: number
+  contentRegexRules: ChatContentRegexRule[]
+  contentRegexEnabledByRuleId: Record<string, boolean>
   params: {
     model: string | null
     temperature: number | null
@@ -2630,6 +2710,7 @@ function normalizeComparableChatOverrides(source?: Partial<ChatOverrides> | null
     sessionSystemPromptMode: overrides.sessionSystemPromptMode === 'override' ? 'override' : 'append',
     longTermMemory: overrides.longTermMemory ?? null,
     contextStartMessageId: overrides.contextStartMessageId ?? null,
+    contextStartKeepBeforeMessages: normalizePositiveInteger(overrides.contextStartKeepBeforeMessages),
     presetId: overrides.presetId ?? null,
     pureAiMode: overrides.pureAiMode ?? null,
     worldBookAttachments: (overrides.worldBookAttachments || []).map((attachment) => ({
@@ -2638,6 +2719,14 @@ function normalizeComparableChatOverrides(source?: Partial<ChatOverrides> | null
       insertDepth: attachment.insertDepth && attachment.insertDepth >= 1 ? attachment.insertDepth : 5,
     })),
     worldBookGlobalExclusions: normalizeWorldBookGlobalExclusions(overrides.worldBookGlobalExclusions),
+    contentRegexScanDepthDefault:
+      typeof overrides.contentRegexScanDepthDefault === 'number' &&
+      Number.isFinite(overrides.contentRegexScanDepthDefault) &&
+      overrides.contentRegexScanDepthDefault >= 1
+        ? Math.floor(overrides.contentRegexScanDepthDefault)
+        : 50,
+    contentRegexRules: normalizeRegexRules(overrides.contentRegexRules),
+    contentRegexEnabledByRuleId: { ...(overrides.contentRegexEnabledByRuleId || {}) },
     params: {
       model: overrides.params.model ?? null,
       temperature: overrides.params.temperature ?? null,
@@ -2693,11 +2782,15 @@ function applyNormalizedComparableToDraft(source: ComparableChatOverrides) {
   chatDraft.value.sessionSystemPromptMode = source.sessionSystemPromptMode
   chatDraft.value.longTermMemory = source.longTermMemory
   chatDraft.value.contextStartMessageId = source.contextStartMessageId
+  chatDraft.value.contextStartKeepBeforeMessages = source.contextStartKeepBeforeMessages
   chatDraft.value.presetId = source.presetId
   chatDraft.value.pureAiMode = source.pureAiMode
   chatDraft.value.worldBookAttachments = source.worldBookAttachments.map((attachment) => ({ ...attachment }))
   syncWorldBookIdsFromAttachments()
   chatDraft.value.worldBookGlobalExclusions = [...source.worldBookGlobalExclusions]
+  chatDraft.value.contentRegexScanDepthDefault = source.contentRegexScanDepthDefault
+  chatDraft.value.contentRegexRules = source.contentRegexRules.map((rule) => ({ ...rule }))
+  chatDraft.value.contentRegexEnabledByRuleId = { ...source.contentRegexEnabledByRuleId }
   chatDraft.value.params = { ...source.params }
   chatDraft.value.draftHelp = { ...source.draftHelp }
   // 与 ensureOverrides 一致：Comparable 里「全默认」时 tts 为 null，但会话草稿必须始终持有 TtsSessionConfig，避免模板访问 chatDraft.tts.model 崩溃。
@@ -2764,6 +2857,168 @@ function handleChatDraftHelpLimitInput(e: Event) {
     chatDraft.value!.draftHelp = ensureDraftHelpDefaults(chatDraft.value!.draftHelp)
     chatDraft.value!.draftHelp.context_message_limit = value
   }, input)
+}
+
+function onContextStartKeepBeforeMessagesInput(e: Event) {
+  const input = e.target as HTMLInputElement | null
+  if (!chatDraft.value) return
+  const raw = (input?.value ?? '').trim()
+  if (raw === '') {
+    chatDraft.value.contextStartKeepBeforeMessages = null
+    return
+  }
+  const n = Number.parseInt(raw, 10)
+  chatDraft.value.contextStartKeepBeforeMessages = Number.isFinite(n) && n >= 2 ? n : null
+}
+
+const contentRegexRulesSorted = computed(() => {
+  const list = globalDraft.value?.contentRegexRuleLibrary || []
+  return [...list].sort((a, b) => (a.order - b.order) || a.id.localeCompare(b.id))
+})
+
+function openRegexRuleEditor(index: number | null = null) {
+  if (!globalDraft.value) return
+  regexEditorIndex.value = index
+  if (index == null) {
+    regexEditorDraft.value = normalizeRegexRule({ order: contentRegexRulesSorted.value.length }, contentRegexRulesSorted.value.length)
+  } else {
+    const found = contentRegexRulesSorted.value[index]
+    regexEditorDraft.value = normalizeRegexRule(found, index)
+  }
+  regexTrialResult.value = null
+  regexEditorOpen.value = true
+}
+
+async function removeRegexRule(index: number) {
+  if (!globalDraft.value) return
+  const list = contentRegexRulesSorted.value
+  const target = list[index]
+  if (!target) return
+  const ok = await notifyConfirm({
+    title: '删除规则',
+    message: `确定删除规则「${target.name || target.pattern.slice(0, 20) || '未命名'}」？`,
+    variant: 'danger',
+  })
+  if (!ok) return
+  globalDraft.value.contentRegexRuleLibrary = list.filter((_, i) => i !== index).map((rule, i) => ({ ...rule, order: i }))
+}
+
+function moveRegexRule(index: number, direction: -1 | 1) {
+  if (!globalDraft.value) return
+  const list = contentRegexRulesSorted.value
+  const target = index + direction
+  if (target < 0 || target >= list.length) return
+  const next = [...list]
+  const currentRule = next[index]
+  const targetRule = next[target]
+  if (!currentRule || !targetRule) return
+  next[index] = targetRule
+  next[target] = currentRule
+  globalDraft.value.contentRegexRuleLibrary = next.map((rule, i) => ({ ...rule, order: i }))
+}
+
+function toggleAllRegexRules(enabled: boolean) {
+  if (!chatDraft.value) return
+  const map = { ...(chatDraft.value.contentRegexEnabledByRuleId || {}) }
+  for (const rule of contentRegexRulesSorted.value) map[rule.id] = enabled
+  chatDraft.value.contentRegexEnabledByRuleId = map
+}
+
+function setRegexRuleEnabled(index: number, enabled: boolean) {
+  if (!chatDraft.value) return
+  const map = { ...(chatDraft.value.contentRegexEnabledByRuleId || {}) }
+  const rule = contentRegexRulesSorted.value[index]
+  if (!rule) return
+  map[rule.id] = enabled
+  chatDraft.value.contentRegexEnabledByRuleId = map
+}
+
+function isRegexRuleEnabled(rule: ChatContentRegexRule): boolean {
+  const map = chatDraft.value?.contentRegexEnabledByRuleId || {}
+  if (Object.prototype.hasOwnProperty.call(map, rule.id)) return !!map[rule.id]
+  return rule.enabled !== false
+}
+
+function regexActionLabel(action?: string | null): string {
+  if (action === 'replace') return '替换'
+  if (action === 'extract') return '提取'
+  if (action === 'extract_and_replace') return '提取并替换显示'
+  return '删除'
+}
+
+function regexMatchModeLabel(mode?: string | null): string {
+  return mode === 'first' ? '首个命中' : '全局命中'
+}
+
+function regexExtractSourceLabel(source?: string | null): string {
+  return source === 'capture_group' ? '捕获分组' : '整段匹配'
+}
+
+let regexDragIndex = -1
+function handleRegexRuleDragStart(index: number) {
+  regexDragIndex = index
+}
+function handleRegexRuleDragOver(e: DragEvent, index: number) {
+  e.preventDefault()
+  if (!chatDraft.value || regexDragIndex < 0 || regexDragIndex === index) return
+  if (!globalDraft.value) return
+  const list = [...contentRegexRulesSorted.value]
+  const [moving] = list.splice(regexDragIndex, 1)
+  if (!moving) return
+  list.splice(index, 0, moving)
+  globalDraft.value.contentRegexRuleLibrary = list.map((rule, i) => ({ ...rule, order: i }))
+  regexDragIndex = index
+}
+function handleRegexRuleDragEnd() {
+  regexDragIndex = -1
+}
+
+function saveRegexRuleEditor() {
+  if (!globalDraft.value || !regexEditorDraft.value) return
+  const normalized = normalizeRegexRule(regexEditorDraft.value, regexEditorDraft.value.order)
+  const list = [...contentRegexRulesSorted.value]
+  if (regexEditorIndex.value == null) {
+    list.push(normalized)
+  } else {
+    list[regexEditorIndex.value] = normalized
+  }
+  globalDraft.value.contentRegexRuleLibrary = list.map((rule, i) => ({ ...normalizeRegexRule(rule, i), order: i }))
+  regexEditorOpen.value = false
+}
+
+async function runRegexRuleTrial() {
+  if (!props.chat?.id || !regexEditorDraft.value) return
+  try {
+    const res = await apiPost<{
+      sourceMode: string
+      beforeText: string
+      afterText: string
+      displayText: string
+      changed: boolean
+      extractedItems: Array<{ value: string; matchedText: string; ruleId: string }>
+      errors: Array<{ error: string; pattern: string; replacement: string }>
+    }>(`/api/chats/${props.chat.id}/content-regex/trial`, {
+      sourceMode: regexTrialSourceMode.value,
+      manualText: regexTrialManualText.value,
+      rule: normalizeRegexRule(regexEditorDraft.value, regexEditorDraft.value.order),
+    })
+    regexTrialResult.value = {
+      beforeText: res.beforeText || '',
+      afterText: res.afterText || '',
+      displayText: res.displayText || res.afterText || '',
+      changed: !!res.changed,
+      extractedItems: Array.isArray(res.extractedItems) ? res.extractedItems : [],
+    }
+    if (Array.isArray(res.errors) && res.errors.length > 0) {
+      for (const err of res.errors) {
+        await notifyMessage(`${err.error}\npattern: ${err.pattern}\nreplacement: ${err.replacement}`, {
+          title: '正则试运行错误',
+        })
+      }
+    }
+  } catch (e) {
+    await notifyMessage(String(e), { title: '正则试运行失败' })
+  }
 }
 
 /**
@@ -4486,15 +4741,36 @@ async function checkUpdate() {
                   <div class="text-right text-xs text-[var(--color-text-secondary)] shrink-0">
                     <div>记忆长度估算：{{ memoryTokenDisplay }} tokens</div>
                     <div>对话长度估算：{{ chatTokenDisplay }} tokens</div>
-                    <div v-if="messagesSinceLastMemoryUpdate != null && tokensSinceLastMemoryUpdate != null" class="text-[var(--color-text-muted)]">
-                      距离上次保存记忆已过去了：~{{ messagesSinceLastMemoryUpdate }} 条消息，约 {{ tokensSinceLastMemoryUpdate }} tokens
+                    <div
+                      v-if="messagesSinceLastMemoryUpdate != null && tokensSinceLastMemoryUpdate != null"
+                      class="text-[var(--color-text-muted)]"
+                    >
+                      距离上次保存记忆已过去了：
+                      <br v-if="isNarrowPortrait" />
+                      ~{{ messagesSinceLastMemoryUpdate }} 条消息，约 {{ tokensSinceLastMemoryUpdate }} tokens
                     </div>
                   </div>
                 </div>
-                <div class="flex items-center gap-2 pb-1">
+                <div class="memory-cutoff-row flex flex-wrap items-center gap-2 pb-1">
                   <button class="btn btn-xs btn-secondary" @click="hideSavedFloors">从已存记忆处截断</button>
                   <button class="btn btn-xs btn-secondary" @click="resetHiddenFloors">恢复完整上下文</button>
-                  <span v-if="chatDraft.contextStartMessageId" class="text-xs text-[var(--color-text-muted)]">
+                  <div
+                    class="memory-keep-control flex items-center gap-1 text-xs text-[var(--color-text-secondary)]"
+                    :class="isNarrowPortrait ? 'basis-full justify-start order-3' : 'ml-auto justify-end order-3'"
+                  >
+                    <span>向前保留</span>
+                    <input
+                      :value="chatDraft.contextStartKeepBeforeMessages ?? ''"
+                      type="number"
+                      min="2"
+                      step="1"
+                      placeholder="N"
+                      class="input h-7 w-20 px-2 text-xs"
+                      @input="onContextStartKeepBeforeMessagesInput"
+                    />
+                    <span>条</span>
+                  </div>
+                  <span v-if="chatDraft.contextStartMessageId" class="memory-anchor-hint order-2 text-xs text-[var(--color-text-muted)]">
                     当前已设置上下文起点
                   </span>
                 </div>
@@ -4607,6 +4883,81 @@ async function checkUpdate() {
                 </div>
               </div>
               <p class="text-xs text-[var(--color-text-muted)] mt-2">实际上下文总限制长度为该「上下文长度」限制加上角色卡、用户信息、自定义系统提示词。草稿助手优先使用当前会话的条数限制，其次全局，最后回退到现有上下文逻辑。</p>
+
+              <div class="space-y-2 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay overflow-hidden">
+                <button
+                  type="button"
+                  class="w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-sm font-medium text-[var(--color-text-secondary)] hover:bg-surface-muted transition-colors"
+                  @click="chatRegexAccordionOpen = !chatRegexAccordionOpen"
+                >
+                  <span>正文正则后处理（规则全局可见，会话独立启用）</span>
+                  <span class="text-[var(--color-text-muted)]">{{ chatRegexAccordionOpen ? '收起' : '展开' }}</span>
+                </button>
+                <div v-show="chatRegexAccordionOpen" class="space-y-3 border-t border-[var(--color-border-subtle)] p-3">
+                  <div class="text-xs text-[var(--color-text-muted)]">规则定义全局共享；本会话仅保存启用状态。assistant 与 user 正文均参与扫描。</div>
+                  <div class="grid grid-cols-2 gap-3">
+                    <div class="space-y-1.5">
+                      <label class="block text-xs font-medium text-[var(--color-text-secondary)]">默认扫描深度（最近 assistant 条数）</label>
+                      <input
+                        v-model.number="chatDraft.contentRegexScanDepthDefault"
+                        type="number"
+                        min="1"
+                        max="50"
+                        class="input w-full"
+                      />
+                    </div>
+                    <div class="flex items-end justify-end gap-2">
+                      <button type="button" class="btn btn-xs btn-secondary" @click="toggleAllRegexRules(true)">全部启用</button>
+                      <button type="button" class="btn btn-xs btn-secondary" @click="toggleAllRegexRules(false)">全部禁用</button>
+                    </div>
+                  </div>
+                  <div class="flex items-center justify-between gap-2">
+                    <div class="text-xs text-[var(--color-text-muted)]">共 {{ contentRegexRulesSorted.length }} 条</div>
+                    <button type="button" class="btn btn-sm btn-primary" @click="openRegexRuleEditor(null)">新建规则</button>
+                  </div>
+                  <div v-if="contentRegexRulesSorted.length === 0" class="rounded-lg border border-dashed border-[var(--color-border-subtle)] bg-surface-muted p-3 text-xs text-[var(--color-text-muted)]">
+                    当前会话暂无正文正则规则。点击「新建规则」开始配置。
+                  </div>
+                  <div v-else class="space-y-2">
+                    <div
+                      v-for="(rule, idx) in contentRegexRulesSorted"
+                      :key="rule.id"
+                      class="rounded-lg border border-[var(--color-border-subtle)] bg-surface-muted p-2"
+                      :class="isRegexRuleEnabled(rule) ? 'border-l-4 border-l-brand' : 'opacity-70 border-l-4 border-l-[var(--color-border)]'"
+                      draggable="true"
+                      @dragstart="handleRegexRuleDragStart(idx)"
+                      @dragover="handleRegexRuleDragOver($event, idx)"
+                      @dragend="handleRegexRuleDragEnd"
+                    >
+                      <div class="flex items-start justify-between gap-2">
+                        <div class="min-w-0 flex-1 cursor-grab active:cursor-grabbing">
+                          <div class="text-xs font-medium text-[var(--color-text)] break-all">{{ rule.name || rule.pattern.slice(0, 50) }}</div>
+                          <div class="mt-1 text-[11px] text-[var(--color-text-muted)] break-all">{{ rule.pattern }}</div>
+                          <div class="mt-1 text-[11px] text-[var(--color-text-muted)]">
+                            {{ regexActionLabel(rule.action) }} / {{ regexMatchModeLabel(rule.matchMode) }} / 深度 {{ rule.scanDepthOverride ?? chatDraft.contentRegexScanDepthDefault ?? 50 }}
+                          </div>
+                          <div v-if="rule.action === 'extract' || rule.action === 'extract_and_replace'" class="mt-1 text-[11px] text-[var(--color-text-muted)]">
+                            提取来源：{{ regexExtractSourceLabel(rule.extractSource) }}
+                          </div>
+                          <div v-if="rule.action === 'replace' || rule.action === 'extract_and_replace'" class="mt-1 text-[11px] text-[var(--color-text-muted)] break-all">
+                            {{ (rule.replacement || '').slice(0, 80) }}
+                          </div>
+                        </div>
+                        <div class="flex items-center gap-1 shrink-0">
+                          <ThemedCheckbox
+                            :checked="isRegexRuleEnabled(rule)"
+                            @update:checked="(checked) => setRegexRuleEnabled(idx, checked)"
+                          />
+                          <button type="button" class="btn btn-xs btn-secondary" @click="openRegexRuleEditor(idx)">编辑</button>
+                          <button type="button" class="btn btn-xs btn-secondary" @click="moveRegexRule(idx, -1)">上移</button>
+                          <button type="button" class="btn btn-xs btn-secondary" @click="moveRegexRule(idx, 1)">下移</button>
+                          <button type="button" class="btn btn-xs btn-secondary" @click="removeRegexRule(idx)">删除</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
 
               <div class="space-y-2">
                 <div class="flex flex-wrap items-center justify-between gap-2">
@@ -4933,6 +5284,118 @@ async function checkUpdate() {
       </div>
   </div>
 
+  <Teleport to="body">
+    <div v-if="regexEditorOpen && regexEditorDraft" class="fixed inset-0 z-[60] flex items-center justify-center">
+      <div class="modal-backdrop" @click="regexEditorOpen = false"></div>
+      <div
+        class="relative m-4 flex max-h-[85vh] w-[min(92vw,560px)] flex-col rounded-2xl theme-panel-bg border border-[var(--color-border)] shadow-xl backdrop-saturate-[1.8]"
+        style="backdrop-filter: blur(var(--blur-heavy)); -webkit-backdrop-filter: blur(var(--blur-heavy))"
+      >
+        <div class="flex items-center justify-between rounded-t-2xl border-b border-[var(--color-border)] bg-surface-muted p-4">
+          <h3 class="text-[var(--color-text)]">正文正则规则</h3>
+          <button type="button" class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)]" @click="regexEditorOpen = false">
+            <X class="w-5 h-5" />
+          </button>
+        </div>
+        <div class="drawer-scroll min-h-0 flex-1 overflow-y-auto p-4 space-y-3">
+          <div class="space-y-1.5">
+            <label class="block text-xs font-medium text-[var(--color-text-secondary)]">规则名称（可选）</label>
+            <input v-model="regexEditorDraft.name" type="text" class="input w-full" placeholder="留空将使用 pattern 前缀" />
+          </div>
+          <div class="space-y-1.5">
+            <label class="block text-xs font-medium text-[var(--color-text-secondary)]">Pattern</label>
+            <textarea v-model="regexEditorDraft.pattern" rows="3" class="input textarea w-full resize-y" placeholder="支持 /pattern/imsu 或普通正则"></textarea>
+          </div>
+          <div class="grid grid-cols-1 gap-3">
+            <div class="space-y-1.5">
+              <label class="block text-xs font-medium text-[var(--color-text-secondary)]">动作</label>
+              <ModernSelect
+                v-model="regexEditorDraft.action"
+                :options="[
+                  { label: '删除命中内容', value: 'remove' },
+                  { label: '替换命中内容', value: 'replace' },
+                  { label: '提取到队列', value: 'extract' },
+                  { label: '提取并替换显示', value: 'extract_and_replace' },
+                ]"
+              />
+            </div>
+            <div v-if="regexEditorDraft.action === 'replace' || regexEditorDraft.action === 'extract_and_replace'" class="space-y-1.5">
+              <label class="block text-xs font-medium text-[var(--color-text-secondary)]">Replacement</label>
+              <textarea v-model="regexEditorDraft.replacement" rows="3" class="input textarea w-full resize-y" placeholder="支持 $1 / $<name>，保存后会归一化"></textarea>
+            </div>
+            <div v-if="regexEditorDraft.action === 'extract' || regexEditorDraft.action === 'extract_and_replace'" class="space-y-1.5">
+              <label class="block text-xs font-medium text-[var(--color-text-secondary)]">提取来源</label>
+              <ModernSelect
+                v-model="regexEditorDraft.extractSource"
+                :options="[
+                  { label: '整段匹配', value: 'whole_match' },
+                  { label: '捕获分组', value: 'capture_group' },
+                ]"
+              />
+            </div>
+            <div v-if="(regexEditorDraft.action === 'extract' || regexEditorDraft.action === 'extract_and_replace') && regexEditorDraft.extractSource === 'capture_group'" class="space-y-1.5">
+              <label class="block text-xs font-medium text-[var(--color-text-secondary)]">提取分组下标</label>
+              <input v-model.number="regexEditorDraft.extractGroupIndex" type="number" min="0" class="input w-full" placeholder="默认 1" />
+            </div>
+            <div class="space-y-1.5">
+              <label class="block text-xs font-medium text-[var(--color-text-secondary)]">匹配模式</label>
+              <ModernSelect
+                v-model="regexEditorDraft.matchMode"
+                :options="[{ label: '全局命中', value: 'global' }, { label: '首个命中', value: 'first' }]"
+              />
+            </div>
+            <div class="space-y-1.5">
+              <label class="block text-xs font-medium text-[var(--color-text-secondary)]">覆盖扫描深度（可选）</label>
+              <input v-model.number="regexEditorDraft.scanDepthOverride" type="number" min="1" max="50" class="input w-full" placeholder="留空使用会话默认深度" />
+            </div>
+          </div>
+
+          <div class="rounded-lg border border-[var(--color-border-subtle)] bg-surface-muted p-3 space-y-2">
+            <div class="text-xs font-medium text-[var(--color-text-secondary)]">试运行</div>
+            <div>
+              <ThemedRadioTags
+                v-model="regexTrialSourceMode"
+                :options="[...regexTrialSourceOptions]"
+                aria-label="试运行来源"
+              />
+            </div>
+            <textarea
+              v-if="regexTrialSourceMode === 'manual'"
+              v-model="regexTrialManualText"
+              rows="4"
+              maxlength="10000"
+              class="input textarea w-full resize-y"
+              placeholder="输入测试文本（最多 10000 字符）"
+            />
+            <button type="button" class="btn btn-xs btn-secondary" @click="runRegexRuleTrial">试运行</button>
+            <div v-if="regexTrialResult" class="grid grid-cols-1 gap-2 text-xs">
+              <div>
+                <div class="text-[var(--color-text-secondary)] mb-1">处理前</div>
+                <pre class="whitespace-pre-wrap rounded border border-[var(--color-border-subtle)] bg-surface-overlay p-2">{{ regexTrialResult.beforeText }}</pre>
+              </div>
+              <div>
+                <div class="text-[var(--color-text-secondary)] mb-1">持久化正文（处理后）</div>
+                <pre class="whitespace-pre-wrap rounded border border-[var(--color-border-subtle)] bg-surface-overlay p-2">{{ regexTrialResult.afterText }}</pre>
+              </div>
+              <div>
+                <div class="text-[var(--color-text-secondary)] mb-1">显示正文（处理后）</div>
+                <pre class="whitespace-pre-wrap rounded border border-[var(--color-border-subtle)] bg-surface-overlay p-2">{{ regexTrialResult.displayText }}</pre>
+              </div>
+              <div>
+                <div class="text-[var(--color-text-secondary)] mb-1">提取队列预览</div>
+                <pre class="whitespace-pre-wrap rounded border border-[var(--color-border-subtle)] bg-surface-overlay p-2">{{ regexTrialResult.extractedItems.map((x) => x.value).join('\n') || '（空）' }}</pre>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="flex items-center justify-end gap-2 rounded-b-2xl border-t border-[var(--color-border)] bg-surface-muted p-4">
+          <button type="button" class="btn btn-secondary" @click="regexEditorOpen = false">取消</button>
+          <button type="button" class="btn btn-primary" @click="saveRegexRuleEditor">保存</button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
+
   <!-- Model Selector Modal（Teleport 到 body 避免被父级 flex/窄容器限制宽度） -->
   <Teleport to="body">
     <div v-if="showModelSelector" class="fixed inset-0 z-[60] flex items-center justify-center">
@@ -5164,4 +5627,5 @@ async function checkUpdate() {
   overscroll-behavior-y: contain;
   scrollbar-gutter: stable;
 }
+
 </style>
