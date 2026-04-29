@@ -86,6 +86,23 @@ export interface WorldBookAttachment {
 }
 
 export type SessionSystemPromptMode = 'append' | 'override'
+export type RegexRuleAction = 'remove' | 'replace' | 'extract' | 'extract_and_replace'
+export type RegexRuleMatchMode = 'global' | 'first'
+export type RegexExtractSource = 'whole_match' | 'capture_group'
+
+export interface ChatContentRegexRule {
+  id: string
+  name?: string | null
+  enabled: boolean
+  order: number
+  pattern: string
+  action: RegexRuleAction
+  replacement?: string | null
+  matchMode?: RegexRuleMatchMode
+  scanDepthOverride?: number | null
+  extractSource?: RegexExtractSource
+  extractGroupIndex?: number | null
+}
 
 export interface ChatOverrides {
   prompt?: string | null
@@ -93,6 +110,8 @@ export interface ChatOverrides {
   longTermMemory?: string | null
   /** 上下文起点消息ID：设置后仅从该消息开始参与发送上下文 */
   contextStartMessageId?: string | null
+  /** 从上下文起点向前额外保留的消息条数（<=1 视为无效） */
+  contextStartKeepBeforeMessages?: number | null
   presetId?: string | null
   pureAiMode?: boolean | null
   /** 与 worldBookAttachments 顺序一致，兼容旧数据 */
@@ -100,6 +119,12 @@ export interface ChatOverrides {
   worldBookAttachments?: WorldBookAttachment[]
   /** 从顺序中移除的全局世界书 ID；该会话生成时不再注入这些书 */
   worldBookGlobalExclusions?: string[]
+  /** 正文正则默认扫描深度（最近 assistant 消息条数） */
+  contentRegexScanDepthDefault?: number
+  /** 会话级正文后处理规则 */
+  contentRegexRules?: ChatContentRegexRule[]
+  /** 会话级规则启用开关（key=全局规则 id），用于各会话独立启停 */
+  contentRegexEnabledByRuleId?: Record<string, boolean>
   params: GenerationParams
   draftHelp?: DraftHelpSettings
   memberSettings?: Record<string, GroupMemberSettings>
@@ -349,6 +374,8 @@ export interface Settings {
   /** TTS 音频缓存上限（MB） */
   ttsAudioCacheLimitMb?: number
   worldBookEntryScanDepthDefault?: number
+  /** 全局正文正则规则库：所有会话可见 */
+  contentRegexRuleLibrary?: ChatContentRegexRule[]
   createdAt: string
   updatedAt: string
 }
@@ -394,6 +421,8 @@ export interface CharacterCard {
   avatarFocusY?: number | null
   attachedWorldBookIds?: string[]
   extraFirstMessageEntries?: ExtraFirstMessageEntry[]
+  mvuEnabled?: boolean
+  contentRegexRules?: ChatContentRegexRule[]
   createdAt: string
   updatedAt: string
 }
@@ -419,6 +448,8 @@ export interface ChatMessage {
   id: string
   role: ChatRole
   content: string
+  /** 仅显示层正文（正则 extract_and_replace 劫持），不用于上下文与持久化编辑 */
+  contentDisplay?: string | null
   images?: ChatImageAttachment[]
   attachments?: AssistantAttachment[]
   characterId?: string | null
