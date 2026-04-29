@@ -393,6 +393,7 @@ class Settings(BaseModel):
     ttsEnabled: bool = False
     ttsAudioCacheLimitMb: int = Field(default=200, ge=10, le=10000)
     worldBookEntryScanDepthDefault: int = 2
+    contentRegexRuleLibrary: list["ChatContentRegexRule"] = Field(default_factory=list)
     createdAt: str = Field(default_factory=_now_iso)
     updatedAt: str = Field(default_factory=_now_iso)
 
@@ -535,6 +536,44 @@ class ExtraFirstMessageEntry(BaseModel):
     chip: bool = True
 
 
+RegexAction = Literal["remove", "replace", "extract", "extract_and_replace"]
+RegexMatchMode = Literal["global", "first"]
+RegexExtractSource = Literal["whole_match", "capture_group"]
+
+
+class ChatContentRegexRule(BaseModel):
+    """会话正文后处理规则。"""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str = Field(default_factory=lambda: uuid4().hex)
+    name: str | None = None
+    enabled: bool = True
+    order: int = 0
+    pattern: str = ""
+    action: RegexAction = "remove"
+    replacement: str | None = None
+    matchMode: RegexMatchMode = "global"
+    scanDepthOverride: int | None = Field(default=None, ge=1)
+    extractSource: RegexExtractSource = "whole_match"
+    extractGroupIndex: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def _validate_regex_if_enabled(self):
+        if not self.enabled:
+            return self
+        pattern = (self.pattern or "").strip()
+        if not pattern:
+            return self
+        try:
+            compile_user_regex(pattern)
+        except re.error as e:
+            raise ValueError(f"invalid regex: {e}") from e
+        if self.extractSource == "capture_group" and self.extractGroupIndex is None:
+            self.extractGroupIndex = 1
+        return self
+
+
 class CharacterCard(BaseModel):
     """
     角色卡片模型
@@ -571,6 +610,8 @@ class CharacterCard(BaseModel):
     avatarFocusY: float | None = None
     attachedWorldBookIds: list[str] = Field(default_factory=list)
     extraFirstMessageEntries: list[ExtraFirstMessageEntry] = Field(default_factory=list)
+    mvuEnabled: bool = False
+    contentRegexRules: list[ChatContentRegexRule] = Field(default_factory=list)
     createdAt: str = Field(default_factory=_now_iso)
     updatedAt: str = Field(default_factory=_now_iso)
 
@@ -651,6 +692,10 @@ class ChatMessage(BaseModel):
     id: str = Field(default_factory=lambda: uuid4().hex)
     role: ChatRole
     content: str
+    contentDisplay: str | None = Field(
+        default=None,
+        description="仅用于前端显示劫持的替代正文；不参与上下文组装，留空则显示 content",
+    )
     images: list["ChatImageAttachment"] = Field(default_factory=list)
     attachments: list["AssistantAttachment"] = Field(default_factory=list)
     characterId: str | None = None
@@ -766,6 +811,7 @@ class ChatOverrides(BaseModel):
     sessionSystemPromptMode: Literal["append", "override"] = "append"
     longTermMemory: str | None = None
     contextStartMessageId: str | None = None
+    contextStartKeepBeforeMessages: int | None = None
     presetId: str | None = None
     pureAiMode: bool | None = None
     worldBookIds: list[str] = Field(default_factory=list)
@@ -774,6 +820,9 @@ class ChatOverrides(BaseModel):
         default_factory=list,
         description="全局世界书从本会话顺序移除时记录其 ID，生成时不再注入该书",
     )
+    contentRegexScanDepthDefault: int = Field(default=50, ge=1)
+    contentRegexRules: list[ChatContentRegexRule] = Field(default_factory=list)
+    contentRegexEnabledByRuleId: dict[str, bool] = Field(default_factory=dict)
     params: GenerationParams = Field(default_factory=GenerationParams)
     draftHelp: DraftHelpSettings = Field(default_factory=DraftHelpSettings)
     tts: "TtsSessionConfig | None" = Field(default=None, description="会话级 TTS 配置")
