@@ -46,10 +46,17 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from app.attachment_policy import ASSISTANT_IMAGE_ATTACHMENT_MAX_BYTES, is_image_mime_type
+from app.content_regex import apply_content_regex_pipeline
+from app.content_regex_queue import (
+    get_content_regex_queue_size,
+    pop_content_regex_item,
+)
+from app.content_regex_scanner import ensure_content_regex_scanner_started
 from app.placeholders import replace_placeholders_in_text
 from app.schemas import (
     AppendMessageRequest,
     Chat,
+    ChatContentRegexRule,
     ChatImageAttachment,
     ChatMessage,
     CreateChatRequest,
@@ -75,6 +82,7 @@ from app.storage import (
 )
 
 router = APIRouter(tags=["chats"])
+ensure_content_regex_scanner_started()
 
 
 def _now_iso() -> str:
@@ -179,6 +187,39 @@ def _single_chat_greeting_variants(character, user_name: str) -> list[str]:
     return variants
 
 
+def _copy_content_regex_rules(rules: list[ChatContentRegexRule] | None) -> list[ChatContentRegexRule]:
+    out: list[ChatContentRegexRule] = []
+    for rule in rules or []:
+        try:
+            data = rule.model_dump(mode="json")
+        except Exception:
+            continue
+        out.append(ChatContentRegexRule.model_validate(data))
+    return out
+
+
+def _merge_group_regex_rules_via_mvu(member_rules: list[tuple[str, list[ChatContentRegexRule]]]) -> list[ChatContentRegexRule]:
+    """群聊规则归并入口（当前以确定性去重实现，后续可替换为第三Agent任务）。"""
+    merged: list[ChatContentRegexRule] = []
+    seen: set[tuple[str, str, str]] = set()
+    order = 0
+    for _, rules in member_rules:
+        for rule in rules:
+            key = (
+                (rule.pattern or "").strip(),
+                (rule.action or "remove").strip(),
+                (rule.replacement or "").strip(),
+            )
+            if not key[0] or key in seen:
+                continue
+            seen.add(key)
+            r = ChatContentRegexRule.model_validate(rule.model_dump(mode="json"))
+            r.order = order
+            order += 1
+            merged.append(r)
+    return merged
+
+
 def _merge_overrides(existing: Chat, incoming: UpdateChatRequest) -> None:
     """
     合并聊天覆盖设置
@@ -201,6 +242,8 @@ def _merge_overrides(existing: Chat, incoming: UpdateChatRequest) -> None:
         existing.overrides.longTermMemory = ov.longTermMemory
     if hasattr(ov, "contextStartMessageId"):
         existing.overrides.contextStartMessageId = ov.contextStartMessageId
+    if "contextStartKeepBeforeMessages" in ov.model_fields_set:
+        existing.overrides.contextStartKeepBeforeMessages = ov.contextStartKeepBeforeMessages
     if getattr(ov, "pureAiMode", None) is not None:
         existing.overrides.pureAiMode = ov.pureAiMode
     if hasattr(ov, "presetId"):
@@ -219,6 +262,14 @@ def _merge_overrides(existing: Chat, incoming: UpdateChatRequest) -> None:
         existing.overrides.worldBookGlobalExclusions = list(
             dict.fromkeys(getattr(ov, "worldBookGlobalExclusions", []) or []),
         )
+    if "contentRegexScanDepthDefault" in ov.model_fields_set:
+        existing.overrides.contentRegexScanDepthDefault = max(1, int(ov.contentRegexScanDepthDefault or 1))
+    if "contentRegexRules" in ov.model_fields_set:
+        existing.overrides.contentRegexRules = _copy_content_regex_rules(getattr(ov, "contentRegexRules", []) or [])
+    if "contentRegexEnabledByRuleId" in ov.model_fields_set:
+        existing.overrides.contentRegexEnabledByRuleId = {
+            str(k): bool(v) for k, v in (getattr(ov, "contentRegexEnabledByRuleId", {}) or {}).items()
+        }
     if hasattr(ov, "draftHelp"):
         if existing.overrides.draftHelp is None:
             existing.overrides.draftHelp = ov.draftHelp
@@ -269,6 +320,28 @@ class ChatSearchResponse(BaseModel):
     query: str
     total: int
     hits: list[ChatSearchHit] = Field(default_factory=list)
+
+
+class ContentRegexTrialRequest(BaseModel):
+    sourceMode: str = "manual"
+    manualText: str | None = None
+    rule: ChatContentRegexRule | None = None
+    rules: list[ChatContentRegexRule] | None = None
+
+
+class ContentRegexTrialResponse(BaseModel):
+    sourceMode: str
+    beforeText: str
+    afterText: str
+    displayText: str
+    changed: bool
+    extractedItems: list[dict[str, str]] = Field(default_factory=list)
+    errors: list[dict[str, str]] = Field(default_factory=list)
+
+
+class ContentRegexQueuePopResponse(BaseModel):
+    item: dict[str, str] | None = None
+    remaining: int = 0
 
 
 @router.get("/chats", response_model=list[Chat])
@@ -371,6 +444,7 @@ def create_chat(req: CreateChatRequest) -> Chat:
     if not is_group:
         try:
             character = load_character(req.characterId)
+            chat.overrides.contentRegexRules = _copy_content_regex_rules(getattr(character, "contentRegexRules", None) or [])
             variants = _single_chat_greeting_variants(character, user_name or "用户")
             if len(variants) == 1:
                 chat.messages.append(
@@ -391,6 +465,24 @@ def create_chat(req: CreateChatRequest) -> Chat:
         except FileNotFoundError:
             pass
     else:
+        member_rules: list[tuple[str, list[ChatContentRegexRule]]] = []
+        any_mvu_enabled = False
+        for mid in chat.memberIds:
+            try:
+                card = load_character(mid)
+                rules = _copy_content_regex_rules(getattr(card, "contentRegexRules", None) or [])
+                member_rules.append((mid, rules))
+                if bool(getattr(card, "mvuEnabled", False)):
+                    any_mvu_enabled = True
+            except FileNotFoundError:
+                continue
+        if any_mvu_enabled:
+            chat.overrides.contentRegexRules = _merge_group_regex_rules_via_mvu(member_rules)
+        else:
+            flat: list[ChatContentRegexRule] = []
+            for _, rules in member_rules:
+                flat.extend(rules)
+            chat.overrides.contentRegexRules = _merge_group_regex_rules_via_mvu([("fallback", flat)])
         if req.firstMessageCharacterId:
             if req.firstMessageCharacterId not in chat.memberIds:
                 raise HTTPException(status_code=400, detail="firstMessageCharacterId is not a member of this group")
@@ -644,6 +736,54 @@ def search_chat(chat_id: str, q: str = Query(..., min_length=1)) -> ChatSearchRe
     return ChatSearchResponse(query=query, total=len(hits), hits=hits)
 
 
+@router.post("/chats/{chat_id}/content-regex/trial", response_model=ContentRegexTrialResponse)
+def trial_chat_content_regex(chat_id: str, req: ContentRegexTrialRequest) -> ContentRegexTrialResponse:
+    try:
+        chat = load_chat(chat_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="chat not found")
+    source_mode = (req.sourceMode or "manual").strip() or "manual"
+    if source_mode == "latest_assistant":
+        before = ""
+        for msg in reversed(chat.messages):
+            if msg.role == "assistant" and (msg.content or "").strip():
+                before = msg.content
+                break
+    else:
+        before = req.manualText or ""
+    if len(before) > 10000:
+        before = before[:10000]
+    active_rules = list(req.rules or [])
+    if req.rule is not None:
+        active_rules = [req.rule]
+    if not active_rules:
+        return ContentRegexTrialResponse(
+            sourceMode=source_mode,
+            beforeText=before,
+            afterText=before,
+            displayText=before,
+            changed=False,
+            extractedItems=[],
+            errors=[],
+        )
+    result = apply_content_regex_pipeline(before, active_rules)
+    return ContentRegexTrialResponse(
+        sourceMode=source_mode,
+        beforeText=before,
+        afterText=result.persisted_text,
+        displayText=result.display_text,
+        changed=(result.persisted_text != before or result.display_text != before),
+        extractedItems=result.extracted_items,
+        errors=result.errors,
+    )
+
+
+@router.get("/chats/{chat_id}/content-regex/queue/pop", response_model=ContentRegexQueuePopResponse)
+def pop_chat_content_regex_queue(chat_id: str) -> ContentRegexQueuePopResponse:
+    item = pop_content_regex_item(chat_id)
+    return ContentRegexQueuePopResponse(item=item, remaining=get_content_regex_queue_size(chat_id))
+
+
 @router.put("/chats/{chat_id}", response_model=Chat)
 def update_chat(chat_id: str, req: UpdateChatRequest) -> Chat:
     """
@@ -739,6 +879,7 @@ def append_message(chat_id: str, req: AppendMessageRequest) -> Chat:
     chat.messages.append(ChatMessage(
         role=req.role,
         content=req.content,
+        contentDisplay=None,
         images=getattr(req, "images", []) or [],
         characterId=req.characterId,
         senderPersonaId=getattr(req, "senderPersonaId", None),
