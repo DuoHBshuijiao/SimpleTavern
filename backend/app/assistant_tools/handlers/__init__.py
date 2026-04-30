@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from app.assistant_tools.handlers import chat, core, workspace, worldbook
+from app.assistant_tools.handlers import chat, core, mvu, workspace, worldbook
 
 HANDLERS: dict[str, Callable[..., dict[str, Any]]] = {
     "core_get_time": core.handle_core_get_time,
@@ -34,6 +34,12 @@ HANDLERS: dict[str, Callable[..., dict[str, Any]]] = {
     "chat_worldbook_attachment_remove": chat.handle_chat_worldbook_attachment_remove,
     "chat_worldbook_attachment_reorder": chat.handle_chat_worldbook_attachment_reorder,
     "chat_summarize_active_worldbooks": chat.handle_chat_summarize_active_worldbooks,
+    "mvu_get_session_state": mvu.handle_mvu_get_session_state,
+    "mvu_define_table": mvu.handle_mvu_define_table,
+    "mvu_set_cell": mvu.handle_mvu_set_cell,
+    "mvu_get_chat_context": mvu.handle_mvu_get_chat_context,
+    "read_mvu_logs": chat.handle_chat_read_mvu_logs,
+    "patch_state_variable": chat.handle_chat_patch_state_variable,
 }
 
 __all__ = ["HANDLERS"]

@@ -18,11 +18,13 @@ from app.storage import (
     load_chat,
     load_chat_memory,
     load_character,
+    load_mvu_logs,
     load_settings,
     load_worldbook,
     mark_last_message_memory_updated,
     save_chat,
     save_chat_memory,
+    save_chat_state_variables,
 )
 from app.tokenizer_service import trim_dict_messages_to_token_budget
 
@@ -392,3 +394,62 @@ def handle_chat_summarize_active_worldbooks(ctx: AssistantToolContext, _args: di
             }
         )
     return R.ok({"activeWorldbooks": summaries, "attachmentOrder": ordered}, tool="chat_summarize_active_worldbooks")
+
+
+def handle_chat_read_mvu_logs(ctx: AssistantToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    chat_id = ctx.chat_id
+    if not chat_id:
+        return R.err(R.FORBIDDEN, "chat context required", tool="read_mvu_logs")
+    chat = _load_chat_ctx(chat_id)
+    if chat is None:
+        return R.err(R.NOT_FOUND, "chat not found", tool="read_mvu_logs", details={"chatId": chat_id})
+
+    raw = args.get("limit")
+    try:
+        limit = max(1, min(200, int(raw)))
+    except (TypeError, ValueError):
+        limit = 50
+
+    logs = load_mvu_logs(chat.characterId, chat_id)
+    recent = logs[-limit:] if len(logs) > limit else logs
+    return R.ok({
+        "total": len(logs),
+        "returned": len(recent),
+        "logs": [entry.model_dump(mode="json") for entry in recent],
+    }, tool="read_mvu_logs")
+
+
+def handle_chat_patch_state_variable(ctx: AssistantToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    chat_id = ctx.chat_id
+    if not chat_id:
+        return R.err(R.FORBIDDEN, "chat context required", tool="patch_state_variable")
+    chat = _load_chat_ctx(chat_id)
+    if chat is None:
+        return R.err(R.NOT_FOUND, "chat not found", tool="patch_state_variable", details={"chatId": chat_id})
+
+    table_name = str(args.get("table_name") or "").strip()
+    field = str(args.get("field") or "").strip()
+    column = str(args.get("column") or "").strip()
+    value = str(args.get("value") or "")
+
+    if not table_name:
+        return R.err(R.VALIDATION_ERROR, "table_name is required", tool="patch_state_variable")
+    if not field:
+        return R.err(R.VALIDATION_ERROR, "field is required", tool="patch_state_variable")
+    if not column:
+        return R.err(R.VALIDATION_ERROR, "column is required", tool="patch_state_variable")
+
+    from app.assistant_tools.handlers.mvu import set_cell_in_state
+    from app.schemas import StateVariables
+
+    state = chat.stateVariables or StateVariables()
+    state = set_cell_in_state(state, table_name, field, column, value, source="chat_assistant")
+    updated = save_chat_state_variables(chat_id, state)
+    return R.ok({
+        "tableName": table_name,
+        "field": field,
+        "column": column,
+        "value": value,
+        "source": "chat_assistant",
+        "version": updated.stateVariables.version if updated.stateVariables else 0,
+    }, tool="patch_state_variable")
