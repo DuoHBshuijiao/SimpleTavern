@@ -34,6 +34,21 @@ def pop_content_regex_item(chat_id: str) -> dict[str, str] | None:
         return item
 
 
+def dequeue_batch(chat_id: str, max_items: int) -> list[dict[str, str]]:
+    if not chat_id or max_items <= 0:
+        return []
+    with _lock:
+        q = _queues.get(chat_id)
+        if not q:
+            return []
+        taken: list[dict[str, str]] = []
+        for _ in range(min(max_items, len(q))):
+            taken.append(dict(q.popleft()))
+        if len(q) == 0:
+            _queues.pop(chat_id, None)
+        return taken
+
+
 def get_content_regex_queue_size(chat_id: str) -> int:
     if not chat_id:
         return 0

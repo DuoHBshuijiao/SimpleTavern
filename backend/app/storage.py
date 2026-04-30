@@ -50,7 +50,7 @@ import portalocker
 from datetime import datetime
 
 from app.attachment_policy import normalize_mime_type
-from app.schemas import AssistantAttachment, AssistantChat, AssistantSettings, Chat, ChatImageAttachment, ChatMessage, CharacterCard, Settings, WorldBook
+from app.schemas import AssistantAttachment, AssistantChat, AssistantSettings, Chat, ChatImageAttachment, ChatMessage, CharacterCard, MvuWorkLogEntry, Settings, StateVariables, WorldBook
 
 
 def _repo_root() -> Path:
@@ -826,6 +826,11 @@ def chat_memory_path(character_id: str, chat_id: str) -> Path:
     return chat_folder(character_id, chat_id) / CHAT_MEMORY_FILENAME
 
 
+def _mvu_logs_path(character_id: str, chat_id: str) -> Path:
+    """返回 MVU 工作日志文件路径（data/chats/{character_id}/{chat_id}/mvu_logs.json）。"""
+    return chat_folder(character_id, chat_id) / "mvu_logs.json"
+
+
 def chat_images_dir(character_id: str, chat_id: str) -> Path:
     """返回会话图片目录（data/chats/{character_id}/{chat_id}/images）。"""
     return chat_folder(character_id, chat_id) / "images"
@@ -1286,6 +1291,42 @@ def save_chat_memory(character_id: str, chat_id: str, content: str) -> None:
     """
     path = chat_memory_path(character_id, chat_id)
     write_json(path, {"longTermMemory": content})
+
+
+_MVU_LOGS_MAX_ENTRIES = 200
+
+
+def load_mvu_logs(character_id: str, chat_id: str) -> list[MvuWorkLogEntry]:
+    """读取 MVU 工作日志。文件不存在时返回空列表。"""
+    path = _mvu_logs_path(character_id, chat_id)
+    if not path.exists():
+        return []
+    raw = read_json(path)
+    if isinstance(raw, list):
+        return [MvuWorkLogEntry.model_validate(item) for item in raw]
+    return []
+
+
+def save_mvu_logs(character_id: str, chat_id: str, entries: list[MvuWorkLogEntry]) -> None:
+    """写入 MVU 工作日志，超过 200 条自动轮转保留最近条目。"""
+    path = _mvu_logs_path(character_id, chat_id)
+    kept = entries[-_MVU_LOGS_MAX_ENTRIES:] if len(entries) > _MVU_LOGS_MAX_ENTRIES else list(entries)
+    write_json(path, [e.model_dump(mode="json") for e in kept])
+
+
+def load_chat_state_variables(chat_id: str) -> StateVariables | None:
+    """读取会话 stateVariables。"""
+    chat = load_chat(chat_id)
+    return chat.stateVariables
+
+
+def save_chat_state_variables(chat_id: str, state: StateVariables) -> Chat:
+    """原子写入 stateVariables，版本递增，更新时间戳。"""
+    chat = load_chat(chat_id)
+    state.version = (state.version or 0) + 1
+    state.updatedAt = datetime.now().astimezone().isoformat()
+    chat.stateVariables = state
+    return save_chat(chat)
 
 
 def _lock_file_path(target: Path) -> Path:
