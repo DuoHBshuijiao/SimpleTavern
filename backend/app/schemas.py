@@ -540,6 +540,9 @@ RegexAction = Literal["remove", "replace", "extract", "extract_and_replace"]
 RegexMatchMode = Literal["global", "first"]
 RegexExtractSource = Literal["whole_match", "capture_group"]
 
+MvuStateSource = Literal["mvu_agent", "chat_assistant"]
+MvuWorkLogEventType = Literal["triggered", "planning", "tool_call", "commit", "error"]
+
 
 class ChatContentRegexRule(BaseModel):
     """会话正文后处理规则。"""
@@ -858,6 +861,45 @@ class ChatOverrides(BaseModel):
         return self
 
 
+class StatusTableRow(BaseModel):
+    """MVU 状态表格行。"""
+    model_config = ConfigDict(extra="allow")
+
+    field: str
+    cells: dict[str, str] = Field(default_factory=dict)
+
+
+class StatusTableDef(BaseModel):
+    """MVU 状态表格定义。"""
+    model_config = ConfigDict(extra="allow")
+
+    name: str
+    columns: list[str] = Field(default_factory=list)
+    rows: list[StatusTableRow] = Field(default_factory=list)
+
+
+class StateVariables(BaseModel):
+    """会话级 MVU 状态变量快照，存于 chat.json 内嵌。"""
+    model_config = ConfigDict(extra="allow")
+
+    version: int = 1
+    updatedAt: str = ""
+    source: "MvuStateSource" = "mvu_agent"
+    tables: list[StatusTableDef] = Field(default_factory=list)
+
+
+class MvuWorkLogEntry(BaseModel):
+    """MVU 助手工作日志条目，存于 mvu_logs.json。"""
+    model_config = ConfigDict(extra="allow")
+
+    id: str = Field(default_factory=lambda: uuid4().hex)
+    chatId: str = ""
+    timestamp: str = Field(default_factory=_now_iso)
+    eventType: "MvuWorkLogEventType" = "triggered"
+    summary: str = ""
+    detail: dict[str, Any] | None = None
+
+
 class GroupMemberSettings(BaseModel):
     """
     群聊成员独立设置模型
@@ -924,6 +966,7 @@ class Chat(BaseModel):
     groupSystemAlwaysAtBottom: bool = True
     createdAt: str = Field(default_factory=_now_iso)
     updatedAt: str = Field(default_factory=_now_iso)
+    stateVariables: StateVariables | None = None
 
 
 class CreateChatRequest(BaseModel):
