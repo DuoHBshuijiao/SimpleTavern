@@ -50,6 +50,7 @@ from app.routes.assistant import router as assistant_router
 from app.routes.tokenizer import router as tokenizer_router
 from app.routes.update import router as update_router
 from app.routes.worldbooks import router as worldbooks_router
+from app.routes.mvu import router as mvu_router
 from app.routes.tts import router as tts_router
 from app.services.data_integrity import data_integrity_service
 from app.services.glm_local_tts_process import stop as stop_glm_local_tts
@@ -128,5 +129,6 @@ app.include_router(import_export_router, prefix="/api")
 app.include_router(assistant_router, prefix="/api")
 app.include_router(tokenizer_router, prefix="/api")
 app.include_router(update_router, prefix="/api")
+app.include_router(mvu_router, prefix="/api")
 app.include_router(worldbooks_router, prefix="/api")
 app.include_router(tts_router, prefix="/api")
