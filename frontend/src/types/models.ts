@@ -527,6 +527,49 @@ export interface GroupMemberSettings {
 }
 
 /**
+ * MVU 状态表格行接口
+ * 对应后端 StatusTableRow
+ */
+export interface StatusTableRow {
+  field: string
+  cells: Record<string, string>
+}
+
+/**
+ * MVU 状态表格定义接口
+ * 对应后端 StatusTableDef
+ */
+export interface StatusTableDef {
+  name: string
+  columns: string[]
+  rows: StatusTableRow[]
+}
+
+/**
+ * MVU 状态变量快照接口
+ * 对应后端 StateVariables
+ */
+export interface StateVariables {
+  version: number
+  updatedAt: string
+  source: 'mvu_agent' | 'chat_assistant'
+  tables: StatusTableDef[]
+}
+
+/**
+ * MVU 工作日志条目接口
+ * 对应后端 MvuWorkLogEntry
+ */
+export interface MvuWorkLogEntry {
+  id: string
+  chatId: string
+  timestamp: string
+  eventType: 'triggered' | 'planning' | 'tool_call' | 'commit' | 'error'
+  summary: string
+  detail?: Record<string, unknown>
+}
+
+/**
  * 聊天会话接口
  *
  * 定义一次完整的聊天会话，包括消息列表、设置、成员信息等。
@@ -564,4 +607,5 @@ export interface Chat {
   groupSystemAlwaysAtBottom?: boolean
   createdAt: string
   updatedAt: string
+  stateVariables?: StateVariables | null
 }
