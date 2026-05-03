@@ -61,7 +61,7 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useCharacterSidebarRecencyStore, useCharactersStore, useChatsStore, useSettingsStore, useUiStore } from '../stores'
+import { useCharacterSidebarRecencyStore, useCharactersStore, useChatsStore, useSettingsStore, useUiStore, useMvuStore } from '../stores'
 import type { SettingsDrawerTab } from '../stores/ui'
 import type { ApiPreset, AssistantAttachment, CharacterCard, ChatImageAttachment, ChatMessage, ExtraFirstMessageEntry, GroupMemberSettings, Chat, MainChatRole, TtsSessionConfig, WorldBook } from '../types/models'
 
@@ -80,7 +80,7 @@ import { useWebGpuBackgroundRuntime } from '../composables/useWebGpuBackgroundRu
 import { useViewportNarrowPortrait } from '../composables/useViewportNarrowPortrait'
 
 // 子组件
-import { ChatSidebar, MessageList, ChatInput, AssistantPanel, AssistantThread } from '../components/chat'
+import { ChatSidebar, MessageList, ChatInput, AssistantPanel, AssistantThread, MvuPanel } from '../components/chat'
 import {
   GroupCreatorModal,
   MessageEditorModal,
@@ -962,6 +962,10 @@ const group = useGroupChat({
 
 /** 是否启用流式传输（与全局设置一致），供助手与生成共用 */
 const isStreamEnabled = computed(() => settings.settings?.streamEnabled !== false)
+
+// MVU Store
+const mvuStore = useMvuStore()
+const mvuPanelOpen = ref(false)
 
 // 聊天助手（助手写入长期记忆后通过 SSE 推送 chat_memory_updated，此处回调使当前会话状态立即刷新，无需切换窗口即可看到「当前会话」长期记忆与「已保存」标记）
 const assistant = useAssistant({
@@ -2378,6 +2382,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  mvuStore.disconnect()
   clearChatSearchAnimTimers()
   window.removeEventListener('resize', scheduleContentAreaLeft)
   if (contentAreaLeftRaf) cancelAnimationFrame(contentAreaLeftRaf)
@@ -2393,6 +2398,15 @@ onBeforeUnmount(() => {
 watch(assistant.isAssistantPanelOpen, (next) => {
   if (next) void assistant.loadState('chat')
 })
+
+// MVU SSE 生命周期：切换聊天时重连
+watch(() => activeChat.value?.id, (nextId, prevId) => {
+  if (prevId && prevId !== nextId) mvuStore.disconnect()
+  if (nextId) {
+    const char = characters.list.find(c => c.id === activeChat.value?.characterId)
+    if (char?.mvuEnabled) mvuStore.connect(nextId)
+  }
+}, { immediate: true })
 
 function scrollWorkspaceAssistantListToBottom() {
   const run = () => {
@@ -4844,6 +4858,7 @@ const editingPersonaAvatarUrl = computed(() => {
             @draft-helper-rewrite="handleDraftHelperRewrite"
             @draft-helper-discard="handleDraftHelperDiscard"
             @draft-helper-stop="handleDraftHelperStop"
+            @toggle-mvu-panel="mvuPanelOpen = !mvuPanelOpen"
           />
 
           <!-- TTS 播放/下载 FAB（仅在 TTS 启用时显示） -->
@@ -4921,6 +4936,13 @@ const editingPersonaAvatarUrl = computed(() => {
       @edit-message="(m) => assistant.openEditMessage(m, 'chat')"
       @delete-message="(m) => assistant.deleteMessage(m, 'chat')"
       @rewrite-message="(m) => assistant.rewriteMessage(m, 'chat')"
+    />
+
+    <MvuPanel
+      :is-open="mvuPanelOpen"
+      :logs="mvuStore.workLogs"
+      :running="mvuStore.isRunning"
+      @update:is-open="mvuPanelOpen = $event"
     />
 
     </div>
