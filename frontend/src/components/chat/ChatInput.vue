@@ -65,6 +65,8 @@ import { validateFilesForTarget } from '../../utils/attachmentPolicy'
 import { resolveRichPaste } from '../../utils/richPaste'
 import ModernAvatar from '../ModernAvatar.vue'
 import ModernSelect from '../ModernSelect.vue'
+import StateVariablesBar from './StateVariablesBar.vue'
+import { useMvuStore } from '../../stores/mvu'
 import { ImagePlus, MessageSquare, PenSquare, RefreshCw, X } from 'lucide-vue-next'
 
 interface ModelOption {
@@ -156,8 +158,10 @@ const emit = defineEmits<{
   'draft-helper-keep': []
   'draft-helper-rewrite': []
   'draft-helper-discard': []
+  'toggle-mvu-panel': []
 }>()
 
+const mvuStore = useMvuStore()
 const imageInputRef = ref<HTMLInputElement | null>(null)
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const showDraftHelperMenu = ref(false)
@@ -187,6 +191,11 @@ function onAssistantFabClick(e: MouseEvent) {
   if (assistantFabOnClick(e)) return
   emit('toggle-assistant')
 }
+
+const mvueFabStyle = computed(() => {
+  const top = typeof fabStyle.value?.top === 'number' ? fabStyle.value.top : parseFloat(fabStyle.value?.top ?? '0') || 0
+  return { ...fabStyle.value, top: `${top + 56}px` }
+})
 
 /**
  * 计算是否有草稿消息
@@ -518,6 +527,11 @@ defineExpose({ getAssistantFabRect, setAssistantTopPx: setAssistantTopPxFromSepa
           <button class="btn btn-xs btn-secondary" @click="emit('draft-helper-discard')">放弃</button>
         </div>
       </div>
+      <StateVariablesBar
+        :capsules="mvuStore.capsuleData"
+        :is-running="mvuStore.isRunning"
+        @toggle-panel="emit('toggle-mvu-panel')"
+      />
       <div class="relative min-h-[80px]">
       <textarea
         ref="textareaRef"
@@ -703,6 +717,18 @@ defineExpose({ getAssistantFabRect, setAssistantTopPx: setAssistantTopPxFromSepa
       @click="onAssistantFabClick"
     >
       助手
+    </button>
+
+    <!-- MVU Panel FAB -->
+    <button
+      v-if="mvuStore.isConnected"
+      type="button"
+      class="chat-fab-surface w-9 h-9 rounded-lg text-xs font-bold shadow-lg transition-[transform,background-color,box-shadow] border border-[var(--color-border)] hover:scale-105 active:scale-95 flex items-center justify-center backdrop-blur-sm"
+      :style="mvueFabStyle"
+      title="MVU 工作日志"
+      @click="emit('toggle-mvu-panel')"
+    >
+      MVU
     </button>
   </div>
 </template>
