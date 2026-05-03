@@ -23,7 +23,7 @@ def _load_chat_safe(chat_id: str | None):
         return None
 
 
-def _render_tables_markdown(tables: list[StatusTableDef]) -> str:
+def render_tables_markdown(tables: list[StatusTableDef]) -> str:
     """将状态表格列表渲染为 markdown，与 prompt_xml 格式一致但不含 XML 包裹。"""
     if not tables:
         return "（暂无状态变量）"
@@ -102,7 +102,7 @@ def handle_mvu_get_session_state(ctx: AssistantToolContext, _args: dict[str, Any
     ) if queue_items else "（队列为空）"
     return R.ok({
         "stateVariables": state.model_dump(mode="json") if state else None,
-        "stateMarkdown": _render_tables_markdown(tables),
+        "stateMarkdown": render_tables_markdown(tables),
         "queueSize": len(queue_items),
         "queueItems": queue_items,
         "queueText": queue_text,
