@@ -26,10 +26,8 @@ def pop_content_regex_item(chat_id: str) -> dict[str, str] | None:
         q = _queues.get(chat_id)
         if not q:
             return None
-        if not q:
-            return None
-        item = q.popleft() if q else None
-        if q is not None and len(q) == 0:
+        item = q.popleft()
+        if len(q) == 0:
             _queues.pop(chat_id, None)
         return item
 
