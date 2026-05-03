@@ -423,6 +423,8 @@ def handle_chat_patch_state_variable(ctx: AssistantToolContext, args: dict[str, 
     chat_id = ctx.chat_id
     if not chat_id:
         return R.err(R.FORBIDDEN, "chat context required", tool="patch_state_variable")
+    if not ctx.allow_write_memory:
+        return R.err(R.FORBIDDEN, "memory write not allowed for this request", tool="patch_state_variable")
     chat = _load_chat_ctx(chat_id)
     if chat is None:
         return R.err(R.NOT_FOUND, "chat not found", tool="patch_state_variable", details={"chatId": chat_id})
