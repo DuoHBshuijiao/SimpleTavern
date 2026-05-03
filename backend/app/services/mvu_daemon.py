@@ -1,10 +1,11 @@
 """MVU 守护进程 — per-chat worker 生命周期 + 双触发器 + 互斥锁 + 冷却。
 
 触发器：
-  1. generate done  → signal_generate_done(chat_id)
-  2. 队列堆积 ≥3   → signal_queue_threshold(chat_id)
+  1. generate done  → signal_generate_done(chat_id)  立即唤醒
+  2. 队列堆积      → daemon 每 5s 轮询检查
 
-两触发器共用同一互斥锁，5 秒冷却防止高频重复触发。
+共用同一互斥锁，5 秒冷却防止高频重复触发。signal_queue_threshold 保留
+供未来扩展，当前由轮询覆盖。
 """
 
 from __future__ import annotations
@@ -15,7 +16,6 @@ import time
 from app.content_regex_queue import dequeue_batch, get_content_regex_queue_size
 from app.mvu_system_prompt import load_mvu_system_prompt
 from app.schemas import AssistantSettings, MvuWorkLogEntry
-from app.assistant_tools.handlers.mvu import render_tables_markdown
 from app.services.mvu_agent import MvuAgentEvent, MvuAgentJob, MvuAgentRunContext, MvuAgentService
 from app.storage import (
     load_chat,
@@ -101,9 +101,9 @@ async def _mvu_loop(chat_id: str) -> None:
 
     while True:
         try:
-            await asyncio.wait_for(event.wait(), timeout=60)
+            await asyncio.wait_for(event.wait(), timeout=5)
         except asyncio.TimeoutError:
-            continue
+            pass
         event.clear()
 
         async with lock:
@@ -138,6 +138,8 @@ async def _run_once(chat_id: str) -> None:
         return
 
     # 组装 job
+    from app.assistant_tools.handlers.mvu import render_tables_markdown
+
     state = chat.stateVariables
     tables = list(state.tables) if state else []
     state_md = render_tables_markdown(tables)
