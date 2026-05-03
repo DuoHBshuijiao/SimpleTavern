@@ -54,6 +54,7 @@ from app.schemas import (
     GroupGenerateRequest,
     SingleInterjectRequest,
 )
+from app.services.mvu_daemon import ensure_mvu_worker, signal_generate_done
 from app.services.user_message_content import build_user_message_content
 from app.storage import load_character, load_chat, load_chat_image_bytes, load_settings, save_chat, save_settings
 from app.storage import list_worldbooks
@@ -678,6 +679,8 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="chat not found")
 
+    ensure_mvu_worker(chat.id)
+
     settings = load_settings()
     try:
         character = load_character(chat.characterId)
@@ -1010,6 +1013,7 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
                 yield _sse("done", done_payload)
             else:
                 yield _sse("done", {"ok": True, "chatId": chat.id})
+            signal_generate_done(chat.id)
         except Exception as e:
             yield _sse("error", {"message": str(e)})
 
@@ -1085,6 +1089,7 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
                 payload["contentRegexErrors"] = content_regex_errors
             if content_display and content_display != assistant_content:
                 payload["contentRegexDisplayText"] = content_display
+            signal_generate_done(chat.id)
             return JSONResponse(payload)
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
@@ -1257,6 +1262,8 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
     
     if req.characterId not in chat.memberIds:
         raise HTTPException(status_code=400, detail="character is not a member of this group")
+
+    ensure_mvu_worker(chat.id)
 
     settings = load_settings()
     pure_ai_mode = _resolve_pure_ai_mode(settings, chat, req.runtimeOverrides)
@@ -1593,6 +1600,7 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
                 yield _sse("done", done_payload)
             else:
                 yield _sse("done", {"ok": True, "chatId": chat.id, "characterId": req.characterId})
+            signal_generate_done(chat.id)
         except Exception as e:
             yield _sse("error", {"message": str(e)})
 
@@ -1665,6 +1673,7 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
                 payload["contentRegexErrors"] = content_regex_errors
             if content_display and content_display != assistant_content:
                 payload["contentRegexDisplayText"] = content_display
+            signal_generate_done(chat.id)
             return JSONResponse(payload)
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
@@ -1707,6 +1716,8 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
     
     if req.characterId not in chat.memberIds:
         raise HTTPException(status_code=400, detail="character is not a member of this group")
+
+    ensure_mvu_worker(chat.id)
 
     settings = load_settings()
     pure_ai_mode = _resolve_pure_ai_mode(settings, chat, None)
@@ -2036,6 +2047,7 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
                 yield _sse("done", done_payload)
             else:
                 yield _sse("done", {"ok": True, "chatId": chat.id, "characterId": req.characterId, "isInterject": True})
+            signal_generate_done(chat.id)
         except Exception as e:
             yield _sse("error", {"message": str(e)})
 
@@ -2109,6 +2121,7 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
                 payload["contentRegexErrors"] = content_regex_errors
             if content_display and content_display != assistant_content:
                 payload["contentRegexDisplayText"] = content_display
+            signal_generate_done(chat.id)
             return JSONResponse(payload)
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
