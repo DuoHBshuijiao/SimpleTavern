@@ -11,11 +11,11 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any
 
 from app.content_regex_queue import dequeue_batch, get_content_regex_queue_size
 from app.mvu_system_prompt import load_mvu_system_prompt
 from app.schemas import AssistantSettings, MvuWorkLogEntry
+from app.assistant_tools.handlers.mvu import render_tables_markdown
 from app.services.mvu_agent import MvuAgentEvent, MvuAgentJob, MvuAgentRunContext, MvuAgentService
 from app.storage import (
     load_chat,
@@ -140,7 +140,7 @@ async def _run_once(chat_id: str) -> None:
     # 组装 job
     state = chat.stateVariables
     tables = list(state.tables) if state else []
-    state_md = _render_tables_markdown(tables)
+    state_md = render_tables_markdown(tables)
 
     queue_text = "\n".join(
         f"- [{it.get('ruleName', '')}] {it.get('value', '')} (action={it.get('action', '')})"
@@ -199,31 +199,3 @@ def signal_queue_threshold(chat_id: str) -> None:
     evt = _events.get(chat_id)
     if evt is not None:
         evt.set()
-
-
-def _render_tables_markdown(tables: list[Any]) -> str:
-    """将状态表格列表渲染为 markdown。"""
-    if not tables:
-        return "（暂无状态变量）"
-    parts: list[str] = []
-    for table in tables:
-        columns = list(getattr(table, "columns", None) or [])
-        rows = list(getattr(table, "rows", None) or [])
-        if not rows:
-            continue
-        lines: list[str] = []
-        name = (getattr(table, "name", None) or "").strip()
-        if name:
-            lines.append(f"## {name}")
-        if columns:
-            header = "| field | " + " | ".join(columns) + " |"
-            lines.append(header)
-            sep = "|---|" + "|".join("---" for _ in columns) + "|"
-            lines.append(sep)
-        for row in rows:
-            field = (getattr(row, "field", None) or "")
-            cells = getattr(row, "cells", None) or {}
-            cell_vals = " | ".join(str(cells.get(c, "")) for c in columns) if columns else ""
-            lines.append(f"| {field} | {cell_vals} |")
-        parts.append("\n".join(lines))
-    return "\n\n".join(parts) if parts else "（暂无状态变量）"
