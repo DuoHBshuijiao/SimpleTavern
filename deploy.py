@@ -450,7 +450,7 @@ def _windows_try_backend_cmd_k(venv_python: str, backend_dir: Path, backend_port
         return None
     rel_norm = os.path.normpath(rel).replace("/", "\\")
     cmd_line = (
-        f"{rel_norm} -m uvicorn app.main:app --host 0.0.0.0 --port {backend_port} || pause"
+        f"{rel_norm} -m uvicorn app.main:app --host 0.0.0.0 --port {backend_port} --timeout-graceful-shutdown 3 || pause"
     )
     return _windows_cmd_k_in_dir(cmd_line, bd)
 
@@ -463,7 +463,7 @@ def start_services(venv_python, npm_cmd, backend_dir, frontend_dir):
     
     # 启动后端
     print_info("启动后端服务...")
-    backend_cmd = [venv_python, "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", str(backend_port)]
+    backend_cmd = [venv_python, "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", str(backend_port), "--timeout-graceful-shutdown", "3"]
     if platform.system() == 'Windows':
         # 优先 cmd /k + 相对路径（如 ..\venv\Scripts\python.exe）：命令行不含带括号/空格的用户绝对路径；
         # 失败时 || pause 保留窗口。无法写相对路径时退回 CreateProcess 直接调 python.exe。
