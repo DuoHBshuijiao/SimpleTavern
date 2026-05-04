@@ -1,19 +1,19 @@
 <template>
   <Teleport to="body">
     <aside
-      class="fixed right-4 top-4 bottom-4 theme-panel-bg backdrop-blur-xl rounded-2xl shadow-2xl transition-all duration-300 overflow-hidden flex flex-col z-[110]"
+      class="fixed right-4 top-4 bottom-4 theme-panel-bg backdrop-blur-xl backdrop-saturate-[1.8] border border-[var(--color-border)] shadow-glass-panel rounded-2xl transition-all duration-300 overflow-hidden flex flex-col z-[110] pointer-events-auto"
       :class="isOpen
         ? 'translate-x-0 w-[360px] opacity-100'
         : 'translate-x-[calc(100%+20px)] w-[360px] opacity-0 pointer-events-none'"
+      style="contain: content; will-change: transform, opacity;"
     >
       <!-- 标题栏 -->
-      <header class="flex items-center justify-between px-5 py-4 border-b border-[var(--color-border-subtle)] shrink-0">
+      <header class="flex items-center justify-between px-4 py-3 border-b border-white/5 shrink-0 bg-white/5 backdrop-blur-md">
         <div class="flex items-center gap-2 min-w-0">
-          <h2 class="text-sm font-semibold text-[var(--color-text)] truncate">MVU 工作日志</h2>
-          <span
-            v-if="running"
-            class="inline-flex items-center justify-center w-2 h-2 rounded-full bg-[var(--color-brand)] animate-pulse"
-          />
+          <span class="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2 flex-wrap min-w-0">
+            <span class="w-2 h-2 rounded-full bg-[#b76e79] shrink-0" :class="{ 'animate-pulse': running }" />
+            <span class="truncate">MVU 工作日志</span>
+          </span>
         </div>
         <button
           type="button"
@@ -48,6 +48,21 @@
           <span class="text-xs text-[var(--color-text-secondary)] leading-5 min-w-0 break-words">{{ entry.summary }}</span>
         </div>
       </div>
+
+      <!-- MVU 模型选择器（裸露悬浮，无背景） -->
+      <div class="shrink-0 px-4 py-2">
+        <ModernSelect
+          :model-value="mvuModel"
+          :options="modelOptions"
+          placement="top"
+          placeholder="MVU Agent 模型..."
+          class="!text-[11px] !min-w-0 w-full"
+          dropdown-width="360"
+          searchable
+          allow-create
+          @select="(v: any) => $emit('select-mvu-model', v)"
+        />
+      </div>
     </aside>
   </Teleport>
 </template>
@@ -55,19 +70,35 @@
 <script setup lang="ts">
 import { computed, ref, watch, nextTick } from 'vue'
 import type { MvuWorkLogEntry } from '../../types/models'
+import ModernSelect from '../ModernSelect.vue'
+
+interface ModelOption {
+  label: string
+  value: string
+  presetId?: string | null
+}
+interface ModelOptionGroup {
+  label: string
+  options: ModelOption[]
+}
 
 const props = withDefaults(defineProps<{
   isOpen: boolean
   logs: MvuWorkLogEntry[]
   maxVisible?: number
   running?: boolean
+  mvuModel?: string | null
+  modelOptions?: (ModelOption | ModelOptionGroup)[]
 }>(), {
   maxVisible: 100,
   running: false,
+  mvuModel: null,
+  modelOptions: () => [],
 })
 
 defineEmits<{
   'update:isOpen': [value: boolean]
+  'select-mvu-model': [value: { value: string; presetId?: string | null }]
 }>()
 
 const logListRef = ref<HTMLElement | null>(null)
