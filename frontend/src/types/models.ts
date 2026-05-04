@@ -476,6 +476,8 @@ export interface ChatMessage {
   reasoningContent?: string | null
   /** 推理/思考耗时（秒，浮点，前端展示一位小数） */
   reasoningDurationSec?: number | null
+  /** MVU 已消费标记，同一会话最多一条消息持有 */
+  mvuProcessed?: boolean
 }
 
 export interface ChatImageAttachment {
