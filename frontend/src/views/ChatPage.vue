@@ -80,7 +80,7 @@ import { useWebGpuBackgroundRuntime } from '../composables/useWebGpuBackgroundRu
 import { useViewportNarrowPortrait } from '../composables/useViewportNarrowPortrait'
 
 // 子组件
-import { ChatSidebar, MessageList, ChatInput, AssistantPanel, AssistantThread, MvuPanel } from '../components/chat'
+import { ChatSidebar, MessageList, ChatInput, AssistantPanel, AssistantThread, InitialStateEditor, MvuPanel } from '../components/chat'
 import {
   GroupCreatorModal,
   MessageEditorModal,
@@ -5225,6 +5225,12 @@ const editingPersonaAvatarUrl = computed(() => {
                     暂无规则。
                   </div>
                 </div>
+
+                <InitialStateEditor
+                  v-if="actions.editingCharacter.value"
+                  :tables="actions.editingCharacter.value.initialStateTables || []"
+                  @update:tables="(v) => { if (actions.editingCharacter.value) actions.editingCharacter.value.initialStateTables = v }"
+                />
               </div>
 
               <div class="form-group">
