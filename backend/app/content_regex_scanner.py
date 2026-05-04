@@ -27,7 +27,18 @@ def _resolve_effective_rules(chat: Any, settings: Any) -> list[Any]:
     global_rules = list(getattr(settings, "contentRegexRuleLibrary", None) or [])
     legacy_rules = list(getattr(getattr(chat, "overrides", None), "contentRegexRules", None) or [])
     enabled_map = dict(getattr(getattr(chat, "overrides", None), "contentRegexEnabledByRuleId", None) or {})
-    source_rules = global_rules if global_rules else legacy_rules
+    # 合并全局规则库与会话级角色规则，同 ID 以全局为准
+    seen_ids: set[str] = set()
+    merged: list[Any] = []
+    for r in global_rules:
+        merged.append(r)
+        seen_ids.add(str(getattr(r, "id", "")))
+    for r in legacy_rules:
+        rid = str(getattr(r, "id", ""))
+        if rid not in seen_ids:
+            merged.append(r)
+            seen_ids.add(rid)
+    source_rules = merged
     out: list[Any] = []
     for r in source_rules:
         cp = r.model_copy(deep=True)
