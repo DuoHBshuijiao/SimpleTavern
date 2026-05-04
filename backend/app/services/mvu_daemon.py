@@ -174,10 +174,21 @@ async def _run_once(chat_id: str) -> None:
         context_markdown=context_md,
     )
 
+    # 解析 API 端点：优先使用会话 preset，否则全局设置
+    preset_id = getattr(chat.overrides, "presetId", None)
+    base_url = settings.llm.baseUrl
+    api_key = settings.llm.apiKey
+    model = getattr(chat.overrides, "mvuModel", None) or settings.llm.defaultModel
+    if preset_id:
+        found_preset = next((p for p in settings.apiPresets if p.id == preset_id), None)
+        if found_preset:
+            base_url = found_preset.baseUrl
+            api_key = found_preset.apiKey
+
     run_ctx = MvuAgentRunContext(
-        base_url=settings.llm.baseUrl,
-        api_key=settings.llm.apiKey,
-        model=getattr(chat.overrides, "mvuModel", None) or settings.llm.defaultModel,
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
     )
 
     agent = MvuAgentService(run_ctx)
