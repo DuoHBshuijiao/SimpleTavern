@@ -458,7 +458,9 @@ function getReasoningForMessageId(messageId: string): string {
     return chatReasoningContent.value
   }
   const block = chatReasoningBlocks.value.find((b) => b.messageId === messageId)
-  return block?.content?.trim() ?? ''
+  if (block?.content?.trim()) return block.content.trim()
+  const msg = activeChat.value?.messages.find((m) => m.id === messageId)
+  return msg?.reasoningContent?.trim() ?? ''
 }
 
 /**
