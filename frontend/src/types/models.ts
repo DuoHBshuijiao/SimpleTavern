@@ -423,6 +423,8 @@ export interface CharacterCard {
   extraFirstMessageEntries?: ExtraFirstMessageEntry[]
   mvuEnabled?: boolean
   contentRegexRules?: ChatContentRegexRule[]
+  /** 新会话初始状态栏定义：创建会话时自动写入 stateVariables.tables */
+  initialStateTables?: StatusTableDef[]
   createdAt: string
   updatedAt: string
 }
