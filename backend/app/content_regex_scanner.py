@@ -12,6 +12,7 @@ from app.storage import (
     list_characters,
     list_chats,
     list_group_chats,
+    load_character,
     load_settings,
     save_chat,
 )
@@ -75,8 +76,33 @@ def _scan_once() -> None:
         if not rules:
             continue
         rules_sig = _rules_signature(rules)
+
+        # 检查角色是否开启 MVU
+        mvu_enabled = False
+        try:
+            character = load_character(chat.characterId)
+            mvu_enabled = bool(getattr(character, "mvuEnabled", False))
+        except Exception:
+            pass
+
+        # 定位 MVU 已消费标记所在的消息索引（-1 表示无标记）
+        last_processed_idx: int = -1
+        if mvu_enabled:
+            for i in range(len(chat.messages) - 1, -1, -1):
+                if getattr(chat.messages[i], "mvuProcessed", False):
+                    last_processed_idx = i
+                    break
+
+        # 找到最新一条有效消息（assistant/user，有内容）的索引
+        last_valid_idx: int = -1
+        for i in range(len(chat.messages) - 1, -1, -1):
+            msg = chat.messages[i]
+            if msg.role in ("assistant", "user") and (msg.content or "").strip():
+                last_valid_idx = i
+                break
+
         dirty = False
-        for msg in chat.messages:
+        for idx, msg in enumerate(chat.messages):
             if msg.role not in ("assistant", "user"):
                 continue
             content = (msg.content or "").strip()
@@ -89,8 +115,24 @@ def _scan_once() -> None:
                 continue
             _processed_signatures[key] = msg_sig
             result = apply_content_regex_pipeline(msg.content, rules)
-            if result.extracted_items:
-                enqueue_content_regex_items(chat.id, result.extracted_items)
+
+            # MVU 入队：仅当角色开启 MVU 且消息符合过滤条件
+            if mvu_enabled and result.extracted_items:
+                should_enqueue = False
+                if last_processed_idx >= 0:
+                    # 已存在消费标记：仅处理标记之后的消息
+                    if idx > last_processed_idx:
+                        should_enqueue = True
+                else:
+                    # 无消费标记（中途开启 MVU）：仅最新一条有效消息入队
+                    if idx == last_valid_idx:
+                        should_enqueue = True
+
+                if should_enqueue:
+                    for item in result.extracted_items:
+                        item["messageId"] = msg.id
+                    enqueue_content_regex_items(chat.id, result.extracted_items)
+
             next_display = result.display_text if result.display_text != msg.content else None
             if getattr(msg, "contentDisplay", None) != next_display:
                 msg.contentDisplay = next_display
