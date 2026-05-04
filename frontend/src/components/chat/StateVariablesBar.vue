@@ -1,7 +1,7 @@
 <template>
   <div
     v-if="capsules.length > 0"
-    class="flex items-center gap-2 py-1.5 overflow-x-auto scrollbar-none shrink-0"
+    class="relative z-20 -mb-0.5 ml-4 flex items-center gap-2 py-1.5 overflow-x-auto scrollbar-none shrink-0"
   >
     <span
       v-for="(cap, i) in visibleCapsules"
