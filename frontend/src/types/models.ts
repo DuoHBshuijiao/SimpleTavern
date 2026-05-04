@@ -137,6 +137,8 @@ export interface ChatOverrides {
   autoMemorySummarySilent?: boolean
   /** 非静默下拒绝确认后的倍数，下次在 n*tier 条时再问 */
   autoMemorySummaryNextAskTier?: number
+  /** MVU Agent 专用模型；空值时回退到全局默认模型 */
+  mvuModel?: string | null
 }
 
 export type AutoReadScope = 'off' | 'assistant_only' | 'user_only' | 'all'
