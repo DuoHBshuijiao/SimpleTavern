@@ -2872,8 +2872,24 @@ function onContextStartKeepBeforeMessagesInput(e: Event) {
 }
 
 const contentRegexRulesSorted = computed(() => {
-  const list = globalDraft.value?.contentRegexRuleLibrary || []
-  return [...list].sort((a, b) => (a.order - b.order) || a.id.localeCompare(b.id))
+  const seen = new Set<string>()
+  const rules: (ChatContentRegexRule & { _origin?: string })[] = []
+
+  const globalList = globalDraft.value?.contentRegexRuleLibrary || []
+  for (const r of globalList) {
+    rules.push({ ...r, _origin: 'global' })
+    seen.add(r.id)
+  }
+
+  const chatList = chatDraft.value?.contentRegexRules || []
+  for (const r of chatList) {
+    if (!seen.has(r.id)) {
+      rules.push({ ...r, _origin: 'character' })
+      seen.add(r.id)
+    }
+  }
+
+  return rules.sort((a, b) => (a.order - b.order) || a.id.localeCompare(b.id))
 })
 
 function openRegexRuleEditor(index: number | null = null) {
@@ -2920,23 +2936,40 @@ function moveRegexRule(index: number, direction: -1 | 1) {
 function toggleAllRegexRules(enabled: boolean) {
   if (!chatDraft.value) return
   const map = { ...(chatDraft.value.contentRegexEnabledByRuleId || {}) }
-  for (const rule of contentRegexRulesSorted.value) map[rule.id] = enabled
+  const chatList = chatDraft.value.contentRegexRules || []
+  for (const item of contentRegexRulesSorted.value) {
+    if ((item as any)._origin === 'character') {
+      const found = chatList.find((r) => r.id === item.id)
+      if (found) found.enabled = enabled
+    } else {
+      map[item.id] = enabled
+    }
+  }
   chatDraft.value.contentRegexEnabledByRuleId = map
 }
 
 function setRegexRuleEnabled(index: number, enabled: boolean) {
+  const item = contentRegexRulesSorted.value[index]
+  if (!item) return
+  if ((item as any)._origin === 'character') {
+    if (chatDraft.value) {
+      const chatList = chatDraft.value.contentRegexRules || []
+      const found = chatList.find((r) => r.id === item.id)
+      if (found) found.enabled = enabled
+    }
+    return
+  }
   if (!chatDraft.value) return
   const map = { ...(chatDraft.value.contentRegexEnabledByRuleId || {}) }
-  const rule = contentRegexRulesSorted.value[index]
-  if (!rule) return
-  map[rule.id] = enabled
+  map[item.id] = enabled
   chatDraft.value.contentRegexEnabledByRuleId = map
 }
 
-function isRegexRuleEnabled(rule: ChatContentRegexRule): boolean {
+function isRegexRuleEnabled(rule: ChatContentRegexRule & { _origin?: string }): boolean {
+  if ((rule as any)._origin === 'character') return rule.enabled !== false
   const map = chatDraft.value?.contentRegexEnabledByRuleId || {}
   if (Object.prototype.hasOwnProperty.call(map, rule.id)) return !!map[rule.id]
-  return rule.enabled !== false
+  return false
 }
 
 function regexActionLabel(action?: string | null): string {
@@ -3074,6 +3107,17 @@ async function saveChatOverrides() {
 
   if (!shouldSaveOverrides) {
     return
+  }
+
+  // 将全局规则库中所有规则的启用状态显式写入 contentRegexEnabledByRuleId
+  if (globalDraft.value?.contentRegexRuleLibrary) {
+    const map = { ...(chatDraft.value.contentRegexEnabledByRuleId || {}) }
+    for (const rule of globalDraft.value.contentRegexRuleLibrary) {
+      if (!Object.prototype.hasOwnProperty.call(map, rule.id)) {
+        map[rule.id] = isRegexRuleEnabled(rule)
+      }
+    }
+    chatDraft.value.contentRegexEnabledByRuleId = map
   }
 
   await chatsStore.updateOverrides(chat.id, chatDraft.value, { skipLoadList: true })
@@ -4931,7 +4975,10 @@ async function checkUpdate() {
                     >
                       <div class="flex items-start justify-between gap-2">
                         <div class="min-w-0 flex-1 cursor-grab active:cursor-grabbing">
-                          <div class="text-xs font-medium text-[var(--color-text)] break-all">{{ rule.name || rule.pattern.slice(0, 50) }}</div>
+                          <div class="text-xs font-medium text-[var(--color-text)] break-all">
+                            {{ rule.name || rule.pattern.slice(0, 50) }}
+                            <span v-if="rule._origin === 'character'" class="inline-block text-[10px] px-1 py-px rounded-full bg-[var(--color-brand-a15)] text-[var(--color-brand)] align-middle ml-1">角色自带</span>
+                          </div>
                           <div class="mt-1 text-[11px] text-[var(--color-text-muted)] break-all">{{ rule.pattern }}</div>
                           <div class="mt-1 text-[11px] text-[var(--color-text-muted)]">
                             {{ regexActionLabel(rule.action) }} / {{ regexMatchModeLabel(rule.matchMode) }} / 深度 {{ rule.scanDepthOverride ?? chatDraft.contentRegexScanDepthDefault ?? 50 }}
