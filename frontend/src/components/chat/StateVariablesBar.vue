@@ -1,16 +1,16 @@
 <template>
   <div
     v-if="capsules.length > 0"
-    class="relative z-20 -mb-0.5 ml-4 flex items-center gap-2 py-1.5 overflow-x-auto scrollbar-none shrink-0"
+    class="relative z-20 flex w-full shrink-0 items-center gap-2 overflow-x-auto px-[18px] py-1.5 scrollbar-none"
   >
     <span
       v-for="(cap, i) in visibleCapsules"
       :key="i"
-      class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border transition-colors duration-300 shrink-0 select-none"
+      class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border backdrop-blur-[var(--blur-heavy)] backdrop-saturate-[1.45] transition-colors duration-300 shrink-0 select-none"
       :class="[
         cap.flashing
-          ? 'border-[var(--color-brand-a40)] bg-[var(--color-brand-a15)]'
-          : 'border-[var(--color-border-subtle)] bg-[var(--color-surface-muted)]'
+          ? 'border-[var(--color-brand-a50)] bg-[var(--color-brand-a30)]'
+          : 'border-[var(--color-border)]/80 bg-surface-overlay'
       ]"
     >
       <span class="text-[var(--color-text-muted)] text-xs leading-4">{{ cap.field }}</span>
