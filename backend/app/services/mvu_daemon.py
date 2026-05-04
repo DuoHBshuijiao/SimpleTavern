@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import time
 
-from app.content_regex_queue import dequeue_batch, get_content_regex_queue_size
+from app.content_regex_queue import clear_queue, dequeue_by_message_id, get_content_regex_queue_size
 from app.mvu_system_prompt import load_mvu_system_prompt
 from app.schemas import AssistantSettings, MvuWorkLogEntry
 from app.services.mvu_agent import MvuAgentEvent, MvuAgentJob, MvuAgentRunContext, MvuAgentService
@@ -22,6 +22,7 @@ from app.storage import (
     load_character,
     load_mvu_logs,
     load_settings,
+    save_chat,
     save_mvu_logs,
 )
 
@@ -92,6 +93,9 @@ def ensure_mvu_worker(chat_id: str) -> bool:
     if existing is not None and not existing.done():
         return True
 
+    # 首次启动 worker：入口清理——清空队列残留，scanner 下轮按规则正确入队
+    clear_queue(chat_id)
+
     _tasks[chat_id] = asyncio.create_task(_mvu_loop(chat_id))
     return True
 
@@ -132,8 +136,8 @@ async def _run_once(chat_id: str) -> None:
 
     settings = load_settings()
 
-    # 消费队列
-    queue_items = dequeue_batch(chat_id, 50)
+    # 消费队列：按消息分组，同一条消息的全部提取项一并处理
+    consumed_msg_id, queue_items = dequeue_by_message_id(chat_id)
     if not queue_items:
         return
 
@@ -187,6 +191,24 @@ async def _run_once(chat_id: str) -> None:
     if log_entries:
         existing = load_mvu_logs(chat.characterId, chat_id)
         save_mvu_logs(chat.characterId, chat_id, existing + log_entries)
+
+    # 标记已消费消息：最新被处理消息设 mvuProcessed，清除旧标记
+    if consumed_msg_id:
+        try:
+            chat_reload = load_chat(chat_id)
+        except FileNotFoundError:
+            return
+        dirty = False
+        for m in chat_reload.messages:
+            if m.id == consumed_msg_id:
+                if not m.mvuProcessed:
+                    m.mvuProcessed = True
+                    dirty = True
+            elif m.mvuProcessed:
+                m.mvuProcessed = False
+                dirty = True
+        if dirty:
+            save_chat(chat_reload)
 
 
 def signal_generate_done(chat_id: str) -> None:
