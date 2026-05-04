@@ -854,6 +854,10 @@ class ChatOverrides(BaseModel):
         ge=1,
         description="非静默下用户拒绝确认后的倍数（下次在 n*tier 条时再问）",
     )
+    mvuModel: str | None = Field(
+        default=None,
+        description="MVU Agent 专用模型；空值时回退到 settings.llm.defaultModel",
+    )
 
     @model_validator(mode="after")
     def _sync_worldbook_attachments(self):
