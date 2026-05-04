@@ -723,7 +723,7 @@ defineExpose({ getAssistantFabRect, setAssistantTopPx: setAssistantTopPxFromSepa
     <button
       v-if="mvuStore.isConnected"
       type="button"
-      class="chat-fab-surface w-9 h-9 rounded-lg text-xs font-bold shadow-lg transition-[transform,background-color,box-shadow] border border-[var(--color-border)] hover:scale-105 active:scale-95 flex items-center justify-center backdrop-blur-sm"
+      class="chat-fab-surface w-12 h-12 rounded-xl font-bold shadow-lg transition-[transform,background-color,box-shadow] border border-[var(--color-border)] hover:scale-105 active:scale-95 flex items-center justify-center backdrop-blur-sm"
       :style="mvueFabStyle"
       title="MVU 工作日志"
       @click="emit('toggle-mvu-panel')"
