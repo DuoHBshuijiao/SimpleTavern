@@ -282,6 +282,9 @@ export function useChatActions(deps: ChatActionsDeps) {
     const copy = JSON.parse(JSON.stringify(card)) as CharacterCard
     if (!Array.isArray(copy.attachedWorldBookIds)) copy.attachedWorldBookIds = []
     copy.extraFirstMessageEntries = normalizeExtraFirstMessageEntries(copy.extraFirstMessageEntries)
+    if (!Array.isArray(copy.contentRegexRules)) copy.contentRegexRules = []
+    if (!Array.isArray(copy.initialStateTables)) copy.initialStateTables = []
+    if (typeof copy.mvuEnabled !== 'boolean') copy.mvuEnabled = false
     editingCharacter.value = copy
     showCharacterEditor.value = true
   }
