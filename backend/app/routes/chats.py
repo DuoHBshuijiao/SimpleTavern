@@ -61,6 +61,7 @@ from app.schemas import (
     ChatMessage,
     CreateChatRequest,
     PromoteToGroupRequest,
+    StateVariables,
     UpdateChatRequest,
     UpdateMessageRequest,
     WorldBookAttachment,
@@ -445,6 +446,17 @@ def create_chat(req: CreateChatRequest) -> Chat:
         try:
             character = load_character(req.characterId)
             chat.overrides.contentRegexRules = _copy_content_regex_rules(getattr(character, "contentRegexRules", None) or [])
+
+            # 从角色卡初始状态栏定义写入会话 stateVariables
+            initial_tables = list(getattr(character, "initialStateTables", None) or [])
+            if initial_tables:
+                chat.stateVariables = StateVariables(
+                    version=1,
+                    updatedAt=_now_iso(),
+                    source="chat_assistant",
+                    tables=initial_tables,
+                )
+
             variants = _single_chat_greeting_variants(character, user_name or "用户")
             if len(variants) == 1:
                 chat.messages.append(
