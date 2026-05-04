@@ -192,6 +192,11 @@ function onAssistantFabClick(e: MouseEvent) {
   emit('toggle-assistant')
 }
 
+function onMvueFabClick(e: MouseEvent) {
+  if (assistantFabOnClick(e)) return
+  emit('toggle-mvu-panel')
+}
+
 const mvueFabStyle = computed(() => {
   const top = typeof fabStyle.value?.top === 'number' ? fabStyle.value.top : parseFloat(fabStyle.value?.top ?? '0') || 0
   return { ...fabStyle.value, top: `${top + 56}px` }
@@ -494,6 +499,16 @@ defineExpose({ getAssistantFabRect, setAssistantTopPx: setAssistantTopPxFromSepa
     :style="shellInlineStyle"
   >
     <div class="chat-input-morph-wrap relative">
+    <div
+      class="chat-input-float-stack relative z-10"
+      :class="{ 'chat-input-float-stack--sink': sinkMorphed }"
+    >
+    <!-- MVU 状态条：与下方输入卡分离，叠在卡片顶缘上方，下沉时与卡片一体平移 -->
+    <StateVariablesBar
+      :capsules="mvuStore.capsuleData"
+      :is-running="mvuStore.isRunning"
+      @toggle-panel="emit('toggle-mvu-panel')"
+    />
     <!-- 
       Refactored Container:
       - Uses bg-slate-900/70 and backdrop-blur-xl for strong glass effect
@@ -501,8 +516,7 @@ defineExpose({ getAssistantFabRect, setAssistantTopPx: setAssistantTopPxFromSepa
       - Removed hardcoded hex colors
     -->
     <div
-      class="chat-input-card-morph relative z-10 bg-surface-overlay backdrop-blur-xl border border-[var(--color-border)] rounded-2xl shadow-xl p-3 flex flex-col gap-2 focus-within:border-brand-a40 focus-within:ring-1 focus-within:ring-brand-a20 focus-within:bg-surface-overlay"
-      :class="{ 'chat-input-card--sink': sinkMorphed }"
+      class="chat-input-card-morph relative z-0 bg-surface-overlay backdrop-blur-xl border border-[var(--color-border)] rounded-2xl shadow-xl p-3 flex flex-col gap-2 focus-within:border-brand-a40 focus-within:ring-1 focus-within:ring-brand-a20 focus-within:bg-surface-overlay"
       style="opacity: 1;"
       @dragenter.prevent="handleDragEnter"
       @dragover.prevent="handleDragOver"
@@ -527,11 +541,6 @@ defineExpose({ getAssistantFabRect, setAssistantTopPx: setAssistantTopPxFromSepa
           <button class="btn btn-xs btn-secondary" @click="emit('draft-helper-discard')">放弃</button>
         </div>
       </div>
-      <StateVariablesBar
-        :capsules="mvuStore.capsuleData"
-        :is-running="mvuStore.isRunning"
-        @toggle-panel="emit('toggle-mvu-panel')"
-      />
       <div class="relative min-h-[80px]">
       <textarea
         ref="textareaRef"
@@ -695,6 +704,7 @@ defineExpose({ getAssistantFabRect, setAssistantTopPx: setAssistantTopPxFromSepa
         aria-hidden="true"
       />
     </div>
+    </div>
 
     <div
       class="chat-input-footer-hint relative z-0 text-center mt-2 text-xs text-[var(--color-text-muted)] pointer-events-none"
@@ -723,10 +733,14 @@ defineExpose({ getAssistantFabRect, setAssistantTopPx: setAssistantTopPxFromSepa
     <button
       v-if="mvuStore.isConnected"
       type="button"
-      class="chat-fab-surface w-12 h-12 rounded-xl font-bold shadow-lg transition-[transform,background-color,box-shadow] border border-[var(--color-border)] hover:scale-105 active:scale-95 flex items-center justify-center backdrop-blur-sm"
+      class="chat-fab-surface w-12 h-12 rounded-xl font-bold shadow-lg transition-[transform,background-color,box-shadow] border border-[var(--color-border)] hover:scale-105 active:scale-95 flex items-center justify-center backdrop-blur-sm cursor-grab active:cursor-grabbing"
       :style="mvueFabStyle"
       title="MVU 工作日志"
-      @click="emit('toggle-mvu-panel')"
+      @pointerdown="assistantFabPointerDown"
+      @pointermove="assistantFabPointerMove"
+      @pointerup="assistantFabPointerUp"
+      @pointercancel="assistantFabPointerCancel"
+      @click="onMvueFabClick"
     >
       MVU
     </button>
@@ -753,7 +767,7 @@ defineExpose({ getAssistantFabRect, setAssistantTopPx: setAssistantTopPxFromSepa
  * 下沉：transform 不占布局，会在壳顶留下与 translateY 等高的空隙。
  * 外壳用等量负 margin-top 上移，与卡片下移相抵，消除与消息区之间的多余缝，且不挤占 flex-1 列表高度。
  * margin 的 transition 必须挂在壳基类上：仅写在 --sink 上时，侧栏展开去掉类后元素失去 transition，margin 会瞬间归零而 transform 仍在过渡，造成底部「截断」感。
- * --chat-input-sink-shift：卡片下移与壳负 margin 必须同值；略大于原 1.125rem，以盖住底部提示行（mt-2 + text-xs）并略有余量。
+ * --chat-input-sink-shift：状态条+输入卡整体下移与壳负 margin 必须同值；略大于原 1.125rem，以盖住底部提示行（mt-2 + text-xs）并略有余量。
  */
 .chat-input-shell {
   --chat-input-sink-shift: 1.75rem;
@@ -765,16 +779,19 @@ defineExpose({ getAssistantFabRect, setAssistantTopPx: setAssistantTopPxFromSepa
   margin-top: calc(-1 * var(--chat-input-sink-shift));
 }
 
+.chat-input-float-stack {
+  transition: transform var(--chat-input-trans-dur, 320ms) var(--chat-input-trans-ease, ease);
+}
+
+.chat-input-float-stack--sink {
+  transform: translateY(var(--chat-input-sink-shift));
+}
+
 .chat-input-card-morph {
   transition:
-    transform var(--chat-input-trans-dur, 320ms) var(--chat-input-trans-ease, ease),
     border-color 200ms ease,
     box-shadow 200ms ease,
     background-color 200ms ease;
-}
-
-.chat-input-card--sink {
-  transform: translateY(var(--chat-input-sink-shift));
 }
 
 .chat-input-footer-hint {
@@ -801,11 +818,14 @@ defineExpose({ getAssistantFabRect, setAssistantTopPx: setAssistantTopPxFromSepa
   .chat-input-shell--sink {
     margin-top: 0 !important;
   }
+  .chat-input-float-stack {
+    transition: none !important;
+  }
+  .chat-input-float-stack--sink {
+    transform: none !important;
+  }
   .chat-input-card-morph {
     transition: border-color 200ms ease, box-shadow 200ms ease, background-color 200ms ease !important;
-  }
-  .chat-input-card--sink {
-    transform: none !important;
   }
   .chat-input-footer-hint {
     transition: none !important;
