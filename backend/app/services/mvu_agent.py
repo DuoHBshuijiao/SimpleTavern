@@ -150,6 +150,8 @@ class MvuAgentService:
                     "role": resp.role or "assistant",
                     "content": resp.content or "",
                 }
+                if resp.reasoning_content:
+                    assistant_msg["reasoning_content"] = resp.reasoning_content
                 if tool_calls:
                     assistant_msg["tool_calls"] = tool_calls
                 current_messages.append(assistant_msg)
