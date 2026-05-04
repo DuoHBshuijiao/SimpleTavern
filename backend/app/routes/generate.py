@@ -136,18 +136,8 @@ def _resolve_user_name_for_message(msg: ChatMessage, fallback_user_name: str) ->
     return getattr(msg, "senderName", None) or fallback_user_name or "用户"
 
 
-def _should_skip_content_regex_for_generated_assistant(chat: Any) -> bool:
-    """首条 assistant 正文不做后处理（含 greeting 多版本场景）。"""
-    first_assistant: ChatMessage | None = next((m for m in chat.messages if m.role == "assistant"), None)
-    if first_assistant is None:
-        return True
-    if getattr(first_assistant, "greetingVariants", None):
-        return True
-    return False
-
-
 def _apply_chat_content_regex(chat: Any, settings: Any, assistant_content: str) -> ContentRegexApplyResult:
-    if not assistant_content or _should_skip_content_regex_for_generated_assistant(chat):
+    if not assistant_content:
         return ContentRegexApplyResult(
             persisted_text=assistant_content,
             display_text=assistant_content,
@@ -162,7 +152,18 @@ def _resolve_effective_content_regex_rules(chat: Any, settings: Any) -> list[Any
     global_rules = list(getattr(settings, "contentRegexRuleLibrary", None) or [])
     legacy_rules = list(getattr(getattr(chat, "overrides", None), "contentRegexRules", None) or [])
     enabled_map = dict(getattr(getattr(chat, "overrides", None), "contentRegexEnabledByRuleId", None) or {})
-    source_rules = global_rules if global_rules else legacy_rules
+    # 合并全局规则库与会话级角色规则，同 ID 以全局为准
+    seen_ids: set[str] = set()
+    merged: list[Any] = []
+    for r in global_rules:
+        merged.append(r)
+        seen_ids.add(str(getattr(r, "id", "")))
+    for r in legacy_rules:
+        rid = str(getattr(r, "id", ""))
+        if rid not in seen_ids:
+            merged.append(r)
+            seen_ids.add(rid)
+    source_rules = merged
     out: list[Any] = []
     for r in source_rules:
         cp = r.model_copy(deep=True)
