@@ -9,25 +9,24 @@
     </div>
 
     <div
-      v-if="!tables.length"
+      v-if="!localTables.length"
       class="text-xs text-[var(--color-text-muted)] border border-dashed border-[var(--color-border-subtle)] rounded-lg px-3 py-2"
     >
       暂无状态表格。新建表格后，新会话将自带初始状态栏。
     </div>
 
     <div
-      v-for="(table, ti) in tables"
+      v-for="(table, ti) in localTables"
       :key="ti"
       class="rounded-lg border border-[var(--color-border-subtle)] bg-surface-muted p-3 space-y-2"
     >
       <div class="flex items-center gap-2 flex-wrap">
-        <input v-model="table.name" class="input flex-1 text-sm min-w-[120px]" placeholder="表格名称" />
+        <input v-model="table.name" class="input flex-1 text-sm min-w-[120px]" placeholder="表格名称" @input="emitUpdate" />
         <button type="button" class="btn btn-xs btn-secondary" @click="addColumn(ti)">+列</button>
         <button type="button" class="btn btn-xs btn-secondary" @click="addRow(ti)">+行</button>
         <button type="button" class="btn btn-xs btn-secondary text-red-400" @click="removeTable(ti)">删除</button>
       </div>
 
-      <!-- 列标签 -->
       <div v-if="table.columns.length" class="flex flex-wrap gap-1">
         <span
           v-for="(_col, ci) in table.columns"
@@ -38,12 +37,12 @@
             v-model="table.columns[ci]"
             class="bg-transparent border-none outline-none text-[10px] w-[60px] text-[var(--color-brand)]"
             placeholder="列名"
+            @input="emitUpdate"
           />
           <button type="button" class="hover:text-red-400 shrink-0 leading-none" @click="removeColumn(ti, ci)">&times;</button>
         </span>
       </div>
 
-      <!-- 数据网格 -->
       <div v-if="table.columns.length && table.rows.length" class="overflow-x-auto -mx-1">
         <table class="w-full text-xs border-collapse">
           <thead>
@@ -64,12 +63,12 @@
                   v-model="row.field"
                   class="input text-xs py-0.5 px-1 w-full min-w-[60px]"
                   placeholder="字段"
+                  @input="emitUpdate"
                 />
               </td>
               <td v-for="col in table.columns" :key="col" class="p-1 border-b border-[var(--color-border-subtle)]">
                 <input
-                  :model-value="row.cells[col] ?? ''"
-                  @input="(e) => setCell(row, col, (e.target as HTMLInputElement).value)"
+                  v-model="row.cells[col]"
                   class="input text-xs py-0.5 px-1 w-full min-w-[60px]"
                   :placeholder="col"
                 />
@@ -89,7 +88,8 @@
 </template>
 
 <script setup lang="ts">
-import type { StatusTableDef, StatusTableRow } from '../../types/models'
+import { reactive, watch } from 'vue'
+import type { StatusTableDef } from '../../types/models'
 
 const props = defineProps<{
   tables: StatusTableDef[]
@@ -99,79 +99,76 @@ const emit = defineEmits<{
   'update:tables': [tables: StatusTableDef[]]
 }>()
 
-function emitUpdate() {
-  emit('update:tables', [...props.tables])
+function deepClone(t: StatusTableDef[]): StatusTableDef[] {
+  return t.map((tbl) => ({
+    name: tbl.name,
+    columns: [...tbl.columns],
+    rows: tbl.rows.map((r) => {
+      const cells: Record<string, string> = {}
+      for (const col of tbl.columns) {
+        cells[col] = (r.cells && r.cells[col]) ? r.cells[col] : ''
+      }
+      return { field: r.field, cells }
+    }),
+  }))
 }
 
-function cloneTable(t: StatusTableDef): StatusTableDef {
-  return {
-    name: t.name,
-    columns: [...t.columns],
-    rows: t.rows.map((r) => ({ field: r.field, cells: { ...r.cells } })),
+const localTables = reactive<StatusTableDef[]>(deepClone(props.tables))
+
+watch(() => props.tables, (val) => {
+  const cloned = deepClone(val)
+  localTables.length = 0
+  for (const t of cloned) {
+    localTables.push(t)
   }
-}
+}, { deep: true })
 
-function setCell(row: StatusTableRow, col: string, value: string) {
-  row.cells = { ...row.cells, [col]: value }
-  emitUpdate()
+function emitUpdate() {
+  emit('update:tables', JSON.parse(JSON.stringify(localTables)))
 }
 
 function addTable() {
-  const updated = [...props.tables, { name: '', columns: [], rows: [] }]
-  emit('update:tables', updated)
+  localTables.push({ name: '', columns: [], rows: [] })
+  emitUpdate()
 }
 
 function removeTable(ti: number) {
-  const updated = [...props.tables]
-  updated.splice(ti, 1)
-  emit('update:tables', updated)
+  localTables.splice(ti, 1)
+  emitUpdate()
 }
 
 function addColumn(ti: number) {
-  const updated = [...props.tables]
-  const table = cloneTable(updated[ti]!)
-  table.columns.push(`列${table.columns.length + 1}`)
-  const colName = table.columns[table.columns.length - 1]!
-  table.rows = table.rows.map((r) => {
-    const cells = { ...r.cells }
-    if (!(colName in cells)) cells[colName] = ''
-    return { field: r.field, cells }
-  })
-  updated[ti] = table
-  emit('update:tables', updated)
+  const table = localTables[ti]!
+  const colName = `列${table.columns.length + 1}`
+  table.columns.push(colName)
+  for (const r of table.rows) {
+    r.cells[colName] = ''
+  }
+  emitUpdate()
 }
 
 function removeColumn(ti: number, ci: number) {
-  const updated = [...props.tables]
-  const table = cloneTable(updated[ti]!)
+  const table = localTables[ti]!
   const removedCol = table.columns[ci]!
   table.columns.splice(ci, 1)
-  table.rows = table.rows.map((r) => {
-    const cells = { ...r.cells }
-    delete cells[removedCol]
-    return { field: r.field, cells }
-  })
-  updated[ti] = table
-  emit('update:tables', updated)
+  for (const r of table.rows) {
+    delete r.cells[removedCol]
+  }
+  emitUpdate()
 }
 
 function addRow(ti: number) {
-  const updated = [...props.tables]
-  const table = cloneTable(updated[ti]!)
+  const table = localTables[ti]!
   const cells: Record<string, string> = {}
   for (const col of table.columns) {
     cells[col] = ''
   }
   table.rows.push({ field: '', cells })
-  updated[ti] = table
-  emit('update:tables', updated)
+  emitUpdate()
 }
 
 function removeRow(ti: number, ri: number) {
-  const updated = [...props.tables]
-  const table = cloneTable(updated[ti]!)
-  table.rows.splice(ri, 1)
-  updated[ti] = table
-  emit('update:tables', updated)
+  localTables[ti]!.rows.splice(ri, 1)
+  emitUpdate()
 }
 </script>
