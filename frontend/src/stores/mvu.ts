@@ -52,6 +52,9 @@ export const useMvuStore = defineStore('mvu', {
       this._eventSource = es
       this.isConnected = true
 
+      // 连接建立后立即拉取当前状态，确保预置 stateVariables 即时展示
+      this.fetchState(chatId)
+
       es.addEventListener('log_entry', (e: MessageEvent) => {
         try {
           const entry: MvuWorkLogEntry = JSON.parse(e.data)
