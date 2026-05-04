@@ -184,6 +184,7 @@ const {
     onLayoutStable: () => props.onAssistantFabLayout?.(),
     onDragEnd: () => props.onAssistantFabDragEnd?.(),
     onSnapEnd: () => props.onAssistantFabSnapEnd?.(),
+    getDragReferenceRect: () => assistantFabButtonRef.value?.getBoundingClientRect() ?? null,
   },
 )
 
