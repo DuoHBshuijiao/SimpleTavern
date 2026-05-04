@@ -251,6 +251,9 @@ export function useChatActions(deps: ChatActionsDeps) {
       avatarFocusY: null,
       attachedWorldBookIds: [],
       extraFirstMessageEntries: [],
+      mvuEnabled: false,
+      contentRegexRules: [],
+      initialStateTables: [],
       createdAt: now,
       updatedAt: now,
     }
