@@ -177,7 +177,7 @@ async def _run_once(chat_id: str) -> None:
     run_ctx = MvuAgentRunContext(
         base_url=settings.llm.baseUrl,
         api_key=settings.llm.apiKey,
-        model=settings.llm.defaultModel,
+        model=getattr(chat.overrides, "mvuModel", None) or settings.llm.defaultModel,
     )
 
     agent = MvuAgentService(run_ctx)
