@@ -966,6 +966,14 @@ const isStreamEnabled = computed(() => settings.settings?.streamEnabled !== fals
 // MVU Store
 const mvuStore = useMvuStore()
 const mvuPanelOpen = ref(false)
+const mvuModel = computed(() => activeChat.value?.overrides?.mvuModel ?? null)
+
+async function onMvuModelSelect(payload: { value: string; presetId?: string | null }) {
+  const chat = activeChat.value
+  if (!chat) return
+  const overrides = { ...chat.overrides, mvuModel: payload.value || null }
+  await chats.updateOverrides(chat.id, overrides, { skipLoadList: true })
+}
 
 // 聊天助手（助手写入长期记忆后通过 SSE 推送 chat_memory_updated，此处回调使当前会话状态立即刷新，无需切换窗口即可看到「当前会话」长期记忆与「已保存」标记）
 const assistant = useAssistant({
@@ -4942,7 +4950,10 @@ const editingPersonaAvatarUrl = computed(() => {
       :is-open="mvuPanelOpen"
       :logs="mvuStore.workLogs"
       :running="mvuStore.isRunning"
+      :mvu-model="mvuModel"
+      :model-options="chatModelOptions"
       @update:is-open="mvuPanelOpen = $event"
+      @select-mvu-model="onMvuModelSelect"
     />
 
     </div>
