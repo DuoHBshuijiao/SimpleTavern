@@ -287,6 +287,8 @@ def _merge_overrides(existing: Chat, incoming: UpdateChatRequest) -> None:
         existing.overrides.autoMemorySummarySilent = ov.autoMemorySummarySilent
     if "autoMemorySummaryNextAskTier" in ov.model_fields_set:
         existing.overrides.autoMemorySummaryNextAskTier = ov.autoMemorySummaryNextAskTier
+    if "mvuModel" in ov.model_fields_set:
+        existing.overrides.mvuModel = ov.mvuModel
 
     for key in ("model", "temperature", "top_p", "max_tokens", "context_size"):
         val = getattr(ov.params, key, None)
