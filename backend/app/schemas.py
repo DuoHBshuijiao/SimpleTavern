@@ -615,6 +615,10 @@ class CharacterCard(BaseModel):
     extraFirstMessageEntries: list[ExtraFirstMessageEntry] = Field(default_factory=list)
     mvuEnabled: bool = False
     contentRegexRules: list[ChatContentRegexRule] = Field(default_factory=list)
+    initialStateTables: list[StatusTableDef] = Field(
+        default_factory=list,
+        description="新会话初始状态栏定义：创建会话时自动写入 chat.stateVariables.tables，source=chat_assistant",
+    )
     createdAt: str = Field(default_factory=_now_iso)
     updatedAt: str = Field(default_factory=_now_iso)
 
