@@ -741,6 +741,10 @@ class ChatMessage(BaseModel):
         default=None,
         description="实际送入 TTS 合成的文本（含后处理/翻译后的朗读稿）",
     )
+    mvuProcessed: bool = Field(
+        default=False,
+        description="MVU 已消费标记：该消息的提取数据已被 MVU Agent 处理；同一会话内最多一条消息持有此标记",
+    )
 
     @model_validator(mode="after")
     def _validate_tool_fields(self) -> ChatMessage:
