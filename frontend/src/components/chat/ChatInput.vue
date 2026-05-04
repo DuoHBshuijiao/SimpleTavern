@@ -65,7 +65,6 @@ import { validateFilesForTarget } from '../../utils/attachmentPolicy'
 import { resolveRichPaste } from '../../utils/richPaste'
 import ModernAvatar from '../ModernAvatar.vue'
 import ModernSelect from '../ModernSelect.vue'
-import StateVariablesBar from './StateVariablesBar.vue'
 import { useMvuStore } from '../../stores/mvu'
 import { ImagePlus, MessageSquare, PenSquare, RefreshCw, X } from 'lucide-vue-next'
 
@@ -477,7 +476,7 @@ const textareaPlaceholderAttr = computed(() =>
   showPlaceholderReveal.value ? '' : inputPlaceholder.value
 )
 
-/** 顶栏 morph 变量挂在输入壳上，子树继承；与下沉负 margin 共用 transition */
+  /** 顶栏 morph 变量挂在输入壳上，子树继承；与下沉负 margin 共用 transition（状态条已移至 MessageList 上方叠层） */
 const shellInlineStyle = computed(() => ({
   color: 'rgba(229, 231, 235, 1)',
   backgroundColor: 'unset',
@@ -504,12 +503,6 @@ defineExpose({ getAssistantFabRect, setAssistantTopPx: setAssistantTopPxFromSepa
       class="chat-input-float-stack relative z-10"
       :class="{ 'chat-input-float-stack--sink': sinkMorphed }"
     >
-    <!-- MVU 状态条：与下方输入卡分离，叠在卡片顶缘上方，下沉时与卡片一体平移 -->
-    <StateVariablesBar
-      :capsules="mvuStore.capsuleData"
-      :is-running="mvuStore.isRunning"
-      @toggle-panel="emit('toggle-mvu-panel')"
-    />
     <!-- 
       Refactored Container:
       - Uses bg-slate-900/70 and backdrop-blur-xl for strong glass effect
@@ -768,7 +761,7 @@ defineExpose({ getAssistantFabRect, setAssistantTopPx: setAssistantTopPxFromSepa
  * 下沉：transform 不占布局，会在壳顶留下与 translateY 等高的空隙。
  * 外壳用等量负 margin-top 上移，与卡片下移相抵，消除与消息区之间的多余缝，且不挤占 flex-1 列表高度。
  * margin 的 transition 必须挂在壳基类上：仅写在 --sink 上时，侧栏展开去掉类后元素失去 transition，margin 会瞬间归零而 transform 仍在过渡，造成底部「截断」感。
- * --chat-input-sink-shift：状态条+输入卡整体下移与壳负 margin 必须同值；略大于原 1.125rem，以盖住底部提示行（mt-2 + text-xs）并略有余量。
+ * --chat-input-sink-shift：输入卡下移与壳负 margin 必须同值；略大于原 1.125rem，以盖住底部提示行（mt-2 + text-xs）并略有余量。
  */
 .chat-input-shell {
   --chat-input-sink-shift: 1.75rem;
