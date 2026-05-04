@@ -8,7 +8,7 @@
       style="contain: content; will-change: transform, opacity;"
     >
       <!-- 标题栏 -->
-      <header class="flex items-center justify-between px-4 py-3 border-b border-white/5 shrink-0 bg-white/5 backdrop-blur-md">
+      <header class="flex items-center justify-between px-4 py-2 border-b border-white/5 shrink-0 bg-white/5 backdrop-blur-md">
         <div class="flex items-center gap-2 min-w-0">
           <span class="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2 flex-wrap min-w-0">
             <span class="w-2 h-2 rounded-full bg-[#b76e79] shrink-0" :class="{ 'animate-pulse': running }" />
