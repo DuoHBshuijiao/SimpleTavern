@@ -81,6 +81,7 @@ import { useViewportNarrowPortrait } from '../composables/useViewportNarrowPortr
 
 // 子组件
 import { ChatSidebar, MessageList, ChatInput, AssistantPanel, AssistantThread, InitialStateEditor, MvuPanel } from '../components/chat'
+import StateVariablesBar from '../components/chat/StateVariablesBar.vue'
 import {
   GroupCreatorModal,
   MessageEditorModal,
@@ -4786,7 +4787,20 @@ const editingPersonaAvatarUrl = computed(() => {
             </div>
           </header>
 
-          <!-- 消息列表 -->
+          <!-- 消息列表：MVU 状态条叠在列表与输入区交界处（贴底），正文滚动从其下方穿过 -->
+          <div class="relative flex min-h-0 min-w-0 flex-1 flex-col">
+            <div
+              v-if="mvuStore.capsuleData.length > 0"
+              class="pointer-events-none absolute inset-x-0 bottom-0 z-30"
+            >
+              <div class="pointer-events-auto mx-auto w-full max-w-4xl px-4">
+                <StateVariablesBar
+                  :capsules="mvuStore.capsuleData"
+                  :is-running="mvuStore.isRunning"
+                  @toggle-panel="mvuPanelOpen = !mvuPanelOpen"
+                />
+              </div>
+            </div>
           <MessageList
             ref="messageListRef"
             :chat-id="activeChat.id"
@@ -4821,6 +4835,7 @@ const editingPersonaAvatarUrl = computed(() => {
             @switch-previous-version="handleSwitchPreviousVersion"
             @switch-next-version="handleSwitchNextVersion"
           />
+          </div>
 
           <!-- 输入区域 -->
           <ChatInput
