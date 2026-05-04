@@ -60,6 +60,8 @@ export function useAssistantFabPosition(
     onDragEnd?: () => void
     /** 左右贴边 snap 动画结束后（用于贴边后再做碰撞检测） */
     onSnapEnd?: () => void
+    /** MVU FAB 拖动时返回助手 FAB 的 rect，保证 grabOffset 相对助手按钮计算 */
+    getDragReferenceRect?: () => DOMRect | null
   },
 ) {
   const initial = loadStored()
@@ -269,7 +271,8 @@ export function useAssistantFabPosition(
     cancelPendingSeparation()
     cancelSnapAnimation()
     const el = e.currentTarget as HTMLElement
-    const rect = el.getBoundingClientRect()
+    const refRect = options?.getDragReferenceRect?.()
+    const rect = refRect ?? el.getBoundingClientRect()
     grabOffsetX = e.clientX - rect.left
     grabOffsetY = e.clientY - rect.top
     dragStartX = e.clientX
