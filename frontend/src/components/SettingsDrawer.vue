@@ -3346,7 +3346,7 @@ async function checkUpdate() {
 
     <!-- Drawer Panel -->
     <div
-      class="drawer-panel absolute right-4 top-4 bottom-4 w-[500px] max-w-[calc(90vw-32px)] theme-panel-bg backdrop-saturate-[1.8] border border-[var(--color-border)] rounded-2xl flex flex-col shadow-xl"
+      class="drawer-panel absolute right-4 top-4 bottom-4 w-[min(500px,calc(100vw-2rem))] theme-panel-bg backdrop-saturate-[1.8] border border-[var(--color-border)] rounded-2xl flex flex-col shadow-xl"
       style="backdrop-filter: blur(var(--blur-heavy)); -webkit-backdrop-filter: blur(var(--blur-heavy));"
     >
         <!-- Header -->
@@ -4226,7 +4226,6 @@ async function checkUpdate() {
                                 draggable="false"
                                 class="absolute right-8 top-1.5 text-[11px] leading-none text-brand"
                                 aria-label="TTS 预设"
-                                title="TTS 预设"
                               >t</span>
                               <button
                                 type="button"
