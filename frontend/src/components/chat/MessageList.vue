@@ -51,13 +51,14 @@
  *    - 位置：组件层，提供消息列表显示功能
  */
 import { ref, nextTick, computed, onBeforeUnmount, onMounted, onBeforeUpdate, onUpdated, watch } from 'vue'
-import type { ChatMessage, CharacterCard, UserPersona } from '../../types/models'
+import type { ChatContentRegexRule, ChatMessage, CharacterCard, UserPersona } from '../../types/models'
 import { useSettingsStore } from '../../stores'
 import ModernAvatar from '../ModernAvatar.vue'
 import ConfirmPopover from '../ConfirmPopover.vue'
 import ReasoningBubble from './ReasoningBubble.vue'
 import AnimatedClipHeight from './AnimatedClipHeight.vue'
 import { renderChatMarkdown, renderChatMarkdownStreaming } from '../../utils/markdownIt'
+import { applyContentRegexDisplay } from '../../utils/contentRegex'
 import { Settings, ChevronLeft, ChevronRight, ChevronDown, X } from 'lucide-vue-next'
 
 const settingsStore = useSettingsStore()
@@ -108,6 +109,8 @@ const props = defineProps<{
   entrancingUserMessageId?: string | null
   /** 重写/保存并发送等插入的助手占位行 id：弱化整行挂载跳变 */
   entrancingAssistantMessageId?: string | null
+  /** 当前会话生效的正则规则（仅用于前端渲染替换，不修改持久化 content） */
+  contentRegexRules?: ChatContentRegexRule[] | null
 }>()
 
 function getChatImageUrl(imageId: string): string {
@@ -395,15 +398,21 @@ function getReasoningDurationForMessage(m: ChatMessage): number | null {
  * 渲染 Markdown；当前正在流式输出的那条助手消息走「补虚闭合」版本，
  * 其它消息用稳定版本，避免为非流式消息付出不必要的补齐成本 / 潜在误判。
  */
+function getDisplayText(m: ChatMessage): string {
+  const raw = props.getDisplayContent(m)
+  if (!raw) return raw
+  return applyContentRegexDisplay(raw, props.contentRegexRules)
+}
+
 function renderMarkdown(m: ChatMessage) {
-  const text = (m.contentDisplay ?? props.getDisplayContent(m))
+  const text = getDisplayText(m)
   const isStreaming =
     (props.isGenerating || props.isInterjecting) && m.id === props.reasoningMessageId
   return isStreaming ? renderChatMarkdownStreaming(text) : renderChatMarkdown(text)
 }
 
 function shouldRenderMainBubble(m: ChatMessage): boolean {
-  const text = (m.contentDisplay ?? props.getDisplayContent(m)).trim()
+  const text = getDisplayText(m).trim()
   if (text) return true
   return Array.isArray(m.images) && m.images.length > 0
 }
