@@ -11,7 +11,10 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
+
+logger = logging.getLogger(__name__)
 
 from app.content_regex_queue import clear_queue, dequeue_by_message_id, get_content_regex_queue_size
 from app.mvu_system_prompt import load_mvu_system_prompt
@@ -136,6 +139,35 @@ async def _run_once(chat_id: str) -> None:
 
     settings = load_settings()
 
+    # 解析 API 端点：优先使用会话 preset，否则全局设置
+    preset_id = getattr(chat.overrides, "presetId", None)
+    base_url = settings.llm.baseUrl
+    api_key = settings.llm.apiKey
+
+    found_preset = None
+    if preset_id:
+        found_preset = next((p for p in settings.apiPresets if p.id == preset_id), None)
+        if found_preset:
+            base_url = found_preset.baseUrl
+            api_key = found_preset.apiKey
+
+    # 模型名称多级回退：
+    #   1) 会话级 MVU 专用模型覆盖（MVU 面板显式选择）
+    #   2) 当前 preset 的首个可用模型
+    #   3) 全局默认模型
+    model = getattr(chat.overrides, "mvuModel", None)
+    if not model and found_preset and found_preset.models:
+        model = found_preset.models[0]
+    if not model:
+        model = settings.llm.defaultModel
+
+    if not model:
+        logger.error("chat %s: MVU model is empty after all resolution attempts, skipping run", chat_id)
+        await _broadcast(chat_id, MvuAgentEvent("error", {
+            "message": "MVU 模型未配置，请在设置中指定默认模型或通过 MVU 面板选择模型"
+        }))
+        return
+
     # 消费队列：按消息分组，同一条消息的全部提取项一并处理
     consumed_msg_id, queue_items = dequeue_by_message_id(chat_id)
     if not queue_items:
@@ -174,17 +206,6 @@ async def _run_once(chat_id: str) -> None:
         context_markdown=context_md,
     )
 
-    # 解析 API 端点：优先使用会话 preset，否则全局设置
-    preset_id = getattr(chat.overrides, "presetId", None)
-    base_url = settings.llm.baseUrl
-    api_key = settings.llm.apiKey
-    model = getattr(chat.overrides, "mvuModel", None) or settings.llm.defaultModel
-    if preset_id:
-        found_preset = next((p for p in settings.apiPresets if p.id == preset_id), None)
-        if found_preset:
-            base_url = found_preset.baseUrl
-            api_key = found_preset.apiKey
-
     run_ctx = MvuAgentRunContext(
         base_url=base_url,
         api_key=api_key,
@@ -192,9 +213,12 @@ async def _run_once(chat_id: str) -> None:
     )
 
     agent = MvuAgentService(run_ctx)
-    events, log_entries = await agent.run_job(job)
+    events, log_entries = await agent.run_job(
+        job,
+        on_event=lambda evt: _broadcast(chat_id, evt),
+    )
 
-    # 推送事件到 SSE 订阅者
+    # 推送遗留事件到 SSE 订阅者（安全网：防 _push 中的 ensure_future 未覆盖的路径）
     for event in events:
         await _broadcast(chat_id, event)
 
