@@ -14,7 +14,6 @@ from app.storage import (
     list_group_chats,
     load_character,
     load_settings,
-    save_chat,
 )
 
 _SCAN_INTERVAL_SECONDS = 0.5
@@ -112,7 +111,6 @@ def _scan_once() -> None:
                 last_valid_idx = i
                 break
 
-        dirty = False
         for idx, msg in enumerate(chat.messages):
             if msg.role not in ("assistant", "user"):
                 continue
@@ -131,11 +129,9 @@ def _scan_once() -> None:
             if mvu_enabled and result.extracted_items:
                 should_enqueue = False
                 if last_processed_idx >= 0:
-                    # 已存在消费标记：仅处理标记之后的消息
                     if idx > last_processed_idx:
                         should_enqueue = True
                 else:
-                    # 无消费标记（中途开启 MVU）：仅最新一条有效消息入队
                     if idx == last_valid_idx:
                         should_enqueue = True
 
@@ -143,14 +139,6 @@ def _scan_once() -> None:
                     for item in result.extracted_items:
                         item["messageId"] = msg.id
                     enqueue_content_regex_items(chat.id, result.extracted_items)
-
-            next_display = result.display_text if result.display_text != msg.content else None
-            if getattr(msg, "contentDisplay", None) != next_display:
-                msg.contentDisplay = next_display
-                dirty = True
-        if dirty:
-            chat.updatedAt = chat.updatedAt
-            save_chat(chat)
 
 
 def _scanner_loop() -> None:
