@@ -470,6 +470,10 @@ export const useChatsStore = defineStore('chats', {
         reasoningContent?: string | null
         reasoningDurationSec?: number | null
         skipReload?: boolean
+        images?: ChatMessage['images']
+        senderPersonaId?: string | null
+        senderName?: string | null
+        senderAvatar?: string | null
       },
     ) {
       const body: {
@@ -482,6 +486,10 @@ export const useChatsStore = defineStore('chats', {
         greetingVariantReasoningDurations?: (number | null)[] | null
         reasoningContent?: string | null
         reasoningDurationSec?: number | null
+        images?: ChatMessage['images']
+        senderPersonaId?: string | null
+        senderName?: string | null
+        senderAvatar?: string | null
       } = { role, content }
       if (characterId !== undefined) body.characterId = characterId
       if (opts && typeof opts.greetingVariantIndex === 'number') {
@@ -510,6 +518,18 @@ export const useChatsStore = defineStore('chats', {
         Number.isFinite(opts.reasoningDurationSec)
       ) {
         body.reasoningDurationSec = opts.reasoningDurationSec
+      }
+      if (opts && 'images' in opts && opts.images !== undefined) {
+        body.images = opts.images ?? []
+      }
+      if (opts && 'senderPersonaId' in opts) {
+        body.senderPersonaId = opts.senderPersonaId
+      }
+      if (opts && 'senderName' in opts) {
+        body.senderName = opts.senderName
+      }
+      if (opts && 'senderAvatar' in opts) {
+        body.senderAvatar = opts.senderAvatar
       }
       const skipReload = opts?.skipReload === true
       const chat = await apiPut<Chat>(`/api/chats/${chatId}/messages/${messageId}`, body)
