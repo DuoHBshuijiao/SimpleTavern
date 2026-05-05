@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref } from 'vue'
+import { usePreferHoverChrome } from '../../composables/usePreferHoverChrome'
 import { renderChatMarkdown } from '../../utils/markdownIt'
 import type { AssistantMessage } from '../../composables/useAssistant'
 import type { AssistantAttachment } from '../../types/models'
@@ -8,6 +9,8 @@ import AnimatedClipHeight from './AnimatedClipHeight.vue'
 import ReasoningBubble from './ReasoningBubble.vue'
 
 const STREAMING_REASONING_ID = '_streaming_pending'
+
+const { preferHoverChrome } = usePreferHoverChrome()
 
 const props = withDefaults(defineProps<{
   messages: AssistantMessage[]
@@ -542,7 +545,8 @@ onBeforeUnmount(() => {
 
     <div
       v-if="showMessageActions && message.role !== 'system' && message.role !== 'tool' && message.role !== 'reasoning'"
-      class="flex items-center gap-3 px-1 opacity-0 group-hover:opacity-100 transition-opacity"
+      class="flex items-center gap-3 px-1 transition-opacity"
+      :class="preferHoverChrome ? 'opacity-0 group-hover:opacity-100' : 'opacity-100'"
     >
       <button
         v-if="message.role === 'assistant'"
