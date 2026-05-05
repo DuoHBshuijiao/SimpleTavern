@@ -31,7 +31,6 @@ from typing import Any, AsyncIterator
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from app.content_regex import ContentRegexApplyResult, apply_content_regex_pipeline
 from app.content_regex_scanner import ensure_content_regex_scanner_started
 from app.llm.openai_compat import chat_completions, chat_completions_message, stream_chat_completions
 from app.placeholders import replace_placeholders_in_text
@@ -134,44 +133,6 @@ def _sse(event: str, data_obj: dict) -> str:
 
 def _resolve_user_name_for_message(msg: ChatMessage, fallback_user_name: str) -> str:
     return getattr(msg, "senderName", None) or fallback_user_name or "用户"
-
-
-def _apply_chat_content_regex(chat: Any, settings: Any, assistant_content: str) -> ContentRegexApplyResult:
-    if not assistant_content:
-        return ContentRegexApplyResult(
-            persisted_text=assistant_content,
-            display_text=assistant_content,
-            extracted_items=[],
-            errors=[],
-        )
-    rules = _resolve_effective_content_regex_rules(chat, settings)
-    return apply_content_regex_pipeline(assistant_content, rules)
-
-
-def _resolve_effective_content_regex_rules(chat: Any, settings: Any) -> list[Any]:
-    global_rules = list(getattr(settings, "contentRegexRuleLibrary", None) or [])
-    legacy_rules = list(getattr(getattr(chat, "overrides", None), "contentRegexRules", None) or [])
-    enabled_map = dict(getattr(getattr(chat, "overrides", None), "contentRegexEnabledByRuleId", None) or {})
-    # 合并全局规则库与会话级角色规则，同 ID 以全局为准
-    seen_ids: set[str] = set()
-    merged: list[Any] = []
-    for r in global_rules:
-        merged.append(r)
-        seen_ids.add(str(getattr(r, "id", "")))
-    for r in legacy_rules:
-        rid = str(getattr(r, "id", ""))
-        if rid not in seen_ids:
-            merged.append(r)
-            seen_ids.add(rid)
-    source_rules = merged
-    out: list[Any] = []
-    for r in source_rules:
-        cp = r.model_copy(deep=True)
-        rid = str(getattr(cp, "id", ""))
-        if rid and rid in enabled_map:
-            cp.enabled = bool(enabled_map[rid])
-        out.append(cp)
-    return out
 
 
 def _build_group_identity_guardrail(char_name: str | None) -> str:
@@ -702,12 +663,15 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
                 getattr(m0, "greetingVariants", None)
                 or getattr(m0, "greetingVariantIndex", None) is not None
                 or getattr(m0, "greetingVariantReasoningContents", None)
+                or getattr(m0, "greetingVariantReasoningDurations", None)
             ):
                 continue
             m0.greetingVariants = None
             m0.greetingVariantIndex = None
             if hasattr(m0, "greetingVariantReasoningContents"):
                 m0.greetingVariantReasoningContents = None
+            if hasattr(m0, "greetingVariantReasoningDurations"):
+                m0.greetingVariantReasoningDurations = None
         replaced_user_message = replace_placeholders_in_text(
             req.userMessage,
             char_name=char_name_for_user_input,
@@ -974,10 +938,6 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
 
             streamed = "".join(full_text)
             assistant_content = streamed.strip()
-            regex_result = _apply_chat_content_regex(chat, settings, assistant_content)
-            assistant_content = regex_result.persisted_text
-            content_display = regex_result.display_text
-            content_regex_errors = regex_result.errors
             reasoning_text = "".join(full_reasoning).strip() or None
             duration_sec: float | None = None
             if reasoning_start is not None and reasoning_end is not None:
@@ -986,7 +946,6 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
                 assistant_msg = ChatMessage(
                     role="assistant",
                     content=assistant_content,
-                    contentDisplay=(content_display if content_display != assistant_content else None),
                     reasoningContent=reasoning_text,
                     reasoningDurationSec=duration_sec if reasoning_text else None,
                 )
@@ -1007,10 +966,6 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
                     done_payload["reasoningContent"] = reasoning_text
                 if duration_sec is not None and reasoning_text:
                     done_payload["reasoningDurationSec"] = duration_sec
-                if content_regex_errors:
-                    done_payload["contentRegexErrors"] = content_regex_errors
-                if content_display != assistant_content:
-                    done_payload["contentRegexDisplayText"] = content_display
                 yield _sse("done", done_payload)
             else:
                 yield _sse("done", {"ok": True, "chatId": chat.id})
@@ -1021,8 +976,6 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
     if not settings.streamEnabled:
         try:
             req_start = time.monotonic()
-            content_regex_errors: list[dict[str, str]] = []
-            content_display = ""
             if thinking_enabled:
                 resp = await chat_completions_message(
                     base_url=base_url,
@@ -1035,10 +988,6 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
                     extra_body=extra_body,
                 )
                 assistant_content = (resp.content or "").strip()
-                regex_result = _apply_chat_content_regex(chat, settings, assistant_content)
-                assistant_content = regex_result.persisted_text
-                content_display = regex_result.display_text
-                content_regex_errors = regex_result.errors
                 reasoning_content = (resp.reasoning_content or None)
             else:
                 result = await chat_completions(
@@ -1052,10 +1001,6 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
                     extra_body=extra_body,
                 )
                 assistant_content = result.text.strip()
-                regex_result = _apply_chat_content_regex(chat, settings, assistant_content)
-                assistant_content = regex_result.persisted_text
-                content_display = regex_result.display_text
-                content_regex_errors = regex_result.errors
                 reasoning_content = None
             req_duration = round(max(0.0, time.monotonic() - req_start), 1) if reasoning_content else None
             assistant_msg = None
@@ -1063,7 +1008,6 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
                 assistant_msg = ChatMessage(
                     role="assistant",
                     content=assistant_content,
-                    contentDisplay=(content_display if content_display != assistant_content else None),
                     reasoningContent=(reasoning_content.strip() if isinstance(reasoning_content, str) and reasoning_content.strip() else None),
                     reasoningDurationSec=req_duration,
                 )
@@ -1086,10 +1030,6 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
                 payload["reasoningContent"] = reasoning_content
             if req_duration is not None:
                 payload["reasoningDurationSec"] = req_duration
-            if content_regex_errors:
-                payload["contentRegexErrors"] = content_regex_errors
-            if content_display and content_display != assistant_content:
-                payload["contentRegexDisplayText"] = content_display
             signal_generate_done(chat.id)
             return JSONResponse(payload)
         except Exception as e:
@@ -1564,10 +1504,6 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
 
             streamed = "".join(full_text)
             assistant_content = streamed.strip()
-            regex_result = _apply_chat_content_regex(chat, settings, assistant_content)
-            assistant_content = regex_result.persisted_text
-            content_display = regex_result.display_text
-            content_regex_errors = regex_result.errors
             reasoning_text = "".join(full_reasoning).strip() or None
             duration_sec: float | None = None
             if reasoning_start is not None and reasoning_end is not None:
@@ -1576,7 +1512,6 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
                 assistant_msg = ChatMessage(
                     role="assistant",
                     content=assistant_content,
-                    contentDisplay=(content_display if content_display != assistant_content else None),
                     characterId=req.characterId,
                     reasoningContent=reasoning_text,
                     reasoningDurationSec=duration_sec if reasoning_text else None,
@@ -1594,10 +1529,6 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
                     done_payload["reasoningContent"] = reasoning_text
                 if duration_sec is not None and reasoning_text:
                     done_payload["reasoningDurationSec"] = duration_sec
-                if content_regex_errors:
-                    done_payload["contentRegexErrors"] = content_regex_errors
-                if content_display != assistant_content:
-                    done_payload["contentRegexDisplayText"] = content_display
                 yield _sse("done", done_payload)
             else:
                 yield _sse("done", {"ok": True, "chatId": chat.id, "characterId": req.characterId})
@@ -1608,8 +1539,6 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
     if not settings.streamEnabled:
         try:
             req_start = time.monotonic()
-            content_regex_errors: list[dict[str, str]] = []
-            content_display = ""
             if thinking_enabled:
                 resp = await chat_completions_message(
                     base_url=base_url,
@@ -1622,10 +1551,6 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
                     extra_body=extra_body,
                 )
                 assistant_content = (resp.content or "").strip()
-                regex_result = _apply_chat_content_regex(chat, settings, assistant_content)
-                assistant_content = regex_result.persisted_text
-                content_display = regex_result.display_text
-                content_regex_errors = regex_result.errors
                 reasoning_content = resp.reasoning_content or None
             else:
                 result = await chat_completions(
@@ -1639,10 +1564,6 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
                     extra_body=extra_body,
                 )
                 assistant_content = result.text.strip()
-                regex_result = _apply_chat_content_regex(chat, settings, assistant_content)
-                assistant_content = regex_result.persisted_text
-                content_display = regex_result.display_text
-                content_regex_errors = regex_result.errors
                 reasoning_content = None
             req_duration = round(max(0.0, time.monotonic() - req_start), 1) if reasoning_content else None
             assistant_msg = None
@@ -1650,7 +1571,6 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
                 assistant_msg = ChatMessage(
                     role="assistant",
                     content=assistant_content,
-                    contentDisplay=(content_display if content_display != assistant_content else None),
                     characterId=req.characterId,
                     reasoningContent=(reasoning_content.strip() if isinstance(reasoning_content, str) and reasoning_content.strip() else None),
                     reasoningDurationSec=req_duration,
@@ -1670,10 +1590,6 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
                 payload["reasoningContent"] = reasoning_content
             if req_duration is not None:
                 payload["reasoningDurationSec"] = req_duration
-            if content_regex_errors:
-                payload["contentRegexErrors"] = content_regex_errors
-            if content_display and content_display != assistant_content:
-                payload["contentRegexDisplayText"] = content_display
             signal_generate_done(chat.id)
             return JSONResponse(payload)
         except Exception as e:
@@ -2010,10 +1926,6 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
 
             streamed = "".join(full_text)
             assistant_content = streamed.strip()
-            regex_result = _apply_chat_content_regex(chat, settings, assistant_content)
-            assistant_content = regex_result.persisted_text
-            content_display = regex_result.display_text
-            content_regex_errors = regex_result.errors
             reasoning_text = "".join(full_reasoning).strip() or None
             duration_sec: float | None = None
             if reasoning_start is not None and reasoning_end is not None:
@@ -2022,7 +1934,6 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
                 assistant_msg = ChatMessage(
                     role="assistant",
                     content=assistant_content,
-                    contentDisplay=(content_display if content_display != assistant_content else None),
                     characterId=req.characterId,
                     reasoningContent=reasoning_text,
                     reasoningDurationSec=duration_sec if reasoning_text else None,
@@ -2041,10 +1952,6 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
                     done_payload["reasoningContent"] = reasoning_text
                 if duration_sec is not None and reasoning_text:
                     done_payload["reasoningDurationSec"] = duration_sec
-                if content_regex_errors:
-                    done_payload["contentRegexErrors"] = content_regex_errors
-                if content_display != assistant_content:
-                    done_payload["contentRegexDisplayText"] = content_display
                 yield _sse("done", done_payload)
             else:
                 yield _sse("done", {"ok": True, "chatId": chat.id, "characterId": req.characterId, "isInterject": True})
@@ -2055,8 +1962,6 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
     if not settings.streamEnabled:
         try:
             req_start = time.monotonic()
-            content_regex_errors: list[dict[str, str]] = []
-            content_display = ""
             if thinking_enabled:
                 resp = await chat_completions_message(
                     base_url=base_url,
@@ -2069,10 +1974,6 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
                     extra_body=extra_body,
                 )
                 assistant_content = (resp.content or "").strip()
-                regex_result = _apply_chat_content_regex(chat, settings, assistant_content)
-                assistant_content = regex_result.persisted_text
-                content_display = regex_result.display_text
-                content_regex_errors = regex_result.errors
                 reasoning_content = resp.reasoning_content or None
             else:
                 result = await chat_completions(
@@ -2086,10 +1987,6 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
                     extra_body=extra_body,
                 )
                 assistant_content = result.text.strip()
-                regex_result = _apply_chat_content_regex(chat, settings, assistant_content)
-                assistant_content = regex_result.persisted_text
-                content_display = regex_result.display_text
-                content_regex_errors = regex_result.errors
                 reasoning_content = None
             req_duration = round(max(0.0, time.monotonic() - req_start), 1) if reasoning_content else None
             assistant_msg = None
@@ -2097,7 +1994,6 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
                 assistant_msg = ChatMessage(
                     role="assistant",
                     content=assistant_content,
-                    contentDisplay=(content_display if content_display != assistant_content else None),
                     characterId=req.characterId,
                     reasoningContent=(reasoning_content.strip() if isinstance(reasoning_content, str) and reasoning_content.strip() else None),
                     reasoningDurationSec=req_duration,
@@ -2118,10 +2014,6 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
                 payload["reasoningContent"] = reasoning_content
             if req_duration is not None:
                 payload["reasoningDurationSec"] = req_duration
-            if content_regex_errors:
-                payload["contentRegexErrors"] = content_regex_errors
-            if content_display and content_display != assistant_content:
-                payload["contentRegexDisplayText"] = content_display
             signal_generate_done(chat.id)
             return JSONResponse(payload)
         except Exception as e:
