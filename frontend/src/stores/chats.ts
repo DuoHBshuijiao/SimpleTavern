@@ -466,8 +466,10 @@ export const useChatsStore = defineStore('chats', {
         greetingVariantIndex?: number | null
         greetingVariants?: string[] | null
         greetingVariantReasoningContents?: string[] | null
+        greetingVariantReasoningDurations?: (number | null)[] | null
         reasoningContent?: string | null
         reasoningDurationSec?: number | null
+        skipReload?: boolean
       },
     ) {
       const body: {
@@ -477,6 +479,7 @@ export const useChatsStore = defineStore('chats', {
         greetingVariantIndex?: number | null
         greetingVariants?: string[] | null
         greetingVariantReasoningContents?: string[] | null
+        greetingVariantReasoningDurations?: (number | null)[] | null
         reasoningContent?: string | null
         reasoningDurationSec?: number | null
       } = { role, content }
@@ -489,6 +492,9 @@ export const useChatsStore = defineStore('chats', {
       }
       if (opts && 'greetingVariantReasoningContents' in opts) {
         body.greetingVariantReasoningContents = opts.greetingVariantReasoningContents
+      }
+      if (opts && 'greetingVariantReasoningDurations' in opts) {
+        body.greetingVariantReasoningDurations = opts.greetingVariantReasoningDurations
       }
       if (opts && 'reasoningContent' in opts) {
         if (opts.reasoningContent == null) {
@@ -505,9 +511,10 @@ export const useChatsStore = defineStore('chats', {
       ) {
         body.reasoningDurationSec = opts.reasoningDurationSec
       }
+      const skipReload = opts?.skipReload === true
       const chat = await apiPut<Chat>(`/api/chats/${chatId}/messages/${messageId}`, body)
       this.activeChat = chat
-      if (this.characterId) await this.loadList(this.characterId)
+      if (!skipReload && this.characterId) await this.loadList(this.characterId)
       return chat
     },
 
@@ -521,12 +528,49 @@ export const useChatsStore = defineStore('chats', {
      * @param {string} chatId - 聊天ID
      * @param {string} messageId - 消息ID
      */
-    async deleteMessage(chatId: string, messageId: string) {
+    async deleteMessage(chatId: string, messageId: string, opts?: { skipReload?: boolean }) {
       await apiDelete(`/api/chats/${chatId}/messages/${messageId}`)
-      await this.load(chatId)
-      if (this.characterId) await this.loadList(this.characterId)
+      if (opts?.skipReload === true) {
+        // 仅更新本地状态：直接从 activeChat 中移除该消息
+        if (this.activeChat && this.activeChat.id === chatId) {
+          const kept = this.activeChat.messages.filter((m) => m.id !== messageId)
+          this.activeChat = { ...this.activeChat, messages: kept }
+        }
+      } else {
+        await this.load(chatId)
+        if (this.characterId) await this.loadList(this.characterId)
+      }
     },
-    
+
+    /**
+     * 保存编辑后的消息并截断后续消息（合并 updateMessage + deleteMessage 为一次 HTTP 调用）
+     *
+     * @param {string} chatId - 聊天ID
+     * @param {string} messageId - 消息ID
+     * @param {MainChatRole} role - 消息角色
+     * @param {string} content - 消息内容
+     * @param {string | null} [characterId] - 角色ID
+     * @returns {Promise<Chat>} 更新后的聊天会话
+     */
+    async saveAndTruncate(
+      chatId: string,
+      messageId: string,
+      role: MainChatRole,
+      content: string,
+      characterId?: string | null,
+    ) {
+      const body: {
+        role: string
+        content: string
+        characterId?: string | null
+      } = { role, content }
+      if (characterId !== undefined) body.characterId = characterId
+      const chat = await apiPut<Chat>(`/api/chats/${chatId}/messages/${messageId}/save-and-truncate`, body)
+      this.activeChat = chat
+      if (this.characterId) await this.loadList(this.characterId)
+      return chat
+    },
+
     /**
      * 添加群聊成员
      *
