@@ -76,7 +76,7 @@ function save() {
             </button>
           </div>
           <div class="modal-body space-y-4">
-            <p class="text-sm text-[var(--color-text-secondary)] truncate" :title="bookName">{{ bookName }}</p>
+            <p class="text-sm text-[var(--color-text-secondary)] truncate">{{ bookName }}</p>
             <div class="space-y-1.5">
               <label class="text-xs font-medium text-[var(--color-text-secondary)]">扫描深度</label>
               <input
