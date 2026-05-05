@@ -452,8 +452,6 @@ export interface ChatMessage {
   id: string
   role: ChatRole
   content: string
-  /** 仅显示层正文（正则 extract_and_replace 劫持），不用于上下文与持久化编辑 */
-  contentDisplay?: string | null
   images?: ChatImageAttachment[]
   attachments?: AssistantAttachment[]
   characterId?: string | null
@@ -472,6 +470,8 @@ export interface ChatMessage {
   greetingVariantIndex?: number | null
   /** 与 greetingVariants 各下标一一对应的思考/推理文（可短于列表则视为空串） */
   greetingVariantReasoningContents?: string[] | null
+  /** 与各 greetingVariants 下标一一对应的思考耗时（秒） */
+  greetingVariantReasoningDurations?: (number | null)[] | null
   /** 已合成的 TTS 音频文件 UUID */
   ttsAudioAssetId?: string | null
   /** 实际送入 TTS 合成的文本（含后处理/翻译后的朗读稿） */
