@@ -372,6 +372,23 @@ const editingTitle = ref('')
 const aborter = ref<AbortController | null>(null)
 const stopRequested = ref(false)
 const stopStreamingHold = ref(false)
+/** 流式延后删除期间从列表隐藏的磁盘消息 id（与 omitMessageIds 对齐） */
+const streamHiddenMessageIds = ref<string[]>([])
+/** 流式成功后应从磁盘删除的消息 id（非 local_*） */
+const streamDeferDeleteIds = ref<string[]>([])
+/** 重写中断：local_rewrite 半截合并到该锚点气泡 */
+const rewriteMergeCtx = ref<{
+  chatId: string
+  anchorId: string
+  anchorTs: string
+  originalMessageId: string
+} | null>(null)
+/** 保存并发送：已更新用户消息后延后截断尾巴；中断时不 append 局部助手 */
+const saveSendDeferCtx = ref<{
+  chatId: string
+  tailIdsToDeleteOnSuccess: string[]
+} | null>(null)
+
 const showEmbeddedCardConfirmModal = ref(false)
 const embeddedCardPreview = ref<EmbeddedCharacterCardPreview | null>(null)
 const embeddedCardImporting = ref(false)
@@ -480,6 +497,16 @@ const selectedCharacter = computed(() => {
  * 从chatsStore获取当前激活的聊天会话。
  */
 const activeChat = computed(() => chats.activeChat)
+
+/** MessageList 用：延后删除时在 UI 中隐藏仍会占上下文的消息 */
+const messageListMessages = computed((): ChatMessage[] => {
+  const chat = activeChat.value
+  if (!chat?.messages?.length) return []
+  const hid = streamHiddenMessageIds.value
+  if (!hid.length) return chat.messages
+  const hide = new Set(hid)
+  return chat.messages.filter((m) => !hide.has(m.id))
+})
 
 /** 侧栏角色列表：按会话活跃度置顶（与 characters.list 内容一致，仅顺序不同） */
 const sidebarCharacters = computed(() => {
@@ -2663,6 +2690,10 @@ watch(
       chatReasoningStreamActive.value = false
       clearReasoningPhaseTiming()
       versions.clearAll()
+      streamHiddenMessageIds.value = []
+      streamDeferDeleteIds.value = []
+      rewriteMergeCtx.value = null
+      saveSendDeferCtx.value = null
     }
     // 切换会话时自动关闭搜索面板并重置搜索状态
     showHeaderMoreMenu.value = false
@@ -3513,6 +3544,20 @@ function stopStreaming() {
  * 用于用户点击终止后：打字机缓冲已通过 flushAll 写入本地消息，此处持久化并同步为可编辑的服务器消息
  */
 async function persistLocalStreamingMessages(chatId: string) {
+  if (saveSendDeferCtx.value?.chatId === chatId) {
+    saveSendDeferCtx.value = null
+    streamHiddenMessageIds.value = []
+    streamDeferDeleteIds.value = []
+    rewriteMergeCtx.value = null
+    chatReasoningContent.value = ''
+    chatReasoningMessageId.value = null
+    chatReasoningStreamActive.value = false
+    clearReasoningPhaseTiming()
+    await chats.load(chatId)
+    await afterChatReload(chatId)
+    return
+  }
+
   const chat = activeChat.value
   if (!chat?.messages?.length) return
 
@@ -3560,6 +3605,8 @@ async function persistLocalStreamingMessages(chatId: string) {
   await chats.load(chatId)
   let serverMessages = activeChat.value?.messages ?? []
 
+  const rewriteSnapshot = rewriteMergeCtx.value
+
   const normReasoning = (s: string | null | undefined) =>
     typeof s === 'string' ? s.trim() : ''
 
@@ -3575,6 +3622,26 @@ async function persistLocalStreamingMessages(chatId: string) {
   for (const candidate of localAssistantMessages) {
     const reasoningForThis = reasoningTextForLocalId(candidate.localId) || null
     const durationForThis = durationSecForLocalId(candidate.localId)
+
+    if (
+      rewriteSnapshot &&
+      rewriteSnapshot.chatId === chatId &&
+      candidate.localId.startsWith('local_rewrite_')
+    ) {
+      await mergeRewriteInterruptedIntoAnchor({
+        chatId,
+        anchorId: rewriteSnapshot.anchorId,
+        originalMessageId: rewriteSnapshot.originalMessageId,
+        partialBody: candidate.content,
+        reasoningForThis,
+        durationForThis,
+      })
+      rewriteMergeCtx.value = null
+      streamHiddenMessageIds.value = []
+      streamDeferDeleteIds.value = []
+      serverMessages = activeChat.value?.messages ?? []
+      continue
+    }
 
     const serverAssistantsSameBody = serverMessages.filter(
       (m) =>
@@ -3778,12 +3845,66 @@ function handleSwitchNextVersion(m: ChatMessage) {
 }
 
 /**
+ * 重写流式中断：将半截生成合并进仍为磁盘上的锚点助手消息的多版本字段
+ */
+async function mergeRewriteInterruptedIntoAnchor(payload: {
+  chatId: string
+  anchorId: string
+  originalMessageId: string
+  partialBody: string
+  reasoningForThis: string | null
+  durationForThis: number | null
+}) {
+  const { chatId, anchorId, originalMessageId, partialBody, reasoningForThis, durationForThis } = payload
+  await chats.load(chatId)
+  const anchorMsg = activeChat.value?.messages.find((x) => x.id === anchorId)
+  if (!anchorMsg || anchorMsg.role !== 'assistant') return
+
+  const gv = anchorMsg.greetingVariants
+  if (gv && gv.length > 1) {
+    versions.hydrateGreetingVariants(
+      anchorMsg.id,
+      gv,
+      anchorMsg.content,
+      anchorMsg.greetingVariantIndex ?? null,
+      anchorMsg.greetingVariantReasoningContents ?? null,
+      anchorMsg.greetingVariantReasoningDurations ?? null,
+    )
+  }
+
+  versions.addNewVersion(
+    originalMessageId,
+    anchorId,
+    partialBody,
+    reasoningForThis ?? undefined,
+    durationForThis,
+  )
+
+  const snap = versions.getVariantArraysForMessage(anchorMsg)
+  if (!snap) return
+
+  const idx = versions.getCurrentVersionIndex(anchorMsg)
+  const display = versions.getDisplayContent(anchorMsg) || partialBody
+  const reason =
+    (versions.getDisplayReasoning(anchorMsg) || reasoningForThis || '').trim() || null
+
+  await chats.updateMessage(chatId, anchorId, 'assistant', display, anchorMsg.characterId, {
+    greetingVariantIndex: idx,
+    greetingVariants: snap.contents,
+    greetingVariantReasoningContents: snap.reasonings,
+    greetingVariantReasoningDurations: snap.durations,
+    reasoningContent: reason,
+    ...(durationForThis != null && Number.isFinite(durationForThis)
+      ? { reasoningDurationSec: durationForThis }
+      : {}),
+  })
+}
+
+/**
  * 处理消息重写
  *
- * 重写指定的助手消息，保存当前版本，删除该消息及之后的所有消息，然后重新生成。
- * 支持单聊和群聊两种模式，支持流式和非流式两种生成方式。
- * 使用versions.saveVersion和addNewVersion（来自composables/useMessageVersions.ts）管理版本。
- * 使用postAndConsumeSse函数（来自api/sse.ts）或apiPost函数（来自api/http.ts）发送请求。
+ * 重写指定的助手消息：先 saveVersion（内存），流式结束前不在磁盘删除该条及尾部；
+ * 借助 omitMessageIds 从本轮上下文排除这些消息；成功后再批量删除并让新版本落库。
  *
  * @param {ChatMessage} m - 要重写的消息（来自types/models.ts）
  * @returns {Promise<void>} 完成时返回
@@ -3811,6 +3932,9 @@ async function handleRewriteMessage(m: ChatMessage) {
   }
   if (!lastUserMessage) return
 
+  const anchorId = m.id
+  const anchorTs = m.ts
+
   const originalMessageId = versions.getOriginalMessageId(m.id)
   const displayContent = versions.getDisplayContent(m)
   const currentReasoning = getReasoningForMessageId(m.id)
@@ -3818,18 +3942,15 @@ async function handleRewriteMessage(m: ChatMessage) {
   versions.saveVersion(originalMessageId, displayContent, currentReasoning, currentDuration)
 
   const messagesToDelete = activeChat.value.messages.slice(messageIndex)
-  for (const msgToDelete of messagesToDelete) {
-    if (!msgToDelete.id.startsWith('local_')) {
-      await chats.deleteMessage(chatId, msgToDelete.id)
-    }
-  }
+  const deferIds = messagesToDelete.map((x) => x.id).filter((id) => !id.startsWith('local_'))
+  const omitMessageIds = deferIds
+  streamDeferDeleteIds.value = deferIds
+  streamHiddenMessageIds.value = [...deferIds]
+  rewriteMergeCtx.value = { chatId, anchorId, anchorTs, originalMessageId }
 
   const listElBeforeLoad = messageListRef.value?.scrollRef ?? null
   const oldListScrollHeight = listElBeforeLoad?.scrollHeight ?? 0
   const oldListScrollTop = listElBeforeLoad?.scrollTop ?? 0
-
-  await chats.load(chatId)
-  bumpSidebarForActiveChat()
 
   isGenerating.value = true
   streamError.value = null
@@ -3870,7 +3991,7 @@ async function handleRewriteMessage(m: ChatMessage) {
         try {
           await postAndConsumeSse(
             '/api/generate/group',
-            { chatId, characterId },
+            { chatId, characterId, omitMessageIds },
             (evt) => {
               if (evt.event === 'delta') onAssistantContentDeltaStarted()
               if (shouldIgnoreStreamingEventWhileStopping(evt.event)) return
@@ -3914,7 +4035,7 @@ async function handleRewriteMessage(m: ChatMessage) {
           assistantMessageId?: string | null
           reasoningContent?: string
           error?: string
-        }>('/api/generate/group', { chatId, characterId })
+        }>('/api/generate/group', { chatId, characterId, omitMessageIds })
         
         if (res.ok) {
           if (typeof res.reasoningContent === 'string') {
@@ -3942,6 +4063,7 @@ async function handleRewriteMessage(m: ChatMessage) {
               senderName: lastUserMessage.senderName ?? selectedPersona.value?.name ?? userName.value,
               senderAvatar: lastUserMessage.senderAvatar ?? selectedPersona.value?.avatar ?? null,
               userPersona: selectedPersona.value ?? null,
+              omitMessageIds,
             },
             (evt) => {
               if (evt.event === 'delta') onAssistantContentDeltaStarted()
@@ -3991,6 +4113,7 @@ async function handleRewriteMessage(m: ChatMessage) {
           userMessage: lastUserMessage.content,
           appendUserMessage: false,
           userPersona: selectedPersona.value ?? null,
+          omitMessageIds,
         })
         
         if (res.ok) {
@@ -4021,12 +4144,19 @@ async function handleRewriteMessage(m: ChatMessage) {
       await afterChatReload(chatId)
     }
     await settings.load()
-    
-    // 添加新版本（使用原始消息ID以累积同一链条上的多版本），并绑定该版本的思考内容
+
+    // 成功后：新版本挂链 + greetingVariants 落盘，再删除磁盘上延后移除的锚点与尾部
     if (!skippedReload && activeChat.value) {
-      const newMsg = activeChat.value.messages.find(msg => 
-        msg.role === 'assistant' && msg.ts > m.ts
+      const assistants = activeChat.value.messages.filter(
+        (msg) => msg.role === 'assistant' && msg.ts > anchorTs,
       )
+      const newMsg =
+        assistants.length === 0
+          ? undefined
+          : assistants.reduce((a, b) =>
+              Date.parse(b.ts || '') >= Date.parse(a.ts || '') ? b : a,
+            )
+
       if (newMsg) {
         const newReasoning = getReasoningForMessageId(newMsg.id)
         const newDuration = newMsg.reasoningDurationSec ?? null
@@ -4043,7 +4173,7 @@ async function handleRewriteMessage(m: ChatMessage) {
                 greetingVariantIndex: idx,
                 greetingVariants: snap.contents,
                 greetingVariantReasoningContents: snap.reasonings,
-            greetingVariantReasoningDurations: snap.durations,
+                greetingVariantReasoningDurations: snap.durations,
                 reasoningContent: reason,
               })
               bumpSidebarForActiveChat()
@@ -4052,6 +4182,29 @@ async function handleRewriteMessage(m: ChatMessage) {
             }
           }
         }
+
+        if (streamDeferDeleteIds.value.length) {
+          const drop = [...streamDeferDeleteIds.value]
+          streamDeferDeleteIds.value = []
+          streamHiddenMessageIds.value = []
+          rewriteMergeCtx.value = null
+          for (const id of drop) {
+            if (!id.startsWith('local_')) {
+              try {
+                await chats.deleteMessage(chatId, id, { skipReload: true })
+              } catch (e) {
+                console.error(e)
+              }
+            }
+          }
+          await chats.load(chatId)
+          await afterChatReload(chatId)
+          bumpSidebarForActiveChat()
+        }
+      } else {
+        streamDeferDeleteIds.value = []
+        streamHiddenMessageIds.value = []
+        rewriteMergeCtx.value = null
       }
     }
   }
@@ -4449,17 +4602,17 @@ async function handleSaveAndSend() {
   const originalMessage = activeChat.value.messages[messageIndex]
   if (!originalMessage) return
 
-  await chats.saveAndTruncate(chatId, messageId, editedRole, editedContent, originalMessage.characterId)
-  bumpSidebarForActiveChat()
-
-  actions.closeEditMessage()
-  group.resetGroupState()
-
   const useStream = settings.settings?.streamEnabled !== false
   const isGroup = activeChat.value.isGroup
   const now = new Date().toISOString()
 
   if (isGroup) {
+    await chats.saveAndTruncate(chatId, messageId, editedRole, editedContent, originalMessage.characterId)
+    bumpSidebarForActiveChat()
+
+    actions.closeEditMessage()
+    group.resetGroupState()
+
     group.showInterject()
     try {
       await chats.load(chatId)
@@ -4472,6 +4625,28 @@ async function handleSaveAndSend() {
     return
   }
 
+  const tailIdsToDeleteOnSuccess = activeChat.value.messages
+    .slice(messageIndex + 1)
+    .map((x) => x.id)
+    .filter((id) => !id.startsWith('local_'))
+  const omitMessageIds = tailIdsToDeleteOnSuccess
+
+  saveSendDeferCtx.value = { chatId, tailIdsToDeleteOnSuccess }
+  streamDeferDeleteIds.value = tailIdsToDeleteOnSuccess
+  streamHiddenMessageIds.value = [...tailIdsToDeleteOnSuccess]
+
+  await chats.updateMessage(chatId, messageId, editedRole, editedContent, originalMessage.characterId, {
+    images: originalMessage.images ?? [],
+    senderPersonaId: originalMessage.senderPersonaId ?? null,
+    senderName: originalMessage.senderName ?? null,
+    senderAvatar: originalMessage.senderAvatar ?? null,
+  })
+  bumpSidebarForActiveChat()
+
+  actions.closeEditMessage()
+  group.resetGroupState()
+
+  streamError.value = null
   isGenerating.value = true
   aborter.value?.abort()
   aborter.value = new AbortController()
@@ -4496,6 +4671,7 @@ async function handleSaveAndSend() {
               userMessage: editedContent,
               appendUserMessage: false,
               userPersona: selectedPersona.value ?? null,
+              omitMessageIds,
             },
             (evt) => {
               if (evt.event === 'delta') onAssistantContentDeltaStarted()
@@ -4539,6 +4715,7 @@ async function handleSaveAndSend() {
           userMessage: editedContent,
           appendUserMessage: false,
           userPersona: selectedPersona.value ?? null,
+          omitMessageIds,
         })
 
         if (res.ok) {
@@ -4566,6 +4743,35 @@ async function handleSaveAndSend() {
     } else {
       await chats.load(chatId)
       await afterChatReload(chatId)
+
+      const ss = saveSendDeferCtx.value
+      if (
+        ss &&
+        ss.chatId === chatId &&
+        ss.tailIdsToDeleteOnSuccess.length &&
+        !streamError.value
+      ) {
+        const drop = [...ss.tailIdsToDeleteOnSuccess]
+        saveSendDeferCtx.value = null
+        streamHiddenMessageIds.value = []
+        streamDeferDeleteIds.value = []
+        for (const id of drop) {
+          if (!id.startsWith('local_')) {
+            try {
+              await chats.deleteMessage(chatId, id, { skipReload: true })
+            } catch (e) {
+              console.error(e)
+            }
+          }
+        }
+        await chats.load(chatId)
+        await afterChatReload(chatId)
+        bumpSidebarForActiveChat()
+      } else if (saveSendDeferCtx.value?.chatId === chatId) {
+        saveSendDeferCtx.value = null
+        streamHiddenMessageIds.value = []
+        streamDeferDeleteIds.value = []
+      }
     }
     await settings.load()
   }
@@ -4903,7 +5109,7 @@ const editingPersonaAvatarUrl = computed(() => {
           <MessageList
             ref="messageListRef"
             :chat-id="activeChat.id"
-            :messages="activeChat.messages"
+            :messages="messageListMessages"
             :is-group="activeChat.isGroup"
             :selected-character="selectedCharacter"
             :characters="characters.list"
