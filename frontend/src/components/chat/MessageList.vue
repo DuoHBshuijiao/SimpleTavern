@@ -59,9 +59,11 @@ import ReasoningBubble from './ReasoningBubble.vue'
 import AnimatedClipHeight from './AnimatedClipHeight.vue'
 import { renderChatMarkdown, renderChatMarkdownStreaming } from '../../utils/markdownIt'
 import { applyContentRegexDisplay } from '../../utils/contentRegex'
+import { usePreferHoverChrome } from '../../composables/usePreferHoverChrome'
 import { Settings, ChevronLeft, ChevronRight, ChevronDown, X } from 'lucide-vue-next'
 
 const settingsStore = useSettingsStore()
+const { preferHoverChrome } = usePreferHoverChrome()
 /** 仅作用于消息气泡内文字的字号（来自全局设置） */
 const messageContentFontSizeStyle = computed(() => {
   const px = settingsStore.settings?.messageFontSize
@@ -1407,8 +1409,8 @@ onBeforeUnmount(() => {
           <div v-if="m.role === 'assistant' && hasMultipleVersions(m)" class="flex items-center justify-center gap-2 mt-1 px-1">
             <button 
               class="text-xs text-gray-500 hover:text-gray-300 transition-colors px-2 py-0.5 rounded hover:bg-white/5"
+              :aria-label="`上一个版本 (${getCurrentVersionIndex(m) + 1}/${getVersionCount(m)})`"
               @click="emit('switch-previous-version', m)"
-              :title="`上一个版本 (${getCurrentVersionIndex(m) + 1}/${getVersionCount(m)})`"
             >
               <ChevronLeft class="w-3 h-3" />
             </button>
@@ -1417,15 +1419,18 @@ onBeforeUnmount(() => {
             </span>
             <button 
               class="text-xs text-gray-500 hover:text-gray-300 transition-colors px-2 py-0.5 rounded hover:bg-white/5"
+              :aria-label="`下一个版本 (${getCurrentVersionIndex(m) + 1}/${getVersionCount(m)})`"
               @click="emit('switch-next-version', m)"
-              :title="`下一个版本 (${getCurrentVersionIndex(m) + 1}/${getVersionCount(m)})`"
             >
               <ChevronRight class="w-3 h-3" />
             </button>
           </div>
 
-          <!-- 底部操作栏 -->
-          <div class="flex items-center gap-2 mt-1 px-1 transition-opacity opacity-0 group-hover:opacity-100">
+          <!-- 底部操作栏：鼠标 hover 显示；触控/笔常驻（与侧栏列表一致） -->
+          <div
+            class="flex items-center gap-2 mt-1 px-1 transition-opacity"
+            :class="preferHoverChrome ? 'opacity-0 group-hover:opacity-100' : 'opacity-100'"
+          >
             <button
               v-if="settingsStore.settings?.ttsEnabled && (m.role === 'assistant' || m.role === 'user') && !m.id.startsWith('local_') && getDisplayContent(m).trim()"
               class="text-xs text-gray-600 hover:text-brand transition-colors"
