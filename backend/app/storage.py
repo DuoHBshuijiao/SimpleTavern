@@ -1055,6 +1055,8 @@ def _sanitize_chat_greeting_variants(chat: Chat) -> None:
         if not gv:
             if getattr(m, "greetingVariantReasoningContents", None):
                 m.greetingVariantReasoningContents = None
+            if hasattr(m, "greetingVariantReasoningDurations") and getattr(m, "greetingVariantReasoningDurations", None):
+                m.greetingVariantReasoningDurations = None
             continue
         cleaned = [str(x).strip() for x in gv if x is not None and str(x).strip()]
         if len(cleaned) >= 2:
@@ -1066,6 +1068,13 @@ def _sanitize_chat_greeting_variants(chat: Chat) -> None:
                 m.greetingVariantReasoningContents = gvr[: len(cleaned)]
             elif gvr and isinstance(gvr, list) and len(gvr) > len(cleaned):
                 m.greetingVariantReasoningContents = gvr[: len(cleaned)]
+            gvd = getattr(m, "greetingVariantReasoningDurations", None) or None
+            if gvd and isinstance(gvd, list) and len(gvd) < len(cleaned):
+                while len(gvd) < len(cleaned):
+                    gvd.append(None)
+                m.greetingVariantReasoningDurations = gvd[: len(cleaned)]
+            elif gvd and isinstance(gvd, list) and len(gvd) > len(cleaned):
+                m.greetingVariantReasoningDurations = gvd[: len(cleaned)]
             cur = (m.content or "").strip()
             idx = getattr(m, "greetingVariantIndex", None)
             if isinstance(idx, int) and 0 <= idx < len(cleaned) and cleaned[idx] == cur:
@@ -1080,6 +1089,8 @@ def _sanitize_chat_greeting_variants(chat: Chat) -> None:
         m.greetingVariantIndex = None
         if hasattr(m, "greetingVariantReasoningContents"):
             m.greetingVariantReasoningContents = None
+        if hasattr(m, "greetingVariantReasoningDurations"):
+            m.greetingVariantReasoningDurations = None
         if len(cleaned) == 1:
             m.content = cleaned[0]
 
