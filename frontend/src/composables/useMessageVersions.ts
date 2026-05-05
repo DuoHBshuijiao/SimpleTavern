@@ -43,6 +43,8 @@ export function useMessageVersions() {
   const messageVersions = ref<Map<string, string[]>>(new Map())
   // 存储每个消息各版本对应的思考内容：messageId -> reasoning[]（与 content 版本一一对应）
   const messageReasoningVersions = ref<Map<string, string[]>>(new Map())
+  // 存储每个消息各版本对应的思考耗时：messageId -> (number|null)[]（与 content 版本一一对应）
+  const messageDurationVersions = ref<Map<string, (number | null)[]>>(new Map())
   // 存储每个消息当前显示的版本索引：messageId -> currentVersionIndex
   const messageVersionIndex = ref<Map<string, number>>(new Map())
   // 存储消息ID映射：originalMessageId -> currentMessageId（用于重写后关联）
@@ -156,19 +158,24 @@ export function useMessageVersions() {
    * @param {string} content - 消息内容
    * @param {string} [reasoning] - 该版本对应的思考内容（可选）
    */
-  function saveVersion(messageId: string, content: string, reasoning?: string) {
+  function saveVersion(messageId: string, content: string, reasoning?: string, duration?: number | null) {
     const versions = messageVersions.value.get(messageId) || []
     let reasonings = messageReasoningVersions.value.get(messageId) || []
+    let durations = messageDurationVersions.value.get(messageId) || []
     const idx = versions.indexOf(content)
     if (idx === -1) {
       versions.push(content)
       reasonings.push(reasoning?.trim() ?? '')
+      durations.push(duration ?? null)
     } else {
       while (reasonings.length <= idx) reasonings.push('')
       reasonings[idx] = reasoning?.trim() ?? ''
+      while (durations.length <= idx) durations.push(null)
+      durations[idx] = duration ?? null
     }
     messageVersions.value.set(messageId, versions)
     messageReasoningVersions.value.set(messageId, reasonings)
+    messageDurationVersions.value.set(messageId, durations)
     messageVersionIndex.value.set(messageId, versions.length - 1)
   }
 
@@ -183,21 +190,24 @@ export function useMessageVersions() {
    * @param {string} newContent - 新版本内容
    * @param {string} [newReasoning] - 新版本对应的思考内容（可选）
    */
-  function addNewVersion(originalMessageId: string, newMessageId: string, newContent: string, newReasoning?: string) {
+  function addNewVersion(originalMessageId: string, newMessageId: string, newContent: string, newReasoning?: string, newDuration?: number | null) {
     const versions = messageVersions.value.get(originalMessageId) || []
     const reasonings = messageReasoningVersions.value.get(originalMessageId) || []
+    const durations = messageDurationVersions.value.get(originalMessageId) || []
     if (newContent && !versions.includes(newContent)) {
       versions.push(newContent)
       reasonings.push(newReasoning?.trim() ?? '')
+      durations.push(newDuration ?? null)
     }
-    
+
     // 如果新消息ID不同，创建映射关系
     if (newMessageId !== originalMessageId && !newMessageId.startsWith('local_')) {
       messageIdMap.value.set(originalMessageId, newMessageId)
     }
-    
+
     messageVersions.value.set(originalMessageId, versions)
     messageReasoningVersions.value.set(originalMessageId, reasonings)
+    messageDurationVersions.value.set(originalMessageId, durations)
     messageVersionIndex.value.set(originalMessageId, versions.length - 1)
   }
 
@@ -267,6 +277,7 @@ export function useMessageVersions() {
     currentContent: string,
     preferredIndex?: number | null,
     persistedReasonings?: (string | null)[] | null,
+    persistedDurations?: (number | null)[] | null,
   ) {
     const cleaned = variants
       .map((v) => (v == null ? '' : String(v)).trim())
@@ -284,6 +295,18 @@ export function useMessageVersions() {
       messageReasoningVersions.value.set(
         originalId,
         cleaned.map(() => ''),
+      )
+    }
+    const dsrc = Array.isArray(persistedDurations) ? persistedDurations : null
+    if (dsrc) {
+      const darr = cleaned.map(
+        (_v, i) => (i < dsrc.length ? dsrc[i] ?? null : null),
+      )
+      messageDurationVersions.value.set(originalId, darr)
+    } else {
+      messageDurationVersions.value.set(
+        originalId,
+        cleaned.map(() => null),
       )
     }
     let idx: number
@@ -349,8 +372,9 @@ export function useMessageVersions() {
     const originalId = getOriginalMessageId(messageId)
     messageVersions.value.delete(originalId)
     messageReasoningVersions.value.delete(originalId)
+    messageDurationVersions.value.delete(originalId)
     messageVersionIndex.value.delete(originalId)
-    
+
     // 清理映射
     for (const [origId, currId] of messageIdMap.value.entries()) {
       if (origId === originalId || currId === messageId) {
@@ -368,6 +392,7 @@ export function useMessageVersions() {
   function clearAll() {
     messageVersions.value.clear()
     messageReasoningVersions.value.clear()
+    messageDurationVersions.value.clear()
     messageVersionIndex.value.clear()
     messageIdMap.value.clear()
   }
@@ -377,19 +402,22 @@ export function useMessageVersions() {
    */
   function getVariantArraysForMessage(
     message: ChatMessage,
-  ): { contents: string[]; reasonings: string[] } | null {
+  ): { contents: string[]; reasonings: string[]; durations: (number | null)[] } | null {
     const messageId = getOriginalMessageId(message.id)
     const contents = messageVersions.value.get(messageId)
     if (!contents || contents.length <= 1) return null
     const rs0 = messageReasoningVersions.value.get(messageId) || []
     const reasonings = contents.map((_, i) => (i < rs0.length && rs0[i] != null ? String(rs0[i]) : ''))
-    return { contents: [...contents], reasonings }
+    const ds0 = messageDurationVersions.value.get(messageId) || []
+    const durations = contents.map((_, i) => (i < ds0.length ? ds0[i] ?? null : null))
+    return { contents: [...contents], reasonings, durations }
   }
 
   return {
     // 状态
     messageVersions,
     messageReasoningVersions,
+    messageDurationVersions,
     messageVersionIndex,
     messageIdMap,
     
