@@ -15,3 +15,9 @@ export const HEADER_EXPAND_MS = 180
 
 /** 与 ChatPage 主区 `duration-300`、侧栏 `transition-all duration-300` 一致，供输入壳 margin/transform 与布局同频 */
 export const MAIN_LAYOUT_TRANSITION_MS = 300
+
+/** TTS 顶栏「队列 + 播放」竖排近似高度（双 chip min-height 1.75rem + flex gap-2），与 TtsPlaybackFab 对齐 */
+export const TTS_TOP_BAR_TWO_BTN_STACK_PX = 64
+
+/** Agent 顶栏胶囊与 TTS 顶栏叠层之间的间距（与 Tailwind gap-2 一致） */
+export const TOP_BAR_AGENT_AFTER_TTS_GAP_PX = 8
