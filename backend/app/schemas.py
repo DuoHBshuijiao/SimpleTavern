@@ -699,10 +699,6 @@ class ChatMessage(BaseModel):
     id: str = Field(default_factory=lambda: uuid4().hex)
     role: ChatRole
     content: str
-    contentDisplay: str | None = Field(
-        default=None,
-        description="仅用于前端显示劫持的替代正文；不参与上下文组装，留空则显示 content",
-    )
     images: list["ChatImageAttachment"] = Field(default_factory=list)
     attachments: list["AssistantAttachment"] = Field(default_factory=list)
     characterId: str | None = None
@@ -718,6 +714,10 @@ class ChatMessage(BaseModel):
     greetingVariantReasoningContents: list[str] | None = Field(
         default=None,
         description="与各 greetingVariants 下标一一对应的思考/推理原文（可短于列表时视为尾部为空串）",
+    )
+    greetingVariantReasoningDurations: list[float | None] | None = Field(
+        default=None,
+        description="与各 greetingVariants 下标一一对应的思考耗时（秒）；可短于列表时视为尾部为 None",
     )
     toolTrace: bool = False
     toolRecord: dict[str, Any] | None = None
@@ -1083,6 +1083,10 @@ class UpdateMessageRequest(BaseModel):
     greetingVariantReasoningContents: list[str] | None = Field(
         default=None,
         description="与 greetingVariants 等长的每候选思考文；不发送则不修改。随 clearing 时一并可清",
+    )
+    greetingVariantReasoningDurations: list[float | None] | None = Field(
+        default=None,
+        description="与 greetingVariants 等长的每候选思考耗时（秒）",
     )
     reasoningContent: str | None = Field(
         default=None,
