@@ -8,7 +8,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal
@@ -96,14 +98,26 @@ class MvuAgentService:
             assistant_settings=AssistantSettings(),
         )
 
-    async def run_job(self, job: MvuAgentJob) -> tuple[list[MvuAgentEvent], list[MvuWorkLogEntry]]:
+    async def run_job(
+        self,
+        job: MvuAgentJob,
+        *,
+        on_event: Callable[[MvuAgentEvent], Awaitable[None]] | None = None,
+    ) -> tuple[list[MvuAgentEvent], list[MvuWorkLogEntry]]:
         """运行一个 MVU job。
+
+        on_event: 可选异步回调，每次产生事件时立即触发（用于实时 SSE 推送）。
 
         Returns:
             (events, log_entries): events 供 SSE 推送，log_entries 供持久化到 mvu_logs.json。
         """
         events: list[MvuAgentEvent] = []
         log_entries: list[MvuWorkLogEntry] = []
+
+        async def _push(evt: MvuAgentEvent) -> None:
+            events.append(evt)
+            if on_event:
+                await on_event(evt)
 
         def _log(event_type: str, summary: str, detail: dict[str, Any] | None = None) -> MvuWorkLogEntry:
             entry = MvuWorkLogEntry(
@@ -115,7 +129,7 @@ class MvuAgentService:
                 detail=detail,
             )
             log_entries.append(entry)
-            events.append(MvuAgentEvent("log_entry", entry.model_dump(mode="json")))
+            asyncio.ensure_future(_push(MvuAgentEvent("log_entry", entry.model_dump(mode="json"))))
             return entry
 
         _log("triggered", f"队列 {len(job.queue_items)} 条待消费")
@@ -158,11 +172,14 @@ class MvuAgentService:
 
                 if not tool_calls:
                     _log("commit", "任务完成，Agent 无更多工具调用")
-                    events.append(MvuAgentEvent("done", {
+                    done_evt = MvuAgentEvent("done", {
                         "ok": True,
                         "chatId": job.chat_id,
                         "queueConsumed": len(job.queue_items),
-                    }))
+                    })
+                    events.append(done_evt)
+                    if on_event:
+                        asyncio.ensure_future(on_event(done_evt))
                     return events, log_entries
 
                 for tc in tool_calls:
@@ -196,13 +213,19 @@ class MvuAgentService:
                     })
 
             _log("error", f"达到工具调用轮次上限 max_tool_turns={self._ctx.max_tool_turns}")
-            events.append(MvuAgentEvent("error", {
+            limit_evt = MvuAgentEvent("error", {
                 "message": f"tool call loop limit exceeded: max_tool_turns={self._ctx.max_tool_turns}",
                 "code": tool_result.LIMIT_EXCEEDED,
-            }))
+            })
+            events.append(limit_evt)
+            if on_event:
+                asyncio.ensure_future(on_event(limit_evt))
             return events, log_entries
 
         except Exception as exc:
             _log("error", f"异常: {exc}")
-            events.append(MvuAgentEvent("error", {"message": str(exc)}))
+            err_evt = MvuAgentEvent("error", {"message": str(exc)})
+            events.append(err_evt)
+            if on_event:
+                asyncio.ensure_future(on_event(err_evt))
             return events, log_entries
