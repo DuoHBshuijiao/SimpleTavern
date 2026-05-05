@@ -2,10 +2,13 @@
  * 聊天页「助手」浮动按钮：拖动、左右贴边、垂直位置 localStorage 持久化。
  */
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { HEADER_LIFT_EASE, HEADER_LIFT_MS, MAIN_LAYOUT_TRANSITION_MS } from '../constants/chatHeaderMorph'
 
 const STORAGE_KEY = 'st_chat_assistant_fab_v1'
 
 export const ASSISTANT_FAB_SIZE = 48
+/** 助手栈内按钮间距（与 flex-col gap-2 一致） */
+export const ASSISTANT_FAB_GAP = 8
 const RIGHT_GAP = 16
 const LEFT_GAP = 8
 const DRAG_THRESHOLD = 5
@@ -44,12 +47,6 @@ function saveStored(data: Stored) {
   }
 }
 
-function clampTop(top: number, minTop: number): number {
-  const min = Math.max(minTop, EDGE_PAD)
-  const max = Math.max(min, window.innerHeight - ASSISTANT_FAB_SIZE - EDGE_PAD)
-  return Math.min(Math.max(min, top), max)
-}
-
 export function useAssistantFabPosition(
   getContentLeft: () => number,
   getMinTop: () => number,
@@ -62,8 +59,23 @@ export function useAssistantFabPosition(
     onSnapEnd?: () => void
     /** MVU FAB 拖动时返回助手 FAB 的 rect，保证 grabOffset 相对助手按钮计算 */
     getDragReferenceRect?: () => DOMRect | null
+    /** 与 TTS FAB 一致：侧栏收起且顶栏 lifting/full 时整体滑出视口 */
+    getInputSinkActive?: () => boolean
+    /** 助手+MVU 栈总高度（顶对齐锚点为栈顶） */
+    getFabStackHeight?: () => number
   },
 ) {
+  function stackHeight(): number {
+    return Math.max(ASSISTANT_FAB_SIZE, options?.getFabStackHeight?.() ?? ASSISTANT_FAB_SIZE)
+  }
+
+  function clampTop(top: number, minTop: number): number {
+    const h = stackHeight()
+    const min = Math.max(minTop, EDGE_PAD)
+    const max = Math.max(min, window.innerHeight - h - EDGE_PAD)
+    return Math.min(Math.max(min, top), max)
+  }
+
   const initial = loadStored()
   const side = ref<'left' | 'right'>(initial.side)
   const topPx = ref(clampTop(initial.topPx, getMinTop()))
@@ -84,6 +96,24 @@ export function useAssistantFabPosition(
   let separationEndTimer: ReturnType<typeof setTimeout> | null = null
   /** 贴边 snap 未结束时延迟执行分离 */
   let pendingSeparationTimer: ReturnType<typeof setTimeout> | null = null
+
+  const inputSinkActive = ref(false)
+  const sinkTransformTransition = ref('none')
+
+  watch(
+    () => options?.getInputSinkActive?.() ?? false,
+    (active) => {
+      inputSinkActive.value = active
+      if (prefersReducedMotion()) {
+        sinkTransformTransition.value = 'none'
+        return
+      }
+      const dur = active ? HEADER_LIFT_MS : MAIN_LAYOUT_TRANSITION_MS
+      const ease = active ? HEADER_LIFT_EASE : 'ease'
+      sinkTransformTransition.value = `transform ${dur}ms ${ease}`
+    },
+    { immediate: true },
+  )
 
   let pointerDown = false
   let hasDragged = false
@@ -134,9 +164,7 @@ export function useAssistantFabPosition(
   function startSnapToEdge(fromLeft: number, fromTop: number, toLeft: number, toTop: number) {
     cancelSnapAnimation()
     const dist = Math.hypot(toLeft - fromLeft, toTop - fromTop)
-    if (dist < 0.5 || prefersReducedMotion()) {
-      return
-    }
+    if (dist < 0.5 || prefersReducedMotion()) return
     isSnapping.value = true
     snapAnimating.value = false
     snapLeftPx.value = fromLeft
@@ -160,6 +188,10 @@ export function useAssistantFabPosition(
     return Math.min(Math.max(EDGE_PAD, left), max)
   }
 
+  function sinkTransformForSide(s: 'left' | 'right'): string {
+    return s === 'left' ? 'translateX(-100vw)' : 'translateX(100vw)'
+  }
+
   const fabStyle = computed(() => {
     if (isDragging.value && dragLeftPx.value != null && dragTopPx.value != null) {
       return {
@@ -170,6 +202,9 @@ export function useAssistantFabPosition(
         zIndex: 50,
         touchAction: 'none' as const,
         transition: 'none',
+        transform: 'none',
+        opacity: 1,
+        pointerEvents: 'auto' as const,
       }
     }
     if (isSnapping.value && snapLeftPx.value != null && snapTopPx.value != null) {
@@ -185,21 +220,35 @@ export function useAssistantFabPosition(
         zIndex: 50,
         touchAction: 'none' as const,
         transition: trans,
+        transform: 'none',
+        opacity: 1,
+        pointerEvents: 'auto' as const,
       }
     }
     const top = clampTop(topPx.value, getMinTop())
     const topTrans = isSeparationTopTransition.value
       ? `top ${SEPARATION_MS}ms ${SEPARATION_EASE}`
       : 'none'
+    const sinkMotion = inputSinkActive.value && !prefersReducedMotion()
+    const sinkA11y = inputSinkActive.value && prefersReducedMotion()
+    const sinkT = sinkTransformTransition.value
+    const combinedTrans =
+      [sinkT !== 'none' && sinkMotion ? sinkT : null, topTrans !== 'none' ? topTrans : null]
+        .filter(Boolean)
+        .join(', ') || 'none'
+    const zWhenSink = 6
     if (side.value === 'left') {
       return {
         position: 'fixed' as const,
         left: `${getContentLeft() + LEFT_GAP}px`,
         top: `${top}px`,
         right: 'auto' as const,
-        zIndex: 50,
+        zIndex: sinkMotion || sinkA11y ? zWhenSink : 50,
         touchAction: 'none' as const,
-        transition: topTrans,
+        transition: combinedTrans,
+        transform: sinkMotion ? sinkTransformForSide('left') : 'none',
+        opacity: sinkA11y ? 0 : 1,
+        pointerEvents: sinkMotion || sinkA11y ? ('none' as const) : ('auto' as const),
       }
     }
     return {
@@ -207,9 +256,12 @@ export function useAssistantFabPosition(
       right: `${RIGHT_GAP}px`,
       top: `${top}px`,
       left: 'auto' as const,
-      zIndex: 50,
+      zIndex: sinkMotion || sinkA11y ? zWhenSink : 50,
       touchAction: 'none' as const,
-      transition: topTrans,
+      transition: combinedTrans,
+      transform: sinkMotion ? sinkTransformForSide('right') : 'none',
+      opacity: sinkA11y ? 0 : 1,
+      pointerEvents: sinkMotion || sinkA11y ? ('none' as const) : ('auto' as const),
     }
   })
 
@@ -223,7 +275,8 @@ export function useAssistantFabPosition(
       left = window.innerWidth - ASSISTANT_FAB_SIZE - RIGHT_GAP
     }
     const top = parseFloat(String(s.top))
-    return new DOMRect(left, top, ASSISTANT_FAB_SIZE, ASSISTANT_FAB_SIZE)
+    const h = stackHeight()
+    return new DOMRect(left, top, ASSISTANT_FAB_SIZE, h)
   }
 
   /** 由页面级碰撞分离调用（不触发 layout/drag 回调） */
@@ -359,7 +412,16 @@ export function useAssistantFabPosition(
       cancelVerticalSeparationAnimation()
       topPx.value = clampTop(topPx.value, getMinTop())
       persist()
-    }
+    },
+  )
+
+  watch(
+    () => stackHeight(),
+    () => {
+      cancelVerticalSeparationAnimation()
+      topPx.value = clampTop(topPx.value, getMinTop())
+      persist()
+    },
   )
 
   let raf = 0
@@ -385,6 +447,7 @@ export function useAssistantFabPosition(
 
   return {
     fabStyle,
+    side,
     getRect,
     setTopPxFromSeparation,
     onPointerDown,
