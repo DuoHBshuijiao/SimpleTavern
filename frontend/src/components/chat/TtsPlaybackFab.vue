@@ -461,19 +461,19 @@ defineExpose({ getRect: getTtsFabRect, setTtsTopPx: setTopPxFromSeparation })
   background: var(--color-text-tertiary, #9ca3af);
 }
 
-/* 顶栏 chip 气质 + 两键独立点缀（与 ChatPage .header-action-chip 对齐） */
+/* 顶栏 chip：尺寸与 ChatInput Agent 胶囊一致 */
 .tts-top-bar-btn {
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 0.45rem;
-  min-height: 2rem;
-  padding: 0.4rem 0.75rem;
-  border-radius: 0.85rem;
+  gap: 0.35rem;
+  min-height: 1.75rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: 0.75rem;
   border: 1px solid var(--color-border-subtle);
   background: color-mix(in srgb, var(--color-surface-overlay, rgba(18, 22, 30, 0.72)) 88%, transparent);
   color: var(--color-text-secondary);
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
   line-height: 1;
   cursor: pointer;
   overflow: hidden;
@@ -516,8 +516,8 @@ defineExpose({ getRect: getTtsFabRect, setTtsTopPx: setTopPxFromSeparation })
 }
 
 .tts-top-bar-btn__icon {
-  width: 1rem;
-  height: 1rem;
+  width: 0.875rem;
+  height: 0.875rem;
   flex-shrink: 0;
   color: var(--color-text);
   position: relative;
@@ -527,8 +527,8 @@ defineExpose({ getRect: getTtsFabRect, setTtsTopPx: setTopPxFromSeparation })
 .tts-top-bar-btn__label {
   position: relative;
   z-index: 1;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  font-weight: 400;
+  letter-spacing: 0.04em;
   color: var(--color-text);
 }
 
