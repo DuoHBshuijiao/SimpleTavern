@@ -79,6 +79,7 @@ import { getWebGpuUnavailableMessage, probeWebGpuAdapter } from '../utils/webgpu
 import type { WebGpuUnavailableReason } from '../utils/webgpuProbe'
 import { concatEnabledWorldBookContents, countTokensForText } from '../utils/tokenEstimate'
 import { normalizeWgslSource } from '../utils/normalizeWgslSource'
+import { applyContentRegexDisplay } from '../utils/contentRegex'
 import {
   compilationMessagesToDiagnostics,
   filterDiagnosticsBySeverity,
@@ -3019,38 +3020,36 @@ function saveRegexRuleEditor() {
   regexEditorOpen.value = false
 }
 
-async function runRegexRuleTrial() {
-  if (!props.chat?.id || !regexEditorDraft.value) return
-  try {
-    const res = await apiPost<{
-      sourceMode: string
-      beforeText: string
-      afterText: string
-      displayText: string
-      changed: boolean
-      extractedItems: Array<{ value: string; matchedText: string; ruleId: string }>
-      errors: Array<{ error: string; pattern: string; replacement: string }>
-    }>(`/api/chats/${props.chat.id}/content-regex/trial`, {
-      sourceMode: regexTrialSourceMode.value,
-      manualText: regexTrialManualText.value,
-      rule: normalizeRegexRule(regexEditorDraft.value, regexEditorDraft.value.order),
-    })
-    regexTrialResult.value = {
-      beforeText: res.beforeText || '',
-      afterText: res.afterText || '',
-      displayText: res.displayText || res.afterText || '',
-      changed: !!res.changed,
-      extractedItems: Array.isArray(res.extractedItems) ? res.extractedItems : [],
-    }
-    if (Array.isArray(res.errors) && res.errors.length > 0) {
-      for (const err of res.errors) {
-        await notifyMessage(`${err.error}\npattern: ${err.pattern}\nreplacement: ${err.replacement}`, {
-          title: '正则试运行错误',
-        })
+function runRegexRuleTrial() {
+  if (!regexEditorDraft.value) return
+  const sourceMode = regexTrialSourceMode.value
+  let before = ''
+  if (sourceMode === 'latest_assistant') {
+    const messages = props.chat?.messages
+    if (messages) {
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const m = messages[i]
+        if (m && m.role === 'assistant' && (m.content || '').trim()) {
+          before = m.content
+          break
+        }
       }
     }
-  } catch (e) {
-    await notifyMessage(String(e), { title: '正则试运行失败' })
+  } else {
+    before = regexTrialManualText.value || ''
+  }
+  if (before.length > 10000) before = before.slice(0, 10000)
+
+  const rule = normalizeRegexRule(regexEditorDraft.value, regexEditorDraft.value.order)
+  const displayText = applyContentRegexDisplay(before, [rule])
+  const changed = displayText !== before
+
+  regexTrialResult.value = {
+    beforeText: before,
+    afterText: displayText,
+    displayText,
+    changed,
+    extractedItems: [],
   }
 }
 
