@@ -1154,6 +1154,10 @@ class GenerateStreamRequest(BaseModel):
         default_factory=list,
         description="仅本次请求拼装 LLM 上下文时忽略的消息 id；不写盘",
     )
+    mergeAssistantIntoMessageId: str | None = Field(
+        default=None,
+        description="将本次助手输出作为指定 assistant 消息的新版变体落盘；为空则追加新消息",
+    )
 
 
 class DraftHelpRequest(BaseModel):
@@ -1200,6 +1204,10 @@ class GroupGenerateRequest(BaseModel):
         default_factory=list,
         description="仅本次请求拼装 LLM 上下文时忽略的消息 id；不写盘",
     )
+    mergeAssistantIntoMessageId: str | None = Field(
+        default=None,
+        description="将本次助手输出作为指定 assistant 消息的新版变体落盘；为空则追加新消息",
+    )
 
 
 class SingleInterjectRequest(BaseModel):
@@ -1215,3 +1223,7 @@ class SingleInterjectRequest(BaseModel):
     chatId: str
     characterId: str
     imageFallbackMode: bool = False
+    omitMessageIds: list[str] = Field(
+        default_factory=list,
+        description="仅本次请求拼装 LLM 上下文时忽略的消息 id；不写盘",
+    )
