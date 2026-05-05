@@ -63,7 +63,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useCharacterSidebarRecencyStore, useCharactersStore, useChatsStore, useSettingsStore, useUiStore, useMvuStore } from '../stores'
 import type { SettingsDrawerTab } from '../stores/ui'
-import type { ApiPreset, AssistantAttachment, CharacterCard, ChatImageAttachment, ChatMessage, ExtraFirstMessageEntry, GroupMemberSettings, Chat, MainChatRole, TtsSessionConfig, WorldBook } from '../types/models'
+import type { ApiPreset, AssistantAttachment, CharacterCard, ChatContentRegexRule, ChatImageAttachment, ChatMessage, ExtraFirstMessageEntry, GroupMemberSettings, Chat, MainChatRole, TtsSessionConfig, WorldBook } from '../types/models'
 
 // Composables
 import { 
@@ -971,10 +971,44 @@ const mvuStore = useMvuStore()
 const mvuPanelOpen = ref(false)
 const mvuModel = computed(() => activeChat.value?.overrides?.mvuModel ?? null)
 
+// 版本切换延迟持久化：切换版本时仅更新内存，记录脏状态，在发送消息前统一落盘
+const pendingGreetingVersion = ref<{
+  chatId: string
+  messageId: string
+  role: string
+  content: string
+  characterId?: string | null
+  greetingVariantIndex: number
+  greetingVariants: string[]
+  greetingVariantReasoningContents: string[]
+  greetingVariantReasoningDurations: (number | null)[]
+  reasoningContent: string | null
+} | null>(null)
+
+async function flushPendingGreetingVersion() {
+  const p = pendingGreetingVersion.value
+  if (!p) return
+  pendingGreetingVersion.value = null
+  try {
+    await chats.updateMessage(p.chatId, p.messageId, p.role as MainChatRole, p.content, p.characterId, {
+      greetingVariantIndex: p.greetingVariantIndex,
+      greetingVariants: p.greetingVariants,
+      greetingVariantReasoningContents: p.greetingVariantReasoningContents,
+      greetingVariantReasoningDurations: p.greetingVariantReasoningDurations,
+      reasoningContent: p.reasoningContent,
+    })
+  } catch (e) {
+    console.error('Failed to persist greeting version:', e)
+  }
+}
+
 async function onMvuModelSelect(payload: { value: string; presetId?: string | null }) {
   const chat = activeChat.value
   if (!chat) return
   const overrides = { ...chat.overrides, mvuModel: payload.value || null }
+  if (payload.presetId) {
+    overrides.presetId = payload.presetId
+  }
   await chats.updateOverrides(chat.id, overrides, { skipLoadList: true })
 }
 
@@ -2051,6 +2085,25 @@ const chatModelOptions = computed(() => {
   return options
 })
 
+/** 当前会话生效的正则规则：合并全局库与会话级角色规则，同 ID 全局优先 */
+const effectiveContentRegexRules = computed(() => {
+  const seen = new Set<string>()
+  const rules: ChatContentRegexRule[] = []
+  const globalLib = settings.settings?.contentRegexRuleLibrary || []
+  for (const r of globalLib) {
+    rules.push(r)
+    seen.add(r.id)
+  }
+  const chatRules = activeChat.value?.overrides?.contentRegexRules || []
+  for (const r of chatRules) {
+    if (!seen.has(r.id)) {
+      rules.push(r)
+      seen.add(r.id)
+    }
+  }
+  return rules.sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.id.localeCompare(b.id))
+})
+
 /**
  * 计算当前聊天模型
  *
@@ -2412,7 +2465,10 @@ watch(assistant.isAssistantPanelOpen, (next) => {
 
 // MVU SSE 生命周期：切换聊天时重连
 watch(() => activeChat.value?.id, (nextId, prevId) => {
-  if (prevId && prevId !== nextId) mvuStore.disconnect()
+  if (prevId && prevId !== nextId) {
+    flushPendingGreetingVersion()
+    mvuStore.disconnect()
+  }
   if (nextId) {
     const char = characters.list.find(c => c.id === activeChat.value?.characterId)
     if (char?.mvuEnabled) mvuStore.connect(nextId)
@@ -2608,6 +2664,7 @@ watch(
         p.content,
         p.greetingVariantIndex ?? null,
         p.greetingVariantReasoningContents ?? null,
+        p.greetingVariantReasoningDurations ?? null,
       )
     }
   },
@@ -2844,6 +2901,9 @@ function handleRemoveDraftImage(imageId: string) {
  * @returns {Promise<void>} 完成时返回
  */
 async function sendUserMessage() {
+  // 发送前先落盘待持久化的版本切换状态
+  await flushPendingGreetingVersion()
+
   const rawText = draftMessage.value.trim()
   const pendingDraftImages = [...draftImages.value]
   const text = replaceInputPlaceholders(rawText)
@@ -2911,6 +2971,7 @@ async function sendUserMessage() {
           msg.content,
           msg.greetingVariantIndex ?? null,
           msg.greetingVariantReasoningContents ?? null,
+          msg.greetingVariantReasoningDurations ?? null,
         )
       }
       if (
@@ -3584,7 +3645,7 @@ function handlePrimaryAction() {
  *
  * @param {ChatMessage} m - 消息对象（来自types/models.ts）
  */
-async function handleSwitchPreviousVersion(m: ChatMessage) {
+function handleSwitchPreviousVersion(m: ChatMessage) {
   const previousContent = versions.getDisplayContent(m)
   const newContent = versions.switchToPreviousVersion(m)
   if (newContent !== null && activeChat.value) {
@@ -3592,6 +3653,13 @@ async function handleSwitchPreviousVersion(m: ChatMessage) {
     if (msg) {
       invalidateTtsCacheIfTextChanged(msg, previousContent, newContent)
       msg.content = newContent
+      const idx = versions.getCurrentVersionIndex(m)
+      msg.greetingVariantIndex = idx
+      const snap = versions.getVariantArraysForMessage(m)
+      if (snap && idx >= 0 && idx < snap.reasonings.length) {
+        msg.reasoningContent = snap.reasonings[idx]?.trim() || null
+        msg.reasoningDurationSec = snap.durations[idx] ?? undefined
+      }
     }
     const needPersist =
       !m.id.startsWith('local_') &&
@@ -3601,25 +3669,19 @@ async function handleSwitchPreviousVersion(m: ChatMessage) {
     if (needPersist) {
       const idx = versions.getCurrentVersionIndex(m)
       const snap = versions.getVariantArraysForMessage(m)
-      const reason =
-        (versions.getDisplayReasoning(m) || msg?.reasoningContent || '').trim() || null
-      try {
-        if (snap) {
-          await chats.updateMessage(activeChat.value.id, m.id, m.role as MainChatRole, newContent, m.characterId, {
-            greetingVariantIndex: idx,
-            greetingVariants: snap.contents,
-            greetingVariantReasoningContents: snap.reasonings,
-            reasoningContent: reason,
-          })
-        } else {
-          await chats.updateMessage(activeChat.value.id, m.id, m.role as MainChatRole, newContent, m.characterId, {
-            greetingVariantIndex: idx,
-            reasoningContent: reason,
-          })
+      if (snap) {
+        pendingGreetingVersion.value = {
+          chatId: activeChat.value.id,
+          messageId: m.id,
+          role: m.role,
+          content: newContent,
+          characterId: m.characterId,
+          greetingVariantIndex: idx,
+          greetingVariants: snap.contents,
+          greetingVariantReasoningContents: snap.reasonings,
+          greetingVariantReasoningDurations: snap.durations,
+          reasoningContent: (snap.reasonings[idx]?.trim() || null),
         }
-        bumpSidebarForActiveChat()
-      } catch (e) {
-        console.error(e)
       }
     }
   }
@@ -3632,7 +3694,7 @@ async function handleSwitchPreviousVersion(m: ChatMessage) {
  *
  * @param {ChatMessage} m - 消息对象（来自types/models.ts）
  */
-async function handleSwitchNextVersion(m: ChatMessage) {
+function handleSwitchNextVersion(m: ChatMessage) {
   const previousContent = versions.getDisplayContent(m)
   const newContent = versions.switchToNextVersion(m)
   if (newContent !== null && activeChat.value) {
@@ -3640,6 +3702,13 @@ async function handleSwitchNextVersion(m: ChatMessage) {
     if (msg) {
       invalidateTtsCacheIfTextChanged(msg, previousContent, newContent)
       msg.content = newContent
+      const idx = versions.getCurrentVersionIndex(m)
+      msg.greetingVariantIndex = idx
+      const snap = versions.getVariantArraysForMessage(m)
+      if (snap && idx >= 0 && idx < snap.reasonings.length) {
+        msg.reasoningContent = snap.reasonings[idx]?.trim() || null
+        msg.reasoningDurationSec = snap.durations[idx] ?? undefined
+      }
     }
     const needPersist =
       !m.id.startsWith('local_') &&
@@ -3649,25 +3718,19 @@ async function handleSwitchNextVersion(m: ChatMessage) {
     if (needPersist) {
       const idx = versions.getCurrentVersionIndex(m)
       const snap = versions.getVariantArraysForMessage(m)
-      const reason =
-        (versions.getDisplayReasoning(m) || msg?.reasoningContent || '').trim() || null
-      try {
-        if (snap) {
-          await chats.updateMessage(activeChat.value.id, m.id, m.role as MainChatRole, newContent, m.characterId, {
-            greetingVariantIndex: idx,
-            greetingVariants: snap.contents,
-            greetingVariantReasoningContents: snap.reasonings,
-            reasoningContent: reason,
-          })
-        } else {
-          await chats.updateMessage(activeChat.value.id, m.id, m.role as MainChatRole, newContent, m.characterId, {
-            greetingVariantIndex: idx,
-            reasoningContent: reason,
-          })
+      if (snap) {
+        pendingGreetingVersion.value = {
+          chatId: activeChat.value.id,
+          messageId: m.id,
+          role: m.role,
+          content: newContent,
+          characterId: m.characterId,
+          greetingVariantIndex: idx,
+          greetingVariants: snap.contents,
+          greetingVariantReasoningContents: snap.reasonings,
+          greetingVariantReasoningDurations: snap.durations,
+          reasoningContent: (snap.reasonings[idx]?.trim() || null),
         }
-        bumpSidebarForActiveChat()
-      } catch (e) {
-        console.error(e)
       }
     }
   }
@@ -3690,6 +3753,9 @@ async function handleRewriteMessage(m: ChatMessage) {
   if (m.id.startsWith('local_')) return
   if (m.role !== 'assistant') return
 
+  // 先落盘待持久化的版本切换状态
+  await flushPendingGreetingVersion()
+
   const chatId = activeChat.value.id
   const messageIndex = activeChat.value.messages.findIndex(msg => msg.id === m.id)
   if (messageIndex === -1) return
@@ -3707,7 +3773,8 @@ async function handleRewriteMessage(m: ChatMessage) {
   const originalMessageId = versions.getOriginalMessageId(m.id)
   const displayContent = versions.getDisplayContent(m)
   const currentReasoning = getReasoningForMessageId(m.id)
-  versions.saveVersion(originalMessageId, displayContent, currentReasoning)
+  const currentDuration = m.reasoningDurationSec ?? null
+  versions.saveVersion(originalMessageId, displayContent, currentReasoning, currentDuration)
 
   const messagesToDelete = activeChat.value.messages.slice(messageIndex)
   for (const msgToDelete of messagesToDelete) {
@@ -3921,7 +3988,8 @@ async function handleRewriteMessage(m: ChatMessage) {
       )
       if (newMsg) {
         const newReasoning = getReasoningForMessageId(newMsg.id)
-        versions.addNewVersion(originalMessageId, newMsg.id, newMsg.content, newReasoning)
+        const newDuration = newMsg.reasoningDurationSec ?? null
+        versions.addNewVersion(originalMessageId, newMsg.id, newMsg.content, newReasoning, newDuration)
         if (!newMsg.id.startsWith('local_')) {
           const snap = versions.getVariantArraysForMessage(newMsg)
           if (snap) {
@@ -3934,6 +4002,7 @@ async function handleRewriteMessage(m: ChatMessage) {
                 greetingVariantIndex: idx,
                 greetingVariants: snap.contents,
                 greetingVariantReasoningContents: snap.reasonings,
+            greetingVariantReasoningDurations: snap.durations,
                 reasoningContent: reason,
               })
               bumpSidebarForActiveChat()
@@ -4339,15 +4408,8 @@ async function handleSaveAndSend() {
   const originalMessage = activeChat.value.messages[messageIndex]
   if (!originalMessage) return
 
-  await chats.updateMessage(chatId, messageId, editedRole, editedContent, originalMessage.characterId)
+  await chats.saveAndTruncate(chatId, messageId, editedRole, editedContent, originalMessage.characterId)
   bumpSidebarForActiveChat()
-
-  const messagesToDelete = activeChat.value.messages.slice(messageIndex + 1)
-  for (const msgToDelete of messagesToDelete) {
-    if (!msgToDelete.id.startsWith('local_')) {
-      await chats.deleteMessage(chatId, msgToDelete.id)
-    }
-  }
 
   actions.closeEditMessage()
   group.resetGroupState()
@@ -4828,6 +4890,7 @@ const editingPersonaAvatarUrl = computed(() => {
             :sidebar-collapsed="sidebarCollapsed"
             :entrancing-user-message-id="entrancingUserMessageId"
             :entrancing-assistant-message-id="entrancingAssistantMessageId"
+            :content-regex-rules="effectiveContentRegexRules"
             @edit-message="(m) => actions.openEditMessage(m, versions.getDisplayContent(m))"
             @delete-message="actions.deleteMessage"
             @read-aloud-message="handleReadAloudMessage"
