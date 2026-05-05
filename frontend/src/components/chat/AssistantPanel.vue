@@ -101,6 +101,7 @@ const emit = defineEmits<{
   'rewrite-message': [m: AssistantMessage]
   'toggle-write-memory': []
   'toggle-destructive': []
+  'switch-to-mvu': []
 }>()
 
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
@@ -288,35 +289,55 @@ watch(
   <Teleport to="body">
   <aside
     class="fixed right-4 top-4 bottom-4 theme-panel-bg backdrop-blur-xl backdrop-saturate-[1.8] border border-[var(--color-border)] shadow-glass-panel rounded-2xl transition-all duration-300 overflow-hidden flex flex-col z-[100] pointer-events-auto"
-    :class="isOpen ? 'translate-x-0 w-[360px] opacity-100' : 'translate-x-[calc(100%+20px)] w-[360px] opacity-0 pointer-events-none'"
+    :class="isOpen ? 'translate-x-0 w-[min(360px,calc(100vw-2rem))] opacity-100' : 'translate-x-[calc(100%+20px)] w-[min(360px,calc(100vw-2rem))] opacity-0 pointer-events-none'"
     style="contain: content; will-change: transform, opacity;"
   >
     <!-- 头部 -->
-    <div class="flex items-center justify-between px-4 py-3 border-b border-white/5 shrink-0 bg-white/5 backdrop-blur-md">
-      <span class="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2 flex-wrap min-w-0">
-        <span class="w-2 h-2 rounded-full bg-[#b76e79] animate-pulse shrink-0"></span>
-        聊天助手
-        <span
-          v-if="allowWriteMemory"
-          class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold normal-case tracking-normal bg-brand/20 text-brand-foreground border border-brand/40"
-          title="已允许记忆写入"
+    <div class="flex items-center justify-between px-4 py-2 border-b border-white/5 shrink-0 bg-white/5 backdrop-blur-md">
+      <div class="flex min-w-0 flex-1 items-center">
+        <div
+          role="button"
+          tabindex="0"
+          class="min-w-0 cursor-pointer rounded-lg px-2 py-1 -mx-1 -my-0.5 transition-colors hover:bg-[var(--color-surface-hover)]"
+          aria-label="切换到 MVU 工作日志"
+          @click="emit('switch-to-mvu')"
+          @keydown.enter.prevent="emit('switch-to-mvu')"
+          @keydown.space.prevent="emit('switch-to-mvu')"
         >
-          记忆
-        </span>
-        <span
-          v-if="allowDestructiveTools"
-          class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold normal-case tracking-normal bg-amber-500/20 text-amber-100 border border-amber-500/40"
-          title="已允许破坏性工具"
+          <span class="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2 flex-wrap min-w-0">
+            <span class="w-2 h-2 rounded-full bg-[#b76e79] animate-pulse shrink-0"></span>
+            聊天助手
+            <span
+              v-if="allowWriteMemory"
+              class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold normal-case tracking-normal bg-brand/20 text-brand-foreground border border-brand/40"
+            >
+              记忆
+            </span>
+            <span
+              v-if="allowDestructiveTools"
+              class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold normal-case tracking-normal bg-amber-500/20 text-amber-100 border border-amber-500/40"
+            >
+              破坏
+            </span>
+          </span>
+        </div>
+      </div>
+      <div class="flex shrink-0 items-center gap-2">
+        <button
+          type="button"
+          class="inline-flex items-center justify-center w-7 h-7 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] transition-colors shrink-0"
+          aria-label="更多"
+          @click="emit('open-settings')"
         >
-          破坏
-        </span>
-      </span>
-      <div class="flex items-center gap-2">
-        <button class="text-gray-500 hover:text-white transition-colors" @click="emit('open-settings')">
-            <MoreHorizontal class="w-4 h-4" />
+          <MoreHorizontal class="w-4 h-4" />
         </button>
-        <button class="text-gray-500 hover:text-white transition-colors" @click="emit('update:isOpen', false)">
-            <X class="w-4 h-4" />
+        <button
+          type="button"
+          class="inline-flex items-center justify-center w-7 h-7 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] transition-colors shrink-0"
+          aria-label="关闭"
+          @click="emit('update:isOpen', false)"
+        >
+          <X class="w-4 h-4" />
         </button>
       </div>
     </div>
