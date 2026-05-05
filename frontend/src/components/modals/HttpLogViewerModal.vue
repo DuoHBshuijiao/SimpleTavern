@@ -364,7 +364,7 @@ function detailEmbedId(itemId: string) {
                       <template v-else>—</template>
                     </span>
                   </div>
-                  <div class="truncate font-mono text-[10px] text-[var(--color-text-secondary)]" :title="it.url">
+                  <div class="truncate font-mono text-[10px] text-[var(--color-text-secondary)]">
                     {{ truncateUrl(it.url, 60) }}
                   </div>
                   <div class="flex items-center gap-1.5 text-[10px] text-[var(--color-text-muted)]">
@@ -399,7 +399,7 @@ function detailEmbedId(itemId: string) {
                           <template v-else>—</template>
                         </span>
                       </div>
-                      <div class="truncate font-mono text-[10px] text-[var(--color-text-secondary)]" :title="it.url">
+                      <div class="truncate font-mono text-[10px] text-[var(--color-text-secondary)]">
                         {{ truncateUrl(it.url, 60) }}
                       </div>
                       <div class="flex items-center gap-1.5 text-[10px] text-[var(--color-text-muted)]">
