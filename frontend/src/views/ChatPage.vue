@@ -1012,6 +1012,16 @@ async function onMvuModelSelect(payload: { value: string; presetId?: string | nu
   await chats.updateOverrides(chat.id, overrides, { skipLoadList: true })
 }
 
+function switchFromMvuToAssistantPanel() {
+  mvuPanelOpen.value = false
+  assistant.isAssistantPanelOpen.value = true
+}
+
+function switchFromAssistantToMvuPanel() {
+  assistant.isAssistantPanelOpen.value = false
+  mvuPanelOpen.value = true
+}
+
 // 聊天助手（助手写入长期记忆后通过 SSE 推送 chat_memory_updated，此处回调使当前会话状态立即刷新，无需切换窗口即可看到「当前会话」长期记忆与「已保存」标记）
 const assistant = useAssistant({
   chatId: assistantChatId,
@@ -1373,7 +1383,37 @@ watch(
       ttsTopBarControlsVisible.value = false
     }
   },
-  { flush: 'post' }
+  { flush: 'post' },
+)
+
+const agentTopBarControlsVisible = ref(false)
+let agentTopBarRevealTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearAgentTopBarRevealTimer() {
+  if (agentTopBarRevealTimer != null) {
+    clearTimeout(agentTopBarRevealTimer)
+    agentTopBarRevealTimer = null
+  }
+}
+
+watch(
+  () => [sidebarCollapsed.value, headerMorphPhase.value] as const,
+  () => {
+    clearAgentTopBarRevealTimer()
+    if (!sidebarCollapsed.value) {
+      agentTopBarControlsVisible.value = false
+      return
+    }
+    if (headerMorphPhase.value === 'full') {
+      agentTopBarRevealTimer = setTimeout(() => {
+        agentTopBarControlsVisible.value = true
+        agentTopBarRevealTimer = null
+      }, HEADER_SQUEEZE_MS + 40)
+    } else {
+      agentTopBarControlsVisible.value = false
+    }
+  },
+  { flush: 'post' },
 )
 
 watch(streamError, (value) => {
@@ -1411,6 +1451,7 @@ onBeforeUnmount(() => {
   if (headerCompactDelayTimer) clearTimeout(headerCompactDelayTimer)
   if (headerLiftChainTimer) clearTimeout(headerLiftChainTimer)
   clearTtsTopBarRevealTimer()
+  clearAgentTopBarRevealTimer()
   clearChatSearchChipsExpandState()
   chatHeaderResizeObserver?.disconnect()
   chatHeaderResizeObserver = null
@@ -4670,7 +4711,6 @@ const editingPersonaAvatarUrl = computed(() => {
                     key="hdr-search-trigger"
                     :class="['header-action-chip', { 'header-action-chip--icon': isNarrowPortrait }]"
                     :disabled="!activeChat"
-                    title="搜索当前会话（Ctrl+F）"
                     @click="openChatSearchBar"
                   >
                     <Search class="w-3.5 h-3.5" />
@@ -4682,7 +4722,6 @@ const editingPersonaAvatarUrl = computed(() => {
                 <button
                   v-if="activeChat.isGroup"
                   :class="['header-action-chip', { 'header-action-chip--icon': isNarrowPortrait }]"
-                  title="群聊设置"
                   @click="showGroupSettings = true"
                 >
                   <Settings class="w-3.5 h-3.5" />
@@ -4691,7 +4730,6 @@ const editingPersonaAvatarUrl = computed(() => {
                 </button>
                 <button
                   :class="['header-action-chip', { 'header-action-chip--icon': isNarrowPortrait }]"
-                  :title="isNarrowPortrait ? '设置' : undefined"
                   @click="settingsTab = 'global'; showSettings = true"
                 >
                   <Settings class="w-3.5 h-3.5" />
@@ -4704,7 +4742,6 @@ const editingPersonaAvatarUrl = computed(() => {
                     class="header-action-chip header-action-chip--icon"
                     :class="showHeaderMoreMenu ? 'header-action-chip--active' : ''"
                     :aria-expanded="showHeaderMoreMenu"
-                    title="更多操作"
                     @click="toggleHeaderMoreMenu"
                   >
                     <MoreHorizontal class="w-4 h-4" />
@@ -4907,6 +4944,9 @@ const editingPersonaAvatarUrl = computed(() => {
             :sidebar-collapsed="sidebarCollapsed"
             :is-narrow-portrait="isNarrowPortrait"
             :header-morph-phase="headerMorphPhase"
+            :show-agent-top-bar-controls="agentTopBarControlsVisible"
+            :tts-enabled="!!settings.settings?.ttsEnabled"
+            :tts-top-bar-controls-visible="ttsTopBarControlsVisible"
             :content-area-left-px="contentAreaLeftPx"
             :assistant-fab-min-top-px="chatAssistantFabMinTopPx"
             :on-assistant-fab-layout="() => runChatFabSeparation(null)"
@@ -4939,6 +4979,7 @@ const editingPersonaAvatarUrl = computed(() => {
             @trigger-interject="triggerInterject"
             @select-model="handleModelSelect"
             @toggle-assistant="assistant.isAssistantPanelOpen.value = !assistant.isAssistantPanelOpen.value"
+            @focus-assistant-panel="switchFromMvuToAssistantPanel"
             @select-images="handleSelectImages"
             @remove-image="handleRemoveDraftImage"
             @open-draft-helper="handleOpenDraftHelper"
@@ -5024,6 +5065,7 @@ const editingPersonaAvatarUrl = computed(() => {
       @edit-message="(m) => assistant.openEditMessage(m, 'chat')"
       @delete-message="(m) => assistant.deleteMessage(m, 'chat')"
       @rewrite-message="(m) => assistant.rewriteMessage(m, 'chat')"
+      @switch-to-mvu="switchFromAssistantToMvuPanel"
     />
 
     <MvuPanel
@@ -5034,6 +5076,7 @@ const editingPersonaAvatarUrl = computed(() => {
       :model-options="chatModelOptions"
       @update:is-open="mvuPanelOpen = $event"
       @select-mvu-model="onMvuModelSelect"
+      @switch-to-assistant="switchFromMvuToAssistantPanel"
     />
 
     </div>
@@ -5353,7 +5396,7 @@ const editingPersonaAvatarUrl = computed(() => {
                       <button
                         type="button"
                         class="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[var(--color-border-subtle)] bg-surface-overlay text-[var(--color-text-secondary)] hover:bg-surface-muted transition-colors"
-                        title="追加为草稿（保留输入框）"
+                        aria-label="追加为草稿（保留输入框）"
                         @click="appendExtraFirstMessageCheck"
                       >
                         <Check class="w-[18px] h-[18px]" />
@@ -5361,7 +5404,7 @@ const editingPersonaAvatarUrl = computed(() => {
                       <button
                         type="button"
                         class="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[var(--color-border-subtle)] bg-surface-overlay text-[var(--color-text-secondary)] hover:bg-surface-muted transition-colors"
-                        title="追加为已保存并清空输入"
+                        aria-label="追加为已保存并清空输入"
                         @click="appendExtraFirstMessagePlus"
                       >
                         <Plus class="w-[18px] h-[18px]" />
@@ -5399,7 +5442,7 @@ const editingPersonaAvatarUrl = computed(() => {
                         <button
                           type="button"
                           class="shrink-0 inline-flex h-7 w-7 items-center justify-center rounded border border-[var(--color-border-subtle)] text-[var(--color-text-muted)] hover:bg-surface-muted hover:text-[var(--color-text)]"
-                          title="从列表移除此条"
+                          aria-label="从列表移除此条"
                           @click.stop="removeExtraFirstMessageAt(entry.index)"
                         >
                           <X class="w-3.5 h-3.5" />
@@ -5450,7 +5493,7 @@ const editingPersonaAvatarUrl = computed(() => {
                     @dragend="handleCharacterEditorWbDragEnd"
                   >
                     <div class="flex min-w-0 flex-1 items-center gap-1.5">
-                      <span class="shrink-0 cursor-grab text-[var(--color-text-muted)] active:cursor-grabbing" title="拖动排序" aria-hidden="true">
+                      <span class="shrink-0 cursor-grab text-[var(--color-text-muted)] active:cursor-grabbing" aria-hidden="true">
                         <GripVertical class="w-4 h-4" />
                       </span>
                       <span class="truncate text-xs text-[var(--color-text)]">{{ idx + 1 }}. {{ characterEditorWorldBookName(wbId) }}</span>
@@ -5518,7 +5561,7 @@ const editingPersonaAvatarUrl = computed(() => {
                 <button
                   type="button"
                   disabled
-                  title="仅聊天会话中可用"
+                  aria-label="记忆写入，仅聊天会话中可用"
                   class="text-xs px-2.5 py-1 rounded-lg border cursor-not-allowed opacity-50 border-[var(--color-border-subtle)] text-[var(--color-text-muted)]"
                 >
                   记忆写入
