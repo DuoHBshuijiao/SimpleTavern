@@ -20,6 +20,7 @@ def normalize_rule_name(name: str | None, pattern: str) -> str:
 
 
 def normalize_replacement_syntax(replacement: str | None) -> str:
+    """将 JS 风格 $N 转为 Python re 可识别的 \g<N>。仅支持数值分组，不支持命名分组。"""
     raw = replacement or ""
     if "$" not in raw:
         return raw
@@ -44,14 +45,6 @@ def normalize_replacement_syntax(replacement: str | None) -> str:
             out.append(rf"\g<{raw[j:k]}>")
             i = k
             continue
-        if j < n and raw[j] == "<":
-            k = j + 1
-            while k < n and raw[k] != ">":
-                k += 1
-            if k < n and k > j + 1:
-                out.append(rf"\g<{raw[j + 1:k]}>")
-                i = k + 1
-                continue
         out.append("$")
         i += 1
     return "".join(out)
@@ -201,15 +194,4 @@ def apply_content_regex_pipeline(
         extracted_items=extracted_items,
         errors=errors,
     )
-
-
-def apply_content_regex_rules(
-    text: str,
-    rules: list[ChatContentRegexRule] | None,
-    *,
-    timeout_seconds: float = _RULE_TIMEOUT_SECONDS,
-) -> tuple[str, list[dict[str, str]]]:
-    """兼容旧接口：仅返回持久化文本与错误。"""
-    result = apply_content_regex_pipeline(text, rules, timeout_seconds=timeout_seconds)
-    return result.persisted_text, result.errors
 
