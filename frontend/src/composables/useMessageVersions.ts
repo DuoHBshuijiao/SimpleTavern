@@ -194,9 +194,16 @@ export function useMessageVersions() {
     const versions = messageVersions.value.get(originalMessageId) || []
     const reasonings = messageReasoningVersions.value.get(originalMessageId) || []
     const durations = messageDurationVersions.value.get(originalMessageId) || []
-    if (newContent && !versions.includes(newContent)) {
+    const normalizedReasoning = newReasoning?.trim() ?? ''
+    const existingIdx = versions.findIndex(
+      (content, i) =>
+        content === newContent &&
+        (reasonings[i]?.trim() ?? '') === normalizedReasoning &&
+        (durations[i] ?? null) === (newDuration ?? null),
+    )
+    if (existingIdx === -1 && (newContent || normalizedReasoning)) {
       versions.push(newContent)
-      reasonings.push(newReasoning?.trim() ?? '')
+      reasonings.push(normalizedReasoning)
       durations.push(newDuration ?? null)
     }
 
@@ -413,6 +420,22 @@ export function useMessageVersions() {
     return { contents: [...contents], reasonings, durations }
   }
 
+  /**
+   * 为强制落盘准备变体快照，允许只有一条或正文为空但有推理内容的版本。
+   */
+  function getVariantArraysForPersist(
+    message: ChatMessage,
+  ): { contents: string[]; reasonings: string[]; durations: (number | null)[] } | null {
+    const messageId = getOriginalMessageId(message.id)
+    const contents = messageVersions.value.get(messageId)
+    if (!contents || contents.length === 0) return null
+    const rs0 = messageReasoningVersions.value.get(messageId) || []
+    const reasonings = contents.map((_, i) => (i < rs0.length && rs0[i] != null ? String(rs0[i]) : ''))
+    const ds0 = messageDurationVersions.value.get(messageId) || []
+    const durations = contents.map((_, i) => (i < ds0.length ? ds0[i] ?? null : null))
+    return { contents: [...contents], reasonings, durations }
+  }
+
   return {
     // 状态
     messageVersions,
@@ -438,6 +461,7 @@ export function useMessageVersions() {
     updateCurrentVersionContent,
     hydrateGreetingVariants,
     getVariantArraysForMessage,
+    getVariantArraysForPersist,
   }
 }
 
