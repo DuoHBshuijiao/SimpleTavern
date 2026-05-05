@@ -3,22 +3,32 @@
     <aside
       class="fixed right-4 top-4 bottom-4 theme-panel-bg backdrop-blur-xl backdrop-saturate-[1.8] border border-[var(--color-border)] shadow-glass-panel rounded-2xl transition-all duration-300 overflow-hidden flex flex-col z-[110] pointer-events-auto"
       :class="isOpen
-        ? 'translate-x-0 w-[360px] opacity-100'
-        : 'translate-x-[calc(100%+20px)] w-[360px] opacity-0 pointer-events-none'"
+        ? 'translate-x-0 w-[min(360px,calc(100vw-2rem))] opacity-100'
+        : 'translate-x-[calc(100%+20px)] w-[min(360px,calc(100vw-2rem))] opacity-0 pointer-events-none'"
       style="contain: content; will-change: transform, opacity;"
     >
       <!-- 标题栏 -->
       <header class="flex items-center justify-between px-4 py-2 border-b border-white/5 shrink-0 bg-white/5 backdrop-blur-md">
-        <div class="flex items-center gap-2 min-w-0">
-          <span class="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2 flex-wrap min-w-0">
-            <span class="w-2 h-2 rounded-full bg-[#b76e79] shrink-0" :class="{ 'animate-pulse': running }" />
-            <span class="truncate">MVU 工作日志</span>
-          </span>
+        <div class="flex min-w-0 flex-1 items-center gap-2">
+          <div
+            role="button"
+            tabindex="0"
+            class="min-w-0 cursor-pointer rounded-lg px-2 py-1 -mx-1 -my-0.5 transition-colors hover:bg-[var(--color-surface-hover)]"
+            aria-label="切换到聊天助手"
+            @click="$emit('switch-to-assistant')"
+            @keydown.enter.prevent="$emit('switch-to-assistant')"
+            @keydown.space.prevent="$emit('switch-to-assistant')"
+          >
+            <span class="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2 flex-wrap min-w-0">
+              <span class="w-2 h-2 rounded-full bg-[#b76e79] shrink-0" :class="{ 'animate-pulse': running }" />
+              <span class="truncate">MVU 工作日志</span>
+            </span>
+          </div>
         </div>
         <button
           type="button"
           class="inline-flex items-center justify-center w-7 h-7 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] transition-colors shrink-0"
-          title="关闭"
+          aria-label="关闭"
           @click="$emit('update:isOpen', false)"
         >
           <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
@@ -99,6 +109,7 @@ const props = withDefaults(defineProps<{
 defineEmits<{
   'update:isOpen': [value: boolean]
   'select-mvu-model': [value: { value: string; presetId?: string | null }]
+  'switch-to-assistant': []
 }>()
 
 const logListRef = ref<HTMLElement | null>(null)
