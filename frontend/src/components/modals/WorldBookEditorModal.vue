@@ -368,7 +368,7 @@ async function save() {
                       <button
                         type="button"
                         class="p-1.5 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-surface-hover"
-                        title="上移"
+                        aria-label="上移"
                         @click="moveEntry(e.id, -1)"
                       >
                         <ChevronUp class="w-4 h-4" />
@@ -376,7 +376,7 @@ async function save() {
                       <button
                         type="button"
                         class="p-1.5 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-surface-hover"
-                        title="下移"
+                        aria-label="下移"
                         @click="moveEntry(e.id, 1)"
                       >
                         <ChevronDown class="w-4 h-4" />
@@ -384,7 +384,7 @@ async function save() {
                       <button
                         type="button"
                         class="p-1.5 rounded-lg text-[var(--color-text-muted)] hover:text-brand hover:bg-surface-hover"
-                        title="编辑"
+                        aria-label="编辑"
                         @click="openEntryEdit(e)"
                       >
                         <Pencil class="w-4 h-4" />
@@ -392,7 +392,7 @@ async function save() {
                       <button
                         type="button"
                         class="p-1.5 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-surface-hover"
-                        title="复制"
+                        aria-label="复制"
                         @click="duplicateEntry(e.id)"
                       >
                         <Copy class="w-4 h-4" />
@@ -400,7 +400,7 @@ async function save() {
                       <button
                         type="button"
                         class="p-1.5 rounded-lg text-[var(--color-text-muted)] hover:text-error hover:bg-surface-hover"
-                        title="删除"
+                        aria-label="删除"
                         @click="openRemoveEntryConfirm($event, e.id)"
                       >
                         <Trash2 class="w-4 h-4" />
