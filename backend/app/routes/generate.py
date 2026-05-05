@@ -79,6 +79,97 @@ def _omit_message_ids_from_request(req: Any) -> set[str]:
     return out
 
 
+def _merge_assistant_output_into_message(
+    chat: Any,
+    *,
+    message_id: str,
+    content: str,
+    character_id: str | None = None,
+    reasoning_content: str | None = None,
+    reasoning_duration_sec: float | None = None,
+) -> ChatMessage:
+    """将助手输出原位追加为指定 assistant 消息的一个变体。"""
+    target = next((m for m in chat.messages if m.id == message_id), None)
+    if target is None:
+        raise HTTPException(status_code=400, detail="merge target message not found")
+    if target.role != "assistant":
+        raise HTTPException(status_code=400, detail="merge target must be assistant")
+    if character_id is not None and (target.characterId or None) != character_id:
+        raise HTTPException(status_code=400, detail="merge target character mismatch")
+
+    base_contents = list(getattr(target, "greetingVariants", None) or [target.content])
+    base_reasonings = list(getattr(target, "greetingVariantReasoningContents", None) or [])
+    base_durations = list(getattr(target, "greetingVariantReasoningDurations", None) or [])
+
+    while len(base_reasonings) < len(base_contents):
+        if len(base_reasonings) == 0:
+            base_reasonings.append((target.reasoningContent or "").strip())
+        else:
+            base_reasonings.append("")
+    while len(base_durations) < len(base_contents):
+        if len(base_durations) == 0:
+            base_durations.append(target.reasoningDurationSec)
+        else:
+            base_durations.append(None)
+
+    base_contents.append(content)
+    base_reasonings.append((reasoning_content or "").strip())
+    base_durations.append(reasoning_duration_sec if reasoning_content else None)
+
+    idx = len(base_contents) - 1
+    target.greetingVariants = base_contents
+    target.greetingVariantIndex = idx
+    target.greetingVariantReasoningContents = base_reasonings
+    target.greetingVariantReasoningDurations = base_durations
+    target.content = content
+    target.reasoningContent = (reasoning_content or "").strip() or None
+    target.reasoningDurationSec = reasoning_duration_sec if target.reasoningContent else None
+
+    for msg in chat.messages:
+        if msg.id == target.id or msg.role != "assistant":
+            continue
+        msg.greetingVariants = None
+        msg.greetingVariantIndex = None
+        if hasattr(msg, "greetingVariantReasoningContents"):
+            msg.greetingVariantReasoningContents = None
+        if hasattr(msg, "greetingVariantReasoningDurations"):
+            msg.greetingVariantReasoningDurations = None
+
+    return target
+
+
+def _append_or_merge_assistant_output(
+    chat: Any,
+    req: Any,
+    *,
+    content: str,
+    character_id: str | None = None,
+    reasoning_content: str | None = None,
+    reasoning_duration_sec: float | None = None,
+) -> ChatMessage | None:
+    merge_id = (getattr(req, "mergeAssistantIntoMessageId", None) or "").strip()
+    if merge_id:
+        return _merge_assistant_output_into_message(
+            chat,
+            message_id=merge_id,
+            content=content,
+            character_id=character_id,
+            reasoning_content=reasoning_content,
+            reasoning_duration_sec=reasoning_duration_sec,
+        )
+    if not content:
+        return None
+    assistant_msg = ChatMessage(
+        role="assistant",
+        content=content,
+        characterId=character_id,
+        reasoningContent=(reasoning_content or "").strip() or None,
+        reasoningDurationSec=reasoning_duration_sec if reasoning_content else None,
+    )
+    chat.messages.append(assistant_msg)
+    return assistant_msg
+
+
 def _now_iso() -> str:
     """
     获取当前时间的ISO格式字符串
@@ -960,14 +1051,15 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
             duration_sec: float | None = None
             if reasoning_start is not None and reasoning_end is not None:
                 duration_sec = round(max(0.0, reasoning_end - reasoning_start), 1)
-            if assistant_content:
-                assistant_msg = ChatMessage(
-                    role="assistant",
+            assistant_msg = None
+            if assistant_content or (getattr(req, "mergeAssistantIntoMessageId", None) and reasoning_text):
+                assistant_msg = _append_or_merge_assistant_output(
+                    chat,
+                    req,
                     content=assistant_content,
-                    reasoningContent=reasoning_text,
-                    reasoningDurationSec=duration_sec if reasoning_text else None,
+                    reasoning_content=reasoning_text,
+                    reasoning_duration_sec=duration_sec,
                 )
-                chat.messages.append(assistant_msg)
                 chat.updatedAt = _now_iso()
                 save_chat(chat)
                 if model and model not in settings.llm.usedModels:
@@ -978,7 +1070,7 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
                 done_payload: dict[str, Any] = {
                     "ok": True,
                     "chatId": chat.id,
-                    "assistantMessageId": assistant_msg.id,
+                    "assistantMessageId": assistant_msg.id if assistant_msg else None,
                 }
                 if reasoning_text:
                     done_payload["reasoningContent"] = reasoning_text
@@ -1022,14 +1114,14 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
                 reasoning_content = None
             req_duration = round(max(0.0, time.monotonic() - req_start), 1) if reasoning_content else None
             assistant_msg = None
-            if assistant_content:
-                assistant_msg = ChatMessage(
-                    role="assistant",
+            if assistant_content or (getattr(req, "mergeAssistantIntoMessageId", None) and reasoning_content):
+                assistant_msg = _append_or_merge_assistant_output(
+                    chat,
+                    req,
                     content=assistant_content,
-                    reasoningContent=(reasoning_content.strip() if isinstance(reasoning_content, str) and reasoning_content.strip() else None),
-                    reasoningDurationSec=req_duration,
+                    reasoning_content=(reasoning_content.strip() if isinstance(reasoning_content, str) and reasoning_content.strip() else None),
+                    reasoning_duration_sec=req_duration,
                 )
-                chat.messages.append(assistant_msg)
                 chat.updatedAt = _now_iso()
                 save_chat(chat)
                 if model and model not in settings.llm.usedModels:
@@ -1529,21 +1621,22 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
             duration_sec: float | None = None
             if reasoning_start is not None and reasoning_end is not None:
                 duration_sec = round(max(0.0, reasoning_end - reasoning_start), 1)
-            if assistant_content:
-                assistant_msg = ChatMessage(
-                    role="assistant",
+            assistant_msg = None
+            if assistant_content or (getattr(req, "mergeAssistantIntoMessageId", None) and reasoning_text):
+                assistant_msg = _append_or_merge_assistant_output(
+                    chat,
+                    req,
                     content=assistant_content,
-                    characterId=req.characterId,
-                    reasoningContent=reasoning_text,
-                    reasoningDurationSec=duration_sec if reasoning_text else None,
+                    character_id=req.characterId,
+                    reasoning_content=reasoning_text,
+                    reasoning_duration_sec=duration_sec,
                 )
-                chat.messages.append(assistant_msg)
                 chat.updatedAt = _now_iso()
                 save_chat(chat)
                 done_payload: dict[str, Any] = {
                     "ok": True,
                     "chatId": chat.id,
-                    "assistantMessageId": assistant_msg.id,
+                    "assistantMessageId": assistant_msg.id if assistant_msg else None,
                     "characterId": req.characterId,
                 }
                 if reasoning_text:
@@ -1588,15 +1681,15 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
                 reasoning_content = None
             req_duration = round(max(0.0, time.monotonic() - req_start), 1) if reasoning_content else None
             assistant_msg = None
-            if assistant_content:
-                assistant_msg = ChatMessage(
-                    role="assistant",
+            if assistant_content or (getattr(req, "mergeAssistantIntoMessageId", None) and reasoning_content):
+                assistant_msg = _append_or_merge_assistant_output(
+                    chat,
+                    req,
                     content=assistant_content,
-                    characterId=req.characterId,
-                    reasoningContent=(reasoning_content.strip() if isinstance(reasoning_content, str) and reasoning_content.strip() else None),
-                    reasoningDurationSec=req_duration,
+                    character_id=req.characterId,
+                    reasoning_content=(reasoning_content.strip() if isinstance(reasoning_content, str) and reasoning_content.strip() else None),
+                    reasoning_duration_sec=req_duration,
                 )
-                chat.messages.append(assistant_msg)
                 chat.updatedAt = _now_iso()
                 save_chat(chat)
             payload = {
