@@ -1150,6 +1150,10 @@ class GenerateStreamRequest(BaseModel):
     senderAvatar: str | None = None
     userPersona: UserPersona | None = None
     runtimeOverrides: ChatOverrides | None = None
+    omitMessageIds: list[str] = Field(
+        default_factory=list,
+        description="仅本次请求拼装 LLM 上下文时忽略的消息 id；不写盘",
+    )
 
 
 class DraftHelpRequest(BaseModel):
@@ -1192,6 +1196,10 @@ class GroupGenerateRequest(BaseModel):
     characterId: str
     imageFallbackMode: bool = False
     runtimeOverrides: ChatOverrides | None = None
+    omitMessageIds: list[str] = Field(
+        default_factory=list,
+        description="仅本次请求拼装 LLM 上下文时忽略的消息 id；不写盘",
+    )
 
 
 class SingleInterjectRequest(BaseModel):
