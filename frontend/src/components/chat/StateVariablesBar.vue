@@ -1,7 +1,7 @@
 <template>
   <div
     v-if="capsules.length > 0"
-    class="relative z-20 flex w-full shrink-0 items-center gap-2 overflow-x-auto px-[18px] py-1.5 scrollbar-none"
+    class="group relative z-20 flex w-full shrink-0 items-center gap-2 overflow-x-auto px-[18px] py-1.5 scrollbar-none"
   >
     <span
       v-for="(cap, i) in visibleCapsules"
@@ -21,7 +21,7 @@
     <span
       v-if="isRunning"
       class="inline-flex items-center justify-center w-4 h-4 shrink-0"
-      title="MVU 运行中"
+      aria-hidden="true"
     >
       <span class="block w-3.5 h-3.5 rounded-full border-2 border-[var(--color-text-muted)] border-t-transparent animate-spin" />
     </span>
@@ -29,8 +29,9 @@
     <!-- 面板开关 -->
     <button
       type="button"
-      class="inline-flex items-center justify-center w-5 h-5 rounded-md shrink-0 text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] transition-colors ml-0.5"
-      title="MVU 工作日志"
+      class="inline-flex items-center justify-center w-5 h-5 rounded-md shrink-0 text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] transition-opacity transition-colors ml-0.5"
+      :class="preferHoverChrome ? 'opacity-0 group-hover:opacity-100' : 'opacity-100'"
+      aria-label="MVU 工作日志"
       @click="$emit('toggle-panel')"
     >
       <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -43,7 +44,10 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { usePreferHoverChrome } from '../../composables/usePreferHoverChrome'
 import type { CapsuleItem } from '../../stores/mvu'
+
+const { preferHoverChrome } = usePreferHoverChrome()
 
 const props = withDefaults(defineProps<{
   capsules: CapsuleItem[]
