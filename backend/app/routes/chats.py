@@ -123,7 +123,19 @@ def _apply_greeting_variants_on_update(
             m.greetingVariantReasoningDurations = None
         return
 
-    cleaned = [str(x).strip() for x in raw if x is not None and str(x).strip()]
+    raw_texts = [str(x).strip() if x is not None else "" for x in raw]
+    reasoning_src = req.greetingVariantReasoningContents if (
+        "greetingVariantReasoningContents" in req_dump and req.greetingVariantReasoningContents is not None
+    ) else None
+    if reasoning_src is not None:
+        kept_indices = [
+            i
+            for i, text in enumerate(raw_texts)
+            if text or (i < len(reasoning_src) and str(reasoning_src[i] or "").strip())
+        ]
+    else:
+        kept_indices = [i for i, text in enumerate(raw_texts) if text]
+    cleaned = [raw_texts[i] for i in kept_indices]
     if len(cleaned) >= 2:
         m.greetingVariants = cleaned
         idx: int
@@ -137,7 +149,8 @@ def _apply_greeting_variants_on_update(
         m.content = cleaned[idx]
 
         if "greetingVariantReasoningContents" in req_dump and req.greetingVariantReasoningContents is not None:
-            src = [str(x) if x is not None else "" for x in req.greetingVariantReasoningContents]
+            raw_src = [str(x) if x is not None else "" for x in req.greetingVariantReasoningContents]
+            src = [raw_src[i] if i < len(raw_src) else "" for i in kept_indices]
             while len(src) < len(cleaned):
                 src.append("")
             m.greetingVariantReasoningContents = src[: len(cleaned)]
@@ -149,7 +162,11 @@ def _apply_greeting_variants_on_update(
             m.greetingVariantReasoningContents = None
 
         if "greetingVariantReasoningDurations" in req_dump and req.greetingVariantReasoningDurations is not None:
-            dur_src = [float(x) if x is not None and float(x) > 0 else None for x in req.greetingVariantReasoningDurations]
+            raw_dur_src = [
+                float(x) if x is not None and float(x) > 0 else None
+                for x in req.greetingVariantReasoningDurations
+            ]
+            dur_src = [raw_dur_src[i] if i < len(raw_dur_src) else None for i in kept_indices]
             while len(dur_src) < len(cleaned):
                 dur_src.append(None)
             m.greetingVariantReasoningDurations = dur_src[: len(cleaned)]
