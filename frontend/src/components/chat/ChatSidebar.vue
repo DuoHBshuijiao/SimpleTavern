@@ -563,7 +563,7 @@ function confirmDelete() {
               >
                 <button
                   class="p-1 hover:text-[var(--color-purple)] text-[var(--color-text-secondary)] transition-colors"
-                  title="创建分支"
+                  aria-label="创建分支"
                   @click.stop="emit('branch-chat', c)"
                 >
                   <Copy class="w-3.5 h-3.5" />
@@ -637,14 +637,14 @@ function confirmDelete() {
               >
                 <button
                   class="p-1 hover:text-brand text-[var(--color-text-secondary)] transition-colors"
-                  title="创建副本改为群聊"
+                  aria-label="创建副本改为群聊"
                   @click.stop="emit('promote-to-group', c)"
                 >
                   <ArrowUp class="w-3.5 h-3.5" />
                 </button>
                 <button
                   class="p-1 hover:text-brand text-[var(--color-text-secondary)] transition-colors"
-                  title="创建分支"
+                  aria-label="创建分支"
                   @click.stop="emit('branch-chat', c)"
                 >
                   <Copy class="w-3.5 h-3.5" />
@@ -682,8 +682,12 @@ function confirmDelete() {
   <div 
     class="fixed top-1/2 -translate-y-1/2 z-50 cursor-pointer p-2 bg-brand-a30 hover:bg-brand-a50 rounded-r-lg backdrop-blur-sm transition-all duration-300 border border-l-0 border-brand-a40 shadow-heavy"
     :class="collapsed ? 'left-0' : 'left-[21rem]'"
+    role="button"
+    tabindex="0"
+    aria-label="切换侧边栏"
     @click="toggleCollapsed"
-    title="切换侧边栏"
+    @keydown.enter.prevent="toggleCollapsed"
+    @keydown.space.prevent="toggleCollapsed"
   >
     <component :is="collapsed ? ChevronRight : ChevronLeft" class="w-3 h-3 text-on-brand" />
   </div>
