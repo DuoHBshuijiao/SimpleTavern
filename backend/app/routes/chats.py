@@ -46,11 +46,6 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from app.attachment_policy import ASSISTANT_IMAGE_ATTACHMENT_MAX_BYTES, is_image_mime_type
-from app.content_regex import apply_content_regex_pipeline
-from app.content_regex_queue import (
-    get_content_regex_queue_size,
-    pop_content_regex_item,
-)
 from app.content_regex_scanner import ensure_content_regex_scanner_started
 from app.placeholders import replace_placeholders_in_text
 from app.schemas import (
@@ -109,6 +104,8 @@ def _clear_greeting_multivariant_on_other_assistants(chat: Chat, keep_message_id
         msg.greetingVariantIndex = None
         if hasattr(msg, "greetingVariantReasoningContents"):
             msg.greetingVariantReasoningContents = None
+        if hasattr(msg, "greetingVariantReasoningDurations"):
+            msg.greetingVariantReasoningDurations = None
 
 
 def _apply_greeting_variants_on_update(
@@ -122,6 +119,8 @@ def _apply_greeting_variants_on_update(
         m.greetingVariantIndex = None
         if hasattr(m, "greetingVariantReasoningContents"):
             m.greetingVariantReasoningContents = None
+        if hasattr(m, "greetingVariantReasoningDurations"):
+            m.greetingVariantReasoningDurations = None
         return
 
     cleaned = [str(x).strip() for x in raw if x is not None and str(x).strip()]
@@ -149,16 +148,28 @@ def _apply_greeting_variants_on_update(
         else:
             m.greetingVariantReasoningContents = None
 
+        if "greetingVariantReasoningDurations" in req_dump and req.greetingVariantReasoningDurations is not None:
+            dur_src = [float(x) if x is not None and float(x) > 0 else None for x in req.greetingVariantReasoningDurations]
+            while len(dur_src) < len(cleaned):
+                dur_src.append(None)
+            m.greetingVariantReasoningDurations = dur_src[: len(cleaned)]
+            d_one = m.greetingVariantReasoningDurations[idx] if 0 <= idx < len(m.greetingVariantReasoningDurations) else None
+            m.reasoningDurationSec = d_one
+        else:
+            m.greetingVariantReasoningDurations = None
+
         _clear_greeting_multivariant_on_other_assistants(chat, m.id)
     elif len(cleaned) == 1:
         m.greetingVariants = None
         m.greetingVariantIndex = None
         m.greetingVariantReasoningContents = None
+        m.greetingVariantReasoningDurations = None
         m.content = cleaned[0]
     else:
         m.greetingVariants = None
         m.greetingVariantIndex = None
         m.greetingVariantReasoningContents = None
+        m.greetingVariantReasoningDurations = None
 
 
 def _single_chat_greeting_variants(character, user_name: str) -> list[str]:
@@ -323,28 +334,6 @@ class ChatSearchResponse(BaseModel):
     query: str
     total: int
     hits: list[ChatSearchHit] = Field(default_factory=list)
-
-
-class ContentRegexTrialRequest(BaseModel):
-    sourceMode: str = "manual"
-    manualText: str | None = None
-    rule: ChatContentRegexRule | None = None
-    rules: list[ChatContentRegexRule] | None = None
-
-
-class ContentRegexTrialResponse(BaseModel):
-    sourceMode: str
-    beforeText: str
-    afterText: str
-    displayText: str
-    changed: bool
-    extractedItems: list[dict[str, str]] = Field(default_factory=list)
-    errors: list[dict[str, str]] = Field(default_factory=list)
-
-
-class ContentRegexQueuePopResponse(BaseModel):
-    item: dict[str, str] | None = None
-    remaining: int = 0
 
 
 @router.get("/chats", response_model=list[Chat])
@@ -750,54 +739,6 @@ def search_chat(chat_id: str, q: str = Query(..., min_length=1)) -> ChatSearchRe
     return ChatSearchResponse(query=query, total=len(hits), hits=hits)
 
 
-@router.post("/chats/{chat_id}/content-regex/trial", response_model=ContentRegexTrialResponse)
-def trial_chat_content_regex(chat_id: str, req: ContentRegexTrialRequest) -> ContentRegexTrialResponse:
-    try:
-        chat = load_chat(chat_id)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="chat not found")
-    source_mode = (req.sourceMode or "manual").strip() or "manual"
-    if source_mode == "latest_assistant":
-        before = ""
-        for msg in reversed(chat.messages):
-            if msg.role == "assistant" and (msg.content or "").strip():
-                before = msg.content
-                break
-    else:
-        before = req.manualText or ""
-    if len(before) > 10000:
-        before = before[:10000]
-    active_rules = list(req.rules or [])
-    if req.rule is not None:
-        active_rules = [req.rule]
-    if not active_rules:
-        return ContentRegexTrialResponse(
-            sourceMode=source_mode,
-            beforeText=before,
-            afterText=before,
-            displayText=before,
-            changed=False,
-            extractedItems=[],
-            errors=[],
-        )
-    result = apply_content_regex_pipeline(before, active_rules)
-    return ContentRegexTrialResponse(
-        sourceMode=source_mode,
-        beforeText=before,
-        afterText=result.persisted_text,
-        displayText=result.display_text,
-        changed=(result.persisted_text != before or result.display_text != before),
-        extractedItems=result.extracted_items,
-        errors=result.errors,
-    )
-
-
-@router.get("/chats/{chat_id}/content-regex/queue/pop", response_model=ContentRegexQueuePopResponse)
-def pop_chat_content_regex_queue(chat_id: str) -> ContentRegexQueuePopResponse:
-    item = pop_content_regex_item(chat_id)
-    return ContentRegexQueuePopResponse(item=item, remaining=get_content_regex_queue_size(chat_id))
-
-
 @router.put("/chats/{chat_id}", response_model=Chat)
 def update_chat(chat_id: str, req: UpdateChatRequest) -> Chat:
     """
@@ -883,17 +824,19 @@ def append_message(chat_id: str, req: AppendMessageRequest) -> Chat:
                 getattr(m, "greetingVariants", None)
                 or getattr(m, "greetingVariantIndex", None) is not None
                 or getattr(m, "greetingVariantReasoningContents", None)
+                or getattr(m, "greetingVariantReasoningDurations", None)
             ):
                 continue
             m.greetingVariants = None
             m.greetingVariantIndex = None
             if hasattr(m, "greetingVariantReasoningContents"):
                 m.greetingVariantReasoningContents = None
+            if hasattr(m, "greetingVariantReasoningDurations"):
+                m.greetingVariantReasoningDurations = None
 
     chat.messages.append(ChatMessage(
         role=req.role,
         content=req.content,
-        contentDisplay=None,
         images=getattr(req, "images", []) or [],
         characterId=req.characterId,
         senderPersonaId=getattr(req, "senderPersonaId", None),
@@ -1013,6 +956,78 @@ def delete_message(chat_id: str, message_id: str) -> Chat:
     if len(chat.messages) == before:
         raise HTTPException(status_code=404, detail="message not found")
 
+    chat.updatedAt = _now_iso()
+    return save_chat(chat)
+
+
+@router.put("/chats/{chat_id}/messages/{message_id}/save-and-truncate", response_model=Chat)
+def save_message_and_truncate(chat_id: str, message_id: str, req: UpdateMessageRequest) -> Chat:
+    """保存编辑后的消息并删除该消息之后的所有消息。
+
+    合并 update_message + 逐条 delete_message 为一次 load/save，
+    避免多次 HTTP 往返与重复 JSON 读写。
+    """
+    try:
+        chat = load_chat(chat_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="chat not found")
+
+    found_idx: int | None = None
+    for i, m in enumerate(chat.messages):
+        if m.id == message_id:
+            old_images = list(getattr(m, "images", []) or [])
+            stored_content = m.content
+            m.role = req.role
+            m.content = req.content
+            if getattr(req, "images", None) is not None:
+                m.images = req.images or []
+                old_ids = {img.id for img in old_images}
+                new_ids = {img.id for img in (m.images or [])}
+                for old_img in old_images:
+                    if old_img.id not in new_ids:
+                        delete_chat_image(chat, old_img)
+            if req.characterId is not None:
+                m.characterId = req.characterId
+            if getattr(req, "senderPersonaId", None) is not None:
+                m.senderPersonaId = req.senderPersonaId
+            if getattr(req, "senderName", None) is not None:
+                m.senderName = req.senderName
+            if getattr(req, "senderAvatar", None) is not None:
+                m.senderAvatar = req.senderAvatar
+            req_dump = req.model_dump(exclude_unset=True)
+            if "greetingVariants" in req_dump:
+                _apply_greeting_variants_on_update(m, req, req_dump, chat)
+            elif "greetingVariantIndex" in req_dump:
+                m.greetingVariantIndex = req_dump["greetingVariantIndex"]
+                gv = getattr(m, "greetingVariants", None)
+                if (
+                    isinstance(gv, list)
+                    and len(gv) >= 2
+                    and isinstance(m.greetingVariantIndex, int)
+                    and 0 <= m.greetingVariantIndex < len(gv)
+                ):
+                    m.content = gv[m.greetingVariantIndex]
+                    gvr = getattr(m, "greetingVariantReasoningContents", None)
+                    if gvr and isinstance(gvr, list) and 0 <= m.greetingVariantIndex < len(gvr):
+                        r0 = (gvr[m.greetingVariantIndex] or "").strip()
+                        m.reasoningContent = r0 if r0 else None
+            if "reasoningContent" in req_dump:
+                m.reasoningContent = req_dump["reasoningContent"]
+            if "reasoningDurationSec" in req_dump:
+                m.reasoningDurationSec = req_dump["reasoningDurationSec"]
+            if m.content != stored_content:
+                m.ttsAudioAssetId = None
+                m.ttsAudioSourceText = None
+            found_idx = i
+            break
+
+    if found_idx is None:
+        raise HTTPException(status_code=404, detail="message not found")
+
+    # 删除 found_idx 之后的所有消息（含关联图片）
+    for msg in chat.messages[found_idx + 1:]:
+        delete_message_images(chat, msg)
+    chat.messages = chat.messages[:found_idx + 1]
     chat.updatedAt = _now_iso()
     return save_chat(chat)
 
