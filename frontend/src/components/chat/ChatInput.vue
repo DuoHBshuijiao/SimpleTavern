@@ -52,12 +52,14 @@
  *    - 位置：组件层，提供聊天输入功能
  */
 import { computed, ref } from 'vue'
-import { useAssistantFabPosition } from '../../composables/useAssistantFabPosition'
+import { useAssistantFabPosition, ASSISTANT_FAB_SIZE, ASSISTANT_FAB_GAP } from '../../composables/useAssistantFabPosition'
 import { notifyMessage } from '../../composables/useNotify'
 import {
   MAIN_LAYOUT_TRANSITION_MS,
   HEADER_LIFT_EASE,
   HEADER_LIFT_MS,
+  TTS_TOP_BAR_TWO_BTN_STACK_PX,
+  TOP_BAR_AGENT_AFTER_TTS_GAP_PX,
   type HeaderMorphPhase,
 } from '../../constants/chatHeaderMorph'
 import type { CharacterCard, GroupMemberSettings } from '../../types/models'
@@ -66,7 +68,7 @@ import { resolveRichPaste } from '../../utils/richPaste'
 import ModernAvatar from '../ModernAvatar.vue'
 import ModernSelect from '../ModernSelect.vue'
 import { useMvuStore } from '../../stores/mvu'
-import { ImagePlus, MessageSquare, PenSquare, RefreshCw, X } from 'lucide-vue-next'
+import { ImagePlus, MessageSquare, PenSquare, RefreshCw, Sparkles, X } from 'lucide-vue-next'
 
 interface ModelOption {
   label: string
@@ -103,6 +105,12 @@ const props = withDefaults(
   isNarrowPortrait?: boolean
   /** 顶栏变形阶段：与 ChatPage headerMorphPhase 一致 */
   headerMorphPhase?: HeaderMorphPhase
+  /** 侧栏收起且顶栏 squeeze 完成后：顶栏下显示 Agent 胶囊（与 TTS 顶栏条时机一致） */
+  showAgentTopBarControls?: boolean
+  /** 全局 TTS 是否启用（决定 Agent 顶栏是否让位给队列/播放） */
+  ttsEnabled?: boolean
+  /** TTS 顶栏替代控件是否已显示（仅当 ttsEnabled 时为 true） */
+  ttsTopBarControlsVisible?: boolean
   // 输入状态
   modelValue: string
   isGenerating: boolean
@@ -138,6 +146,9 @@ const props = withDefaults(
     sidebarCollapsed: false,
     isNarrowPortrait: false,
     headerMorphPhase: 'inset',
+    showAgentTopBarControls: false,
+    ttsEnabled: false,
+    ttsTopBarControlsVisible: false,
   }
 )
 
@@ -158,6 +169,7 @@ const emit = defineEmits<{
   'draft-helper-rewrite': []
   'draft-helper-discard': []
   'toggle-mvu-panel': []
+  'focus-assistant-panel': []
 }>()
 
 const mvuStore = useMvuStore()
@@ -166,10 +178,12 @@ const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const showDraftHelperMenu = ref(false)
 const isDragOverComposer = ref(false)
 /** 碰撞检测用真实视口矩形（与 CSS 过渡中的 topPx 解耦） */
-const assistantFabButtonRef = ref<HTMLElement | null>(null)
+const assistantFabStackRef = ref<HTMLElement | null>(null)
+const assistantFabButtonRef = ref<HTMLButtonElement | null>(null)
 
 const {
   fabStyle,
+  side,
   setTopPxFromSeparation: setAssistantTopPxFromSeparation,
   onPointerDown: assistantFabPointerDown,
   onPointerMove: assistantFabPointerMove,
@@ -184,6 +198,13 @@ const {
     onDragEnd: () => props.onAssistantFabDragEnd?.(),
     onSnapEnd: () => props.onAssistantFabSnapEnd?.(),
     getDragReferenceRect: () => assistantFabButtonRef.value?.getBoundingClientRect() ?? null,
+    getInputSinkActive: () =>
+      props.sidebarCollapsed &&
+      (props.headerMorphPhase === 'lifting' || props.headerMorphPhase === 'full'),
+    getFabStackHeight: () =>
+      mvuStore.isConnected
+        ? ASSISTANT_FAB_SIZE + ASSISTANT_FAB_GAP + ASSISTANT_FAB_SIZE
+        : ASSISTANT_FAB_SIZE,
   },
 )
 
@@ -197,9 +218,31 @@ function onMvueFabClick(e: MouseEvent) {
   emit('toggle-mvu-panel')
 }
 
-const mvueFabStyle = computed(() => {
-  const top = typeof fabStyle.value?.top === 'number' ? fabStyle.value.top : parseFloat(fabStyle.value?.top ?? '0') || 0
-  return { ...fabStyle.value, top: `${top + 56}px` }
+function onAgentTopBarClick(e: MouseEvent) {
+  e.stopPropagation()
+  emit('focus-assistant-panel')
+}
+
+const agentTopBarStackStyle = computed(() => {
+  const minTop = props.assistantFabMinTopPx ?? 0
+  const underTts =
+    props.ttsEnabled && props.ttsTopBarControlsVisible
+      ? TTS_TOP_BAR_TWO_BTN_STACK_PX + TOP_BAR_AGENT_AFTER_TTS_GAP_PX
+      : 0
+  const top = `${minTop + underTts}px`
+  const leftBase = props.contentAreaLeftPx ?? 0
+  if (side.value === 'left') {
+    return {
+      top,
+      left: `${leftBase + 8}px`,
+      right: 'auto' as const,
+    }
+  }
+  return {
+    top,
+    right: '16px',
+    left: 'auto' as const,
+  }
 })
 
 /**
@@ -486,7 +529,7 @@ const shellInlineStyle = computed(() => ({
 }))
 
 function getAssistantFabRect(): DOMRect | null {
-  return assistantFabButtonRef.value?.getBoundingClientRect() ?? null
+  return assistantFabStackRef.value?.getBoundingClientRect() ?? null
 }
 
 defineExpose({ getAssistantFabRect, setAssistantTopPx: setAssistantTopPxFromSeparation })
@@ -612,8 +655,12 @@ defineExpose({ getAssistantFabRect, setAssistantTopPx: setAssistantTopPxFromSepa
                   v-for="member in groupMembers"
                   :key="member.id"
                   class="cursor-pointer hover:scale-110 transition-transform shrink-0"
-                  :title="`让 ${member.name} 单次回应一条`"
+                  role="button"
+                  tabindex="0"
+                  :aria-label="`让 ${member.name} 单次回应一条`"
                   @click="emit('trigger-interject', member.id)"
+                  @keydown.enter.prevent="emit('trigger-interject', member.id)"
+                  @keydown.space.prevent="emit('trigger-interject', member.id)"
                 >
                   <ModernAvatar
                     :src="member.avatar ? `/api/avatars/${member.avatar}` : null"
@@ -634,8 +681,8 @@ defineExpose({ getAssistantFabRect, setAssistantTopPx: setAssistantTopPxFromSepa
             <button
               class="chat-action-button chat-action-button--secondary shadow-lg transition-all active:scale-95"
               :disabled="isGenerating && !showContinueButton"
+              aria-label="写作辅助"
               @click="toggleDraftHelperMenu"
-              title="写作辅助"
             >
               <PenSquare class="w-4 h-4" />
             </button>
@@ -654,8 +701,8 @@ defineExpose({ getAssistantFabRect, setAssistantTopPx: setAssistantTopPxFromSepa
           <button
             class="chat-action-button chat-action-button--secondary shadow-lg transition-all active:scale-95"
             :disabled="isGenerating && !showContinueButton"
+            aria-label="选择图片"
             @click="openImagePicker"
-            title="选择图片"
           >
             <ImagePlus class="w-4 h-4" />
           </button>
@@ -708,36 +755,61 @@ defineExpose({ getAssistantFabRect, setAssistantTopPx: setAssistantTopPxFromSepa
     </div>
     </div>
     
-    <!-- 助手按钮（可拖动，松手左右贴边，位置持久化） -->
-    <button
-      ref="assistantFabButtonRef"
-      type="button"
-      class="chat-fab-surface w-12 h-12 rounded-xl font-bold shadow-lg transition-[transform,background-color,box-shadow] border border-[var(--color-border)] hover:scale-105 active:scale-95 flex items-center justify-center backdrop-blur-sm cursor-grab active:cursor-grabbing"
+    <!-- 助手 / MVU FAB：侧栏收起顶栏 full 后与 TTS 同相滑出，顶栏下替代为 Agent 胶囊 -->
+    <div
+      ref="assistantFabStackRef"
+      class="assistant-fab-stack flex flex-col gap-2"
+      :class="{ 'assistant-fab-stack--hidden': showAgentTopBarControls }"
       :style="fabStyle"
-      @pointerdown="assistantFabPointerDown"
-      @pointermove="assistantFabPointerMove"
-      @pointerup="assistantFabPointerUp"
-      @pointercancel="assistantFabPointerCancel"
-      @click="onAssistantFabClick"
     >
-      助手
-    </button>
+      <button
+        ref="assistantFabButtonRef"
+        type="button"
+        class="chat-fab-surface w-12 h-12 rounded-xl font-bold shadow-lg transition-[transform,background-color,box-shadow] border border-[var(--color-border)] hover:scale-105 active:scale-95 flex items-center justify-center backdrop-blur-sm cursor-grab active:cursor-grabbing"
+        @pointerdown="assistantFabPointerDown"
+        @pointermove="assistantFabPointerMove"
+        @pointerup="assistantFabPointerUp"
+        @pointercancel="assistantFabPointerCancel"
+        @click="onAssistantFabClick"
+      >
+        助手
+      </button>
 
-    <!-- MVU Panel FAB -->
-    <button
-      v-if="mvuStore.isConnected"
-      type="button"
-      class="chat-fab-surface w-12 h-12 rounded-xl font-bold shadow-lg transition-[transform,background-color,box-shadow] border border-[var(--color-border)] hover:scale-105 active:scale-95 flex items-center justify-center backdrop-blur-sm cursor-grab active:cursor-grabbing"
-      :style="mvueFabStyle"
-      title="MVU 工作日志"
-      @pointerdown="assistantFabPointerDown"
-      @pointermove="assistantFabPointerMove"
-      @pointerup="assistantFabPointerUp"
-      @pointercancel="assistantFabPointerCancel"
-      @click="onMvueFabClick"
-    >
-      MVU
-    </button>
+      <button
+        v-if="mvuStore.isConnected"
+        type="button"
+        class="chat-fab-surface w-12 h-12 rounded-xl font-bold shadow-lg transition-[transform,background-color,box-shadow] border border-[var(--color-border)] hover:scale-105 active:scale-95 flex items-center justify-center backdrop-blur-sm cursor-grab active:cursor-grabbing"
+        @pointerdown="assistantFabPointerDown"
+        @pointermove="assistantFabPointerMove"
+        @pointerup="assistantFabPointerUp"
+        @pointercancel="assistantFabPointerCancel"
+        @click="onMvueFabClick"
+      >
+        MVU
+      </button>
+    </div>
+
+    <Transition name="tts-top-bar-fade">
+      <div
+        v-if="showAgentTopBarControls"
+        class="fixed z-[9] flex flex-col gap-2 pointer-events-none"
+        :style="agentTopBarStackStyle"
+      >
+        <div class="pointer-events-auto flex flex-col gap-2">
+          <button
+            type="button"
+            class="agent-top-bar-btn"
+            :class="{ 'agent-top-bar-btn--after-tts': ttsEnabled && ttsTopBarControlsVisible }"
+            aria-label="打开聊天助手"
+            @click="onAgentTopBarClick"
+          >
+            <span class="agent-top-bar-btn__glow" aria-hidden="true" />
+            <Sparkles class="agent-top-bar-btn__icon" aria-hidden="true" />
+            <span class="agent-top-bar-btn__label">Agent</span>
+          </button>
+        </div>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -833,5 +905,113 @@ defineExpose({ getAssistantFabRect, setAssistantTopPx: setAssistantTopPxFromSepa
 .draft-helper-menu {
   backdrop-filter: blur(var(--blur-light));
   -webkit-backdrop-filter: blur(var(--blur-light));
+}
+
+/* 与 TtsPlaybackFab：顶栏替代出现时隐藏可拖动栈（仍占位过渡） */
+.assistant-fab-stack--hidden {
+  visibility: hidden;
+}
+
+/* 与 TtsPlaybackFab .tts-top-bar-fade 同名，过渡时长一致 */
+.tts-top-bar-fade-enter-active,
+.tts-top-bar-fade-leave-active {
+  transition: opacity 0.22s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.tts-top-bar-fade-enter-from,
+.tts-top-bar-fade-leave-to {
+  opacity: 0;
+}
+
+/* 小于 TTS 顶栏 chip，气质对齐 TtsPlaybackFab .tts-top-bar-btn */
+.agent-top-bar-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 1.75rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--color-border-subtle);
+  background: color-mix(in srgb, var(--color-surface-overlay, rgba(18, 22, 30, 0.72)) 88%, transparent);
+  color: var(--color-text-secondary);
+  font-size: 0.6875rem;
+  line-height: 1;
+  cursor: pointer;
+  overflow: hidden;
+  backdrop-filter: blur(var(--blur-light));
+  -webkit-backdrop-filter: blur(var(--blur-light));
+  box-shadow: var(--shadow-glass-panel, 0 8px 24px rgba(0, 0, 0, 0.18));
+  transition:
+    background-color 200ms cubic-bezier(0.25, 1, 0.5, 1),
+    border-color 200ms cubic-bezier(0.25, 1, 0.5, 1),
+    color 200ms cubic-bezier(0.25, 1, 0.5, 1),
+    transform 180ms cubic-bezier(0.25, 1, 0.5, 1);
+  animation: agentTopBarSlideIn 0.38s cubic-bezier(0.25, 1, 0.5, 1) backwards;
+}
+
+.agent-top-bar-btn--after-tts {
+  animation-delay: 0.14s;
+}
+
+.agent-top-bar-btn__glow {
+  position: absolute;
+  inset: 0;
+  opacity: 0.32;
+  pointer-events: none;
+  background: radial-gradient(
+    120% 80% at 30% 40%,
+    color-mix(in srgb, var(--color-brand, #6366f1) 26%, transparent),
+    transparent 62%
+  );
+}
+
+.agent-top-bar-btn__icon {
+  width: 0.875rem;
+  height: 0.875rem;
+  flex-shrink: 0;
+  color: var(--color-text);
+  position: relative;
+  z-index: 1;
+}
+
+.agent-top-bar-btn__label {
+  position: relative;
+  z-index: 1;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  color: var(--color-text);
+}
+
+.agent-top-bar-btn:hover {
+  background: color-mix(in srgb, var(--color-surface-overlay, rgba(18, 22, 30, 0.72)) 96%, var(--color-border-subtle) 4%);
+  border-color: var(--color-border);
+  color: var(--color-text);
+}
+
+.agent-top-bar-btn:active {
+  transform: scale(0.97);
+}
+
+@keyframes agentTopBarSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-top-bar-btn {
+    animation: none;
+  }
+
+  .tts-top-bar-fade-enter-active,
+  .tts-top-bar-fade-leave-active {
+    transition-duration: 0.01ms !important;
+  }
 }
 </style>
