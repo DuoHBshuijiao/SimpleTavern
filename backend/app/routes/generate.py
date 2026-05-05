@@ -64,6 +64,21 @@ router = APIRouter(tags=["generate"])
 ensure_content_regex_scanner_started()
 
 
+def _omit_message_ids_from_request(req: Any) -> set[str]:
+    """请求级：从本轮 LLM 对话上下文排除的消息 id（不修改磁盘会话）。"""
+    raw = getattr(req, "omitMessageIds", None)
+    if not raw:
+        return set()
+    out: set[str] = set()
+    for x in raw:
+        if x is None:
+            continue
+        s = str(x).strip()
+        if s:
+            out.add(s)
+    return out
+
+
 def _now_iso() -> str:
     """
     获取当前时间的ISO格式字符串
@@ -822,7 +837,10 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
 
     conversation: list[dict] = []
     image_fallback_mode = bool(getattr(req, "imageFallbackMode", False))
+    omit_ids = _omit_message_ids_from_request(req)
     for m in chat.messages:
+        if m.id in omit_ids:
+            continue
         role = "system" if pure_ai_mode and m.role == "user" else m.role
         conversation.append({
             "role": role,
@@ -1381,8 +1399,11 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
     )
     image_fallback_mode = bool(getattr(req, "imageFallbackMode", False))
     conversation: list[dict] = []
+    omit_ids = _omit_message_ids_from_request(req)
     char_name_cache: dict[str, str] = {}
     for m in chat.messages:
+        if m.id in omit_ids:
+            continue
         char_name_for_message = _resolve_char_name_for_history_message(
             m,
             default_char_name=character.name or "角色",
@@ -1803,8 +1824,11 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
     )
     image_fallback_mode = bool(getattr(req, "imageFallbackMode", False))
     conversation: list[dict] = []
+    omit_ids = _omit_message_ids_from_request(req)
     char_name_cache: dict[str, str] = {}
     for m in chat.messages:
+        if m.id in omit_ids:
+            continue
         char_name_for_message = _resolve_char_name_for_history_message(
             m,
             default_char_name=character.name or "角色",
