@@ -82,7 +82,7 @@ const contentMaxHeightClassDefault = 'max-h-[72vh]'
         :class="stackDetailHeader ? 'items-baseline' : 'min-w-[120px] flex-1 items-center'"
       >
         <span class="shrink-0 font-mono">{{ detail.method }}</span>
-        <span class="min-w-0 max-w-full break-all font-mono" :title="detail.url">{{ detail.url }}</span>
+        <span class="min-w-0 max-w-full break-all font-mono">{{ detail.url }}</span>
       </div>
     </div>
 
