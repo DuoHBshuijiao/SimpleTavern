@@ -44,7 +44,8 @@ async def stream_mvu_work_log(chat_id: str) -> StreamingResponse:
     async def event_iter() -> AsyncIterator[str]:
         try:
             for entry in catch_up:
-                yield _sse("log_entry", entry.model_dump(mode="json"))
+                # 历史日志只用于面板补齐，不应驱动前端 MVU 运行态动画。
+                yield _sse("log_history", entry.model_dump(mode="json"))
 
             while True:
                 try:
