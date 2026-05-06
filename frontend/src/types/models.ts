@@ -86,6 +86,8 @@ export interface WorldBookAttachment {
 }
 
 export type SessionSystemPromptMode = 'append' | 'override'
+export type MvuMode = 'regex' | 'directive'
+export type ChatMvuMode = MvuMode | null
 export type RegexRuleAction = 'remove' | 'replace' | 'extract' | 'extract_and_replace'
 export type RegexRuleMatchMode = 'global' | 'first'
 export type RegexExtractSource = 'whole_match' | 'capture_group'
@@ -139,6 +141,10 @@ export interface ChatOverrides {
   autoMemorySummaryNextAskTier?: number
   /** MVU Agent 专用模型；空值时回退到全局默认模型 */
   mvuModel?: string | null
+  /** 会话级 MVU 模式覆盖；null 表示继承角色设置 */
+  mvuMode?: ChatMvuMode
+  /** 会话级 MVU 指令覆盖；空值表示无覆盖 */
+  mvuDirective?: string | null
 }
 
 export type AutoReadScope = 'off' | 'assistant_only' | 'user_only' | 'all'
@@ -424,6 +430,8 @@ export interface CharacterCard {
   attachedWorldBookIds?: string[]
   extraFirstMessageEntries?: ExtraFirstMessageEntry[]
   mvuEnabled?: boolean
+  mvuMode?: MvuMode
+  mvuDirective?: string | null
   contentRegexRules?: ChatContentRegexRule[]
   /** 新会话初始状态栏定义：创建会话时自动写入 stateVariables.tables */
   initialStateTables?: StatusTableDef[]
