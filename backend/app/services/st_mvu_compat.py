@@ -171,6 +171,36 @@ def extract_st_mvu_payload(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def extract_st_mvu_import_context(raw: dict[str, Any]) -> dict[str, Any]:
+    """提取导入期 MVU Agent 使用的完整有效上下文，不截断 ST 脚本/世界书正文。"""
+    merged = _merged_st_card_data(raw)
+    extensions = merged.get("extensions") if isinstance(merged.get("extensions"), dict) else {}
+    character_book = merged.get("character_book") if isinstance(merged.get("character_book"), dict) else None
+    return {
+        "format": "sillytavern_character_card",
+        "rawCard": raw,
+        "character": {
+            "name": merged.get("name") or "新角色",
+            "description": merged.get("description") or "",
+            "personality": merged.get("personality") or "",
+            "scenario": merged.get("scenario") or "",
+            "firstMessage": merged.get("first_mes") or merged.get("firstMessage") or "",
+            "alternateGreetings": merged.get("alternate_greetings") if isinstance(merged.get("alternate_greetings"), list) else [],
+            "exampleDialogue": merged.get("mes_example") or merged.get("exampleDialogue") or "",
+            "systemPrompt": merged.get("system_prompt") or merged.get("systemPrompt") or "",
+        },
+        "extensions": extensions,
+        "tavernHelper": _extension_value(merged, "tavern_helper"),
+        "regexScripts": _raw_regex_scripts(_extension_value(merged, "regex_scripts")),
+        "characterBook": character_book,
+        "mvuCandidates": {
+            "characterBookCandidates": _book_candidates(character_book),
+            "hasTavernHelper": bool(_extension_value(merged, "tavern_helper")),
+            "regexScriptCount": len(_raw_regex_scripts(_extension_value(merged, "regex_scripts"))),
+        },
+    }
+
+
 def _default_directive_from_payload(payload: dict[str, Any]) -> str:
     parts = [
         "你是 SimpleTavern 的 MVU 状态维护 Agent。",
@@ -384,7 +414,7 @@ def build_directive_compat_result(payload: dict[str, Any], analyzer: Analyzer | 
         {"title": item.get("title"), "reason": "ST 世界书 MVU 候选"}
         for item in (payload.get("characterBookCandidates") or [])[:_MAX_ITEMS]
     ]
-    warnings = ["L4 暂不生成 regex 模式规则；已保留原 SillyTavern 世界书。"]
+    warnings = ["旧版本地 directive 兼容仅供测试/兜底；正式导入会由 MVU Agent 分析完整 ST 角色卡。"]
     if not tables:
         warnings.append("未提取到明确初始状态表，已仅生成指令模式提示词。")
     return validate_st_mvu_compat_result({
