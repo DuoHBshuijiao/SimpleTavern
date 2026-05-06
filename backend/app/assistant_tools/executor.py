@@ -111,6 +111,8 @@ def _chat_overrides_sse_payload(name: str, ctx: AssistantToolContext, result: di
         "chat_worldbook_attachment_remove",
         "chat_worldbook_attachment_reorder",
         "chat_worldbook_global_exclusion_set",
+        "chat_content_regex_manage",
+        "character_content_regex_manage",
     ):
         return {"chatId": ctx.chat_id}
     return None
