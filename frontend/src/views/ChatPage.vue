@@ -5312,6 +5312,7 @@ const editingPersonaAvatarUrl = computed(() => {
       :streaming-content="assistant.assistantStreamingContent.value"
       :streaming-reasoning="assistant.assistantStreamingReasoning.value"
       :reasoning-stream-phase-active="assistant.assistantReasoningStreamPhaseActive.value"
+      :reasoning-elapsed-sec="assistant.assistantReasoningElapsedSec.value"
       :allow-write-memory="assistant.allowWriteMemoryEnabled.value"
       :allow-destructive-tools="assistant.allowDestructiveToolsEnabled.value"
       :current-model="assistantCurrentModel"
@@ -5812,6 +5813,7 @@ const editingPersonaAvatarUrl = computed(() => {
                 :streaming-content="assistant.workspaceStreamingContent.value"
                 :streaming-reasoning="assistant.workspaceStreamingReasoning.value"
                 :reasoning-stream-phase-active="assistant.workspaceReasoningStreamPhaseActive.value"
+                :reasoning-elapsed-sec="assistant.workspaceReasoningElapsedSec.value"
                 :show-message-actions="false"
               />
             </div>
