@@ -234,6 +234,10 @@ export function useChatActions(deps: ChatActionsDeps) {
     return out
   }
 
+  function normalizeCharacterMvuMode(raw: unknown): CharacterCard['mvuMode'] {
+    return raw === 'directive' ? 'directive' : 'regex'
+  }
+
   function newCard(): CharacterCard {
     const now = new Date().toISOString()
     return {
@@ -252,6 +256,8 @@ export function useChatActions(deps: ChatActionsDeps) {
       attachedWorldBookIds: [],
       extraFirstMessageEntries: [],
       mvuEnabled: false,
+      mvuMode: 'regex',
+      mvuDirective: null,
       contentRegexRules: [],
       initialStateTables: [],
       createdAt: now,
@@ -285,6 +291,8 @@ export function useChatActions(deps: ChatActionsDeps) {
     if (!Array.isArray(copy.contentRegexRules)) copy.contentRegexRules = []
     if (!Array.isArray(copy.initialStateTables)) copy.initialStateTables = []
     if (typeof copy.mvuEnabled !== 'boolean') copy.mvuEnabled = false
+    copy.mvuMode = normalizeCharacterMvuMode(copy.mvuMode)
+    copy.mvuDirective = typeof copy.mvuDirective === 'string' ? copy.mvuDirective : null
     editingCharacter.value = copy
     showCharacterEditor.value = true
   }
@@ -420,6 +428,11 @@ export function useChatActions(deps: ChatActionsDeps) {
         (typeof cardObj.mvuEnabled === 'boolean' ? cardObj.mvuEnabled : undefined)
         ?? current.mvuEnabled
         ?? false,
+      mvuMode: normalizeCharacterMvuMode(cardObj.mvuMode ?? current.mvuMode),
+      mvuDirective:
+        (typeof cardObj.mvuDirective === 'string' ? cardObj.mvuDirective : undefined)
+        ?? current.mvuDirective
+        ?? null,
       contentRegexRules: Array.isArray(cardObj.contentRegexRules)
         ? cardObj.contentRegexRules as CharacterCard['contentRegexRules']
         : (Array.isArray(current.contentRegexRules) ? [...current.contentRegexRules] : []),
