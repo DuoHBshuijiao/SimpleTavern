@@ -1,6 +1,16 @@
 import { useCharactersStore, useChatsStore, useSettingsStore } from '../stores'
 import type { MvuMode } from '../types/models'
 
+export interface SillyTavernMvuCompatResult {
+  mode: MvuMode
+  applied: boolean
+  summary?: string
+  rules?: number
+  warnings?: string[]
+  worldbookMarks?: Array<Record<string, unknown>>
+  confidence?: number
+}
+
 export interface SettingsImportResult {
   ok?: boolean
   imported?: string[]
@@ -35,22 +45,6 @@ export interface SillyTavernPreviewResult {
   preview: SillyTavernImportPreview
 }
 
-export interface SillyTavernConfirmOptions {
-  pendingId: string
-  enableMvuCompatibility: boolean
-  mvuMode: MvuMode
-}
-
-export interface SillyTavernMvuCompatResult {
-  mode: MvuMode
-  applied: boolean
-  summary?: string
-  rules?: number
-  warnings?: string[]
-  worldbookMarks?: Array<Record<string, unknown>>
-  confidence?: number
-}
-
 export interface SillyTavernConfirmResult extends SettingsImportResult {
   character?: unknown
   worldbook?: unknown
@@ -59,6 +53,26 @@ export interface SillyTavernConfirmResult extends SettingsImportResult {
     requestedMode: MvuMode
     detected: SillyTavernMvuPreview
   }
+}
+
+export interface SillyTavernConfirmOptions {
+  pendingId: string
+  enableMvuCompatibility: boolean
+  mvuMode: MvuMode
+}
+
+/** 与 confirm 相同字段 + 可选头像文件名（已由 /api/avatars 保存时使用） */
+export interface SillyTavernMaterializeOptions extends SillyTavernConfirmOptions {
+  avatarFilename?: string | null
+}
+
+export interface SillyTavernMaterializeResult {
+  ok: boolean
+  character: Record<string, unknown>
+  worldbook?: Record<string, unknown> | null
+  warnings?: string[]
+  mvuCompat?: SillyTavernMvuCompatResult
+  mvu?: SillyTavernConfirmResult['mvu']
 }
 
 export function useSettingsImport() {
@@ -98,6 +112,23 @@ export function useSettingsImport() {
     return (await r.json()) as SillyTavernConfirmResult
   }
 
+  async function materializeSillyTavernPending(options: SillyTavernMaterializeOptions): Promise<SillyTavernMaterializeResult> {
+    const r = await fetch('/api/import/sillytavern/materialize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pendingId: options.pendingId,
+        enableMvuCompatibility: options.enableMvuCompatibility,
+        mvuMode: options.mvuMode,
+        avatarFilename: options.avatarFilename ?? null,
+      }),
+    })
+    if (!r.ok) {
+      throw new Error(await r.text())
+    }
+    return (await r.json()) as SillyTavernMaterializeResult
+  }
+
   async function refreshDataAfterImport() {
     await settingsStore.load()
     await charactersStore.loadAll()
@@ -105,6 +136,10 @@ export function useSettingsImport() {
     if (chatsStore.characterId) {
       await chatsStore.loadList(chatsStore.characterId)
     }
+  }
+
+  function normalizeImportNoticeText(text: string): string {
+    return text.replace(/L4\s*暂不生成\s*regex\s*模式规则；?/g, '未生成正文正则规则；')
   }
 
   function formatImportResultMessage(result: SettingsImportResult) {
@@ -115,8 +150,8 @@ export function useSettingsImport() {
     const mvuSummary = compat
       ? `\nMVU 兼容：${compat.mode} / ${compat.applied ? '已应用' : '未应用'}${mvuSummaryText ? `，${mvuSummaryText}` : ''}`
       : ''
-    const warnings = result.warnings?.length ? `\n警告：${result.warnings.join('; ')}` : ''
-    const mvuWarnings = !warnings && compat?.warnings?.length ? `\nMVU 警告：${compat.warnings.join('; ')}` : ''
+    const warnings = result.warnings?.length ? `\n警告：${result.warnings.map(normalizeImportNoticeText).join('; ')}` : ''
+    const mvuWarnings = !warnings && compat?.warnings?.length ? `\nMVU 警告：${compat.warnings.map(normalizeImportNoticeText).join('; ')}` : ''
     return `导入完成：${imported}${mvuSummary}${warnings}${mvuWarnings}`
   }
 
@@ -124,6 +159,7 @@ export function useSettingsImport() {
     importSettingsFile,
     previewSillyTavernImport,
     confirmSillyTavernImport,
+    materializeSillyTavernPending,
     refreshDataAfterImport,
     formatImportResultMessage,
   }
