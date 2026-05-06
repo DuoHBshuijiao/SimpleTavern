@@ -10,6 +10,9 @@ export interface CapsuleItem {
   flashing: boolean
 }
 
+/** SSE catch-up 会连续推送多条 commit/error，尾部防抖合并为一次 GET /state */
+const FETCH_STATE_DEBOUNCE_MS = 100
+
 export const useMvuStore = defineStore('mvu', {
   state: () => ({
     isConnected: false,
@@ -20,6 +23,7 @@ export const useMvuStore = defineStore('mvu', {
     _reconnectDelay: 1000,
     _reconnectTimer: null as ReturnType<typeof setTimeout> | null,
     _activeChatId: null as string | null,
+    _fetchStateTimer: null as ReturnType<typeof setTimeout> | null,
   }),
 
   getters: {
@@ -66,14 +70,14 @@ export const useMvuStore = defineStore('mvu', {
             this.isRunning = true
           } else if (entry.eventType === 'commit' || entry.eventType === 'error') {
             this.isRunning = false
-            this.fetchState(chatId)
+            this._scheduleFetchState(chatId)
           }
         } catch { /* ignore malformed */ }
       })
 
       es.addEventListener('done', () => {
         this.isRunning = false
-        this.fetchState(chatId)
+        this._scheduleFetchState(chatId)
       })
 
       es.addEventListener('error', () => {
@@ -90,6 +94,10 @@ export const useMvuStore = defineStore('mvu', {
     },
 
     disconnect() {
+      if (this._fetchStateTimer) {
+        clearTimeout(this._fetchStateTimer)
+        this._fetchStateTimer = null
+      }
       if (this._reconnectTimer) {
         clearTimeout(this._reconnectTimer)
         this._reconnectTimer = null
@@ -111,6 +119,15 @@ export const useMvuStore = defineStore('mvu', {
           this.stateVariables = data.stateVariables
         }
       } catch { /* ignore network errors */ }
+    },
+
+    _scheduleFetchState(chatId: string) {
+      if (this._fetchStateTimer) clearTimeout(this._fetchStateTimer)
+      this._fetchStateTimer = setTimeout(() => {
+        this._fetchStateTimer = null
+        if (this._activeChatId !== chatId) return
+        void this.fetchState(chatId)
+      }, FETCH_STATE_DEBOUNCE_MS)
     },
 
     _scheduleReconnect(chatId: string) {
