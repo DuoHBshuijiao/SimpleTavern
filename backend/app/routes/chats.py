@@ -317,6 +317,10 @@ def _merge_overrides(existing: Chat, incoming: UpdateChatRequest) -> None:
         existing.overrides.autoMemorySummaryNextAskTier = ov.autoMemorySummaryNextAskTier
     if "mvuModel" in ov.model_fields_set:
         existing.overrides.mvuModel = ov.mvuModel
+    if "mvuMode" in ov.model_fields_set:
+        existing.overrides.mvuMode = ov.mvuMode
+    if "mvuDirective" in ov.model_fields_set:
+        existing.overrides.mvuDirective = ov.mvuDirective
 
     for key in ("model", "temperature", "top_p", "max_tokens", "context_size"):
         val = getattr(ov.params, key, None)
@@ -454,6 +458,8 @@ def create_chat(req: CreateChatRequest) -> Chat:
         try:
             character = load_character(req.characterId)
             chat.overrides.contentRegexRules = _copy_content_regex_rules(getattr(character, "contentRegexRules", None) or [])
+            chat.overrides.mvuMode = getattr(character, "mvuMode", "regex")
+            chat.overrides.mvuDirective = getattr(character, "mvuDirective", None)
 
             # 从角色卡初始状态栏定义写入会话 stateVariables
             initial_tables = list(getattr(character, "initialStateTables", None) or [])
@@ -487,6 +493,7 @@ def create_chat(req: CreateChatRequest) -> Chat:
     else:
         member_rules: list[tuple[str, list[ChatContentRegexRule]]] = []
         any_mvu_enabled = False
+        # L1 阶段群聊只归并正文正则，不继承/合并角色指令模式。
         for mid in chat.memberIds:
             try:
                 card = load_character(mid)
