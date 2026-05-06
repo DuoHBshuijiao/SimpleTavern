@@ -394,6 +394,10 @@ class Settings(BaseModel):
     ttsAudioCacheLimitMb: int = Field(default=200, ge=10, le=10000)
     worldBookEntryScanDepthDefault: int = 2
     contentRegexRuleLibrary: list["ChatContentRegexRule"] = Field(default_factory=list)
+    mvuModel: str | None = Field(
+        default=None,
+        description="全局 MVU Agent / 导入期 MVU Agent 专用模型名；空值时回退 llm.defaultModel 与 modelCandidates",
+    )
     createdAt: str = Field(default_factory=_now_iso)
     updatedAt: str = Field(default_factory=_now_iso)
 
@@ -875,7 +879,7 @@ class ChatOverrides(BaseModel):
     )
     mvuModel: str | None = Field(
         default=None,
-        description="MVU Agent 专用模型；空值时回退到 settings.llm.defaultModel",
+        description="已废弃：MVU 模型改由全局 settings.mvuModel 配置，读档时可能仍存在旧键",
     )
     mvuMode: MvuMode | None = Field(default=None, description="会话级 MVU 模式；空值时由上游默认策略决定")
     mvuDirective: str | None = Field(default=None, description="会话级 MVU 指令模式提示词；空白归一为空值")
