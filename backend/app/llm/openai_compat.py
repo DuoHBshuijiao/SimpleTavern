@@ -133,12 +133,17 @@ def _chat_completions_url(base_url: str) -> str:
     否则在规范化 base 后拼接 /chat/completions。
     """
     raw = base_url.strip()
-    if raw and not (raw.startswith("http://") or raw.startswith("https://")):
+    if not raw:
+        raise ValueError(
+            "API 基础地址未配置或为空。请在全局设置中填写「默认 API 基础地址」，"
+            "或确保至少有一个 API 预设填写了 Base URL。"
+        )
+    if not (raw.startswith("http://") or raw.startswith("https://")):
         raw = "https://" + raw
     raw = raw.rstrip("/")
     if _CHAT_COMPLETIONS_SUFFIX in raw.lower():
         return raw
-    return _normalize_base_url(base_url) + _CHAT_COMPLETIONS_SUFFIX
+    return _normalize_base_url(raw) + _CHAT_COMPLETIONS_SUFFIX
 
 
 def _models_url(base_url: str) -> str:
@@ -147,7 +152,12 @@ def _models_url(base_url: str) -> str:
     若用户填入的 base_url 已包含 /chat/completions，则先去掉该部分得到 base，再拼接 /models。
     """
     raw = base_url.strip()
-    if raw and not (raw.startswith("http://") or raw.startswith("https://")):
+    if not raw:
+        raise ValueError(
+            "API 基础地址未配置或为空。请在全局设置中填写「默认 API 基础地址」，"
+            "或确保至少有一个 API 预设填写了 Base URL。"
+        )
+    if not (raw.startswith("http://") or raw.startswith("https://")):
         raw = "https://" + raw
     raw = raw.rstrip("/")
     lower = raw.lower()
@@ -155,7 +165,7 @@ def _models_url(base_url: str) -> str:
         idx = lower.rfind(_CHAT_COMPLETIONS_SUFFIX)
         base_for_models = raw[:idx].rstrip("/")
         return _normalize_base_url(base_for_models) + "/models"
-    return _normalize_base_url(base_url) + "/models"
+    return _normalize_base_url(raw) + "/models"
 
 
 # OpenRouter 等平台用于展示来源的请求头（可选，便于在 openrouter.ai 等站点被识别）
