@@ -2312,6 +2312,7 @@ const assistantCurrentModel = computed(() => {
  */
 async function handleModelSelect(option: any) {
   if (!chats.activeChat) return
+  await flushPendingGreetingVersion()
   const overrides = { ...chats.activeChat.overrides }
   overrides.params = { ...overrides.params, model: option.value }
   
@@ -5260,15 +5261,16 @@ const editingPersonaAvatarUrl = computed(() => {
           </header>
 
           <!-- 消息列表：MVU 状态条叠在列表与输入区交界处（贴底），正文滚动从其下方穿过 -->
-          <div class="relative flex min-h-0 min-w-0 flex-1 flex-col">
+          <div class="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-visible">
             <div
               v-if="mvuStore.capsuleData.length > 0"
-              class="pointer-events-none absolute inset-x-0 bottom-0 z-30"
+              class="pointer-events-none absolute inset-x-0 bottom-0 z-30 overflow-visible"
             >
               <div class="pointer-events-auto mx-auto w-full max-w-4xl px-4">
                 <StateVariablesBar
                   :capsules="mvuStore.capsuleData"
                   :is-running="mvuStore.isRunning"
+                  :chat-id="activeChat.id"
                   @toggle-panel="mvuPanelOpen = !mvuPanelOpen"
                 />
               </div>
