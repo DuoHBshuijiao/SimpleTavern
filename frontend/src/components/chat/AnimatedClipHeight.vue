@@ -208,6 +208,7 @@ function sync() {
     frame.style.transition = ''
     lastW = target.width
     lastH = frameH
+    scheduleSettledCheck()
     return
   }
   if (firstSync) {
@@ -220,6 +221,7 @@ function sync() {
     frame.style.height = `${frameH}px`
     requestAnimationFrame(() => {
       frame.style.transition = ''
+      scheduleSettledCheck()
     })
     return
   }
