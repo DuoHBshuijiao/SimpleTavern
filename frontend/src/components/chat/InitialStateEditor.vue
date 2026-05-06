@@ -34,10 +34,10 @@
           class="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--color-brand-a15)] text-[var(--color-brand)]"
         >
           <input
-            v-model="table.columns[ci]"
             class="bg-transparent border-none outline-none text-[10px] w-[60px] text-[var(--color-brand)]"
             placeholder="列名"
-            @input="emitUpdate"
+            :value="table.columns[ci]"
+            @input="onColumnNameInput(ti, ci, $event)"
           />
           <button type="button" class="hover:text-red-400 shrink-0 leading-none" @click="removeColumn(ti, ci)">&times;</button>
         </span>
@@ -49,8 +49,8 @@
             <tr>
               <th class="text-left p-1.5 text-[var(--color-text-muted)] font-medium border-b border-[var(--color-border-subtle)] w-[80px]">字段</th>
               <th
-                v-for="col in table.columns"
-                :key="col"
+                v-for="(col, hci) in table.columns"
+                :key="hci"
                 class="text-left p-1.5 text-[var(--color-text-muted)] font-medium border-b border-[var(--color-border-subtle)]"
               >{{ col }}</th>
               <th class="w-6 border-b border-[var(--color-border-subtle)]" />
@@ -66,11 +66,12 @@
                   @input="emitUpdate"
                 />
               </td>
-              <td v-for="col in table.columns" :key="col" class="p-1 border-b border-[var(--color-border-subtle)]">
+              <td v-for="(col, hci) in table.columns" :key="hci" class="p-1 border-b border-[var(--color-border-subtle)]">
                 <input
                   v-model="row.cells[col]"
                   class="input text-xs py-0.5 px-1 w-full min-w-[60px]"
                   :placeholder="col"
+                  @input="emitUpdate"
                 />
               </td>
               <td class="p-1 border-b border-[var(--color-border-subtle)]">
@@ -125,6 +126,30 @@ watch(() => props.tables, (val) => {
 
 function emitUpdate() {
   emit('update:tables', JSON.parse(JSON.stringify(localTables)))
+}
+
+/** 列名变更时同步迁移每行 cells 的键，避免 v-model 只改 columns 导致数据挂在旧键上 */
+function onColumnNameInput(ti: number, ci: number, e: Event) {
+  const el = e.target
+  if (!(el instanceof HTMLInputElement)) return
+  const newName = el.value
+  const table = localTables[ti]!
+  const oldName = table.columns[ci] ?? ''
+  if (oldName === newName) {
+    emitUpdate()
+    return
+  }
+  table.columns[ci] = newName
+  if (oldName !== '') {
+    for (const r of table.rows) {
+      if (Object.prototype.hasOwnProperty.call(r.cells, oldName)) {
+        const v = r.cells[oldName]!
+        delete r.cells[oldName]
+        r.cells[newName] = v
+      }
+    }
+  }
+  emitUpdate()
 }
 
 function addTable() {
