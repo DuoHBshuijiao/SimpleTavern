@@ -57,6 +57,7 @@ from app.services.assistant_agent import (
 )
 from app.services.user_message_content import build_user_message_content
 from app.schemas import (
+    AssistantAppendRole,
     build_reasoning_request_config,
     filter_reasoning_extra_body_for_upstream,
     AssistantAttachment,
@@ -66,7 +67,6 @@ from app.schemas import (
     Chat,
     CharacterCard,
     ChatMessage,
-    MainChatRole,
     UpdateMessageRequest,
 )
 from app.storage import (
@@ -220,6 +220,12 @@ def _assistant_messages_to_openai(messages: list[ChatMessage]) -> list[dict[str,
     out: list[dict[str, Any]] = []
     _LEGACY_TOOL_TRACE_MAX = 2000
     for m in messages:
+        if m.role == "reasoning":
+            rc = (m.content or "").strip()
+            if rc:
+                out.append({"role": "assistant", "content": "", "reasoning_content": rc})
+            continue
+
         if m.role == "tool":
             tid = (getattr(m, "tool_call_id", None) or "").strip()
             if tid:
@@ -646,7 +652,8 @@ def get_assistant_chat(
 
 class AppendAssistantMessageRequest(BaseModel):
     """追加助手消息请求"""
-    role: MainChatRole = "assistant"
+
+    role: AssistantAppendRole = "assistant"
     content: str = ""
     reasoningContent: str | None = None
     reasoningDurationSec: float | None = None
@@ -662,14 +669,23 @@ def append_assistant_message(
     向助手聊天追加一条消息（用于流式中断时保存截断内容）。
     """
     chat = _resolve_assistant_chat_by_scope(scope, chatId)
-    chat.messages.append(
-        ChatMessage(
-            role=req.role,
-            content=req.content,
-            reasoningContent=req.reasoningContent,
-            reasoningDurationSec=req.reasoningDurationSec,
+    if req.role == "reasoning":
+        chat.messages.append(
+            ChatMessage(
+                role="reasoning",
+                content=req.content or "",
+                reasoningDurationSec=req.reasoningDurationSec,
+            )
         )
-    )
+    else:
+        chat.messages.append(
+            ChatMessage(
+                role=req.role,
+                content=req.content,
+                reasoningContent=req.reasoningContent,
+                reasoningDurationSec=req.reasoningDurationSec,
+            )
+        )
     return _save_assistant_chat_by_scope(scope, chatId, chat)
 
 
