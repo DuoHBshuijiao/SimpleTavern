@@ -79,8 +79,10 @@ const props = defineProps<{
   streamingContent?: string
   /** 当前正在流式接收的思考内容 */
   streamingReasoning?: string
-  /** 是否仍处于思考流式阶段（首条正文 delta 前为 true；与 useAssistant 对齐） */
+  /** 是否仍处于思考流式阶段（首条正文 delta 前为 true；工具后轮次会再次为 true） */
   reasoningStreamPhaseActive: boolean
+  /** 当前思考段流式已用秒数（overlay 展示「已思考 x.x 秒」） */
+  reasoningElapsedSec?: number | null
   /** 是否显示记忆写入 / 破坏性工具开关（仅聊天作用域） */
   showToolPermissionToggles?: boolean
   allowWriteMemory?: boolean
@@ -362,6 +364,7 @@ watch(
         :streaming-content="streamingContent"
         :streaming-reasoning="streamingReasoning"
         :reasoning-stream-phase-active="reasoningStreamPhaseActive"
+        :reasoning-elapsed-sec="reasoningElapsedSec ?? null"
         @edit-message="emit('edit-message', $event)"
         @delete-message="emit('delete-message', $event)"
         @rewrite-message="emit('rewrite-message', $event)"
