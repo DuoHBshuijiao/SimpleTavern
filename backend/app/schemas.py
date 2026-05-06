@@ -540,6 +540,7 @@ RegexAction = Literal["remove", "replace", "extract", "extract_and_replace"]
 RegexMatchMode = Literal["global", "first"]
 RegexExtractSource = Literal["whole_match", "capture_group"]
 
+MvuMode = Literal["regex", "directive"]
 MvuStateSource = Literal["mvu_agent", "chat_assistant"]
 MvuWorkLogEventType = Literal["triggered", "planning", "tool_call", "commit", "error"]
 
@@ -614,6 +615,8 @@ class CharacterCard(BaseModel):
     attachedWorldBookIds: list[str] = Field(default_factory=list)
     extraFirstMessageEntries: list[ExtraFirstMessageEntry] = Field(default_factory=list)
     mvuEnabled: bool = False
+    mvuMode: MvuMode = "regex"
+    mvuDirective: str | None = None
     contentRegexRules: list[ChatContentRegexRule] = Field(default_factory=list)
     initialStateTables: list[StatusTableDef] = Field(
         default_factory=list,
@@ -621,6 +624,13 @@ class CharacterCard(BaseModel):
     )
     createdAt: str = Field(default_factory=_now_iso)
     updatedAt: str = Field(default_factory=_now_iso)
+
+    @model_validator(mode="after")
+    def _normalize_mvu_directive(self):
+        if self.mvuDirective is not None:
+            directive = self.mvuDirective.strip()
+            self.mvuDirective = directive or None
+        return self
 
 
 class WorldBookEntry(BaseModel):
@@ -867,6 +877,8 @@ class ChatOverrides(BaseModel):
         default=None,
         description="MVU Agent 专用模型；空值时回退到 settings.llm.defaultModel",
     )
+    mvuMode: MvuMode | None = Field(default=None, description="会话级 MVU 模式；空值时由上游默认策略决定")
+    mvuDirective: str | None = Field(default=None, description="会话级 MVU 指令模式提示词；空白归一为空值")
 
     @model_validator(mode="after")
     def _sync_worldbook_attachments(self):
@@ -879,6 +891,9 @@ class ChatOverrides(BaseModel):
             ]
         if self.worldBookAttachments:
             self.worldBookIds = [a.worldBookId for a in self.worldBookAttachments]
+        if self.mvuDirective is not None:
+            directive = self.mvuDirective.strip()
+            self.mvuDirective = directive or None
         return self
 
 
