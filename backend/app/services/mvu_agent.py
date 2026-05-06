@@ -3,7 +3,7 @@
 与 AssistantAgentService（交互式、用户消息驱动）职责隔离：
 - MVU agent 由系统事件触发（生成完成 / 队列堆积），无用户消息
 - 非流式 LLM 调用（后台无观众），仅产出 work log entry 事件
-- 工具集限定为 5 个 MVU 域工具，不含 workspace/chat/worldbook
+- 工具集限定为 MVU 域与正文正则 CRUD 工具，不含 workspace/chat/worldbook
 """
 
 from __future__ import annotations
@@ -29,6 +29,8 @@ _MVU_TOOL_NAMES = {
     "mvu_set_cell",
     "mvu_get_chat_context",
     "read_mvu_logs",
+    "chat_content_regex_manage",
+    "character_content_regex_manage",
 }
 
 
@@ -62,6 +64,9 @@ class MvuAgentJob:
     queue_items: list[dict[str, str]]
     queue_text: str
     context_markdown: str
+    mode: Literal["regex", "directive"] = "regex"
+    directive: str | None = None
+    context_window_count: int = 10
 
 
 @dataclass(frozen=True)
@@ -132,15 +137,35 @@ class MvuAgentService:
             asyncio.ensure_future(_push(MvuAgentEvent("log_entry", entry.model_dump(mode="json"))))
             return entry
 
-        _log("triggered", f"队列 {len(job.queue_items)} 条待消费")
+        if job.mode == "directive":
+            _log("triggered", "指令模式：根据生成完成信号维护状态", {
+                "mode": job.mode,
+                "contextWindowCount": job.context_window_count,
+            })
+        else:
+            _log("triggered", f"队列 {len(job.queue_items)} 条待消费", {
+                "mode": job.mode,
+                "queueConsumed": len(job.queue_items),
+            })
 
         tool_ctx = self._tool_ctx(job.chat_id)
 
-        context_block = (
-            f"## 当前状态\n{job.state_markdown}\n\n"
-            f"## 提取队列\n{job.queue_text}\n\n"
-            f"## 最近对话\n{job.context_markdown}"
-        )
+        if job.mode == "directive":
+            directive = (job.directive or "").strip() or "（未配置指令；仅根据最近对话中明确的数据变化维护状态）"
+            context_block = (
+                "## 模式\n"
+                "directive：无正则队列，依据数据变更指令和最近对话维护状态。\n\n"
+                f"## 数据变更指令\n{directive}\n\n"
+                f"## 当前状态\n{job.state_markdown}\n\n"
+                f"## 最近 {job.context_window_count} 条对话\n{job.context_markdown}"
+            )
+        else:
+            context_block = (
+                f"## 模式\nregex：根据提取队列维护状态。\n\n"
+                f"## 当前状态\n{job.state_markdown}\n\n"
+                f"## 提取队列\n{job.queue_text}\n\n"
+                f"## 最近对话\n{job.context_markdown}"
+            )
         current_messages: list[dict[str, Any]] = [
             {"role": "system", "content": job.system_prompt},
             {"role": "user", "content": f"请根据以下上下文维护状态变量：\n\n{context_block}"},
@@ -175,6 +200,7 @@ class MvuAgentService:
                     done_evt = MvuAgentEvent("done", {
                         "ok": True,
                         "chatId": job.chat_id,
+                        "mode": job.mode,
                         "queueConsumed": len(job.queue_items),
                     })
                     events.append(done_evt)
