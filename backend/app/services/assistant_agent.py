@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Callable, Literal
 from uuid import uuid4
@@ -158,10 +159,19 @@ class AssistantAgentService:
                 current_messages.append(llm_assistant_msg)
 
                 if not tool_calls_raw:
+                    rc_strip = (resp.reasoning_content or "").strip()
+                    if rc_strip:
+                        self._append_message(
+                            ChatMessage(
+                                role="reasoning",
+                                content=rc_strip,
+                                reasoningDurationSec=None,
+                            )
+                        )
                     assistant_msg = ChatMessage(
                         role=resp.role or "assistant",
                         content=resp.content or "",
-                        reasoningContent=resp.reasoning_content or None,
+                        reasoningContent=None,
                     )
                     self._append_message(assistant_msg)
                     return AssistantAgentRunResult(
@@ -175,12 +185,21 @@ class AssistantAgentService:
                         chat_overrides_updated=co_updates,
                     )
 
+                rc_strip = (resp.reasoning_content or "").strip()
+                if rc_strip:
+                    self._append_message(
+                        ChatMessage(
+                            role="reasoning",
+                            content=rc_strip,
+                            reasoningDurationSec=None,
+                        )
+                    )
                 self._append_message(
                     ChatMessage(
                         role=resp.role or "assistant",
                         content=resp.content or "",
                         tool_calls=list(tool_calls_for_llm or []),
-                        reasoningContent=resp.reasoning_content or None,
+                        reasoningContent=None,
                     )
                 )
                 executed, _ = self._execute_tool_calls(
@@ -219,6 +238,8 @@ class AssistantAgentService:
             tool_calls_from_stream: list[dict[str, Any]] | None = None
             normalized_stream: list[dict[str, Any]] = []
 
+            reasoning_phase_started: float | None = None
+            reasoning_phase_end: float | None = None
             try:
                 async for chunk in stream_chat_completions(
                     base_url=self._ctx.base_url,
@@ -230,9 +251,13 @@ class AssistantAgentService:
                     extra_body=self._ctx.extra_body,
                 ):
                     if chunk.kind == "reasoning":
+                        if reasoning_phase_started is None:
+                            reasoning_phase_started = time.monotonic()
                         final_reasoning_content += chunk.text
                         yield AssistantAgentEvent("reasoning", {"text": chunk.text})
                     elif chunk.kind == "content":
+                        if reasoning_phase_started is not None and reasoning_phase_end is None:
+                            reasoning_phase_end = time.monotonic()
                         final_content += chunk.text
                         yield AssistantAgentEvent("delta", {"text": chunk.text})
                     elif chunk.kind == "finish":
@@ -240,6 +265,11 @@ class AssistantAgentService:
             except Exception as exc:
                 yield AssistantAgentEvent("error", {"message": str(exc)})
                 return
+
+            reasoning_duration_sec: float | None = None
+            if reasoning_phase_started is not None:
+                end_mono = reasoning_phase_end if reasoning_phase_end is not None else time.monotonic()
+                reasoning_duration_sec = round(end_mono - reasoning_phase_started, 3)
 
             if final_reasoning_content:
                 llm_assistant_msg["reasoning_content"] = final_reasoning_content
@@ -249,11 +279,21 @@ class AssistantAgentService:
                 llm_assistant_msg["tool_calls"] = normalized_stream
             current_messages.append(llm_assistant_msg)
 
+            frc_strip = final_reasoning_content.strip()
+            if frc_strip:
+                self._append_message(
+                    ChatMessage(
+                        role="reasoning",
+                        content=frc_strip,
+                        reasoningDurationSec=reasoning_duration_sec,
+                    )
+                )
+
             if not tool_calls_from_stream:
                 assistant_msg = ChatMessage(
                     role="assistant",
                     content=final_content,
-                    reasoningContent=final_reasoning_content or None,
+                    reasoningContent=None,
                 )
                 self._append_message(assistant_msg)
                 yield AssistantAgentEvent("done", {"ok": True, "messageId": assistant_msg.id})
@@ -264,7 +304,7 @@ class AssistantAgentService:
                     role="assistant",
                     content=final_content or "",
                     tool_calls=list(normalized_stream),
-                    reasoningContent=final_reasoning_content or None,
+                    reasoningContent=None,
                 )
             )
 
