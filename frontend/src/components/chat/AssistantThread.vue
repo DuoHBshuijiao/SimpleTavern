@@ -18,14 +18,17 @@ const props = withDefaults(defineProps<{
   reasoningBlocks?: Array<{ messageId: string; content: string }>
   streamingContent?: string
   streamingReasoning?: string
-  /** 首条正文 delta 前为 true；与 useAssistant reasoning*StreamPhaseActive 对齐 */
+  /** 是否仍处于思考流式阶段（首条正文 delta 前为 true；工具后轮次会再次为 true） */
   reasoningStreamPhaseActive: boolean
+  /** 当前思考段流式已用秒数（一位小数），供 overlay ReasoningBubble duration */
+  reasoningElapsedSec?: number | null
   showMessageActions?: boolean
   attachmentScope?: 'chat' | 'workspace'
   chatId?: string | null
 }>(), {
   showMessageActions: true,
   attachmentScope: 'chat',
+  reasoningElapsedSec: null,
 })
 
 const emit = defineEmits<{
@@ -386,7 +389,7 @@ onBeforeUnmount(() => {
         data-chat-bubble-column
       >
         <ReasoningBubble
-          class="w-full max-w-full"
+          class="mb-2"
           :content="message.content"
           :is-streaming="false"
           :duration-sec="typeof message.reasoningDurationSec === 'number' ? message.reasoningDurationSec : null"
@@ -430,7 +433,7 @@ onBeforeUnmount(() => {
       >
       <ReasoningBubble
         v-if="message.role === 'assistant' && getPersistedReasoningForAssistant(message)"
-        class="w-full max-w-full"
+        class="mb-2"
         :content="getPersistedReasoningForAssistant(message) || ''"
         :is-streaming="false"
         :duration-sec="typeof message.reasoningDurationSec === 'number' ? message.reasoningDurationSec : null"
@@ -581,10 +584,14 @@ onBeforeUnmount(() => {
   >
     <ReasoningBubble
       v-if="(streamingReasoning ?? '').trim()"
-      class="w-full max-w-full"
+      class="mb-2"
       :content="(streamingReasoning ?? '').trim()"
       :is-streaming="reasoningStreamPhaseActive"
-      :duration-sec="null"
+      :duration-sec="
+        typeof reasoningElapsedSec === 'number' && Number.isFinite(reasoningElapsedSec)
+          ? reasoningElapsedSec
+          : null
+      "
       :expanded="isReasoningExpanded(STREAMING_REASONING_ID)"
       @update:expanded="(v) => (expandedReasoningMessageId = v ? STREAMING_REASONING_ID : null)"
     />
