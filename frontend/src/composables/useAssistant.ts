@@ -133,10 +133,14 @@ export function useAssistant(options: UseAssistantOptions) {
   const workspaceAssistantStreamError = ref<string | null>(null)
   const workspaceStreamingContent = ref('')
   const workspaceStreamingReasoning = ref('')
-  /** 首条正文 delta 前为 true（chat 作用域，供 ReasoningBubble 流式态） */
+  /** 首条正文 delta 前为 true（chat 作用域，供 ReasoningBubble 流式态）；工具后轮次 reasoning 会再次置 true */
   const assistantReasoningStreamPhaseActive = ref(false)
-  /** 首条正文 delta 前为 true（workspace 作用域） */
+  /** workspace 作用域：同上 */
   const workspaceReasoningStreamPhaseActive = ref(false)
+  /** 聊天助手：当前思考段已用秒数（流式 overlay，一位小数） */
+  const assistantReasoningElapsedSec = ref<number | null>(null)
+  /** 工作区助手：同上 */
+  const workspaceReasoningElapsedSec = ref<number | null>(null)
 
   // 公共状态
   const showAssistantSettings = ref(false)
@@ -374,22 +378,27 @@ export function useAssistant(options: UseAssistantOptions) {
           m.role === 'user' ||
           m.role === 'assistant' ||
           m.role === 'system' ||
-          m.role === 'tool',
+          m.role === 'tool' ||
+          m.role === 'reasoning',
       )
       .map((m, idx: number) => {
         const rc =
           typeof (m as { reasoningContent?: unknown }).reasoningContent === 'string'
             ? (m as { reasoningContent: string }).reasoningContent
             : null
+        const rds = (m as { reasoningDurationSec?: unknown }).reasoningDurationSec
+        const reasoningDurationSec =
+          typeof rds === 'number' && Number.isFinite(rds) ? rds : undefined
         return {
           id: m.id ?? `assistant_msg_${Date.now()}_${idx}`,
-          role: m.role as 'user' | 'assistant' | 'system' | 'tool',
+          role: m.role as AssistantMessage['role'],
           content: m.content ?? '',
           ts: m.ts ?? new Date().toISOString(),
           attachments: Array.isArray((m as { attachments?: unknown }).attachments)
             ? ((m as { attachments: AssistantAttachment[] }).attachments)
             : undefined,
           reasoningContent: rc && rc.trim() ? rc : undefined,
+          reasoningDurationSec,
           tool_call_id:
             typeof (m as { tool_call_id?: unknown }).tool_call_id === 'string'
               ? (m as { tool_call_id: string }).tool_call_id
@@ -433,15 +442,23 @@ export function useAssistant(options: UseAssistantOptions) {
     })
   }
 
-  function pushReasoningSegment(state: ReturnType<typeof getState>, text: string, seq: number) {
+  function pushReasoningSegment(
+    state: ReturnType<typeof getState>,
+    text: string,
+    seq: number,
+    durationSec?: number | null,
+  ) {
     const trimmed = text.trim()
     if (!trimmed) return
     const now = new Date().toISOString()
+    const reasoningDurationSec =
+      typeof durationSec === 'number' && Number.isFinite(durationSec) ? durationSec : undefined
     state.messages.value.push({
       id: `assistant_reasoning_${Date.now()}_${seq}`,
       role: 'reasoning',
       content: trimmed,
       ts: now,
+      ...(reasoningDurationSec !== undefined ? { reasoningDurationSec } : {}),
     })
   }
 
@@ -733,12 +750,6 @@ export function useAssistant(options: UseAssistantOptions) {
    * @returns {Promise<void>} 完成时返回
    */
   async function deleteMessage(m: AssistantMessage, scope: AssistantScope) {
-    if (m.role === 'reasoning') {
-      const state = getState(scope)
-      const idx = state.messages.value.findIndex((msg) => msg.id === m.id)
-      if (idx >= 0) state.messages.value.splice(idx, 1)
-      return
-    }
     try {
       await apiDelete(buildPath(`/api/assistant/chat/messages/${m.id}`, scope))
       await loadChat(scope)
@@ -834,8 +845,10 @@ export function useAssistant(options: UseAssistantOptions) {
     state.isGenerating.value = true
     if (scope === 'workspace') {
       workspaceReasoningStreamPhaseActive.value = true
+      workspaceReasoningElapsedSec.value = null
     } else {
       assistantReasoningStreamPhaseActive.value = true
+      assistantReasoningElapsedSec.value = null
     }
     assistantAborters[scope]?.abort()
     assistantAborters[scope] = new AbortController()
@@ -869,14 +882,28 @@ export function useAssistant(options: UseAssistantOptions) {
     let needsFlushBeforeTool = true
     let afterToolTrace = false
     let segmentSeq = 0
+    let reasoningPhaseStartedAtMs: number | null = null
+
+    function reasoningElapsedNow(): number | null {
+      if (reasoningPhaseStartedAtMs === null) return null
+      return Math.round((Date.now() - reasoningPhaseStartedAtMs) / 100) / 10
+    }
+
+    function touchReasoningElapsedRef() {
+      const sec = reasoningElapsedNow()
+      if (sec === null) return
+      if (scope === 'workspace') workspaceReasoningElapsedSec.value = sec
+      else assistantReasoningElapsedSec.value = sec
+    }
 
     function flushSegmentBeforeToolsIfNeeded() {
       state.streamingReasoning.value = ''
       state.streamingContent.value = ''
       if (!needsFlushBeforeTool) return
       if (reasoningBuffer.trim()) {
-        pushReasoningSegment(state, reasoningBuffer, segmentSeq++)
+        pushReasoningSegment(state, reasoningBuffer, segmentSeq++, reasoningElapsedNow())
         reasoningBuffer = ''
+        reasoningPhaseStartedAtMs = null
       }
       if (deltaBuffer.trim()) {
         pushAssistantSegment(state, deltaBuffer, segmentSeq++)
@@ -906,6 +933,10 @@ export function useAssistant(options: UseAssistantOptions) {
           body,
           (evt) => {
             if (evt.event === 'delta') {
+              if (reasoningPhaseStartedAtMs !== null) {
+                touchReasoningElapsedRef()
+              }
+              reasoningPhaseStartedAtMs = null
               if (scope === 'workspace') {
                 workspaceReasoningStreamPhaseActive.value = false
               } else {
@@ -924,13 +955,22 @@ export function useAssistant(options: UseAssistantOptions) {
             } else if (evt.event === 'reasoning') {
               const data = evt.data as { text?: string } | undefined
               const t = data?.text
-              if (typeof t === 'string') {
+              if (typeof t === 'string' && t.length > 0) {
                 if (afterToolTrace) {
                   needsFlushBeforeTool = true
                   afterToolTrace = false
                 }
+                if (reasoningPhaseStartedAtMs === null) {
+                  reasoningPhaseStartedAtMs = Date.now()
+                }
+                if (scope === 'workspace') {
+                  workspaceReasoningStreamPhaseActive.value = true
+                } else {
+                  assistantReasoningStreamPhaseActive.value = true
+                }
                 reasoningBuffer += t
                 state.streamingReasoning.value += t
+                touchReasoningElapsedRef()
               }
             } else if (evt.event === 'done') {
               if (scope === 'workspace') {
@@ -938,16 +978,13 @@ export function useAssistant(options: UseAssistantOptions) {
               } else {
                 assistantReasoningStreamPhaseActive.value = false
               }
+              if (scope === 'workspace') workspaceReasoningElapsedSec.value = null
+              else assistantReasoningElapsedSec.value = null
               state.streamingContent.value = ''
               state.streamingReasoning.value = ''
-              if (reasoningBuffer.trim()) {
-                pushReasoningSegment(state, reasoningBuffer, segmentSeq++)
-                reasoningBuffer = ''
-              }
-              if (deltaBuffer.trim()) {
-                pushAssistantSegment(state, deltaBuffer, segmentSeq++)
-                deltaBuffer = ''
-              }
+              reasoningBuffer = ''
+              deltaBuffer = ''
+              reasoningPhaseStartedAtMs = null
               const data = evt.data as { messageId?: string } | undefined
               const serverMessageId = data?.messageId
               if (typeof serverMessageId === 'string' && serverMessageId.trim()) {
@@ -995,9 +1032,12 @@ export function useAssistant(options: UseAssistantOptions) {
             } else if (evt.event === 'error') {
               if (scope === 'workspace') {
                 workspaceReasoningStreamPhaseActive.value = false
+                workspaceReasoningElapsedSec.value = null
               } else {
                 assistantReasoningStreamPhaseActive.value = false
+                assistantReasoningElapsedSec.value = null
               }
+              reasoningPhaseStartedAtMs = null
               const data = evt.data as { message?: string } | undefined
               state.streamError.value = String(data?.message ?? 'unknown error')
             }
@@ -1078,8 +1118,10 @@ export function useAssistant(options: UseAssistantOptions) {
         (state.streamingReasoning.value ?? '').trim() !== '' || (state.streamingContent.value ?? '').trim() !== ''
       if (scope === 'workspace') {
         workspaceReasoningStreamPhaseActive.value = false
+        workspaceReasoningElapsedSec.value = null
       } else {
         assistantReasoningStreamPhaseActive.value = false
+        assistantReasoningElapsedSec.value = null
       }
       if (aborted || hadStreamingSurface) {
         await nextTick()
@@ -1105,13 +1147,24 @@ export function useAssistant(options: UseAssistantOptions) {
           }
         }
         const merged = parts.join('\n\n')
+        const abortReasoningSec = reasoningElapsedNow()
         if (merged.trim() || reasoningPersist) {
           try {
-            await apiPost(buildPath('/api/assistant/chat/messages', scope), {
-              role: 'assistant',
-              content: merged,
-              ...(reasoningPersist ? { reasoningContent: reasoningPersist } : {}),
-            })
+            if (reasoningPersist) {
+              await apiPost(buildPath('/api/assistant/chat/messages', scope), {
+                role: 'reasoning',
+                content: reasoningPersist,
+                ...(typeof abortReasoningSec === 'number' && Number.isFinite(abortReasoningSec)
+                  ? { reasoningDurationSec: abortReasoningSec }
+                  : {}),
+              })
+            }
+            if (merged.trim()) {
+              await apiPost(buildPath('/api/assistant/chat/messages', scope), {
+                role: 'assistant',
+                content: merged,
+              })
+            }
           } catch (_) {
             // 持久化失败时仍重新加载，避免本地与服务器不一致
           }
@@ -1161,6 +1214,7 @@ export function useAssistant(options: UseAssistantOptions) {
     assistantStreamingContent,
     assistantStreamingReasoning,
     assistantReasoningStreamPhaseActive,
+    assistantReasoningElapsedSec,
 
     // Workspace scope 状态
     workspaceAssistantMessages,
@@ -1172,6 +1226,7 @@ export function useAssistant(options: UseAssistantOptions) {
     workspaceStreamingContent,
     workspaceStreamingReasoning,
     workspaceReasoningStreamPhaseActive,
+    workspaceReasoningElapsedSec,
 
     // 公共状态
     showAssistantSettings,
