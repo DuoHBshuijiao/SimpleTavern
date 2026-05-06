@@ -132,6 +132,13 @@ const stDetectedMvu = computed(() => {
   return Boolean(mvu?.hasTavernHelper || mvu?.hasRegexScripts || mvu?.characterBookCandidateCount)
 })
 
+const stConfirmLabel = computed(() => {
+  if (!stConfirming.value) return '确认导入 ST 角色'
+  return stEnableMvuCompatibility.value && stMvuMode.value === 'directive'
+    ? 'MVU Agent 分析中...'
+    : '导入中...'
+})
+
 const characterListKey = computed(() => props.characters.map((c) => c.id).join(','))
 
 watch(
@@ -192,10 +199,75 @@ function updateStMvuMode(value: string) {
   stMvuMode.value = value === 'directive' ? 'directive' : 'regex'
 }
 
+/** 与专用「导入 SillyTavern 数据」共用：预览成功后写入 pendingId / MVU 默认值 */
+async function loadStPreviewFromFile(file: File): Promise<void> {
+  stPreviewLoading.value = true
+  try {
+    const result = await previewSillyTavernImport(file)
+    stPendingId.value = result.pendingId
+    stExpiresAt.value = result.expiresAt
+    stPreview.value = result.preview
+    stMvuMode.value = result.preview.mvu.suggestedMode || 'regex'
+    stEnableMvuCompatibility.value = Boolean(
+      result.preview.mvu.hasTavernHelper
+      || result.preview.mvu.hasRegexScripts
+      || result.preview.mvu.characterBookCandidateCount,
+    )
+  } finally {
+    stPreviewLoading.value = false
+  }
+}
+
+function notifyStPreviewError(err: unknown) {
+  if (props.pushError) {
+    props.pushError({ message: err instanceof Error ? err.message : String(err), source: 'main', title: 'SillyTavern 导入失败' })
+  } else {
+    void notifyMessage(err instanceof Error ? err.message : String(err))
+  }
+}
+
 async function handleImportChange(e: Event) {
   const input = e.target as HTMLInputElement
   const file = input.files?.[0]
   if (!file) return
+  const lower = file.name.toLowerCase()
+
+  // PNG：一律走 ST 预览（与「导入 SillyTavern 数据」相同），否则 /api/import 会跳过 MVU 选项
+  if (lower.endsWith('.png')) {
+    resetStPreview()
+    try {
+      await loadStPreviewFromFile(file)
+    } catch (err) {
+      resetStPreview()
+      notifyStPreviewError(err)
+    } finally {
+      input.value = ''
+    }
+    return
+  }
+
+  // JSON：先尝试 ST 角色卡预览；若不是 ST 卡则退回通用设置/数据导入
+  if (lower.endsWith('.json')) {
+    resetStPreview()
+    try {
+      await loadStPreviewFromFile(file)
+      input.value = ''
+      return
+    } catch {
+      // 非 SillyTavern 角色卡形状时继续走下方通用导入
+    }
+    try {
+      const result = await importSettingsFile(file)
+      await refreshDataAfterImport()
+      await notifyMessage(formatImportResultMessage(result))
+    } catch (err) {
+      await notifyMessage(err instanceof Error ? err.message : String(err))
+    } finally {
+      input.value = ''
+    }
+    return
+  }
+
   try {
     const result = await importSettingsFile(file)
     await refreshDataAfterImport()
@@ -211,27 +283,12 @@ async function handleStImportChange(e: Event) {
   const input = e.target as HTMLInputElement
   const file = input.files?.[0]
   if (!file) return
-  stPreviewLoading.value = true
   try {
-    const result = await previewSillyTavernImport(file)
-    stPendingId.value = result.pendingId
-    stExpiresAt.value = result.expiresAt
-    stPreview.value = result.preview
-    stMvuMode.value = result.preview.mvu.suggestedMode || 'regex'
-    stEnableMvuCompatibility.value = Boolean(
-      result.preview.mvu.hasTavernHelper
-      || result.preview.mvu.hasRegexScripts
-      || result.preview.mvu.characterBookCandidateCount,
-    )
+    await loadStPreviewFromFile(file)
   } catch (err) {
     resetStPreview()
-    if (props.pushError) {
-      props.pushError({ message: err instanceof Error ? err.message : String(err), source: 'main', title: 'SillyTavern 导入失败' })
-    } else {
-      await notifyMessage(err instanceof Error ? err.message : String(err))
-    }
+    notifyStPreviewError(err)
   } finally {
-    stPreviewLoading.value = false
     input.value = ''
   }
 }
@@ -382,14 +439,16 @@ async function confirmJanitorImport() {
           <div class="max-h-[65vh] space-y-4 overflow-y-auto pr-1">
             <section class="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface-muted)] p-4">
               <h4 class="text-sm font-medium text-[var(--color-text-secondary)]">本地文件导入</h4>
-              <p class="mt-2 text-xs text-[var(--color-text-muted)]">支持 txt/json/zip，逻辑与设置中的“导入数据”一致。</p>
-              <p class="mt-1 text-xs text-[var(--color-text-muted)]">SillyTavern 专用按钮仅支持 PNG/JSON 角色卡，不支持聊天记录导入。</p>
+              <p class="mt-2 text-xs text-[var(--color-text-muted)]">
+                支持 txt/json/jsonl/zip；其中 PNG 或 SillyTavern 形状 JSON 会先进入下方预览（含 MVU 选项），与设置里「仅备份 JSON」区分。
+              </p>
+              <p class="mt-1 text-xs text-[var(--color-text-muted)]">专用按钮同样仅用于 PNG / ST 角色 JSON；不支持 ST 聊天记录导入。</p>
               <div class="mt-3 flex flex-wrap gap-2">
                 <button class="btn btn-sm btn-secondary" @click="triggerImport">选择文件导入</button>
                 <button class="btn btn-sm btn-secondary" :disabled="stPreviewLoading" @click="triggerStImport">
                   {{ stPreviewLoading ? '读取预览中...' : '导入 SillyTavern 数据' }}
                 </button>
-                <input ref="importInputRef" type="file" class="hidden" accept=".txt,.json,.jsonl,.zip" @change="handleImportChange" />
+                <input ref="importInputRef" type="file" class="hidden" accept=".txt,.json,.jsonl,.zip,.png" @change="handleImportChange" />
                 <input ref="stImportInputRef" type="file" class="hidden" accept=".png,.json" @change="handleStImportChange" />
               </div>
               <div
@@ -415,7 +474,7 @@ async function confirmJanitorImport() {
                   ST 世界书将作为 SimpleTavern 世界书完整保留；MVU 兼容只生成指令或正文正则，不删除原条目。
                 </p>
                 <p class="mt-1 text-[var(--color-text-muted)]">
-                  Regex 模式会尝试转换可表达的 regex_scripts；指令模式会生成 MVU 指令与初始状态表，Tavern Helper JS 不会执行。
+                  Regex 模式会尝试转换可表达的 regex_scripts；指令模式会把完整 ST 卡上下文交给 MVU Agent，生成 MVU 指令与初始状态表，Tavern Helper JS 不会执行。
                 </p>
                 <div
                   v-if="stPreview.mvu.characterBookCandidates.length"
@@ -450,7 +509,7 @@ async function confirmJanitorImport() {
                   </div>
                   <div class="flex items-end">
                     <button class="btn btn-sm btn-primary" :disabled="!stPendingId || stConfirming" @click="confirmStImport">
-                      {{ stConfirming ? '导入中...' : '确认导入 ST 角色' }}
+                      {{ stConfirmLabel }}
                     </button>
                   </div>
                 </div>
