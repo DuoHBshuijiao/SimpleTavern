@@ -59,19 +59,25 @@
         </div>
       </div>
 
-      <!-- MVU 模型选择器（裸露悬浮，无背景） -->
-      <div class="shrink-0 px-4 py-2">
+      <!-- MVU 模型 -->
+      <div class="shrink-0 space-y-1 px-4 py-2 border-t border-[var(--color-border-subtle)]">
         <ModernSelect
-          :model-value="mvuModel"
+          :model-value="mvuModel ?? ''"
           :options="modelOptions"
           placement="top"
-          placeholder="MVU Agent 模型..."
+          placeholder="留空则使用默认模型名称与候选回退"
           class="!text-[11px] !min-w-0 w-full"
           dropdown-width="360"
           searchable
           allow-create
           @select="(v: any) => $emit('select-mvu-model', v)"
         />
+        <p
+          v-if="resolvedMvuModel && !(mvuModel || '').trim()"
+          class="text-[10px] leading-snug text-[var(--color-text-muted)]"
+        >
+          当前生效（回退）：<span class="font-mono text-[var(--color-text-secondary)]">{{ resolvedMvuModel }}</span>
+        </p>
       </div>
     </aside>
   </Teleport>
@@ -92,18 +98,24 @@ interface ModelOptionGroup {
   options: ModelOption[]
 }
 
-const props = withDefaults(defineProps<{
+interface Props {
   isOpen: boolean
   logs: MvuWorkLogEntry[]
   maxVisible?: number
   running?: boolean
+  /** 全局 settings.mvuModel（与设置抽屉同源） */
   mvuModel?: string | null
   modelOptions?: (ModelOption | ModelOptionGroup)[]
-}>(), {
+  /** 未单独指定 MVU 模型时的回退生效名（仅作提示） */
+  resolvedMvuModel?: string | null
+}
+
+const props = withDefaults(defineProps<Props>(), {
   maxVisible: 100,
   running: false,
   mvuModel: null,
   modelOptions: () => [],
+  resolvedMvuModel: null,
 })
 
 defineEmits<{
