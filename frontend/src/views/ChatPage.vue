@@ -1934,6 +1934,8 @@ async function confirmImportEmbeddedCard() {
       systemPrompt: incoming.systemPrompt,
       extraFirstMessageEntries: Array.isArray(incoming.extraFirstMessageEntries) ? incoming.extraFirstMessageEntries : [],
       mvuEnabled: incoming.mvuEnabled === true,
+      mvuMode: incoming.mvuMode === 'directive' ? 'directive' : 'regex',
+      mvuDirective: typeof incoming.mvuDirective === 'string' ? incoming.mvuDirective : null,
       contentRegexRules: Array.isArray(incoming.contentRegexRules) ? incoming.contentRegexRules : [],
       attachedWorldBookIds,
       avatar: current.avatar || incoming.avatar,
@@ -5562,69 +5564,96 @@ const editingPersonaAvatarUrl = computed(() => {
                   />
                   <span>启用 MVU 管线</span>
                 </label>
-                <div class="flex items-center justify-between">
-                  <div class="text-xs text-[var(--color-text-muted)]">角色自带正文正则（新建会话时注入）</div>
-                  <button type="button" class="btn btn-xs btn-secondary" @click="addCharacterRegexRule">新建规则</button>
+                <div class="grid grid-cols-1 md:grid-cols-[minmax(0,220px)_1fr] gap-3">
+                  <div class="space-y-1.5">
+                    <label class="block text-xs font-medium text-[var(--color-text-secondary)]">MVU 模式</label>
+                    <ModernSelect
+                      v-model="actions.editingCharacter.value.mvuMode"
+                      :options="[
+                        { label: '正则模式', value: 'regex' },
+                        { label: '指令模式', value: 'directive' },
+                      ]"
+                      placeholder="选择 MVU 模式..."
+                      dropdown-width="auto"
+                    />
+                  </div>
+                  <div class="text-xs text-[var(--color-text-muted)] self-end pb-2">
+                    正则模式使用正文正则提取状态变更；指令模式保存给后续 MVU 流程读取的自然语言规则。
+                  </div>
                 </div>
-                <div class="space-y-2">
-                  <div
-                    v-for="(rule, idx) in (actions.editingCharacter.value.contentRegexRules || [])"
-                    :key="rule.id || idx"
-                    class="rounded-lg border border-[var(--color-border-subtle)] bg-surface-muted p-2 space-y-2"
-                  >
-                    <div class="flex items-center gap-2">
-                      <input v-model="rule.name" class="input flex-1" placeholder="规则名称（可选）" />
-                      <label class="inline-flex items-center gap-1 text-xs cursor-pointer select-none">
-                        <ThemedCheckbox
-                          :checked="rule.enabled"
-                          @update:checked="(v) => (rule.enabled = v)"
+                <div v-if="actions.editingCharacter.value.mvuMode === 'directive'" class="space-y-1.5">
+                  <label class="block text-xs font-medium text-[var(--color-text-secondary)]">MVU 指令</label>
+                  <textarea
+                    v-model="actions.editingCharacter.value.mvuDirective"
+                    class="input textarea h-32"
+                    placeholder="描述如何从回复中识别状态变化、如何更新状态栏。"
+                  ></textarea>
+                </div>
+                <template v-else>
+                  <div class="flex items-center justify-between">
+                    <div class="text-xs text-[var(--color-text-muted)]">角色自带正文正则（新建会话时注入）</div>
+                    <button type="button" class="btn btn-xs btn-secondary" @click="addCharacterRegexRule">新建规则</button>
+                  </div>
+                  <div class="space-y-2">
+                    <div
+                      v-for="(rule, idx) in (actions.editingCharacter.value.contentRegexRules || [])"
+                      :key="rule.id || idx"
+                      class="rounded-lg border border-[var(--color-border-subtle)] bg-surface-muted p-2 space-y-2"
+                    >
+                      <div class="flex items-center gap-2">
+                        <input v-model="rule.name" class="input flex-1" placeholder="规则名称（可选）" />
+                        <label class="inline-flex items-center gap-1 text-xs cursor-pointer select-none">
+                          <ThemedCheckbox
+                            :checked="rule.enabled"
+                            @update:checked="(v) => (rule.enabled = v)"
+                          />
+                          <span>启用</span>
+                        </label>
+                        <button type="button" class="btn btn-xs btn-secondary" @click="removeCharacterRegexRule(idx)">删除</button>
+                      </div>
+                      <textarea v-model="rule.pattern" class="input textarea h-20" placeholder="pattern"></textarea>
+                      <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
+                        <ModernSelect
+                          v-model="rule.action"
+                          :options="[
+                            { label: '删除', value: 'remove' },
+                            { label: '替换', value: 'replace' },
+                            { label: '提取', value: 'extract' },
+                            { label: '提取并替换显示', value: 'extract_and_replace' },
+                          ]"
+                          placeholder="选择处理动作..."
+                          dropdown-width="auto"
                         />
-                        <span>启用</span>
-                      </label>
-                      <button type="button" class="btn btn-xs btn-secondary" @click="removeCharacterRegexRule(idx)">删除</button>
+                        <ModernSelect
+                          v-model="rule.matchMode"
+                          :options="[
+                            { label: '全局命中', value: 'global' },
+                            { label: '首个命中', value: 'first' },
+                          ]"
+                          placeholder="选择匹配模式..."
+                          dropdown-width="auto"
+                        />
+                        <input v-model.number="rule.scanDepthOverride" type="number" min="1" class="input" placeholder="覆盖深度(可选)" />
+                      </div>
+                      <textarea v-if="rule.action === 'replace' || rule.action === 'extract_and_replace'" v-model="rule.replacement" class="input textarea h-16" placeholder="replacement"></textarea>
+                      <div v-if="rule.action === 'extract' || rule.action === 'extract_and_replace'" class="grid grid-cols-1 md:grid-cols-2 gap-2">
+                        <ModernSelect
+                          v-model="rule.extractSource"
+                          :options="[
+                            { label: '整段匹配', value: 'whole_match' },
+                            { label: '捕获分组', value: 'capture_group' },
+                          ]"
+                          placeholder="选择提取来源..."
+                          dropdown-width="auto"
+                        />
+                        <input v-if="rule.extractSource === 'capture_group'" v-model.number="rule.extractGroupIndex" type="number" min="0" class="input" placeholder="提取分组下标" />
+                      </div>
                     </div>
-                    <textarea v-model="rule.pattern" class="input textarea h-20" placeholder="pattern"></textarea>
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
-                      <ModernSelect
-                        v-model="rule.action"
-                        :options="[
-                          { label: '删除', value: 'remove' },
-                          { label: '替换', value: 'replace' },
-                          { label: '提取', value: 'extract' },
-                          { label: '提取并替换显示', value: 'extract_and_replace' },
-                        ]"
-                        placeholder="选择处理动作..."
-                        dropdown-width="auto"
-                      />
-                      <ModernSelect
-                        v-model="rule.matchMode"
-                        :options="[
-                          { label: '全局命中', value: 'global' },
-                          { label: '首个命中', value: 'first' },
-                        ]"
-                        placeholder="选择匹配模式..."
-                        dropdown-width="auto"
-                      />
-                      <input v-model.number="rule.scanDepthOverride" type="number" min="1" class="input" placeholder="覆盖深度(可选)" />
-                    </div>
-                    <textarea v-if="rule.action === 'replace' || rule.action === 'extract_and_replace'" v-model="rule.replacement" class="input textarea h-16" placeholder="replacement"></textarea>
-                    <div v-if="rule.action === 'extract' || rule.action === 'extract_and_replace'" class="grid grid-cols-1 md:grid-cols-2 gap-2">
-                      <ModernSelect
-                        v-model="rule.extractSource"
-                        :options="[
-                          { label: '整段匹配', value: 'whole_match' },
-                          { label: '捕获分组', value: 'capture_group' },
-                        ]"
-                        placeholder="选择提取来源..."
-                        dropdown-width="auto"
-                      />
-                      <input v-if="rule.extractSource === 'capture_group'" v-model.number="rule.extractGroupIndex" type="number" min="0" class="input" placeholder="提取分组下标" />
+                    <div v-if="!(actions.editingCharacter.value.contentRegexRules || []).length" class="text-xs text-[var(--color-text-muted)] border border-dashed border-[var(--color-border-subtle)] rounded-lg px-3 py-2">
+                      暂无规则。
                     </div>
                   </div>
-                  <div v-if="!(actions.editingCharacter.value.contentRegexRules || []).length" class="text-xs text-[var(--color-text-muted)] border border-dashed border-[var(--color-border-subtle)] rounded-lg px-3 py-2">
-                    暂无规则。
-                  </div>
-                </div>
+                </template>
 
                 <InitialStateEditor
                   v-if="actions.editingCharacter.value"
