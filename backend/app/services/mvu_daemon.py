@@ -13,12 +13,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from typing import Literal
 
 logger = logging.getLogger(__name__)
 
 from app.content_regex_queue import clear_queue, dequeue_by_message_id, get_content_regex_queue_size
 from app.mvu_system_prompt import load_mvu_system_prompt
-from app.schemas import AssistantSettings, MvuWorkLogEntry
+from app.schemas import AssistantSettings, CharacterCard, Chat, MvuWorkLogEntry
 from app.services.mvu_agent import MvuAgentEvent, MvuAgentJob, MvuAgentRunContext, MvuAgentService
 from app.storage import (
     load_chat,
@@ -36,6 +37,7 @@ _events: dict[str, asyncio.Event] = {}
 _locks: dict[str, asyncio.Lock] = {}
 _tasks: dict[str, asyncio.Task] = {}
 _last_run: dict[str, float] = {}
+_context_window_counts: dict[str, int] = {}
 
 # SSE 订阅者（per chat_id 的 asyncio.Queue 列表）
 _subscribers: dict[str, list[asyncio.Queue]] = {}
@@ -77,6 +79,30 @@ def _get_or_create(chat_id: str) -> tuple[asyncio.Event, asyncio.Lock]:
     return _events[chat_id], _locks[chat_id]
 
 
+def _resolve_mvu_runtime_config(chat: Chat, character: CharacterCard | None) -> tuple[Literal["regex", "directive"], str | None]:
+    overrides = getattr(chat, "overrides", None)
+    mode = getattr(overrides, "mvuMode", None) if overrides is not None else None
+    if mode not in ("regex", "directive"):
+        mode = getattr(character, "mvuMode", None) if character is not None else None
+    if mode not in ("regex", "directive"):
+        mode = "regex"
+
+    directive = getattr(overrides, "mvuDirective", None) if overrides is not None else None
+    if directive is None or not str(directive).strip():
+        directive = getattr(character, "mvuDirective", None) if character is not None else None
+    directive = str(directive).strip() if directive is not None else ""
+    return mode, directive or None
+
+
+def _next_context_window_count(chat_id: str) -> int:
+    current = _context_window_counts.get(chat_id, 10)
+    if current >= 30:
+        _context_window_counts[chat_id] = 10
+    else:
+        _context_window_counts[chat_id] = min(current + 2, 30)
+    return current
+
+
 def ensure_mvu_worker(chat_id: str) -> bool:
     """确保 chat_id 的 MVU worker loop 已启动。返回 True 表示已在运行或成功启动。"""
     try:
@@ -107,8 +133,10 @@ async def _mvu_loop(chat_id: str) -> None:
     event, lock = _events[chat_id], _locks[chat_id]
 
     while True:
+        triggered_by_signal = False
         try:
             await asyncio.wait_for(event.wait(), timeout=5)
+            triggered_by_signal = True
         except asyncio.TimeoutError:
             pass
         event.clear()
@@ -118,8 +146,18 @@ async def _mvu_loop(chat_id: str) -> None:
             if now - _last_run.get(chat_id, 0) < _COOLDOWN_SECS:
                 continue
 
+            try:
+                chat = load_chat(chat_id)
+                character = load_character(chat.characterId)
+            except FileNotFoundError:
+                continue
+            mode, _directive = _resolve_mvu_runtime_config(chat, character)
+
             queue_size = get_content_regex_queue_size(chat_id)
-            if queue_size == 0:
+            if mode == "directive":
+                if not triggered_by_signal:
+                    continue
+            elif queue_size == 0:
                 continue
 
             try:
@@ -136,6 +174,12 @@ async def _run_once(chat_id: str) -> None:
         chat = load_chat(chat_id)
     except FileNotFoundError:
         return
+    try:
+        character = load_character(chat.characterId)
+    except FileNotFoundError:
+        character = None
+
+    mode, directive = _resolve_mvu_runtime_config(chat, character)
 
     settings = load_settings()
 
@@ -168,10 +212,16 @@ async def _run_once(chat_id: str) -> None:
         }))
         return
 
-    # 消费队列：按消息分组，同一条消息的全部提取项一并处理
-    consumed_msg_id, queue_items = dequeue_by_message_id(chat_id)
-    if not queue_items:
-        return
+    # 正则模式消费队列；指令模式由生成完成信号触发，不读取/消费正则队列。
+    consumed_msg_id: str | None = None
+    if mode == "regex":
+        consumed_msg_id, queue_items = dequeue_by_message_id(chat_id)
+        if not queue_items:
+            return
+        context_window_count = 10
+    else:
+        queue_items = []
+        context_window_count = _next_context_window_count(chat_id)
 
     # 组装 job
     from app.assistant_tools.handlers.mvu import render_tables_markdown
@@ -185,7 +235,7 @@ async def _run_once(chat_id: str) -> None:
         for it in queue_items
     ) if queue_items else "（队列为空）"
 
-    recent = chat.messages[-10:] if len(chat.messages) > 10 else chat.messages
+    recent = chat.messages[-context_window_count:] if len(chat.messages) > context_window_count else chat.messages
     ctx_lines: list[str] = []
     for m in recent:
         content = (m.content or "").strip()
@@ -204,6 +254,9 @@ async def _run_once(chat_id: str) -> None:
         queue_items=queue_items,
         queue_text=queue_text,
         context_markdown=context_md,
+        mode=mode,
+        directive=directive,
+        context_window_count=context_window_count,
     )
 
     run_ctx = MvuAgentRunContext(
@@ -228,7 +281,7 @@ async def _run_once(chat_id: str) -> None:
         save_mvu_logs(chat.characterId, chat_id, existing + log_entries)
 
     # 标记已消费消息：最新被处理消息设 mvuProcessed，清除旧标记
-    if consumed_msg_id:
+    if mode == "regex" and consumed_msg_id:
         try:
             chat_reload = load_chat(chat_id)
         except FileNotFoundError:
