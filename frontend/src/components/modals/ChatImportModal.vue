@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { apiGet } from '../../api/http'
 import { useSettingsImport } from '../../composables/useSettingsImport'
 import { notifyMessage } from '../../composables/useNotify'
-import type { CharacterCard, Chat, UserPersona } from '../../types/models'
+import type { CharacterCard, Chat, MvuMode, UserPersona } from '../../types/models'
 import ModernSelect from '../ModernSelect.vue'
 import ThemedCheckbox from '../ThemedCheckbox.vue'
 
@@ -85,7 +85,13 @@ const emit = defineEmits<{
   (e: 'janitor-imported', payload: { chatId: string; characterId: string | null; openAfterImport: boolean }): void
 }>()
 
-const { importSettingsFile, refreshDataAfterImport, formatImportResultMessage } = useSettingsImport()
+const {
+  importSettingsFile,
+  previewSillyTavernImport,
+  confirmSillyTavernImport,
+  refreshDataAfterImport,
+  formatImportResultMessage,
+} = useSettingsImport()
 
 const importInputRef = ref<HTMLInputElement | null>(null)
 const stImportInputRef = ref<HTMLInputElement | null>(null)
@@ -99,6 +105,13 @@ const selectedCharacterId = ref('')
 const selectedPersonaId = ref('')
 const janitorConfirming = ref(false)
 const jaiCharacterUrl = ref('')
+const stPreviewLoading = ref(false)
+const stConfirming = ref(false)
+const stPendingId = ref('')
+const stExpiresAt = ref('')
+const stPreview = ref<Awaited<ReturnType<typeof previewSillyTavernImport>>['preview'] | null>(null)
+const stEnableMvuCompatibility = ref(false)
+const stMvuMode = ref<MvuMode>('regex')
 
 const personaOptions = computed(() => [
   { label: '（不指定 Persona）', value: '' },
@@ -108,6 +121,16 @@ const personaOptions = computed(() => [
 const characterOptions = computed(() =>
   props.characters.map((c) => ({ label: c.name || c.id, value: c.id })),
 )
+
+const stMvuModeOptions = [
+  { label: 'Regex 兼容', value: 'regex' },
+  { label: '指令模式', value: 'directive' },
+]
+
+const stDetectedMvu = computed(() => {
+  const mvu = stPreview.value?.mvu
+  return Boolean(mvu?.hasTavernHelper || mvu?.hasRegexScripts || mvu?.characterBookCandidateCount)
+})
 
 const characterListKey = computed(() => props.characters.map((c) => c.id).join(','))
 
@@ -157,6 +180,18 @@ function triggerStImport() {
   stImportInputRef.value?.click()
 }
 
+function resetStPreview() {
+  stPendingId.value = ''
+  stExpiresAt.value = ''
+  stPreview.value = null
+  stEnableMvuCompatibility.value = false
+  stMvuMode.value = 'regex'
+}
+
+function updateStMvuMode(value: string) {
+  stMvuMode.value = value === 'directive' ? 'directive' : 'regex'
+}
+
 async function handleImportChange(e: Event) {
   const input = e.target as HTMLInputElement
   const file = input.files?.[0]
@@ -176,10 +211,46 @@ async function handleStImportChange(e: Event) {
   const input = e.target as HTMLInputElement
   const file = input.files?.[0]
   if (!file) return
+  stPreviewLoading.value = true
   try {
-    const result = await importSettingsFile(file)
+    const result = await previewSillyTavernImport(file)
+    stPendingId.value = result.pendingId
+    stExpiresAt.value = result.expiresAt
+    stPreview.value = result.preview
+    stMvuMode.value = result.preview.mvu.suggestedMode || 'regex'
+    stEnableMvuCompatibility.value = Boolean(
+      result.preview.mvu.hasTavernHelper
+      || result.preview.mvu.hasRegexScripts
+      || result.preview.mvu.characterBookCandidateCount,
+    )
+  } catch (err) {
+    resetStPreview()
+    if (props.pushError) {
+      props.pushError({ message: err instanceof Error ? err.message : String(err), source: 'main', title: 'SillyTavern 导入失败' })
+    } else {
+      await notifyMessage(err instanceof Error ? err.message : String(err))
+    }
+  } finally {
+    stPreviewLoading.value = false
+    input.value = ''
+  }
+}
+
+async function confirmStImport() {
+  if (!stPendingId.value) {
+    await notifyMessage('请先选择 SillyTavern PNG/JSON 并生成预览。')
+    return
+  }
+  stConfirming.value = true
+  try {
+    const result = await confirmSillyTavernImport({
+      pendingId: stPendingId.value,
+      enableMvuCompatibility: stEnableMvuCompatibility.value,
+      mvuMode: stMvuMode.value,
+    })
     await refreshDataAfterImport()
     await notifyMessage(formatImportResultMessage(result))
+    resetStPreview()
   } catch (err) {
     if (props.pushError) {
       props.pushError({ message: err instanceof Error ? err.message : String(err), source: 'main', title: 'SillyTavern 导入失败' })
@@ -187,7 +258,7 @@ async function handleStImportChange(e: Event) {
       await notifyMessage(err instanceof Error ? err.message : String(err))
     }
   } finally {
-    input.value = ''
+    stConfirming.value = false
   }
 }
 
@@ -315,9 +386,75 @@ async function confirmJanitorImport() {
               <p class="mt-1 text-xs text-[var(--color-text-muted)]">SillyTavern 专用按钮仅支持 PNG/JSON 角色卡，不支持聊天记录导入。</p>
               <div class="mt-3 flex flex-wrap gap-2">
                 <button class="btn btn-sm btn-secondary" @click="triggerImport">选择文件导入</button>
-                <button class="btn btn-sm btn-secondary" @click="triggerStImport">导入 SillyTavern 数据</button>
+                <button class="btn btn-sm btn-secondary" :disabled="stPreviewLoading" @click="triggerStImport">
+                  {{ stPreviewLoading ? '读取预览中...' : '导入 SillyTavern 数据' }}
+                </button>
                 <input ref="importInputRef" type="file" class="hidden" accept=".txt,.json,.jsonl,.zip" @change="handleImportChange" />
                 <input ref="stImportInputRef" type="file" class="hidden" accept=".png,.json" @change="handleStImportChange" />
+              </div>
+              <div
+                v-if="stPreview"
+                class="mt-3 rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-surface-overlay)] p-3 text-xs text-[var(--color-text-muted)]"
+              >
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div class="text-[var(--color-text-secondary)]">SillyTavern 预览</div>
+                    <div class="mt-1">
+                      角色名：<span class="text-[var(--color-text)]">{{ stPreview.characterName || '未知' }}</span>
+                    </div>
+                  </div>
+                  <button class="btn btn-xs btn-secondary" :disabled="stConfirming" @click="resetStPreview">重新选择</button>
+                </div>
+                <div class="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
+                  <div>世界书：<span class="text-[var(--color-text)]">{{ stPreview.worldBookName || '未检测到' }}</span></div>
+                  <div>世界书条目：<span class="text-[var(--color-text)]">{{ stPreview.worldBookEntryCount }}</span></div>
+                  <div>tavern_helper：<span class="text-[var(--color-text)]">{{ stPreview.mvu.hasTavernHelper ? '已检测到' : '未检测到' }}</span></div>
+                  <div>regex_scripts：<span class="text-[var(--color-text)]">{{ stPreview.mvu.regexScriptCount }}</span></div>
+                </div>
+                <p v-if="stPreview.worldBookEntryCount" class="mt-2 text-[var(--color-text-muted)]">
+                  ST 世界书将作为 SimpleTavern 世界书完整保留；MVU 兼容只生成指令或正文正则，不删除原条目。
+                </p>
+                <p class="mt-1 text-[var(--color-text-muted)]">
+                  Regex 模式会尝试转换可表达的 regex_scripts；指令模式会生成 MVU 指令与初始状态表，Tavern Helper JS 不会执行。
+                </p>
+                <div
+                  v-if="stPreview.mvu.characterBookCandidates.length"
+                  class="mt-2 rounded-md border border-[var(--color-border-subtle)] bg-[var(--color-surface-muted)] p-2"
+                >
+                  <div class="text-[var(--color-text-secondary)]">世界书 MVU 候选</div>
+                  <div class="mt-1 space-y-1">
+                    <div
+                      v-for="candidate in stPreview.mvu.characterBookCandidates"
+                      :key="candidate.title"
+                      class="flex items-center justify-between gap-2"
+                    >
+                      <span class="truncate text-[var(--color-text)]">{{ candidate.title }}</span>
+                      <span>{{ candidate.enabled ? '启用' : '禁用' }}</span>
+                    </div>
+                  </div>
+                </div>
+                <label class="mt-3 flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
+                  <ThemedCheckbox :checked="stEnableMvuCompatibility" @update:checked="stEnableMvuCompatibility = $event" />
+                  启用 MVU 兼容
+                  <span v-if="stDetectedMvu" class="text-[var(--color-text-secondary)]">已检测到候选结构</span>
+                </label>
+                <div class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-[1fr_auto]">
+                  <div>
+                    <div class="mb-1 text-xs text-[var(--color-text-muted)]">MVU 模式</div>
+                    <ModernSelect
+                      :model-value="stMvuMode"
+                      :options="stMvuModeOptions"
+                      placeholder="选择 MVU 模式"
+                      @update:model-value="updateStMvuMode"
+                    />
+                  </div>
+                  <div class="flex items-end">
+                    <button class="btn btn-sm btn-primary" :disabled="!stPendingId || stConfirming" @click="confirmStImport">
+                      {{ stConfirming ? '导入中...' : '确认导入 ST 角色' }}
+                    </button>
+                  </div>
+                </div>
+                <div v-if="stExpiresAt" class="mt-2 text-[var(--color-text-muted)]">预览暂存至：{{ stExpiresAt }}</div>
               </div>
             </section>
 
