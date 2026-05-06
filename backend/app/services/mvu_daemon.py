@@ -18,8 +18,16 @@ from typing import Literal
 logger = logging.getLogger(__name__)
 
 from app.content_regex_queue import clear_queue, dequeue_by_message_id, get_content_regex_queue_size
+from app.mvu_model_resolve import resolve_mvu_model_from_settings
 from app.mvu_system_prompt import load_mvu_system_prompt
-from app.schemas import AssistantSettings, CharacterCard, Chat, MvuWorkLogEntry
+from app.schemas import (
+    AssistantSettings,
+    CharacterCard,
+    Chat,
+    MvuWorkLogEntry,
+    build_reasoning_request_config,
+    filter_reasoning_extra_body_for_upstream,
+)
 from app.services.mvu_agent import MvuAgentEvent, MvuAgentJob, MvuAgentRunContext, MvuAgentService
 from app.storage import (
     load_chat,
@@ -196,21 +204,24 @@ async def _run_once(chat_id: str) -> None:
             api_key = found_preset.apiKey
 
     # 模型名称多级回退：
-    #   1) 会话级 MVU 专用模型覆盖（MVU 面板显式选择）
-    #   2) 当前 preset 的首个可用模型
-    #   3) 全局默认模型
-    model = getattr(chat.overrides, "mvuModel", None)
+    #   1) 全局 settings.mvuModel → defaultModel → modelCandidates（见 mvu_model_resolve）
+    #   2) 当前会话 preset 的首个可用模型
+    model = resolve_mvu_model_from_settings(settings)
     if not model and found_preset and found_preset.models:
-        model = found_preset.models[0]
-    if not model:
-        model = settings.llm.defaultModel
+        model = (found_preset.models[0] or "").strip()
 
     if not model:
         logger.error("chat %s: MVU model is empty after all resolution attempts, skipping run", chat_id)
         await _broadcast(chat_id, MvuAgentEvent("error", {
-            "message": "MVU 模型未配置，请在设置中指定默认模型或通过 MVU 面板选择模型"
+            "message": "MVU 模型未配置，请在全局设置中指定 MVU 模型或默认模型",
         }))
         return
+
+    reasoning_cfg = build_reasoning_request_config(settings)
+    extra_body = filter_reasoning_extra_body_for_upstream(model, reasoning_cfg["extra_body"])
+    tool_temperature: float | None = None
+    if not reasoning_cfg["thinking_enabled"]:
+        tool_temperature = settings.generationDefaults.temperature
 
     # 正则模式消费队列；指令模式由生成完成信号触发，不读取/消费正则队列。
     consumed_msg_id: str | None = None
@@ -263,6 +274,8 @@ async def _run_once(chat_id: str) -> None:
         base_url=base_url,
         api_key=api_key,
         model=model,
+        temperature=tool_temperature,
+        extra_body=extra_body,
     )
 
     agent = MvuAgentService(run_ctx)
