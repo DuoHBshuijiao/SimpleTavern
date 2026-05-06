@@ -661,19 +661,23 @@ class WorldBook(BaseModel):
     updatedAt: str = Field(default_factory=_now_iso)
 
 
-ChatRole = Literal["system", "user", "assistant", "tool"]
+ChatRole = Literal["system", "user", "assistant", "tool", "reasoning"]
 """
 聊天消息角色类型
 
-支持四种角色：
+支持五种角色：
     - system: 系统消息
     - user: 用户消息
     - assistant: AI助手消息
     - tool: 工具返回（OpenAI Chat Completions 对齐；主会话正常对话不应写入）
+    - reasoning: 独立思考链段落（助手会话持久化；正文见 content，可选 reasoningDurationSec）
 """
 
 MainChatRole = Literal["system", "user", "assistant"]
 """主聊天、追加/更新消息等路径允许的角色（不含 tool，避免客户端伪造工具链）。"""
+
+AssistantAppendRole = Literal["system", "user", "assistant", "reasoning"]
+"""助手会话 POST /assistant/chat/messages 允许追加的角色（含独立 reasoning 段，不含 tool）。"""
 
 
 class ChatMessage(BaseModel):
@@ -685,7 +689,7 @@ class ChatMessage(BaseModel):
     主要属性：
         version: 版本号
         id: 消息唯一标识符，自动生成
-        role: 消息角色（system/user/assistant/tool）
+        role: 消息角色（system/user/assistant/tool/reasoning）
         content: 消息内容
         characterId: 群聊中标识发言角色ID
         senderPersonaId: 发送者Persona ID，用于切换身份后保持历史消息显示
@@ -755,6 +759,11 @@ class ChatMessage(BaseModel):
         if self.role == "tool":
             if not (self.tool_call_id and str(self.tool_call_id).strip()):
                 raise ValueError("role=tool 时必须提供非空的 tool_call_id")
+        if self.role == "reasoning":
+            if self.tool_calls is not None:
+                raise ValueError("role=reasoning 消息不可包含 tool_calls")
+            if self.tool_call_id and str(self.tool_call_id).strip():
+                raise ValueError("role=reasoning 消息不可包含 tool_call_id")
         if self.tool_calls is not None and self.role != "assistant":
             raise ValueError("仅 assistant 消息可包含 tool_calls")
         return self
