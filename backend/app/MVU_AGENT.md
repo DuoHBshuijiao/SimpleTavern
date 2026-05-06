@@ -55,6 +55,8 @@
 
 ## SillyTavern 导入兼容边界
 
+- **MVU 模型**：由全局 `settings.mvuModel` 指定（空则回退 `defaultModel` 与 `modelCandidates`），与会话无关；无需进入聊天即可在设置里配置。
+- **思考模式与非流式工具轮**：导入期 MVU Agent 与后台 MVU Agent 与主生成一致，使用 `build_reasoning_request_config` / `filter_reasoning_extra_body_for_upstream`；开启思考时在后续请求中携带上一轮 assistant 的 `reasoning_content`（DeepSeek 等网关要求）。
 - ST 世界书会作为 SimpleTavern 世界书完整保留并绑定到导入角色；MVU 兼容不会删除或执行世界书条目。
 - `regex` 模式只转换 SimpleTavern 正文正则可表达的 `regex_scripts`，例如隐藏 `<UpdateVariable>` 或普通替换；大型 HTML/UI 与事件逻辑会跳过并给出 warning。
 - `directive` 模式生成 `mvuDirective` 与初始状态表，供后台 MVU worker 在生成后维护状态；当前不推进群聊指令模式。
