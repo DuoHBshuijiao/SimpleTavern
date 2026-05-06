@@ -315,8 +315,6 @@ def _merge_overrides(existing: Chat, incoming: UpdateChatRequest) -> None:
         existing.overrides.autoMemorySummarySilent = ov.autoMemorySummarySilent
     if "autoMemorySummaryNextAskTier" in ov.model_fields_set:
         existing.overrides.autoMemorySummaryNextAskTier = ov.autoMemorySummaryNextAskTier
-    if "mvuModel" in ov.model_fields_set:
-        existing.overrides.mvuModel = ov.mvuModel
     if "mvuMode" in ov.model_fields_set:
         existing.overrides.mvuMode = ov.mvuMode
     if "mvuDirective" in ov.model_fields_set:
