@@ -53,7 +53,7 @@ from app.schemas import (
     GroupGenerateRequest,
     SingleInterjectRequest,
 )
-from app.services.mvu_daemon import ensure_mvu_worker, signal_generate_done
+from app.services.mvu_daemon import ensure_mvu_worker, signal_generate_done, _resolve_mvu_runtime_config
 from app.services.user_message_content import build_user_message_content
 from app.storage import load_character, load_chat, load_chat_image_bytes, load_settings, save_chat, save_settings
 from app.storage import list_worldbooks
@@ -339,6 +339,33 @@ def _resolve_and_append_global_prefill(
         return ""
     messages.append({"role": "assistant", "content": resolved})
     return resolved
+
+
+def _inject_mvu_state_tables_for_directive(messages: list[dict], chat: Any, character: Any) -> bool:
+    """仅修改本次请求 messages，将指令模式状态表追加到最后一条 assistant 后。"""
+    mode, _directive = _resolve_mvu_runtime_config(chat, character)
+    if mode != "directive":
+        return False
+    state = getattr(chat, "stateVariables", None)
+    tables = list(getattr(state, "tables", None) or [])
+    if not tables:
+        return False
+
+    from app.assistant_tools.handlers.mvu import render_tables_markdown
+
+    state_md = render_tables_markdown(tables).strip()
+    if not state_md or state_md == "（暂无状态变量）":
+        return False
+
+    for msg in reversed(messages):
+        if msg.get("role") != "assistant":
+            continue
+        content = msg.get("content")
+        if not isinstance(content, str):
+            continue
+        msg["content"] = f"{content.rstrip()}\n\n[当前状态栏]\n{state_md}"
+        return True
+    return False
 
 
 def _message_to_openai_content(
@@ -1011,6 +1038,7 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
         char_name=character.name or "角色",
         user_name=prefill_user,
     )
+    _inject_mvu_state_tables_for_directive(messages, chat, character)
 
     reasoning_cfg = build_reasoning_request_config(settings)
     thinking_enabled = reasoning_cfg["thinking_enabled"]
@@ -1581,6 +1609,7 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
         runtime_user_name=runtime_user_name,
         settings=settings,
     )
+    _inject_mvu_state_tables_for_directive(messages, chat, character)
 
     reasoning_cfg = build_reasoning_request_config(settings)
     thinking_enabled = reasoning_cfg["thinking_enabled"]
@@ -2007,6 +2036,7 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
         runtime_user_name=runtime_user_name,
         settings=settings,
     )
+    _inject_mvu_state_tables_for_directive(messages, chat, character)
 
     reasoning_cfg = build_reasoning_request_config(settings)
     thinking_enabled = reasoning_cfg["thinking_enabled"]
