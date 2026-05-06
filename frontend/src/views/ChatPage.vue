@@ -63,7 +63,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useCharacterSidebarRecencyStore, useCharactersStore, useChatsStore, useSettingsStore, useUiStore, useMvuStore } from '../stores'
 import type { SettingsDrawerTab } from '../stores/ui'
-import type { ApiPreset, AssistantAttachment, CharacterCard, ChatContentRegexRule, ChatImageAttachment, ChatMessage, ExtraFirstMessageEntry, GroupMemberSettings, Chat, MainChatRole, TtsSessionConfig, WorldBook } from '../types/models'
+import type { ApiPreset, AssistantAttachment, CharacterCard, ChatContentRegexRule, ChatImageAttachment, ChatMessage, ExtraFirstMessageEntry, GroupMemberSettings, Chat, MainChatRole, MvuMode, TtsSessionConfig, WorldBook } from '../types/models'
 
 // Composables
 import { 
@@ -74,6 +74,7 @@ import {
   useChatActions,
   useSettingsImport,
 } from '../composables'
+import type { SillyTavernImportPreview } from '../composables/useSettingsImport'
 import { usePageBackground } from '../composables/usePageBackground'
 import { useWebGpuBackground } from '../composables/useWebGpuBackground'
 import { useWebGpuBackgroundRuntime } from '../composables/useWebGpuBackgroundRuntime'
@@ -133,7 +134,7 @@ const characterSidebarRecency = useCharacterSidebarRecencyStore()
 const uiStore = useUiStore()
 const route = useRoute()
 const router = useRouter()
-const { refreshDataAfterImport } = useSettingsImport()
+const { refreshDataAfterImport, previewSillyTavernImport, materializeSillyTavernPending } = useSettingsImport()
 const pageBackground = usePageBackground(() => settings.settings)
 const webgpuCanvasRef = ref<HTMLCanvasElement | null>(null)
 const { runtimeState: webgpuRuntimeState } = useWebGpuBackgroundRuntime()
@@ -394,6 +395,48 @@ const saveSendDeferCtx = ref<{
 const showEmbeddedCardConfirmModal = ref(false)
 const embeddedCardPreview = ref<EmbeddedCharacterCardPreview | null>(null)
 const embeddedCardImporting = ref(false)
+/** 头像裁剪上传 PNG 后，与完整 ST 导入一致的预览 pending（用于 MVU 选项） */
+const avatarEmbeddedStPendingId = ref('')
+const avatarEmbeddedStExpiresAt = ref('')
+const avatarEmbeddedStPreview = ref<SillyTavernImportPreview | null>(null)
+const avatarEmbeddedEnableMvu = ref(false)
+const avatarEmbeddedMvuMode = ref<MvuMode>('regex')
+const avatarEmbeddedMvuModeOptions = [
+  { label: 'Regex 兼容', value: 'regex' },
+  { label: '指令模式', value: 'directive' },
+] as const
+
+const avatarEmbeddedDetectedMvu = computed(() => {
+  const mvu = avatarEmbeddedStPreview.value?.mvu
+  return Boolean(mvu?.hasTavernHelper || mvu?.hasRegexScripts || mvu?.characterBookCandidateCount)
+})
+
+const embeddedCardConfirmLabel = computed(() => {
+  if (!embeddedCardImporting.value) return '覆盖当前编辑'
+  return avatarEmbeddedEnableMvu.value && avatarEmbeddedMvuMode.value === 'directive'
+    ? 'MVU Agent 分析中...'
+    : '导入中...'
+})
+
+function imageDataUrlToPngFile(imageData: string, filename: string): File {
+  const base64 = imageData.includes(',') ? imageData.split(',')[1]! : imageData
+  const bin = atob(base64)
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  return new File([bytes], filename, { type: 'image/png' })
+}
+
+function resetAvatarEmbeddedStState() {
+  avatarEmbeddedStPendingId.value = ''
+  avatarEmbeddedStExpiresAt.value = ''
+  avatarEmbeddedStPreview.value = null
+  avatarEmbeddedEnableMvu.value = false
+  avatarEmbeddedMvuMode.value = 'regex'
+}
+
+function updateAvatarEmbeddedMvuMode(value: string) {
+  avatarEmbeddedMvuMode.value = value === 'directive' ? 'directive' : 'regex'
+}
 /** 主聊天当前展示思考链的消息 ID（仅前端临时，刷新后消失） */
 const chatReasoningMessageId = ref<string | null>(null)
 /** 主聊天思考链内容（当前正在流式接收的一条） */
@@ -998,7 +1041,39 @@ const isStreamEnabled = computed(() => settings.settings?.streamEnabled !== fals
 // MVU Store
 const mvuStore = useMvuStore()
 const mvuPanelOpen = ref(false)
-const mvuModel = computed(() => activeChat.value?.overrides?.mvuModel ?? null)
+/** 与后端 mvu_model_resolve 一致：全局 mvuModel → 默认模型 → 候选首项 */
+const mvuResolvedModelForPanel = computed(() => {
+  const s = settings.settings
+  if (!s) return null
+  const explicit = (s.mvuModel || '').trim()
+  if (explicit) return explicit
+  const def = (s.llm.defaultModel || '').trim()
+  if (def) return def
+  for (const c of s.llm.modelCandidates || []) {
+    const t = (c || '').trim()
+    if (t) return t
+  }
+  return null
+})
+
+async function onMvuPanelMvuModelSelect(payload: { value: string; presetId?: string | null }) {
+  if (!settings.settings) {
+    try {
+      await settings.load()
+    } catch {
+      return
+    }
+  }
+  if (!settings.settings) return
+  try {
+    await settings.save({
+      ...settings.settings,
+      mvuModel: payload.value?.trim() || null,
+    })
+  } catch (e) {
+    console.error('Failed to save global MVU model:', e)
+  }
+}
 
 // 版本切换延迟持久化：切换版本时仅更新内存，记录脏状态，在发送消息前统一落盘
 const pendingGreetingVersion = ref<{
@@ -1029,16 +1104,6 @@ async function flushPendingGreetingVersion() {
   } catch (e) {
     console.error('Failed to persist greeting version:', e)
   }
-}
-
-async function onMvuModelSelect(payload: { value: string; presetId?: string | null }) {
-  const chat = activeChat.value
-  if (!chat) return
-  const overrides = { ...chat.overrides, mvuModel: payload.value || null }
-  if (payload.presetId) {
-    overrides.presetId = payload.presetId
-  }
-  await chats.updateOverrides(chat.id, overrides, { skipLoadList: true })
 }
 
 function switchFromMvuToAssistantPanel() {
@@ -1888,6 +1953,7 @@ function clearEmbeddedCardPreviewState() {
   showEmbeddedCardConfirmModal.value = false
   embeddedCardPreview.value = null
   embeddedCardImporting.value = false
+  resetAvatarEmbeddedStState()
 }
 
 function avatarObjectPositionByFocus(focusX?: number | null, focusY?: number | null): string {
@@ -1897,9 +1963,25 @@ function avatarObjectPositionByFocus(focusX?: number | null, focusY?: number | n
 }
 
 async function handleCharacterAvatarSave(payload: AvatarCropSavePayload) {
+  resetAvatarEmbeddedStState()
   const embedded = await actions.handleCharacterAvatarSave(payload.imageData, payload.focusX ?? null, payload.focusY ?? null)
   if (embedded?.card) {
     embeddedCardPreview.value = embedded
+    try {
+      const file = imageDataUrlToPngFile(payload.imageData, 'avatar.png')
+      const prev = await previewSillyTavernImport(file)
+      avatarEmbeddedStPendingId.value = prev.pendingId
+      avatarEmbeddedStExpiresAt.value = prev.expiresAt
+      avatarEmbeddedStPreview.value = prev.preview
+      avatarEmbeddedMvuMode.value = prev.preview.mvu.suggestedMode || 'regex'
+      avatarEmbeddedEnableMvu.value = Boolean(
+        prev.preview.mvu.hasTavernHelper
+        || prev.preview.mvu.hasRegexScripts
+        || prev.preview.mvu.characterBookCandidateCount,
+      )
+    } catch {
+      resetAvatarEmbeddedStState()
+    }
     showEmbeddedCardConfirmModal.value = true
   }
 }
@@ -1916,10 +1998,28 @@ async function confirmImportEmbeddedCard() {
   embeddedCardImporting.value = true
   try {
     const current = actions.editingCharacter.value
-    const incoming = embeddedCardPreview.value.card
+    let incoming: CharacterCard
+    let worldbookPayload: WorldBook | undefined
+    let mergeWarnings: string[] | undefined
+
+    if (avatarEmbeddedStPendingId.value) {
+      const built = await materializeSillyTavernPending({
+        pendingId: avatarEmbeddedStPendingId.value,
+        enableMvuCompatibility: avatarEmbeddedEnableMvu.value,
+        mvuMode: avatarEmbeddedMvuMode.value,
+        avatarFilename: current.avatar || null,
+      })
+      incoming = built.character as unknown as CharacterCard
+      worldbookPayload = built.worldbook ? (built.worldbook as unknown as WorldBook) : undefined
+      mergeWarnings = built.warnings
+    } else {
+      incoming = embeddedCardPreview.value.card
+      worldbookPayload = embeddedCardPreview.value.worldbook ?? undefined
+    }
+
     let attachedWorldBookIds: string[] = []
-    if (embeddedCardPreview.value.worldbook) {
-      const savedBook = await apiPost<WorldBook>('/api/worldbooks', embeddedCardPreview.value.worldbook)
+    if (worldbookPayload) {
+      const savedBook = await apiPost<WorldBook>('/api/worldbooks', worldbookPayload)
       attachedWorldBookIds = [savedBook.id]
       await loadCharacterEditorWorldbooks()
     }
@@ -1937,6 +2037,9 @@ async function confirmImportEmbeddedCard() {
       mvuMode: incoming.mvuMode === 'directive' ? 'directive' : 'regex',
       mvuDirective: typeof incoming.mvuDirective === 'string' ? incoming.mvuDirective : null,
       contentRegexRules: Array.isArray(incoming.contentRegexRules) ? incoming.contentRegexRules : [],
+      initialStateTables: Array.isArray(incoming.initialStateTables)
+        ? incoming.initialStateTables
+        : current.initialStateTables,
       attachedWorldBookIds,
       avatar: current.avatar || incoming.avatar,
       avatarFocusX: current.avatarFocusX ?? incoming.avatarFocusX ?? null,
@@ -1945,6 +2048,9 @@ async function confirmImportEmbeddedCard() {
     await apiPut<CharacterCard>('/api/assistant/workspace/character-card', mergedCard)
     actions.applyAssistantCard(mergedCard)
     clearEmbeddedCardPreviewState()
+    if (mergeWarnings?.length) {
+      void notifyMessage(mergeWarnings.join('；'), { title: '内嵌卡合并提示' })
+    }
   } catch (error) {
     errorStack.pushError({ message: error, source: 'main', title: '导入 PNG 内嵌角色数据失败' })
     embeddedCardImporting.value = false
@@ -5340,10 +5446,11 @@ const editingPersonaAvatarUrl = computed(() => {
       :is-open="mvuPanelOpen"
       :logs="mvuStore.workLogs"
       :running="mvuStore.isRunning"
-      :mvu-model="mvuModel"
+      :mvu-model="settings.settings?.mvuModel ?? null"
       :model-options="chatModelOptions"
+      :resolved-mvu-model="mvuResolvedModelForPanel"
       @update:is-open="mvuPanelOpen = $event"
-      @select-mvu-model="onMvuModelSelect"
+      @select-mvu-model="onMvuPanelMvuModelSelect"
       @switch-to-assistant="switchFromMvuToAssistantPanel"
     />
 
@@ -6154,22 +6261,55 @@ const editingPersonaAvatarUrl = computed(() => {
         <h3 class="modal-title text-[var(--color-text)]">检测到 PNG 内嵌角色卡</h3>
         <button class="modal-close text-[var(--color-text-muted)] hover:text-[var(--color-text)]" @click="clearEmbeddedCardPreviewState">×</button>
       </div>
-      <div class="modal-body">
+      <div class="modal-body max-h-[min(70vh,520px)] overflow-y-auto pr-1 space-y-3">
         <div class="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface-muted)] p-4 text-sm text-[var(--color-text-secondary)] space-y-2">
           <p>是否用内嵌角色数据覆盖当前编辑内容？</p>
           <p class="text-xs text-[var(--color-text-muted)]">
-            确认后将覆盖简介、Personality、Scenario、首句、示例对话、系统提示词、额外首句，并重置世界书绑定为内嵌角色卡对应世界书（若存在）；当前上传图片会保留为头像。
+            确认后将覆盖简介、Personality、Scenario、首句、示例对话、系统提示词、额外首句与 MVU 相关字段，并重置世界书绑定为内嵌角色卡对应世界书（若存在）；当前上传图片会保留为头像。
           </p>
           <p class="text-xs text-[var(--color-text-muted)]">
-            检测结果：角色名「{{ embeddedCardPreview?.card?.name || '未命名角色' }}」，
-            世界书：{{ embeddedCardPreview?.worldbook ? '有（将新建并绑定）' : '无（将清空绑定）' }}。
+            检测结果：角色名「{{ avatarEmbeddedStPreview?.characterName || embeddedCardPreview?.card?.name || '未命名角色' }}」，
+            世界书：{{
+              embeddedCardPreview?.worldbook || (avatarEmbeddedStPreview && avatarEmbeddedStPreview.worldBookEntryCount > 0)
+                ? '有（将新建并绑定）'
+                : '无（将清空绑定）'
+            }}。
           </p>
+        </div>
+        <div
+          v-if="avatarEmbeddedStPreview"
+          class="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface-overlay)] p-4 text-xs text-[var(--color-text-muted)] space-y-2"
+        >
+          <div class="text-[var(--color-text-secondary)]">SillyTavern / MVU 预览</div>
+          <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <div>世界书条目：<span class="text-[var(--color-text)]">{{ avatarEmbeddedStPreview.worldBookEntryCount }}</span></div>
+            <div>tavern_helper：<span class="text-[var(--color-text)]">{{ avatarEmbeddedStPreview.mvu.hasTavernHelper ? '已检测到' : '未检测到' }}</span></div>
+            <div>regex_scripts：<span class="text-[var(--color-text)]">{{ avatarEmbeddedStPreview.mvu.regexScriptCount }}</span></div>
+          </div>
+          <label class="flex items-center gap-2">
+            <ThemedCheckbox :checked="avatarEmbeddedEnableMvu" @update:checked="avatarEmbeddedEnableMvu = $event" />
+            启用 MVU 兼容
+            <span v-if="avatarEmbeddedDetectedMvu" class="text-[var(--color-text-secondary)]">已检测到候选结构</span>
+          </label>
+          <p class="text-[var(--color-text-muted)]">
+            指令模式会把完整 ST 卡上下文交给 MVU Agent，生成角色卡 MVU 指令与初始状态栏后再合并到当前编辑内容。
+          </p>
+          <div>
+            <div class="mb-1 text-[var(--color-text-muted)]">MVU 模式</div>
+            <ModernSelect
+              :model-value="avatarEmbeddedMvuMode"
+              :options="[...avatarEmbeddedMvuModeOptions]"
+              placeholder="选择 MVU 模式"
+              @update:model-value="updateAvatarEmbeddedMvuMode"
+            />
+          </div>
+          <p v-if="avatarEmbeddedStExpiresAt" class="text-[var(--color-text-muted)]">预览暂存至：{{ avatarEmbeddedStExpiresAt }}</p>
         </div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" :disabled="embeddedCardImporting" @click="clearEmbeddedCardPreviewState">仅使用头像</button>
         <button class="btn btn-primary" :disabled="embeddedCardImporting" @click="confirmImportEmbeddedCard">
-          {{ embeddedCardImporting ? '导入中...' : '覆盖当前编辑' }}
+          {{ embeddedCardConfirmLabel }}
         </button>
       </div>
     </div>
