@@ -139,7 +139,7 @@ export interface ChatOverrides {
   autoMemorySummarySilent?: boolean
   /** 非静默下拒绝确认后的倍数，下次在 n*tier 条时再问 */
   autoMemorySummaryNextAskTier?: number
-  /** MVU Agent 专用模型；空值时回退到全局默认模型 */
+  /** @deprecated 会话级 MVU 模型已废弃；全局 settings.mvuModel */
   mvuModel?: string | null
   /** 会话级 MVU 模式覆盖；null 表示继承角色设置 */
   mvuMode?: ChatMvuMode
@@ -381,6 +381,8 @@ export interface Settings {
   ttsEnabled?: boolean
   /** TTS 音频缓存上限（MB） */
   ttsAudioCacheLimitMb?: number
+  /** MVU Agent / directive 导入 Agent 专用模型；空则回退 llm.defaultModel 与 modelCandidates */
+  mvuModel?: string | null
   worldBookEntryScanDepthDefault?: number
   /** 全局正文正则规则库：所有会话可见 */
   contentRegexRuleLibrary?: ChatContentRegexRule[]
