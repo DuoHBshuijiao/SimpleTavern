@@ -7,6 +7,7 @@
     - GET /chats/{chat_id}/export: 导出聊天会话（支持txt和json格式）
     - GET /settings/backup: 备份设置（支持basic/with_characters/with_chats三种范围）
     - POST /import: 导入数据（支持zip/json/txt以及ST png/json角色卡）
+    - POST /import/sillytavern/preview|confirm|materialize: ST 角色卡预览、确认落库、仅生成 JSON（头像内嵌合并等）
     - POST /import/janitor/pending: 暂存Janitor捕获的聊天数据（独立字典，与角色 HTML 导入无关）
     - GET /import/janitor/pending/{pending_id}: 获取Janitor待导入预览
     - POST /import/janitor/confirm: 确认导入Janitor聊天到本地会话
@@ -58,11 +59,11 @@ from app.prompt_xml import (
 )
 from app.schemas import Chat, ChatContentRegexRule, ChatMessage, CharacterCard, ExtraFirstMessageEntry, MvuMode, Settings, StatusTableDef, WorldBook
 from app.services.st_mvu_compat import (
-    run_st_mvu_compat_agent,
     run_st_mvu_regex_compat_agent,
     validate_st_mvu_compat_result,
     validate_st_mvu_regex_compat_result,
 )
+from app.services.st_mvu_import_agent import run_st_mvu_import_agent
 from app.storage import (
     avatar_path,
     avatars_dir,
@@ -101,6 +102,15 @@ class SillyTavernConfirmRequest(BaseModel):
     pendingId: str
     enableMvuCompatibility: bool = False
     mvuMode: MvuMode = "regex"
+
+
+class SillyTavernMaterializeRequest(BaseModel):
+    """由预览 pending 生成角色卡与世界书数据（不落库），供头像嵌入卡编辑合并等场景。"""
+
+    pendingId: str
+    enableMvuCompatibility: bool = False
+    mvuMode: MvuMode = "regex"
+    avatarFilename: str | None = None
 
 
 def _sanitize_filename(name: str, fallback: str) -> str:
@@ -1838,27 +1848,23 @@ def _map_st_to_character_and_worldbook(raw: dict[str, Any]) -> tuple[CharacterCa
     return card, worldbook
 
 
-def _import_sillytavern_card(
+async def _materialize_sillytavern_card(
     raw: dict[str, Any],
     avatar_filename: str | None = None,
     *,
     enable_mvu_compatibility: bool = False,
     mvu_mode: MvuMode = "regex",
-) -> dict[str, Any]:
+) -> tuple[CharacterCard, WorldBook | None, list[str], dict[str, Any]]:
+    """
+    将 ST 原始 dict 映射为 CharacterCard / WorldBook，并按选项应用 MVU 兼容（仅内存，不写库）。
+    """
     card, worldbook = _map_st_to_character_and_worldbook(raw)
     if isinstance(avatar_filename, str) and avatar_filename.strip():
         card.avatar = avatar_filename.strip()
+    warnings: list[str] = []
     if enable_mvu_compatibility:
         card.mvuEnabled = True
         card.mvuMode = mvu_mode
-    imported = ["character"]
-    warnings: list[str] = []
-    saved_worldbook: WorldBook | None = None
-    if worldbook is not None:
-        saved_worldbook = save_worldbook(worldbook)
-        card.attachedWorldBookIds = [saved_worldbook.id]
-        imported.append("worldbook")
-    saved_card = save_character(card)
     mvu_compat: dict[str, Any] = {
         "mode": mvu_mode,
         "applied": False,
@@ -1868,15 +1874,14 @@ def _import_sillytavern_card(
     }
     if enable_mvu_compatibility and mvu_mode == "directive":
         try:
-            compat_result = validate_st_mvu_compat_result(run_st_mvu_compat_agent(raw))
-            saved_card.mvuEnabled = True
-            saved_card.mvuMode = "directive"
-            saved_card.mvuDirective = compat_result["directive"] or None
-            saved_card.initialStateTables = [
+            compat_result = validate_st_mvu_compat_result(await run_st_mvu_import_agent(raw))
+            card.mvuEnabled = True
+            card.mvuMode = "directive"
+            card.mvuDirective = compat_result["directive"] or None
+            card.initialStateTables = [
                 StatusTableDef.model_validate(item)
                 for item in compat_result.get("initialStateTables", [])
             ]
-            saved_card = save_character(saved_card)
             mvu_compat = {
                 "mode": "directive",
                 "applied": bool(compat_result.get("applied")),
@@ -1902,16 +1907,15 @@ def _import_sillytavern_card(
     elif enable_mvu_compatibility and mvu_mode == "regex":
         try:
             compat_result = validate_st_mvu_regex_compat_result(run_st_mvu_regex_compat_agent(raw))
-            saved_card.mvuEnabled = True
-            saved_card.mvuMode = "regex"
-            saved_card.mvuDirective = None
-            existing_rules = list(getattr(saved_card, "contentRegexRules", []) or [])
+            card.mvuEnabled = True
+            card.mvuMode = "regex"
+            card.mvuDirective = None
+            existing_rules = list(getattr(card, "contentRegexRules", []) or [])
             generated_rules = [
                 ChatContentRegexRule.model_validate(item)
                 for item in compat_result.get("regexRules", [])
             ]
-            saved_card.contentRegexRules = (existing_rules + generated_rules)[:100]
-            saved_card = save_character(saved_card)
+            card.contentRegexRules = (existing_rules + generated_rules)[:100]
             mvu_compat = {
                 "mode": "regex",
                 "applied": bool(compat_result.get("applied")),
@@ -1936,6 +1940,29 @@ def _import_sillytavern_card(
                 "worldbookMarks": [],
                 "rules": 0,
             }
+    return card, worldbook, warnings, mvu_compat
+
+
+async def _import_sillytavern_card(
+    raw: dict[str, Any],
+    avatar_filename: str | None = None,
+    *,
+    enable_mvu_compatibility: bool = False,
+    mvu_mode: MvuMode = "regex",
+) -> dict[str, Any]:
+    card, worldbook, warnings, mvu_compat = await _materialize_sillytavern_card(
+        raw,
+        avatar_filename,
+        enable_mvu_compatibility=enable_mvu_compatibility,
+        mvu_mode=mvu_mode,
+    )
+    imported = ["character"]
+    saved_worldbook: WorldBook | None = None
+    if worldbook is not None:
+        saved_worldbook = save_worldbook(worldbook)
+        card.attachedWorldBookIds = [saved_worldbook.id]
+        imported.append("worldbook")
+    saved_card = save_character(card)
     out: dict[str, Any] = {
         "imported": imported,
         "warnings": warnings,
@@ -1952,7 +1979,7 @@ def _import_sillytavern_card(
     return out
 
 
-def _import_from_json(raw: Any) -> dict[str, Any]:
+async def _import_from_json(raw: Any) -> dict[str, Any]:
     """
     从JSON数据导入
     
@@ -1974,7 +2001,7 @@ def _import_from_json(raw: Any) -> dict[str, Any]:
         raw = raw.get("chat")
 
     if _looks_like_st_card(raw):
-        return _import_sillytavern_card(raw)
+        return await _import_sillytavern_card(raw)
 
     if isinstance(raw, dict) and ("name" in raw and ("personality" in raw or "systemPrompt" in raw)):
         card = CharacterCard.model_validate(raw)
@@ -2199,7 +2226,7 @@ async def preview_sillytavern_import(file: UploadFile = File(...)) -> dict[str, 
 
 
 @router.post("/import/sillytavern/confirm")
-def confirm_sillytavern_import(req: SillyTavernConfirmRequest) -> dict[str, Any]:
+async def confirm_sillytavern_import(req: SillyTavernConfirmRequest) -> dict[str, Any]:
     _cleanup_expired_sillytavern_pending()
     item = _sillytavern_pending_store.get(req.pendingId)
     if not item:
@@ -2213,7 +2240,7 @@ def confirm_sillytavern_import(req: SillyTavernConfirmRequest) -> dict[str, Any]
     if isinstance(png_payload, bytes) and png_payload:
         avatar_filename = f"{uuid4().hex}.png"
         save_avatar(avatar_filename, png_payload)
-    result = _import_sillytavern_card(
+    result = await _import_sillytavern_card(
         raw,
         avatar_filename=avatar_filename,
         enable_mvu_compatibility=req.enableMvuCompatibility,
@@ -2221,6 +2248,41 @@ def confirm_sillytavern_import(req: SillyTavernConfirmRequest) -> dict[str, Any]
     )
     _sillytavern_pending_store.pop(req.pendingId, None)
     return {"ok": True, **result}
+
+
+@router.post("/import/sillytavern/materialize")
+async def materialize_sillytavern_pending(req: SillyTavernMaterializeRequest) -> dict[str, Any]:
+    """由预览 pending 生成角色卡与世界书 JSON（不写库），用于头像裁剪合并编辑等。"""
+    _cleanup_expired_sillytavern_pending()
+    item = _sillytavern_pending_store.get(req.pendingId)
+    if not item:
+        raise HTTPException(status_code=404, detail="SillyTavern pending not found or expired")
+    _, stored = item
+    raw = stored.get("raw")
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail="invalid SillyTavern pending payload")
+    avatar_override = req.avatarFilename.strip() if isinstance(req.avatarFilename, str) and req.avatarFilename.strip() else None
+    card, worldbook, warnings, mvu_compat = await _materialize_sillytavern_card(
+        raw,
+        avatar_filename=avatar_override,
+        enable_mvu_compatibility=req.enableMvuCompatibility,
+        mvu_mode=req.mvuMode,
+    )
+    _sillytavern_pending_store.pop(req.pendingId, None)
+    out: dict[str, Any] = {
+        "ok": True,
+        "character": card.model_dump(mode="json"),
+        "warnings": warnings,
+        "mvuCompat": mvu_compat,
+        "mvu": {
+            "enabled": bool(req.enableMvuCompatibility),
+            "requestedMode": req.mvuMode,
+            "detected": _build_sillytavern_preview(raw)["mvu"],
+        },
+    }
+    if worldbook is not None:
+        out["worldbook"] = worldbook.model_dump(mode="json")
+    return out
 
 
 def _decode_character_html_bytes(payload: bytes) -> str:
@@ -2343,13 +2405,13 @@ async def import_data(file: UploadFile = File(...)) -> dict:
             st_raw = _extract_st_json_from_png(payload)
             avatar_filename = f"{uuid4().hex}.png"
             save_avatar(avatar_filename, payload)
-            return {"ok": True, **_import_sillytavern_card(st_raw, avatar_filename=avatar_filename)}
+            return {"ok": True, **(await _import_sillytavern_card(st_raw, avatar_filename=avatar_filename))}
         if filename.endswith(".jsonl") or (file.content_type and "jsonl" in file.content_type):
             result = _import_from_jsonl(payload.decode("utf-8"))
             return {"ok": True, **result}
         if filename.endswith(".json") or (file.content_type and "json" in file.content_type):
             raw = json.loads(payload.decode("utf-8"))
-            result = _import_from_json(raw)
+            result = await _import_from_json(raw)
             return {"ok": True, **result}
         text = payload.decode("utf-8")
         if "SimpleTavern Chat Export" in text or "[Message]" in text:
