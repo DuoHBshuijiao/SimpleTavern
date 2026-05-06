@@ -604,6 +604,49 @@ def _all_registered() -> list[RegisteredTool]:
             risk=ToolRisk.READ,
         ),
         _fn(
+            "chat_content_regex_manage",
+            "管理当前会话的正文正则规则（ChatOverrides.contentRegexRules）。"
+            "operation=list 列出规则；upsert 传入 rule 对象（更新时含 id）；delete 传入 rule_id。"
+            "启用规则会校验 pattern；单会话最多 100 条。",
+            {
+                "type": "object",
+                "properties": {
+                    "operation": {"type": "string", "enum": ["list", "upsert", "delete"]},
+                    "rule_id": {"type": "string", "description": "delete 时必填"},
+                    "rule": {"type": "object", "description": "upsert 时必填，字段同 ChatContentRegexRule"},
+                },
+                "required": ["operation"],
+                "additionalProperties": False,
+            },
+            needs_chat=True,
+            needs_memory_write=False,
+            needs_destructive=False,
+            handler=H["chat_content_regex_manage"],
+            scopes=frozenset({CH}),
+            risk=ToolRisk.WRITE,
+        ),
+        _fn(
+            "character_content_regex_manage",
+            "管理当前会话绑定角色卡（chat.characterId）的正文正则模板（CharacterCard.contentRegexRules）。"
+            "群聊仅作用于主角色 characterId。operation=list|upsert|delete，用法同 chat_content_regex_manage。",
+            {
+                "type": "object",
+                "properties": {
+                    "operation": {"type": "string", "enum": ["list", "upsert", "delete"]},
+                    "rule_id": {"type": "string", "description": "delete 时必填"},
+                    "rule": {"type": "object", "description": "upsert 时必填，字段同 ChatContentRegexRule"},
+                },
+                "required": ["operation"],
+                "additionalProperties": False,
+            },
+            needs_chat=True,
+            needs_memory_write=False,
+            needs_destructive=False,
+            handler=H["character_content_regex_manage"],
+            scopes=frozenset({CH}),
+            risk=ToolRisk.WRITE,
+        ),
+        _fn(
             "patch_state_variable",
             "修补 MVU 状态变量中的指定单元格。仅聊天助手可调用。参数：table_name、field、column、value。",
             {
