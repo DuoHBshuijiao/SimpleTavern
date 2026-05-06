@@ -49,6 +49,7 @@ import {
   type ChatMvuMode,
   type ChatOverrides,
   type Settings,
+  type MvuMode,
   type TtsProvider,
   type TtsSessionConfig,
   type WorldBook,
@@ -111,6 +112,8 @@ const chatsStore = useChatsStore()
 const charactersStore = useCharactersStore()
 const {
   importSettingsFile,
+  previewSillyTavernImport,
+  confirmSillyTavernImport,
   refreshDataAfterImport,
   formatImportResultMessage,
 } = useSettingsImport()
@@ -191,6 +194,101 @@ const presetVoicesLoading = ref(false)
 const presetModelListSelection = ref<Set<string>>(new Set())
 const presetVoiceListSelection = ref<Set<string>>(new Set())
 const importInputRef = ref<HTMLInputElement | null>(null)
+const stImportInputRef = ref<HTMLInputElement | null>(null)
+const stPendingId = ref('')
+const stExpiresAt = ref('')
+const stPreview = ref<Awaited<ReturnType<typeof previewSillyTavernImport>>['preview'] | null>(null)
+const stEnableMvuCompatibility = ref(false)
+const stMvuMode = ref<MvuMode>('regex')
+const stPreviewLoading = ref(false)
+const stConfirming = ref(false)
+
+const stMvuModeOptions = [
+  { label: 'Regex 兼容', value: 'regex' },
+  { label: '指令模式', value: 'directive' },
+]
+
+const stDetectedMvu = computed(() => {
+  const mvu = stPreview.value?.mvu
+  return Boolean(mvu?.hasTavernHelper || mvu?.hasRegexScripts || mvu?.characterBookCandidateCount)
+})
+
+const stImportConfirmLabel = computed(() => {
+  if (!stConfirming.value) return '确认导入 ST 角色'
+  return stEnableMvuCompatibility.value && stMvuMode.value === 'directive'
+    ? 'MVU Agent 分析中…'
+    : '导入中…'
+})
+
+function resetStImportPreview() {
+  stPendingId.value = ''
+  stExpiresAt.value = ''
+  stPreview.value = null
+  stEnableMvuCompatibility.value = false
+  stMvuMode.value = 'regex'
+}
+
+function updateStImportMvuMode(value: string) {
+  stMvuMode.value = value === 'directive' ? 'directive' : 'regex'
+}
+
+async function loadStImportPreviewFromFile(file: File): Promise<void> {
+  stPreviewLoading.value = true
+  try {
+    const result = await previewSillyTavernImport(file)
+    stPendingId.value = result.pendingId
+    stExpiresAt.value = result.expiresAt
+    stPreview.value = result.preview
+    stMvuMode.value = result.preview.mvu.suggestedMode || 'regex'
+    stEnableMvuCompatibility.value = Boolean(
+      result.preview.mvu.hasTavernHelper
+      || result.preview.mvu.hasRegexScripts
+      || result.preview.mvu.characterBookCandidateCount,
+    )
+  } finally {
+    stPreviewLoading.value = false
+  }
+}
+
+function triggerStImport() {
+  stImportInputRef.value?.click()
+}
+
+async function handleStImportPick(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  try {
+    await loadStImportPreviewFromFile(file)
+  } catch (err) {
+    resetStImportPreview()
+    await notifyMessage(err instanceof Error ? err.message : String(err))
+  } finally {
+    input.value = ''
+  }
+}
+
+async function confirmStImportFromSettings() {
+  if (!stPendingId.value) {
+    await notifyMessage('请先选择 SillyTavern PNG/JSON 并生成预览。')
+    return
+  }
+  stConfirming.value = true
+  try {
+    const result = await confirmSillyTavernImport({
+      pendingId: stPendingId.value,
+      enableMvuCompatibility: stEnableMvuCompatibility.value,
+      mvuMode: stMvuMode.value,
+    })
+    await refreshDataAfterImport()
+    await notifyMessage(formatImportResultMessage(result))
+    resetStImportPreview()
+  } catch (err) {
+    await notifyMessage(err instanceof Error ? err.message : String(err))
+  } finally {
+    stConfirming.value = false
+  }
+}
 const worldbooks = ref<WorldBook[]>([])
 /** 全部世界书列表：按书 ID 缓存启用条目正文的 token 估测 */
 const worldbookTokenTotals = ref<Record<string, number | null>>({})
@@ -649,7 +747,6 @@ function ensureOverrides(v?: Partial<ChatOverrides> | null): ChatOverrides {
       v.autoMemorySummaryNextAskTier >= 1
         ? Math.floor(v.autoMemorySummaryNextAskTier)
         : 1,
-    mvuModel: v?.mvuModel ?? null,
     mvuMode: normalizeChatMvuMode(v?.mvuMode),
     mvuDirective: typeof v?.mvuDirective === 'string' ? v.mvuDirective : null,
   }
@@ -2594,6 +2691,67 @@ const chatModelOptions = computed(() => {
   return options
 })
 
+const globalAvailableModelSet = computed(() => {
+  if (!globalDraft.value) return new Set<string>()
+  const presets = globalDraft.value.apiPresets
+  if (presets && presets.length > 0) {
+    return new Set(presets.filter((p) => !isTtsApiPreset(p)).flatMap((p) => p.models || []))
+  }
+  return new Set(globalDraft.value.llm.modelCandidates || [])
+})
+
+/** 全局 MVU 模型下拉：与聊天页模型分组一致（最近使用 / 各预设 / 全局候选） */
+const globalMvuModelOptions = computed(() => {
+  const options: any[] = []
+  if (!globalDraft.value) return []
+
+  const recentModels = (globalDraft.value.llm.usedModels || []).filter((m) =>
+    globalAvailableModelSet.value.has(m),
+  )
+  if (recentModels.length > 0) {
+    options.push({
+      label: '最近使用',
+      options: recentModels.map((m) => {
+        let preset = null
+        if (globalDraft.value!.apiPresets) {
+          preset = globalDraft.value!.apiPresets.find(
+            (p) => !isTtsApiPreset(p) && p.models.includes(m),
+          )
+        }
+        return { label: m, value: m, presetId: preset ? preset.id : null }
+      }),
+    })
+  }
+
+  for (const preset of globalDraft.value.apiPresets) {
+    if (isTtsApiPreset(preset)) continue
+    if (preset.models && preset.models.length > 0) {
+      options.push({
+        label: preset.name,
+        options: preset.models.map((m) => ({ label: m, value: m, presetId: preset.id })),
+      })
+    }
+  }
+
+  if (
+    (!globalDraft.value.apiPresets || globalDraft.value.apiPresets.length === 0) &&
+    globalDraft.value.llm.modelCandidates &&
+    globalDraft.value.llm.modelCandidates.length > 0
+  ) {
+    options.push({
+      label: '全局配置',
+      options: globalDraft.value.llm.modelCandidates.map((m) => ({ label: m, value: m, presetId: null })),
+    })
+  }
+
+  return options
+})
+
+function handleGlobalMvuModelSelect(option: { value: string; presetId?: string | null }) {
+  if (!globalDraft.value) return
+  globalDraft.value.mvuModel = option.value?.trim() || null
+}
+
 /**
  * 处理聊天模型选择
  *
@@ -2711,7 +2869,6 @@ interface ComparableChatOverrides {
   lastAutoMemorySummaryAfterMessageId: string | null
   autoMemorySummarySilent: boolean
   autoMemorySummaryNextAskTier: number
-  mvuModel: string | null
   mvuMode: ChatMvuMode
   mvuDirective: string | null
 }
@@ -2770,7 +2927,6 @@ function normalizeComparableChatOverrides(source?: Partial<ChatOverrides> | null
       overrides.autoMemorySummaryNextAskTier >= 1
         ? Math.floor(overrides.autoMemorySummaryNextAskTier)
         : 1,
-    mvuModel: overrides.mvuModel ?? null,
     mvuMode: normalizeChatMvuMode(overrides.mvuMode),
     mvuDirective: typeof overrides.mvuDirective === 'string' ? overrides.mvuDirective : null,
   }
@@ -2820,7 +2976,6 @@ function applyNormalizedComparableToDraft(source: ComparableChatOverrides) {
   chatDraft.value.lastAutoMemorySummaryAfterMessageId = source.lastAutoMemorySummaryAfterMessageId
   chatDraft.value.autoMemorySummarySilent = source.autoMemorySummarySilent
   chatDraft.value.autoMemorySummaryNextAskTier = source.autoMemorySummaryNextAskTier
-  chatDraft.value.mvuModel = source.mvuModel
   chatDraft.value.mvuMode = source.mvuMode
   chatDraft.value.mvuDirective = source.mvuDirective
 }
@@ -3315,14 +3470,51 @@ async function handleImportChange(e: Event) {
   const input = e.target as HTMLInputElement
   const file = input.files?.[0]
   if (!file) return
+  const lower = file.name.toLowerCase()
+
+  if (lower.endsWith('.png')) {
+    resetStImportPreview()
+    try {
+      await loadStImportPreviewFromFile(file)
+    } catch (err) {
+      resetStImportPreview()
+      await notifyMessage(err instanceof Error ? err.message : String(err))
+    } finally {
+      input.value = ''
+    }
+    return
+  }
+
+  if (lower.endsWith('.json')) {
+    resetStImportPreview()
+    try {
+      await loadStImportPreviewFromFile(file)
+      input.value = ''
+      return
+    } catch {
+      // 非 ST 角色卡 JSON 时走通用导入
+    }
+    try {
+      const result = await importSettingsFile(file)
+      await refreshDataAfterImport()
+      await notifyMessage(formatImportResultMessage(result))
+    } catch (err) {
+      await notifyMessage(err instanceof Error ? err.message : String(err))
+    } finally {
+      input.value = ''
+    }
+    return
+  }
+
   try {
     const result = await importSettingsFile(file)
     await refreshDataAfterImport()
     await notifyMessage(formatImportResultMessage(result))
   } catch (err) {
     await notifyMessage(err instanceof Error ? err.message : String(err))
+  } finally {
+    input.value = ''
   }
-  input.value = ''
 }
 
 /**
@@ -3557,6 +3749,22 @@ async function checkUpdate() {
                       class="input w-full"
                       placeholder="例如: gpt-3.5-turbo"
                     />
+                  </div>
+
+                  <div class="space-y-1.5">
+                    <label class="block text-sm font-medium text-[var(--color-text-secondary)]">MVU Agent 模型</label>
+                    <ModernSelect
+                      :model-value="globalDraft.mvuModel ?? ''"
+                      :options="globalMvuModelOptions"
+                      placeholder="留空则使用默认模型名称与候选回退"
+                      class="w-full"
+                      searchable
+                      allow-create
+                      @select="handleGlobalMvuModelSelect"
+                    />
+                    <p class="text-xs text-[var(--color-text-muted)]">
+                      MVU 后台与 SillyTavern directive 导入兼容共用此模型；无需进入会话即可配置。
+                    </p>
                   </div>
                     </div>
                   </div>
@@ -4038,18 +4246,89 @@ async function checkUpdate() {
                         <button
                           type="button"
                           class="min-h-10 rounded-lg bg-surface-muted px-3 py-2 text-center text-sm leading-tight text-[var(--color-text)] transition-colors min-w-0 hover:bg-surface-hover"
+                          :disabled="stPreviewLoading"
                           @click="triggerImport"
                         >
-                          导入数据
+                          {{ stPreviewLoading ? '读取预览中…' : '导入数据' }}
                         </button>
                       </div>
+                      <button
+                        type="button"
+                        class="min-h-10 w-full rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-surface-overlay)] px-3 py-2 text-center text-sm leading-tight text-[var(--color-text-secondary)] transition-colors hover:bg-surface-hover"
+                        :disabled="stPreviewLoading"
+                        @click="triggerStImport"
+                      >
+                        {{ stPreviewLoading ? '读取预览中…' : '仅选择 SillyTavern 角色卡（PNG / JSON）' }}
+                      </button>
                       <input
                         ref="importInputRef"
                         type="file"
                         class="hidden"
-                        accept=".txt,.json,.jsonl,.zip"
+                        accept=".txt,.json,.jsonl,.zip,.png"
                         @change="handleImportChange"
                       />
+                      <input
+                        ref="stImportInputRef"
+                        type="file"
+                        class="hidden"
+                        accept=".png,.json"
+                        @change="handleStImportPick"
+                      />
+                      <div
+                        v-if="stPreview"
+                        class="rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-surface-overlay)] p-3 text-xs text-[var(--color-text-muted)]"
+                      >
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                          <div class="text-[var(--color-text-secondary)]">SillyTavern 预览</div>
+                          <button
+                            type="button"
+                            class="min-h-8 rounded-md bg-surface-muted px-2 py-1 text-[var(--color-text)] hover:bg-surface-hover"
+                            @click="resetStImportPreview"
+                          >
+                            清除
+                          </button>
+                        </div>
+                        <div class="mt-2">
+                          角色名：<span class="text-[var(--color-text)]">{{ stPreview.characterName || '未知' }}</span>
+                        </div>
+                        <div class="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                          <div>世界书：<span class="text-[var(--color-text)]">{{ stPreview.worldBookName || '未检测到' }}</span></div>
+                          <div>世界书条目：<span class="text-[var(--color-text)]">{{ stPreview.worldBookEntryCount }}</span></div>
+                          <div>tavern_helper：<span class="text-[var(--color-text)]">{{ stPreview.mvu.hasTavernHelper ? '已检测到' : '未检测到' }}</span></div>
+                          <div>regex_scripts：<span class="text-[var(--color-text)]">{{ stPreview.mvu.regexScriptCount }}</span></div>
+                        </div>
+                        <label class="mt-3 flex items-center gap-2 text-[var(--color-text-muted)]">
+                          <ThemedCheckbox :checked="stEnableMvuCompatibility" @update:checked="stEnableMvuCompatibility = $event" />
+                          启用 MVU 兼容
+                          <span v-if="stDetectedMvu" class="text-[var(--color-text-secondary)]">已检测到候选结构</span>
+                        </label>
+                        <p class="text-[var(--color-text-muted)]">
+                          指令模式会把完整 ST 卡上下文交给 MVU Agent，生成角色卡 MVU 指令与初始状态栏后再完成导入。
+                        </p>
+                        <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+                          <div>
+                            <div class="mb-1 text-[var(--color-text-muted)]">MVU 模式</div>
+                            <ModernSelect
+                              :model-value="stMvuMode"
+                              :options="stMvuModeOptions"
+                              placeholder="选择 MVU 模式"
+                              @update:model-value="updateStImportMvuMode"
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            class="btn btn-sm btn-primary min-h-10 w-full sm:w-auto"
+                            :disabled="!stPendingId || stConfirming"
+                            @click="confirmStImportFromSettings"
+                          >
+                            {{ stImportConfirmLabel }}
+                          </button>
+                        </div>
+                        <div v-if="stExpiresAt" class="mt-2 text-[var(--color-text-muted)]">预览暂存至：{{ stExpiresAt }}</div>
+                      </div>
+                    </div>
+                    <div class="text-xs text-[var(--color-text-muted)]">
+                      PNG 或 SillyTavern 形状 JSON 会先显示预览并可勾选 MVU；普通备份 JSON 仍走一键导入。
                     </div>
                     <div class="text-xs text-[var(--color-text-muted)]">
                       备份会导出全部系统设置（含用户 Persona 头像）；“包含角色卡/包含全部聊天记录”同时包含世界书数据。
@@ -4961,7 +5240,7 @@ async function checkUpdate() {
                 <div class="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <div class="text-sm font-medium text-[var(--color-text-secondary)]">MVU 模式覆盖</div>
-                    <div class="mt-1 text-xs text-[var(--color-text-muted)]">只覆盖当前会话的 MVU 模式与指令，不影响 MVU Agent 专用模型。</div>
+                    <div class="mt-1 text-xs text-[var(--color-text-muted)]">只覆盖当前会话的 MVU 模式与指令。MVU 所用模型在全局「连接与默认模型」中配置。</div>
                   </div>
                   <ModernSelect
                     v-model="chatMvuModeSelectValue"
