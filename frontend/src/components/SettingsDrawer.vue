@@ -46,6 +46,7 @@ import {
   type ApiPresetVoice,
   type Chat,
   type ChatContentRegexRule,
+  type ChatMvuMode,
   type ChatOverrides,
   type Settings,
   type TtsProvider,
@@ -166,6 +167,11 @@ const regexTrialSourceMode = ref<'manual' | 'latest_assistant'>('manual')
 const regexTrialSourceOptions = [
   { label: '手动输入', value: 'manual' },
   { label: '最近一条 assistant', value: 'latest_assistant' },
+] as const
+const chatMvuModeOptions = [
+  { label: '继承角色', value: '' },
+  { label: '正则模式', value: 'regex' },
+  { label: '指令模式', value: 'directive' },
 ] as const
 const regexTrialManualText = ref('')
 const regexTrialResult = ref<{
@@ -574,6 +580,11 @@ function normalizeRegexRules(
   return (rules || []).map((rule, index) => normalizeRegexRule(rule || {}, index))
 }
 
+function normalizeChatMvuMode(raw: unknown): ChatMvuMode {
+  if (raw === 'regex' || raw === 'directive') return raw
+  return null
+}
+
 /**
  * 确保覆盖设置格式正确
  *
@@ -638,6 +649,9 @@ function ensureOverrides(v?: Partial<ChatOverrides> | null): ChatOverrides {
       v.autoMemorySummaryNextAskTier >= 1
         ? Math.floor(v.autoMemorySummaryNextAskTier)
         : 1,
+    mvuModel: v?.mvuModel ?? null,
+    mvuMode: normalizeChatMvuMode(v?.mvuMode),
+    mvuDirective: typeof v?.mvuDirective === 'string' ? v.mvuDirective : null,
   }
 }
 
@@ -2697,6 +2711,9 @@ interface ComparableChatOverrides {
   lastAutoMemorySummaryAfterMessageId: string | null
   autoMemorySummarySilent: boolean
   autoMemorySummaryNextAskTier: number
+  mvuModel: string | null
+  mvuMode: ChatMvuMode
+  mvuDirective: string | null
 }
 
 function normalizeWorldBookGlobalExclusions(ids: string[] | undefined): string[] {
@@ -2753,6 +2770,9 @@ function normalizeComparableChatOverrides(source?: Partial<ChatOverrides> | null
       overrides.autoMemorySummaryNextAskTier >= 1
         ? Math.floor(overrides.autoMemorySummaryNextAskTier)
         : 1,
+    mvuModel: overrides.mvuModel ?? null,
+    mvuMode: normalizeChatMvuMode(overrides.mvuMode),
+    mvuDirective: typeof overrides.mvuDirective === 'string' ? overrides.mvuDirective : null,
   }
 }
 
@@ -2800,6 +2820,9 @@ function applyNormalizedComparableToDraft(source: ComparableChatOverrides) {
   chatDraft.value.lastAutoMemorySummaryAfterMessageId = source.lastAutoMemorySummaryAfterMessageId
   chatDraft.value.autoMemorySummarySilent = source.autoMemorySummarySilent
   chatDraft.value.autoMemorySummaryNextAskTier = source.autoMemorySummaryNextAskTier
+  chatDraft.value.mvuModel = source.mvuModel
+  chatDraft.value.mvuMode = source.mvuMode
+  chatDraft.value.mvuDirective = source.mvuDirective
 }
 
 async function ensureCharactersLoadedForSave() {
@@ -2871,6 +2894,14 @@ function onContextStartKeepBeforeMessagesInput(e: Event) {
   const n = Number.parseInt(raw, 10)
   chatDraft.value.contextStartKeepBeforeMessages = Number.isFinite(n) && n >= 2 ? n : null
 }
+
+const chatMvuModeSelectValue = computed({
+  get: () => chatDraft.value?.mvuMode ?? '',
+  set: (value: string) => {
+    if (!chatDraft.value) return
+    chatDraft.value.mvuMode = normalizeChatMvuMode(value)
+  },
+})
 
 const contentRegexRulesSorted = computed(() => {
   const seen = new Set<string>()
@@ -4925,6 +4956,30 @@ async function checkUpdate() {
                 </div>
               </div>
               <p class="text-xs text-[var(--color-text-muted)] mt-2">实际上下文总限制长度为该「上下文长度」限制加上角色卡、用户信息、自定义系统提示词。草稿助手优先使用当前会话的条数限制，其次全局，最后回退到现有上下文逻辑。</p>
+
+              <div class="space-y-3 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay p-3">
+                <div class="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div class="text-sm font-medium text-[var(--color-text-secondary)]">MVU 模式覆盖</div>
+                    <div class="mt-1 text-xs text-[var(--color-text-muted)]">只覆盖当前会话的 MVU 模式与指令，不影响 MVU Agent 专用模型。</div>
+                  </div>
+                  <ModernSelect
+                    v-model="chatMvuModeSelectValue"
+                    :options="[...chatMvuModeOptions]"
+                    class="w-full sm:w-[180px]"
+                    placeholder="继承角色"
+                    dropdown-width="auto"
+                  />
+                </div>
+                <div v-if="chatDraft.mvuMode === 'directive'" class="space-y-1.5">
+                  <label class="block text-xs font-medium text-[var(--color-text-secondary)]">会话 MVU 指令</label>
+                  <textarea
+                    v-model="chatDraft.mvuDirective"
+                    class="input textarea h-28"
+                    placeholder="留空表示本会话没有额外指令。"
+                  ></textarea>
+                </div>
+              </div>
 
               <div class="space-y-2 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay overflow-hidden">
                 <button
