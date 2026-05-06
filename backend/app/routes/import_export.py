@@ -56,7 +56,13 @@ from app.prompt_xml import (
     wrap_group_roster,
     wrap_user_name,
 )
-from app.schemas import Chat, ChatMessage, CharacterCard, ExtraFirstMessageEntry, Settings, WorldBook
+from app.schemas import Chat, ChatContentRegexRule, ChatMessage, CharacterCard, ExtraFirstMessageEntry, MvuMode, Settings, StatusTableDef, WorldBook
+from app.services.st_mvu_compat import (
+    run_st_mvu_compat_agent,
+    run_st_mvu_regex_compat_agent,
+    validate_st_mvu_compat_result,
+    validate_st_mvu_regex_compat_result,
+)
 from app.storage import (
     avatar_path,
     avatars_dir,
@@ -78,15 +84,23 @@ from app.storage import (
 
 router = APIRouter(tags=["import_export"])
 JANITOR_CHAT_PENDING_TTL_SECONDS = 10 * 60
+SILLYTAVERN_IMPORT_PENDING_TTL_SECONDS = 10 * 60
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 # 仅暂存 Janitor「聊天」捕获；角色 HTML 导入走独立接口，不写入此字典。
 _janitor_chat_pending_store: dict[str, tuple[datetime, dict[str, Any]]] = {}
+_sillytavern_pending_store: dict[str, tuple[datetime, dict[str, Any]]] = {}
 
 
 class JanitorConfirmRequest(BaseModel):
     pendingId: str
     characterId: str
     userPersonaId: str | None = None
+
+
+class SillyTavernConfirmRequest(BaseModel):
+    pendingId: str
+    enableMvuCompatibility: bool = False
+    mvuMode: MvuMode = "regex"
 
 
 def _sanitize_filename(name: str, fallback: str) -> str:
@@ -111,6 +125,13 @@ def _cleanup_expired_janitor_chat_pending() -> None:
     expired = [pid for pid, (expire_at, _) in _janitor_chat_pending_store.items() if expire_at <= now]
     for pid in expired:
         _janitor_chat_pending_store.pop(pid, None)
+
+
+def _cleanup_expired_sillytavern_pending() -> None:
+    now = datetime.now().astimezone()
+    expired = [pid for pid, (expire_at, _) in _sillytavern_pending_store.items() if expire_at <= now]
+    for pid in expired:
+        _sillytavern_pending_store.pop(pid, None)
 
 
 def _validate_janitor_payload(raw: Any) -> dict[str, Any]:
@@ -1702,11 +1723,102 @@ def _build_worldbook_from_st(card_name: str, raw_data: dict[str, Any]) -> WorldB
     return WorldBook(name=wb_name, entries=entries)
 
 
-def _map_st_to_character_and_worldbook(raw: dict[str, Any]) -> tuple[CharacterCard, WorldBook | None]:
+def _merged_st_card_data(raw: dict[str, Any]) -> dict[str, Any]:
     data = raw.get("data") if isinstance(raw.get("data"), dict) else {}
     merged = dict(raw)
     if isinstance(data, dict):
         merged.update(data)
+    return merged
+
+
+_MVU_CANDIDATE_KEYWORDS = (
+    "mvu",
+    "tavern_helper",
+    "regex_scripts",
+    "状态",
+    "变量",
+    "状态栏",
+    "status",
+    "variable",
+)
+
+
+def _st_extensions_value(merged: dict[str, Any], key: str) -> Any:
+    extensions = merged.get("extensions")
+    if isinstance(extensions, dict) and key in extensions:
+        return extensions.get(key)
+    return merged.get(key)
+
+
+def _count_regex_scripts(raw_scripts: Any) -> int:
+    if isinstance(raw_scripts, list):
+        return len([item for item in raw_scripts if item is not None])
+    if isinstance(raw_scripts, dict):
+        return len(raw_scripts)
+    return 1 if raw_scripts else 0
+
+
+def _character_book_mvu_candidates(character_book: Any) -> list[dict[str, Any]]:
+    if not isinstance(character_book, dict):
+        return []
+    entries = character_book.get("entries")
+    if not isinstance(entries, list):
+        return []
+    candidates: list[dict[str, Any]] = []
+    for idx, raw in enumerate(entries):
+        if not isinstance(raw, dict):
+            continue
+        title = str(raw.get("comment") or raw.get("name") or f"条目 {idx + 1}").strip()
+        keys = raw.get("keys") if isinstance(raw.get("keys"), list) else []
+        probe = "\n".join(
+            [
+                title,
+                str(raw.get("content") or ""),
+                " ".join(str(k or "") for k in keys),
+            ],
+        ).lower()
+        if not any(keyword.lower() in probe for keyword in _MVU_CANDIDATE_KEYWORDS):
+            continue
+        candidates.append(
+            {
+                "title": title or f"条目 {idx + 1}",
+                "enabled": bool(raw.get("enabled", True)),
+                "keys": [str(k) for k in keys if str(k).strip()][:8],
+            },
+        )
+    return candidates
+
+
+def _build_sillytavern_preview(raw: dict[str, Any]) -> dict[str, Any]:
+    merged = _merged_st_card_data(raw)
+    character_name = _coalesce_st_text(merged.get("name"), "新角色")
+    character_book = merged.get("character_book")
+    entries = character_book.get("entries") if isinstance(character_book, dict) else []
+    entry_count = len(entries) if isinstance(entries, list) else 0
+    tavern_helper = _st_extensions_value(merged, "tavern_helper")
+    regex_scripts = _st_extensions_value(merged, "regex_scripts")
+    regex_script_count = _count_regex_scripts(regex_scripts)
+    candidates = _character_book_mvu_candidates(character_book)
+    return {
+        "characterName": character_name,
+        "worldBookName": _coalesce_st_text(
+            character_book.get("name") if isinstance(character_book, dict) else None,
+            f"{character_name} 世界书" if entry_count else "",
+        ),
+        "worldBookEntryCount": entry_count,
+        "mvu": {
+            "hasTavernHelper": bool(tavern_helper),
+            "hasRegexScripts": regex_script_count > 0,
+            "regexScriptCount": regex_script_count,
+            "characterBookCandidateCount": len(candidates),
+            "characterBookCandidates": candidates[:8],
+            "suggestedMode": "regex" if regex_script_count > 0 else "directive",
+        },
+    }
+
+
+def _map_st_to_character_and_worldbook(raw: dict[str, Any]) -> tuple[CharacterCard, WorldBook | None]:
+    merged = _merged_st_card_data(raw)
     description = _coalesce_st_text(merged.get("description"))
     personality = _coalesce_st_text(merged.get("personality"))
     scenario = _coalesce_st_text(merged.get("scenario"))
@@ -1726,10 +1838,19 @@ def _map_st_to_character_and_worldbook(raw: dict[str, Any]) -> tuple[CharacterCa
     return card, worldbook
 
 
-def _import_sillytavern_card(raw: dict[str, Any], avatar_filename: str | None = None) -> dict[str, Any]:
+def _import_sillytavern_card(
+    raw: dict[str, Any],
+    avatar_filename: str | None = None,
+    *,
+    enable_mvu_compatibility: bool = False,
+    mvu_mode: MvuMode = "regex",
+) -> dict[str, Any]:
     card, worldbook = _map_st_to_character_and_worldbook(raw)
     if isinstance(avatar_filename, str) and avatar_filename.strip():
         card.avatar = avatar_filename.strip()
+    if enable_mvu_compatibility:
+        card.mvuEnabled = True
+        card.mvuMode = mvu_mode
     imported = ["character"]
     warnings: list[str] = []
     saved_worldbook: WorldBook | None = None
@@ -1738,6 +1859,83 @@ def _import_sillytavern_card(raw: dict[str, Any], avatar_filename: str | None = 
         card.attachedWorldBookIds = [saved_worldbook.id]
         imported.append("worldbook")
     saved_card = save_character(card)
+    mvu_compat: dict[str, Any] = {
+        "mode": mvu_mode,
+        "applied": False,
+        "summary": "",
+        "warnings": [],
+        "worldbookMarks": [],
+    }
+    if enable_mvu_compatibility and mvu_mode == "directive":
+        try:
+            compat_result = validate_st_mvu_compat_result(run_st_mvu_compat_agent(raw))
+            saved_card.mvuEnabled = True
+            saved_card.mvuMode = "directive"
+            saved_card.mvuDirective = compat_result["directive"] or None
+            saved_card.initialStateTables = [
+                StatusTableDef.model_validate(item)
+                for item in compat_result.get("initialStateTables", [])
+            ]
+            saved_card = save_character(saved_card)
+            mvu_compat = {
+                "mode": "directive",
+                "applied": bool(compat_result.get("applied")),
+                "summary": compat_result.get("summary") or "",
+                "warnings": list(compat_result.get("warnings") or []),
+                "worldbookMarks": list(compat_result.get("worldbookMarks") or []),
+                "confidence": compat_result.get("confidence", 0.0),
+            }
+            warnings.extend(mvu_compat["warnings"])
+        except Exception as e:
+            detail = str(e).strip() or type(e).__name__
+            if len(detail) > 160:
+                detail = detail[:157] + "..."
+            warning = f"MVU directive 兼容生成失败，已保留普通角色导入（{detail}）"
+            warnings.append(warning)
+            mvu_compat = {
+                "mode": "directive",
+                "applied": False,
+                "summary": "MVU directive 兼容生成失败，普通导入已保留。",
+                "warnings": [warning],
+                "worldbookMarks": [],
+            }
+    elif enable_mvu_compatibility and mvu_mode == "regex":
+        try:
+            compat_result = validate_st_mvu_regex_compat_result(run_st_mvu_regex_compat_agent(raw))
+            saved_card.mvuEnabled = True
+            saved_card.mvuMode = "regex"
+            saved_card.mvuDirective = None
+            existing_rules = list(getattr(saved_card, "contentRegexRules", []) or [])
+            generated_rules = [
+                ChatContentRegexRule.model_validate(item)
+                for item in compat_result.get("regexRules", [])
+            ]
+            saved_card.contentRegexRules = (existing_rules + generated_rules)[:100]
+            saved_card = save_character(saved_card)
+            mvu_compat = {
+                "mode": "regex",
+                "applied": bool(compat_result.get("applied")),
+                "summary": compat_result.get("summary") or "",
+                "warnings": list(compat_result.get("warnings") or []),
+                "worldbookMarks": list(compat_result.get("worldbookMarks") or []),
+                "confidence": compat_result.get("confidence", 0.0),
+                "rules": len(generated_rules),
+            }
+            warnings.extend(mvu_compat["warnings"])
+        except Exception as e:
+            detail = str(e).strip() or type(e).__name__
+            if len(detail) > 160:
+                detail = detail[:157] + "..."
+            warning = f"MVU regex 兼容生成失败，已保留普通角色导入（{detail}）"
+            warnings.append(warning)
+            mvu_compat = {
+                "mode": "regex",
+                "applied": False,
+                "summary": "MVU regex 兼容生成失败，普通导入已保留。",
+                "warnings": [warning],
+                "worldbookMarks": [],
+                "rules": 0,
+            }
     out: dict[str, Any] = {
         "imported": imported,
         "warnings": warnings,
@@ -1745,6 +1943,12 @@ def _import_sillytavern_card(raw: dict[str, Any], avatar_filename: str | None = 
     }
     if saved_worldbook is not None:
         out["worldbook"] = saved_worldbook.model_dump(mode="json")
+    out["mvu"] = {
+        "enabled": bool(enable_mvu_compatibility),
+        "requestedMode": mvu_mode,
+        "detected": _build_sillytavern_preview(raw)["mvu"],
+    }
+    out["mvuCompat"] = mvu_compat
     return out
 
 
@@ -1946,6 +2150,77 @@ def confirm_janitor_import(req: JanitorConfirmRequest) -> dict[str, Any]:
         "warnings": [],
         "chat": saved.model_dump(mode="json"),
     }
+
+
+def _parse_sillytavern_upload(payload: bytes, filename: str, content_type: str | None) -> tuple[dict[str, Any], bytes | None]:
+    if not payload:
+        raise HTTPException(status_code=400, detail="empty file")
+    lower_name = filename.lower()
+    if payload[:8] == PNG_SIGNATURE:
+        try:
+            return _extract_st_json_from_png(payload), payload
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"invalid SillyTavern png: {e}") from e
+    if lower_name.endswith(".json") or (content_type and "json" in content_type.lower()):
+        try:
+            raw = json.loads(payload.decode("utf-8"))
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"invalid json: {e}") from e
+        if not _looks_like_st_card(raw):
+            raise HTTPException(status_code=400, detail="json is not a SillyTavern character card")
+        return raw, None
+    raise HTTPException(status_code=400, detail="unsupported SillyTavern file format")
+
+
+@router.post("/import/sillytavern/preview")
+async def preview_sillytavern_import(file: UploadFile = File(...)) -> dict[str, Any]:
+    _cleanup_expired_sillytavern_pending()
+    payload = await file.read()
+    raw, png_payload = _parse_sillytavern_upload(payload, file.filename or "", file.content_type)
+    preview = _build_sillytavern_preview(raw)
+    pending_id = uuid4().hex
+    expires_at = datetime.now().astimezone() + timedelta(seconds=SILLYTAVERN_IMPORT_PENDING_TTL_SECONDS)
+    expires_at = expires_at.replace(microsecond=0)
+    _sillytavern_pending_store[pending_id] = (
+        expires_at,
+        {
+            "raw": raw,
+            "pngPayload": png_payload,
+            "filename": file.filename or "",
+            "preview": preview,
+        },
+    )
+    return {
+        "ok": True,
+        "pendingId": pending_id,
+        "expiresAt": expires_at.isoformat(),
+        "preview": preview,
+    }
+
+
+@router.post("/import/sillytavern/confirm")
+def confirm_sillytavern_import(req: SillyTavernConfirmRequest) -> dict[str, Any]:
+    _cleanup_expired_sillytavern_pending()
+    item = _sillytavern_pending_store.get(req.pendingId)
+    if not item:
+        raise HTTPException(status_code=404, detail="SillyTavern pending not found or expired")
+    _, stored = item
+    raw = stored.get("raw")
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail="invalid SillyTavern pending payload")
+    avatar_filename: str | None = None
+    png_payload = stored.get("pngPayload")
+    if isinstance(png_payload, bytes) and png_payload:
+        avatar_filename = f"{uuid4().hex}.png"
+        save_avatar(avatar_filename, png_payload)
+    result = _import_sillytavern_card(
+        raw,
+        avatar_filename=avatar_filename,
+        enable_mvu_compatibility=req.enableMvuCompatibility,
+        mvu_mode=req.mvuMode,
+    )
+    _sillytavern_pending_store.pop(req.pendingId, None)
+    return {"ok": True, **result}
 
 
 def _decode_character_html_bytes(payload: bytes) -> str:
