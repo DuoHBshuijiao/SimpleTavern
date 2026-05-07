@@ -8,7 +8,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -125,7 +124,7 @@ class MvuAgentService:
             if on_event:
                 await on_event(evt)
 
-        def _log(event_type: str, summary: str, detail: dict[str, Any] | None = None) -> MvuWorkLogEntry:
+        async def _alog(event_type: str, summary: str, detail: dict[str, Any] | None = None) -> MvuWorkLogEntry:
             entry = MvuWorkLogEntry(
                 id=uuid4().hex,
                 chatId=job.chat_id,
@@ -135,16 +134,16 @@ class MvuAgentService:
                 detail=detail,
             )
             log_entries.append(entry)
-            asyncio.ensure_future(_push(MvuAgentEvent("log_entry", entry.model_dump(mode="json"))))
+            await _push(MvuAgentEvent("log_entry", entry.model_dump(mode="json")))
             return entry
 
         if job.mode == "directive":
-            _log("triggered", "指令模式：根据生成完成信号维护状态", {
+            await _alog("triggered", "指令模式：根据生成完成信号维护状态", {
                 "mode": job.mode,
                 "contextWindowCount": job.context_window_count,
             })
         else:
-            _log("triggered", f"队列 {len(job.queue_items)} 条待消费", {
+            await _alog("triggered", f"队列 {len(job.queue_items)} 条待消费", {
                 "mode": job.mode,
                 "queueConsumed": len(job.queue_items),
             })
@@ -197,7 +196,7 @@ class MvuAgentService:
                 current_messages.append(assistant_msg)
 
                 if not tool_calls:
-                    _log("commit", "任务完成，Agent 无更多工具调用")
+                    await _alog("commit", "任务完成，Agent 无更多工具调用")
                     done_evt = MvuAgentEvent("done", {
                         "ok": True,
                         "chatId": job.chat_id,
@@ -206,7 +205,7 @@ class MvuAgentService:
                     })
                     events.append(done_evt)
                     if on_event:
-                        asyncio.ensure_future(on_event(done_evt))
+                        await on_event(done_evt)
                     return events, log_entries
 
                 for tc in tool_calls:
@@ -233,26 +232,26 @@ class MvuAgentService:
                         f"{fn_name}: {'OK' if ok else code} — "
                         f"{str(result.get('message', '') or list(result.get('data', {}).keys()))[:120]}"
                     )
-                    _log("tool_call" if ok else "error", summary, {
+                    await _alog("tool_call" if ok else "error", summary, {
                         "tool": fn_name,
                         "args": args,
                         "ok": ok,
                     })
 
-            _log("error", f"达到工具调用轮次上限 max_tool_turns={self._ctx.max_tool_turns}")
+            await _alog("error", f"达到工具调用轮次上限 max_tool_turns={self._ctx.max_tool_turns}")
             limit_evt = MvuAgentEvent("error", {
                 "message": f"tool call loop limit exceeded: max_tool_turns={self._ctx.max_tool_turns}",
                 "code": tool_result.LIMIT_EXCEEDED,
             })
             events.append(limit_evt)
             if on_event:
-                asyncio.ensure_future(on_event(limit_evt))
+                await on_event(limit_evt)
             return events, log_entries
 
         except Exception as exc:
-            _log("error", f"异常: {exc}")
+            await _alog("error", f"异常: {exc}")
             err_evt = MvuAgentEvent("error", {"message": str(exc)})
             events.append(err_evt)
             if on_event:
-                asyncio.ensure_future(on_event(err_evt))
+                await on_event(err_evt)
             return events, log_entries
