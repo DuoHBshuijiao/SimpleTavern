@@ -33,6 +33,7 @@ from app.services.tts_platform import (
     GlmTtsPlatform,
     MiniMaxTtsPlatform,
     OmniVoiceLocalTtsPlatform,
+    OpenAiSpeechCompatTtsPlatform,
     Qwen3LocalTtsPlatform,
     SynthesisRequest,
     SynthesisResult,
@@ -62,7 +63,8 @@ EMOTION_TAG_HINTS = [
 ]
 
 EMOTION_TAGS_DIRECTIVE = (
-    "You may insert MiniMax-compatible English speech tags only when they are clearly justified by the text. "
+    "You may insert English speech tags in parentheses only when clearly justified by the text and only if the "
+    "downstream TTS model is documented to support them; otherwise omit tags. "
     f"Allowed tags: {', '.join(EMOTION_TAG_HINTS)}. "
     "Do not invent unsupported tags. Do not overuse tags."
 )
@@ -107,6 +109,10 @@ def _resolve_tts_provider(raw: str | None) -> TtsProvider:
         return "qwen3_local"
     if normalized == "omnivoice_local":
         return "omnivoice_local"
+    if normalized == "openrouter":
+        return "openrouter"
+    if normalized == "siliconflow":
+        return "siliconflow"
     raise HTTPException(status_code=400, detail=f"不支持的 TTS provider: {raw}")
 
 
@@ -155,6 +161,18 @@ def _build_platform(
         )
     if provider == "glm":
         return GlmTtsPlatform(api_key=api_key, base_url=base_url or "https://open.bigmodel.cn/api")
+    if provider == "openrouter":
+        return OpenAiSpeechCompatTtsPlatform(
+            api_key=api_key,
+            base_url=base_url or "https://openrouter.ai/api/v1",
+            variant="openrouter",
+        )
+    if provider == "siliconflow":
+        return OpenAiSpeechCompatTtsPlatform(
+            api_key=api_key,
+            base_url=base_url or "https://api.siliconflow.cn/v1",
+            variant="siliconflow",
+        )
     return MiniMaxTtsPlatform(api_key=api_key, base_url=base_url or "https://api.minimaxi.com")
 
 
@@ -175,6 +193,10 @@ def _get_platform(settings: Settings, preset_id: str | None = None) -> TtsPlatfo
     if provider == "omnivoice_local" and not base_url:
         port = matched.ttsOmniVoiceLocalPort or 8089
         base_url = f"http://127.0.0.1:{port}"
+    if provider == "openrouter" and (not base_url or base_url == "https://api.openai.com"):
+        base_url = "https://openrouter.ai/api/v1"
+    if provider == "siliconflow" and (not base_url or base_url == "https://api.openai.com"):
+        base_url = "https://api.siliconflow.cn/v1"
     vc_url: str | None = None
     if provider == "qwen3_local":
         vc_url = _qwen3_voice_clone_base_url(matched)
@@ -704,6 +726,11 @@ async def test_voices(req: TestVoicesReq):
         return {"voices": [], "hint": "Qwen3-TTS（本地）当前走 FastAPI 网关；请在预设中手动维护 speaker 名称，或直接查网关的 /v1/meta。"}
     if resolved_provider == "omnivoice_local":
         return {"voices": [], "hint": "OmniVoice（本地）采用预设内音色目录；请手动维护“自动 / 指令 / 克隆”音色条目。"}
+    if resolved_provider == "openrouter":
+        return {
+            "voices": [],
+            "hint": "OpenRouter TTS 无统一音色列表接口；请在预设「音色目录」中填写 voice，或在 openrouter.ai 查看模型说明。",
+        }
     platform = _get_inline_platform(req.baseUrl, req.apiKey, req.provider)
     try:
         voices = await platform.list_voices(req.voice_type)
@@ -899,7 +926,7 @@ async def preprocess_text(req: PreprocessReq):
         )
         .replace(
             "{{EMOTION_TAGS_DIRECTIVE}}",
-            EMOTION_TAGS_DIRECTIVE if req.inject_emotion_tags and provider == "minimax" else "Do not insert any emotion tags.",
+            EMOTION_TAGS_DIRECTIVE if req.inject_emotion_tags else "Do not insert any emotion tags.",
         )
     )
 
@@ -992,6 +1019,27 @@ async def clone_voice(
     resolved_provider = _resolve_tts_provider(provider)
     platform = _get_inline_platform(baseUrl, apiKey, resolved_provider)
     try:
+        if resolved_provider == "siliconflow":
+            source_bytes = await source_file.read()
+            transcript = (text or "").strip()
+            if not transcript:
+                raise HTTPException(
+                    status_code=400,
+                    detail="硅基流动参考音频上传必须填写参考音频对应文本（表单字段 text）",
+                )
+            result = await platform.upload_reference_voice(
+                file_bytes=source_bytes,
+                filename=source_file.filename or "audio.mp3",
+                content_type=source_file.content_type,
+                model=(model or "").strip() or "FunAudioLLM/CosyVoice2-0.5B",
+                custom_name=voice_id.strip(),
+                text=transcript,
+            )
+            return {
+                "voiceId": result.voice_id,
+                "previewUrl": result.preview_url,
+                "voiceType": "private",
+            }
         source_upload = await platform.upload_file(
             await source_file.read(),
             source_file.filename or "source-audio.wav",
