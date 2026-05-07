@@ -1,5 +1,5 @@
 """
-主聊天生成：可选两轮 web_search 工具（首轮 tools + 次轮纯文本）。
+主聊天生成：可选多轮 web_search 工具（搜索与模型读结果交替），直至不再调用工具或达到上限。
 """
 
 from __future__ import annotations
@@ -13,6 +13,8 @@ from uuid import uuid4
 from app.llm.openai_compat import chat_completions_message, stream_chat_completions
 from app.schemas import Settings
 from app.services.web_search import OPENAI_WEB_SEARCH_TOOLS, run_web_search, web_search_is_configured
+
+WEB_SEARCH_MAX_TOOL_ROUNDS = 8
 
 
 def normalize_tool_calls_ids(tool_calls: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
@@ -50,18 +52,21 @@ async def iter_web_search_stream_events(
       {"type": "done", "content_saved": str, "reasoning_full": str | None, "reasoning_duration_sec": float | None}
     """
     msgs = deepcopy(messages)
-    max_rounds = 2 if (web_search_enabled and web_search_is_configured(settings)) else 1
     full_reasoning: list[str] = []
     reasoning_start: float | None = None
     reasoning_end: float | None = None
 
-    for round_idx in range(max_rounds):
-        use_tools = max_rounds == 2 and round_idx == 0
+    use_web = web_search_enabled and web_search_is_configured(settings)
+    tool_rounds_used = 0
+
+    while True:
+        use_tools = use_web and tool_rounds_used < WEB_SEARCH_MAX_TOOL_ROUNDS
         eb = dict(extra_body or {})
         if use_tools:
             eb["tool_choice"] = "auto"
         tools = OPENAI_WEB_SEARCH_TOOLS if use_tools else None
         round_content: list[str] = []
+        round_reasoning_chunks: list[str] = []
         finish_tc = None
 
         async for chunk in stream_chat_completions(
@@ -81,6 +86,7 @@ async def iter_web_search_stream_events(
                     reasoning_start = now
                 reasoning_end = now
                 full_reasoning.append(chunk.text)
+                round_reasoning_chunks.append(chunk.text)
                 yield {"type": "reasoning", "text": chunk.text}
             elif chunk.kind == "content":
                 round_content.append(chunk.text)
@@ -94,6 +100,9 @@ async def iter_web_search_stream_events(
                 text_blob = "".join(round_content)
                 asst: dict[str, Any] = {"role": "assistant", "content": text_blob or None}
                 asst["tool_calls"] = norm
+                rc_round = "".join(round_reasoning_chunks).strip()
+                if rc_round:
+                    asst["reasoning_content"] = rc_round
                 msgs.append(asst)
                 for tc in norm:
                     fn = tc.get("function") or {}
@@ -112,6 +121,7 @@ async def iter_web_search_stream_events(
                             ensure_ascii=False,
                         )
                     msgs.append({"role": "tool", "tool_call_id": tc["id"], "content": body})
+                tool_rounds_used += 1
                 continue
 
         reasoning_full = "".join(full_reasoning).strip()
@@ -142,16 +152,18 @@ async def nonstream_web_search_rounds(
     web_search_enabled: bool,
 ) -> tuple[str, str | None, float | None]:
     """
-    非流式两轮。
+    非流式多轮。
     返回 (assistant 正文, reasoning 全文或 None, reasoning 耗时秒或 None)。
     """
     msgs = deepcopy(messages)
-    max_rounds = 2 if (web_search_enabled and web_search_is_configured(settings)) else 1
     reasoning_parts: list[str] = []
     req_start = time.monotonic()
 
-    for round_idx in range(max_rounds):
-        use_tools = max_rounds == 2 and round_idx == 0
+    use_web = web_search_enabled and web_search_is_configured(settings)
+    tool_rounds_used = 0
+
+    while True:
+        use_tools = use_web and tool_rounds_used < WEB_SEARCH_MAX_TOOL_ROUNDS
         eb = dict(extra_body or {})
         if use_tools:
             eb["tool_choice"] = "auto"
@@ -174,7 +186,13 @@ async def nonstream_web_search_rounds(
         if use_tools and resp.tool_calls:
             norm = normalize_tool_calls_ids(resp.tool_calls)
             if norm:
-                asst = {"role": "assistant", "content": resp.content or None, "tool_calls": norm}
+                asst: dict[str, Any] = {
+                    "role": "assistant",
+                    "content": resp.content or None,
+                    "tool_calls": norm,
+                }
+                if isinstance(rc, str) and rc.strip():
+                    asst["reasoning_content"] = rc
                 msgs.append(asst)
                 for tc in norm:
                     fn = tc.get("function") or {}
@@ -193,11 +211,10 @@ async def nonstream_web_search_rounds(
                             ensure_ascii=False,
                         )
                     msgs.append({"role": "tool", "tool_call_id": tc["id"], "content": body})
+                tool_rounds_used += 1
                 continue
 
         content_final = (resp.content or "").strip()
         reasoning_full = "".join(reasoning_parts).strip() or None
         dur = round(max(0.0, time.monotonic() - req_start), 1) if reasoning_full else None
         return content_final, reasoning_full, dur
-
-    return "", None, None
