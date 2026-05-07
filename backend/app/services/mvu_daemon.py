@@ -4,7 +4,7 @@
   1. generate done  → signal_generate_done(chat_id)  立即唤醒
   2. 队列堆积      → daemon 每 5s 轮询检查
 
-共用同一互斥锁，5 秒冷却防止高频重复触发。signal_queue_threshold 保留
+共用同一互斥锁，1 秒冷却防止高频重复触发。signal_queue_threshold 保留
 供未来扩展，当前由轮询覆盖。
 """
 
@@ -18,6 +18,7 @@ from typing import Literal
 logger = logging.getLogger(__name__)
 
 from app.content_regex_queue import clear_queue, dequeue_by_message_id, get_content_regex_queue_size
+from app.group_mvu import is_chat_mvu_runtime_enabled
 from app.mvu_model_resolve import resolve_mvu_model_from_settings
 from app.mvu_system_prompt import load_mvu_system_prompt
 from app.schemas import (
@@ -38,7 +39,7 @@ from app.storage import (
     save_mvu_logs,
 )
 
-_COOLDOWN_SECS = 5.0
+_COOLDOWN_SECS = 1.0
 
 # per-chat 原语
 _events: dict[str, asyncio.Event] = {}
@@ -117,11 +118,11 @@ def ensure_mvu_worker(chat_id: str) -> bool:
         chat = load_chat(chat_id)
     except FileNotFoundError:
         return False
-    try:
-        character = load_character(chat.characterId)
-    except FileNotFoundError:
+    if not is_chat_mvu_runtime_enabled(chat):
         return False
-    if not getattr(character, "mvuEnabled", False):
+    try:
+        load_character(chat.characterId)
+    except FileNotFoundError:
         return False
 
     _get_or_create(chat_id)
@@ -283,10 +284,6 @@ async def _run_once(chat_id: str) -> None:
         job,
         on_event=lambda evt: _broadcast(chat_id, evt),
     )
-
-    # 推送遗留事件到 SSE 订阅者（安全网：防 _push 中的 ensure_future 未覆盖的路径）
-    for event in events:
-        await _broadcast(chat_id, event)
 
     # 持久化工作日志
     if log_entries:
