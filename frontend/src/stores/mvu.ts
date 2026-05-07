@@ -122,6 +122,9 @@ export const useMvuStore = defineStore('mvu', {
       es.addEventListener('heartbeat', () => { /* no-op */ })
 
       es.onerror = () => {
+        // 忽略过期连接的错误回调，避免切会话后仍用旧 chatId 重连
+        if (this._eventSource !== es) return
+        if (this._activeChatId !== chatId) return
         this.isConnected = false
         es.close()
         this._scheduleReconnect(chatId)
@@ -147,14 +150,22 @@ export const useMvuStore = defineStore('mvu', {
         this._eventSource.close()
         this._eventSource = null
       }
+      this._activeChatId = null
       this.isConnected = false
       this.isRunning = false
     },
 
     async fetchState(chatId: string) {
+      if (this._activeChatId !== chatId) return
       try {
         const resp = await fetch(`/api/mvu/${chatId}/state`)
-        if (!resp.ok) return
+        if (!resp.ok) {
+          if (resp.status === 404 && this._activeChatId === chatId) {
+            this.disconnect()
+          }
+          return
+        }
+        if (this._activeChatId !== chatId) return
         const data = await resp.json()
         if (data.ok && data.stateVariables) {
           this.stateVariables = data.stateVariables
@@ -175,6 +186,8 @@ export const useMvuStore = defineStore('mvu', {
       if (this._reconnectTimer) clearTimeout(this._reconnectTimer)
       const delay = Math.min(this._reconnectDelay, 30000)
       this._reconnectTimer = setTimeout(() => {
+        // 仅当前活跃会话仍是目标 chatId 时才重连，避免请求已不存在会话
+        if (this._activeChatId !== chatId) return
         this._reconnectDelay = Math.min(this._reconnectDelay * 2, 30000)
         this.connect(chatId)
       }, delay)
