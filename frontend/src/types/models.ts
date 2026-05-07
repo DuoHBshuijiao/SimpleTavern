@@ -126,6 +126,7 @@ export interface WorldBookAttachment {
 export type SessionSystemPromptMode = 'append' | 'override'
 export type MvuMode = 'regex' | 'directive'
 export type ChatMvuMode = MvuMode | null
+export type GroupMvuPreset = 'off' | 'inherit_member' | 'fork_session'
 export type RegexRuleAction = 'remove' | 'replace' | 'extract' | 'extract_and_replace'
 export type RegexRuleMatchMode = 'global' | 'first'
 export type RegexExtractSource = 'whole_match' | 'capture_group'
@@ -183,6 +184,12 @@ export interface ChatOverrides {
   mvuMode?: ChatMvuMode
   /** 会话级 MVU 指令覆盖；空值表示无覆盖 */
   mvuDirective?: string | null
+  /** 群聊 MVU 总开关；null/undefined 表示旧档未显式写入 */
+  groupMvuEnabled?: boolean | null
+  /** 群聊 MVU 锚定成员（须在 memberIds 内） */
+  groupMvuAnchorCharacterId?: string | null
+  /** fork/沿用快照时的模板成员 */
+  groupMvuTemplateCharacterId?: string | null
 }
 
 export type AutoReadScope = 'off' | 'assistant_only' | 'user_only' | 'all'
