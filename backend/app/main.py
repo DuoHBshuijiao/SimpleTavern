@@ -49,6 +49,7 @@ from app.routes.llm import router as llm_router
 from app.routes.assistant import router as assistant_router
 from app.routes.tokenizer import router as tokenizer_router
 from app.routes.update import router as update_router
+from app.routes.web_search import router as web_search_router
 from app.routes.worldbooks import router as worldbooks_router
 from app.routes.mvu import router as mvu_router
 from app.routes.tts import router as tts_router
@@ -120,6 +121,7 @@ app.include_router(clipboard_router, prefix="/api")
 app.include_router(data_integrity_router, prefix="/api")
 app.include_router(llm_router, prefix="/api")
 app.include_router(generate_router, prefix="/api")
+app.include_router(web_search_router, prefix="/api")
 app.include_router(avatars_router, prefix="/api")
 app.include_router(font_router, prefix="/api")
 app.include_router(http_log_router, prefix="/api")
