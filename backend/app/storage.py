@@ -1243,6 +1243,9 @@ def save_chat(chat: Chat) -> Chat:
     Returns:
         Chat: 保存后的聊天对象
     """
+    from app.group_mvu import maybe_migrate_legacy_group_mvu_on_save
+
+    maybe_migrate_legacy_group_mvu_on_save(chat)
     memory = getattr(chat.overrides, "longTermMemory", None)
     if memory is not None and memory.strip():
         save_chat_memory(chat.characterId, chat.id, memory)
