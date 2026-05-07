@@ -152,8 +152,13 @@ function optionPresetId(opt: Option): string {
   return opt.presetId == null ? '' : String(opt.presetId)
 }
 
+/** 选项 value 与 v-model 统一按字符串比较，避免个别场景下类型不一致导致触发区无标签 */
+function optionValueEqualsModel(optValue: string): boolean {
+  return String(props.modelValue ?? '') === String(optValue ?? '')
+}
+
 function isOptionSelected(opt: Option): boolean {
-  if (props.modelValue !== opt.value) return false
+  if (!optionValueEqualsModel(opt.value)) return false
   if (props.selectedPresetId == null || props.selectedPresetId === '') return true
   return optionPresetId(opt) === String(props.selectedPresetId)
 }
@@ -165,31 +170,32 @@ function isOptionSelected(opt: Option): boolean {
  * 如果未找到，则返回modelValue本身。
  */
 const selectedLabel = computed(() => {
-  if (!props.modelValue) return ''
+  const mv = props.modelValue
+  if (mv == null || mv === '') return ''
   const exactMatches: Option[] = []
   const valueMatches: Option[] = []
-  
+
   for (const opt of normalizedOptions.value) {
-     if ('options' in opt) {
-        for (const sub of opt.options) {
-          if (sub.value !== props.modelValue) continue
-          valueMatches.push(sub)
-          if (isOptionSelected(sub)) {
-            exactMatches.push(sub)
-          }
+    if ('options' in opt) {
+      for (const sub of opt.options) {
+        if (!optionValueEqualsModel(sub.value)) continue
+        valueMatches.push(sub)
+        if (isOptionSelected(sub)) {
+          exactMatches.push(sub)
         }
-     } else {
-        if (opt.value === props.modelValue) {
-          valueMatches.push(opt)
-          if (isOptionSelected(opt)) {
-            exactMatches.push(opt)
-          }
+      }
+    } else {
+      if (optionValueEqualsModel(opt.value)) {
+        valueMatches.push(opt)
+        if (isOptionSelected(opt)) {
+          exactMatches.push(opt)
         }
-     }
+      }
+    }
   }
-  if (exactMatches.length > 0) return exactMatches[0]?.label ?? props.modelValue
-  if (valueMatches.length > 0) return valueMatches[0]?.label ?? props.modelValue
-  return props.modelValue
+  if (exactMatches.length > 0) return exactMatches[0]?.label ?? String(mv)
+  if (valueMatches.length > 0) return valueMatches[0]?.label ?? String(mv)
+  return String(mv)
 })
 
 /**
@@ -235,8 +241,18 @@ function updateDropdownPosition() {
     style.right = `${window.innerWidth - rect.right}px`
     style.left = 'auto'
   } else {
-    style.left = `${rect.left}px`
-    style.width = `${rect.width}px`
+    // 触发器在 flex/grid 子项中偶发极窄时，rect.width 会同步压窄下拉；设下限并横向夹紧视口
+    const gutter = 8
+    const minDropdownPx = 200
+    let w = Math.max(rect.width, minDropdownPx)
+    const maxW = Math.max(minDropdownPx, window.innerWidth - gutter * 2)
+    if (w > maxW) w = maxW
+    let left = rect.left
+    if (left + w > window.innerWidth - gutter) {
+      left = Math.max(gutter, window.innerWidth - gutter - w)
+    }
+    style.left = `${left}px`
+    style.width = `${w}px`
   }
   dropdownStyle.value = style
 }
@@ -399,6 +415,8 @@ onUnmounted(() => {
 </script>
 
 <template>
+  <!-- 根节点勿加 min-w-0：在父级 flex 子项中会把整块选择器压到仅 chevron+padding 宽。
+       触发区内标签用 min-w-0 以利 truncate；若在 shrink-to-fit 链路里塌缩，由调用方外包 min-w-*（见会话设置群聊 MVU）。 -->
   <div ref="containerRef" class="relative group w-full">
     <!-- Trigger -->
     <div
@@ -410,10 +428,13 @@ onUnmounted(() => {
       ]"
       @click="toggle"
     >
-      <div class="truncate select-none" :class="!modelValue ? 'text-[var(--color-text-muted)]' : ''">
+      <div
+        class="min-w-0 flex-1 truncate select-none"
+        :class="modelValue == null || modelValue === '' ? 'text-[var(--color-text-muted)]' : ''"
+      >
         {{ selectedLabel || placeholder }}
       </div>
-        <div class="flex items-center gap-2 ml-2 text-[var(--color-text-muted)]">
+        <div class="flex shrink-0 items-center gap-2 ml-2 text-[var(--color-text-muted)]">
          <Loader2 v-if="loading" class="animate-spin text-brand w-3 h-3" />
          <ChevronDown v-else class="w-3 h-3 transition-transform duration-200" :class="isOpen ? 'rotate-180' : ''" />
       </div>
