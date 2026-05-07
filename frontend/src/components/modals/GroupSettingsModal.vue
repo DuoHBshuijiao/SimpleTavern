@@ -31,9 +31,11 @@
  *    - 依赖：依赖vue
  *    - 位置：组件层，提供群聊设置功能
  */
-import { ref, watch } from 'vue'
-import type { Chat, CharacterCard } from '../../types/models'
+import { ref, watch, computed } from 'vue'
+import type { Chat, CharacterCard, ChatContentRegexRule, ChatMvuMode, ChatOverrides, StatusTableDef } from '../../types/models'
 import ModernAvatar from '../ModernAvatar.vue'
+import ModernSelect from '../ModernSelect.vue'
+import MvuCapabilityEditor from '../chat/MvuCapabilityEditor.vue'
 import { GripVertical, X } from 'lucide-vue-next'
 
 const props = defineProps<{
@@ -49,6 +51,13 @@ const emit = defineEmits<{
     groupDelay: number
     groupSystemInjectDepth: number
     groupSystemAlwaysAtBottom: boolean
+    groupMvuEnabled: boolean
+    groupMvuAnchorCharacterId: string | null
+    groupMvuTemplateCharacterId: string | null
+    mvuMode: ChatMvuMode
+    mvuDirective: string | null
+    contentRegexRules: ChatContentRegexRule[]
+    stateTables: StatusTableDef[]
   }]
   'open-member-settings': [memberId: string]
 }>()
@@ -59,6 +68,14 @@ const groupSystemInjectDepthDraft = ref<number>(5)
 const groupSystemAlwaysAtBottomDraft = ref<boolean>(true)
 const draggingIdx = ref<number | null>(null)
 
+const groupMvuEnabledDraft = ref(false)
+const groupMvuAnchorDraft = ref<string | null>(null)
+const groupMvuTemplateDraft = ref<string | null>(null)
+const mvuModeDraft = ref<ChatMvuMode>(null)
+const mvuDirectiveDraft = ref('')
+const contentRegexRulesDraft = ref<ChatContentRegexRule[]>([])
+const stateTablesDraft = ref<StatusTableDef[]>([])
+
 watch(() => props.show, (val) => {
   if (val && props.chat) {
     memberIdsDraft.value = [...props.chat.memberIds]
@@ -66,6 +83,19 @@ watch(() => props.show, (val) => {
     groupSystemInjectDepthDraft.value =
       typeof props.chat.groupSystemInjectDepth === 'number' ? props.chat.groupSystemInjectDepth : 5
     groupSystemAlwaysAtBottomDraft.value = props.chat.groupSystemAlwaysAtBottom !== false
+    const ov = (props.chat.overrides || {}) as ChatOverrides
+    groupMvuEnabledDraft.value = ov.groupMvuEnabled === true
+    groupMvuAnchorDraft.value = ov.groupMvuAnchorCharacterId ?? null
+    groupMvuTemplateDraft.value = ov.groupMvuTemplateCharacterId ?? null
+    mvuModeDraft.value = (ov.mvuMode === 'directive' ? 'directive' : ov.mvuMode === 'regex' ? 'regex' : null) as ChatMvuMode
+    mvuDirectiveDraft.value = typeof ov.mvuDirective === 'string' ? ov.mvuDirective : ''
+    contentRegexRulesDraft.value = (ov.contentRegexRules || []).map((r) => ({ ...r }))
+    const tables = props.chat.stateVariables?.tables ?? []
+    stateTablesDraft.value = tables.map((t) => ({
+      name: t.name,
+      columns: [...t.columns],
+      rows: t.rows.map((r) => ({ field: r.field, cells: { ...r.cells } })),
+    }))
   }
 })
 
@@ -80,6 +110,28 @@ watch(() => props.show, (val) => {
 function getCharacter(id: string) {
   return props.characters.find(c => c.id === id)
 }
+
+const groupMvuAnchorOptions = computed(() => {
+  const ids = [...memberIdsDraft.value]
+  const anchor = groupMvuAnchorDraft.value
+  if (anchor && !ids.includes(anchor)) {
+    ids.unshift(anchor)
+  }
+  return ids.map((id) => ({
+    label: getCharacter(id)?.name || id,
+    value: id,
+  }))
+})
+
+const groupMvuAnchorSelectOptions = computed(() => [
+  { label: '（未选择）', value: '' },
+  ...groupMvuAnchorOptions.value,
+])
+
+const groupMvuTemplateSelectOptions = computed(() => [
+  { label: '（无）', value: '' },
+  ...groupMvuAnchorOptions.value,
+])
 
 /**
  * 处理拖拽开始
@@ -141,6 +193,13 @@ function save() {
     groupDelay: groupDelayDraft.value,
     groupSystemInjectDepth: Math.max(0, Number(groupSystemInjectDepthDraft.value) || 0),
     groupSystemAlwaysAtBottom: groupSystemAlwaysAtBottomDraft.value,
+    groupMvuEnabled: groupMvuEnabledDraft.value,
+    groupMvuAnchorCharacterId: groupMvuAnchorDraft.value,
+    groupMvuTemplateCharacterId: groupMvuTemplateDraft.value,
+    mvuMode: mvuModeDraft.value,
+    mvuDirective: mvuDirectiveDraft.value.trim() ? mvuDirectiveDraft.value : null,
+    contentRegexRules: contentRegexRulesDraft.value.map((r, i) => ({ ...r, order: i })),
+    stateTables: stateTablesDraft.value,
   })
 }
 </script>
@@ -207,6 +266,63 @@ function save() {
             <div class="form-hint">整段 system 将插在倒数第 N 条消息（含世界书产生条目）之前；仅关闭「永远在底部」时生效。</div>
           </div>
 
+          <div class="form-group rounded-xl border border-white/10 bg-white/5 p-3 space-y-3">
+            <div class="text-sm font-medium text-brand-light">MVU</div>
+            <div class="flex items-start justify-between gap-3">
+              <p class="min-w-0 flex-1 text-xs text-gray-500">启用后由锚定成员的状态栏与 MVU 模式（指令 / 正则）驱动；与会话设置抽屉写入同一套 overrides。</p>
+              <button
+                type="button"
+                class="flex shrink-0 items-center gap-2"
+                @click="groupMvuEnabledDraft = !groupMvuEnabledDraft"
+              >
+                <div
+                  class="w-10 h-5 rounded-full relative transition-colors duration-200"
+                  :class="groupMvuEnabledDraft ? 'bg-brand' : 'bg-gray-700'"
+                >
+                  <div
+                    class="absolute top-1 w-3 h-3 rounded-full bg-white transition-transform duration-200"
+                    :class="groupMvuEnabledDraft ? 'left-6' : 'left-1'"
+                  />
+                </div>
+                <span class="min-w-[2.5rem] text-center text-xs text-gray-400">{{ groupMvuEnabledDraft ? '开启' : '关闭' }}</span>
+              </button>
+            </div>
+            <div v-if="groupMvuEnabledDraft" class="space-y-3">
+              <div class="space-y-1.5">
+                <label class="block text-xs text-gray-500">锚定成员（须在成员列表内）</label>
+                <ModernSelect
+                  :model-value="groupMvuAnchorDraft || ''"
+                  @update:model-value="(v) => (groupMvuAnchorDraft = v || null)"
+                  :options="groupMvuAnchorSelectOptions"
+                  placeholder="选择成员"
+                  class="w-full"
+                />
+              </div>
+              <div class="space-y-1.5">
+                <label class="block text-xs text-gray-500">模板成员（可选，仅作记录）</label>
+                <ModernSelect
+                  :model-value="groupMvuTemplateDraft || ''"
+                  @update:model-value="(v) => (groupMvuTemplateDraft = v || null)"
+                  :options="groupMvuTemplateSelectOptions"
+                  placeholder="可选"
+                  class="w-full"
+                />
+              </div>
+              <MvuCapabilityEditor
+                :mvu-mode="mvuModeDraft"
+                :mvu-directive="mvuDirectiveDraft"
+                :content-regex-rules="contentRegexRulesDraft"
+                :initial-state-tables="stateTablesDraft"
+                :allow-inherit="true"
+                tables-empty-hint="暂无状态表格。点击「新建表格」开始配置。"
+                @update:mvu-mode="(v) => (mvuModeDraft = v)"
+                @update:mvu-directive="(v) => (mvuDirectiveDraft = v)"
+                @update:content-regex-rules="(v) => (contentRegexRulesDraft = v)"
+                @update:initial-state-tables="(v) => (stateTablesDraft = v)"
+              />
+            </div>
+          </div>
+
           <!-- 成员列表与排序 -->
           <div class="form-group">
             <label class="label text-brand-light">成员与发言顺序</label>
@@ -246,7 +362,7 @@ function save() {
                 <div class="flex-1 min-w-0">
                   <div class="font-medium text-sm text-gray-200 truncate">{{ getCharacter(id)?.name || '未知角色' }}</div>
                   <div v-if="chat.memberSettings?.[id]?.probability !== undefined && chat.memberSettings[id].probability < 1" class="text-[10px] text-yellow-500/80">
-                    参与概率: {{ Math.round(chat.memberSettings![id]!.probability * 100) }}%
+                    参与概率: {{ Math.round(Number(chat.memberSettings?.[id]?.probability) * 100) }}%
                   </div>
                 </div>
 
