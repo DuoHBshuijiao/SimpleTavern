@@ -100,6 +100,7 @@ class MvuAgentService:
             scope="mvu",
             allow_write_memory=False,
             allow_destructive_tools=False,
+            allow_web_search=False,
             assistant_settings=AssistantSettings(),
         )
 
