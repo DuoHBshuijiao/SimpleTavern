@@ -595,6 +595,7 @@ RegexMatchMode = Literal["global", "first"]
 RegexExtractSource = Literal["whole_match", "capture_group"]
 
 MvuMode = Literal["regex", "directive"]
+GroupMvuPreset = Literal["off", "inherit_member", "fork_session"]
 MvuStateSource = Literal["mvu_agent", "chat_assistant"]
 MvuWorkLogEventType = Literal["triggered", "planning", "tool_call", "commit", "error"]
 
@@ -933,6 +934,18 @@ class ChatOverrides(BaseModel):
     )
     mvuMode: MvuMode | None = Field(default=None, description="会话级 MVU 模式；空值时由上游默认策略决定")
     mvuDirective: str | None = Field(default=None, description="会话级 MVU 指令模式提示词；空白归一为空值")
+    groupMvuEnabled: bool | None = Field(
+        default=None,
+        description="群聊 MVU 总开关；None 表示未显式写入（旧档兼容），True/False 为显式启用或关闭",
+    )
+    groupMvuAnchorCharacterId: str | None = Field(
+        default=None,
+        description="群聊 MVU 锚定成员角色 ID，须在会话 memberIds 内",
+    )
+    groupMvuTemplateCharacterId: str | None = Field(
+        default=None,
+        description="沿用或 fork 会话 MVU 时选用的模板成员角色 ID",
+    )
 
     @model_validator(mode="after")
     def _sync_worldbook_attachments(self):
@@ -1076,6 +1089,8 @@ class CreateChatRequest(BaseModel):
         firstMessageCharacterId: 群聊时选择启用哪个成员的首条消息作为开场
         groupSystemInjectDepth: 群聊 system 深度插入（可选，默认由服务端为 5）
         groupSystemAlwaysAtBottom: 为 True 时整段 system 在首条，不启深度（可选，默认 True）
+        groupMvuPreset: 群聊创建时 MVU 预设
+        groupMvuPresetCharacterId: 预设成员角色 ID（须在 memberIds 内）
     """
     characterId: str
     title: str | None = None
@@ -1087,6 +1102,24 @@ class CreateChatRequest(BaseModel):
     firstMessageCharacterId: str | None = None
     groupSystemInjectDepth: int | None = Field(default=None, ge=0)
     groupSystemAlwaysAtBottom: bool | None = None
+    groupMvuPreset: GroupMvuPreset | None = None
+    groupMvuPresetCharacterId: str | None = None
+    mvuMode: MvuMode | None = Field(
+        default=None,
+        description="群聊创建时手工指定的会话 MVU 模式；None 表示沿用预设来源 / 默认",
+    )
+    mvuDirective: str | None = Field(
+        default=None,
+        description="群聊创建时手工指定的会话 MVU 指令；空白归一为 None",
+    )
+    contentRegexRules: list[ChatContentRegexRule] | None = Field(
+        default=None,
+        description="群聊创建时手工指定的会话级正文正则规则；不传则沿用预设来源 / 默认合并",
+    )
+    initialStateTables: list[StatusTableDef] | None = Field(
+        default=None,
+        description="群聊创建时手工指定的初始状态栏；不传则沿用预设来源 / 默认",
+    )
 
 
 class PromoteToGroupRequest(BaseModel):
@@ -1200,6 +1233,10 @@ class UpdateChatRequest(BaseModel):
     userPersonaId: str | None = None
     groupSystemInjectDepth: int | None = Field(default=None, ge=0)
     groupSystemAlwaysAtBottom: bool | None = None
+    stateVariables: "StateVariables | None" = Field(
+        default=None,
+        description="群聊设置弹窗等场景一次性更新初始状态栏；None 表示清空",
+    )
 
 
 class GenerateStreamRequest(BaseModel):
