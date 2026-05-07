@@ -64,6 +64,44 @@ export interface DraftHelpSettings {
   context_message_limit?: number | null
 }
 
+export type WebSearchProvider = 'tavily' | 'bocha'
+
+/** Tavily Search POST /search 可选字段（apiKey 存在全局嵌套） */
+export interface WebSearchTavilySettings {
+  apiKey?: string
+  max_results?: number | null
+  search_depth?: string | null
+  topic?: string | null
+  include_answer?: boolean | string | null
+  include_raw_content?: boolean | string | null
+  time_range?: string | null
+  start_date?: string | null
+  end_date?: string | null
+  include_domains?: string[] | null
+  exclude_domains?: string[] | null
+  chunks_per_source?: number | null
+  include_images?: boolean | null
+  include_image_descriptions?: boolean | null
+  include_favicon?: boolean | null
+}
+
+/** 博查 POST /v1/web-search */
+export interface WebSearchBochaSettings {
+  apiKey?: string
+  baseUrl?: string
+  count?: number | null
+  freshness?: string | null
+  summary?: boolean | null
+  include?: string | null
+  exclude?: string | null
+}
+
+export interface WebSearchSettings {
+  provider: WebSearchProvider
+  tavily?: WebSearchTavilySettings
+  bocha?: WebSearchBochaSettings
+}
+
 /**
  * 聊天覆盖设置接口
  *
@@ -148,7 +186,7 @@ export interface ChatOverrides {
 }
 
 export type AutoReadScope = 'off' | 'assistant_only' | 'user_only' | 'all'
-export type TtsProvider = 'minimax' | 'glm' | 'glm_local' | 'qwen3_local' | 'omnivoice_local'
+export type TtsProvider = 'minimax' | 'glm' | 'glm_local' | 'qwen3_local' | 'omnivoice_local' | 'openrouter' | 'siliconflow'
 
 export interface ApiPresetVoice {
   voiceId: string
@@ -383,6 +421,8 @@ export interface Settings {
   ttsAudioCacheLimitMb?: number
   /** MVU Agent / directive 导入 Agent 专用模型；空则回退 llm.defaultModel 与 modelCandidates */
   mvuModel?: string | null
+  /** 主聊天网络搜索（Tavily / 博查）的全局配置；输入区开关状态见 ChatPage */
+  webSearch?: WebSearchSettings | null
   worldBookEntryScanDepthDefault?: number
   /** 全局正文正则规则库：所有会话可见 */
   contentRegexRuleLibrary?: ChatContentRegexRule[]
