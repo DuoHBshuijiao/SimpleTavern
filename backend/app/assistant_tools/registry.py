@@ -29,6 +29,7 @@ class RegisteredTool:
     needs_chat: bool
     needs_memory_write: bool
     needs_destructive: bool
+    needs_web_search: bool
     handler: Callable[..., dict[str, Any]]
     scopes: frozenset[ToolScope]
     risk: ToolRisk
@@ -43,6 +44,7 @@ def _fn(
     needs_chat: bool,
     needs_memory_write: bool,
     needs_destructive: bool,
+    needs_web_search: bool = False,
     handler: Callable[..., dict[str, Any]],
     scopes: frozenset[ToolScope],
     risk: ToolRisk,
@@ -55,6 +57,7 @@ def _fn(
         needs_chat=needs_chat,
         needs_memory_write=needs_memory_write,
         needs_destructive=needs_destructive,
+        needs_web_search=needs_web_search,
         handler=handler,
         scopes=scopes,
         risk=risk,
@@ -90,6 +93,31 @@ def _all_registered() -> list[RegisteredTool]:
             needs_destructive=False,
             handler=H["core_get_time"],
             scopes=frozenset({WS, GL}),
+            risk=ToolRisk.READ,
+        ),
+        _fn(
+            "web_search",
+            (
+                "使用全局设置中的 Tavily 或博查 Search API 检索互联网信息。"
+                "适合查询近期事实、新闻、版本变化、资料出处或需要外部验证的问题。"
+            ),
+            {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "检索关键词或问句，尽量简洁明确。",
+                    }
+                },
+                "required": ["query"],
+                "additionalProperties": False,
+            },
+            needs_chat=False,
+            needs_memory_write=False,
+            needs_destructive=False,
+            needs_web_search=True,
+            handler=H["web_search"],
+            scopes=frozenset({WS, CH}),
             risk=ToolRisk.READ,
         ),
         _fn(
@@ -692,6 +720,8 @@ def build_openai_tools_list(ctx: Any) -> list[dict[str, Any]]:
         if rt.needs_memory_write and not ctx.allow_write_memory:
             continue
         if rt.needs_destructive and not ctx.allow_destructive_tools:
+            continue
+        if rt.needs_web_search and not ctx.allow_web_search:
             continue
         out.append(_openai_def(rt))
     return out
