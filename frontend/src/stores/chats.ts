@@ -50,7 +50,7 @@
 
 import { defineStore } from 'pinia'
 
-import type { Chat, ChatMessage, ChatOverrides, GroupMemberSettings, MainChatRole } from '../types/models'
+import type { Chat, ChatMessage, ChatOverrides, GroupMemberSettings, GroupMvuPreset, MainChatRole, StateVariables } from '../types/models'
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/http'
 
 interface UpdateOverridesOptions {
@@ -152,9 +152,18 @@ export const useChatsStore = defineStore('chats', {
       userPersonaId?: string | null,
       groupSystemInjectDepth?: number,
       groupSystemAlwaysAtBottom?: boolean,
+      groupMvuPreset?: GroupMvuPreset | null,
+      groupMvuPresetCharacterId?: string | null,
+      /** 群聊创建弹窗内手工编辑的 MVU 草稿（可选；启用 MVU 时由父组件传入） */
+      mvuDraft?: {
+        mvuMode?: import('../types/models').ChatMvuMode
+        mvuDirective?: string | null
+        contentRegexRules?: import('../types/models').ChatContentRegexRule[]
+        initialStateTables?: import('../types/models').StatusTableDef[]
+      } | null,
     ) {
-      const chat = await apiPost<Chat>('/api/chats', { 
-        characterId, 
+      const body: Record<string, unknown> = {
+        characterId,
         title: title || '新群聊',
         isGroup: true,
         memberIds,
@@ -164,7 +173,16 @@ export const useChatsStore = defineStore('chats', {
         userPersonaId: userPersonaId ?? null,
         groupSystemInjectDepth: groupSystemInjectDepth ?? null,
         groupSystemAlwaysAtBottom: groupSystemAlwaysAtBottom ?? null,
-      })
+        groupMvuPreset: groupMvuPreset ?? null,
+        groupMvuPresetCharacterId: groupMvuPresetCharacterId ?? null,
+      }
+      if (mvuDraft) {
+        if (mvuDraft.mvuMode !== undefined) body.mvuMode = mvuDraft.mvuMode
+        if (mvuDraft.mvuDirective !== undefined) body.mvuDirective = mvuDraft.mvuDirective
+        if (mvuDraft.contentRegexRules !== undefined) body.contentRegexRules = mvuDraft.contentRegexRules
+        if (mvuDraft.initialStateTables !== undefined) body.initialStateTables = mvuDraft.initialStateTables
+      }
+      const chat = await apiPost<Chat>('/api/chats', body)
       await this.loadGroupList()
       this.activeChatId = chat.id
       this.activeChat = chat
@@ -355,6 +373,10 @@ export const useChatsStore = defineStore('chats', {
         groupDelay: number
         groupSystemInjectDepth: number
         groupSystemAlwaysAtBottom: boolean
+        /** 与群聊设置弹窗内 MVU 等字段合并后的完整 overrides，避免部分 PATCH 清空其它会话字段 */
+        overrides?: ChatOverrides
+        /** 群聊设置内编辑的初始状态栏（顶层 chat.stateVariables，不在 overrides） */
+        stateVariables?: StateVariables | null
       },
     ) {
       const chat = await apiPut<Chat>(`/api/chats/${chatId}`, {
@@ -362,6 +384,8 @@ export const useChatsStore = defineStore('chats', {
         groupDelay: body.groupDelay,
         groupSystemInjectDepth: body.groupSystemInjectDepth,
         groupSystemAlwaysAtBottom: body.groupSystemAlwaysAtBottom,
+        ...(body.overrides ? { overrides: body.overrides } : {}),
+        ...(body.stateVariables !== undefined ? { stateVariables: body.stateVariables } : {}),
       })
       this.activeChat = chat
       await this.loadGroupList()
