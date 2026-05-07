@@ -52,7 +52,7 @@ from app.regex_compat import compile_user_regex
 
 
 ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh"]
-TtsProvider = Literal["minimax", "glm", "glm_local", "qwen3_local", "omnivoice_local"]
+TtsProvider = Literal["minimax", "glm", "glm_local", "qwen3_local", "omnivoice_local", "openrouter", "siliconflow"]
 
 
 class ReasoningRequestConfig(TypedDict):
@@ -348,6 +348,55 @@ class ShaderPresetMutationResponse(BaseModel):
     )
 
 
+WebSearchProvider = Literal["tavily", "bocha"]
+
+
+class WebSearchTavilySettings(BaseModel):
+    """Tavily Search 请求参数（与官方 POST /search 对齐；apiKey 存于本地设置）。"""
+
+    model_config = ConfigDict(extra="allow")
+
+    apiKey: str = ""
+    max_results: int | None = Field(default=None, ge=0, le=20)
+    search_depth: str | None = None
+    topic: str | None = None
+    include_answer: bool | str | None = None
+    include_raw_content: bool | str | None = None
+    time_range: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+    include_domains: list[str] | None = None
+    exclude_domains: list[str] | None = None
+    chunks_per_source: int | None = Field(default=None, ge=1, le=3)
+    include_images: bool | None = None
+    include_image_descriptions: bool | None = None
+    include_favicon: bool | None = None
+
+
+class WebSearchBochaSettings(BaseModel):
+    """博查 Web Search 请求参数（POST /v1/web-search；count 1–50 以正文说明为准）。"""
+
+    model_config = ConfigDict(extra="allow")
+
+    apiKey: str = ""
+    baseUrl: str = "https://api.bocha.cn"
+    count: int | None = Field(default=None, ge=1, le=50)
+    freshness: str | None = None
+    summary: bool | None = None
+    include: str | None = None
+    exclude: str | None = None
+
+
+class WebSearchSettings(BaseModel):
+    """主聊天网络搜索：按 provider 选择 Tavily 或博查，嵌套字段与各厂商 Search API 一致。"""
+
+    model_config = ConfigDict(extra="allow")
+
+    provider: WebSearchProvider = "tavily"
+    tavily: WebSearchTavilySettings | None = Field(default_factory=WebSearchTavilySettings)
+    bocha: WebSearchBochaSettings | None = Field(default_factory=WebSearchBochaSettings)
+
+
 class Settings(BaseModel):
     """
     全局设置模型
@@ -398,6 +447,7 @@ class Settings(BaseModel):
         default=None,
         description="全局 MVU Agent / 导入期 MVU Agent 专用模型名；空值时回退 llm.defaultModel 与 modelCandidates",
     )
+    webSearch: WebSearchSettings | None = None
     createdAt: str = Field(default_factory=_now_iso)
     updatedAt: str = Field(default_factory=_now_iso)
 
@@ -1186,6 +1236,7 @@ class GenerateStreamRequest(BaseModel):
         default=None,
         description="将本次助手输出作为指定 assistant 消息的新版变体落盘；为空则追加新消息",
     )
+    webSearchEnabled: bool = False
 
 
 class DraftHelpRequest(BaseModel):
@@ -1236,6 +1287,7 @@ class GroupGenerateRequest(BaseModel):
         default=None,
         description="将本次助手输出作为指定 assistant 消息的新版变体落盘；为空则追加新消息",
     )
+    webSearchEnabled: bool = False
 
 
 class SingleInterjectRequest(BaseModel):
@@ -1255,3 +1307,8 @@ class SingleInterjectRequest(BaseModel):
         default_factory=list,
         description="仅本次请求拼装 LLM 上下文时忽略的消息 id；不写盘",
     )
+    mergeAssistantIntoMessageId: str | None = Field(
+        default=None,
+        description="将本次助手输出作为指定 assistant 消息的新版变体落盘；为空则追加新消息",
+    )
+    webSearchEnabled: bool = False
