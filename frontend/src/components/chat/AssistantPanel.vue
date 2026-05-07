@@ -47,7 +47,7 @@ import type { AssistantAttachment } from '../../types/models'
 import ModernSelect from '../ModernSelect.vue'
 import AssistantThread from './AssistantThread.vue'
 import ConfirmPopover from '../../components/ConfirmPopover.vue'
-import { Sparkles, Loader2, MoreHorizontal, X } from 'lucide-vue-next'
+import { Globe, Sparkles, Loader2, MoreHorizontal, X } from 'lucide-vue-next'
 import { ref, watch, nextTick } from 'vue'
 import { resolveRichPaste } from '../../utils/richPaste'
 
@@ -87,6 +87,7 @@ const props = defineProps<{
   showToolPermissionToggles?: boolean
   allowWriteMemory?: boolean
   allowDestructiveTools?: boolean
+  allowWebSearch?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -103,6 +104,7 @@ const emit = defineEmits<{
   'rewrite-message': [m: AssistantMessage]
   'toggle-write-memory': []
   'toggle-destructive': []
+  'toggle-web-search': []
   'switch-to-mvu': []
 }>()
 
@@ -120,6 +122,10 @@ function handleKeydown(e: KeyboardEvent) {
   if (e.ctrlKey && e.key === 'Enter') {
     emit('send')
   }
+}
+
+function handleDraftInput(e: Event) {
+  emit('update:draft', (e.target as HTMLTextAreaElement | null)?.value ?? '')
 }
 
 function buildAttachmentUrl(attachment: AssistantAttachment): string {
@@ -321,6 +327,12 @@ watch(
             >
               破坏
             </span>
+            <span
+              v-if="allowWebSearch"
+              class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold normal-case tracking-normal bg-brand/20 text-brand-foreground border border-brand/40"
+            >
+              搜索
+            </span>
           </span>
         </div>
       </div>
@@ -395,6 +407,17 @@ watch(
           >
             破坏性工具
           </button>
+          <button
+            type="button"
+            class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg border transition-colors shadow-lg backdrop-blur-sm"
+            :class="allowWebSearch
+              ? 'bg-brand/30 border-brand text-brand-foreground shadow-[0_0_0_1px_rgba(183,110,121,0.35)]'
+              : 'border-white/15 bg-black/40 text-gray-300 hover:border-white/25'"
+            @click="emit('toggle-web-search')"
+          >
+            <Globe class="h-3 w-3" />
+            网络搜索
+          </button>
         </div>
       </div>
     </div>
@@ -408,7 +431,7 @@ watch(
       @drop.prevent="handleDrop"
     >
       <div v-if="draftAttachments.length" class="mb-3 flex flex-wrap gap-2">
-        <template v-for="attachment in draftAttachments" :key="attachment.id">
+        <div v-for="attachment in draftAttachments" :key="attachment.id">
           <div
             v-if="attachment.kind === 'image'"
             class="relative h-20 w-20 overflow-hidden rounded-lg border border-white/10 bg-white/5"
@@ -432,13 +455,13 @@ watch(
             <span class="truncate text-xs text-gray-200">{{ getAttachmentLabel(attachment) }}</span>
             <X class="ml-auto mt-0.5 h-3 w-3 shrink-0 text-gray-500 transition-colors group-hover:text-white" />
           </button>
-        </template>
+        </div>
       </div>
       <div class="relative">
         <textarea
           ref="textareaRef"
           :value="draft"
-          @input="emit('update:draft', ($event.target as HTMLTextAreaElement).value)"
+          @input="handleDraftInput"
           @paste="handlePaste"
           class="input textarea h-24 !bg-white/5 !border-white/10 focus:!border-brand-a40 focus:!bg-white/10 backdrop-blur-md"
           placeholder="输入建议或要求 (Ctrl + Enter)..."
