@@ -50,6 +50,8 @@ import {
   type ChatOverrides,
   type Settings,
   type MvuMode,
+  type StateVariables,
+  type StatusTableDef,
   type TtsProvider,
   type TtsSessionConfig,
   type WebSearchProvider,
@@ -57,6 +59,7 @@ import {
   type WorldBookAttachment,
 } from '../types/models'
 import ModernSelect from './ModernSelect.vue'
+import MvuCapabilityEditor from './chat/MvuCapabilityEditor.vue'
 import ThemedCheckbox from './ThemedCheckbox.vue'
 import ThemedRadioTags from './ThemedRadioTags.vue'
 import TtsVoiceInput from './TtsVoiceInput.vue'
@@ -112,6 +115,22 @@ const emit = defineEmits<{
 const settingsStore = useSettingsStore()
 const chatsStore = useChatsStore()
 const charactersStore = useCharactersStore()
+const groupChatMvuAnchorSelectOptions = computed(() => {
+  const chat = props.chat
+  if (!chat?.isGroup) return [{ label: '（未选择）', value: '' }]
+  const ids = [...(chat.memberIds || [])]
+  const anchor = chatDraft.value?.groupMvuAnchorCharacterId ?? null
+  if (anchor && !ids.includes(anchor)) {
+    ids.unshift(anchor)
+  }
+  return [
+    { label: '（未选择）', value: '' },
+    ...ids.map((id) => ({
+      value: id,
+      label: charactersStore.list.find((c) => c.id === id)?.name || id,
+    })),
+  ]
+})
 const {
   importSettingsFile,
   previewSillyTavernImport,
@@ -169,6 +188,8 @@ const webSearchRemoteStatus = ref<Record<string, unknown> | null>(null)
 const webSearchRemoteStatusFetching = ref(false)
 const webSearchStatusFetchSeq = ref(0)
 const chatDraft = ref<ChatOverrides | null>(null)
+/** 会话设置抽屉里编辑的初始状态栏（顶层 chat.stateVariables.tables） */
+const chatStateTablesDraft = ref<StatusTableDef[]>([])
 const isSaving = ref(false)
 const regexEditorOpen = ref(false)
 const regexEditorIndex = ref<number | null>(null)
@@ -178,11 +199,6 @@ const regexTrialSourceMode = ref<'manual' | 'latest_assistant'>('manual')
 const regexTrialSourceOptions = [
   { label: '手动输入', value: 'manual' },
   { label: '最近一条 assistant', value: 'latest_assistant' },
-] as const
-const chatMvuModeOptions = [
-  { label: '继承角色', value: '' },
-  { label: '正则模式', value: 'regex' },
-  { label: '指令模式', value: 'directive' },
 ] as const
 const regexTrialManualText = ref('')
 
@@ -690,6 +706,7 @@ async function handleSaveAll() {
   try {
     await saveGlobal()
     await saveChatOverrides()
+    await saveChatStateVariables()
     close()
   } catch (error) {
     await notifyMessage(formatSaveError('保存设置失败', error))
@@ -697,6 +714,21 @@ async function handleSaveAll() {
     suppressTokenEstimates.value = false
     isSaving.value = false
   }
+}
+
+async function saveChatStateVariables() {
+  const chat = props.chat
+  if (!chat) return
+  const draftTables = JSON.parse(JSON.stringify(chatStateTablesDraft.value)) as StatusTableDef[]
+  const currentTables: StatusTableDef[] = chat.stateVariables?.tables ?? []
+  if (JSON.stringify(draftTables) === JSON.stringify(currentTables)) return
+  const stateVariables: StateVariables = {
+    version: chat.stateVariables?.version ?? 1,
+    updatedAt: new Date().toISOString(),
+    source: chat.stateVariables?.source ?? 'chat_assistant',
+    tables: draftTables,
+  }
+  await apiPut(`/api/chats/${chat.id}`, { stateVariables })
 }
 
 /**
@@ -830,6 +862,9 @@ function ensureOverrides(v?: Partial<ChatOverrides> | null): ChatOverrides {
         : 1,
     mvuMode: normalizeChatMvuMode(v?.mvuMode),
     mvuDirective: typeof v?.mvuDirective === 'string' ? v.mvuDirective : null,
+    groupMvuEnabled: v?.groupMvuEnabled ?? null,
+    groupMvuAnchorCharacterId: v?.groupMvuAnchorCharacterId ?? null,
+    groupMvuTemplateCharacterId: v?.groupMvuTemplateCharacterId ?? null,
   }
 }
 
@@ -1701,6 +1736,7 @@ watch(
     globalDraft.value = s
     await loadWebGpuPresetSource((s as Settings).webgpuBackgroundActivePresetId ?? null)
     chatDraft.value = ensureOverrides(props.chat ? clone(props.chat.overrides) : undefined)
+    chatStateTablesDraft.value = cloneStateTables(props.chat?.stateVariables?.tables)
     if (s.ttsEnabled) void fetchTtsCacheStats()
 
     if (fontList.value.length === 0) {
@@ -1746,6 +1782,44 @@ watch(
     if (chatDraft.value) mergeGlobalWorldBooksIntoDraft()
   },
 )
+
+/** 抽屉已打开时切换当前会话，重载会话草稿，避免群聊 MVU 锚点等字段与 options 错位导致选择器空白 */
+watch(
+  () => props.chat?.id,
+  (chatId, prevId) => {
+    if (!props.show || !chatId || chatId === prevId || !props.chat) return
+    chatDraft.value = ensureOverrides(clone(props.chat.overrides))
+    chatStateTablesDraft.value = cloneStateTables(props.chat.stateVariables?.tables)
+    mergeGlobalWorldBooksIntoDraft()
+  },
+)
+
+/** SSE / 父级刷新 overrides 时把群 MVU 等字段同步进 chatDraft，防止抽屉显示与服务端错位 */
+watch(
+  () => [
+    props.chat?.overrides?.groupMvuEnabled ?? null,
+    props.chat?.overrides?.groupMvuAnchorCharacterId ?? null,
+    props.chat?.overrides?.groupMvuTemplateCharacterId ?? null,
+    props.chat?.overrides?.mvuMode ?? null,
+    props.chat?.overrides?.mvuDirective ?? null,
+  ] as const,
+  ([gEnabled, gAnchor, gTemplate, mMode, mDirective]) => {
+    if (!props.show || !chatDraft.value) return
+    chatDraft.value.groupMvuEnabled = gEnabled as ChatOverrides['groupMvuEnabled']
+    chatDraft.value.groupMvuAnchorCharacterId = gAnchor as string | null
+    chatDraft.value.groupMvuTemplateCharacterId = gTemplate as string | null
+    chatDraft.value.mvuMode = mMode as ChatOverrides['mvuMode']
+    chatDraft.value.mvuDirective = mDirective as string | null
+  },
+)
+
+function cloneStateTables(tables: StatusTableDef[] | null | undefined): StatusTableDef[] {
+  return (tables || []).map((t) => ({
+    name: t.name,
+    columns: [...t.columns],
+    rows: t.rows.map((r) => ({ field: r.field, cells: { ...r.cells } })),
+  }))
+}
 
 const worldBookAddOptions = computed(() => {
   return worldbooks.value.map((b) => ({ label: b.name || b.id, value: b.id }))
@@ -2991,6 +3065,9 @@ interface ComparableChatOverrides {
   autoMemorySummaryNextAskTier: number
   mvuMode: ChatMvuMode
   mvuDirective: string | null
+  groupMvuEnabled: boolean | null
+  groupMvuAnchorCharacterId: string | null
+  groupMvuTemplateCharacterId: string | null
 }
 
 function normalizeWorldBookGlobalExclusions(ids: string[] | undefined): string[] {
@@ -3049,6 +3126,9 @@ function normalizeComparableChatOverrides(source?: Partial<ChatOverrides> | null
         : 1,
     mvuMode: normalizeChatMvuMode(overrides.mvuMode),
     mvuDirective: typeof overrides.mvuDirective === 'string' ? overrides.mvuDirective : null,
+    groupMvuEnabled: overrides.groupMvuEnabled ?? null,
+    groupMvuAnchorCharacterId: overrides.groupMvuAnchorCharacterId ?? null,
+    groupMvuTemplateCharacterId: overrides.groupMvuTemplateCharacterId ?? null,
   }
 }
 
@@ -3098,6 +3178,9 @@ function applyNormalizedComparableToDraft(source: ComparableChatOverrides) {
   chatDraft.value.autoMemorySummaryNextAskTier = source.autoMemorySummaryNextAskTier
   chatDraft.value.mvuMode = source.mvuMode
   chatDraft.value.mvuDirective = source.mvuDirective
+  chatDraft.value.groupMvuEnabled = source.groupMvuEnabled
+  chatDraft.value.groupMvuAnchorCharacterId = source.groupMvuAnchorCharacterId
+  chatDraft.value.groupMvuTemplateCharacterId = source.groupMvuTemplateCharacterId
 }
 
 async function ensureCharactersLoadedForSave() {
@@ -3169,14 +3252,6 @@ function onContextStartKeepBeforeMessagesInput(e: Event) {
   const n = Number.parseInt(raw, 10)
   chatDraft.value.contextStartKeepBeforeMessages = Number.isFinite(n) && n >= 2 ? n : null
 }
-
-const chatMvuModeSelectValue = computed({
-  get: () => chatDraft.value?.mvuMode ?? '',
-  set: (value: string) => {
-    if (!chatDraft.value) return
-    chatDraft.value.mvuMode = normalizeChatMvuMode(value)
-  },
-})
 
 const contentRegexRulesSorted = computed(() => {
   const seen = new Set<string>()
@@ -3736,7 +3811,7 @@ async function checkUpdate() {
         <!-- Content -->
         <div
           ref="drawerScrollRef"
-          class="drawer-scroll flex-1 min-h-0 overflow-y-auto p-6 custom-scrollbar bg-transparent"
+          class="drawer-scroll flex-1 min-h-0 min-w-0 overflow-y-auto p-6 custom-scrollbar bg-transparent"
         >
           <!-- Global Settings -->
           <div v-if="preloaded" v-show="tab === 'global'" class="space-y-6">
@@ -5512,28 +5587,57 @@ async function checkUpdate() {
               </div>
               <p class="text-xs text-[var(--color-text-muted)] mt-2">实际上下文总限制长度为该「上下文长度」限制加上角色卡、用户信息、自定义系统提示词。草稿助手优先使用当前会话的条数限制，其次全局，最后回退到现有上下文逻辑。</p>
 
-              <div class="space-y-3 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay p-3">
-                <div class="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <div class="text-sm font-medium text-[var(--color-text-secondary)]">MVU 模式覆盖</div>
-                    <div class="mt-1 text-xs text-[var(--color-text-muted)]">只覆盖当前会话的 MVU 模式与指令。MVU 所用模型在全局「连接与默认模型」中配置。</div>
-                  </div>
-                  <ModernSelect
-                    v-model="chatMvuModeSelectValue"
-                    :options="[...chatMvuModeOptions]"
-                    class="w-full sm:w-[180px]"
-                    placeholder="继承角色"
-                    dropdown-width="auto"
+              <div v-if="chatDraft && props.chat?.isGroup" class="space-y-3 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay p-3">
+                <div class="text-sm font-medium text-[var(--color-text-secondary)]">群聊 MVU</div>
+                <label class="inline-flex items-center gap-2 text-sm text-[var(--color-text-secondary)] cursor-pointer select-none">
+                  <ThemedCheckbox
+                    :checked="chatDraft?.groupMvuEnabled === true"
+                    @update:checked="(v) => { if (chatDraft) chatDraft.groupMvuEnabled = v }"
                   />
+                  <span>启用群聊 MVU</span>
+                </label>
+                <div v-if="chatDraft?.groupMvuEnabled === true" class="w-full min-w-0 space-y-3">
+                  <div class="block w-full min-w-[12rem] max-w-md space-y-1.5">
+                    <label class="block w-full min-w-0 text-xs font-medium text-[var(--color-text-secondary)]">锚定成员</label>
+                    <ModernSelect
+                      :model-value="chatDraft?.groupMvuAnchorCharacterId || ''"
+                      @update:model-value="(v) => { if (chatDraft) chatDraft.groupMvuAnchorCharacterId = v || null }"
+                      :options="groupChatMvuAnchorSelectOptions"
+                      placeholder="选择成员"
+                      class="w-full"
+                    />
+                  </div>
+                  <div class="block w-full min-w-[12rem] max-w-md space-y-1.5">
+                    <label class="block w-full min-w-0 text-xs font-medium text-[var(--color-text-secondary)]">模板成员（可选）</label>
+                    <ModernSelect
+                      :model-value="chatDraft?.groupMvuTemplateCharacterId || ''"
+                      @update:model-value="(v) => { if (chatDraft) chatDraft.groupMvuTemplateCharacterId = v || null }"
+                      :options="groupChatMvuAnchorSelectOptions"
+                      placeholder="可选"
+                      class="w-full"
+                    />
+                  </div>
+                  <p class="text-xs text-[var(--color-text-muted)]">与「群聊设置」弹窗写入同一字段。</p>
                 </div>
-                <div v-if="chatDraft.mvuMode === 'directive'" class="space-y-1.5">
-                  <label class="block text-xs font-medium text-[var(--color-text-secondary)]">会话 MVU 指令</label>
-                  <textarea
-                    v-model="chatDraft.mvuDirective"
-                    class="input textarea h-28"
-                    placeholder="留空表示本会话没有额外指令。"
-                  ></textarea>
+              </div>
+
+              <div class="space-y-3 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay p-3">
+                <div>
+                  <div class="text-sm font-medium text-[var(--color-text-secondary)]">MVU 模式覆盖</div>
+                  <div class="mt-1 text-xs text-[var(--color-text-muted)]">只覆盖当前会话的 MVU 模式、指令、正则规则与初始状态栏。MVU 所用模型在全局「连接与默认模型」中配置。</div>
                 </div>
+                <MvuCapabilityEditor
+                  :mvu-mode="chatDraft.mvuMode ?? null"
+                  :mvu-directive="chatDraft.mvuDirective ?? ''"
+                  :content-regex-rules="chatDraft.contentRegexRules || []"
+                  :initial-state-tables="chatStateTablesDraft"
+                  :allow-inherit="true"
+                  tables-empty-hint="暂无状态表格。点击「新建表格」开始配置。"
+                  @update:mvu-mode="(v) => { if (chatDraft) chatDraft.mvuMode = v }"
+                  @update:mvu-directive="(v) => { if (chatDraft) chatDraft.mvuDirective = v }"
+                  @update:content-regex-rules="(v) => { if (chatDraft) chatDraft.contentRegexRules = v }"
+                  @update:initial-state-tables="(v) => { chatStateTablesDraft = v }"
+                />
               </div>
 
               <div class="space-y-2 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay overflow-hidden">
