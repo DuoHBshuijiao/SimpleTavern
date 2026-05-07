@@ -8,11 +8,11 @@ from typing import Any
 
 from app.content_regex import apply_content_regex_pipeline
 from app.content_regex_queue import enqueue_content_regex_items
+from app.group_mvu import is_chat_mvu_runtime_enabled
 from app.storage import (
     list_characters,
     list_chats,
     list_group_chats,
-    load_character,
     load_settings,
 )
 
@@ -87,13 +87,8 @@ def _scan_once() -> None:
             continue
         rules_sig = _rules_signature(rules)
 
-        # 检查角色是否开启 MVU
-        mvu_enabled = False
-        try:
-            character = load_character(chat.characterId)
-            mvu_enabled = bool(getattr(character, "mvuEnabled", False))
-        except Exception:
-            pass
+        # 检查会话是否启用 MVU（单聊看角色卡；群聊看显式开关与兼容逻辑）
+        mvu_enabled = is_chat_mvu_runtime_enabled(chat)
 
         # 定位 MVU 已消费标记所在的消息索引（-1 表示无标记）
         last_processed_idx: int = -1
