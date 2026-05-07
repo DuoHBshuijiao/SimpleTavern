@@ -52,6 +52,7 @@ import {
   type MvuMode,
   type TtsProvider,
   type TtsSessionConfig,
+  type WebSearchProvider,
   type WorldBook,
   type WorldBookAttachment,
 } from '../types/models'
@@ -72,6 +73,7 @@ import {
   writeWebGpuDraftSource,
 } from '../composables/useWebGpuBackgroundRuntime'
 import { X, Eye, EyeOff, Check, Loader2, GripVertical, ChevronDown } from 'lucide-vue-next'
+import WebSearchQuotaSummary from './WebSearchQuotaSummary.vue'
 import WorldBookEditorModal from './modals/WorldBookEditorModal.vue'
 import WebGpuShaderEditorModal from './modals/WebGpuShaderEditorModal.vue'
 import WorldBookSessionAttachModal from './modals/WorldBookSessionAttachModal.vue'
@@ -153,6 +155,7 @@ const worldBookNewNameDraft = ref('')
 /** 全局设置 Tab 内折叠区块（不用原生 details，否则关闭时子树被立刻隐藏，grid 高度过渡无法反复播放） */
 const globalAccordionOpen = reactive({
   connection: false,
+  webSearch: false,
   prompts: false,
   appearance: false,
   tts: false,
@@ -160,6 +163,11 @@ const globalAccordionOpen = reactive({
 })
 
 const globalDraft = ref<Settings | null>(null)
+/** GET /api/web-search/status 缓存（打开全局设置时刷新） */
+const webSearchRemoteStatus = ref<Record<string, unknown> | null>(null)
+/** 正在刷新用量：不清空已有快照，仅作弱提示与样式 */
+const webSearchRemoteStatusFetching = ref(false)
+const webSearchStatusFetchSeq = ref(0)
 const chatDraft = ref<ChatOverrides | null>(null)
 const isSaving = ref(false)
 const regexEditorOpen = ref(false)
@@ -177,6 +185,76 @@ const chatMvuModeOptions = [
   { label: '指令模式', value: 'directive' },
 ] as const
 const regexTrialManualText = ref('')
+
+function ensureWebSearchSettingsShape(s: Settings) {
+  if (!s.webSearch) {
+    s.webSearch = {
+      provider: 'tavily',
+      tavily: { apiKey: '' },
+      bocha: { apiKey: '', baseUrl: 'https://api.bocha.cn' },
+    }
+  }
+  if (!s.webSearch.provider) s.webSearch.provider = 'tavily'
+  if (!s.webSearch.tavily) s.webSearch.tavily = { apiKey: '' }
+  if (!s.webSearch.bocha) s.webSearch.bocha = { apiKey: '', baseUrl: 'https://api.bocha.cn' }
+  if (!s.webSearch.bocha.baseUrl) s.webSearch.bocha.baseUrl = 'https://api.bocha.cn'
+}
+
+function wsRecord(v: unknown): Record<string, unknown> | null {
+  return v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null
+}
+
+function tavilySuccessPayloadUnusable(data: Record<string, unknown>): boolean {
+  const key = wsRecord(data.key)
+  const account = wsRecord(data.account)
+  const keyOk =
+    key &&
+    typeof key.usage === 'number' &&
+    Number.isFinite(key.usage) &&
+    typeof key.limit === 'number' &&
+    Number.isFinite(key.limit)
+  const accountOk =
+    account &&
+    typeof account.plan_usage === 'number' &&
+    Number.isFinite(account.plan_usage) &&
+    typeof account.plan_limit === 'number' &&
+    Number.isFinite(account.plan_limit)
+  return !keyOk && !accountOk
+}
+
+/** Tavily 用量偶发返回仅含 raw 的空壳或缺字段；触发一次短延迟重试，减轻「先提示无字段再恢复」的闪烁 */
+function webSearchStatusBodyLooksIncomplete(body: Record<string, unknown>): boolean {
+  const t = wsRecord(body.tavily)
+  if (!t || t.ok !== true) return false
+  const data = wsRecord(t.data)
+  if (!data) return true
+  const keys = Object.keys(data)
+  if (keys.length === 0) return true
+  if (keys.length === 1 && keys[0] === 'raw') return true
+  return tavilySuccessPayloadUnusable(data)
+}
+
+async function refreshWebSearchRemoteStatus(): Promise<void> {
+  const seq = ++webSearchStatusFetchSeq.value
+  webSearchRemoteStatusFetching.value = true
+  try {
+    let data = await apiGet<Record<string, unknown>>('/api/web-search/status')
+    if (seq !== webSearchStatusFetchSeq.value) return
+    if (webSearchStatusBodyLooksIncomplete(data)) {
+      await new Promise<void>((r) => setTimeout(r, 360))
+      if (seq !== webSearchStatusFetchSeq.value) return
+      data = await apiGet<Record<string, unknown>>('/api/web-search/status')
+      if (seq !== webSearchStatusFetchSeq.value) return
+    }
+    webSearchRemoteStatus.value = data
+  } catch {
+    if (seq !== webSearchStatusFetchSeq.value) return
+    /* 保留 webSearchRemoteStatus，避免抽屉打开时一闪清空 */
+  } finally {
+    if (seq === webSearchStatusFetchSeq.value) webSearchRemoteStatusFetching.value = false
+  }
+}
+
 const regexTrialResult = ref<{
   beforeText: string
   afterText: string
@@ -469,20 +547,36 @@ const TTS_PROVIDER_OPTIONS: Array<{ label: string; value: TtsProvider }> = [
   { label: 'GLM-TTS（本地）', value: 'glm_local' },
   { label: 'Qwen3-TTS（本地）', value: 'qwen3_local' },
   { label: 'OmniVoice（本地）', value: 'omnivoice_local' },
+  { label: 'OpenRouter TTS', value: 'openrouter' },
+  { label: '硅基流动', value: 'siliconflow' },
 ]
 
-// --- TTS 缓存统计（轮询后端 GET /api/tts/cache/stats） ---
-const ttsCacheStats = ref<{ usedBytes: number; limitBytes: number; lastPatrolAt: string; prunedFiles: number } | null>(null)
-let ttsCachePollTimer: ReturnType<typeof setInterval> | null = null
+const WEB_SEARCH_PROVIDER_OPTIONS: Array<{ label: string; value: WebSearchProvider }> = [
+  { label: 'Tavily', value: 'tavily' },
+  { label: '博查（国内）', value: 'bocha' },
+]
 
-function startTtsCachePoll() {
-  fetchTtsCacheStats()
-  if (ttsCachePollTimer) clearInterval(ttsCachePollTimer)
-  ttsCachePollTimer = setInterval(fetchTtsCacheStats, 30_000)
+function formatTtsProviderLabel(provider: TtsProvider): string {
+  switch (provider) {
+    case 'glm_local':
+      return 'GLM-TTS（本地）'
+    case 'qwen3_local':
+      return 'Qwen3-TTS（本地）'
+    case 'omnivoice_local':
+      return 'OmniVoice（本地）'
+    case 'glm':
+      return 'GLM TTS（智谱）'
+    case 'openrouter':
+      return 'OpenRouter TTS'
+    case 'siliconflow':
+      return '硅基流动'
+    default:
+      return 'MiniMax（兼容）'
+  }
 }
-function stopTtsCachePoll() {
-  if (ttsCachePollTimer) { clearInterval(ttsCachePollTimer); ttsCachePollTimer = null }
-}
+
+// --- TTS 缓存统计（打开设置抽屉或开启 TTS 时请求 GET /api/tts/cache/stats，不轮询） ---
+const ttsCacheStats = ref<{ usedBytes: number; limitBytes: number; lastPatrolAt: string; prunedFiles: number } | null>(null)
 async function fetchTtsCacheStats() {
   try {
     const res = await apiGet<{ usedBytes: number; limitBytes: number; lastPatrolAt: string; prunedFiles: number }>('/api/tts/cache/stats')
@@ -500,7 +594,7 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1048576).toFixed(1)} MB`
 }
 
-// 打开设置抽屉时从后端获取版本号（仅请求一次）；依赖 globalDraft / TTS 轮询，须放在其后避免 TDZ
+// 打开设置抽屉时从后端获取版本号（仅请求一次）
 watch(
   () => props.show,
   (visible) => {
@@ -513,22 +607,9 @@ watch(
       worldBookCreateExpanded.value = false
       worldBookNewNameDraft.value = ''
       void deletePendingPageBackgrounds(savedPageBackgroundImage.value)
-      stopTtsCachePoll()
-    } else {
-      // 打开时如果 TTS 已启用，开始轮询缓存统计
-      if (globalDraft.value?.ttsEnabled) startTtsCachePoll()
     }
   },
   { immediate: true }
-)
-
-watch(
-  () => [props.show, globalDraft.value?.ttsEnabled] as const,
-  ([visible, enabled]) => {
-    if (!visible) return
-    if (enabled) startTtsCachePoll()
-    else stopTtsCachePoll()
-  },
 )
 
 // 检查更新
@@ -816,7 +897,7 @@ function updateChatTtsPreprocessEnabled(enabled: boolean) {
 function updateChatTtsInjectEmotionTags(enabled: boolean) {
   const tts = ensureChatTtsConfig()
   if (!tts) return
-  tts.injectEmotionTags = selectedChatTtsProvider.value === 'minimax' ? enabled : false
+  tts.injectEmotionTags = enabled
 }
 
 function updateChatTtsPreprocessTargetLanguage(rawValue: string) {
@@ -907,7 +988,11 @@ function applyPresetTtsProvider(
         ? 'qwen3_local'
         : provider === 'omnivoice_local'
           ? 'omnivoice_local'
-        : 'minimax'
+          : provider === 'openrouter'
+            ? 'openrouter'
+            : provider === 'siliconflow'
+              ? 'siliconflow'
+            : 'minimax'
   const previousProvider = resolveTtsProvider(preset)
   preset.presetKind = 'tts'
   preset.ttsProvider = nextProvider
@@ -946,6 +1031,24 @@ function applyPresetTtsProvider(
     }
     if (!preset.baseUrl || preset.baseUrl === 'https://api.openai.com') {
       preset.baseUrl = `http://127.0.0.1:${preset.ttsOmniVoiceLocalPort}`
+    }
+  }
+  if (nextProvider === 'openrouter') {
+    if (!preset.baseUrl || preset.baseUrl === 'https://api.openai.com') {
+      preset.baseUrl = 'https://openrouter.ai/api/v1'
+    }
+    const seed = 'google/gemini-3.1-flash-tts-preview'
+    if (!preset.models.includes(seed)) {
+      preset.models = [seed, ...preset.models]
+    }
+  }
+  if (nextProvider === 'siliconflow') {
+    if (!preset.baseUrl || preset.baseUrl === 'https://api.openai.com') {
+      preset.baseUrl = 'https://api.siliconflow.cn/v1'
+    }
+    const seed = 'FunAudioLLM/CosyVoice2-0.5B'
+    if (!preset.models.includes(seed)) {
+      preset.models = [seed, ...preset.models]
     }
   }
   if (options?.notifyOnSwitch !== false) {
@@ -1594,11 +1697,11 @@ watch(
 
     pendingPageBackgroundUploads.clear()
     markSavedPageBackground((s as Settings).pageBackgroundImage ?? null)
+    ensureWebSearchSettingsShape(s as Settings)
     globalDraft.value = s
     await loadWebGpuPresetSource((s as Settings).webgpuBackgroundActivePresetId ?? null)
     chatDraft.value = ensureOverrides(props.chat ? clone(props.chat.overrides) : undefined)
-    if (s.ttsEnabled) startTtsCachePoll()
-    else stopTtsCachePoll()
+    if (s.ttsEnabled) void fetchTtsCacheStats()
 
     if (fontList.value.length === 0) {
       try {
@@ -1624,6 +1727,14 @@ watch(
       fetchMemoryTokenCount()
       if (props.chat?.id) fetchChatTokenCount()
     }
+  },
+)
+
+watch(
+  () => [props.show, tab.value] as const,
+  async ([open, t]) => {
+    if (!open || t !== 'global') return
+    await refreshWebSearchRemoteStatus()
   },
 )
 
@@ -2054,6 +2165,10 @@ const editingPresetIsQwen3Local = computed(() => editingPresetTtsProvider.value 
 
 const editingPresetIsOmniVoiceLocal = computed(() => editingPresetTtsProvider.value === 'omnivoice_local')
 
+const editingPresetIsSiliconflow = computed(() => editingPresetTtsProvider.value === 'siliconflow')
+
+const editingPresetIsOpenrouter = computed(() => editingPresetTtsProvider.value === 'openrouter')
+
 const editingPresetSupportsVoiceDesign = computed(() => editingPresetTtsProvider.value === 'minimax')
 
 const editingPresetSupportsPromptAudio = computed(() => editingPresetTtsProvider.value === 'minimax')
@@ -2066,6 +2181,8 @@ const editingPresetBaseUrlPlaceholder = computed(() => {
   if (editingPresetTtsProvider.value === 'glm_local') return 'http://127.0.0.1:8088'
   if (editingPresetTtsProvider.value === 'qwen3_local') return 'http://127.0.0.1:8080'
   if (editingPresetTtsProvider.value === 'omnivoice_local') return 'http://127.0.0.1:8089'
+  if (editingPresetTtsProvider.value === 'openrouter') return 'https://openrouter.ai/api/v1'
+  if (editingPresetTtsProvider.value === 'siliconflow') return 'https://api.siliconflow.cn/v1'
   return editingPresetTtsProvider.value === 'glm'
     ? 'https://open.bigmodel.cn/api 或 …/api/paas/v4/audio/speech'
     : 'https://api.minimaxi.com 或 MiniMax TTS 完整接口地址'
@@ -2084,6 +2201,12 @@ const editingPresetBaseUrlHint = computed(() => {
   }
   if (editingPresetTtsProvider.value === 'omnivoice_local') {
     return '本地 OmniVoice FastAPI 地址，通常为 http://127.0.0.1:<端口>；启用托管时会根据端口自动生成。'
+  }
+  if (editingPresetTtsProvider.value === 'openrouter') {
+    return '填写 OpenRouter API 根路径，推荐 https://openrouter.ai/api/v1（不含 /audio/speech）。'
+  }
+  if (editingPresetTtsProvider.value === 'siliconflow') {
+    return '填写硅基流动 OpenAI 兼容根路径，通常为 https://api.siliconflow.cn/v1。'
   }
   return editingPresetTtsProvider.value === 'glm'
     ? 'GLM TTS 推荐填写 https://open.bigmodel.cn/api，也兼容完整 /api/paas/v4/... 接口地址。'
@@ -2201,14 +2324,6 @@ const selectedChatTtsPreset = computed(() => {
 })
 
 const selectedChatTtsProvider = computed<TtsProvider>(() => resolveTtsProvider(selectedChatTtsPreset.value))
-
-watch(selectedChatTtsProvider, (provider) => {
-  if (provider === 'minimax') return
-  const tts = chatDraft.value?.tts
-  if (tts?.injectEmotionTags) {
-    tts.injectEmotionTags = false
-  }
-})
 
 const availableTtsVoices = computed(() => {
   const selectedPreset = selectedChatTtsPreset.value
@@ -2371,7 +2486,11 @@ async function submitTtsClone() {
     return
   }
   if (!ttsCloneDraft.voiceId.trim()) {
-    await notifyMessage('请填写克隆后的 voice_id')
+    await notifyMessage(provider === 'siliconflow' ? '请填写自定义音色名称（customName）' : '请填写克隆后的 voice_id')
+    return
+  }
+  if (provider === 'siliconflow' && !ttsCloneDraft.previewText.trim()) {
+    await notifyMessage('硅基流动上传必须填写参考音频对应文本')
     return
   }
 
@@ -2795,6 +2914,7 @@ async function saveGlobal() {
     ? null
     : Math.max(0, Math.min(64, draft.pageBackgroundBlurPx))
   ensureWebgpuSettingsShape(draft)
+  ensureWebSearchSettingsShape(draft)
   draft.webgpuBackgroundEnabled = draft.webgpuBackgroundEnabled === true
   draft.webgpuBackgroundActivePresetId = draft.webgpuBackgroundActivePresetId ?? null
   await settingsStore.save(draft)
@@ -3771,6 +3891,126 @@ async function checkUpdate() {
                 </div>
               </div>
 
+              <!-- 网络搜索（Tavily / 博查） -->
+              <div class="rounded-xl border border-[var(--color-border-subtle)] bg-surface-muted/40 overflow-hidden">
+                <button
+                  type="button"
+                  class="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3.5 text-left text-sm text-[var(--color-text-secondary)] select-none hover:bg-surface-hover/40"
+                  :aria-expanded="globalAccordionOpen.webSearch"
+                  @click="globalAccordionOpen.webSearch = !globalAccordionOpen.webSearch"
+                >
+                  <span>网络搜索</span>
+                  <ChevronDown
+                    class="h-4 w-4 shrink-0 text-[var(--color-text-muted)] transition-transform duration-[800ms] ease-in-out"
+                    :class="globalAccordionOpen.webSearch ? 'rotate-180' : ''"
+                  />
+                </button>
+                <div
+                  class="grid transition-[grid-template-rows] duration-[800ms] ease-in-out"
+                  :class="globalAccordionOpen.webSearch ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'"
+                >
+                  <div class="min-h-0 overflow-hidden">
+                    <div class="space-y-5 border-t border-[var(--color-border-subtle)] px-4 pb-4 pt-4">
+                      <p class="text-xs text-[var(--color-text-muted)]">
+                        主聊天输入区可通过开关启用搜索（开启后每次发送均生效，直至关闭）；此处配置第三方 Search API。用量与余额在打开本抽屉时自动查询。
+                      </p>
+                      <div v-if="globalDraft.webSearch" class="space-y-4">
+                        <div class="space-y-1.5">
+                          <label class="block text-sm font-medium text-[var(--color-text-secondary)]">提供方</label>
+                          <ModernSelect
+                            v-model="globalDraft.webSearch.provider"
+                            :options="WEB_SEARCH_PROVIDER_OPTIONS"
+                            placeholder="选择搜索提供方…"
+                            class="w-full"
+                          />
+                        </div>
+                        <template v-if="globalDraft.webSearch.provider === 'tavily' && globalDraft.webSearch.tavily">
+                          <div class="space-y-1.5">
+                            <label class="block text-sm font-medium text-[var(--color-text-secondary)]">Tavily API Key</label>
+                            <input
+                              v-model="globalDraft.webSearch.tavily.apiKey"
+                              type="password"
+                              autocomplete="off"
+                              class="input w-full"
+                              placeholder="tvly-..."
+                            />
+                          </div>
+                          <div class="grid grid-cols-2 gap-3">
+                            <div class="space-y-1.5">
+                              <label class="block text-xs text-[var(--color-text-muted)]">max_results（0–20）</label>
+                              <input
+                                v-model.number="globalDraft.webSearch.tavily.max_results"
+                                type="number"
+                                min="0"
+                                max="20"
+                                class="input w-full"
+                              />
+                            </div>
+                            <div class="space-y-1.5">
+                              <label class="block text-xs text-[var(--color-text-muted)]">search_depth</label>
+                              <input
+                                v-model="globalDraft.webSearch.tavily.search_depth"
+                                type="text"
+                                class="input w-full"
+                                placeholder="basic / advanced / fast …"
+                              />
+                            </div>
+                          </div>
+                        </template>
+                        <template v-else-if="globalDraft.webSearch.bocha">
+                          <div class="space-y-1.5">
+                            <label class="block text-sm font-medium text-[var(--color-text-secondary)]">博查 API Key</label>
+                            <input
+                              v-model="globalDraft.webSearch.bocha.apiKey"
+                              type="password"
+                              autocomplete="off"
+                              class="input w-full"
+                            />
+                          </div>
+                          <div class="space-y-1.5">
+                            <label class="block text-sm font-medium text-[var(--color-text-secondary)]">API 根地址</label>
+                            <input
+                              v-model="globalDraft.webSearch.bocha.baseUrl"
+                              type="text"
+                              class="input w-full"
+                              placeholder="https://api.bocha.cn"
+                            />
+                          </div>
+                          <div class="space-y-1.5">
+                            <label class="block text-sm font-medium text-[var(--color-text-secondary)]">count（1–50）</label>
+                            <input
+                              v-model.number="globalDraft.webSearch.bocha.count"
+                              type="number"
+                              min="1"
+                              max="50"
+                              class="input w-full"
+                            />
+                          </div>
+                        </template>
+                        <div
+                          class="rounded-lg border border-[var(--color-border-subtle)] bg-surface-muted/30 p-3 text-xs text-[var(--color-text-muted)] transition-opacity duration-200"
+                          :class="webSearchRemoteStatusFetching ? 'opacity-70' : ''"
+                        >
+                          <div class="mb-1 flex items-center justify-between gap-2 font-medium text-[var(--color-text-secondary)]">
+                            <span>用量 / 余额</span>
+                            <span
+                              v-if="webSearchRemoteStatusFetching"
+                              class="text-[11px] font-normal text-[var(--color-text-muted)]"
+                            >
+                              刷新中…
+                            </span>
+                          </div>
+                          <WebSearchQuotaSummary
+                            :status="webSearchRemoteStatus"
+                            :provider="globalDraft.webSearch.provider"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <!-- 提示词与生成参数（默认折叠） -->
               <div class="rounded-xl border border-[var(--color-border-subtle)] bg-surface-muted/40 overflow-hidden">
                 <button
@@ -4365,7 +4605,7 @@ async function checkUpdate() {
                         <button
                           type="button"
                           class="flex min-h-11 w-full cursor-pointer items-center gap-3 py-1 text-left group"
-                          @click="globalDraft!.ttsEnabled = !globalDraft!.ttsEnabled; if (globalDraft!.ttsEnabled) startTtsCachePoll(); else stopTtsCachePoll()"
+                          @click="globalDraft!.ttsEnabled = !globalDraft!.ttsEnabled; if (globalDraft!.ttsEnabled) void fetchTtsCacheStats()"
                         >
                           <div
                             class="relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200 ease-out"
@@ -4419,7 +4659,7 @@ async function checkUpdate() {
                       </div>
 
                       <p class="text-xs text-[var(--color-text-muted)]">
-                        开启后可在聊天界面使用语音合成功能。需在 API 预设中至少配置一个 TTS 服务预设，可选 MiniMax 或 GLM TTS。
+                        开启后可在聊天界面使用语音合成功能。需在 API 预设中至少配置一个 TTS 服务预设（MiniMax、GLM TTS、OpenRouter TTS、硅基流动等）。
                       </p>
                     </div>
                   </div>
@@ -4716,7 +4956,7 @@ async function checkUpdate() {
 
                           <div v-if="isTtsPreset(editingPreset)" class="space-y-3 rounded-xl border border-[var(--color-border-subtle)] bg-surface-muted/35 p-3">
                             <p class="text-[11px] text-[var(--color-text-muted)]">
-                              当前提供商：{{ editingPresetTtsProvider === 'glm_local' ? 'GLM-TTS（本地）' : editingPresetTtsProvider === 'qwen3_local' ? 'Qwen3-TTS（本地）' : editingPresetTtsProvider === 'omnivoice_local' ? 'OmniVoice（本地）' : editingPresetTtsProvider === 'glm' ? 'GLM TTS（智谱）' : 'MiniMax（兼容）' }}
+                              当前提供商：{{ formatTtsProviderLabel(editingPresetTtsProvider) }}
                             </p>
 
                             <!-- GLM-TTS 本地专属配置 -->
@@ -4971,7 +5211,43 @@ async function checkUpdate() {
                               </div>
                             </template>
 
-                            <!-- 非 glm_local：保留原有的手动添加 + 克隆 + 设计 -->
+                            <template v-else-if="editingPresetIsSiliconflow">
+                              <div class="space-y-2 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay px-3 py-3">
+                                <div class="text-xs font-medium text-[var(--color-text-secondary)]">硅基流动 · 上传参考音频</div>
+                                <p class="text-[10px] text-[var(--color-text-muted)]">
+                                  需提供参考音频文件、与音频一致的转写文本，以及自定义音色名（对应官方 customName）；成功后返回的 uri 将写入音色目录。
+                                </p>
+                                <div class="flex flex-wrap gap-2">
+                                  <button type="button" class="btn btn-xs btn-secondary" @click="pickTtsCloneSourceFile">选择参考音频</button>
+                                  <span class="text-[10px] text-[var(--color-text-muted)]">{{ ttsCloneSourceFile?.name || '未选择文件' }}</span>
+                                </div>
+                                <input ref="ttsCloneSourceInputRef" type="file" class="hidden" accept=".mp3,.wav,.m4a,.opus" @change="onTtsCloneSourceChange" />
+                                <input v-model="ttsCloneDraft.voiceId" type="text" class="input input-sm w-full" placeholder="自定义音色名称（customName）" />
+                                <ModernSelect
+                                  v-model="ttsCloneDraft.model"
+                                  :options="ttsSessionModelOptions"
+                                  searchable
+                                  allow-create
+                                  placeholder="TTS 模型（如 FunAudioLLM/CosyVoice2-0.5B）"
+                                  @select="(option) => { ttsCloneDraft.model = option.value }"
+                                />
+                                <textarea v-model="ttsCloneDraft.previewText" rows="3" class="input textarea w-full resize-y" placeholder="参考音频对应文本（必填）"></textarea>
+                                <button type="button" class="btn btn-sm btn-primary w-full" :disabled="ttsCloneLoading" @click="submitTtsClone">{{ ttsCloneLoading ? '上传中...' : '上传并写入音色' }}</button>
+                                <audio v-if="ttsClonePreviewUrl" :src="ttsClonePreviewUrl" controls class="w-full"></audio>
+                              </div>
+                              <div class="rounded-lg border border-dashed border-[var(--color-border-subtle)] bg-surface-overlay px-3 py-3 text-xs text-[var(--color-text-muted)]">
+                                硅基流动不提供与本应用内 MiniMax「音色设计」等价的云端接口；可使用上方上传或模型预置音色。
+                              </div>
+                            </template>
+
+                            <template v-else-if="editingPresetIsOpenrouter">
+                              <div class="rounded-lg border border-dashed border-[var(--color-border-subtle)] bg-surface-overlay px-3 py-3 text-xs text-[var(--color-text-muted)] space-y-2">
+                                <p>OpenRouter TTS 不支持在本面板内上传参考音频：请在下方「音色目录」填写模型文档要求的 <span class="font-mono">voice</span>；上游路由与偏好请在 OpenRouter 网站自行配置。</p>
+                                <p>详见 <a href="https://openrouter.ai/docs" target="_blank" rel="noopener noreferrer" class="text-brand underline">OpenRouter 文档</a>。</p>
+                              </div>
+                            </template>
+
+                            <!-- MiniMax / GLM（云端）：手动添加 + 克隆 + 设计 -->
                             <template v-else>
                               <div class="flex flex-col gap-3">
                                 <div class="space-y-2 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay px-3 py-3">
@@ -5505,7 +5781,7 @@ async function checkUpdate() {
                     />
                     <p class="text-xs text-[var(--color-text-muted)]">
                       先选模型，预设会自动关联到对应的 TTS 服务。
-                      <span v-if="selectedChatTtsPreset" class="text-brand">当前预设：{{ selectedChatTtsPreset.name }} · {{ selectedChatTtsProvider === 'glm_local' ? 'GLM-TTS（本地）' : selectedChatTtsProvider === 'qwen3_local' ? 'Qwen3-TTS（本地）' : selectedChatTtsProvider === 'omnivoice_local' ? 'OmniVoice（本地）' : selectedChatTtsProvider === 'glm' ? 'GLM TTS' : 'MiniMax' }}</span>
+                      <span v-if="selectedChatTtsPreset" class="text-brand">当前预设：{{ selectedChatTtsPreset.name }} · {{ formatTtsProviderLabel(selectedChatTtsProvider) }}</span>
                     </p>
                     <p v-if="ttsSessionModelOptions.length === 0" class="text-xs text-[var(--color-text-muted)]">
                       还没有可用的 TTS 模型。请先在 API 预设中把目标预设标记为 TTS 服务并获取模型列表。
@@ -5554,8 +5830,8 @@ async function checkUpdate() {
                         <ThemedCheckbox :checked="chatDraft.tts?.preprocessEnabled === true" />
                         <span>启用文本后处理</span>
                       </button>
-                      <button type="button" class="inline-flex items-center gap-2 transition-colors hover:text-[var(--color-text)]" :disabled="!(chatDraft.tts?.preprocessEnabled === true) || selectedChatTtsProvider !== 'minimax'" @click="updateChatTtsInjectEmotionTags(!(chatDraft.tts?.injectEmotionTags === true))">
-                        <ThemedCheckbox :checked="chatDraft.tts?.injectEmotionTags === true" :disabled="!(chatDraft.tts?.preprocessEnabled === true) || selectedChatTtsProvider !== 'minimax'" />
+                      <button type="button" class="inline-flex items-center gap-2 transition-colors hover:text-[var(--color-text)]" :disabled="!(chatDraft.tts?.preprocessEnabled === true)" @click="updateChatTtsInjectEmotionTags(!(chatDraft.tts?.injectEmotionTags === true))">
+                        <ThemedCheckbox :checked="chatDraft.tts?.injectEmotionTags === true" :disabled="!(chatDraft.tts?.preprocessEnabled === true)" />
                         <span>注入英文情绪标签</span>
                       </button>
                     </div>
@@ -5581,7 +5857,7 @@ async function checkUpdate() {
                       @select="updateChatTtsPreprocessModel"
                     />
                     <p class="text-xs text-[var(--color-text-muted)]">
-                      后处理请求会以 JSON 发送 language、raw_text、inject_emotion_tags；目标语言同时写入提示词占位符。留空则不翻译。模型从普通文本预设里选；英文情绪标签仅对 MiniMax TTS 生效。
+                      后处理请求会以 JSON 发送 language、raw_text、inject_emotion_tags；目标语言同时写入提示词占位符。留空则不翻译。模型从普通文本预设里选。若开启「注入语气相关标签」，请确认当前 TTS 模型文档是否支持，否则可能产生异常或怪音。
                     </p>
                   </div>
 
