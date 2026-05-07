@@ -73,6 +73,8 @@ export type SendAssistantMessageOptions = {
   allowWriteMemoryOverride?: boolean
   /** 仅本次请求覆盖「破坏性工具」开关 */
   allowDestructiveToolsOverride?: boolean
+  /** 仅本次请求覆盖「网络搜索」开关 */
+  allowWebSearchOverride?: boolean
 }
 
 /** 自动触发记忆总结时注入助手会话的 user 正文 */
@@ -158,16 +160,19 @@ export function useAssistant(options: UseAssistantOptions) {
 
   const LS_ASSISTANT_MEM = 'assistant_allow_write_memory'
   const LS_ASSISTANT_DEST = 'assistant_allow_destructive_tools'
+  const LS_ASSISTANT_WEB = 'assistant_allow_web_search'
   const LS_WARNED_MEM = 'assistant_warned_memory_switch'
   const LS_WARNED_DEST = 'assistant_warned_destructive_switch'
 
   const allowWriteMemoryEnabled = ref(false)
   const allowDestructiveToolsEnabled = ref(false)
+  const allowWebSearchEnabled = ref(false)
 
   function loadAssistantToolPrefs() {
     try {
       allowWriteMemoryEnabled.value = localStorage.getItem(LS_ASSISTANT_MEM) === '1'
       allowDestructiveToolsEnabled.value = localStorage.getItem(LS_ASSISTANT_DEST) === '1'
+      allowWebSearchEnabled.value = localStorage.getItem(LS_ASSISTANT_WEB) === '1'
     } catch {
       /* ignore */
     }
@@ -177,6 +182,7 @@ export function useAssistant(options: UseAssistantOptions) {
     try {
       localStorage.setItem(LS_ASSISTANT_MEM, allowWriteMemoryEnabled.value ? '1' : '0')
       localStorage.setItem(LS_ASSISTANT_DEST, allowDestructiveToolsEnabled.value ? '1' : '0')
+      localStorage.setItem(LS_ASSISTANT_WEB, allowWebSearchEnabled.value ? '1' : '0')
     } catch {
       /* ignore */
     }
@@ -229,6 +235,16 @@ export function useAssistant(options: UseAssistantOptions) {
 
   function toggleAllowDestructiveTools() {
     void setAllowDestructiveTools(!allowDestructiveToolsEnabled.value)
+  }
+
+  function setAllowWebSearch(next: boolean) {
+    if (allowWebSearchEnabled.value === next) return
+    allowWebSearchEnabled.value = next
+    persistAssistantToolPrefs()
+  }
+
+  function toggleAllowWebSearch() {
+    setAllowWebSearch(!allowWebSearchEnabled.value)
   }
 
   // 消息编辑状态
@@ -864,6 +880,10 @@ export function useAssistant(options: UseAssistantOptions) {
       sendOptions?.allowDestructiveToolsOverride !== undefined
         ? sendOptions.allowDestructiveToolsOverride
         : allowDestructiveToolsEnabled.value
+    const allowWebSearch =
+      sendOptions?.allowWebSearchOverride !== undefined
+        ? sendOptions.allowWebSearchOverride
+        : allowWebSearchEnabled.value
     const body = {
       userMessage: text,
       model: assistantSettings.value.model,
@@ -872,6 +892,7 @@ export function useAssistant(options: UseAssistantOptions) {
       chatId: scope === 'chat' ? chatId.value : null,
       allowWriteMemory,
       allowDestructiveTools,
+      allowWebSearch,
       scope,
       attachments: draftAttachments,
     }
@@ -1234,10 +1255,13 @@ export function useAssistant(options: UseAssistantOptions) {
     assistantSettings,
     allowWriteMemoryEnabled,
     allowDestructiveToolsEnabled,
+    allowWebSearchEnabled,
     setAllowWriteMemory,
     setAllowDestructiveTools,
+    setAllowWebSearch,
     toggleAllowWriteMemory,
     toggleAllowDestructiveTools,
+    toggleAllowWebSearch,
 
     // 消息编辑状态
     showAssistantMessageEditor,
