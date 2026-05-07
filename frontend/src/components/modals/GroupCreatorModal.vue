@@ -30,10 +30,12 @@
  *    - 位置：组件层，提供群聊创建功能
  */
 import { ref, computed, watch } from 'vue'
-import type { CharacterCard } from '../../types/models'
+import type { CharacterCard, ChatContentRegexRule, ChatMvuMode, GroupMvuPreset, StatusTableDef } from '../../types/models'
 import ModernAvatar from '../ModernAvatar.vue'
 import ModernSelect from '../ModernSelect.vue'
 import ThemedCheckbox from '../ThemedCheckbox.vue'
+import MvuCapabilityEditor from '../chat/MvuCapabilityEditor.vue'
+import { characterHasMvuProfileData } from '../../utils/groupMvu'
 
 const props = defineProps<{
   show: boolean
@@ -55,6 +57,12 @@ const emit = defineEmits<{
     memberInclusions: Record<string, { includePersonality: boolean; includeScenario: boolean }>
     groupSystemInjectDepth: number
     groupSystemAlwaysAtBottom: boolean
+    groupMvuPreset: GroupMvuPreset
+    groupMvuPresetCharacterId: string | null
+    mvuMode: ChatMvuMode
+    mvuDirective: string | null
+    contentRegexRules: ChatContentRegexRule[]
+    initialStateTables: StatusTableDef[]
   }]
 }>()
 
@@ -67,6 +75,15 @@ const groupFirstMessageCharacterId = ref<string | null>(null)
 const groupMemberInclusions = ref<Record<string, { includePersonality: boolean; includeScenario: boolean }>>({})
 const groupSystemInjectDepth = ref(5)
 const groupSystemAlwaysAtBottom = ref(true)
+/** 群聊 MVU：总开关 + 单一来源选择（沿用成员 / 以成员为模板） */
+const groupMvuEnabled = ref(false)
+/** 空 | inherit:<id> | fork:<id> */
+const groupMvuSourceKey = ref('')
+/** 启用 MVU 时本地编辑的会话级 MVU 草稿（提交时通过 create 事件带回） */
+const mvuModeDraft = ref<ChatMvuMode>(null)
+const mvuDirectiveDraft = ref<string>('')
+const contentRegexRulesDraft = ref<ChatContentRegexRule[]>([])
+const initialStateTablesDraft = ref<StatusTableDef[]>([])
 
 const isMigrateMode = computed(() => !!(props.migrateFromChatId && (props.initialMemberIds?.length ?? 0) > 0))
 
@@ -86,6 +103,12 @@ watch(() => props.show, (newVal) => {
     }
     groupSystemInjectDepth.value = 5
     groupSystemAlwaysAtBottom.value = true
+    groupMvuEnabled.value = false
+    groupMvuSourceKey.value = ''
+    mvuModeDraft.value = null
+    mvuDirectiveDraft.value = ''
+    contentRegexRulesDraft.value = []
+    initialStateTablesDraft.value = []
     return
   }
   selectedMemberIds.value = []
@@ -96,6 +119,12 @@ watch(() => props.show, (newVal) => {
   groupMemberInclusions.value = {}
   groupSystemInjectDepth.value = 5
   groupSystemAlwaysAtBottom.value = true
+  groupMvuEnabled.value = false
+  groupMvuSourceKey.value = ''
+  mvuModeDraft.value = null
+  mvuDirectiveDraft.value = ''
+  contentRegexRulesDraft.value = []
+  initialStateTablesDraft.value = []
 })
 
 /**
@@ -116,6 +145,84 @@ const groupFirstMessageOptions = computed(() => {
     ...opts
   ]
 })
+
+const groupMvuSourceOptions = computed(() => {
+  const head = [{ label: '（请选择 MVU 来源）', value: '' }]
+  if (selectedMemberIds.value.length < 2) return head
+  const inherit = selectedMemberIds.value
+    .map((id) => props.characters.find((c) => c.id === id))
+    .filter((c): c is CharacterCard => !!c && characterHasMvuProfileData(c))
+    .map((c) => ({ label: `沿用「${c.name}」的 MVU`, value: `inherit:${c.id}` }))
+  const fork = selectedMemberIds.value.map((id) => {
+    const c = props.characters.find((x) => x.id === id)
+    return { label: `以「${c?.name || id}」为模板的 MVU`, value: `fork:${id}` }
+  })
+  return [...head, ...inherit, ...fork]
+})
+
+/** 选定来源后：把对应角色卡的 MVU 配置预填到草稿，便于用户在弹窗里直接调整 */
+function syncDraftFromSourceKey(key: string) {
+  if (!key) {
+    mvuModeDraft.value = null
+    mvuDirectiveDraft.value = ''
+    contentRegexRulesDraft.value = []
+    initialStateTablesDraft.value = []
+    return
+  }
+  const idx = key.indexOf(':')
+  if (idx < 0) return
+  const pid = key.slice(idx + 1)
+  const card = props.characters.find((c) => c.id === pid)
+  if (!card) return
+  mvuModeDraft.value = (card.mvuMode === 'directive' ? 'directive' : 'regex')
+  mvuDirectiveDraft.value = typeof card.mvuDirective === 'string' ? card.mvuDirective : ''
+  contentRegexRulesDraft.value = (card.contentRegexRules || []).map((r) => ({ ...r }))
+  initialStateTablesDraft.value = (card.initialStateTables || []).map((t) => ({
+    name: t.name,
+    columns: [...t.columns],
+    rows: t.rows.map((r) => ({ field: r.field, cells: { ...r.cells } })),
+  }))
+}
+
+watch(groupMvuEnabled, (on) => {
+  if (!on) {
+    groupMvuSourceKey.value = ''
+    syncDraftFromSourceKey('')
+    return
+  }
+  if (groupMvuSourceKey.value) return
+  const pick = groupMvuSourceOptions.value.find((o) => o.value && o.value.startsWith('inherit:'))
+  if (pick) {
+    groupMvuSourceKey.value = pick.value
+    syncDraftFromSourceKey(pick.value)
+    return
+  }
+  const forkPick = groupMvuSourceOptions.value.find((o) => o.value && o.value.startsWith('fork:'))
+  if (forkPick) {
+    groupMvuSourceKey.value = forkPick.value
+    syncDraftFromSourceKey(forkPick.value)
+  }
+})
+
+watch(groupMvuSourceKey, (k) => {
+  if (!groupMvuEnabled.value) return
+  syncDraftFromSourceKey(k)
+})
+
+watch(
+  () => [...selectedMemberIds.value],
+  () => {
+    const k = groupMvuSourceKey.value
+    if (!k) return
+    const idx = k.indexOf(':')
+    if (idx < 0) return
+    const id = k.slice(idx + 1)
+    if (!selectedMemberIds.value.includes(id)) {
+      groupMvuSourceKey.value = ''
+      syncDraftFromSourceKey('')
+    }
+  },
+)
 
 /**
  * 切换成员选择
@@ -156,7 +263,29 @@ function toggleMemberSelection(characterId: string) {
  */
 function handleCreate() {
   if (selectedMemberIds.value.length < 2) return
-  
+  let groupMvuPreset: GroupMvuPreset = 'off'
+  let groupMvuPresetCharacterId: string | null = null
+  if (groupMvuEnabled.value) {
+    const key = groupMvuSourceKey.value
+    const idx = key.indexOf(':')
+    if (idx < 0) return
+    const kind = key.slice(0, idx)
+    const pid = key.slice(idx + 1)
+    if (!pid || !selectedMemberIds.value.includes(pid)) return
+    if (kind === 'inherit') {
+      const card = props.characters.find((c) => c.id === pid)
+      if (!card || !characterHasMvuProfileData(card)) return
+      groupMvuPreset = 'inherit_member'
+      groupMvuPresetCharacterId = pid
+    } else if (kind === 'fork') {
+      groupMvuPreset = 'fork_session'
+      groupMvuPresetCharacterId = pid
+    } else {
+      return
+    }
+  }
+
+  const trimmedDirective = (mvuDirectiveDraft.value || '').trim()
   emit('create', {
     title: groupTitle.value || '新群聊',
     memberIds: selectedMemberIds.value,
@@ -165,6 +294,14 @@ function handleCreate() {
     memberInclusions: groupMemberInclusions.value,
     groupSystemInjectDepth: Math.max(0, Number(groupSystemInjectDepth.value) || 0),
     groupSystemAlwaysAtBottom: groupSystemAlwaysAtBottom.value,
+    groupMvuPreset,
+    groupMvuPresetCharacterId,
+    mvuMode: groupMvuEnabled.value ? mvuModeDraft.value : null,
+    mvuDirective: groupMvuEnabled.value && trimmedDirective ? trimmedDirective : null,
+    contentRegexRules: groupMvuEnabled.value
+      ? contentRegexRulesDraft.value.map((r, i) => ({ ...r, order: i }))
+      : [],
+    initialStateTables: groupMvuEnabled.value ? initialStateTablesDraft.value : [],
   })
   emit('update:show', false)
 }
@@ -257,6 +394,56 @@ function handleCreate() {
               </div>
               <div class="text-xs text-gray-500 mt-2">创建后会在聊天窗口内直接插入该角色的首句（会写入聊天记录）。</div>
             </div>
+
+            <div v-if="!isMigrateMode" class="bg-white/5 border border-white/10 rounded-xl p-3 space-y-3">
+              <div class="text-sm text-gray-300 font-medium">群聊 MVU</div>
+              <div class="flex items-center justify-between gap-3">
+                <div class="min-w-0 flex-1 text-sm text-gray-400">启用群聊 MVU（状态栏 / 指令 / 正则队列）</div>
+                <button
+                  type="button"
+                  class="flex shrink-0 items-center gap-2"
+                  @click="groupMvuEnabled = !groupMvuEnabled"
+                >
+                  <div
+                    class="w-10 h-5 rounded-full relative transition-colors duration-200"
+                    :class="groupMvuEnabled ? 'bg-brand' : 'bg-gray-700'"
+                  >
+                    <div
+                      class="absolute top-1 w-3 h-3 rounded-full bg-white transition-transform duration-200"
+                      :class="groupMvuEnabled ? 'left-6' : 'left-1'"
+                    />
+                  </div>
+                  <span class="min-w-[2.5rem] text-center text-xs text-gray-400">{{ groupMvuEnabled ? '开启' : '关闭' }}</span>
+                </button>
+              </div>
+              <div v-if="groupMvuEnabled" class="space-y-3 pt-2 border-t border-white/5">
+                <div class="space-y-1.5">
+                  <label class="block text-xs text-gray-500">MVU 来源</label>
+                  <ModernSelect
+                    :model-value="groupMvuSourceKey"
+                    @update:model-value="(v) => (groupMvuSourceKey = v)"
+                    :options="groupMvuSourceOptions"
+                    :disabled="selectedMemberIds.length < 2"
+                    placeholder="（请选择）"
+                    class="w-full"
+                  />
+                  <p v-if="selectedMemberIds.length < 2" class="text-xs text-gray-500">请先选择至少两名群成员后再选择 MVU 来源。</p>
+                </div>
+                <MvuCapabilityEditor
+                  v-if="groupMvuSourceKey"
+                  :mvu-mode="mvuModeDraft"
+                  :mvu-directive="mvuDirectiveDraft"
+                  :content-regex-rules="contentRegexRulesDraft"
+                  :initial-state-tables="initialStateTablesDraft"
+                  :allow-inherit="true"
+                  tables-empty-hint="暂无状态表格。点击「新建表格」开始配置。"
+                  @update:mvu-mode="(v) => (mvuModeDraft = v)"
+                  @update:mvu-directive="(v) => (mvuDirectiveDraft = v)"
+                  @update:content-regex-rules="(v) => (contentRegexRulesDraft = v)"
+                  @update:initial-state-tables="(v) => (initialStateTablesDraft = v)"
+                />
+              </div>
+            </div>
             
             <div>
               <div class="text-sm text-gray-400 mb-3">
@@ -320,7 +507,11 @@ function handleCreate() {
             <span v-if="selectedMemberIds.length < 2" class="text-yellow-500">(至少需要2个)</span>
           </div>
           <button class="btn btn-secondary bg-white/5 hover:bg-white/10 text-gray-300 border border-white/5" @click="emit('update:show', false)">取消</button>
-          <button class="btn btn-primary" :disabled="selectedMemberIds.length < 2" @click="handleCreate">
+          <button
+            class="btn btn-primary"
+            :disabled="selectedMemberIds.length < 2 || (groupMvuEnabled && !groupMvuSourceKey)"
+            @click="handleCreate"
+          >
             创建群聊
           </button>
         </div>
