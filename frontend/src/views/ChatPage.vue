@@ -63,7 +63,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useCharacterSidebarRecencyStore, useCharactersStore, useChatsStore, useSettingsStore, useUiStore, useMvuStore } from '../stores'
 import type { SettingsDrawerTab } from '../stores/ui'
-import type { ApiPreset, AssistantAttachment, CharacterCard, ChatContentRegexRule, ChatImageAttachment, ChatMessage, ExtraFirstMessageEntry, GroupMemberSettings, Chat, MainChatRole, MvuMode, TtsSessionConfig, WorldBook } from '../types/models'
+import type { ApiPreset, AssistantAttachment, CharacterCard, ChatContentRegexRule, ChatImageAttachment, ChatMessage, ChatOverrides, ChatMvuMode, ExtraFirstMessageEntry, GroupMemberSettings, Chat, MainChatRole, MvuMode, TtsSessionConfig, WorldBook, GroupMvuPreset } from '../types/models'
 
 // Composables
 import { 
@@ -81,7 +81,7 @@ import { useWebGpuBackgroundRuntime } from '../composables/useWebGpuBackgroundRu
 import { useViewportNarrowPortrait } from '../composables/useViewportNarrowPortrait'
 
 // 子组件
-import { ChatSidebar, MessageList, ChatInput, AssistantPanel, AssistantThread, InitialStateEditor, MvuPanel } from '../components/chat'
+import { ChatSidebar, MessageList, ChatInput, AssistantPanel, AssistantThread, MvuCapabilityEditor, MvuPanel } from '../components/chat'
 import StateVariablesBar from '../components/chat/StateVariablesBar.vue'
 import {
   GroupCreatorModal,
@@ -117,6 +117,7 @@ import { validateFilesForTarget } from '../utils/attachmentPolicy'
 import { resolveRichPaste } from '../utils/richPaste'
 import { formatApiError } from '../utils/worldBookValidation'
 import { resolveBumpCharacterId } from '../utils/characterSidebarBump'
+import { isChatMvuRuntimeEnabled } from '../utils/groupMvu'
 import {
   HEADER_EXPAND_MS,
   HEADER_LIFT_EASE,
@@ -2075,38 +2076,6 @@ function ensureCharacterAttachedWbIds() {
   if (!Array.isArray(c.attachedWorldBookIds)) c.attachedWorldBookIds = []
 }
 
-function ensureCharacterRegexRules() {
-  const c = actions.editingCharacter.value
-  if (!c) return
-  if (!Array.isArray(c.contentRegexRules)) c.contentRegexRules = []
-}
-
-function addCharacterRegexRule() {
-  const c = actions.editingCharacter.value
-  if (!c) return
-  ensureCharacterRegexRules()
-  c.contentRegexRules!.push({
-    id: crypto.randomUUID(),
-    name: '',
-    enabled: true,
-    order: c.contentRegexRules!.length,
-    pattern: '',
-    action: 'remove',
-    replacement: '',
-    matchMode: 'global',
-    extractSource: 'whole_match',
-    extractGroupIndex: null,
-    scanDepthOverride: null,
-  })
-}
-
-function removeCharacterRegexRule(index: number) {
-  const c = actions.editingCharacter.value
-  if (!c?.contentRegexRules) return
-  c.contentRegexRules.splice(index, 1)
-  c.contentRegexRules = c.contentRegexRules.map((rule, i) => ({ ...rule, order: i }))
-}
-
 function characterEditorWorldBookName(id: string) {
   return characterEditorWorldbooks.value.find((b) => b.id === id)?.name || id
 }
@@ -2188,9 +2157,39 @@ async function handleGroupSettingsApply(payload: {
   groupDelay: number
   groupSystemInjectDepth: number
   groupSystemAlwaysAtBottom: boolean
+  groupMvuEnabled: boolean
+  groupMvuAnchorCharacterId: string | null
+  groupMvuTemplateCharacterId: string | null
+  mvuMode: ChatMvuMode
+  mvuDirective: string | null
+  contentRegexRules: ChatContentRegexRule[]
+  stateTables: import('../types/models').StatusTableDef[]
 }) {
   if (!activeChat.value) return
-  await chats.updateGroupSettings(activeChat.value.id, payload)
+  // 不能直接对 Pinia 响应式 Proxy 用 structuredClone（会抛 DataCloneError），
+  // 使用 JSON 深拷贝即可——overrides 本身已是纯 JSON 数据。
+  const base = JSON.parse(JSON.stringify(activeChat.value.overrides)) as ChatOverrides
+  base.groupMvuEnabled = payload.groupMvuEnabled
+  base.groupMvuAnchorCharacterId = payload.groupMvuAnchorCharacterId
+  base.groupMvuTemplateCharacterId = payload.groupMvuTemplateCharacterId
+  base.mvuMode = payload.mvuMode
+  base.mvuDirective = payload.mvuDirective
+  base.contentRegexRules = payload.contentRegexRules.map((r, i) => ({ ...r, order: i }))
+  const currentState = activeChat.value.stateVariables
+  const stateVariables = {
+    version: currentState?.version ?? 1,
+    updatedAt: new Date().toISOString(),
+    source: (currentState?.source ?? 'chat_assistant') as 'mvu_agent' | 'chat_assistant',
+    tables: payload.stateTables,
+  }
+  await chats.updateGroupSettings(activeChat.value.id, {
+    memberIds: payload.memberIds,
+    groupDelay: payload.groupDelay,
+    groupSystemInjectDepth: payload.groupSystemInjectDepth,
+    groupSystemAlwaysAtBottom: payload.groupSystemAlwaysAtBottom,
+    overrides: base,
+    stateVariables,
+  })
   showGroupSettings.value = false
 }
 
@@ -2660,17 +2659,28 @@ watch(assistant.isAssistantPanelOpen, (next) => {
   if (next) void assistant.loadState('chat')
 })
 
-// MVU SSE 生命周期：切换聊天时重连
-watch(() => activeChat.value?.id, (nextId, prevId) => {
-  if (prevId && prevId !== nextId) {
-    flushPendingGreetingVersion()
-    mvuStore.disconnect()
-  }
-  if (nextId) {
-    const char = characters.list.find(c => c.id === activeChat.value?.characterId)
-    if (char?.mvuEnabled) mvuStore.connect(nextId)
-  }
-}, { immediate: true })
+// MVU SSE 生命周期：切换聊天或群聊 MVU 开关时重连
+watch(
+  () => {
+    const ac = activeChat.value
+    if (!ac) return { id: null as string | null, on: false }
+    return {
+      id: ac.id,
+      on: isChatMvuRuntimeEnabled(ac, (id) => characters.list.find((c) => c.id === id)),
+    }
+  },
+  (next, prev) => {
+    if (prev?.id && (prev.id !== next.id || (prev.on && !next.on))) {
+      flushPendingGreetingVersion()
+      mvuStore.disconnect()
+    }
+    const shouldConnect =
+      Boolean(next.id && next.on) &&
+      (prev?.id !== next.id || (!prev?.on && next.on))
+    if (shouldConnect && next.id) mvuStore.connect(next.id)
+  },
+  { immediate: true },
+)
 
 function scrollWorkspaceAssistantListToBottom() {
   const run = () => {
@@ -4555,6 +4565,12 @@ async function handleCreateGroup(data: {
   memberInclusions: Record<string, { includePersonality: boolean; includeScenario: boolean }>
   groupSystemInjectDepth: number
   groupSystemAlwaysAtBottom: boolean
+  groupMvuPreset: GroupMvuPreset
+  groupMvuPresetCharacterId: string | null
+  mvuMode: ChatMvuMode
+  mvuDirective: string | null
+  contentRegexRules: ChatContentRegexRule[]
+  initialStateTables: import('../types/models').StatusTableDef[]
 }) {
   const firstMember = data.memberIds[0]
   if (!firstMember) return
@@ -4599,6 +4615,14 @@ async function handleCreateGroup(data: {
     personaId ?? null,
     data.groupSystemInjectDepth,
     data.groupSystemAlwaysAtBottom,
+    data.groupMvuPreset,
+    data.groupMvuPresetCharacterId,
+    {
+      mvuMode: data.mvuMode,
+      mvuDirective: data.mvuDirective,
+      contentRegexRules: data.contentRegexRules,
+      initialStateTables: data.initialStateTables,
+    },
   )
 }
 
@@ -5727,101 +5751,18 @@ const editingPersonaAvatarUrl = computed(() => {
                   />
                   <span>启用 MVU 管线</span>
                 </label>
-                <div class="grid grid-cols-1 md:grid-cols-[minmax(0,220px)_1fr] gap-3">
-                  <div class="space-y-1.5">
-                    <label class="block text-xs font-medium text-[var(--color-text-secondary)]">MVU 模式</label>
-                    <ModernSelect
-                      v-model="actions.editingCharacter.value.mvuMode"
-                      :options="[
-                        { label: '正则模式', value: 'regex' },
-                        { label: '指令模式', value: 'directive' },
-                      ]"
-                      placeholder="选择 MVU 模式..."
-                      dropdown-width="auto"
-                    />
-                  </div>
-                  <div class="text-xs text-[var(--color-text-muted)] self-end pb-2">
-                    正则模式使用正文正则提取状态变更；指令模式保存给后续 MVU 流程读取的自然语言规则。
-                  </div>
-                </div>
-                <div v-if="actions.editingCharacter.value.mvuMode === 'directive'" class="space-y-1.5">
-                  <label class="block text-xs font-medium text-[var(--color-text-secondary)]">MVU 指令</label>
-                  <textarea
-                    v-model="actions.editingCharacter.value.mvuDirective"
-                    class="input textarea h-32"
-                    placeholder="描述如何从回复中识别状态变化、如何更新状态栏。"
-                  ></textarea>
-                </div>
-                <template v-else>
-                  <div class="flex items-center justify-between">
-                    <div class="text-xs text-[var(--color-text-muted)]">角色自带正文正则（新建会话时注入）</div>
-                    <button type="button" class="btn btn-xs btn-secondary" @click="addCharacterRegexRule">新建规则</button>
-                  </div>
-                  <div class="space-y-2">
-                    <div
-                      v-for="(rule, idx) in (actions.editingCharacter.value.contentRegexRules || [])"
-                      :key="rule.id || idx"
-                      class="rounded-lg border border-[var(--color-border-subtle)] bg-surface-muted p-2 space-y-2"
-                    >
-                      <div class="flex items-center gap-2">
-                        <input v-model="rule.name" class="input flex-1" placeholder="规则名称（可选）" />
-                        <label class="inline-flex items-center gap-1 text-xs cursor-pointer select-none">
-                          <ThemedCheckbox
-                            :checked="rule.enabled"
-                            @update:checked="(v) => (rule.enabled = v)"
-                          />
-                          <span>启用</span>
-                        </label>
-                        <button type="button" class="btn btn-xs btn-secondary" @click="removeCharacterRegexRule(idx)">删除</button>
-                      </div>
-                      <textarea v-model="rule.pattern" class="input textarea h-20" placeholder="pattern"></textarea>
-                      <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
-                        <ModernSelect
-                          v-model="rule.action"
-                          :options="[
-                            { label: '删除', value: 'remove' },
-                            { label: '替换', value: 'replace' },
-                            { label: '提取', value: 'extract' },
-                            { label: '提取并替换显示', value: 'extract_and_replace' },
-                          ]"
-                          placeholder="选择处理动作..."
-                          dropdown-width="auto"
-                        />
-                        <ModernSelect
-                          v-model="rule.matchMode"
-                          :options="[
-                            { label: '全局命中', value: 'global' },
-                            { label: '首个命中', value: 'first' },
-                          ]"
-                          placeholder="选择匹配模式..."
-                          dropdown-width="auto"
-                        />
-                        <input v-model.number="rule.scanDepthOverride" type="number" min="1" class="input" placeholder="覆盖深度(可选)" />
-                      </div>
-                      <textarea v-if="rule.action === 'replace' || rule.action === 'extract_and_replace'" v-model="rule.replacement" class="input textarea h-16" placeholder="replacement"></textarea>
-                      <div v-if="rule.action === 'extract' || rule.action === 'extract_and_replace'" class="grid grid-cols-1 md:grid-cols-2 gap-2">
-                        <ModernSelect
-                          v-model="rule.extractSource"
-                          :options="[
-                            { label: '整段匹配', value: 'whole_match' },
-                            { label: '捕获分组', value: 'capture_group' },
-                          ]"
-                          placeholder="选择提取来源..."
-                          dropdown-width="auto"
-                        />
-                        <input v-if="rule.extractSource === 'capture_group'" v-model.number="rule.extractGroupIndex" type="number" min="0" class="input" placeholder="提取分组下标" />
-                      </div>
-                    </div>
-                    <div v-if="!(actions.editingCharacter.value.contentRegexRules || []).length" class="text-xs text-[var(--color-text-muted)] border border-dashed border-[var(--color-border-subtle)] rounded-lg px-3 py-2">
-                      暂无规则。
-                    </div>
-                  </div>
-                </template>
-
-                <InitialStateEditor
-                  v-if="actions.editingCharacter.value"
-                  :tables="actions.editingCharacter.value.initialStateTables || []"
-                  @update:tables="(v) => { if (actions.editingCharacter.value) actions.editingCharacter.value.initialStateTables = v }"
+                <MvuCapabilityEditor
+                  :mvu-mode="actions.editingCharacter.value.mvuMode ?? 'regex'"
+                  :mvu-directive="actions.editingCharacter.value.mvuDirective ?? ''"
+                  :content-regex-rules="actions.editingCharacter.value.contentRegexRules || []"
+                  :initial-state-tables="actions.editingCharacter.value.initialStateTables || []"
+                  :allow-inherit="false"
+                  tables-subtitle="新会话自动写入"
+                  tables-empty-hint="暂无状态表格。新建表格后，新会话将自带初始状态栏。"
+                  @update:mvu-mode="(v) => { if (actions.editingCharacter.value) actions.editingCharacter.value.mvuMode = (v ?? 'regex') as MvuMode }"
+                  @update:mvu-directive="(v) => { if (actions.editingCharacter.value) actions.editingCharacter.value.mvuDirective = v }"
+                  @update:content-regex-rules="(v) => { if (actions.editingCharacter.value) actions.editingCharacter.value.contentRegexRules = v }"
+                  @update:initial-state-tables="(v) => { if (actions.editingCharacter.value) actions.editingCharacter.value.initialStateTables = v }"
                 />
               </div>
 
@@ -6203,9 +6144,11 @@ const editingPersonaAvatarUrl = computed(() => {
   <!-- 助手设置弹窗 -->
   <div v-if="assistant.showAssistantSettings.value" class="modal">
     <div class="modal-backdrop" @click="assistant.showAssistantSettings.value = false"></div>
-    <div class="modal-content chat-modal-width-520-92">
+    <div
+      class="modal-content chat-modal-width-520-92 glass-panel bg-gradient-to-br from-slate-900/30 to-slate-800/25 backdrop-blur-2xl backdrop-saturate-[1.8] border border-white/10"
+    >
       <div class="modal-header">
-        <h3 class="modal-title">聊天助手设置</h3>
+        <h3 class="modal-title text-slate-50">聊天助手设置</h3>
         <button class="modal-close" @click="assistant.showAssistantSettings.value = false">
             <X class="w-5 h-5" />
         </button>
