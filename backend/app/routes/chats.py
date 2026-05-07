@@ -48,6 +48,10 @@ from pydantic import BaseModel, Field
 from app.attachment_policy import ASSISTANT_IMAGE_ATTACHMENT_MAX_BYTES, is_image_mime_type
 from app.content_regex_scanner import ensure_content_regex_scanner_started
 from app.placeholders import replace_placeholders_in_text
+from app.group_mvu import (
+    apply_character_mvu_snapshot_to_group_chat,
+    character_has_mvu_profile_data,
+)
 from app.schemas import (
     AppendMessageRequest,
     Chat,
@@ -249,6 +253,63 @@ def _merge_group_regex_rules_via_mvu(member_rules: list[tuple[str, list[ChatCont
     return merged
 
 
+def _rebuild_group_content_regex_from_members(chat: Chat) -> None:
+    """按成员合并会话级正文正则（与新建群聊一致）。"""
+    member_rules: list[tuple[str, list[ChatContentRegexRule]]] = []
+    any_mvu_enabled = False
+    for mid in chat.memberIds:
+        try:
+            card = load_character(mid)
+            rules = _copy_content_regex_rules(getattr(card, "contentRegexRules", None) or [])
+            member_rules.append((mid, rules))
+            if bool(getattr(card, "mvuEnabled", False)):
+                any_mvu_enabled = True
+        except FileNotFoundError:
+            continue
+    if any_mvu_enabled:
+        chat.overrides.contentRegexRules = _merge_group_regex_rules_via_mvu(member_rules)
+    else:
+        flat: list[ChatContentRegexRule] = []
+        for _, rules in member_rules:
+            flat.extend(rules)
+        chat.overrides.contentRegexRules = _merge_group_regex_rules_via_mvu([("fallback", flat)])
+
+
+def _apply_group_mvu_create_preset(chat: Chat, req: CreateChatRequest) -> None:
+    """群聊创建：根据请求应用 MVU 预设（不修改已合并的 contentRegexRules）。"""
+    preset = req.groupMvuPreset or "off"
+    if preset == "off":
+        chat.overrides.groupMvuEnabled = False
+        return
+    pid = (req.groupMvuPresetCharacterId or "").strip()
+    if not pid or pid not in chat.memberIds:
+        raise HTTPException(status_code=400, detail="groupMvuPresetCharacterId must be a group member")
+    try:
+        card = load_character(pid)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="groupMvuPresetCharacterId character not found") from None
+    if preset == "inherit_member" and not character_has_mvu_profile_data(card):
+        raise HTTPException(
+            status_code=400,
+            detail="所选成员不具备可用的 MVU 配置数据（初始状态栏、MVU 指令或提取类正文正则）",
+        )
+    apply_character_mvu_snapshot_to_group_chat(chat, card)
+    chat.overrides.groupMvuEnabled = True
+    chat.overrides.groupMvuAnchorCharacterId = pid
+    chat.overrides.groupMvuTemplateCharacterId = pid
+
+
+def _validate_group_mvu_overrides(chat: Chat) -> None:
+    if not chat.isGroup:
+        return
+    aid = getattr(chat.overrides, "groupMvuAnchorCharacterId", None)
+    if aid and aid not in chat.memberIds:
+        raise HTTPException(status_code=400, detail="groupMvuAnchorCharacterId must be in memberIds")
+    tid = getattr(chat.overrides, "groupMvuTemplateCharacterId", None)
+    if tid and tid not in chat.memberIds:
+        raise HTTPException(status_code=400, detail="groupMvuTemplateCharacterId must be in memberIds")
+
+
 def _merge_overrides(existing: Chat, incoming: UpdateChatRequest) -> None:
     """
     合并聊天覆盖设置
@@ -319,6 +380,12 @@ def _merge_overrides(existing: Chat, incoming: UpdateChatRequest) -> None:
         existing.overrides.mvuMode = ov.mvuMode
     if "mvuDirective" in ov.model_fields_set:
         existing.overrides.mvuDirective = ov.mvuDirective
+    if "groupMvuEnabled" in ov.model_fields_set:
+        existing.overrides.groupMvuEnabled = ov.groupMvuEnabled
+    if "groupMvuAnchorCharacterId" in ov.model_fields_set:
+        existing.overrides.groupMvuAnchorCharacterId = ov.groupMvuAnchorCharacterId
+    if "groupMvuTemplateCharacterId" in ov.model_fields_set:
+        existing.overrides.groupMvuTemplateCharacterId = ov.groupMvuTemplateCharacterId
 
     for key in ("model", "temperature", "top_p", "max_tokens", "context_size"):
         val = getattr(ov.params, key, None)
@@ -489,25 +556,7 @@ def create_chat(req: CreateChatRequest) -> Chat:
         except FileNotFoundError:
             pass
     else:
-        member_rules: list[tuple[str, list[ChatContentRegexRule]]] = []
-        any_mvu_enabled = False
-        # L1 阶段群聊只归并正文正则，不继承/合并角色指令模式。
-        for mid in chat.memberIds:
-            try:
-                card = load_character(mid)
-                rules = _copy_content_regex_rules(getattr(card, "contentRegexRules", None) or [])
-                member_rules.append((mid, rules))
-                if bool(getattr(card, "mvuEnabled", False)):
-                    any_mvu_enabled = True
-            except FileNotFoundError:
-                continue
-        if any_mvu_enabled:
-            chat.overrides.contentRegexRules = _merge_group_regex_rules_via_mvu(member_rules)
-        else:
-            flat: list[ChatContentRegexRule] = []
-            for _, rules in member_rules:
-                flat.extend(rules)
-            chat.overrides.contentRegexRules = _merge_group_regex_rules_via_mvu([("fallback", flat)])
+        _rebuild_group_content_regex_from_members(chat)
         if req.firstMessageCharacterId:
             if req.firstMessageCharacterId not in chat.memberIds:
                 raise HTTPException(status_code=400, detail="firstMessageCharacterId is not a member of this group")
@@ -527,7 +576,23 @@ def create_chat(req: CreateChatRequest) -> Chat:
                     ))
             except FileNotFoundError:
                 raise HTTPException(status_code=404, detail="firstMessageCharacter not found")
-    
+        _apply_group_mvu_create_preset(chat, req)
+        # 群聊创建：手工 MVU 草稿覆盖预设来源（在 _apply_group_mvu_create_preset 之后执行，
+        # 用户在弹窗里直接编辑的模式 / 指令 / 正则 / 状态栏优先生效）
+        if "mvuMode" in req.model_fields_set and req.mvuMode is not None:
+            chat.overrides.mvuMode = req.mvuMode
+        if "mvuDirective" in req.model_fields_set:
+            chat.overrides.mvuDirective = req.mvuDirective or None
+        if "contentRegexRules" in req.model_fields_set and req.contentRegexRules is not None:
+            chat.overrides.contentRegexRules = _copy_content_regex_rules(req.contentRegexRules)
+        if "initialStateTables" in req.model_fields_set and req.initialStateTables is not None:
+            chat.stateVariables = StateVariables(
+                version=1,
+                updatedAt=_now_iso(),
+                source="chat_assistant",
+                tables=list(req.initialStateTables),
+            )
+
     return save_chat(chat)
 
 
@@ -607,6 +672,13 @@ def promote_to_group(source_chat_id: str, req: PromoteToGroupRequest) -> Chat:
 
     new_chat.messages = migrated
 
+    _rebuild_group_content_regex_from_members(new_chat)
+    new_chat.overrides.groupMvuEnabled = True
+    new_chat.overrides.groupMvuAnchorCharacterId = source.characterId
+    new_chat.overrides.groupMvuTemplateCharacterId = source.characterId
+    if source.stateVariables is not None:
+        new_chat.stateVariables = source.stateVariables.model_copy(deep=True)
+
     try:
         save_chat(new_chat)
         copy_chat_images_for_promote(
@@ -673,6 +745,8 @@ def branch_chat(source_chat_id: str) -> Chat:
         new_chat.groupSystemAlwaysAtBottom = source.groupSystemAlwaysAtBottom
         for mid, s in source.memberSettings.items():
             new_chat.memberSettings[mid] = s.model_copy(deep=True)
+        if source.stateVariables is not None:
+            new_chat.stateVariables = source.stateVariables.model_copy(deep=True)
     else:
         new_chat = Chat(
             characterId=cid,
@@ -681,6 +755,8 @@ def branch_chat(source_chat_id: str) -> Chat:
         )
         new_chat.overrides = source.overrides.model_copy(deep=True)
         new_chat.userPersonaId = source.userPersonaId
+        if source.stateVariables is not None:
+            new_chat.stateVariables = source.stateVariables.model_copy(deep=True)
 
     new_chat.createdAt = _now_iso()
     new_chat.updatedAt = _now_iso()
@@ -811,6 +887,12 @@ def update_chat(chat_id: str, req: UpdateChatRequest) -> Chat:
         and (incoming_memory or "") != (current_memory or "")
     )
     _merge_overrides(chat, req)
+    _validate_group_mvu_overrides(chat)
+    if "stateVariables" in req.model_fields_set:
+        if req.stateVariables is None:
+            chat.stateVariables = None
+        else:
+            chat.stateVariables = req.stateVariables.model_copy(deep=True)
     if memory_actually_changed:
         mark_last_message_memory_updated(chat)
     chat.updatedAt = _now_iso()
