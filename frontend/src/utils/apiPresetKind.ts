@@ -10,5 +10,7 @@ export function resolveTtsProvider(preset?: Pick<ApiPreset, 'ttsProvider'> | nul
   if (preset?.ttsProvider === 'glm_local') return 'glm_local'
   if (preset?.ttsProvider === 'qwen3_local') return 'qwen3_local'
   if (preset?.ttsProvider === 'omnivoice_local') return 'omnivoice_local'
+  if (preset?.ttsProvider === 'openrouter') return 'openrouter'
+  if (preset?.ttsProvider === 'siliconflow') return 'siliconflow'
   return 'minimax'
 }
