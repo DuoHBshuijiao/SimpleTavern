@@ -85,6 +85,7 @@ import type { ComponentPublicInstance } from 'vue'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { usePreferHoverChrome } from '../../composables/usePreferHoverChrome'
 import { useMvuStore, type CapsuleItem } from '../../stores/mvu'
+import { computeFlexWrapExtraHeight } from '../../utils/stateBarWrapExtra'
 
 /** 与 CSS 动画周期一致 */
 const SCAN_PERIOD_MS = 2000
@@ -102,8 +103,9 @@ const props = withDefaults(defineProps<{
   chatId: null,
 })
 
-defineEmits<{
+const emit = defineEmits<{
   'toggle-panel': []
+  'wrap-extra-height-change': [px: number]
 }>()
 
 /** 稳定列表 key：同表重复 field 时用索引区分，避免 Vue 复用节点导致无过渡 */
@@ -145,6 +147,23 @@ function bindPillTrackRef(el: Element | ComponentPublicInstance | null) {
   void nextTick(() => computePillMetrics())
 }
 
+function reportWrapExtraHeight(row: HTMLElement | null) {
+  if (!row) {
+    emit('wrap-extra-height-change', 0)
+    return
+  }
+
+  const items = Array.from(row.children)
+    .filter((el): el is HTMLElement => el instanceof HTMLElement)
+    .map((el) => ({
+      offsetTop: el.offsetTop,
+      offsetHeight: el.offsetHeight,
+      offsetWidth: el.offsetWidth,
+    }))
+
+  emit('wrap-extra-height-change', computeFlexWrapExtraHeight(items))
+}
+
 /** 将 flex-wrap 后同一视觉行的胶囊归桶（offsetTop 容差 2px，兼容子像素） */
 function bucketPillsByVisualLine(pills: HTMLElement[]): HTMLElement[][] {
   const sorted = [...pills].sort((a, b) => a.offsetTop - b.offsetTop || a.offsetLeft - b.offsetLeft)
@@ -173,8 +192,10 @@ function computePillMetrics() {
   const n = props.capsules.length
   if (!row || n === 0) {
     pillMetrics.value = []
+    reportWrapExtraHeight(null)
     return
   }
+  reportWrapExtraHeight(row)
   const pills = Array.from(row.children).filter(
     (el): el is HTMLElement => el instanceof HTMLElement && el.hasAttribute('data-svbar-pill'),
   )
@@ -331,6 +352,7 @@ onBeforeUnmount(() => {
   pillTrackResizeObserver?.disconnect()
   pillTrackResizeObserver = null
   stopScanImmediately()
+  emit('wrap-extra-height-change', 0)
 })
 </script>
 
