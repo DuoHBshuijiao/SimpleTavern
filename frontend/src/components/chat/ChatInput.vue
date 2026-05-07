@@ -309,7 +309,7 @@ const primaryActionLabel = computed(() => {
     return hasDraftMessage.value ? '发送' : '继续轮次'
   }
   if (props.isGroup && !hasDraftMessage.value) {
-    return '开始下一轮'
+    return '下一轮'
   }
   return props.isGenerating && !props.isPaused && !props.showContinueButton ? '生成中...' : '发送'
 })
