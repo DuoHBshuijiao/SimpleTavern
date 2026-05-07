@@ -53,7 +53,9 @@ from app.schemas import (
     GroupGenerateRequest,
     SingleInterjectRequest,
 )
+from app.services.generate_web_search_runtime import iter_web_search_stream_events, nonstream_web_search_rounds
 from app.services.mvu_daemon import ensure_mvu_worker, signal_generate_done, _resolve_mvu_runtime_config
+from app.services.web_search import web_search_is_configured
 from app.services.user_message_content import build_user_message_content
 from app.storage import load_character, load_chat, load_chat_image_bytes, load_settings, save_chat, save_settings
 from app.storage import list_worldbooks
@@ -1047,38 +1049,67 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
         temperature = None
 
     async def event_iter() -> AsyncIterator[str]:
-        full_text: list[str] = []
-        full_reasoning: list[str] = []
-        reasoning_start: float | None = None
-        reasoning_end: float | None = None
         try:
-            async for chunk in stream_chat_completions(
-                base_url=base_url,
-                api_key=api_key,
-                model=model,
-                messages=messages,
-                temperature=temperature,
-                top_p=top_p,
-                max_tokens=max_tokens,
-                extra_body=extra_body,
-            ):
-                if chunk.kind == "reasoning":
-                    now = time.monotonic()
-                    if reasoning_start is None:
-                        reasoning_start = now
-                    reasoning_end = now
-                    full_reasoning.append(chunk.text)
-                    yield _sse("reasoning", {"text": chunk.text})
-                else:
-                    full_text.append(chunk.text)
-                    yield _sse("delta", {"text": chunk.text})
-
-            streamed = "".join(full_text)
-            assistant_content = streamed.strip()
-            reasoning_text = "".join(full_reasoning).strip() or None
+            assistant_content = ""
+            reasoning_text: str | None = None
             duration_sec: float | None = None
-            if reasoning_start is not None and reasoning_end is not None:
-                duration_sec = round(max(0.0, reasoning_end - reasoning_start), 1)
+            ws_on = bool(getattr(req, "webSearchEnabled", False)) and web_search_is_configured(settings)
+            if ws_on:
+                async for ev in iter_web_search_stream_events(
+                    messages=messages,
+                    base_url=base_url,
+                    api_key=api_key,
+                    model=model,
+                    temperature=temperature,
+                    top_p=top_p,
+                    max_tokens=max_tokens,
+                    extra_body=extra_body,
+                    settings=settings,
+                    web_search_enabled=True,
+                ):
+                    et = ev["type"]
+                    if et == "reasoning":
+                        yield _sse("reasoning", {"text": ev["text"]})
+                    elif et == "delta":
+                        yield _sse("delta", {"text": ev["text"]})
+                    elif et == "done":
+                        assistant_content = (ev.get("content_saved") or "").strip()
+                        rt = ev.get("reasoning_full")
+                        reasoning_text = (rt.strip() if isinstance(rt, str) and rt.strip() else None)
+                        ds = ev.get("reasoning_duration_sec")
+                        duration_sec = ds if isinstance(ds, (int, float)) else None
+            else:
+                full_text: list[str] = []
+                full_reasoning: list[str] = []
+                reasoning_start: float | None = None
+                reasoning_end: float | None = None
+                async for chunk in stream_chat_completions(
+                    base_url=base_url,
+                    api_key=api_key,
+                    model=model,
+                    messages=messages,
+                    temperature=temperature,
+                    top_p=top_p,
+                    max_tokens=max_tokens,
+                    extra_body=extra_body,
+                ):
+                    if chunk.kind == "reasoning":
+                        now = time.monotonic()
+                        if reasoning_start is None:
+                            reasoning_start = now
+                        reasoning_end = now
+                        full_reasoning.append(chunk.text)
+                        yield _sse("reasoning", {"text": chunk.text})
+                    else:
+                        full_text.append(chunk.text)
+                        yield _sse("delta", {"text": chunk.text})
+
+                streamed = "".join(full_text)
+                assistant_content = streamed.strip()
+                reasoning_text = "".join(full_reasoning).strip() or None
+                duration_sec = None
+                if reasoning_start is not None and reasoning_end is not None:
+                    duration_sec = round(max(0.0, reasoning_end - reasoning_start), 1)
             assistant_msg = None
             if assistant_content or (getattr(req, "mergeAssistantIntoMessageId", None) and reasoning_text):
                 assistant_msg = _append_or_merge_assistant_output(
@@ -1114,7 +1145,23 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
     if not settings.streamEnabled:
         try:
             req_start = time.monotonic()
-            if thinking_enabled:
+            ws_on = bool(getattr(req, "webSearchEnabled", False)) and web_search_is_configured(settings)
+            if ws_on:
+                assistant_content, reasoning_content, req_duration = await nonstream_web_search_rounds(
+                    messages=messages,
+                    base_url=base_url,
+                    api_key=api_key,
+                    model=model,
+                    temperature=temperature,
+                    top_p=top_p,
+                    max_tokens=max_tokens,
+                    extra_body=extra_body,
+                    settings=settings,
+                    web_search_enabled=True,
+                )
+                if reasoning_content is None:
+                    req_duration = None
+            elif thinking_enabled:
                 resp = await chat_completions_message(
                     base_url=base_url,
                     api_key=api_key,
@@ -1127,6 +1174,7 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
                 )
                 assistant_content = (resp.content or "").strip()
                 reasoning_content = (resp.reasoning_content or None)
+                req_duration = round(max(0.0, time.monotonic() - req_start), 1) if reasoning_content else None
             else:
                 result = await chat_completions(
                     base_url=base_url,
@@ -1140,7 +1188,7 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
                 )
                 assistant_content = result.text.strip()
                 reasoning_content = None
-            req_duration = round(max(0.0, time.monotonic() - req_start), 1) if reasoning_content else None
+                req_duration = None
             assistant_msg = None
             if assistant_content or (getattr(req, "mergeAssistantIntoMessageId", None) and reasoning_content):
                 assistant_msg = _append_or_merge_assistant_output(
@@ -1618,38 +1666,67 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
         temperature = None
 
     async def event_iter():
-        full_text: list[str] = []
-        full_reasoning: list[str] = []
-        reasoning_start: float | None = None
-        reasoning_end: float | None = None
         try:
-            async for chunk in stream_chat_completions(
-                base_url=base_url,
-                api_key=api_key,
-                model=model,
-                messages=messages,
-                temperature=temperature,
-                top_p=top_p,
-                max_tokens=max_tokens,
-                extra_body=extra_body,
-            ):
-                if chunk.kind == "reasoning":
-                    now = time.monotonic()
-                    if reasoning_start is None:
-                        reasoning_start = now
-                    reasoning_end = now
-                    full_reasoning.append(chunk.text)
-                    yield _sse("reasoning", {"text": chunk.text})
-                else:
-                    full_text.append(chunk.text)
-                    yield _sse("delta", {"text": chunk.text})
-
-            streamed = "".join(full_text)
-            assistant_content = streamed.strip()
-            reasoning_text = "".join(full_reasoning).strip() or None
+            assistant_content = ""
+            reasoning_text: str | None = None
             duration_sec: float | None = None
-            if reasoning_start is not None and reasoning_end is not None:
-                duration_sec = round(max(0.0, reasoning_end - reasoning_start), 1)
+            ws_on = bool(getattr(req, "webSearchEnabled", False)) and web_search_is_configured(settings)
+            if ws_on:
+                async for ev in iter_web_search_stream_events(
+                    messages=messages,
+                    base_url=base_url,
+                    api_key=api_key,
+                    model=model,
+                    temperature=temperature,
+                    top_p=top_p,
+                    max_tokens=max_tokens,
+                    extra_body=extra_body,
+                    settings=settings,
+                    web_search_enabled=True,
+                ):
+                    et = ev["type"]
+                    if et == "reasoning":
+                        yield _sse("reasoning", {"text": ev["text"]})
+                    elif et == "delta":
+                        yield _sse("delta", {"text": ev["text"]})
+                    elif et == "done":
+                        assistant_content = (ev.get("content_saved") or "").strip()
+                        rt = ev.get("reasoning_full")
+                        reasoning_text = (rt.strip() if isinstance(rt, str) and rt.strip() else None)
+                        ds = ev.get("reasoning_duration_sec")
+                        duration_sec = ds if isinstance(ds, (int, float)) else None
+            else:
+                full_text: list[str] = []
+                full_reasoning: list[str] = []
+                reasoning_start: float | None = None
+                reasoning_end: float | None = None
+                async for chunk in stream_chat_completions(
+                    base_url=base_url,
+                    api_key=api_key,
+                    model=model,
+                    messages=messages,
+                    temperature=temperature,
+                    top_p=top_p,
+                    max_tokens=max_tokens,
+                    extra_body=extra_body,
+                ):
+                    if chunk.kind == "reasoning":
+                        now = time.monotonic()
+                        if reasoning_start is None:
+                            reasoning_start = now
+                        reasoning_end = now
+                        full_reasoning.append(chunk.text)
+                        yield _sse("reasoning", {"text": chunk.text})
+                    else:
+                        full_text.append(chunk.text)
+                        yield _sse("delta", {"text": chunk.text})
+
+                streamed = "".join(full_text)
+                assistant_content = streamed.strip()
+                reasoning_text = "".join(full_reasoning).strip() or None
+                duration_sec = None
+                if reasoning_start is not None and reasoning_end is not None:
+                    duration_sec = round(max(0.0, reasoning_end - reasoning_start), 1)
             assistant_msg = None
             if assistant_content or (getattr(req, "mergeAssistantIntoMessageId", None) and reasoning_text):
                 assistant_msg = _append_or_merge_assistant_output(
@@ -1682,7 +1759,23 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
     if not settings.streamEnabled:
         try:
             req_start = time.monotonic()
-            if thinking_enabled:
+            ws_on = bool(getattr(req, "webSearchEnabled", False)) and web_search_is_configured(settings)
+            if ws_on:
+                assistant_content, reasoning_content, req_duration = await nonstream_web_search_rounds(
+                    messages=messages,
+                    base_url=base_url,
+                    api_key=api_key,
+                    model=model,
+                    temperature=temperature,
+                    top_p=top_p,
+                    max_tokens=max_tokens,
+                    extra_body=extra_body,
+                    settings=settings,
+                    web_search_enabled=True,
+                )
+                if reasoning_content is None:
+                    req_duration = None
+            elif thinking_enabled:
                 resp = await chat_completions_message(
                     base_url=base_url,
                     api_key=api_key,
@@ -1695,6 +1788,7 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
                 )
                 assistant_content = (resp.content or "").strip()
                 reasoning_content = resp.reasoning_content or None
+                req_duration = round(max(0.0, time.monotonic() - req_start), 1) if reasoning_content else None
             else:
                 result = await chat_completions(
                     base_url=base_url,
@@ -1708,7 +1802,7 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
                 )
                 assistant_content = result.text.strip()
                 reasoning_content = None
-            req_duration = round(max(0.0, time.monotonic() - req_start), 1) if reasoning_content else None
+                req_duration = None
             assistant_msg = None
             if assistant_content or (getattr(req, "mergeAssistantIntoMessageId", None) and reasoning_content):
                 assistant_msg = _append_or_merge_assistant_output(
@@ -2045,38 +2139,67 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
         temperature = None
 
     async def event_iter():
-        full_text: list[str] = []
-        full_reasoning: list[str] = []
-        reasoning_start: float | None = None
-        reasoning_end: float | None = None
         try:
-            async for chunk in stream_chat_completions(
-                base_url=base_url,
-                api_key=api_key,
-                model=model,
-                messages=messages,
-                temperature=temperature,
-                top_p=top_p,
-                max_tokens=max_tokens,
-                extra_body=extra_body,
-            ):
-                if chunk.kind == "reasoning":
-                    now = time.monotonic()
-                    if reasoning_start is None:
-                        reasoning_start = now
-                    reasoning_end = now
-                    full_reasoning.append(chunk.text)
-                    yield _sse("reasoning", {"text": chunk.text})
-                else:
-                    full_text.append(chunk.text)
-                    yield _sse("delta", {"text": chunk.text})
-
-            streamed = "".join(full_text)
-            assistant_content = streamed.strip()
-            reasoning_text = "".join(full_reasoning).strip() or None
+            assistant_content = ""
+            reasoning_text: str | None = None
             duration_sec: float | None = None
-            if reasoning_start is not None and reasoning_end is not None:
-                duration_sec = round(max(0.0, reasoning_end - reasoning_start), 1)
+            ws_on = bool(getattr(req, "webSearchEnabled", False)) and web_search_is_configured(settings)
+            if ws_on:
+                async for ev in iter_web_search_stream_events(
+                    messages=messages,
+                    base_url=base_url,
+                    api_key=api_key,
+                    model=model,
+                    temperature=temperature,
+                    top_p=top_p,
+                    max_tokens=max_tokens,
+                    extra_body=extra_body,
+                    settings=settings,
+                    web_search_enabled=True,
+                ):
+                    et = ev["type"]
+                    if et == "reasoning":
+                        yield _sse("reasoning", {"text": ev["text"]})
+                    elif et == "delta":
+                        yield _sse("delta", {"text": ev["text"]})
+                    elif et == "done":
+                        assistant_content = (ev.get("content_saved") or "").strip()
+                        rt = ev.get("reasoning_full")
+                        reasoning_text = (rt.strip() if isinstance(rt, str) and rt.strip() else None)
+                        ds = ev.get("reasoning_duration_sec")
+                        duration_sec = ds if isinstance(ds, (int, float)) else None
+            else:
+                full_text: list[str] = []
+                full_reasoning: list[str] = []
+                reasoning_start: float | None = None
+                reasoning_end: float | None = None
+                async for chunk in stream_chat_completions(
+                    base_url=base_url,
+                    api_key=api_key,
+                    model=model,
+                    messages=messages,
+                    temperature=temperature,
+                    top_p=top_p,
+                    max_tokens=max_tokens,
+                    extra_body=extra_body,
+                ):
+                    if chunk.kind == "reasoning":
+                        now = time.monotonic()
+                        if reasoning_start is None:
+                            reasoning_start = now
+                        reasoning_end = now
+                        full_reasoning.append(chunk.text)
+                        yield _sse("reasoning", {"text": chunk.text})
+                    else:
+                        full_text.append(chunk.text)
+                        yield _sse("delta", {"text": chunk.text})
+
+                streamed = "".join(full_text)
+                assistant_content = streamed.strip()
+                reasoning_text = "".join(full_reasoning).strip() or None
+                duration_sec = None
+                if reasoning_start is not None and reasoning_end is not None:
+                    duration_sec = round(max(0.0, reasoning_end - reasoning_start), 1)
             if assistant_content:
                 assistant_msg = ChatMessage(
                     role="assistant",
@@ -2109,7 +2232,23 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
     if not settings.streamEnabled:
         try:
             req_start = time.monotonic()
-            if thinking_enabled:
+            ws_on = bool(getattr(req, "webSearchEnabled", False)) and web_search_is_configured(settings)
+            if ws_on:
+                assistant_content, reasoning_content, req_duration = await nonstream_web_search_rounds(
+                    messages=messages,
+                    base_url=base_url,
+                    api_key=api_key,
+                    model=model,
+                    temperature=temperature,
+                    top_p=top_p,
+                    max_tokens=max_tokens,
+                    extra_body=extra_body,
+                    settings=settings,
+                    web_search_enabled=True,
+                )
+                if reasoning_content is None:
+                    req_duration = None
+            elif thinking_enabled:
                 resp = await chat_completions_message(
                     base_url=base_url,
                     api_key=api_key,
@@ -2122,6 +2261,7 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
                 )
                 assistant_content = (resp.content or "").strip()
                 reasoning_content = resp.reasoning_content or None
+                req_duration = round(max(0.0, time.monotonic() - req_start), 1) if reasoning_content else None
             else:
                 result = await chat_completions(
                     base_url=base_url,
@@ -2135,7 +2275,7 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
                 )
                 assistant_content = result.text.strip()
                 reasoning_content = None
-            req_duration = round(max(0.0, time.monotonic() - req_start), 1) if reasoning_content else None
+                req_duration = None
             assistant_msg = None
             if assistant_content:
                 assistant_msg = ChatMessage(
