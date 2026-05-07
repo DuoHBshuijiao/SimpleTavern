@@ -67,8 +67,19 @@ import { validateFilesForTarget } from '../../utils/attachmentPolicy'
 import { resolveRichPaste } from '../../utils/richPaste'
 import ModernAvatar from '../ModernAvatar.vue'
 import ModernSelect from '../ModernSelect.vue'
+import SelectDropdownSurface from '../SelectDropdownSurface.vue'
 import { useMvuStore } from '../../stores/mvu'
-import { ImagePlus, MessageSquare, PenSquare, RefreshCw, Sparkles, X } from 'lucide-vue-next'
+import {
+  Check,
+  Globe,
+  ImagePlus,
+  MessageSquare,
+  MoreHorizontal,
+  PenSquare,
+  RefreshCw,
+  Sparkles,
+  X,
+} from 'lucide-vue-next'
 
 interface ModelOption {
   label: string
@@ -139,6 +150,9 @@ const props = withDefaults(
   currentPresetId?: string | null
   modelOptions: (ModelOption | ModelOptionGroup | string)[]
   
+  /** 主聊天网络搜索开关：为 true 时每次发送均在服务端挂载搜索工具，直至用户关闭 */
+  webSearchEnabled?: boolean
+  
   // 辅助函数
   getMemberSettings: (memberId: string) => GroupMemberSettings
   }>(),
@@ -149,6 +163,7 @@ const props = withDefaults(
     showAgentTopBarControls: false,
     ttsEnabled: false,
     ttsTopBarControlsVisible: false,
+    webSearchEnabled: false,
   }
 )
 
@@ -170,12 +185,18 @@ const emit = defineEmits<{
   'draft-helper-discard': []
   'toggle-mvu-panel': []
   'focus-assistant-panel': []
+  'update:webSearchEnabled': [value: boolean]
 }>()
 
 const mvuStore = useMvuStore()
 const imageInputRef = ref<HTMLInputElement | null>(null)
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const showDraftHelperMenu = ref(false)
+const showComposerOverflowMenu = ref(false)
+/** SelectDropdownSurface 定位锚点（relative 包裹触发按钮） */
+const draftHelperMenuAnchorRef = ref<HTMLElement | null>(null)
+const composerOverflowMenuAnchorRef = ref<HTMLElement | null>(null)
+
 const isDragOverComposer = ref(false)
 /** 碰撞检测用真实视口矩形（与 CSS 过渡中的 topPx 解耦） */
 const assistantFabStackRef = ref<HTMLElement | null>(null)
@@ -216,6 +237,22 @@ function onAssistantFabClick(e: MouseEvent) {
 function onMvueFabClick(e: MouseEvent) {
   if (assistantFabOnClick(e)) return
   emit('toggle-mvu-panel')
+}
+
+function toggleWebSearch() {
+  emit('update:webSearchEnabled', !props.webSearchEnabled)
+}
+
+function openImagePickerFromOverflow() {
+  showComposerOverflowMenu.value = false
+  openImagePicker()
+}
+
+function toggleComposerOverflowMenu() {
+  showComposerOverflowMenu.value = !showComposerOverflowMenu.value
+  if (showComposerOverflowMenu.value) {
+    showDraftHelperMenu.value = false
+  }
 }
 
 function onAgentTopBarClick(e: MouseEvent) {
@@ -444,6 +481,9 @@ function handleInput(e: Event) {
 
 function toggleDraftHelperMenu() {
   showDraftHelperMenu.value = !showDraftHelperMenu.value
+  if (showDraftHelperMenu.value) {
+    showComposerOverflowMenu.value = false
+  }
 }
 
 function triggerDraftHelper(mode: 'write' | 'enhance') {
@@ -537,7 +577,7 @@ defineExpose({ getAssistantFabRect, setAssistantTopPx: setAssistantTopPxFromSepa
 
 <template>
   <div
-    class="chat-input-shell shrink-0 px-4 pb-6 pt-0 w-full max-w-4xl mx-auto z-20 relative overflow-visible"
+    class="chat-input-shell shrink-0 px-4 pb-6 pt-0 w-full max-w-4xl mx-auto z-40 relative overflow-visible"
     :class="{ 'chat-input-shell--sink': sinkMorphed }"
     :style="shellInlineStyle"
   >
@@ -677,7 +717,7 @@ defineExpose({ getAssistantFabRect, setAssistantTopPx: setAssistantTopPxFromSepa
           
           <div class="flex min-w-0 shrink items-center gap-3">
           <div class="flex items-center gap-0 shrink-0">
-          <div class="relative">
+          <div ref="draftHelperMenuAnchorRef" class="relative">
             <button
               class="chat-action-button chat-action-button--secondary shadow-lg transition-all active:scale-95"
               :disabled="isGenerating && !showContinueButton"
@@ -686,18 +726,47 @@ defineExpose({ getAssistantFabRect, setAssistantTopPx: setAssistantTopPxFromSepa
             >
               <PenSquare class="w-4 h-4" />
             </button>
-            <div
-              v-if="showDraftHelperMenu"
-              class="draft-helper-menu absolute right-0 bottom-full mb-2 w-56 rounded-lg border border-[var(--color-border)] bg-surface-overlay p-2 shadow-xl z-30"
+            <SelectDropdownSurface
+              v-model:open="showDraftHelperMenu"
+              :anchor-ref="draftHelperMenuAnchorRef"
+              placement="top"
+              :auto-width="true"
+              :gap-px="8"
+              max-height-class="max-h-[min(320px,calc(100vh-6rem))]"
             >
-              <button class="w-full text-left px-2 py-1.5 text-sm text-[var(--color-text)] rounded hover:bg-surface-muted" @click="triggerDraftHelper('write')">
+              <button
+                type="button"
+                class="w-full text-left px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors text-[var(--color-text-secondary)] hover:bg-surface-muted"
+                role="menuitem"
+                @click="triggerDraftHelper('write')"
+              >
                 帮我写点什么
               </button>
-              <button class="w-full text-left px-2 py-1.5 text-sm text-[var(--color-text)] rounded hover:bg-surface-muted" @click="triggerDraftHelper('enhance')">
+              <button
+                type="button"
+                class="w-full text-left px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors text-[var(--color-text-secondary)] hover:bg-surface-muted"
+                role="menuitem"
+                @click="triggerDraftHelper('enhance')"
+              >
                 润色并扩写我的草稿
               </button>
-            </div>
+            </SelectDropdownSurface>
           </div>
+          <template v-if="!isNarrowPortrait">
+          <button
+            type="button"
+            class="chat-action-button shadow-lg transition-all active:scale-95"
+            :class="
+              webSearchEnabled
+                ? 'bg-brand/25 text-brand ring-2 ring-brand border border-brand/30'
+                : 'chat-action-button--secondary'
+            "
+            :disabled="isGenerating && !showContinueButton"
+            aria-label="网络搜索：开启后每次发送启用，直至关闭；需在全局设置配置 Tavily 或博查"
+            @click="toggleWebSearch"
+          >
+            <Globe class="w-4 h-4" />
+          </button>
           <button
             class="chat-action-button chat-action-button--secondary shadow-lg transition-all active:scale-95"
             :disabled="isGenerating && !showContinueButton"
@@ -706,6 +775,51 @@ defineExpose({ getAssistantFabRect, setAssistantTopPx: setAssistantTopPxFromSepa
           >
             <ImagePlus class="w-4 h-4" />
           </button>
+          </template>
+          <template v-else>
+          <div ref="composerOverflowMenuAnchorRef" class="relative">
+            <button
+              type="button"
+              class="chat-action-button chat-action-button--secondary shadow-lg transition-all active:scale-95"
+              :disabled="isGenerating && !showContinueButton"
+              aria-label="更多输入选项"
+              @click="toggleComposerOverflowMenu"
+            >
+              <MoreHorizontal class="w-4 h-4" />
+            </button>
+            <SelectDropdownSurface
+              v-model:open="showComposerOverflowMenu"
+              :anchor-ref="composerOverflowMenuAnchorRef"
+              placement="top"
+              :auto-width="true"
+              :gap-px="8"
+              max-height-class="max-h-[min(320px,calc(100vh-6rem))]"
+            >
+              <button
+                type="button"
+                class="w-full px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors flex items-center justify-between gap-2"
+                :class="
+                  webSearchEnabled
+                    ? 'bg-brand-a20 text-brand hover:bg-brand-a30'
+                    : 'text-[var(--color-text-secondary)] hover:bg-surface-muted'
+                "
+                role="menuitem"
+                @click="showComposerOverflowMenu = false; toggleWebSearch()"
+              >
+                <span class="min-w-0 truncate text-left">网络搜索</span>
+                <Check v-if="webSearchEnabled" class="w-3 h-3 shrink-0 text-brand" />
+              </button>
+              <button
+                type="button"
+                class="w-full text-left px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors text-[var(--color-text-secondary)] hover:bg-surface-muted"
+                role="menuitem"
+                @click="openImagePickerFromOverflow"
+              >
+                选择图片
+              </button>
+            </SelectDropdownSurface>
+          </div>
+          </template>
           </div>
           <input
             ref="imageInputRef"
@@ -900,11 +1014,6 @@ defineExpose({ getAssistantFabRect, setAssistantTopPx: setAssistantTopPxFromSepa
     animation: none !important;
     clip-path: none !important;
   }
-}
-
-.draft-helper-menu {
-  backdrop-filter: blur(var(--blur-light));
-  -webkit-backdrop-filter: blur(var(--blur-light));
 }
 
 /* 与 TtsPlaybackFab：顶栏替代出现时隐藏可拖动栈（仍占位过渡） */
