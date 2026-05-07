@@ -105,6 +105,8 @@ const props = defineProps<{
   getVersionCount: (m: ChatMessage) => number
   /** 固定顶栏高度（px），用于滚动区上方占位，使滚动条从顶栏下缘起算 */
   headerInsetPx: number
+  /** 底部叠层额外占位（px）；只增加真实可滚动高度，不参与消息虚拟高度计算 */
+  bottomScrollExtraPx?: number
   /** 侧栏是否折叠；用于侧栏宽度动画结束后合并重排补偿，降低抖动 */
   sidebarCollapsed?: boolean
   /** 本次发送的用户消息 id：播放一次性自下而上入场动画（纯 AI 模式为 system 角色） */
@@ -146,6 +148,7 @@ const SCROLL_BOTTOM_SHOW_THRESHOLD = 200
 const SCROLL_BOTTOM_NEAR_THRESHOLD = 24
 const AUTO_FOLLOW_DISTANCE_THRESHOLD = 300
 const SCROLL_TO_BOTTOM_SETTLE_MS = 140
+const SCROLL_BOTTOM_BASE_PADDING_PX = 16
 /** 用户发送消息时的动画滚动时长（与气泡入场关键帧时长对齐，产生「视口下移带入气泡 + 落地上浮」的一体化过渡） */
 const USER_SEND_SCROLL_ANIM_MS = 420
 /** 动画滚动的最大补偿距离；超过则直接瞬移兜底，避免从顶部发送时出现长时间滚动 */
@@ -1070,6 +1073,9 @@ function updateViewport() {
 
 const totalCount = computed(() => props.messages.length)
 const headerOverlayOffset = computed(() => Math.max(0, props.headerInsetPx) + 16)
+const bottomScrollPaddingPx = computed(() => {
+  return SCROLL_BOTTOM_BASE_PADDING_PX + Math.max(0, Math.ceil(props.bottomScrollExtraPx ?? 0))
+})
 const prefixHeights = computed(() => buildPrefixHeights(measuredHeights.value, props.messages))
 const totalHeight = computed(() => prefixHeights.value[totalCount.value] ?? 0)
 const isNearBottom = computed(() => realDistanceFromBottom.value <= SCROLL_BOTTOM_NEAR_THRESHOLD)
@@ -1184,6 +1190,34 @@ watch(
   },
 )
 
+watch(
+  () => props.bottomScrollExtraPx ?? 0,
+  () => {
+    nextTick(() => {
+      const el = scrollRef.value
+      if (!el) return
+      if (userSendScrollActive.value) {
+        syncScrollMetrics(el)
+        return
+      }
+      if (!effectiveCanFollow(el)) {
+        syncScrollMetrics(el)
+        return
+      }
+      alignToBottom(el, true)
+      requestAnimationFrame(() => {
+        const latest = scrollRef.value
+        if (!latest) return
+        if (effectiveCanFollow(latest)) {
+          alignToBottom(latest, true)
+        } else {
+          syncScrollMetrics(latest)
+        }
+      })
+    })
+  },
+)
+
 onBeforeUpdate(() => {
   snapshotRowRects()
 })
@@ -1250,9 +1284,10 @@ onBeforeUnmount(() => {
   <div class="relative flex-1 min-h-0">
     <div
       ref="scrollRef"
-      class="h-full overflow-y-auto px-4 pb-4 scroll-smooth custom-scrollbar"
+      class="h-full overflow-y-auto px-4 scroll-smooth custom-scrollbar"
       :style="{
         paddingTop: `${headerOverlayOffset}px`,
+        paddingBottom: `${bottomScrollPaddingPx}px`,
         transform: 'translateZ(0)',
         contain: 'content',
       }"
