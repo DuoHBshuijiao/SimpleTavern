@@ -59,7 +59,12 @@ from app.services.web_search import web_search_is_configured
 from app.services.user_message_content import build_user_message_content
 from app.storage import load_character, load_chat, load_chat_image_bytes, load_settings, save_chat, save_settings
 from app.storage import list_worldbooks
-from app.tokenizer_service import count_tokens, count_tokens_for_messages, trim_messages_to_context
+from app.tokenizer_service import (
+    count_tokens,
+    count_tokens_for_messages,
+    trim_assistant_openai_messages_to_context,
+    trim_messages_to_context,
+)
 
 
 router = APIRouter(tags=["generate"])
@@ -389,6 +394,110 @@ def _message_to_openai_content(
         image_items=image_items,
         image_fallback_mode=image_fallback_mode,
     )
+
+
+def _reasoning_from_main_chat_msg(m: ChatMessage) -> str | None:
+    if getattr(m, "reasoningContent", None):
+        s = (m.reasoningContent or "").strip()
+        if s:
+            return s
+    extra = getattr(m, "model_extra", None) or {}
+    if isinstance(extra, dict) and extra.get("reasoning_content"):
+        s = str(extra["reasoning_content"]).strip()
+        if s:
+            return s
+    return None
+
+
+def _conversation_has_tool_chain(messages: list[dict]) -> bool:
+    for item in messages:
+        if item.get("role") == "tool":
+            return True
+        if item.get("tool_calls"):
+            return True
+    return False
+
+
+def _trim_main_chat_conversation(conversation: list[dict], budget: int | None) -> list[dict]:
+    if budget is None:
+        return list(conversation)
+    if _conversation_has_tool_chain(conversation):
+        return trim_assistant_openai_messages_to_context(conversation, budget, None)
+    return trim_messages_to_context(conversation, budget, None)
+
+
+def _main_chat_message_to_conversation_entries(
+    *,
+    chat: Any,
+    m: ChatMessage,
+    image_fallback_mode: bool,
+    group_mode: bool,
+    pure_ai_mode: bool,
+    runtime_user_name: str,
+    char_name_for_message: str,
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    mid = m.id
+
+    if m.role == "reasoning":
+        rc = (m.content or "").strip()
+        if rc:
+            out.append({"role": "assistant", "content": "", "reasoning_content": rc, "_message_id": mid})
+        return out
+
+    if m.role == "tool":
+        tid = (getattr(m, "tool_call_id", None) or "").strip()
+        if tid:
+            out.append({"role": "tool", "tool_call_id": tid, "content": m.content or "", "_message_id": mid})
+        return out
+
+    raw_content = _message_to_openai_content(chat, m, image_fallback_mode=image_fallback_mode)
+
+    if m.role == "user":
+        if group_mode:
+            if pure_ai_mode:
+                prefix = f"[{_resolve_user_name_for_message(m, runtime_user_name)}]: "
+                content = f"{prefix}{raw_content}" if isinstance(raw_content, str) else [{"type": "text", "text": prefix}, *raw_content]
+                out.append({"role": "system", "content": content, "_message_id": mid})
+            else:
+                user_name = _resolve_user_name_for_message(m, runtime_user_name)
+                prefix = f"[{user_name}]: "
+                content = f"{prefix}{raw_content}" if isinstance(raw_content, str) else [{"type": "text", "text": prefix}, *raw_content]
+                out.append({"role": "user", "content": content, "_message_id": mid})
+        else:
+            role = "system" if pure_ai_mode and m.role == "user" else m.role
+            out.append({"role": role, "content": raw_content, "_message_id": mid})
+        return out
+
+    if m.role == "system":
+        out.append({"role": "system", "content": raw_content, "_message_id": mid})
+        return out
+
+    if m.role == "assistant":
+        if group_mode:
+            prefix = f"[{char_name_for_message}]: "
+            content: Any = f"{prefix}{raw_content}" if isinstance(raw_content, str) else [{"type": "text", "text": prefix}, *raw_content]
+        else:
+            content = raw_content
+
+        rc = _reasoning_from_main_chat_msg(m)
+        tcalls = getattr(m, "tool_calls", None)
+        d: dict[str, Any] = {"role": "assistant", "_message_id": mid}
+        if tcalls:
+            d["tool_calls"] = tcalls
+            if isinstance(content, str):
+                d["content"] = content or None
+            else:
+                d["content"] = None
+        else:
+            d["content"] = content
+        if rc:
+            d["reasoning_content"] = rc
+        out.append(d)
+        return out
+
+    out.append({"role": m.role, "content": raw_content, "_message_id": mid})
+    return out
 
 
 def _resolve_char_name_for_history_message(
@@ -958,15 +1067,21 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
     conversation: list[dict] = []
     image_fallback_mode = bool(getattr(req, "imageFallbackMode", False))
     omit_ids = _omit_message_ids_from_request(req)
+    prefill_name = (persona_for_prompt.name.strip() if persona_for_prompt and persona_for_prompt.name else "用户")
     for m in chat.messages:
         if m.id in omit_ids:
             continue
-        role = "system" if pure_ai_mode and m.role == "user" else m.role
-        conversation.append({
-            "role": role,
-            "content": _message_to_openai_content(chat, m, image_fallback_mode=image_fallback_mode),
-            "_message_id": m.id,
-        })
+        conversation.extend(
+            _main_chat_message_to_conversation_entries(
+                chat=chat,
+                m=m,
+                image_fallback_mode=image_fallback_mode,
+                group_mode=False,
+                pure_ai_mode=pure_ai_mode,
+                runtime_user_name=prefill_name,
+                char_name_for_message="",
+            )
+        )
 
     conversation = _slice_conversation_with_anchor(
         conversation,
@@ -975,7 +1090,7 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
     )
     system_tokens = count_tokens(system_prompt) or 0
     pretrim_budget = max(int(context_size) - system_tokens, 0) if context_size and context_size >= 1 else None
-    base_conversation = trim_messages_to_context(conversation, pretrim_budget, None) if pretrim_budget is not None else list(conversation)
+    base_conversation = _trim_main_chat_conversation(conversation, pretrim_budget) if pretrim_budget is not None else list(conversation)
 
     worldbook_order = list(getattr(chat.overrides, "worldBookIds", []) or [])
     wb_global_excl = set(getattr(chat.overrides, "worldBookGlobalExclusions", []) or [])
@@ -1008,7 +1123,7 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
         if worldbook_token_known:
             history_budget -= max(worldbook_tokens_total, 0)
         history_budget = max(history_budget, 0)
-        conversation = trim_messages_to_context(base_conversation, history_budget, None)
+        conversation = _trim_main_chat_conversation(base_conversation, history_budget)
     else:
         conversation = list(base_conversation)
 
@@ -1577,25 +1692,17 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
             default_char_name=character.name or "角色",
             character_name_cache=char_name_cache,
         )
-        raw_content = _message_to_openai_content(chat, m, image_fallback_mode=image_fallback_mode)
-        if m.role == "user":
-            if pure_ai_mode:
-                prefix = f"[{_resolve_user_name_for_message(m, runtime_user_name)}]: "
-                content = f"{prefix}{raw_content}" if isinstance(raw_content, str) else [{"type": "text", "text": prefix}, *raw_content]
-                conversation.append({"role": "system", "content": content, "_message_id": m.id})
-            else:
-                user_name = _resolve_user_name_for_message(m, runtime_user_name)
-                prefix = f"[{user_name}]: "
-                content = f"{prefix}{raw_content}" if isinstance(raw_content, str) else [{"type": "text", "text": prefix}, *raw_content]
-                conversation.append({"role": "user", "content": content, "_message_id": m.id})
-        elif m.role == "assistant":
-            prefix = f"[{char_name_for_message}]: "
-            content = f"{prefix}{raw_content}" if isinstance(raw_content, str) else [{"type": "text", "text": prefix}, *raw_content]
-            conversation.append({"role": "assistant", "content": content, "_message_id": m.id})
-        elif m.role == "tool":
-            continue
-        elif m.role == "system":
-            conversation.append({"role": "system", "content": raw_content, "_message_id": m.id})
+        conversation.extend(
+            _main_chat_message_to_conversation_entries(
+                chat=chat,
+                m=m,
+                image_fallback_mode=image_fallback_mode,
+                group_mode=True,
+                pure_ai_mode=pure_ai_mode,
+                runtime_user_name=runtime_user_name,
+                char_name_for_message=char_name_for_message,
+            )
+        )
     conversation = _slice_conversation_with_anchor(
         conversation,
         getattr(chat.overrides, "contextStartMessageId", None),
@@ -1603,7 +1710,7 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
     )
     system_tokens = count_tokens(system_prompt) or 0
     pretrim_budget = max(int(context_size) - system_tokens, 0) if context_size and context_size >= 1 else None
-    base_conversation = trim_messages_to_context(conversation, pretrim_budget, None) if pretrim_budget is not None else list(conversation)
+    base_conversation = _trim_main_chat_conversation(conversation, pretrim_budget) if pretrim_budget is not None else list(conversation)
 
     worldbook_order = list(getattr(chat.overrides, "worldBookIds", []) or [])
     wb_global_excl = set(getattr(chat.overrides, "worldBookGlobalExclusions", []) or [])
@@ -1636,7 +1743,7 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
         if worldbook_token_known:
             history_budget -= max(worldbook_tokens_total, 0)
         history_budget = max(history_budget, 0)
-        conversation = trim_messages_to_context(base_conversation, history_budget, None)
+        conversation = _trim_main_chat_conversation(base_conversation, history_budget)
     else:
         conversation = list(base_conversation)
 
@@ -2050,25 +2157,17 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
             default_char_name=character.name or "角色",
             character_name_cache=char_name_cache,
         )
-        raw_content = _message_to_openai_content(chat, m, image_fallback_mode=image_fallback_mode)
-        if m.role == "user":
-            if pure_ai_mode:
-                prefix = f"[{_resolve_user_name_for_message(m, runtime_user_name)}]: "
-                content = f"{prefix}{raw_content}" if isinstance(raw_content, str) else [{"type": "text", "text": prefix}, *raw_content]
-                conversation.append({"role": "system", "content": content, "_message_id": m.id})
-            else:
-                user_name = _resolve_user_name_for_message(m, runtime_user_name)
-                prefix = f"[{user_name}]: "
-                content = f"{prefix}{raw_content}" if isinstance(raw_content, str) else [{"type": "text", "text": prefix}, *raw_content]
-                conversation.append({"role": "user", "content": content, "_message_id": m.id})
-        elif m.role == "assistant":
-            prefix = f"[{char_name_for_message}]: "
-            content = f"{prefix}{raw_content}" if isinstance(raw_content, str) else [{"type": "text", "text": prefix}, *raw_content]
-            conversation.append({"role": "assistant", "content": content, "_message_id": m.id})
-        elif m.role == "tool":
-            continue
-        elif m.role == "system":
-            conversation.append({"role": "system", "content": raw_content, "_message_id": m.id})
+        conversation.extend(
+            _main_chat_message_to_conversation_entries(
+                chat=chat,
+                m=m,
+                image_fallback_mode=image_fallback_mode,
+                group_mode=True,
+                pure_ai_mode=pure_ai_mode,
+                runtime_user_name=runtime_user_name,
+                char_name_for_message=char_name_for_message,
+            )
+        )
     conversation = _slice_conversation_with_anchor(
         conversation,
         getattr(chat.overrides, "contextStartMessageId", None),
@@ -2076,7 +2175,7 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
     )
     system_tokens = count_tokens(system_prompt) or 0
     pretrim_budget = max(int(context_size) - system_tokens, 0) if context_size and context_size >= 1 else None
-    base_conversation = trim_messages_to_context(conversation, pretrim_budget, None) if pretrim_budget is not None else list(conversation)
+    base_conversation = _trim_main_chat_conversation(conversation, pretrim_budget) if pretrim_budget is not None else list(conversation)
 
     worldbook_order = list(getattr(chat.overrides, "worldBookIds", []) or [])
     wb_global_excl = set(getattr(chat.overrides, "worldBookGlobalExclusions", []) or [])
@@ -2109,7 +2208,7 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
         if worldbook_token_known:
             history_budget -= max(worldbook_tokens_total, 0)
         history_budget = max(history_budget, 0)
-        conversation = trim_messages_to_context(base_conversation, history_budget, None)
+        conversation = _trim_main_chat_conversation(base_conversation, history_budget)
     else:
         conversation = list(base_conversation)
 
