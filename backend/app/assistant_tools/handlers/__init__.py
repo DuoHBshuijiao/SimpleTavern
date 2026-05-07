@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from app.assistant_tools.handlers import chat, content_regex_tools, core, mvu, workspace, worldbook
+from app.assistant_tools.handlers import chat, content_regex_tools, core, mvu, web_search, workspace, worldbook
 
 HANDLERS: dict[str, Callable[..., dict[str, Any]]] = {
     "core_get_time": core.handle_core_get_time,
+    "web_search": web_search.handle_web_search,
     "workspace_read_file": workspace.handle_workspace_read_file,
     "workspace_create_file": workspace.handle_workspace_create_file,
     "workspace_write_file": workspace.handle_workspace_write_file,
