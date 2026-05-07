@@ -123,6 +123,7 @@ class AssistantStreamRequest(BaseModel):
     chatId: str | None = None
     allowWriteMemory: bool | None = None
     allowDestructiveTools: bool | None = None
+    allowWebSearch: bool | None = None
     maxToolTurns: int | None = Field(default=None, ge=1)
     maxToolsPerTurn: int | None = Field(default=None, ge=1)
     scope: str | None = None
@@ -862,11 +863,13 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
     if scope == "workspace":
         allow_write_memory = False
     allow_destructive_tools = bool(req.allowDestructiveTools) if req.allowDestructiveTools is not None else False
+    allow_web_search = bool(req.allowWebSearch) if req.allowWebSearch is not None else False
     tool_ctx = AssistantToolContext(
         chat_id=chat_id,
         scope=scope,
         allow_write_memory=allow_write_memory,
         allow_destructive_tools=allow_destructive_tools,
+        allow_web_search=allow_web_search,
         assistant_settings=assistant_settings,
     )
     extra_body = filter_reasoning_extra_body_for_upstream(model, reasoning_cfg["extra_body"])
