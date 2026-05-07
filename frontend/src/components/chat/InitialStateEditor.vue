@@ -3,7 +3,7 @@
     <div class="flex items-center justify-between">
       <label class="label">
         <span>初始状态栏</span>
-        <span class="opacity-60 text-xs ml-2">新会话自动写入</span>
+        <span v-if="props.subtitle" class="opacity-60 text-xs ml-2">{{ props.subtitle }}</span>
       </label>
       <button type="button" class="btn btn-xs btn-secondary" @click="addTable">新建表格</button>
     </div>
@@ -12,7 +12,7 @@
       v-if="!localTables.length"
       class="text-xs text-[var(--color-text-muted)] border border-dashed border-[var(--color-border-subtle)] rounded-lg px-3 py-2"
     >
-      暂无状态表格。新建表格后，新会话将自带初始状态栏。
+      {{ props.emptyHint }}
     </div>
 
     <div
@@ -92,9 +92,16 @@
 import { reactive, watch } from 'vue'
 import type { StatusTableDef } from '../../types/models'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   tables: StatusTableDef[]
-}>()
+  /** 副标题（默认沿用「新会话自动写入」；传空字符串可隐藏） */
+  subtitle?: string
+  /** 空状态提示文案 */
+  emptyHint?: string
+}>(), {
+  subtitle: '新会话自动写入',
+  emptyHint: '暂无状态表格。新建表格后，新会话将自带初始状态栏。',
+})
 
 const emit = defineEmits<{
   'update:tables': [tables: StatusTableDef[]]
