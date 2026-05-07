@@ -1,7 +1,7 @@
 """
 TTS 平台抽象层
 
-定义 TtsPlatform 接口以及 MiniMax / GLM TTS 实现。
+定义 TtsPlatform 接口以及 MiniMax / GLM / OpenRouter / 硅基流动等 TTS 实现。
 其他厂商可继续继承 TtsPlatform 扩展。
 """
 
@@ -15,12 +15,13 @@ import logging
 import mimetypes
 import pathlib
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Literal
+from urllib.parse import urlsplit, urlunsplit
 import wave
 
 import httpx
 
-from app.llm.openai_compat import _normalize_base_url
+from app.llm.openai_compat import _common_headers, _normalize_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -1216,3 +1217,305 @@ class Qwen3LocalTtsPlatform(TtsPlatform):
             return True
         except Exception:
             return False
+
+
+# ---------------------------------------------------------------------------
+# OpenRouter / 硅基流动：OpenAI 风格 POST /audio/speech
+# ---------------------------------------------------------------------------
+
+SpeechCompatVariant = Literal["openrouter", "siliconflow"]
+
+_SILICONFLOW_DEFAULT_BASE = "https://api.siliconflow.cn/v1"
+
+_COSYVOICE2_PRESET_VOICES: tuple[tuple[str, str], ...] = (
+    ("FunAudioLLM/CosyVoice2-0.5B:alex", "CosyVoice2 alex"),
+    ("FunAudioLLM/CosyVoice2-0.5B:anna", "CosyVoice2 anna"),
+    ("FunAudioLLM/CosyVoice2-0.5B:bella", "CosyVoice2 bella"),
+    ("FunAudioLLM/CosyVoice2-0.5B:benjamin", "CosyVoice2 benjamin"),
+    ("FunAudioLLM/CosyVoice2-0.5B:charles", "CosyVoice2 charles"),
+    ("FunAudioLLM/CosyVoice2-0.5B:claire", "CosyVoice2 claire"),
+    ("FunAudioLLM/CosyVoice2-0.5B:david", "CosyVoice2 david"),
+    ("FunAudioLLM/CosyVoice2-0.5B:diana", "CosyVoice2 diana"),
+)
+
+
+def _normalize_openrouter_speech_base(raw: str) -> str:
+    """OpenRouter TTS base：须以 /api/v1 结尾（非单纯 /v1）。"""
+    base = (raw or "").strip()
+    if not base:
+        base = "https://openrouter.ai/api/v1"
+    if not (base.startswith("http://") or base.startswith("https://")):
+        base = "https://" + base
+    base = base.rstrip("/")
+    low = base.lower()
+    if "/audio/speech" in low:
+        idx = low.find("/audio/speech")
+        base = base[:idx].rstrip("/")
+        low = base.lower()
+    parts = urlsplit(base)
+    path = (parts.path or "").rstrip("/")
+    if not path:
+        return urlunsplit((parts.scheme, parts.netloc, "/api/v1", "", "")).rstrip("/")
+    if path == "/v1" or path.endswith("/v1") and "/api/" not in path:
+        return urlunsplit((parts.scheme, parts.netloc, "/api/v1", "", "")).rstrip("/")
+    return base
+
+
+def _normalize_siliconflow_speech_base(raw: str) -> str:
+    base = (raw or "").strip()
+    if not base:
+        return _SILICONFLOW_DEFAULT_BASE
+    return _normalize_base_url(base)
+
+
+def _speech_compat_response_format(
+    variant: SpeechCompatVariant,
+    audio_format: str,
+) -> tuple[str, str]:
+    """返回 (upstream response_format, normalized format for storage)."""
+    fmt = (audio_format or "mp3").strip().lower()
+    if variant == "openrouter":
+        if fmt == "wav":
+            return "mp3", "mp3"
+        if fmt not in {"mp3", "pcm"}:
+            return "mp3", "mp3"
+        return fmt, fmt
+    # siliconflow
+    if fmt in {"mp3", "opus", "wav", "pcm"}:
+        return fmt, fmt
+    return "mp3", "mp3"
+
+
+def _speech_compat_content_type_to_format(content_type: str | None) -> str | None:
+    if not content_type:
+        return None
+    low = content_type.split(";")[0].strip().lower()
+    if "mpeg" in low or low.endswith("/mp3"):
+        return "mp3"
+    if "wav" in low:
+        return "wav"
+    if "pcm" in low or "octet-stream" in low:
+        return "pcm"
+    if "opus" in low:
+        return "opus"
+    return None
+
+
+class OpenAiSpeechCompatTtsPlatform(TtsPlatform):
+    """OpenRouter / 硅基流动：POST /v1/audio/speech（不发送 OpenRouter provider 筛选字段）。"""
+
+    def __init__(
+        self,
+        api_key: str,
+        base_url: str,
+        variant: SpeechCompatVariant,
+    ) -> None:
+        self._api_key = api_key
+        self._variant = variant
+        if variant == "openrouter":
+            self._base_url = _normalize_openrouter_speech_base(base_url)
+        else:
+            self._base_url = _normalize_siliconflow_speech_base(base_url or _SILICONFLOW_DEFAULT_BASE)
+        self._client = httpx.AsyncClient(
+            base_url=self._base_url,
+            timeout=httpx.Timeout(connect=15, read=180, write=60, pool=10),
+        )
+
+    async def close(self) -> None:
+        await self._client.aclose()
+
+    def _speech_headers_json(self) -> dict[str, str]:
+        if self._variant == "openrouter":
+            h = _common_headers(self._api_key)
+            h["Content-Type"] = "application/json"
+            return h
+        return {
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+        }
+
+    @staticmethod
+    def _extract_json_error_message(data: Any) -> str | None:
+        if not isinstance(data, dict):
+            return None
+        err = data.get("error")
+        if isinstance(err, dict):
+            msg = err.get("message")
+            code = err.get("code")
+            if msg and code is not None:
+                return f"{msg} (code={code})"
+            if msg:
+                return str(msg)
+        return None
+
+    def _raise_for_speech_http_error(self, resp: httpx.Response) -> None:
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            detail = None
+            try:
+                detail = self._extract_json_error_message(resp.json())
+            except Exception:
+                detail = None
+            if detail:
+                raise RuntimeError(detail) from exc
+            raise RuntimeError(f"TTS HTTP {resp.status_code}: {(resp.text or '')[:500]}") from exc
+
+    def _build_speech_json_body(self, req: SynthesisRequest, *, stream: bool | None) -> dict[str, Any]:
+        rf_up, _ = _speech_compat_response_format(self._variant, req.audio_format)
+        body: dict[str, Any] = {
+            "model": (req.model or "").strip(),
+            "input": req.text,
+            "voice": req.voice_id,
+            "response_format": rf_up,
+            "speed": float(req.speed),
+        }
+        if self._variant == "siliconflow":
+            body["stream"] = bool(stream) if stream is not None else False
+            for k, v in req.extra.items():
+                if k not in body:
+                    body[k] = v
+        return body
+
+    async def synthesize(self, req: SynthesisRequest) -> SynthesisResult:
+        _, fmt_norm = _speech_compat_response_format(self._variant, req.audio_format)
+        stream_arg: bool | None = False if self._variant == "siliconflow" else None
+        body = self._build_speech_json_body(req, stream=stream_arg)
+        resp = await self._client.post("/audio/speech", json=body, headers=self._speech_headers_json())
+        self._raise_for_speech_http_error(resp)
+        audio_bytes = resp.content
+        if not audio_bytes:
+            raise RuntimeError("TTS 返回空音频")
+        ct_fmt = _speech_compat_content_type_to_format(resp.headers.get("content-type"))
+        out_fmt = ct_fmt or fmt_norm
+        return SynthesisResult(
+            audio_bytes=audio_bytes,
+            format=out_fmt,
+            sample_rate=req.sample_rate,
+        )
+
+    async def synthesize_stream(self, req: SynthesisRequest) -> AsyncIterator[bytes]:
+        stream_arg: bool | None = True if self._variant == "siliconflow" else None
+        body = self._build_speech_json_body(req, stream=stream_arg)
+        async with self._client.stream(
+            "POST",
+            "/audio/speech",
+            json=body,
+            headers=self._speech_headers_json(),
+        ) as resp:
+            self._raise_for_speech_http_error(resp)
+            async for chunk in resp.aiter_bytes():
+                if chunk:
+                    yield chunk
+
+    async def list_voices(self, voice_type: str = "all") -> list[VoiceInfo]:
+        del voice_type
+        if self._variant == "openrouter":
+            return []
+        voices: list[VoiceInfo] = [
+            VoiceInfo(voice_id=vid, name=name, voice_type="system") for vid, name in _COSYVOICE2_PRESET_VOICES
+        ]
+        try:
+            resp = await self._client.get(
+                "/audio/voice/list",
+                headers={"Authorization": f"Bearer {self._api_key}"},
+            )
+            if resp.status_code != 200:
+                return voices
+            data = resp.json()
+            for item in data.get("results") or []:
+                if not isinstance(item, dict):
+                    continue
+                uri = str(item.get("uri") or "").strip()
+                if not uri:
+                    continue
+                name = str(item.get("customName") or uri).strip()
+                voices.append(VoiceInfo(voice_id=uri, name=name, voice_type="private"))
+        except Exception:
+            logger.warning("[TTS] SiliconFlow voice list failed", exc_info=True)
+        return voices
+
+    async def upload_file(
+        self,
+        file_bytes: bytes,
+        filename: str,
+        content_type: str | None = None,
+        *,
+        purpose: str = "voice_clone",
+    ) -> UploadFileResult:
+        del purpose
+        if self._variant != "siliconflow":
+            raise NotImplementedError("OpenRouter TTS 不支持文件上传接口")
+        raise NotImplementedError("硅基流动请使用 upload_reference_voice（路由单次 multipart）")
+
+    async def upload_reference_voice(
+        self,
+        *,
+        file_bytes: bytes,
+        filename: str,
+        content_type: str | None,
+        model: str,
+        custom_name: str,
+        text: str,
+    ) -> VoiceCloneResult:
+        """硅基流动官方参考音频上传：POST /uploads/audio/voice。"""
+        if self._variant != "siliconflow":
+            raise NotImplementedError("仅硅基流动支持参考音频上传")
+        ct = content_type or mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        files = {"file": (filename, file_bytes, ct)}
+        data = {
+            "model": model.strip(),
+            "customName": custom_name.strip(),
+            "text": text.strip(),
+        }
+        resp = await self._client.post(
+            "/uploads/audio/voice",
+            headers={"Authorization": f"Bearer {self._api_key}"},
+            files=files,
+            data=data,
+        )
+        self._raise_for_speech_http_error(resp)
+        js = resp.json()
+        uri = str(js.get("uri") or "").strip()
+        if not uri:
+            raise RuntimeError("硅基流动上传未返回 uri")
+        return VoiceCloneResult(voice_id=uri, preview_url=None)
+
+    async def clone_voice(
+        self,
+        *,
+        source_file_id: str,
+        voice_id: str,
+        model: str | None = None,
+        text: str | None = None,
+        language_boost: str | None = None,
+        prompt_audio_file_id: str | None = None,
+        prompt_text: str | None = None,
+        need_noise_reduction: bool = False,
+        need_volume_normalization: bool = False,
+        aigc_watermark: bool = False,
+    ) -> VoiceCloneResult:
+        del (
+            source_file_id,
+            voice_id,
+            model,
+            text,
+            language_boost,
+            prompt_audio_file_id,
+            prompt_text,
+            need_noise_reduction,
+            need_volume_normalization,
+            aigc_watermark,
+        )
+        raise NotImplementedError("请使用硅基流动专用上传路由或 MiniMax/GLM 复刻流程")
+
+    async def design_voice(
+        self,
+        *,
+        prompt: str,
+        preview_text: str,
+        voice_id: str | None = None,
+        aigc_watermark: bool = False,
+    ) -> VoiceDesignResult:
+        del prompt, preview_text, voice_id, aigc_watermark
+        raise NotImplementedError("当前提供商不支持音色设计")
