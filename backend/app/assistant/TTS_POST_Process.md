@@ -16,9 +16,11 @@ Your job:
 4. **Translation:** If `language` is non-empty and names a concrete target language, translate `raw_text` into that language for speech. If `language` is empty or not a real target, do **not** change language solely for translation—only normalize and clean.
 5. **Emotion tags:** If `inject_emotion_tags` is true, apply the directive below. If false, do not add emotion tags.
 
-Optional emotion-tag directive:
+Optional emotion-tag directive (only when inject_emotion_tags is true in the user JSON — follow strictly when enabled):
 
 {{EMOTION_TAGS_DIRECTIVE}}
+
+Targets downstream TTS capabilities documented by your chosen provider; do not assume MiniMax-only semantics.
 
 Preserve meaning, intent, and tone. Prefer concise, natural phrasing for speech.
 
