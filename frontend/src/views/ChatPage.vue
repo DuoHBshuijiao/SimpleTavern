@@ -105,7 +105,7 @@ import {
   FAB_COLLISION_GAP_PX,
   rectsOverlap,
 } from '../composables/useFabCollision'
-import { Users, Settings, Sparkles, Loader2, X, MoreHorizontal, GripVertical, Check, Plus, Search } from 'lucide-vue-next'
+import { Users, Settings, Sparkles, Loader2, X, MoreHorizontal, GripVertical, Check, Plus, Search, Globe } from 'lucide-vue-next'
 
 // API
 import { postAndConsumeSse } from '../api/sse'
@@ -680,6 +680,8 @@ function resolveTtsModel(tts: TtsSessionConfig, preset: ApiPreset | null): strin
   if (provider === 'glm' || provider === 'glm_local') return 'glm-tts'
   if (provider === 'qwen3_local') return 'qwen3-tts'
   if (provider === 'omnivoice_local') return 'omnivoice-tts'
+  if (provider === 'openrouter') return 'google/gemini-3.1-flash-tts-preview'
+  if (provider === 'siliconflow') return 'FunAudioLLM/CosyVoice2-0.5B'
   return 'speech-2.8-hd'
 }
 
@@ -1402,6 +1404,8 @@ watch(
 
 /** 助手 FAB 与 TTS FAB 碰撞分离（useFabCollision 需在页面层调用两组件 getRect） */
 const chatInputRef = ref<InstanceType<typeof ChatInput> | null>(null)
+/** 主聊天网络搜索开关：为 true 时每次生成请求挂载搜索工具，直至用户关闭；需全局配置 Tavily/博查 API Key */
+const webSearchSessionEnabled = ref(false)
 const ttsPlaybackFabRef = ref<InstanceType<typeof TtsPlaybackFab> | null>(null)
 
 /**
@@ -2336,6 +2340,20 @@ async function handleModelSelect(option: any) {
  * 使用nextTick确保DOM更新后再滚动。
  */
 const messageListRef = ref<InstanceType<typeof MessageList> | null>(null)
+const mvuStateBarWrapExtraHeightPx = ref(0)
+
+function updateMvuStateBarWrapExtraHeight(px: number) {
+  mvuStateBarWrapExtraHeightPx.value = Math.max(0, Math.ceil(px))
+}
+
+watch(
+  () => [activeChat.value?.id ?? null, mvuStore.capsuleData.length] as const,
+  ([chatId, capsuleCount], [oldChatId]) => {
+    if (chatId !== oldChatId || capsuleCount <= 0) {
+      mvuStateBarWrapExtraHeightPx.value = 0
+    }
+  },
+)
 
 /** 本次发送的用户消息 id，供 MessageList 播放一次性入场动画 */
 const entrancingUserMessageId = ref<string | null>(null)
@@ -2978,7 +2996,7 @@ async function runGroupGeneration(
       try {
         await postAndConsumeSse(
           '/api/generate/group',
-          { chatId, characterId, imageFallbackMode },
+          { chatId, characterId, imageFallbackMode, webSearchEnabled: webSearchSessionEnabled.value },
           (evt) => {
             if (evt.event === 'delta') onAssistantContentDeltaStarted()
             if (shouldIgnoreStreamingEventWhileStopping(evt.event)) return
@@ -3027,7 +3045,12 @@ async function runGroupGeneration(
         content: string
         reasoningContent?: string
         error?: string
-      }>('/api/generate/group', { chatId, characterId, imageFallbackMode })
+      }>('/api/generate/group', {
+        chatId,
+        characterId,
+        imageFallbackMode,
+        webSearchEnabled: webSearchSessionEnabled.value,
+      })
       
       if (res.ok) {
         if (typeof res.reasoningContent === 'string') {
@@ -3256,6 +3279,7 @@ async function sendUserMessage() {
               senderName: selectedPersona.value?.name ?? userName.value,
               senderAvatar: selectedPersona.value?.avatar ?? null,
               userPersona: selectedPersona.value ?? null,
+              webSearchEnabled: webSearchSessionEnabled.value,
             },
             (evt) => {
               if (evt.event === 'delta') onAssistantContentDeltaStarted()
@@ -3312,6 +3336,7 @@ async function sendUserMessage() {
           senderName: selectedPersona.value?.name ?? userName.value,
           senderAvatar: selectedPersona.value?.avatar ?? null,
           userPersona: selectedPersona.value ?? null,
+          webSearchEnabled: webSearchSessionEnabled.value,
         })
         
         if (res.ok) {
@@ -3349,6 +3374,7 @@ async function sendUserMessage() {
                   appendUserMessage: false,
                   imageFallbackMode: true,
                   userPersona: selectedPersona.value ?? null,
+                  webSearchEnabled: webSearchSessionEnabled.value,
                 }, (evt) => {
                   if (evt.event === 'delta') {
                     const data = evt.data as { text?: string } | undefined
@@ -3369,6 +3395,7 @@ async function sendUserMessage() {
                 appendUserMessage: false,
                 imageFallbackMode: true,
                 userPersona: selectedPersona.value ?? null,
+                webSearchEnabled: webSearchSessionEnabled.value,
               })
               if (!retryRes.ok) throw new Error(retryRes.error || 'unknown error')
               chats.appendLocalMessageContent(localAssistantId, retryRes.content || '')
@@ -3549,7 +3576,7 @@ async function triggerInterject(characterId: string) {
       try {
         await postAndConsumeSse(
           '/api/generate/interject',
-          { chatId, characterId, omitMessageIds },
+          { chatId, characterId, omitMessageIds, webSearchEnabled: webSearchSessionEnabled.value },
           (evt) => {
             if (evt.event === 'delta') onAssistantContentDeltaStarted()
             if (shouldIgnoreStreamingEventWhileStopping(evt.event)) return
@@ -3595,7 +3622,12 @@ async function triggerInterject(characterId: string) {
         content: string
         reasoningContent?: string
         error?: string
-      }>('/api/generate/interject', { chatId, characterId, omitMessageIds })
+      }>('/api/generate/interject', {
+        chatId,
+        characterId,
+        omitMessageIds,
+        webSearchEnabled: webSearchSessionEnabled.value,
+      })
       
       if (res.ok) {
         if (typeof res.reasoningContent === 'string') {
@@ -4187,7 +4219,13 @@ async function handleRewriteMessage(m: ChatMessage) {
         try {
           await postAndConsumeSse(
             '/api/generate/group',
-            { chatId, characterId, omitMessageIds, mergeAssistantIntoMessageId: anchorId },
+            {
+              chatId,
+              characterId,
+              omitMessageIds,
+              mergeAssistantIntoMessageId: anchorId,
+              webSearchEnabled: webSearchSessionEnabled.value,
+            },
             (evt) => {
               if (evt.event === 'delta') onAssistantContentDeltaStarted()
               if (shouldIgnoreStreamingEventWhileStopping(evt.event)) return
@@ -4231,7 +4269,13 @@ async function handleRewriteMessage(m: ChatMessage) {
           assistantMessageId?: string | null
           reasoningContent?: string
           error?: string
-        }>('/api/generate/group', { chatId, characterId, omitMessageIds, mergeAssistantIntoMessageId: anchorId })
+        }>('/api/generate/group', {
+          chatId,
+          characterId,
+          omitMessageIds,
+          mergeAssistantIntoMessageId: anchorId,
+          webSearchEnabled: webSearchSessionEnabled.value,
+        })
         
         if (res.ok) {
           if (typeof res.reasoningContent === 'string') {
@@ -4261,6 +4305,7 @@ async function handleRewriteMessage(m: ChatMessage) {
               userPersona: selectedPersona.value ?? null,
               omitMessageIds,
               mergeAssistantIntoMessageId: anchorId,
+              webSearchEnabled: webSearchSessionEnabled.value,
             },
             (evt) => {
               if (evt.event === 'delta') onAssistantContentDeltaStarted()
@@ -4312,6 +4357,7 @@ async function handleRewriteMessage(m: ChatMessage) {
           userPersona: selectedPersona.value ?? null,
           omitMessageIds,
           mergeAssistantIntoMessageId: anchorId,
+          webSearchEnabled: webSearchSessionEnabled.value,
         })
         
         if (res.ok) {
@@ -4852,6 +4898,7 @@ async function handleSaveAndSend() {
               appendUserMessage: false,
               userPersona: selectedPersona.value ?? null,
               omitMessageIds,
+              webSearchEnabled: webSearchSessionEnabled.value,
             },
             (evt) => {
               if (evt.event === 'delta') onAssistantContentDeltaStarted()
@@ -4896,6 +4943,7 @@ async function handleSaveAndSend() {
           appendUserMessage: false,
           userPersona: selectedPersona.value ?? null,
           omitMessageIds,
+          webSearchEnabled: webSearchSessionEnabled.value,
         })
 
         if (res.ok) {
@@ -5272,6 +5320,7 @@ const editingPersonaAvatarUrl = computed(() => {
                   :is-running="mvuStore.isRunning"
                   :chat-id="activeChat.id"
                   @toggle-panel="mvuPanelOpen = !mvuPanelOpen"
+                  @wrap-extra-height-change="updateMvuStateBarWrapExtraHeight"
                 />
               </div>
             </div>
@@ -5299,6 +5348,7 @@ const editingPersonaAvatarUrl = computed(() => {
             :get-current-version-index="versions.getCurrentVersionIndex"
             :get-version-count="versions.getVersionCount"
             :header-inset-px="chatHeaderHeightPx"
+            :bottom-scroll-extra-px="mvuStateBarWrapExtraHeightPx"
             :sidebar-collapsed="sidebarCollapsed"
             :entrancing-user-message-id="entrancingUserMessageId"
             :entrancing-assistant-message-id="entrancingAssistantMessageId"
@@ -5363,6 +5413,8 @@ const editingPersonaAvatarUrl = computed(() => {
             @draft-helper-discard="handleDraftHelperDiscard"
             @draft-helper-stop="handleDraftHelperStop"
             @toggle-mvu-panel="mvuPanelOpen = !mvuPanelOpen"
+            :web-search-enabled="webSearchSessionEnabled"
+            @update:web-search-enabled="webSearchSessionEnabled = $event"
           />
 
           <!-- TTS 播放/下载 FAB（仅在 TTS 启用时显示） -->
@@ -5425,6 +5477,7 @@ const editingPersonaAvatarUrl = computed(() => {
       :reasoning-elapsed-sec="assistant.assistantReasoningElapsedSec.value"
       :allow-write-memory="assistant.allowWriteMemoryEnabled.value"
       :allow-destructive-tools="assistant.allowDestructiveToolsEnabled.value"
+      :allow-web-search="assistant.allowWebSearchEnabled.value"
       :current-model="assistantCurrentModel"
       :current-preset-id="assistant.assistantSettings.value.presetId ?? null"
       :model-options="chatModelOptions"
@@ -5434,6 +5487,7 @@ const editingPersonaAvatarUrl = computed(() => {
       @remove-attachment="assistant.removeDraftAttachment('chat', $event)"
       @toggle-write-memory="assistant.toggleAllowWriteMemory"
       @toggle-destructive="assistant.toggleAllowDestructiveTools"
+      @toggle-web-search="assistant.toggleAllowWebSearch"
       @send="assistant.sendMessage('chat')"
       @reset="assistant.resetChat"
       @open-settings="assistant.showAssistantSettings.value = true"
@@ -5981,6 +6035,17 @@ const editingPersonaAvatarUrl = computed(() => {
                 >
                   破坏性工具
                 </button>
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg border transition-colors"
+                  :class="assistant.allowWebSearchEnabled.value
+                    ? 'bg-brand/15 border-brand/50 text-brand-foreground'
+                    : 'border-[var(--color-border-subtle)] text-[var(--color-text-muted)]'"
+                  @click="assistant.toggleAllowWebSearch"
+                >
+                  <Globe class="h-3 w-3" />
+                  网络搜索
+                </button>
                 <span class="text-[10px] text-[var(--color-text-muted)]">工作区不写长期记忆</span>
               </div>
               <div v-if="assistant.workspaceAssistantDraftAttachments.value.length" class="mb-3 flex flex-wrap gap-2">
@@ -6220,6 +6285,19 @@ const editingPersonaAvatarUrl = computed(() => {
             <p class="text-xs text-[var(--color-text-muted)] mb-4">
               以下开关与侧栏消息列表底部的权限按钮同步，变更后立即写入本机偏好。
             </p>
+            <label class="flex items-start gap-3 cursor-pointer mb-4">
+              <ThemedCheckbox
+                class="mt-0.5"
+                :checked="assistant.allowWebSearchEnabled.value"
+                @update:checked="assistant.setAllowWebSearch"
+              />
+              <span>
+                <span class="text-sm text-[var(--color-text)]">允许网络搜索</span>
+                <span class="block text-xs text-[var(--color-text-muted)] mt-1">
+                  开启后聊天助手与工具区助手可调用全局设置里的 Tavily / 博查搜索；MVU Agent 不会挂载此工具。
+                </span>
+              </span>
+            </label>
             <label class="flex items-start gap-3 cursor-pointer mb-4">
               <ThemedCheckbox
                 class="mt-0.5"
