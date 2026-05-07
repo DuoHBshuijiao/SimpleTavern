@@ -14,3 +14,4 @@ class AssistantToolContext:
     allow_write_memory: bool
     allow_destructive_tools: bool
     assistant_settings: AssistantSettings
+    allow_web_search: bool = False
