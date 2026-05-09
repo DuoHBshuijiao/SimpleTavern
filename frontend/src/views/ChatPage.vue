@@ -544,6 +544,34 @@ const selectedCharacter = computed(() => {
  */
 const activeChat = computed(() => chats.activeChat)
 
+/** 占位符重试成功后：在同一会话且同模型+同 API 预设下自动对上游使用 [image] 占位，直到切换模型/预设或换会话 */
+const imageStickyBinding = ref<{ chatId: string; model: string; presetId: string | null } | null>(null)
+
+function resolveImageBindingKey(): { chatId: string; model: string; presetId: string | null } | null {
+  const chat = activeChat.value
+  if (!chat?.id) return null
+  const model = chat.overrides?.params?.model || settings.settings?.llm?.defaultModel || ''
+  const presetId = chat.overrides?.presetId ?? null
+  return { chatId: chat.id, model, presetId }
+}
+
+function isImageStickyActive(): boolean {
+  const cur = resolveImageBindingKey()
+  const sticky = imageStickyBinding.value
+  if (!cur || !sticky) return false
+  return sticky.chatId === cur.chatId && sticky.model === cur.model && sticky.presetId === cur.presetId
+}
+
+const imageBindingWatchKey = computed(() => {
+  const chat = activeChat.value
+  if (!chat) return ''
+  return `${chat.id}\0${chat.overrides?.params?.model ?? ''}\0${chat.overrides?.presetId ?? ''}`
+})
+
+watch(imageBindingWatchKey, () => {
+  imageStickyBinding.value = null
+})
+
 /** MessageList 用：延后删除时在 UI 中隐藏仍会占上下文的消息 */
 const messageListMessages = computed((): ChatMessage[] => {
   const chat = activeChat.value
@@ -3285,6 +3313,7 @@ async function sendUserMessage() {
               chatId,
               userMessage: text,
               userImages: uploadedImages,
+              imageFallbackMode: isImageStickyActive(),
               senderPersonaId: selectedPersona.value?.id ?? null,
               senderName: selectedPersona.value?.name ?? userName.value,
               senderAvatar: selectedPersona.value?.avatar ?? null,
@@ -3342,6 +3371,7 @@ async function sendUserMessage() {
           chatId,
           userMessage: text,
           userImages: uploadedImages,
+          imageFallbackMode: isImageStickyActive(),
           senderPersonaId: selectedPersona.value?.id ?? null,
           senderName: selectedPersona.value?.name ?? userName.value,
           senderAvatar: selectedPersona.value?.avatar ?? null,
@@ -3413,6 +3443,8 @@ async function sendUserMessage() {
             }
             await chats.load(chatId)
             await afterChatReload(chatId)
+            const bind = resolveImageBindingKey()
+            if (bind) imageStickyBinding.value = bind
           }
         })
       } else {
@@ -4309,6 +4341,7 @@ async function handleRewriteMessage(m: ChatMessage) {
               chatId,
               userMessage: lastUserMessage.content,
               appendUserMessage: false,
+              imageFallbackMode: isImageStickyActive(),
               senderPersonaId: lastUserMessage.senderPersonaId ?? selectedPersona.value?.id ?? null,
               senderName: lastUserMessage.senderName ?? selectedPersona.value?.name ?? userName.value,
               senderAvatar: lastUserMessage.senderAvatar ?? selectedPersona.value?.avatar ?? null,
@@ -4364,6 +4397,7 @@ async function handleRewriteMessage(m: ChatMessage) {
           chatId,
           userMessage: lastUserMessage.content,
           appendUserMessage: false,
+          imageFallbackMode: isImageStickyActive(),
           userPersona: selectedPersona.value ?? null,
           omitMessageIds,
           mergeAssistantIntoMessageId: anchorId,
@@ -4920,6 +4954,7 @@ async function handleSaveAndSend() {
               chatId,
               userMessage: editedContent,
               appendUserMessage: false,
+              imageFallbackMode: isImageStickyActive(),
               userPersona: selectedPersona.value ?? null,
               omitMessageIds,
               webSearchEnabled: webSearchSessionEnabled.value,
@@ -4965,6 +5000,7 @@ async function handleSaveAndSend() {
           chatId,
           userMessage: editedContent,
           appendUserMessage: false,
+          imageFallbackMode: isImageStickyActive(),
           userPersona: selectedPersona.value ?? null,
           omitMessageIds,
           webSearchEnabled: webSearchSessionEnabled.value,
