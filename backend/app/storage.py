@@ -50,7 +50,20 @@ import portalocker
 from datetime import datetime
 
 from app.attachment_policy import normalize_mime_type
-from app.schemas import AssistantAttachment, AssistantChat, AssistantSettings, Chat, ChatImageAttachment, ChatMessage, CharacterCard, MvuWorkLogEntry, Settings, StateVariables, WorldBook
+from app.schemas import (
+    AssistantAttachment,
+    AssistantChat,
+    AssistantSettings,
+    Chat,
+    ChatImageAttachment,
+    ChatMessage,
+    CharacterCard,
+    KnowledgeGraph,
+    MvuWorkLogEntry,
+    Settings,
+    StateVariables,
+    WorldBook,
+)
 
 
 def _repo_root() -> Path:
@@ -831,6 +844,11 @@ def _mvu_logs_path(character_id: str, chat_id: str) -> Path:
     return chat_folder(character_id, chat_id) / "mvu_logs.json"
 
 
+def _knowledge_graph_path(character_id: str, chat_id: str) -> Path:
+    """返回知识图谱文件路径（data/chats/{character_id}/{chat_id}/knowledge_graph.json）。"""
+    return chat_folder(character_id, chat_id) / "knowledge_graph.json"
+
+
 def chat_images_dir(character_id: str, chat_id: str) -> Path:
     """返回会话图片目录（data/chats/{character_id}/{chat_id}/images）。"""
     return chat_folder(character_id, chat_id) / "images"
@@ -1326,6 +1344,45 @@ def save_mvu_logs(character_id: str, chat_id: str, entries: list[MvuWorkLogEntry
     path = _mvu_logs_path(character_id, chat_id)
     kept = entries[-_MVU_LOGS_MAX_ENTRIES:] if len(entries) > _MVU_LOGS_MAX_ENTRIES else list(entries)
     write_json(path, [e.model_dump(mode="json") for e in kept])
+
+
+def load_knowledge_graph(chat_id: str) -> KnowledgeGraph | None:
+    """读取知识图谱。文件不存在时返回 None。"""
+    found = _find_chat_path_by_id(chat_id)
+    if found is None:
+        raise FileNotFoundError(chat_id)
+    _, character_id = found
+    path = _knowledge_graph_path(character_id, chat_id)
+    if not path.exists():
+        return None
+    raw = read_json(path)
+    return KnowledgeGraph.model_validate(raw)
+
+
+def save_knowledge_graph(chat_id: str, kg: KnowledgeGraph) -> KnowledgeGraph:
+    """写入知识图谱 JSON（带文件锁）。"""
+    found = _find_chat_path_by_id(chat_id)
+    if found is None:
+        raise FileNotFoundError(chat_id)
+    _, character_id = found
+    path = _knowledge_graph_path(character_id, chat_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    kg.updatedAt = datetime.now().astimezone().isoformat()
+    write_json(path, kg.model_dump(mode="json"))
+    return kg
+
+
+def delete_knowledge_graph(chat_id: str) -> None:
+    """删除知识图谱文件及其锁文件。"""
+    found = _find_chat_path_by_id(chat_id)
+    if found is None:
+        return
+    _, character_id = found
+    path = _knowledge_graph_path(character_id, chat_id)
+    if path.exists():
+        with _lock_for(path):
+            path.unlink(missing_ok=True)
+    _lock_file_path(path).unlink(missing_ok=True)
 
 
 def load_chat_state_variables(chat_id: str) -> StateVariables | None:
