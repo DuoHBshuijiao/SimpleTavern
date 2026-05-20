@@ -572,7 +572,15 @@ function getAssistantFabRect(): DOMRect | null {
   return assistantFabStackRef.value?.getBoundingClientRect() ?? null
 }
 
-defineExpose({ getAssistantFabRect, setAssistantTopPx: setAssistantTopPxFromSeparation })
+function focusComposer() {
+  textareaRef.value?.focus()
+}
+
+defineExpose({
+  getAssistantFabRect,
+  setAssistantTopPx: setAssistantTopPxFromSeparation,
+  focusComposer,
+})
 </script>
 
 <template>
