@@ -3,7 +3,7 @@
  */
 import { nextTick } from 'vue'
 import { defineStore } from 'pinia'
-import type { MvuWorkLogEntry, StateVariables, StatusTableDef } from '../types/models'
+import type { KnowledgeGraph, KnowledgeGraphResponse, MvuWorkLogEntry, StateVariables, StatusTableDef } from '../types/models'
 
 export interface CapsuleItem {
   field: string
@@ -21,6 +21,7 @@ export const useMvuStore = defineStore('mvu', {
   state: () => ({
     isConnected: false,
     stateVariables: null as StateVariables | null,
+    knowledgeGraph: null as KnowledgeGraph | null,
     workLogs: [] as MvuWorkLogEntry[],
     isRunning: false,
     /**
@@ -42,6 +43,12 @@ export const useMvuStore = defineStore('mvu', {
     /** 胶囊条是否允许在 isRunning 回落后播放「收尾扫描」一周期 */
     allowCapsuleScanTail(): boolean {
       return this.sawTriggeredSinceConnect && !this.tailScanSuppressed
+    },
+
+    hasKnowledgeGraph(): boolean {
+      const kg = this.knowledgeGraph
+      if (!kg) return false
+      return (kg.entities ?? []).some((e) => !e.deleted)
     },
 
     capsuleData(): CapsuleItem[] {
@@ -78,10 +85,12 @@ export const useMvuStore = defineStore('mvu', {
       if (this._eventSource) this.disconnect()
       this._activeChatId = chatId
       this.workLogs = []
+      this.knowledgeGraph = null
       this.isRunning = false
       this.sawTriggeredSinceConnect = false
 
       const url = `/api/mvu/${chatId}/stream`
+      void this.fetchKnowledgeGraph(chatId)
       const es = new EventSource(url)
       this._eventSource = es
       this.isConnected = true
@@ -151,6 +160,7 @@ export const useMvuStore = defineStore('mvu', {
         this._eventSource = null
       }
       this._activeChatId = null
+      this.knowledgeGraph = null
       this.isConnected = false
       this.isRunning = false
     },
@@ -173,12 +183,24 @@ export const useMvuStore = defineStore('mvu', {
       } catch { /* ignore network errors */ }
     },
 
+    async fetchKnowledgeGraph(chatId: string) {
+      if (this._activeChatId !== chatId && this._activeChatId !== null) return
+      try {
+        const resp = await fetch(`/api/mvu/${chatId}/knowledge-graph`)
+        if (!resp.ok) return
+        const data = (await resp.json()) as KnowledgeGraphResponse
+        if (this._activeChatId !== null && this._activeChatId !== chatId) return
+        this.knowledgeGraph = data.knowledgeGraph ?? null
+      } catch { /* ignore */ }
+    },
+
     _scheduleFetchState(chatId: string) {
       if (this._fetchStateTimer) clearTimeout(this._fetchStateTimer)
       this._fetchStateTimer = setTimeout(() => {
         this._fetchStateTimer = null
         if (this._activeChatId !== chatId) return
         void this.fetchState(chatId)
+        void this.fetchKnowledgeGraph(chatId)
       }, FETCH_STATE_DEBOUNCE_MS)
     },
 
