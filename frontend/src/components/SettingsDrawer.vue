@@ -35,7 +35,9 @@
  *    - 位置：组件层，提供设置管理功能
  */
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import { useChatsStore, useCharactersStore, useSettingsStore } from '../stores'
+import { useChatsStore, useCharactersStore, useMvuStore, useSettingsStore } from '../stores'
+import { isChatMvuRuntimeEnabled } from '../utils/groupMvu'
+import { countActiveEntities, countRelations } from '../utils/kgVisNetwork'
 import {
   normalizeReasoningEffort,
   normalizeThemeId,
@@ -110,7 +112,24 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'update:show', v: boolean): void
   (e: 'open-member-settings', memberId: string): void
+  (e: 'open-knowledge-graph'): void
 }>()
+
+const mvuStore = useMvuStore()
+
+const chatMvuRuntimeEnabled = computed(() => {
+  const chat = props.chat
+  if (!chat) return false
+  return isChatMvuRuntimeEnabled(chat, (id) => charactersStore.list.find((c) => c.id === id))
+})
+
+const kgStatsSummary = computed(() => {
+  const kg = mvuStore.knowledgeGraph
+  const n = countActiveEntities(kg)
+  const m = countRelations(kg)
+  if (n === 0) return '暂无数据，将由 MVU 自动维护或手动添加'
+  return `${n} 个实体 · ${m} 条关系`
+})
 
 const settingsStore = useSettingsStore()
 const chatsStore = useChatsStore()
@@ -167,6 +186,15 @@ watch(() => props.initialTab, (newTab) => {
 watch(tab, (t) => {
   if (t === 'chat') chatTabEverOpened.value = true
 })
+
+watch(
+  () => [tab.value, props.chat?.id, chatMvuRuntimeEnabled.value] as const,
+  ([t, chatId, mvuOn]) => {
+    if (t === 'chat' && chatId && mvuOn) {
+      void mvuStore.fetchKnowledgeGraph(chatId)
+    }
+  },
+)
 
 const worldBookCreateExpanded = ref(false)
 const worldBookNewNameDraft = ref('')
@@ -694,6 +722,19 @@ async function deletePendingPageBackgrounds(exceptFilename: string | null | unde
 
 function formatSaveError(prefix: string, error: unknown): string {
   return `${prefix}: ${error instanceof Error ? error.message : String(error)}`
+}
+
+async function clearKnowledgeGraph() {
+  const chat = props.chat
+  if (!chat) return
+  if (!confirm('确定清空本会话的知识图谱？此操作不可撤销。')) return
+  try {
+    await apiDelete(`/api/mvu/${chat.id}/knowledge-graph`)
+    mvuStore.knowledgeGraph = null
+    await notifyMessage('知识图谱已清空')
+  } catch (error) {
+    await notifyMessage(formatSaveError('清空图谱失败', error))
+  }
 }
 
 /**
@@ -5638,6 +5679,29 @@ async function checkUpdate() {
                   @update:content-regex-rules="(v) => { if (chatDraft) chatDraft.contentRegexRules = v }"
                   @update:initial-state-tables="(v) => { chatStateTablesDraft = v }"
                 />
+              </div>
+
+              <div
+                v-if="chatMvuRuntimeEnabled"
+                class="space-y-3 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay p-3"
+              >
+                <div>
+                  <div class="text-sm font-medium text-[var(--color-text-secondary)]">知识图谱</div>
+                  <p class="mt-1 text-xs text-[var(--color-text-muted)]">{{ kgStatsSummary }}</p>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  <button type="button" class="btn btn-sm btn-primary" @click="emit('open-knowledge-graph')">
+                    打开图谱
+                  </button>
+                  <button
+                    v-if="mvuStore.hasKnowledgeGraph"
+                    type="button"
+                    class="btn btn-sm btn-secondary"
+                    @click="clearKnowledgeGraph"
+                  >
+                    清空图谱
+                  </button>
+                </div>
               </div>
 
               <div class="space-y-2 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay overflow-hidden">
