@@ -38,6 +38,19 @@
         </button>
       </header>
 
+      <div
+        v-if="hasKnowledgeGraph"
+        class="shrink-0 px-4 py-2 border-b border-[var(--color-border-subtle)]"
+      >
+        <button
+          type="button"
+          class="w-full text-left text-xs text-[var(--color-brand)] hover:underline"
+          @click="$emit('open-knowledge-graph')"
+        >
+          查看知识图谱
+        </button>
+      </div>
+
       <!-- 日志列表 -->
       <div ref="logListRef" class="flex-1 overflow-y-auto px-5 py-3 space-y-2">
         <div v-if="logs.length === 0" class="text-xs text-[var(--color-text-muted)] py-6 text-center">
@@ -101,6 +114,7 @@ interface ModelOptionGroup {
 interface Props {
   isOpen: boolean
   logs: MvuWorkLogEntry[]
+  hasKnowledgeGraph?: boolean
   maxVisible?: number
   running?: boolean
   /** 全局 settings.mvuModel（与设置抽屉同源） */
@@ -111,6 +125,7 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
+  hasKnowledgeGraph: false,
   maxVisible: 100,
   running: false,
   mvuModel: null,
@@ -122,6 +137,7 @@ defineEmits<{
   'update:isOpen': [value: boolean]
   'select-mvu-model': [value: { value: string; presetId?: string | null }]
   'switch-to-assistant': []
+  'open-knowledge-graph': []
 }>()
 
 const logListRef = ref<HTMLElement | null>(null)
