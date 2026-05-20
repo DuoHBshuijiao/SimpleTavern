@@ -712,4 +712,34 @@ export interface Chat {
   createdAt: string
   updatedAt: string
   stateVariables?: StateVariables | null
+  /** 消息分叉溯源：源会话 ID */
+  forkedFromChatId?: string | null
+  /** 消息分叉溯源：锚点消息 ID */
+  forkedFromMessageId?: string | null
+}
+
+export interface ForkSiblingSummary {
+  chatId: string
+  title: string
+  createdAt: string
+}
+
+export interface ForkOrigin {
+  chatId: string
+  title: string
+  messageId: string
+  messageIndex: number
+}
+
+export interface ForkOutgoingGroup {
+  messageId: string
+  messageIndex: number
+  count: number
+  chats: ForkSiblingSummary[]
+}
+
+export interface ForkLineageResponse {
+  origin: ForkOrigin | null
+  siblings: ForkSiblingSummary[]
+  outgoingForks: ForkOutgoingGroup[]
 }
