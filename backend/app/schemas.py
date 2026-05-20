@@ -1134,6 +1134,50 @@ class Chat(BaseModel):
     createdAt: str = Field(default_factory=_now_iso)
     updatedAt: str = Field(default_factory=_now_iso)
     stateVariables: StateVariables | None = None
+    forkedFromChatId: str | None = Field(
+        default=None,
+        description="消息分叉溯源：源会话 ID",
+    )
+    forkedFromMessageId: str | None = Field(
+        default=None,
+        description="消息分叉溯源：锚点消息 ID（含该条及之前历史被复制）",
+    )
+
+
+class ForkChatRequest(BaseModel):
+    """从此处分叉到新会话的请求体。"""
+    forkAtMessageId: str
+    newChatName: str | None = None
+
+
+class ForkSiblingSummary(BaseModel):
+    """同源同锚点的平行分叉会话摘要。"""
+    chatId: str
+    title: str
+    createdAt: str
+
+
+class ForkOrigin(BaseModel):
+    """当前会话的分叉来源。"""
+    chatId: str
+    title: str
+    messageId: str
+    messageIndex: int = Field(ge=1, description="1-based index in source messages")
+
+
+class ForkOutgoingGroup(BaseModel):
+    """从当前会话某条消息拉出的子分叉列表。"""
+    messageId: str
+    messageIndex: int = Field(ge=1)
+    count: int = Field(ge=0)
+    chats: list[ForkSiblingSummary] = Field(default_factory=list)
+
+
+class ForkLineageResponse(BaseModel):
+    """分叉溯源：来源、兄弟分叉、本会话拉出的子分叉。"""
+    origin: ForkOrigin | None = None
+    siblings: list[ForkSiblingSummary] = Field(default_factory=list)
+    outgoingForks: list[ForkOutgoingGroup] = Field(default_factory=list)
 
 
 class CreateChatRequest(BaseModel):
