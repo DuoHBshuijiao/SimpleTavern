@@ -375,6 +375,32 @@ def _inject_mvu_state_tables_for_directive(messages: list[dict], chat: Any, char
     return False
 
 
+def _inject_knowledge_graph(messages: list[dict], chat: Any) -> bool:
+    """仅修改本次请求 messages，将知识图谱摘要追加到最后一条 assistant 后。"""
+    from app.group_mvu import is_chat_mvu_runtime_enabled
+    from app.services.knowledge_graph import has_graph_data, render_context_text
+    from app.storage import load_knowledge_graph
+
+    if not is_chat_mvu_runtime_enabled(chat):
+        return False
+    kg = load_knowledge_graph(chat.id)
+    if not has_graph_data(kg):
+        return False
+    body = render_context_text(kg).strip()
+    if not body:
+        return False
+    block = f"\n\n<KnowledgeGraph>\n{body}\n</KnowledgeGraph>"
+    for msg in reversed(messages):
+        if msg.get("role") != "assistant":
+            continue
+        content = msg.get("content")
+        if not isinstance(content, str):
+            continue
+        msg["content"] = f"{content.rstrip()}{block}"
+        return True
+    return False
+
+
 def _message_to_openai_content(
     chat,
     msg: ChatMessage,
@@ -1156,6 +1182,7 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
         user_name=prefill_user,
     )
     _inject_mvu_state_tables_for_directive(messages, chat, character)
+    _inject_knowledge_graph(messages, chat)
 
     reasoning_cfg = build_reasoning_request_config(settings)
     thinking_enabled = reasoning_cfg["thinking_enabled"]
@@ -1765,6 +1792,7 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
         settings=settings,
     )
     _inject_mvu_state_tables_for_directive(messages, chat, character)
+    _inject_knowledge_graph(messages, chat)
 
     reasoning_cfg = build_reasoning_request_config(settings)
     thinking_enabled = reasoning_cfg["thinking_enabled"]
@@ -2230,6 +2258,7 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
         settings=settings,
     )
     _inject_mvu_state_tables_for_directive(messages, chat, character)
+    _inject_knowledge_graph(messages, chat)
 
     reasoning_cfg = build_reasoning_request_config(settings)
     thinking_enabled = reasoning_cfg["thinking_enabled"]
