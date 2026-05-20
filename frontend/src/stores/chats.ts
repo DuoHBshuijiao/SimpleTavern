@@ -50,7 +50,16 @@
 
 import { defineStore } from 'pinia'
 
-import type { Chat, ChatMessage, ChatOverrides, GroupMemberSettings, GroupMvuPreset, MainChatRole, StateVariables } from '../types/models'
+import type {
+  Chat,
+  ChatMessage,
+  ChatOverrides,
+  ForkLineageResponse,
+  GroupMemberSettings,
+  GroupMvuPreset,
+  MainChatRole,
+  StateVariables,
+} from '../types/models'
 import { apiDelete, apiGet, apiPost, apiPut } from '../api/http'
 
 interface UpdateOverridesOptions {
@@ -234,6 +243,28 @@ export const useChatsStore = defineStore('chats', {
       this.activeChatId = chat.id
       this.activeChat = chat
       return chat
+    },
+    /**
+     * 从此处分叉到新会话：复制锚点及之前的历史，源会话不变。
+     */
+    async forkChat(sourceChatId: string, forkAtMessageId: string, newChatName?: string) {
+      const chat = await apiPost<Chat>(
+        `/api/chats/${encodeURIComponent(sourceChatId)}/fork`,
+        {
+          forkAtMessageId,
+          newChatName: newChatName?.trim() || null,
+        },
+      )
+      await this.loadGroupList()
+      await this.loadList(chat.characterId)
+      this.activeChatId = chat.id
+      this.activeChat = chat
+      return chat
+    },
+    async fetchForkLineage(chatId: string): Promise<ForkLineageResponse> {
+      return apiGet<ForkLineageResponse>(
+        `/api/chats/${encodeURIComponent(chatId)}/fork-lineage`,
+      )
     },
     /**
      * 加载群聊列表
