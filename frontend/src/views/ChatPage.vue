@@ -92,6 +92,7 @@ import {
   ChatImportModal,
 } from '../components/modals'
 import ErrorModal from '../components/modals/ErrorModal.vue'
+import KnowledgeGraphModal from '../components/modals/KnowledgeGraphModal.vue'
 import SettingsDrawer from '../components/SettingsDrawer.vue'
 import AvatarCropper from '../components/AvatarCropper.vue'
 import ModernAvatar from '../components/ModernAvatar.vue'
@@ -1148,6 +1149,11 @@ const isStreamEnabled = computed(() => settings.settings?.streamEnabled !== fals
 // MVU Store
 const mvuStore = useMvuStore()
 const mvuPanelOpen = ref(false)
+const knowledgeGraphModalOpen = ref(false)
+
+function openKnowledgeGraphModal() {
+  knowledgeGraphModalOpen.value = true
+}
 /** 与后端 mvu_model_resolve 一致：全局 mvuModel → 默认模型 → 候选首项 */
 const mvuResolvedModelForPanel = computed(() => {
   const s = settings.settings
@@ -5640,6 +5646,7 @@ const editingPersonaAvatarUrl = computed(() => {
     <MvuPanel
       :is-open="mvuPanelOpen"
       :logs="mvuStore.workLogs"
+      :has-knowledge-graph="mvuStore.hasKnowledgeGraph"
       :running="mvuStore.isRunning"
       :mvu-model="settings.settings?.mvuModel ?? null"
       :model-options="chatModelOptions"
@@ -5647,6 +5654,12 @@ const editingPersonaAvatarUrl = computed(() => {
       @update:is-open="mvuPanelOpen = $event"
       @select-mvu-model="onMvuPanelMvuModelSelect"
       @switch-to-assistant="switchFromMvuToAssistantPanel"
+      @open-knowledge-graph="openKnowledgeGraphModal"
+    />
+
+    <KnowledgeGraphModal
+      v-model:show="knowledgeGraphModalOpen"
+      :chat-id="activeChat?.id ?? null"
     />
 
     </div>
@@ -5718,6 +5731,7 @@ const editingPersonaAvatarUrl = computed(() => {
       :chat="activeChat" 
       :initial-tab="settingsTab" 
       @open-member-settings="actions.openMemberSettingsEditor"
+      @open-knowledge-graph="openKnowledgeGraphModal"
     />
 
     <ChatExportModal
