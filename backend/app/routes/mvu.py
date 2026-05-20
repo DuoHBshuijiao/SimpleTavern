@@ -15,9 +15,16 @@ from typing import AsyncIterator
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
-from app.schemas import StateVariables
+from app.schemas import (
+    KgEntityUpsertBody,
+    KgRelationDeleteBody,
+    KgRelationUpsertBody,
+    StateVariables,
+)
+from app.services import knowledge_graph as kg_svc
+from app.services.knowledge_graph import KnowledgeGraphError, kg_error_to_http
 from app.services.mvu_daemon import ensure_mvu_worker, subscribe, unsubscribe
-from app.storage import load_chat, load_mvu_logs, save_chat_state_variables
+from app.storage import load_chat, load_knowledge_graph, load_mvu_logs, save_chat_state_variables
 
 router = APIRouter(tags=["mvu"])
 
@@ -104,3 +111,116 @@ def update_mvu_state(chat_id: str, body: StateVariables):
         "ok": True,
         "stateVariables": updated.stateVariables.model_dump(mode="json") if updated.stateVariables else None,
     }
+
+
+def _kg_response(kg):
+    return {
+        "ok": True,
+        "knowledgeGraph": kg.model_dump(mode="json") if kg else None,
+        "hasData": kg_svc.has_graph_data(kg),
+    }
+
+
+@router.get("/mvu/{chat_id}/knowledge-graph")
+def get_knowledge_graph(chat_id: str):
+    try:
+        load_chat(chat_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="chat not found")
+    kg = load_knowledge_graph(chat_id)
+    return _kg_response(kg)
+
+
+@router.delete("/mvu/{chat_id}/knowledge-graph")
+def clear_knowledge_graph(chat_id: str):
+    try:
+        load_chat(chat_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="chat not found")
+    try:
+        kg_svc.clear_graph(chat_id)
+    except KnowledgeGraphError as e:
+        raise kg_error_to_http(e)
+    return {"ok": True, "knowledgeGraph": None, "hasData": False}
+
+
+@router.post("/mvu/{chat_id}/knowledge-graph/entities")
+def upsert_knowledge_graph_entity(chat_id: str, body: KgEntityUpsertBody):
+    try:
+        load_chat(chat_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="chat not found")
+    try:
+        kg, entity_id = kg_svc.upsert_entity(
+            chat_id,
+            name=body.name,
+            entity_type=body.type,
+            properties=body.properties,
+            entity_id=body.entityId,
+            source="user",
+            expected_version=body.expectedVersion,
+        )
+    except KnowledgeGraphError as e:
+        raise kg_error_to_http(e)
+    resp = _kg_response(kg)
+    resp["entityId"] = entity_id
+    return resp
+
+
+@router.delete("/mvu/{chat_id}/knowledge-graph/entities/{entity_id}")
+def delete_knowledge_graph_entity(chat_id: str, entity_id: str, expectedVersion: int | None = None):
+    try:
+        load_chat(chat_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="chat not found")
+    try:
+        kg = kg_svc.delete_entity(
+            chat_id,
+            entity_id,
+            source="user",
+            expected_version=expectedVersion,
+        )
+    except KnowledgeGraphError as e:
+        raise kg_error_to_http(e)
+    return _kg_response(kg)
+
+
+@router.post("/mvu/{chat_id}/knowledge-graph/relations")
+def upsert_knowledge_graph_relation(chat_id: str, body: KgRelationUpsertBody):
+    try:
+        load_chat(chat_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="chat not found")
+    try:
+        kg = kg_svc.upsert_relation(
+            chat_id,
+            subject_id=body.subjectId,
+            predicate=body.predicate,
+            object_id=body.objectId,
+            confidence=body.confidence,
+            source="user",
+            expected_version=body.expectedVersion,
+        )
+    except KnowledgeGraphError as e:
+        raise kg_error_to_http(e)
+    return _kg_response(kg)
+
+
+@router.delete("/mvu/{chat_id}/knowledge-graph/relations")
+def delete_knowledge_graph_relation(chat_id: str, body: KgRelationDeleteBody):
+    try:
+        load_chat(chat_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="chat not found")
+    try:
+        kg = kg_svc.delete_relation(
+            chat_id,
+            subject_id=body.subjectId,
+            predicate=body.predicate,
+            object_id=body.objectId,
+            source="user",
+            expected_version=body.expectedVersion,
+        )
+    except KnowledgeGraphError as e:
+        raise kg_error_to_http(e)
+    return _kg_response(kg)
