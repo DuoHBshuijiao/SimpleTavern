@@ -619,6 +619,47 @@ export interface StateVariables {
   tables: StatusTableDef[]
 }
 
+/** 知识图谱实体类型 */
+export type KgEntityType = '人物' | '地点' | '物品' | '势力' | '事件'
+
+/** 知识图谱数据来源 */
+export type KgSource = 'mvu_agent' | 'user'
+
+/** 知识图谱实体 */
+export interface KgEntity {
+  id: string
+  name: string
+  type: KgEntityType
+  properties: Record<string, string>
+  firstMentionedAt?: string | null
+  deleted?: boolean
+}
+
+/** 知识图谱关系 */
+export interface KgRelation {
+  subject: string
+  predicate: string
+  object: string
+  establishedAt?: string | null
+  confidence: number
+}
+
+/** 会话级知识图谱 */
+export interface KnowledgeGraph {
+  entities: KgEntity[]
+  relations: KgRelation[]
+  version: number
+  updatedAt: string
+  source: KgSource
+}
+
+/** GET /api/mvu/{chatId}/knowledge-graph 响应 */
+export interface KnowledgeGraphResponse {
+  ok: boolean
+  knowledgeGraph: KnowledgeGraph | null
+  hasData: boolean
+}
+
 /**
  * MVU 工作日志条目接口
  * 对应后端 MvuWorkLogEntry
