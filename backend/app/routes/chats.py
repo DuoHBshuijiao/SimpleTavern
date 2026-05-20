@@ -58,7 +58,13 @@ from app.schemas import (
     ChatContentRegexRule,
     ChatImageAttachment,
     ChatMessage,
+    ChatOverrides,
     CreateChatRequest,
+    ForkChatRequest,
+    ForkLineageResponse,
+    ForkOrigin,
+    ForkOutgoingGroup,
+    ForkSiblingSummary,
     PromoteToGroupRequest,
     StateVariables,
     UpdateChatRequest,
@@ -71,6 +77,7 @@ from app.storage import (
     delete_chat,
     delete_chat_image,
     delete_message_images,
+    iter_fork_chat_summaries,
     list_chats,
     list_group_chats,
     load_character,
@@ -779,6 +786,208 @@ def branch_chat(source_chat_id: str) -> Chat:
         raise
 
     return new_chat
+
+
+def _message_index_1based(messages: list[ChatMessage], message_id: str) -> int | None:
+    for i, m in enumerate(messages):
+        if m.id == message_id:
+            return i + 1
+    return None
+
+
+def _clear_fork_memory_overrides(overrides: ChatOverrides) -> None:
+    """分叉新会话：时间线独立，清空长期记忆与上下文锚点。"""
+    overrides.longTermMemory = None
+    overrides.contextStartMessageId = None
+    overrides.contextStartKeepBeforeMessages = None
+    overrides.lastAutoMemorySummaryAfterMessageId = None
+
+
+def _default_fork_title(source: Chat, custom: str | None) -> str:
+    name = (custom or "").strip()
+    if name:
+        return name
+    base = (source.title or "").strip()
+    if not base:
+        base = "新群聊" if source.isGroup else "新对话"
+    return f"分叉：{base}"
+
+
+def _fork_chat(source: Chat, fork_at_message_id: str, new_chat_name: str | None) -> Chat:
+    fork_idx: int | None = None
+    for i, m in enumerate(source.messages):
+        if m.id == fork_at_message_id:
+            fork_idx = i
+            break
+    if fork_idx is None:
+        raise HTTPException(status_code=404, detail="message not found")
+
+    fork_title = _default_fork_title(source, new_chat_name)
+    cid = source.characterId
+    migrated: list[ChatMessage] = []
+    for m in source.messages[: fork_idx + 1]:
+        d = m.model_dump(mode="json")
+        if m.role == "assistant":
+            d["characterId"] = m.characterId or cid
+        migrated.append(ChatMessage.model_validate(d))
+
+    if source.isGroup:
+        member_ids = list(source.memberIds)
+        if len(member_ids) < 2:
+            raise HTTPException(status_code=400, detail="group chat has fewer than 2 members")
+        for mid in member_ids:
+            try:
+                load_character(mid)
+            except FileNotFoundError:
+                raise HTTPException(status_code=404, detail=f"character not found: {mid}") from None
+
+        new_chat = Chat(
+            characterId=cid,
+            title=fork_title,
+            isGroup=True,
+            memberIds=list(member_ids),
+        )
+        new_chat.overrides = source.overrides.model_copy(deep=True)
+        _clear_fork_memory_overrides(new_chat.overrides)
+        new_chat.userPersonaId = source.userPersonaId
+        new_chat.groupDelay = source.groupDelay
+        new_chat.groupSystemInjectDepth = source.groupSystemInjectDepth
+        new_chat.groupSystemAlwaysAtBottom = source.groupSystemAlwaysAtBottom
+        for mid, s in source.memberSettings.items():
+            new_chat.memberSettings[mid] = s.model_copy(deep=True)
+    else:
+        new_chat = Chat(
+            characterId=cid,
+            title=fork_title,
+            isGroup=False,
+        )
+        new_chat.overrides = source.overrides.model_copy(deep=True)
+        _clear_fork_memory_overrides(new_chat.overrides)
+        new_chat.userPersonaId = source.userPersonaId
+
+    new_chat.createdAt = _now_iso()
+    new_chat.updatedAt = _now_iso()
+    new_chat.messages = migrated
+    new_chat.forkedFromChatId = source.id
+    new_chat.forkedFromMessageId = fork_at_message_id
+    new_chat.stateVariables = None
+
+    try:
+        save_chat(new_chat)
+        copy_chat_images_for_promote(
+            source.characterId,
+            source.id,
+            new_chat.messages,
+            new_chat.characterId,
+            new_chat.id,
+        )
+    except Exception:
+        try:
+            delete_chat(new_chat.id)
+        except Exception:
+            pass
+        raise
+
+    return new_chat
+
+
+@router.post("/chats/{source_chat_id}/fork", response_model=Chat)
+def fork_chat(source_chat_id: str, req: ForkChatRequest) -> Chat:
+    """
+    从指定消息（含）截断复制历史到新会话；不复制 stateVariables 与 assistant_chat.json。
+    """
+    try:
+        source = load_chat(source_chat_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="chat not found") from None
+
+    fork_at = (req.forkAtMessageId or "").strip()
+    if not fork_at:
+        raise HTTPException(status_code=400, detail="forkAtMessageId is required")
+
+    return _fork_chat(source, fork_at, req.newChatName)
+
+
+@router.get("/chats/{chat_id}/fork-lineage", response_model=ForkLineageResponse)
+def get_fork_lineage(chat_id: str) -> ForkLineageResponse:
+    """分叉溯源：来源、兄弟分叉、从本会话拉出的子分叉。"""
+    try:
+        current = load_chat(chat_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="chat not found") from None
+
+    origin: ForkOrigin | None = None
+    siblings: list[ForkSiblingSummary] = []
+    src_chat_id = getattr(current, "forkedFromChatId", None)
+    src_msg_id = getattr(current, "forkedFromMessageId", None)
+    if src_chat_id and src_msg_id:
+        try:
+            src_chat = load_chat(src_chat_id)
+        except FileNotFoundError:
+            src_chat = None
+        idx = (
+            _message_index_1based(src_chat.messages, src_msg_id)
+            if src_chat is not None
+            else None
+        )
+        origin = ForkOrigin(
+            chatId=src_chat_id,
+            title=(src_chat.title if src_chat else "已删除的会话"),
+            messageId=src_msg_id,
+            messageIndex=idx if idx is not None else 1,
+        )
+
+    outgoing_by_msg: dict[str, list[ForkSiblingSummary]] = {}
+    for summary in iter_fork_chat_summaries():
+        if summary.id == chat_id:
+            continue
+        if summary.forkedFromChatId == chat_id and summary.forkedFromMessageId:
+            mid = summary.forkedFromMessageId
+            outgoing_by_msg.setdefault(mid, []).append(
+                ForkSiblingSummary(
+                    chatId=summary.id,
+                    title=summary.title,
+                    createdAt=summary.createdAt,
+                )
+            )
+        if (
+            src_chat_id
+            and src_msg_id
+            and summary.forkedFromChatId == src_chat_id
+            and summary.forkedFromMessageId == src_msg_id
+            and summary.id != chat_id
+        ):
+            siblings.append(
+                ForkSiblingSummary(
+                    chatId=summary.id,
+                    title=summary.title,
+                    createdAt=summary.createdAt,
+                )
+            )
+
+    outgoing_forks: list[ForkOutgoingGroup] = []
+    for mid, chats in outgoing_by_msg.items():
+        idx = _message_index_1based(current.messages, mid)
+        if idx is None:
+            continue
+        sorted_chats = sorted(chats, key=lambda c: c.createdAt, reverse=True)
+        outgoing_forks.append(
+            ForkOutgoingGroup(
+                messageId=mid,
+                messageIndex=idx,
+                count=len(sorted_chats),
+                chats=sorted_chats,
+            )
+        )
+    outgoing_forks.sort(key=lambda g: g.messageIndex)
+
+    siblings.sort(key=lambda c: c.createdAt, reverse=True)
+
+    return ForkLineageResponse(
+        origin=origin,
+        siblings=siblings,
+        outgoingForks=outgoing_forks,
+    )
 
 
 @router.get("/chats/{chat_id}", response_model=Chat)
