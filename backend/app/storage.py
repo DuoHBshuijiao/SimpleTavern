@@ -1504,6 +1504,58 @@ def list_group_chats() -> list[Chat]:
     return out
 
 
+@dataclass(frozen=True)
+class ForkChatSummary:
+    """分叉溯源扫描用的轻量会话摘要（不加载 messages）。"""
+    id: str
+    title: str
+    createdAt: str
+    forkedFromChatId: str | None
+    forkedFromMessageId: str | None
+
+
+def iter_fork_chat_summaries() -> Iterable[ForkChatSummary]:
+    """
+    遍历所有会话的分叉相关元数据，用于 fork-lineage 全库扫描。
+    仅读取 chat.json 顶层字段，不加载 messages。
+    """
+    base = _chats_dir()
+    if not base.exists():
+        return
+    for character_dir in base.iterdir():
+        if not character_dir.is_dir():
+            continue
+        for entry in character_dir.iterdir():
+            if not entry.is_dir():
+                continue
+            record_path = entry / CHAT_RECORD_FILENAME
+            if not record_path.is_file():
+                continue
+            try:
+                with _lock_for(record_path):
+                    raw = read_json(record_path)
+            except Exception:
+                continue
+            chat_id = str(raw.get("id") or entry.name or "").strip()
+            if not chat_id:
+                continue
+            yield ForkChatSummary(
+                id=chat_id,
+                title=str(raw.get("title") or "新对话").strip() or "新对话",
+                createdAt=str(raw.get("createdAt") or ""),
+                forkedFromChatId=(
+                    str(raw["forkedFromChatId"]).strip()
+                    if raw.get("forkedFromChatId")
+                    else None
+                ),
+                forkedFromMessageId=(
+                    str(raw["forkedFromMessageId"]).strip()
+                    if raw.get("forkedFromMessageId")
+                    else None
+                ),
+            )
+
+
 def avatars_dir() -> Path:
     """
     获取头像目录路径（公开接口）
