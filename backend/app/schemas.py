@@ -991,6 +991,70 @@ class StateVariables(BaseModel):
     tables: list[StatusTableDef] = Field(default_factory=list)
 
 
+KgEntityType = Literal["人物", "地点", "物品", "势力", "事件"]
+KgSource = Literal["mvu_agent", "user"]
+
+
+class KgEntity(BaseModel):
+    """知识图谱实体。"""
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    name: str
+    type: KgEntityType
+    properties: dict[str, str] = Field(default_factory=dict)
+    firstMentionedAt: str | None = None
+    deleted: bool = False
+
+
+class KgRelation(BaseModel):
+    """知识图谱关系三元组。"""
+    model_config = ConfigDict(extra="allow")
+
+    subject: str
+    predicate: str
+    object: str
+    establishedAt: str | None = None
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+
+
+class KnowledgeGraph(BaseModel):
+    """会话级知识图谱，存于 knowledge_graph.json。"""
+    model_config = ConfigDict(extra="allow")
+
+    entities: list[KgEntity] = Field(default_factory=list)
+    relations: list[KgRelation] = Field(default_factory=list)
+    version: int = 0
+    updatedAt: str = ""
+    source: KgSource = "mvu_agent"
+
+
+class KgEntityUpsertBody(BaseModel):
+    """REST / 手动维护：实体 upsert。"""
+    name: str
+    type: KgEntityType
+    properties: dict[str, str] = Field(default_factory=dict)
+    entityId: str | None = None
+    expectedVersion: int | None = None
+
+
+class KgRelationUpsertBody(BaseModel):
+    """REST / 手动维护：关系 upsert。"""
+    subjectId: str
+    predicate: str
+    objectId: str
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    expectedVersion: int | None = None
+
+
+class KgRelationDeleteBody(BaseModel):
+    """REST：按三元组删除关系。"""
+    subjectId: str
+    predicate: str
+    objectId: str
+    expectedVersion: int | None = None
+
+
 class MvuWorkLogEntry(BaseModel):
     """MVU 助手工作日志条目，存于 mvu_logs.json。"""
     model_config = ConfigDict(extra="allow")
