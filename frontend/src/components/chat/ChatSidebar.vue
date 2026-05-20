@@ -69,6 +69,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Copy,
+  GitBranch,
   Pencil,
   Trash2,
   Users,
@@ -548,7 +549,14 @@ function confirmDelete() {
                     <X class="w-3 h-3" />
                   </button>
                 </div>
-                <div v-else class="truncate flex-1">{{ c.title }}</div>
+                <div v-else class="truncate flex-1 flex items-center gap-1 min-w-0">
+                  <GitBranch
+                    v-if="c.forkedFromChatId"
+                    class="w-3 h-3 shrink-0 text-brand"
+                    aria-hidden="true"
+                  />
+                  <span class="truncate">{{ c.title }}</span>
+                </div>
                 <span class="text-[10px] text-[var(--color-text-muted)] shrink-0">({{ c.memberIds.length }}人)</span>
               </div>
               
@@ -622,7 +630,14 @@ function confirmDelete() {
                       <X class="w-3 h-3" />
                     </button>
                   </div>
-                  <div v-else class="truncate">{{ c.title }}</div>
+                  <div v-else class="truncate flex items-center gap-1 min-w-0">
+                    <GitBranch
+                      v-if="c.forkedFromChatId"
+                      class="w-3 h-3 shrink-0 text-brand"
+                      aria-hidden="true"
+                    />
+                    <span class="truncate">{{ c.title }}</span>
+                  </div>
                 </div>
               </div>
               
