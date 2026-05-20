@@ -51,16 +51,23 @@
  *    - 位置：组件层，提供消息列表显示功能
  */
 import { ref, nextTick, computed, onBeforeUnmount, onMounted, onBeforeUpdate, onUpdated, watch } from 'vue'
-import type { ChatContentRegexRule, ChatMessage, CharacterCard, UserPersona } from '../../types/models'
+import type {
+  ChatContentRegexRule,
+  ChatMessage,
+  CharacterCard,
+  ForkSiblingSummary,
+  UserPersona,
+} from '../../types/models'
 import { useSettingsStore } from '../../stores'
 import ModernAvatar from '../ModernAvatar.vue'
 import ConfirmPopover from '../ConfirmPopover.vue'
+import SelectDropdownSurface from '../SelectDropdownSurface.vue'
 import ReasoningBubble from './ReasoningBubble.vue'
 import AnimatedClipHeight from './AnimatedClipHeight.vue'
 import { renderChatMarkdown, renderChatMarkdownStreaming } from '../../utils/markdownIt'
 import { applyContentRegexDisplay } from '../../utils/contentRegex'
 import { usePreferHoverChrome } from '../../composables/usePreferHoverChrome'
-import { Settings, ChevronLeft, ChevronRight, ChevronDown, X } from 'lucide-vue-next'
+import { Settings, ChevronLeft, ChevronRight, ChevronDown, MoreHorizontal, X } from 'lucide-vue-next'
 
 const settingsStore = useSettingsStore()
 const { preferHoverChrome } = usePreferHoverChrome()
@@ -115,6 +122,8 @@ const props = defineProps<{
   entrancingAssistantMessageId?: string | null
   /** 当前会话生效的正则规则（仅用于前端渲染替换，不修改持久化 content） */
   contentRegexRules?: ChatContentRegexRule[] | null
+  /** 从本会话各消息拉出的子分叉（messageId -> 摘要） */
+  outgoingForksByMessageId?: Record<string, { count: number; chats: ForkSiblingSummary[] }>
 }>()
 
 function getChatImageUrl(imageId: string): string {
@@ -128,7 +137,76 @@ const emit = defineEmits<{
   'rewrite-message': [m: ChatMessage]
   'switch-previous-version': [m: ChatMessage]
   'switch-next-version': [m: ChatMessage]
+  'fork-message': [m: ChatMessage]
+  'select-fork-child': [chatId: string]
 }>()
+
+const messageMenuOpen = ref(false)
+const messageMenuMessageId = ref<string | null>(null)
+const menuAnchorById = new Map<string, HTMLElement>()
+
+function setMessageMenuAnchor(messageId: string, el: unknown) {
+  if (el instanceof HTMLElement) menuAnchorById.set(messageId, el)
+  else menuAnchorById.delete(messageId)
+}
+
+const messageMenuAnchorRef = computed(() => {
+  const id = messageMenuMessageId.value
+  return id ? menuAnchorById.get(id) ?? null : null
+})
+
+function toggleMessageMenu(messageId: string) {
+  if (messageMenuMessageId.value === messageId && messageMenuOpen.value) {
+    messageMenuOpen.value = false
+    messageMenuMessageId.value = null
+  } else {
+    messageMenuMessageId.value = messageId
+    messageMenuOpen.value = true
+  }
+}
+
+function closeMessageMenu() {
+  messageMenuOpen.value = false
+  messageMenuMessageId.value = null
+}
+
+function canForkMessage(m: ChatMessage): boolean {
+  return !m.id.startsWith('local_') && m.role !== 'tool'
+}
+
+function getOutgoingFork(m: ChatMessage) {
+  return props.outgoingForksByMessageId?.[m.id]
+}
+
+const forkListOpen = ref(false)
+const forkListMessageId = ref<string | null>(null)
+const forkListAnchorById = new Map<string, HTMLElement>()
+
+function setForkListAnchor(messageId: string, el: unknown) {
+  if (el instanceof HTMLElement) forkListAnchorById.set(messageId, el)
+  else forkListAnchorById.delete(messageId)
+}
+
+const forkListAnchorRef = computed(() => {
+  const id = forkListMessageId.value
+  return id ? forkListAnchorById.get(id) ?? null : null
+})
+
+function toggleForkList(messageId: string) {
+  if (forkListMessageId.value === messageId && forkListOpen.value) {
+    forkListOpen.value = false
+    forkListMessageId.value = null
+  } else {
+    forkListMessageId.value = messageId
+    forkListOpen.value = true
+  }
+}
+
+function onSelectForkChild(chatId: string) {
+  forkListOpen.value = false
+  forkListMessageId.value = null
+  emit('select-fork-child', chatId)
+}
 
 // 滚动容器引用
 const scrollRef = ref<HTMLElement | null>(null)
@@ -1339,11 +1417,46 @@ onBeforeUnmount(() => {
           data-chat-bubble-column
           :class="m.role === 'user' ? 'items-end' : 'items-start'"
         >
-          <div class="flex items-center gap-2 mb-1 px-1">
+          <div class="flex items-center gap-2 mb-1 px-1 flex-wrap">
             <span class="text-xs font-bold" :class="m.role === 'user' ? 'text-brand-fg-soft' : 'text-[var(--color-text-muted)]'">
               {{ getMessageLabel(m) }}
             </span>
             <span v-if="m.role === 'system'" class="text-[10px] bg-yellow-500/10 text-yellow-500 px-1.5 py-0.5 rounded">SYSTEM</span>
+            <div
+              v-if="getOutgoingFork(m)"
+              :ref="(el) => setForkListAnchor(m.id, el)"
+              class="relative"
+            >
+              <button
+                type="button"
+                class="text-[10px] text-brand hover:underline"
+                :aria-label="`已有 ${getOutgoingFork(m)?.count ?? 0} 个分叉，点击查看`"
+                @click.stop="toggleForkList(m.id)"
+              >
+                已有 {{ getOutgoingFork(m)?.count }} 个分叉
+              </button>
+              <SelectDropdownSurface
+                v-if="forkListMessageId === m.id"
+                v-model:open="forkListOpen"
+                :anchor-ref="forkListAnchorRef"
+                placement="bottom"
+                :auto-width="true"
+                :gap-px="4"
+                max-height-class="max-h-48"
+                @update:open="(v) => { if (!v) forkListMessageId = null }"
+              >
+                <button
+                  v-for="fc in getOutgoingFork(m)?.chats ?? []"
+                  :key="fc.chatId"
+                  type="button"
+                  class="w-full text-left px-3 py-2 rounded-lg text-sm text-[var(--color-text-secondary)] hover:bg-surface-muted truncate"
+                  role="menuitem"
+                  @click="onSelectForkChild(fc.chatId)"
+                >
+                  {{ fc.title }}
+                </button>
+              </SelectDropdownSurface>
+            </div>
           </div>
 
           <!-- 思考链气泡：流式未展开默认 100px 限高（streamingWindowHeight），超出内层滚动；结束后收起为「已思考 x.x 秒」小卡片 -->
@@ -1371,6 +1484,41 @@ onBeforeUnmount(() => {
               isUserSendEntering(m) ? 'message-bubble--user-send-enter' : '',
             ]"
           >
+            <div
+              v-if="canForkMessage(m)"
+              :ref="(el) => setMessageMenuAnchor(m.id, el)"
+              class="absolute top-2 right-2 z-10"
+              :class="preferHoverChrome ? 'opacity-0 group-hover:opacity-100' : 'opacity-100'"
+            >
+              <button
+                type="button"
+                class="p-1 rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-white/10 transition-colors"
+                :disabled="isGenerating"
+                aria-label="消息更多操作"
+                @click.stop="toggleMessageMenu(m.id)"
+              >
+                <MoreHorizontal class="w-4 h-4" />
+              </button>
+              <SelectDropdownSurface
+                v-if="messageMenuMessageId === m.id"
+                v-model:open="messageMenuOpen"
+                :anchor-ref="messageMenuAnchorRef"
+                placement="bottom"
+                :auto-width="true"
+                :gap-px="4"
+                @update:open="(v) => { if (!v) closeMessageMenu() }"
+              >
+                <button
+                  type="button"
+                  class="w-full text-left px-3 py-2 rounded-lg text-sm text-[var(--color-text-secondary)] hover:bg-surface-muted whitespace-nowrap"
+                  role="menuitem"
+                  aria-label="从此处分叉到新会话"
+                  @click="closeMessageMenu(); emit('fork-message', m)"
+                >
+                  从此处分叉到新会话
+                </button>
+              </SelectDropdownSurface>
+            </div>
             <AnimatedClipHeight
               mode="intrinsic-fullColumn"
               :relax-height-dead-zone="
