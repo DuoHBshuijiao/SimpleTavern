@@ -63,7 +63,8 @@ import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useCharacterSidebarRecencyStore, useCharactersStore, useChatsStore, useSettingsStore, useUiStore, useMvuStore } from '../stores'
 import type { SettingsDrawerTab } from '../stores/ui'
-import type { ApiPreset, AssistantAttachment, CharacterCard, ChatContentRegexRule, ChatImageAttachment, ChatMessage, ChatOverrides, ChatMvuMode, ExtraFirstMessageEntry, GroupMemberSettings, Chat, MainChatRole, MvuMode, TtsSessionConfig, WorldBook, GroupMvuPreset } from '../types/models'
+import type { ApiPreset, AssistantAttachment, CharacterCard, ChatContentRegexRule, ChatImageAttachment, ChatMessage, ChatOverrides, ChatMvuMode, ExtraFirstMessageEntry, ForkLineageResponse, ForkSiblingSummary, GroupMemberSettings, Chat, MainChatRole, MvuMode, TtsSessionConfig, WorldBook, GroupMvuPreset } from '../types/models'
+import { buildForkTitle, forkMessagePreview } from '../utils/chatFork'
 
 // Composables
 import { 
@@ -82,6 +83,7 @@ import { useViewportNarrowPortrait } from '../composables/useViewportNarrowPortr
 
 // 子组件
 import { ChatSidebar, MessageList, ChatInput, AssistantPanel, AssistantThread, MvuCapabilityEditor, MvuPanel } from '../components/chat'
+import ForkLineageBanner from '../components/chat/ForkLineageBanner.vue'
 import StateVariablesBar from '../components/chat/StateVariablesBar.vue'
 import {
   GroupCreatorModal,
@@ -93,6 +95,7 @@ import {
 } from '../components/modals'
 import ErrorModal from '../components/modals/ErrorModal.vue'
 import KnowledgeGraphModal from '../components/modals/KnowledgeGraphModal.vue'
+import MessageForkModal from '../components/modals/MessageForkModal.vue'
 import SettingsDrawer from '../components/SettingsDrawer.vue'
 import AvatarCropper from '../components/AvatarCropper.vue'
 import ModernAvatar from '../components/ModernAvatar.vue'
@@ -4617,6 +4620,96 @@ async function handleBranchChat(chat: Chat) {
   }
 }
 
+const showForkModal = ref(false)
+const forkTargetMessage = ref<ChatMessage | null>(null)
+const forkSubmitting = ref(false)
+const forkLineage = ref<ForkLineageResponse | null>(null)
+const forkLineageLoading = ref(false)
+
+const outgoingForksByMessageId = computed(() => {
+  const map: Record<string, { count: number; chats: ForkSiblingSummary[] }> = {}
+  for (const g of forkLineage.value?.outgoingForks ?? []) {
+    map[g.messageId] = { count: g.count, chats: g.chats }
+  }
+  return map
+})
+
+const forkModalDefaultTitle = computed(() => {
+  const chat = activeChat.value
+  if (!chat) return '分叉：新对话'
+  return buildForkTitle(chat.title, chat.isGroup)
+})
+
+const forkModalPreview = computed(() => {
+  const m = forkTargetMessage.value
+  if (!m) return ''
+  return forkMessagePreview(versions.getDisplayContent(m))
+})
+
+async function refreshForkLineage(chatId: string) {
+  forkLineageLoading.value = true
+  try {
+    forkLineage.value = await chats.fetchForkLineage(chatId)
+  } catch {
+    forkLineage.value = null
+  } finally {
+    forkLineageLoading.value = false
+  }
+}
+
+watch(
+  () => chats.activeChatId,
+  (id) => {
+    if (id) void refreshForkLineage(id)
+    else forkLineage.value = null
+  },
+  { immediate: true },
+)
+
+function onForkMessage(m: ChatMessage) {
+  forkTargetMessage.value = m
+  showForkModal.value = true
+}
+
+async function onConfirmFork(newChatName: string) {
+  const chat = activeChat.value
+  const msg = forkTargetMessage.value
+  if (!chat || !msg) return
+  forkSubmitting.value = true
+  try {
+    const created = await chats.forkChat(chat.id, msg.id, newChatName || undefined)
+    showForkModal.value = false
+    forkTargetMessage.value = null
+    await afterChatReload(created.id)
+    await nextTick()
+    chatInputRef.value?.focusComposer?.()
+  } catch (e: unknown) {
+    await notifyMessage(e instanceof Error ? e.message : String(e), { title: '分叉失败' })
+  } finally {
+    forkSubmitting.value = false
+  }
+}
+
+async function onNavigateForkSource() {
+  const origin = forkLineage.value?.origin
+  if (!origin) return
+  try {
+    await chats.load(origin.chatId)
+    await afterChatReload(origin.chatId)
+  } catch (e: unknown) {
+    await notifyMessage(e instanceof Error ? e.message : String(e), { title: '无法打开源会话' })
+  }
+}
+
+async function onSelectForkChild(chatId: string) {
+  try {
+    await chats.load(chatId)
+    await afterChatReload(chatId)
+  } catch (e: unknown) {
+    await notifyMessage(e instanceof Error ? e.message : String(e), { title: '无法打开分叉会话' })
+  }
+}
+
 /**
  * 选择聊天
  *
@@ -5469,6 +5562,11 @@ const editingPersonaAvatarUrl = computed(() => {
                 />
               </div>
             </div>
+          <ForkLineageBanner
+            :lineage="forkLineage"
+            :loading="forkLineageLoading"
+            @navigate-source="onNavigateForkSource"
+          />
           <MessageList
             ref="messageListRef"
             :chat-id="activeChat.id"
@@ -5498,12 +5596,15 @@ const editingPersonaAvatarUrl = computed(() => {
             :entrancing-user-message-id="entrancingUserMessageId"
             :entrancing-assistant-message-id="entrancingAssistantMessageId"
             :content-regex-rules="effectiveContentRegexRules"
+            :outgoing-forks-by-message-id="outgoingForksByMessageId"
             @edit-message="(m) => actions.openEditMessage(m, versions.getDisplayContent(m))"
             @delete-message="actions.deleteMessage"
             @read-aloud-message="handleReadAloudMessage"
             @rewrite-message="handleRewriteMessage"
             @switch-previous-version="handleSwitchPreviousVersion"
             @switch-next-version="handleSwitchNextVersion"
+            @fork-message="onForkMessage"
+            @select-fork-child="onSelectForkChild"
           />
           </div>
 
@@ -5694,6 +5795,14 @@ const editingPersonaAvatarUrl = computed(() => {
 
     <!-- 助手设置抽屉 -->
           <!-- 消息编辑弹窗 -->
+    <MessageForkModal
+      v-model:show="showForkModal"
+      :message-preview="forkModalPreview"
+      :default-title="forkModalDefaultTitle"
+      :is-submitting="forkSubmitting"
+      @confirm="onConfirmFork"
+    />
+
     <MessageEditorModal
       :show="actions.showMessageEditor.value"
       :message-id="actions.editingMessageId.value"
