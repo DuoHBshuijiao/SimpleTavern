@@ -32,8 +32,8 @@
  * @returns {Promise<T>} 解析后的JSON响应数据
  * @throws {Error} 请求失败时抛出错误，错误信息为响应文本
  */
-export async function apiGet<T>(path: string): Promise<T> {
-  const r = await fetch(path, { method: 'GET' })
+export async function apiGet<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const r = await fetch(path, { method: 'GET', signal })
   if (!r.ok) throw new Error(await r.text())
   return (await r.json()) as T
 }
