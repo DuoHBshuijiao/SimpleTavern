@@ -2579,6 +2579,13 @@ function scrollToBottom(instant = false, force = false) {
   })
 }
 
+/** 切换会话：等 MessageList 批量行高落盘后再单次贴底 */
+function scrollToBottomAfterLayout(instant = true, force = true) {
+  nextTick(() => {
+    messageListRef.value?.scrollToBottomAfterLayout?.(instant, force)
+  })
+}
+
 /**
  * 仅用于「用户发送消息」时对齐到底部：MessageList 内以 rAF 驱动一段 ~420ms 的平滑滚动，
  * 与气泡入场关键帧同步，让新消息从视口下方抬入视野。流式 / 重写 / 切聊天等其它场景
@@ -2971,10 +2978,8 @@ watch(
     }
     await chats.loadList(cid)
     const ac = chats.activeChat
+    // 仅当当前群聊包含该角色时留在群聊；点击群外角色（如 A）应跳到该角色最新单聊
     if (ac?.isGroup && ac.memberIds?.includes(cid)) {
-      return
-    }
-    if (ac?.isGroup && chats.activeChatId) {
       return
     }
     const latest = pickLatestChatByUpdatedAt(chats.list)
@@ -3023,7 +3028,7 @@ watch(
   () => activeChat.value?.id,
   (next, prev) => {
     if (next && next !== prev) {
-      scrollToBottom(true, true)
+      scrollToBottomAfterLayout(true, true)
     }
     if (prev != null && next !== prev) {
       clearMessageListEnterAnimations()
@@ -5673,9 +5678,10 @@ const editingPersonaAvatarUrl = computed(() => {
 
           <!-- 消息列表：MVU 状态条叠在列表与输入区交界处（贴底），正文滚动从其下方穿过 -->
           <div class="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-visible">
+            <!-- z-[45] 须高于 chat-input-shell 的 z-40，避免侧栏收起 sink 时透明输入壳挡住 MVU 状态条按钮 -->
             <div
               v-if="mvuStore.capsuleData.length > 0"
-              class="pointer-events-none absolute inset-x-0 bottom-0 z-30 overflow-visible"
+              class="pointer-events-none absolute inset-x-0 bottom-0 z-[45] overflow-visible"
             >
               <div class="pointer-events-auto mx-auto w-full max-w-4xl px-4">
                 <StateVariablesBar
