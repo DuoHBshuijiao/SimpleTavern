@@ -190,7 +190,24 @@ export interface ChatOverrides {
   groupMvuAnchorCharacterId?: string | null
   /** fork/沿用快照时的模板成员 */
   groupMvuTemplateCharacterId?: string | null
+  /** 会话级知识图谱开关；undefined/null 视为启用 */
+  knowledgeGraphEnabled?: boolean | null
+  /** RP 注入位置；undefined/null 为 legacy（末条 assistant 末尾追加） */
+  knowledgeGraphInjectPosition?: KnowledgeGraphInjectPosition | null
+  /** 深度插入条数 */
+  knowledgeGraphInjectDepth?: number
+  /** 最新消息前模式锚定角色 */
+  knowledgeGraphBeforeLastRole?: KnowledgeGraphBeforeLastRole
 }
+
+export type KnowledgeGraphInjectPosition =
+  | 'before_system'
+  | 'after_system'
+  | 'depth'
+  | 'before_last'
+  | 'legacy'
+
+export type KnowledgeGraphBeforeLastRole = 'assistant' | 'system' | 'user'
 
 export type AutoReadScope = 'off' | 'assistant_only' | 'user_only' | 'all'
 export type TtsProvider = 'minimax' | 'glm' | 'glm_local' | 'qwen3_local' | 'omnivoice_local' | 'openrouter' | 'siliconflow'
