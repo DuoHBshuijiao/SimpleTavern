@@ -96,6 +96,7 @@ type ImagePreviewWindow = {
 
 const imagePreviews = ref<ImagePreviewWindow[]>([])
 const activeDraggingPreviewId = ref<number | null>(null)
+let activePreviewPointerId: number | null = null
 let previewWindowIdSeed = 0
 let previewWindowZSeed = 1450
 
@@ -190,8 +191,9 @@ async function toggleTextAttachment(attachment: AssistantAttachment) {
 }
 
 function removePreviewDragListeners() {
-  window.removeEventListener('mousemove', onPreviewDragMove)
-  window.removeEventListener('mouseup', stopPreviewDrag)
+  window.removeEventListener('pointermove', onPreviewDragMove)
+  window.removeEventListener('pointerup', stopPreviewDrag)
+  window.removeEventListener('pointercancel', stopPreviewDrag)
 }
 
 function getPreviewById(id: number) {
@@ -227,6 +229,7 @@ function closeImagePreview(id: number) {
   if (preview?.isDragging) {
     preview.isDragging = false
     activeDraggingPreviewId.value = null
+    activePreviewPointerId = null
     removePreviewDragListeners()
   }
   imagePreviews.value = imagePreviews.value.filter((item) => item.id !== id)
@@ -260,24 +263,27 @@ function handlePreviewWheel(id: number, event: WheelEvent) {
   preview.scale = nextScale
 }
 
-function startPreviewDrag(id: number, event: MouseEvent) {
+function startPreviewDrag(id: number, event: PointerEvent) {
   if (event.button !== 0) return
   const preview = getPreviewById(id)
   if (!preview) return
   event.preventDefault()
   activeDraggingPreviewId.value = id
+  activePreviewPointerId = event.pointerId
   preview.isDragging = true
   preview.dragStart = { x: event.clientX, y: event.clientY }
   preview.positionAtDragStart = { ...preview.position }
   bringPreviewToFront(id)
-  window.addEventListener('mousemove', onPreviewDragMove)
-  window.addEventListener('mouseup', stopPreviewDrag)
+  window.addEventListener('pointermove', onPreviewDragMove)
+  window.addEventListener('pointerup', stopPreviewDrag)
+  window.addEventListener('pointercancel', stopPreviewDrag)
 }
 
-function onPreviewDragMove(event: MouseEvent) {
-  if (activeDraggingPreviewId.value == null) return
+function onPreviewDragMove(event: PointerEvent) {
+  if (activeDraggingPreviewId.value == null || activePreviewPointerId !== event.pointerId) return
   const preview = getPreviewById(activeDraggingPreviewId.value)
   if (!preview || !preview.isDragging) return
+  event.preventDefault()
   const offsetX = event.clientX - preview.dragStart.x
   const offsetY = event.clientY - preview.dragStart.y
   preview.position = {
@@ -286,12 +292,14 @@ function onPreviewDragMove(event: MouseEvent) {
   }
 }
 
-function stopPreviewDrag() {
+function stopPreviewDrag(event?: PointerEvent) {
+  if (event != null && activePreviewPointerId !== event.pointerId) return
   if (activeDraggingPreviewId.value != null) {
     const preview = getPreviewById(activeDraggingPreviewId.value)
     if (preview) preview.isDragging = false
   }
   activeDraggingPreviewId.value = null
+  activePreviewPointerId = null
   removePreviewDragListeners()
 }
 
@@ -640,14 +648,14 @@ onBeforeUnmount(() => {
           :class="preview.isDragging ? 'cursor-grabbing' : 'cursor-grab'"
           :style="getPreviewDialogStyle(preview)"
           @wheel.prevent="(event) => handlePreviewWheel(preview.id, event)"
-          @mousedown="(event) => startPreviewDrag(preview.id, event)"
+          @pointerdown="(event) => startPreviewDrag(preview.id, event)"
         >
           <button
             type="button"
             class="image-preview-close"
             aria-label="关闭图片预览"
             @click.stop="closeImagePreview(preview.id)"
-            @mousedown.stop
+            @pointerdown.stop
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M18 6 6 18" />
@@ -682,6 +690,7 @@ onBeforeUnmount(() => {
   padding: 12px;
   transform-origin: center center;
   user-select: none;
+  touch-action: none;
 }
 
 .image-preview-close {
