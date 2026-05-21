@@ -11,7 +11,7 @@ from typing import Any, Literal
 
 from pydantic import ValidationError
 
-from app.schemas import AssistantChat, Chat
+from app.schemas import AssistantChat
 from app.storage import (
     ASSISTANT_CHAT_FILENAME,
     CHAT_MEMORY_FILENAME,
@@ -20,6 +20,7 @@ from app.storage import (
     assistant_workspace_chat_path,
     chats_dir,
     get_repo_root,
+    read_bytes_under_lock,
     write_json,
 )
 
@@ -35,8 +36,8 @@ IntegrityTargetKind = Literal[
 ]
 RepairAction = Literal["delete", "reset_json"]
 
-STARTUP_SCAN_DELAY_SEC = 30
-SCAN_INTERVAL_SEC = 10
+STARTUP_SCAN_DELAY_SEC = 60
+SCAN_INTERVAL_SEC = 30
 READ_RETRY_DELAY_SEC = 0.15
 READ_RETRY_ATTEMPTS = 2
 
@@ -107,7 +108,7 @@ def _normalize_detail(value: str | None) -> str | None:
 def _read_bytes_once(path: Path) -> StableFileRead | None:
     try:
         before = path.stat()
-        data = path.read_bytes()
+        data = read_bytes_under_lock(path, shared=True)
         after = path.stat()
     except FileNotFoundError:
         return None
@@ -261,8 +262,7 @@ class DataIntegrityService:
     def _validate_schema(self, target: ScanTarget, raw: Any) -> str | None:
         try:
             if target.kind in {"chat_record", "legacy_chat"}:
-                Chat.model_validate(raw)
-                return None
+                return self._validate_chat_record_schema(raw)
             if target.kind == "chat_memory":
                 return self._validate_chat_memory_schema(raw)
             AssistantChat.model_validate(raw)
@@ -271,6 +271,24 @@ class DataIntegrityService:
             return _normalize_detail(str(exc))
         except ValueError as exc:
             return _normalize_detail(str(exc))
+
+    def _validate_chat_record_schema(self, raw: Any) -> str | None:
+        """
+        巡检只做轻量结构检查，避免后台扫描反复完整校验超长 messages。
+        完整 Pydantic 校验仍发生在用户实际加载会话时。
+        """
+        if not isinstance(raw, dict):
+            return "聊天记录必须是对象"
+        for key in ("id", "characterId", "messages"):
+            if key not in raw:
+                return f"聊天记录缺少 {key} 字段"
+        if not isinstance(raw.get("id"), str) or not raw.get("id"):
+            return "聊天记录 id 必须是非空字符串"
+        if not isinstance(raw.get("characterId"), str) or not raw.get("characterId"):
+            return "聊天记录 characterId 必须是非空字符串"
+        if not isinstance(raw.get("messages"), list):
+            return "聊天记录 messages 必须是数组"
+        return None
 
     async def _scan_target(self, target: ScanTarget) -> tuple[FileSnapshot, ScanIssue] | None:
         stable = await self._read_stable_bytes(target.path)
