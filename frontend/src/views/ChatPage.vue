@@ -1202,6 +1202,10 @@ const chatMvuRuntimeEnabledForPanel = computed(() => {
   return isChatMvuRuntimeEnabled(ac, (id) => characters.list.find((c) => c.id === id))
 })
 
+const showMvuStateBar = computed(
+  () => chatMvuRuntimeEnabledForPanel.value && mvuStore.capsuleData.length > 0,
+)
+
 const knowledgeGraphEnabledEffective = computed(
   () => chats.activeChat?.overrides?.knowledgeGraphEnabled !== false,
 )
@@ -2516,9 +2520,9 @@ function updateMvuStateBarWrapExtraHeight(px: number) {
 }
 
 watch(
-  () => [activeChat.value?.id ?? null, mvuStore.capsuleData.length] as const,
-  ([chatId, capsuleCount], [oldChatId]) => {
-    if (chatId !== oldChatId || capsuleCount <= 0) {
+  () => [activeChat.value?.id ?? null, showMvuStateBar.value] as const,
+  ([chatId, visible], [oldChatId]) => {
+    if (chatId !== oldChatId || !visible) {
       mvuStateBarWrapExtraHeightPx.value = 0
     }
   },
@@ -5679,20 +5683,23 @@ const editingPersonaAvatarUrl = computed(() => {
           <!-- 消息列表：MVU 状态条叠在列表与输入区交界处（贴底），正文滚动从其下方穿过 -->
           <div class="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-visible">
             <!-- z-[45] 须高于 chat-input-shell 的 z-40，避免侧栏收起 sink 时透明输入壳挡住 MVU 状态条按钮 -->
-            <div
-              v-if="mvuStore.capsuleData.length > 0"
-              class="pointer-events-none absolute inset-x-0 bottom-0 z-[45] overflow-visible"
-            >
-              <div class="pointer-events-auto mx-auto w-full max-w-4xl px-4">
-                <StateVariablesBar
-                  :capsules="mvuStore.capsuleData"
-                  :is-running="mvuStore.isRunning"
-                  :chat-id="activeChat.id"
-                  @toggle-panel="mvuPanelOpen = !mvuPanelOpen"
-                  @wrap-extra-height-change="updateMvuStateBarWrapExtraHeight"
-                />
+            <Transition name="mvu-state-bar">
+              <div
+                v-if="showMvuStateBar"
+                key="mvu-state-bar"
+                class="pointer-events-none absolute inset-x-0 bottom-0 z-[45] overflow-visible"
+              >
+                <div class="pointer-events-auto mx-auto w-full max-w-4xl px-4">
+                  <StateVariablesBar
+                    :capsules="mvuStore.capsuleData"
+                    :is-running="mvuStore.isRunning"
+                    :chat-id="activeChat.id"
+                    @toggle-panel="mvuPanelOpen = !mvuPanelOpen"
+                    @wrap-extra-height-change="updateMvuStateBarWrapExtraHeight"
+                  />
+                </div>
               </div>
-            </div>
+            </Transition>
           <ForkLineageBanner
             :lineage="forkLineage"
             :loading="forkLineageLoading"
@@ -6873,6 +6880,27 @@ const editingPersonaAvatarUrl = computed(() => {
   transform: translateY(6px);
 }
 
+/* MVU 状态条：从输入区方向滑入/滑出（锚点在底边） */
+.mvu-state-bar-enter-active,
+.mvu-state-bar-leave-active {
+  transition:
+    opacity 300ms cubic-bezier(0.4, 0, 0.2, 1),
+    transform 320ms cubic-bezier(0.25, 1, 0.5, 1);
+  transform-origin: bottom center;
+}
+
+.mvu-state-bar-enter-from,
+.mvu-state-bar-leave-to {
+  opacity: 0;
+  transform: translateY(12px);
+}
+
+.mvu-state-bar-enter-to,
+.mvu-state-bar-leave-from {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 /* 会话搜索命中 chip 行：与主搜索区相同 grid 手法，顶栏高度随 ResizeObserver 连续变化 */
 .chat-search-chips-expand {
   display: grid;
@@ -6905,7 +6933,9 @@ const editingPersonaAvatarUrl = computed(() => {
   .header-more-pop-enter-active,
   .header-more-pop-leave-active,
   .chat-header-groupstrip-enter-active,
-  .chat-header-groupstrip-leave-active {
+  .chat-header-groupstrip-leave-active,
+  .mvu-state-bar-enter-active,
+  .mvu-state-bar-leave-active {
     transition-duration: 0.01ms !important;
   }
 
@@ -6914,7 +6944,9 @@ const editingPersonaAvatarUrl = computed(() => {
   .header-more-pop-enter-from,
   .header-more-pop-leave-to,
   .chat-header-groupstrip-enter-from,
-  .chat-header-groupstrip-leave-to {
+  .chat-header-groupstrip-leave-to,
+  .mvu-state-bar-enter-from,
+  .mvu-state-bar-leave-to {
     opacity: 1;
     transform: none;
   }
