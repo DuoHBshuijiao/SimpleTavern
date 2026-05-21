@@ -5,7 +5,7 @@
  * - 内容布局宽度独立于当前 frame 宽度，避免动画过程中反复重排
  * - frame 只负责 width/height 过渡与 overflow 裁剪
  */
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 type FrameMode = 'intrinsic' | 'intrinsic-fullColumn' | 'fullWidth' | 'fixed'
 
@@ -44,6 +44,7 @@ let lastW = 0
 let lastH = 0
 let lastContentLayoutWidth = 0
 let settleRaf = 0
+let syncRaf = 0
 
 const hostInlineStyle = computed<Record<string, string>>(() => {
   if (props.mode === 'fullWidth') {
@@ -194,13 +195,30 @@ function onFrameTransitionEnd(event: TransitionEvent) {
   scheduleSettledCheck()
 }
 
+function scheduleSync() {
+  if (syncRaf) cancelAnimationFrame(syncRaf)
+  syncRaf = requestAnimationFrame(() => {
+    syncRaf = 0
+    sync()
+  })
+}
+
 function sync() {
   const frame = frameRef.value
   if (!frame) return
   const target = measureTargetSize()
   if (!target) return
-  syncVisibleContentWidth(target.contentWidth)
   const frameH = frameHeightForSync(target.height)
+  if (!firstSync && !reducedMotion()) {
+    const dw = Math.abs(target.width - lastW)
+    const dh = Math.abs(frameH - lastH)
+    const hDead = props.relaxHeightDeadZone ? 0.01 : 1
+    const changedW = dw >= 0.01
+    const changedH = dh >= hDead
+    const changedContentW = Math.abs(target.contentWidth - lastContentLayoutWidth) >= 0.01
+    if (!changedW && !changedH && !changedContentW) return
+  }
+  syncVisibleContentWidth(target.contentWidth)
   if (reducedMotion()) {
     frame.style.width = `${target.width}px`
     frame.style.height = `${frameH}px`
@@ -251,14 +269,14 @@ function attach() {
   const h = hostRef.value
   if (!v || !m || !h) return
   ro = new ResizeObserver(() => {
-    nextTick(sync)
+    scheduleSync()
   })
   ro.observe(v)
   ro.observe(m)
   ro.observe(h)
   const col = h.closest(CHAT_BUBBLE_COLUMN)
   if (col) ro.observe(col)
-  nextTick(sync)
+  scheduleSync()
 }
 
 watch([hostRef, frameRef, visibleRef, measureRef], () => {
@@ -273,11 +291,11 @@ watch([hostRef, frameRef, visibleRef, measureRef], () => {
 
 watch(
   () => [props.mode, props.fixedWidthPx, props.fixedHeightPx, props.durationMs, props.easing, props.contentFullWidth] as const,
-  () => nextTick(sync),
+  () => scheduleSync(),
 )
 
 function onResize() {
-  nextTick(sync)
+  scheduleSync()
 }
 
 onMounted(() => {
@@ -286,6 +304,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onResize)
+  if (syncRaf) cancelAnimationFrame(syncRaf)
   if (settleRaf) cancelAnimationFrame(settleRaf)
   clearVisibleContentWidth()
   ro?.disconnect()
