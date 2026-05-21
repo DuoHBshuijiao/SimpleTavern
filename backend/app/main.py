@@ -64,6 +64,13 @@ from app.tokenizer_service import warmup_tokenizer
 from app.version import APP_VERSION
 
 
+async def _warm_fork_index() -> None:
+    """启动后预热 fork 索引，避免首个 lineage 请求承担冷重建。"""
+    from app.fork_index import rebuild_fork_index
+
+    await asyncio.to_thread(rebuild_fork_index)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -72,6 +79,7 @@ async def lifespan(app: FastAPI):
     """
     ensure_data_initialized()
     warmup_tokenizer()
+    fork_index_task = asyncio.create_task(_warm_fork_index())
     integrity_scan_task = asyncio.create_task(data_integrity_service.run_startup_scan())
     await tts_cache_patrol.start()
     await http_log_sweeper.start()
@@ -83,7 +91,12 @@ async def lifespan(app: FastAPI):
         stop_glm_local_tts()
         stop_omnivoice_local_tts()
         stop_qwen3_local_tts()
+        fork_index_task.cancel()
         integrity_scan_task.cancel()
+        try:
+            await fork_index_task
+        except asyncio.CancelledError:
+            pass
         try:
             await integrity_scan_task
         except asyncio.CancelledError:
