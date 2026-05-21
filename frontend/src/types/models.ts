@@ -733,6 +733,8 @@ export interface Chat {
   forkedFromChatId?: string | null
   /** 消息分叉溯源：锚点消息 ID */
   forkedFromMessageId?: string | null
+  /** 锚点在源会话中的 1-based 序号 */
+  forkedFromMessageIndex?: number | null
 }
 
 export interface ForkSiblingSummary {
