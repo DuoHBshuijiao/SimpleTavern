@@ -376,12 +376,15 @@ def _inject_mvu_state_tables_for_directive(messages: list[dict], chat: Any, char
 
 
 def _inject_knowledge_graph(messages: list[dict], chat: Any) -> bool:
-    """仅修改本次请求 messages，将知识图谱摘要追加到最后一条 assistant 后。"""
+    """仅修改本次请求 messages，按会话配置注入知识图谱摘要。"""
     from app.group_mvu import is_chat_mvu_runtime_enabled
+    from app.kg_inject import apply_knowledge_graph_injection, is_knowledge_graph_enabled
     from app.services.knowledge_graph import has_graph_data, render_context_text
     from app.storage import load_knowledge_graph
 
     if not is_chat_mvu_runtime_enabled(chat):
+        return False
+    if not is_knowledge_graph_enabled(chat):
         return False
     kg = load_knowledge_graph(chat.id)
     if not has_graph_data(kg):
@@ -389,16 +392,7 @@ def _inject_knowledge_graph(messages: list[dict], chat: Any) -> bool:
     body = render_context_text(kg).strip()
     if not body:
         return False
-    block = f"\n\n<KnowledgeGraph>\n{body}\n</KnowledgeGraph>"
-    for msg in reversed(messages):
-        if msg.get("role") != "assistant":
-            continue
-        content = msg.get("content")
-        if not isinstance(content, str):
-            continue
-        msg["content"] = f"{content.rstrip()}{block}"
-        return True
-    return False
+    return apply_knowledge_graph_injection(messages, chat, body)
 
 
 def _message_to_openai_content(
