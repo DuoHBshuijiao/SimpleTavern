@@ -64,8 +64,6 @@ import { useRoute, useRouter } from 'vue-router'
 import { useCharacterSidebarRecencyStore, useCharactersStore, useChatsStore, useSettingsStore, useUiStore, useMvuStore } from '../stores'
 import type { SettingsDrawerTab } from '../stores/ui'
 import type { ApiPreset, AssistantAttachment, CharacterCard, ChatContentRegexRule, ChatImageAttachment, ChatMessage, ChatOverrides, ChatMvuMode, ExtraFirstMessageEntry, ForkLineageResponse, ForkSiblingSummary, GroupMemberSettings, Chat, MainChatRole, MvuMode, TtsSessionConfig, WorldBook, GroupMvuPreset } from '../types/models'
-import { buildForkTitle, forkMessagePreview } from '../utils/chatFork'
-
 // Composables
 import { 
   useStreamOutput, 
@@ -95,7 +93,6 @@ import {
 } from '../components/modals'
 import ErrorModal from '../components/modals/ErrorModal.vue'
 import KnowledgeGraphModal from '../components/modals/KnowledgeGraphModal.vue'
-import MessageForkModal from '../components/modals/MessageForkModal.vue'
 import SettingsDrawer from '../components/SettingsDrawer.vue'
 import AvatarCropper from '../components/AvatarCropper.vue'
 import ModernAvatar from '../components/ModernAvatar.vue'
@@ -1156,6 +1153,25 @@ const knowledgeGraphModalOpen = ref(false)
 
 function openKnowledgeGraphModal() {
   knowledgeGraphModalOpen.value = true
+}
+
+const chatMvuRuntimeEnabledForPanel = computed(() => {
+  const ac = chats.activeChat
+  if (!ac) return false
+  return isChatMvuRuntimeEnabled(ac, (id) => characters.list.find((c) => c.id === id))
+})
+
+const knowledgeGraphEnabledEffective = computed(
+  () => chats.activeChat?.overrides?.knowledgeGraphEnabled !== false,
+)
+
+async function onKnowledgeGraphEnabledChange(enabled: boolean) {
+  if (!chats.activeChat) return
+  const overrides = {
+    ...chats.activeChat.overrides,
+    knowledgeGraphEnabled: enabled,
+  }
+  await chats.updateOverrides(chats.activeChat.id, overrides, { skipLoadList: true })
 }
 /** 与后端 mvu_model_resolve 一致：全局 mvuModel → 默认模型 → 候选首项 */
 const mvuResolvedModelForPanel = computed(() => {
@@ -4620,8 +4636,6 @@ async function handleBranchChat(chat: Chat) {
   }
 }
 
-const showForkModal = ref(false)
-const forkTargetMessage = ref<ChatMessage | null>(null)
 const forkSubmitting = ref(false)
 const forkLineage = ref<ForkLineageResponse | null>(null)
 const forkLineageLoading = ref(false)
@@ -4632,18 +4646,6 @@ const outgoingForksByMessageId = computed(() => {
     map[g.messageId] = { count: g.count, chats: g.chats }
   }
   return map
-})
-
-const forkModalDefaultTitle = computed(() => {
-  const chat = activeChat.value
-  if (!chat) return '分叉：新对话'
-  return buildForkTitle(chat.title, chat.isGroup)
-})
-
-const forkModalPreview = computed(() => {
-  const m = forkTargetMessage.value
-  if (!m) return ''
-  return forkMessagePreview(versions.getDisplayContent(m))
 })
 
 async function refreshForkLineage(chatId: string) {
@@ -4666,20 +4668,12 @@ watch(
   { immediate: true },
 )
 
-function onForkMessage(m: ChatMessage) {
-  forkTargetMessage.value = m
-  showForkModal.value = true
-}
-
-async function onConfirmFork(newChatName: string) {
+async function onForkMessage(m: ChatMessage) {
   const chat = activeChat.value
-  const msg = forkTargetMessage.value
-  if (!chat || !msg) return
+  if (!chat || forkSubmitting.value) return
   forkSubmitting.value = true
   try {
-    const created = await chats.forkChat(chat.id, msg.id, newChatName || undefined)
-    showForkModal.value = false
-    forkTargetMessage.value = null
+    const created = await chats.forkChat(chat.id, m.id)
     await afterChatReload(created.id)
     await nextTick()
     chatInputRef.value?.focusComposer?.()
@@ -5597,6 +5591,7 @@ const editingPersonaAvatarUrl = computed(() => {
             :entrancing-assistant-message-id="entrancingAssistantMessageId"
             :content-regex-rules="effectiveContentRegexRules"
             :outgoing-forks-by-message-id="outgoingForksByMessageId"
+            :is-forking="forkSubmitting"
             @edit-message="(m) => actions.openEditMessage(m, versions.getDisplayContent(m))"
             @delete-message="actions.deleteMessage"
             @read-aloud-message="handleReadAloudMessage"
@@ -5747,12 +5742,15 @@ const editingPersonaAvatarUrl = computed(() => {
     <MvuPanel
       :is-open="mvuPanelOpen"
       :logs="mvuStore.workLogs"
+      :mvu-runtime-enabled="chatMvuRuntimeEnabledForPanel"
+      :knowledge-graph-enabled="knowledgeGraphEnabledEffective"
       :has-knowledge-graph="mvuStore.hasKnowledgeGraph"
       :running="mvuStore.isRunning"
       :mvu-model="settings.settings?.mvuModel ?? null"
       :model-options="chatModelOptions"
       :resolved-mvu-model="mvuResolvedModelForPanel"
       @update:is-open="mvuPanelOpen = $event"
+      @update:knowledge-graph-enabled="onKnowledgeGraphEnabledChange"
       @select-mvu-model="onMvuPanelMvuModelSelect"
       @switch-to-assistant="switchFromMvuToAssistantPanel"
       @open-knowledge-graph="openKnowledgeGraphModal"
@@ -5795,14 +5793,6 @@ const editingPersonaAvatarUrl = computed(() => {
 
     <!-- 助手设置抽屉 -->
           <!-- 消息编辑弹窗 -->
-    <MessageForkModal
-      v-model:show="showForkModal"
-      :message-preview="forkModalPreview"
-      :default-title="forkModalDefaultTitle"
-      :is-submitting="forkSubmitting"
-      @confirm="onConfirmFork"
-    />
-
     <MessageEditorModal
       :show="actions.showMessageEditor.value"
       :message-id="actions.editingMessageId.value"
