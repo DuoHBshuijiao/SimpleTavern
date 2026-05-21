@@ -104,7 +104,9 @@ export const useChatsStore = defineStore('chats', {
       this.loading = true
       this.error = null
       try {
-        this.list = await apiGet<Chat[]>(`/api/chats?characterId=${encodeURIComponent(characterId)}`)
+        this.list = await apiGet<Chat[]>(
+          `/api/chats?characterId=${encodeURIComponent(characterId)}&summary=1`,
+        )
       } catch (e: unknown) {
         const error = e instanceof Error ? e.message : String(e)
         this.error = error
@@ -261,9 +263,10 @@ export const useChatsStore = defineStore('chats', {
       this.activeChat = chat
       return chat
     },
-    async fetchForkLineage(chatId: string): Promise<ForkLineageResponse> {
+    async fetchForkLineage(chatId: string, signal?: AbortSignal): Promise<ForkLineageResponse> {
       return apiGet<ForkLineageResponse>(
         `/api/chats/${encodeURIComponent(chatId)}/fork-lineage`,
+        signal,
       )
     },
     /**
@@ -278,7 +281,7 @@ export const useChatsStore = defineStore('chats', {
       this.loading = true
       this.error = null
       try {
-        this.groupList = await apiGet<Chat[]>('/api/chats/groups')
+        this.groupList = await apiGet<Chat[]>('/api/chats/groups?summary=1')
       } catch (e: unknown) {
         const error = e instanceof Error ? e.message : String(e)
         this.error = error
