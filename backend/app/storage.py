@@ -55,6 +55,7 @@ from app.schemas import (
     AssistantChat,
     AssistantSettings,
     Chat,
+    ChatOverrides,
     ChatImageAttachment,
     ChatMessage,
     CharacterCard,
@@ -63,6 +64,7 @@ from app.schemas import (
     Settings,
     StateVariables,
     WorldBook,
+    _now_iso,
 )
 
 
@@ -401,6 +403,26 @@ def read_json(path: Path) -> dict[str, Any]:
     with _lock_for(path):
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
+
+
+def read_bytes_under_lock(path: Path, *, shared: bool = True) -> bytes:
+    """
+    读取文件字节，并通过同一套 lock 文件与 JSON 写路径协调。
+
+    shared=True 用于后台巡检等纯读场景，避免与其它读者互斥；写路径仍使用独占锁。
+    """
+    if not path.exists():
+        raise FileNotFoundError(str(path))
+    lock_path = Path(str(path) + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    mode = portalocker.LOCK_SH if shared else portalocker.LOCK_EX
+    with open(lock_path, "a+b") as fh:
+        portalocker.lock(fh, mode)
+        try:
+            with open(path, "rb") as f:
+                return f.read()
+        finally:
+            portalocker.unlock(fh)
 
 
 def write_json(path: Path, obj: Any) -> None:
@@ -1279,6 +1301,9 @@ def save_chat(chat: Chat) -> Chat:
     if legacy.exists():
         with _lock_for(legacy):
             legacy.unlink(missing_ok=True)
+    from app.fork_index import sync_chat_fork_index
+
+    sync_chat_fork_index(chat)
     return chat
 
 
@@ -1441,6 +1466,9 @@ def delete_chat(chat_id: str) -> None:
         p.unlink(missing_ok=True)
     _lock_file_path(p).unlink(missing_ok=True)
     delete_chat_memory(character_id, chat_id)
+    from app.fork_index import remove_chat_fork_index
+
+    remove_chat_fork_index(chat_id)
     chat_dir_path = chat_folder(character_id, chat_id)
     if chat_dir_path.exists():
         try:
@@ -1508,17 +1536,245 @@ def list_group_chats() -> list[Chat]:
 class ForkChatSummary:
     """分叉溯源扫描用的轻量会话摘要（不加载 messages）。"""
     id: str
+    characterId: str
     title: str
     createdAt: str
     forkedFromChatId: str | None
     forkedFromMessageId: str | None
+    forkedFromMessageIndex: int | None = None
+
+
+@dataclass(frozen=True)
+class ChatListMeta:
+    """侧栏列表用的轻量会话元数据（不加载 messages）。"""
+    id: str
+    characterId: str
+    title: str
+    createdAt: str
+    updatedAt: str
+    isGroup: bool
+    memberIds: tuple[str, ...]
+    forkedFromChatId: str | None
+    forkedFromMessageId: str | None
+    forkedFromMessageIndex: int | None = None
+    userPersonaId: str | None = None
+
+
+_RE_JSON_STRING = r'"((?:\\.|[^"\\])*)"'
+_RE_CHAT_ID = re.compile(r'"id"\s*:\s*' + _RE_JSON_STRING)
+_RE_CHAT_TITLE = re.compile(r'"title"\s*:\s*' + _RE_JSON_STRING)
+_RE_CHAT_CREATED = re.compile(r'"createdAt"\s*:\s*' + _RE_JSON_STRING)
+_RE_FORK_PARENT = re.compile(r'"forkedFromChatId"\s*:\s*"([^"\\]+)"')
+_RE_FORK_PARENT_NULL = re.compile(r'"forkedFromChatId"\s*:\s*null')
+_RE_FORK_MSG = re.compile(r'"forkedFromMessageId"\s*:\s*"([^"\\]+)"')
+_RE_FORK_MSG_NULL = re.compile(r'"forkedFromMessageId"\s*:\s*null')
+_RE_FORK_IDX = re.compile(r'"forkedFromMessageIndex"\s*:\s*(\d+)')
+_RE_UPDATED_AT = re.compile(r'"updatedAt"\s*:\s*' + _RE_JSON_STRING)
+_RE_IS_GROUP = re.compile(r'"isGroup"\s*:\s*(true|false)')
+_RE_USER_PERSONA_ID = re.compile(r'"userPersonaId"\s*:\s*' + _RE_JSON_STRING)
+_RE_USER_PERSONA_ID_NULL = re.compile(r'"userPersonaId"\s*:\s*null')
+_RE_MEMBER_IDS = re.compile(r'"memberIds"\s*:\s*\[(.*?)\]', re.DOTALL)
+_RE_MEMBER_ID_HEX = re.compile(r'"([0-9a-f]{32})"')
+
+
+def _unescape_json_string(raw: str) -> str:
+    try:
+        return json.loads(f'"{raw}"')
+    except Exception:
+        return raw.replace("\\\"", '"').replace("\\\\", "\\")
+
+
+def _match_json_string(m: re.Match[str] | None) -> str | None:
+    if m is None:
+        return None
+    if m.lastindex and m.lastindex >= 1:
+        g1 = m.group(1)
+        if g1 is not None:
+            return _unescape_json_string(g1)
+    return None
+
+
+def read_chat_fork_meta(path: Path) -> ForkChatSummary | None:
+    """
+    读取 chat.json 分叉相关元数据：头尾切片 + 正则，不解析 messages。
+    """
+    try:
+        size = path.stat().st_size
+        with open(path, "r", encoding="utf-8") as f:
+            head = f.read(4096)
+        with open(path, "rb") as f:
+            if size > 2048:
+                f.seek(max(0, size - 2048))
+            tail = f.read().decode("utf-8", errors="ignore")
+    except OSError:
+        return None
+
+    chat_id = _match_json_string(_RE_CHAT_ID.search(head)) or path.parent.name
+    if not chat_id:
+        return None
+    title = (_match_json_string(_RE_CHAT_TITLE.search(head)) or "").strip() or "新对话"
+    created_at = _match_json_string(_RE_CHAT_CREATED.search(head)) or ""
+
+    fork_parent: str | None = None
+    if not _RE_FORK_PARENT_NULL.search(tail):
+        pm = _RE_FORK_PARENT.search(tail)
+        if pm:
+            fork_parent = pm.group(1)
+    fork_msg: str | None = None
+    if not _RE_FORK_MSG_NULL.search(tail):
+        mm = _RE_FORK_MSG.search(tail)
+        if mm:
+            fork_msg = mm.group(1)
+    idx_m = _RE_FORK_IDX.search(tail)
+    fork_idx: int | None = int(idx_m.group(1)) if idx_m else None
+
+    return ForkChatSummary(
+        id=chat_id,
+        characterId=path.parent.parent.name if path.parent.parent.name else "",
+        title=title,
+        createdAt=created_at,
+        forkedFromChatId=fork_parent,
+        forkedFromMessageId=fork_msg,
+        forkedFromMessageIndex=fork_idx,
+    )
+
+
+def _parse_member_ids_from_chunk(chunk: str) -> tuple[str, ...]:
+    m = _RE_MEMBER_IDS.search(chunk)
+    if not m:
+        return ()
+    return tuple(_RE_MEMBER_ID_HEX.findall(m.group(1)))
+
+
+def _parse_is_group(chunk: str) -> bool:
+    m = _RE_IS_GROUP.search(chunk)
+    return m is not None and m.group(1) == "true"
+
+
+def _parse_user_persona_id(chunk: str) -> str | None:
+    if _RE_USER_PERSONA_ID_NULL.search(chunk):
+        return None
+    m = _RE_USER_PERSONA_ID.search(chunk)
+    return _match_json_string(m)
+
+
+def read_chat_list_meta(path: Path) -> ChatListMeta | None:
+    """
+    读取 chat.json 侧栏列表元数据：头尾切片 + 正则，不解析 messages。
+    memberIds / isGroup / updatedAt 多在文件尾部（messages 之后）。
+    """
+    fork = read_chat_fork_meta(path)
+    if fork is None:
+        return None
+    try:
+        size = path.stat().st_size
+        with open(path, "r", encoding="utf-8") as f:
+            head = f.read(4096)
+        with open(path, "rb") as f:
+            tail_size = min(size, 16384)
+            if size > tail_size:
+                f.seek(size - tail_size)
+            tail = f.read().decode("utf-8", errors="ignore")
+    except OSError:
+        return None
+
+    combined = head + tail
+    updated_at = _match_json_string(_RE_UPDATED_AT.search(tail)) or _match_json_string(
+        _RE_UPDATED_AT.search(head)
+    ) or fork.createdAt
+    is_group = _parse_is_group(head) or _parse_is_group(tail)
+    member_ids = _parse_member_ids_from_chunk(combined) or _parse_member_ids_from_chunk(tail)
+    user_persona_id = _parse_user_persona_id(tail) or _parse_user_persona_id(combined)
+
+    return ChatListMeta(
+        id=fork.id,
+        characterId=fork.characterId,
+        title=fork.title,
+        createdAt=fork.createdAt,
+        updatedAt=updated_at or fork.createdAt,
+        isGroup=is_group,
+        memberIds=member_ids,
+        forkedFromChatId=fork.forkedFromChatId,
+        forkedFromMessageId=fork.forkedFromMessageId,
+        forkedFromMessageIndex=fork.forkedFromMessageIndex,
+        userPersonaId=user_persona_id,
+    )
+
+
+def _list_meta_to_chat(meta: ChatListMeta) -> Chat:
+    """将轻量元数据转为侧栏可用的 Chat（messages 为空）。"""
+    return Chat(
+        id=meta.id,
+        characterId=meta.characterId,
+        title=meta.title,
+        messages=[],
+        overrides=ChatOverrides(),
+        isGroup=meta.isGroup,
+        memberIds=list(meta.memberIds),
+        createdAt=meta.createdAt or _now_iso(),
+        updatedAt=meta.updatedAt or meta.createdAt or _now_iso(),
+        forkedFromChatId=meta.forkedFromChatId,
+        forkedFromMessageId=meta.forkedFromMessageId,
+        forkedFromMessageIndex=meta.forkedFromMessageIndex,
+        userPersonaId=meta.userPersonaId,
+    )
+
+
+def _collect_chat_summaries_for_character(character_id: str) -> list[Chat]:
+    out: list[Chat] = []
+    base = chat_dir(character_id)
+    if not base.exists():
+        return out
+    seen_ids: set[str] = set()
+
+    for entry in base.iterdir():
+        if not entry.is_dir():
+            continue
+        record_path = entry / CHAT_RECORD_FILENAME
+        if record_path.exists():
+            meta = read_chat_list_meta(record_path)
+            if meta is not None:
+                out.append(_list_meta_to_chat(meta))
+                seen_ids.add(meta.id)
+
+    for p in list_json_files(base):
+        if p.name == CHAT_MEMORY_FILENAME:
+            continue
+        if p.stem in seen_ids:
+            continue
+        if (base / p.stem / CHAT_RECORD_FILENAME).exists():
+            continue
+        meta = read_chat_list_meta(p)
+        if meta is not None:
+            out.append(_list_meta_to_chat(meta))
+
+    out.sort(key=lambda c: c.updatedAt, reverse=True)
+    return out
+
+
+def list_chat_summaries(character_id: str) -> list[Chat]:
+    """列出指定角色的会话摘要（无 messages），供侧栏使用。"""
+    return _collect_chat_summaries_for_character(character_id)
+
+
+def list_group_chat_summaries() -> list[Chat]:
+    """列出所有群聊会话摘要（无 messages）。"""
+    out: list[Chat] = []
+    base = _chats_dir()
+    if not base.exists():
+        return out
+    for character_dir in base.iterdir():
+        if not character_dir.is_dir():
+            continue
+        for chat in _collect_chat_summaries_for_character(character_dir.name):
+            if chat.isGroup:
+                out.append(chat)
+    out.sort(key=lambda c: c.updatedAt, reverse=True)
+    return out
 
 
 def iter_fork_chat_summaries() -> Iterable[ForkChatSummary]:
-    """
-    遍历所有会话的分叉相关元数据，用于 fork-lineage 全库扫描。
-    仅读取 chat.json 顶层字段，不加载 messages。
-    """
+    """遍历所有会话的分叉元数据（轻量读取，供索引重建）。"""
     base = _chats_dir()
     if not base.exists():
         return
@@ -1531,29 +1787,9 @@ def iter_fork_chat_summaries() -> Iterable[ForkChatSummary]:
             record_path = entry / CHAT_RECORD_FILENAME
             if not record_path.is_file():
                 continue
-            try:
-                with _lock_for(record_path):
-                    raw = read_json(record_path)
-            except Exception:
-                continue
-            chat_id = str(raw.get("id") or entry.name or "").strip()
-            if not chat_id:
-                continue
-            yield ForkChatSummary(
-                id=chat_id,
-                title=str(raw.get("title") or "新对话").strip() or "新对话",
-                createdAt=str(raw.get("createdAt") or ""),
-                forkedFromChatId=(
-                    str(raw["forkedFromChatId"]).strip()
-                    if raw.get("forkedFromChatId")
-                    else None
-                ),
-                forkedFromMessageId=(
-                    str(raw["forkedFromMessageId"]).strip()
-                    if raw.get("forkedFromMessageId")
-                    else None
-                ),
-            )
+            summary = read_chat_fork_meta(record_path)
+            if summary is not None:
+                yield summary
 
 
 def avatars_dir() -> Path:
