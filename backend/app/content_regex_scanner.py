@@ -15,8 +15,8 @@ from app.storage import (
     list_group_chats,
     load_settings,
 )
-
-_SCAN_INTERVAL_SECONDS = 5.0
+    # 扫描间隔时间，之前出于性能考虑从0.5s改为5s，但实际进行性能检查后发现前端渲染瓶颈不在于此，因此改为0.5s
+_SCAN_INTERVAL_SECONDS = 0.5
 _scanner_started = False
 _scanner_lock = threading.Lock()
 _processed_signatures: dict[tuple[str, str], str] = {}
