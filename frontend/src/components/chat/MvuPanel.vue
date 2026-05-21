@@ -39,10 +39,18 @@
       </header>
 
       <div
-        v-if="hasKnowledgeGraph"
-        class="shrink-0 px-4 py-2 border-b border-[var(--color-border-subtle)]"
+        v-if="mvuRuntimeEnabled"
+        class="shrink-0 px-4 py-2 border-b border-[var(--color-border-subtle)] space-y-2"
       >
+        <label class="inline-flex items-center gap-2 text-xs text-[var(--color-text-secondary)] cursor-pointer select-none">
+          <ThemedCheckbox
+            :checked="knowledgeGraphEnabled"
+            @update:checked="$emit('update:knowledgeGraphEnabled', $event)"
+          />
+          <span>启用知识图谱</span>
+        </label>
         <button
+          v-if="hasKnowledgeGraph"
           type="button"
           class="w-full text-left text-xs text-[var(--color-brand)] hover:underline"
           @click="$emit('open-knowledge-graph')"
@@ -100,6 +108,7 @@
 import { computed, ref, watch, nextTick } from 'vue'
 import type { MvuWorkLogEntry } from '../../types/models'
 import ModernSelect from '../ModernSelect.vue'
+import ThemedCheckbox from '../ThemedCheckbox.vue'
 
 interface ModelOption {
   label: string
@@ -114,6 +123,8 @@ interface ModelOptionGroup {
 interface Props {
   isOpen: boolean
   logs: MvuWorkLogEntry[]
+  mvuRuntimeEnabled?: boolean
+  knowledgeGraphEnabled?: boolean
   hasKnowledgeGraph?: boolean
   maxVisible?: number
   running?: boolean
@@ -125,6 +136,8 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
+  mvuRuntimeEnabled: false,
+  knowledgeGraphEnabled: true,
   hasKnowledgeGraph: false,
   maxVisible: 100,
   running: false,
@@ -135,6 +148,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 defineEmits<{
   'update:isOpen': [value: boolean]
+  'update:knowledgeGraphEnabled': [value: boolean]
   'select-mvu-model': [value: { value: string; presetId?: string | null }]
   'switch-to-assistant': []
   'open-knowledge-graph': []
