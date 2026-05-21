@@ -215,6 +215,22 @@ let pendingBottomSnapTimer: ReturnType<typeof setTimeout> | null = null
 let pendingBottomSnapScrollEndCleanup: (() => void) | null = null
 let pendingBottomSnapRefresh: (() => void) | null = null
 
+/** 进入会话首屏抑制 FLIP，避免估高收敛阶段对全部可见行做几何读取 */
+const FLIP_SUPPRESS_MS = 400
+let flipSuppressedUntil = 0
+let lastFlipWindowStart = -1
+let lastFlipWindowEnd = -1
+let lastFlipSidebarCollapsed: boolean | undefined = undefined
+let flipSnapshotPending = false
+
+const pendingMeasureIds = new Set<string>()
+let pendingHeightFlushRaf: number | null = null
+let pendingAlignAfterHeightFlush = false
+/** scrollToBottomAfterLayout 请求强制贴底，不受上一会话 wasNearBottom 影响 */
+let pendingAlignForce = false
+
+const markdownHtmlCache = new Map<string, string>()
+
 // 删除确认状态
 const deleteConfirm = ref<{
   message: ChatMessage
@@ -237,6 +253,7 @@ type ImagePreviewWindow = {
 
 const imagePreviews = ref<ImagePreviewWindow[]>([])
 const activeDraggingPreviewId = ref<number | null>(null)
+let activePreviewPointerId: number | null = null
 let previewWindowIdSeed = 0
 let previewWindowZSeed = 1200
 
@@ -262,8 +279,9 @@ function openImagePreview(src: string, alt: string) {
 }
 
 function removePreviewDragListeners() {
-  window.removeEventListener('mousemove', onPreviewDragMove)
-  window.removeEventListener('mouseup', stopPreviewDrag)
+  window.removeEventListener('pointermove', onPreviewDragMove)
+  window.removeEventListener('pointerup', stopPreviewDrag)
+  window.removeEventListener('pointercancel', stopPreviewDrag)
 }
 
 function getPreviewById(id: number) {
@@ -282,6 +300,7 @@ function closeImagePreview(id: number) {
   if (target?.isDragging) {
     target.isDragging = false
     activeDraggingPreviewId.value = null
+    activePreviewPointerId = null
     removePreviewDragListeners()
   }
   imagePreviews.value = imagePreviews.value.filter((preview) => preview.id !== id)
@@ -318,24 +337,27 @@ function handlePreviewWheel(id: number, event: WheelEvent) {
   preview.scale = nextScale
 }
 
-function startPreviewDrag(id: number, event: MouseEvent) {
+function startPreviewDrag(id: number, event: PointerEvent) {
   if (event.button !== 0) return
   const preview = getPreviewById(id)
   if (!preview) return
   event.preventDefault()
   activeDraggingPreviewId.value = id
+  activePreviewPointerId = event.pointerId
   preview.isDragging = true
   preview.dragStart = { x: event.clientX, y: event.clientY }
   preview.positionAtDragStart = { ...preview.position }
   bringPreviewToFront(id)
-  window.addEventListener('mousemove', onPreviewDragMove)
-  window.addEventListener('mouseup', stopPreviewDrag)
+  window.addEventListener('pointermove', onPreviewDragMove)
+  window.addEventListener('pointerup', stopPreviewDrag)
+  window.addEventListener('pointercancel', stopPreviewDrag)
 }
 
-function onPreviewDragMove(event: MouseEvent) {
-  if (activeDraggingPreviewId.value == null) return
+function onPreviewDragMove(event: PointerEvent) {
+  if (activeDraggingPreviewId.value == null || activePreviewPointerId !== event.pointerId) return
   const preview = getPreviewById(activeDraggingPreviewId.value)
   if (!preview || !preview.isDragging) return
+  event.preventDefault()
   const offsetX = event.clientX - preview.dragStart.x
   const offsetY = event.clientY - preview.dragStart.y
   preview.position = {
@@ -344,12 +366,14 @@ function onPreviewDragMove(event: MouseEvent) {
   }
 }
 
-function stopPreviewDrag() {
+function stopPreviewDrag(event?: PointerEvent) {
+  if (event != null && activePreviewPointerId !== event.pointerId) return
   if (activeDraggingPreviewId.value != null) {
     const preview = getPreviewById(activeDraggingPreviewId.value)
     if (preview) preview.isDragging = false
   }
   activeDraggingPreviewId.value = null
+  activePreviewPointerId = null
   removePreviewDragListeners()
 }
 
@@ -460,11 +484,40 @@ function getDisplayText(m: ChatMessage): string {
   return applyContentRegexDisplay(raw, props.contentRegexRules)
 }
 
+function markdownCacheKey(m: ChatMessage): string {
+  const text = getDisplayText(m)
+  const versionIdx = props.getCurrentVersionIndex(m)
+  const rulesKey = (props.contentRegexRules ?? [])
+    .map((r) => `${r.id}:${r.enabled}:${r.pattern}`)
+    .join('|')
+  return `${m.id}|v${versionIdx}|${text.length}|${text.slice(0, 80)}|${rulesKey}`
+}
+
 function renderMarkdown(m: ChatMessage) {
   const text = getDisplayText(m)
   const isStreaming =
     (props.isGenerating || props.isInterjecting) && m.id === props.reasoningMessageId
-  return isStreaming ? renderChatMarkdownStreaming(text) : renderChatMarkdown(text)
+  if (isStreaming) return renderChatMarkdownStreaming(text)
+  const key = markdownCacheKey(m)
+  const cached = markdownHtmlCache.get(key)
+  if (cached != null) return cached
+  const html = renderChatMarkdown(text)
+  markdownHtmlCache.set(key, html)
+  return html
+}
+
+function messageRowMemoDeps(m: ChatMessage): unknown[] {
+  const streaming =
+    (props.isGenerating || props.isInterjecting) && m.id === props.reasoningMessageId
+  return [
+    m.id,
+    getDisplayText(m),
+    props.getCurrentVersionIndex(m),
+    streaming,
+    props.reasoningMessageId,
+    isReasoningExpanded(m.id),
+    m.images?.length ?? 0,
+  ]
 }
 
 function shouldRenderMainBubble(m: ChatMessage): boolean {
@@ -985,6 +1038,24 @@ function findIndexByOffset(offset: number, prefix: number[] = prefixHeights.valu
   return Math.max(0, Math.min(count - 1, l))
 }
 
+/**
+ * 切换会话后贴底：先批量落盘行高，再单次 alignToBottom，避免与 ResizeObserver 多轨抢 scrollHeight。
+ */
+function scrollToBottomAfterLayout(instant = true, force = true) {
+  if (force || instant) {
+    userDismissedAutoFollow.value = false
+  }
+  if (force) {
+    wasNearBottomBeforeMutation.value = true
+  }
+  cancelPendingBottomSnap()
+  pendingAlignForce = force
+  pendingAlignAfterHeightFlush = true
+  nextTick(() => {
+    schedulePendingHeightFlush(true)
+  })
+}
+
 function scrollToBottom(instant = false, force = false) {
   nextTick(() => {
     const el = scrollRef.value
@@ -1146,18 +1217,105 @@ const visibleMessages = computed(() => {
   return props.messages.slice(windowStart.value, windowEnd.value + 1)
 })
 
+function alignAfterHeightFlush(instant = true, force = false) {
+  const el = scrollRef.value
+  if (!el) return
+  if (userSendScrollActive.value) {
+    syncScrollMetrics(el)
+    return
+  }
+  if (force || effectiveCanFollow(el)) {
+    alignToBottom(el, instant)
+  } else {
+    syncScrollMetrics(el)
+  }
+}
+
+function flushPendingHeights() {
+  const ids = [...pendingMeasureIds]
+  pendingMeasureIds.clear()
+  const patch: Record<string, number> = {}
+  let changed = false
+  for (const messageId of ids) {
+    const domEl = rowEls.get(messageId)
+    if (!domEl) continue
+    const measured = Math.ceil(domEl.getBoundingClientRect().height)
+    const rowHeight = (measured > 0 ? measured : DEFAULT_ROW_HEIGHT - MESSAGE_ROW_GAP) + MESSAGE_ROW_GAP
+    if ((measuredHeights.value[messageId] ?? DEFAULT_ROW_HEIGHT) !== rowHeight) {
+      patch[messageId] = rowHeight
+      changed = true
+    }
+  }
+  if (changed) {
+    measuredHeights.value = { ...measuredHeights.value, ...patch }
+  }
+  if (pendingMeasureIds.size > 0) {
+    schedulePendingHeightFlush(pendingAlignAfterHeightFlush)
+    return
+  }
+  if (!pendingAlignAfterHeightFlush) return
+
+  const visible = visibleMessages.value
+  const awaitingRefs =
+    visible.length > 0 && visible.some((m) => !rowEls.has(m.id))
+  if (awaitingRefs) {
+    schedulePendingHeightFlush(true)
+    return
+  }
+
+  const force = pendingAlignForce
+  pendingAlignForce = false
+  pendingAlignAfterHeightFlush = false
+  nextTick(() => alignAfterHeightFlush(true, force))
+}
+
+function schedulePendingHeightFlush(alignAfter = false) {
+  if (alignAfter) pendingAlignAfterHeightFlush = true
+  if (pendingHeightFlushRaf != null) return
+  pendingHeightFlushRaf = requestAnimationFrame(() => {
+    pendingHeightFlushRaf = null
+    flushPendingHeights()
+  })
+}
+
 function setMessageRowRefById(messageId: string, el: unknown) {
   const domEl = normalizeElement(el)
   if (!domEl) {
     rowEls.delete(messageId)
+    pendingMeasureIds.delete(messageId)
     return
   }
   rowEls.set(messageId, domEl)
-  const measured = Math.ceil(domEl.getBoundingClientRect().height)
-  const rowHeight = (measured > 0 ? measured : DEFAULT_ROW_HEIGHT - MESSAGE_ROW_GAP) + MESSAGE_ROW_GAP
-  if ((measuredHeights.value[messageId] ?? DEFAULT_ROW_HEIGHT) !== rowHeight) {
-    measuredHeights.value = { ...measuredHeights.value, [messageId]: rowHeight }
+  pendingMeasureIds.add(messageId)
+  schedulePendingHeightFlush()
+}
+
+function shouldRunRowFlip(): boolean {
+  if (typeof performance !== 'undefined' && performance.now() < flipSuppressedUntil) {
+    return false
   }
+  const ws = windowStart.value
+  const we = windowEnd.value
+  const sidebar = props.sidebarCollapsed
+  const windowChanged = ws !== lastFlipWindowStart || we !== lastFlipWindowEnd
+  const sidebarChanged = sidebar !== lastFlipSidebarCollapsed
+  return windowChanged || sidebarChanged
+}
+
+function maybeSnapshotRowRects() {
+  if (!shouldRunRowFlip()) return
+  flipSnapshotPending = true
+  snapshotRowRects()
+}
+
+function maybePlayRowFlip() {
+  if (!flipSnapshotPending) return
+  flipSnapshotPending = false
+  if (!shouldRunRowFlip()) return
+  lastFlipWindowStart = windowStart.value
+  lastFlipWindowEnd = windowEnd.value
+  lastFlipSidebarCollapsed = props.sidebarCollapsed
+  playRowFlip()
 }
 
 function snapshotRowRects() {
@@ -1206,11 +1364,30 @@ watch(
   () => {
     cancelPendingBottomSnap()
     measuredHeights.value = {}
+    markdownHtmlCache.clear()
+    pendingMeasureIds.clear()
+    rowEls.clear()
+    prevRowRects.clear()
+    if (pendingHeightFlushRaf != null) {
+      cancelAnimationFrame(pendingHeightFlushRaf)
+      pendingHeightFlushRaf = null
+    }
+    flipSuppressedUntil =
+      typeof performance !== 'undefined' ? performance.now() + FLIP_SUPPRESS_MS : 0
+    lastFlipWindowStart = -1
+    lastFlipWindowEnd = -1
+    lastFlipSidebarCollapsed = undefined
+    flipSnapshotPending = false
     userDismissedAutoFollow.value = false
+    wasNearBottomBeforeMutation.value = true
+    scrollTop.value = 0
     nextTick(() => {
       updateViewport()
-      if (!scrollRef.value) return
-      syncScrollMetrics(scrollRef.value)
+      const el = scrollRef.value
+      if (!el) return
+      // 先用默认行高估算贴底，避免沿用上一会话 scrollTop 导致虚拟窗口错位
+      alignToBottom(el, true)
+      syncScrollMetrics(el)
     })
   },
 )
@@ -1270,15 +1447,21 @@ watch(
 )
 
 onBeforeUpdate(() => {
-  snapshotRowRects()
+  maybeSnapshotRowRects()
 })
 
 onUpdated(() => {
-  playRowFlip()
+  maybePlayRowFlip()
 })
 
 // 暴露滚动方法
-defineExpose({ scrollToBottom, scrollToBottomAnimated, scrollToMessage, scrollRef })
+defineExpose({
+  scrollToBottom,
+  scrollToBottomAfterLayout,
+  scrollToBottomAnimated,
+  scrollToMessage,
+  scrollRef,
+})
 
 onMounted(() => {
   updateViewport()
@@ -1323,6 +1506,12 @@ onBeforeUnmount(() => {
   }
   cancelPendingBottomSnap()
   cancelUserSendScrollAnim()
+  pendingMeasureIds.clear()
+  if (pendingHeightFlushRaf != null) {
+    cancelAnimationFrame(pendingHeightFlushRaf)
+    pendingHeightFlushRaf = null
+  }
+  markdownHtmlCache.clear()
   window.removeEventListener('resize', updateViewport)
   if (contentResizeObserver) {
     contentResizeObserver.disconnect()
@@ -1348,9 +1537,10 @@ onBeforeUnmount(() => {
     >
       <div ref="contentRef" class="max-w-4xl mx-auto">
       <div v-if="topSpacerHeight > 0" :style="{ height: `${topSpacerHeight}px` }"></div>
-      <div 
-        v-for="m in visibleMessages" 
-        :key="m.id" 
+      <div
+        v-for="m in visibleMessages"
+        :key="m.id"
+        v-memo="messageRowMemoDeps(m)"
         :ref="(el) => setMessageRowRefById(m.id, el)"
         class="flex gap-4 group mb-8" 
         :class="[
@@ -1627,14 +1817,14 @@ onBeforeUnmount(() => {
             :class="preview.isDragging ? 'cursor-grabbing' : 'cursor-grab'"
             :style="getPreviewDialogStyle(preview)"
             @wheel.prevent="(event) => handlePreviewWheel(preview.id, event)"
-            @mousedown="(event) => startPreviewDrag(preview.id, event)"
+            @pointerdown="(event) => startPreviewDrag(preview.id, event)"
           >
             <button
               type="button"
               class="image-preview-close"
               aria-label="关闭图片预览"
               @click.stop="closeImagePreview(preview.id)"
-              @mousedown.stop
+              @pointerdown.stop
             >
               <X class="w-4 h-4" />
             </button>
@@ -1762,6 +1952,7 @@ onBeforeUnmount(() => {
   padding: 12px;
   transform-origin: center center;
   user-select: none;
+  touch-action: none;
 }
 
 .image-preview-close {
