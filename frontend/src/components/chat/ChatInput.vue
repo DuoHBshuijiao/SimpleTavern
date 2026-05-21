@@ -585,11 +585,11 @@ defineExpose({
 
 <template>
   <div
-    class="chat-input-shell shrink-0 px-4 pb-6 pt-0 w-full max-w-4xl mx-auto z-40 relative overflow-visible"
+    class="chat-input-shell pointer-events-none shrink-0 px-4 pb-6 pt-0 w-full max-w-4xl mx-auto z-40 relative overflow-visible"
     :class="{ 'chat-input-shell--sink': sinkMorphed }"
     :style="shellInlineStyle"
   >
-    <div class="chat-input-morph-wrap relative">
+    <div class="chat-input-morph-wrap pointer-events-auto relative">
     <div
       class="chat-input-float-stack relative z-10"
       :class="{ 'chat-input-float-stack--sink': sinkMorphed }"
@@ -880,7 +880,7 @@ defineExpose({
     <!-- 助手 / MVU FAB：侧栏收起顶栏 full 后与 TTS 同相滑出，顶栏下替代为 Agent 胶囊 -->
     <div
       ref="assistantFabStackRef"
-      class="assistant-fab-stack flex flex-col gap-2"
+      class="assistant-fab-stack pointer-events-auto flex flex-col gap-2"
       :class="{ 'assistant-fab-stack--hidden': showAgentTopBarControls }"
       :style="fabStyle"
     >
