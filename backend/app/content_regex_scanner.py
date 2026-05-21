@@ -16,7 +16,7 @@ from app.storage import (
     load_settings,
 )
 
-_SCAN_INTERVAL_SECONDS = 0.5
+_SCAN_INTERVAL_SECONDS = 5.0
 _scanner_started = False
 _scanner_lock = threading.Lock()
 _processed_signatures: dict[tuple[str, str], str] = {}
