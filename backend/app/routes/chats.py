@@ -393,6 +393,14 @@ def _merge_overrides(existing: Chat, incoming: UpdateChatRequest) -> None:
         existing.overrides.groupMvuAnchorCharacterId = ov.groupMvuAnchorCharacterId
     if "groupMvuTemplateCharacterId" in ov.model_fields_set:
         existing.overrides.groupMvuTemplateCharacterId = ov.groupMvuTemplateCharacterId
+    if "knowledgeGraphEnabled" in ov.model_fields_set:
+        existing.overrides.knowledgeGraphEnabled = ov.knowledgeGraphEnabled
+    if "knowledgeGraphInjectPosition" in ov.model_fields_set:
+        existing.overrides.knowledgeGraphInjectPosition = ov.knowledgeGraphInjectPosition
+    if "knowledgeGraphInjectDepth" in ov.model_fields_set:
+        existing.overrides.knowledgeGraphInjectDepth = max(0, int(ov.knowledgeGraphInjectDepth or 0))
+    if "knowledgeGraphBeforeLastRole" in ov.model_fields_set:
+        existing.overrides.knowledgeGraphBeforeLastRole = ov.knowledgeGraphBeforeLastRole
 
     for key in ("model", "temperature", "top_p", "max_tokens", "context_size"):
         val = getattr(ov.params, key, None)
