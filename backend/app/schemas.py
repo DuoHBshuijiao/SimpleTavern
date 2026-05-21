@@ -1167,6 +1167,11 @@ class Chat(BaseModel):
         default=None,
         description="消息分叉溯源：锚点消息 ID（含该条及之前历史被复制）",
     )
+    forkedFromMessageIndex: int | None = Field(
+        default=None,
+        ge=1,
+        description="消息分叉溯源：锚点在源会话 messages 中的 1-based 序号（fork 时写入，避免 lineage 加载源会话）",
+    )
 
 
 class ForkChatRequest(BaseModel):
