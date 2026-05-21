@@ -84,6 +84,7 @@ export const useMvuStore = defineStore('mvu', {
     connect(chatId: string) {
       if (this._eventSource) this.disconnect()
       this._activeChatId = chatId
+      this.stateVariables = null
       this.workLogs = []
       this.knowledgeGraph = null
       this.isRunning = false
@@ -160,6 +161,7 @@ export const useMvuStore = defineStore('mvu', {
         this._eventSource = null
       }
       this._activeChatId = null
+      this.stateVariables = null
       this.knowledgeGraph = null
       this.isConnected = false
       this.isRunning = false
@@ -177,8 +179,8 @@ export const useMvuStore = defineStore('mvu', {
         }
         if (this._activeChatId !== chatId) return
         const data = await resp.json()
-        if (data.ok && data.stateVariables) {
-          this.stateVariables = data.stateVariables
+        if (data.ok) {
+          this.stateVariables = data.stateVariables ?? null
         }
       } catch { /* ignore network errors */ }
     },
