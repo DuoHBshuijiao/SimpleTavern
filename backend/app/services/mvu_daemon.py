@@ -257,10 +257,13 @@ async def _run_once(chat_id: str) -> None:
         ctx_lines.append(f"[{label}]: {content}")
     context_md = "\n\n".join(ctx_lines) if ctx_lines else "（暂无对话）"
 
+    from app.kg_inject import is_knowledge_graph_enabled
+
+    kg_on = is_knowledge_graph_enabled(chat)
     job = MvuAgentJob(
         chat_id=chat_id,
         character_id=chat.characterId,
-        system_prompt=load_mvu_system_prompt(),
+        system_prompt=load_mvu_system_prompt(include_knowledge_graph=kg_on),
         state=state,
         state_markdown=state_md,
         queue_items=queue_items,
@@ -269,6 +272,7 @@ async def _run_once(chat_id: str) -> None:
         mode=mode,
         directive=directive,
         context_window_count=context_window_count,
+        knowledge_graph_enabled=kg_on,
     )
 
     run_ctx = MvuAgentRunContext(
@@ -279,7 +283,7 @@ async def _run_once(chat_id: str) -> None:
         extra_body=extra_body,
     )
 
-    agent = MvuAgentService(run_ctx)
+    agent = MvuAgentService(run_ctx, include_knowledge_graph=kg_on)
     events, log_entries = await agent.run_job(
         job,
         on_event=lambda evt: _broadcast(chat_id, evt),
