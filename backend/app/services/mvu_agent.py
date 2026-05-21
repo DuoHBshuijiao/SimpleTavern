@@ -20,32 +20,19 @@ from app.assistant_tools.executor import execute_tool
 from app.assistant_tools.registry import registered_tools
 from app.assistant_tools import result as tool_result
 from app.llm.openai_compat import chat_completions_message
+from app.kg_inject import mvu_tool_names
 from app.schemas import AssistantSettings, MvuWorkLogEntry, StateVariables
-
-_MVU_TOOL_NAMES = {
-    "mvu_get_session_state",
-    "mvu_define_table",
-    "mvu_set_cell",
-    "mvu_get_chat_context",
-    "kg_upsert_entity",
-    "kg_delete_entity",
-    "kg_upsert_relation",
-    "kg_get_context",
-    "kg_query",
-    "read_mvu_logs",
-    "chat_content_regex_manage",
-    "character_content_regex_manage",
-}
 
 
 def _now_iso() -> str:
     return datetime.now().astimezone().isoformat()
 
 
-def _build_mvu_tools() -> list[dict[str, Any]]:
+def _build_mvu_tools(*, include_knowledge_graph: bool = True) -> list[dict[str, Any]]:
+    allowed = mvu_tool_names(include_knowledge_graph)
     tools: list[dict[str, Any]] = []
     for rt in registered_tools():
-        if rt.name in _MVU_TOOL_NAMES:
+        if rt.name in allowed:
             tools.append({
                 "type": "function",
                 "function": {
@@ -71,6 +58,7 @@ class MvuAgentJob:
     mode: Literal["regex", "directive"] = "regex"
     directive: str | None = None
     context_window_count: int = 10
+    knowledge_graph_enabled: bool = True
 
 
 @dataclass(frozen=True)
@@ -94,9 +82,9 @@ class MvuAgentRunContext:
 class MvuAgentService:
     """MVU agent 循环 — 非交互、非流式、仅产出 log_entry 事件。"""
 
-    def __init__(self, run_ctx: MvuAgentRunContext):
+    def __init__(self, run_ctx: MvuAgentRunContext, *, include_knowledge_graph: bool = True):
         self._ctx = run_ctx
-        self._tools = _build_mvu_tools()
+        self._tools = _build_mvu_tools(include_knowledge_graph=include_knowledge_graph)
 
     def _tool_ctx(self, chat_id: str) -> AssistantToolContext:
         return AssistantToolContext(
