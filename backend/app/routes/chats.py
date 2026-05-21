@@ -62,9 +62,6 @@ from app.schemas import (
     CreateChatRequest,
     ForkChatRequest,
     ForkLineageResponse,
-    ForkOrigin,
-    ForkOutgoingGroup,
-    ForkSiblingSummary,
     PromoteToGroupRequest,
     StateVariables,
     UpdateChatRequest,
@@ -77,8 +74,9 @@ from app.storage import (
     delete_chat,
     delete_chat_image,
     delete_message_images,
-    iter_fork_chat_summaries,
+    list_chat_summaries,
     list_chats,
+    list_group_chat_summaries,
     list_group_chats,
     load_character,
     load_chat,
@@ -438,27 +436,40 @@ class ChatSearchResponse(BaseModel):
 
 
 @router.get("/chats", response_model=list[Chat])
-def get_chats(characterId: str = Query(...)) -> list[Chat]:
+def get_chats(
+    characterId: str = Query(...),
+    summary: bool = Query(False, description="为 true 时仅返回侧栏摘要（无 messages）"),
+) -> list[Chat]:
     """
     获取指定角色的所有聊天会话
     
     Args:
         characterId: 角色ID（查询参数）
+        summary: 为 true 时使用轻量摘要，不加载 messages
     
     Returns:
         list[Chat]: 聊天会话列表，按更新时间倒序
     """
+    if summary:
+        return list_chat_summaries(characterId)
     return list_chats(characterId)
 
 
 @router.get("/chats/groups", response_model=list[Chat])
-def get_group_chats() -> list[Chat]:
+def get_group_chats(
+    summary: bool = Query(False, description="为 true 时仅返回侧栏摘要（无 messages）"),
+) -> list[Chat]:
     """
     获取所有群聊会话
+    
+    Args:
+        summary: 为 true 时使用轻量摘要，不加载 messages
     
     Returns:
         list[Chat]: 群聊会话列表，按更新时间倒序
     """
+    if summary:
+        return list_group_chat_summaries()
     return list_group_chats()
 
 
@@ -878,6 +889,7 @@ def _fork_chat(source: Chat, fork_at_message_id: str, new_chat_name: str | None)
     new_chat.messages = migrated
     new_chat.forkedFromChatId = source.id
     new_chat.forkedFromMessageId = fork_at_message_id
+    new_chat.forkedFromMessageIndex = fork_idx + 1
     new_chat.stateVariables = None
 
     try:
@@ -918,84 +930,10 @@ def fork_chat(source_chat_id: str, req: ForkChatRequest) -> Chat:
 
 @router.get("/chats/{chat_id}/fork-lineage", response_model=ForkLineageResponse)
 def get_fork_lineage(chat_id: str) -> ForkLineageResponse:
-    """分叉溯源：来源、兄弟分叉、从本会话拉出的子分叉。"""
-    try:
-        current = load_chat(chat_id)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="chat not found") from None
+    """分叉溯源：来源、兄弟分叉、从本会话拉出的子分叉（fork_index，不加载源会话）。"""
+    from app.fork_index import build_fork_lineage
 
-    origin: ForkOrigin | None = None
-    siblings: list[ForkSiblingSummary] = []
-    src_chat_id = getattr(current, "forkedFromChatId", None)
-    src_msg_id = getattr(current, "forkedFromMessageId", None)
-    if src_chat_id and src_msg_id:
-        try:
-            src_chat = load_chat(src_chat_id)
-        except FileNotFoundError:
-            src_chat = None
-        idx = (
-            _message_index_1based(src_chat.messages, src_msg_id)
-            if src_chat is not None
-            else None
-        )
-        origin = ForkOrigin(
-            chatId=src_chat_id,
-            title=(src_chat.title if src_chat else "已删除的会话"),
-            messageId=src_msg_id,
-            messageIndex=idx if idx is not None else 1,
-        )
-
-    outgoing_by_msg: dict[str, list[ForkSiblingSummary]] = {}
-    for summary in iter_fork_chat_summaries():
-        if summary.id == chat_id:
-            continue
-        if summary.forkedFromChatId == chat_id and summary.forkedFromMessageId:
-            mid = summary.forkedFromMessageId
-            outgoing_by_msg.setdefault(mid, []).append(
-                ForkSiblingSummary(
-                    chatId=summary.id,
-                    title=summary.title,
-                    createdAt=summary.createdAt,
-                )
-            )
-        if (
-            src_chat_id
-            and src_msg_id
-            and summary.forkedFromChatId == src_chat_id
-            and summary.forkedFromMessageId == src_msg_id
-            and summary.id != chat_id
-        ):
-            siblings.append(
-                ForkSiblingSummary(
-                    chatId=summary.id,
-                    title=summary.title,
-                    createdAt=summary.createdAt,
-                )
-            )
-
-    outgoing_forks: list[ForkOutgoingGroup] = []
-    for mid, chats in outgoing_by_msg.items():
-        idx = _message_index_1based(current.messages, mid)
-        if idx is None:
-            continue
-        sorted_chats = sorted(chats, key=lambda c: c.createdAt, reverse=True)
-        outgoing_forks.append(
-            ForkOutgoingGroup(
-                messageId=mid,
-                messageIndex=idx,
-                count=len(sorted_chats),
-                chats=sorted_chats,
-            )
-        )
-    outgoing_forks.sort(key=lambda g: g.messageIndex)
-
-    siblings.sort(key=lambda c: c.createdAt, reverse=True)
-
-    return ForkLineageResponse(
-        origin=origin,
-        siblings=siblings,
-        outgoingForks=outgoing_forks,
-    )
+    return build_fork_lineage(chat_id)
 
 
 @router.get("/chats/{chat_id}", response_model=Chat)
