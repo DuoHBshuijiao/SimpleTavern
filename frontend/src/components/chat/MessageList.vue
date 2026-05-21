@@ -67,7 +67,7 @@ import AnimatedClipHeight from './AnimatedClipHeight.vue'
 import { renderChatMarkdown, renderChatMarkdownStreaming } from '../../utils/markdownIt'
 import { applyContentRegexDisplay } from '../../utils/contentRegex'
 import { usePreferHoverChrome } from '../../composables/usePreferHoverChrome'
-import { Settings, ChevronLeft, ChevronRight, ChevronDown, MoreHorizontal, X } from 'lucide-vue-next'
+import { Settings, ChevronLeft, ChevronRight, ChevronDown, X } from 'lucide-vue-next'
 
 const settingsStore = useSettingsStore()
 const { preferHoverChrome } = usePreferHoverChrome()
@@ -124,6 +124,8 @@ const props = defineProps<{
   contentRegexRules?: ChatContentRegexRule[] | null
   /** 从本会话各消息拉出的子分叉（messageId -> 摘要） */
   outgoingForksByMessageId?: Record<string, { count: number; chats: ForkSiblingSummary[] }>
+  /** 正在从此消息创建分支会话 */
+  isForking?: boolean
 }>()
 
 function getChatImageUrl(imageId: string): string {
@@ -140,35 +142,6 @@ const emit = defineEmits<{
   'fork-message': [m: ChatMessage]
   'select-fork-child': [chatId: string]
 }>()
-
-const messageMenuOpen = ref(false)
-const messageMenuMessageId = ref<string | null>(null)
-const menuAnchorById = new Map<string, HTMLElement>()
-
-function setMessageMenuAnchor(messageId: string, el: unknown) {
-  if (el instanceof HTMLElement) menuAnchorById.set(messageId, el)
-  else menuAnchorById.delete(messageId)
-}
-
-const messageMenuAnchorRef = computed(() => {
-  const id = messageMenuMessageId.value
-  return id ? menuAnchorById.get(id) ?? null : null
-})
-
-function toggleMessageMenu(messageId: string) {
-  if (messageMenuMessageId.value === messageId && messageMenuOpen.value) {
-    messageMenuOpen.value = false
-    messageMenuMessageId.value = null
-  } else {
-    messageMenuMessageId.value = messageId
-    messageMenuOpen.value = true
-  }
-}
-
-function closeMessageMenu() {
-  messageMenuOpen.value = false
-  messageMenuMessageId.value = null
-}
 
 function canForkMessage(m: ChatMessage): boolean {
   return !m.id.startsWith('local_') && m.role !== 'tool'
@@ -1484,41 +1457,6 @@ onBeforeUnmount(() => {
               isUserSendEntering(m) ? 'message-bubble--user-send-enter' : '',
             ]"
           >
-            <div
-              v-if="canForkMessage(m)"
-              :ref="(el) => setMessageMenuAnchor(m.id, el)"
-              class="absolute top-2 right-2 z-10"
-              :class="preferHoverChrome ? 'opacity-0 group-hover:opacity-100' : 'opacity-100'"
-            >
-              <button
-                type="button"
-                class="p-1 rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-white/10 transition-colors"
-                :disabled="isGenerating"
-                aria-label="消息更多操作"
-                @click.stop="toggleMessageMenu(m.id)"
-              >
-                <MoreHorizontal class="w-4 h-4" />
-              </button>
-              <SelectDropdownSurface
-                v-if="messageMenuMessageId === m.id"
-                v-model:open="messageMenuOpen"
-                :anchor-ref="messageMenuAnchorRef"
-                placement="bottom"
-                :auto-width="true"
-                :gap-px="4"
-                @update:open="(v) => { if (!v) closeMessageMenu() }"
-              >
-                <button
-                  type="button"
-                  class="w-full text-left px-3 py-2 rounded-lg text-sm text-[var(--color-text-secondary)] hover:bg-surface-muted whitespace-nowrap"
-                  role="menuitem"
-                  aria-label="从此处分叉到新会话"
-                  @click="closeMessageMenu(); emit('fork-message', m)"
-                >
-                  从此处分叉到新会话
-                </button>
-              </SelectDropdownSurface>
-            </div>
             <AnimatedClipHeight
               mode="intrinsic-fullColumn"
               :relax-height-dead-zone="
@@ -1620,6 +1558,14 @@ onBeforeUnmount(() => {
               @click="emit('read-aloud-message', m)"
             >
               朗读
+            </button>
+            <button
+              v-if="canForkMessage(m)"
+              class="text-xs text-gray-600 hover:text-brand transition-colors"
+              :disabled="isGenerating || isForking"
+              @click="emit('fork-message', m)"
+            >
+              分支
             </button>
             <button 
               v-if="m.role === 'assistant' && !m.id.startsWith('local_')" 
