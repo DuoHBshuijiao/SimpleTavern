@@ -1047,9 +1047,50 @@ let scheduleMaybeTriggerAutoMemorySummary: (chatId: string) => void = () => {}
 const autoMemorySummaryInFlight = ref(false)
 let memSummaryDebounceTimer: ReturnType<typeof setTimeout> | null = null
 
+let postSwitchIdleHandle: number | null = null
+let postSwitchDeferTimer: ReturnType<typeof setTimeout> | null = null
+let mvuConnectDeferTimer: ReturnType<typeof setTimeout> | null = null
+
+function cancelDeferredPostSwitchWork() {
+  if (postSwitchIdleHandle != null) {
+    if (typeof cancelIdleCallback === 'function') {
+      cancelIdleCallback(postSwitchIdleHandle)
+    }
+    postSwitchIdleHandle = null
+  }
+  if (postSwitchDeferTimer) {
+    clearTimeout(postSwitchDeferTimer)
+    postSwitchDeferTimer = null
+  }
+}
+
+function cancelDeferredMvuConnect() {
+  if (mvuConnectDeferTimer) {
+    clearTimeout(mvuConnectDeferTimer)
+    mvuConnectDeferTimer = null
+  }
+}
+
+function scheduleDeferredPostSwitchWork(chatId: string) {
+  cancelDeferredPostSwitchWork()
+  const run = () => {
+    postSwitchIdleHandle = null
+    postSwitchDeferTimer = null
+    const ac = activeChat.value
+    if (!ac || ac.id !== chatId) return
+    void flushAutoReadTtsAfterChatReload()
+    scheduleMaybeTriggerAutoMemorySummary(chatId)
+    syncForkLineageForLoadedChat(chatId)
+  }
+  if (typeof requestIdleCallback === 'function') {
+    postSwitchIdleHandle = requestIdleCallback(run, { timeout: 2000 })
+  } else {
+    postSwitchDeferTimer = setTimeout(run, 0)
+  }
+}
+
 async function afterChatReload(chatId: string) {
-  await flushAutoReadTtsAfterChatReload()
-  scheduleMaybeTriggerAutoMemorySummary(chatId)
+  scheduleDeferredPostSwitchWork(chatId)
 }
 
 /** 遍历 pendingTtsBinds，按内容指纹匹配当前消息并调用 bind-message 写回 TTS 字段 */
@@ -2777,6 +2818,8 @@ onBeforeUnmount(() => {
   if (contentAreaLeftRaf) cancelAnimationFrame(contentAreaLeftRaf)
   cancelContentAreaLeftLayoutSync()
   if (contentAreaLeftSepDebounce) clearTimeout(contentAreaLeftSepDebounce)
+  if (forkLineageDebounceTimer) clearTimeout(forkLineageDebounceTimer)
+  forkLineageAbort?.abort()
 })
 
 /**
@@ -2806,7 +2849,17 @@ watch(
     const shouldConnect =
       Boolean(next.id && next.on) &&
       (prev?.id !== next.id || (!prev?.on && next.on))
-    if (shouldConnect && next.id) mvuStore.connect(next.id)
+    if (shouldConnect && next.id) {
+      cancelDeferredMvuConnect()
+      const connectId = next.id
+      mvuConnectDeferTimer = setTimeout(() => {
+        mvuConnectDeferTimer = null
+        const ac = activeChat.value
+        if (!ac || ac.id !== connectId) return
+        const on = isChatMvuRuntimeEnabled(ac, (id) => characters.list.find((c) => c.id === id))
+        if (on) mvuStore.connect(connectId)
+      }, 80)
+    }
   },
   { immediate: true },
 )
@@ -2896,13 +2949,32 @@ watch(
   { immediate: true },
 )
 
+/** 群聊校正 selectedCharacterId 时跳过「自动打开最新单聊」，但仍刷新侧栏列表 */
+let skipNextCharacterListLoad = false
+
 watch(
   () => selectedCharacterId.value,
   async (cid) => {
     if (!cid) return
+    if (skipNextCharacterListLoad) {
+      skipNextCharacterListLoad = false
+      await chats.loadList(cid)
+      return
+    }
+    const acBefore = chats.activeChat
+    if (
+      acBefore?.isGroup &&
+      chats.activeChatId &&
+      acBefore.memberIds?.includes(cid)
+    ) {
+      return
+    }
     await chats.loadList(cid)
     const ac = chats.activeChat
     if (ac?.isGroup && ac.memberIds?.includes(cid)) {
+      return
+    }
+    if (ac?.isGroup && chats.activeChatId) {
       return
     }
     const latest = pickLatestChatByUpdatedAt(chats.list)
@@ -2925,7 +2997,10 @@ watch(
     const sel = selectedCharacterId.value
     if (sel && chat.memberIds.includes(sel)) return
     const first = chat.memberIds.find((id) => characters.list.some((c) => c.id === id))
-    if (first) selectedCharacterId.value = first
+    if (first) {
+      skipNextCharacterListLoad = true
+      selectedCharacterId.value = first
+    }
   },
 )
 
@@ -4639,6 +4714,10 @@ async function handleBranchChat(chat: Chat) {
 const forkSubmitting = ref(false)
 const forkLineage = ref<ForkLineageResponse | null>(null)
 const forkLineageLoading = ref(false)
+let forkLineageAbort: AbortController | null = null
+let forkLineageDebounceTimer: ReturnType<typeof setTimeout> | null = null
+const forkLineageCache = new Map<string, { value: ForkLineageResponse; expiresAt: number }>()
+const FORK_LINEAGE_CACHE_TTL_MS = 30_000
 
 const outgoingForksByMessageId = computed(() => {
   const map: Record<string, { count: number; chats: ForkSiblingSummary[] }> = {}
@@ -4649,23 +4728,74 @@ const outgoingForksByMessageId = computed(() => {
 })
 
 async function refreshForkLineage(chatId: string) {
+  forkLineageAbort?.abort()
+  const ac = new AbortController()
+  forkLineageAbort = ac
   forkLineageLoading.value = true
   try {
-    forkLineage.value = await chats.fetchForkLineage(chatId)
-  } catch {
+    const lineage = await chats.fetchForkLineage(chatId, ac.signal)
+    forkLineageCache.set(chatId, {
+      value: lineage,
+      expiresAt: Date.now() + FORK_LINEAGE_CACHE_TTL_MS,
+    })
+    forkLineage.value = lineage
+  } catch (e: unknown) {
+    if (e instanceof DOMException && e.name === 'AbortError') return
     forkLineage.value = null
   } finally {
-    forkLineageLoading.value = false
+    if (forkLineageAbort === ac) {
+      forkLineageLoading.value = false
+      forkLineageAbort = null
+    }
   }
+}
+
+function cancelPendingForkLineage() {
+  if (forkLineageDebounceTimer) {
+    clearTimeout(forkLineageDebounceTimer)
+    forkLineageDebounceTimer = null
+  }
+  forkLineageAbort?.abort()
+  forkLineageAbort = null
+  forkLineageLoading.value = false
+}
+
+function scheduleRefreshForkLineage(chatId: string, delayMs = 400) {
+  if (forkLineageDebounceTimer) clearTimeout(forkLineageDebounceTimer)
+  forkLineageDebounceTimer = setTimeout(() => {
+    forkLineageDebounceTimer = null
+    void refreshForkLineage(chatId)
+  }, delayMs)
+}
+
+function syncForkLineageForLoadedChat(chatId: string) {
+  const chat = activeChat.value
+  if (!chat || chat.id !== chatId) return
+  cancelPendingForkLineage()
+
+  const cached = forkLineageCache.get(chatId)
+  if (cached && cached.expiresAt > Date.now()) {
+    forkLineage.value = cached.value
+    return
+  }
+
+  // 普通会话不主动拉 lineage，避免切换任意会话都产生慢请求。
+  if (!chat.forkedFromChatId) {
+    forkLineage.value = null
+    return
+  }
+
+  scheduleRefreshForkLineage(chatId)
 }
 
 watch(
   () => chats.activeChatId,
-  (id) => {
-    if (id) void refreshForkLineage(id)
-    else forkLineage.value = null
+  () => {
+    cancelDeferredPostSwitchWork()
+    cancelDeferredMvuConnect()
+    cancelPendingForkLineage()
+    forkLineage.value = null
   },
-  { immediate: true },
 )
 
 async function onForkMessage(m: ChatMessage) {
@@ -4690,6 +4820,7 @@ async function onNavigateForkSource() {
   try {
     await chats.load(origin.chatId)
     await afterChatReload(origin.chatId)
+    void refreshForkLineage(origin.chatId)
   } catch (e: unknown) {
     await notifyMessage(e instanceof Error ? e.message : String(e), { title: '无法打开源会话' })
   }
