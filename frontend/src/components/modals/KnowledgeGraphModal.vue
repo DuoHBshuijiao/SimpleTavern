@@ -8,8 +8,14 @@ import { DataSet } from 'vis-data'
 import 'vis-network/styles/vis-network.min.css'
 import { X, RefreshCw, Plus, Trash2 } from 'lucide-vue-next'
 import { apiPost, apiDelete } from '../../api/http'
-import type { KgEntityType, KnowledgeGraphResponse } from '../../types/models'
+import type {
+  KgEntityType,
+  KnowledgeGraphBeforeLastRole,
+  KnowledgeGraphInjectPosition,
+  KnowledgeGraphResponse,
+} from '../../types/models'
 import { useMvuStore } from '../../stores/mvu'
+import { useChatsStore } from '../../stores/chats'
 import {
   KG_ENTITY_TYPES,
   countActiveEntities,
@@ -28,6 +34,27 @@ const emit = defineEmits<{
 }>()
 
 const mvuStore = useMvuStore()
+const chatsStore = useChatsStore()
+
+const KG_INJECT_OPTIONS: { label: string; value: KnowledgeGraphInjectPosition | 'default' }[] = [
+  { label: '末条助手消息后（默认）', value: 'default' },
+  { label: '系统提示词前', value: 'before_system' },
+  { label: '提示词后', value: 'after_system' },
+  { label: '深度插入', value: 'depth' },
+  { label: '最新消息前', value: 'before_last' },
+]
+
+const KG_BEFORE_LAST_ROLE_OPTIONS: { label: string; value: KnowledgeGraphBeforeLastRole }[] = [
+  { label: 'assistant', value: 'assistant' },
+  { label: 'system', value: 'system' },
+  { label: 'user', value: 'user' },
+]
+
+const injectPositionUi = ref<KnowledgeGraphInjectPosition | 'default'>('default')
+const injectDepthUi = ref(5)
+const beforeLastRoleUi = ref<KnowledgeGraphBeforeLastRole>('assistant')
+let injectSaveTimer: ReturnType<typeof setTimeout> | null = null
+
 const graphContainer = ref<HTMLElement | null>(null)
 const network = shallowRef<Network | null>(null)
 const loading = ref(false)
@@ -74,6 +101,59 @@ const statsLabel = computed(() => {
 
 function close() {
   emit('update:show', false)
+}
+
+function syncInjectUiFromChat() {
+  const ov = chatsStore.activeChat?.overrides
+  if (!ov) {
+    injectPositionUi.value = 'default'
+    injectDepthUi.value = 5
+    beforeLastRoleUi.value = 'assistant'
+    return
+  }
+  const pos = ov.knowledgeGraphInjectPosition
+  injectPositionUi.value =
+    pos === 'before_system' || pos === 'after_system' || pos === 'depth' || pos === 'before_last'
+      ? pos
+      : 'default'
+  injectDepthUi.value =
+    typeof ov.knowledgeGraphInjectDepth === 'number' && ov.knowledgeGraphInjectDepth >= 0
+      ? ov.knowledgeGraphInjectDepth
+      : 5
+  beforeLastRoleUi.value = ov.knowledgeGraphBeforeLastRole ?? 'assistant'
+}
+
+async function persistInjectSettings() {
+  if (!props.chatId || chatsStore.activeChat?.id !== props.chatId) return
+  const base = { ...chatsStore.activeChat.overrides }
+  if (injectPositionUi.value === 'default') {
+    base.knowledgeGraphInjectPosition = null
+  } else {
+    base.knowledgeGraphInjectPosition = injectPositionUi.value
+  }
+  base.knowledgeGraphInjectDepth = Math.max(0, Number(injectDepthUi.value) || 0)
+  base.knowledgeGraphBeforeLastRole = beforeLastRoleUi.value
+  await chatsStore.updateOverrides(props.chatId, base, { skipLoadList: true })
+}
+
+function scheduleInjectSave() {
+  if (injectSaveTimer) clearTimeout(injectSaveTimer)
+  injectSaveTimer = setTimeout(() => {
+    injectSaveTimer = null
+    void persistInjectSettings()
+  }, 400)
+}
+
+function onInjectPositionSelect(opt: unknown) {
+  const v = typeof opt === 'string' ? opt : String((opt as { value?: string })?.value ?? 'default')
+  injectPositionUi.value = v as KnowledgeGraphInjectPosition | 'default'
+  scheduleInjectSave()
+}
+
+function onBeforeLastRoleSelect(opt: unknown) {
+  const v = typeof opt === 'string' ? opt : String((opt as { value?: string })?.value ?? 'assistant')
+  beforeLastRoleUi.value = v as KnowledgeGraphBeforeLastRole
+  scheduleInjectSave()
 }
 
 function applyKgFromResponse(data: KnowledgeGraphResponse) {
@@ -276,11 +356,16 @@ watch(
   () => props.show,
   async (open) => {
     if (open && props.chatId) {
+      syncInjectUiFromChat()
       await refresh()
     } else {
       destroyNetwork()
       selectedEntityId.value = null
       panelMode.value = 'view'
+      if (injectSaveTimer) {
+        clearTimeout(injectSaveTimer)
+        injectSaveTimer = null
+      }
     }
   },
 )
@@ -347,6 +432,38 @@ onUnmounted(() => destroyNetwork())
             class="flex-1 min-w-0 bg-[var(--color-surface-muted)]"
           />
           <aside class="w-[min(320px,40%)] shrink-0 border-l border-[var(--color-border-subtle)] flex flex-col overflow-y-auto p-4 space-y-3">
+            <div class="space-y-2 pb-2 border-b border-[var(--color-border-subtle)]">
+              <div class="text-xs font-medium text-[var(--color-text-secondary)]">注入设置</div>
+              <label class="block space-y-1">
+                <span class="text-xs text-[var(--color-text-muted)]">注入位置</span>
+                <ModernSelect
+                  :model-value="injectPositionUi"
+                  :options="KG_INJECT_OPTIONS"
+                  class="w-full"
+                  @select="onInjectPositionSelect"
+                />
+              </label>
+              <label v-if="injectPositionUi === 'depth'" class="block space-y-1">
+                <span class="text-xs text-[var(--color-text-muted)]">注入深度（从末尾计）</span>
+                <input
+                  v-model.number="injectDepthUi"
+                  type="number"
+                  min="0"
+                  class="input w-full text-xs"
+                  @change="scheduleInjectSave"
+                />
+              </label>
+              <label v-if="injectPositionUi === 'before_last'" class="block space-y-1">
+                <span class="text-xs text-[var(--color-text-muted)]">锚定消息角色</span>
+                <ModernSelect
+                  :model-value="beforeLastRoleUi"
+                  :options="KG_BEFORE_LAST_ROLE_OPTIONS"
+                  class="w-full"
+                  @select="onBeforeLastRoleSelect"
+                />
+              </label>
+            </div>
+
             <div v-if="activeEntities.length === 0 && panelMode === 'view'" class="text-xs text-[var(--color-text-muted)] space-y-2">
               <p>暂无实体。MVU 会在对话中自动维护图谱，也可手动添加。</p>
               <button type="button" class="btn btn-sm btn-primary w-full" @click="startNewEntity">添加首个实体</button>
