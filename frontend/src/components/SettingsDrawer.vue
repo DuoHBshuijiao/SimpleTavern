@@ -50,6 +50,8 @@ import {
   type ChatContentRegexRule,
   type ChatMvuMode,
   type ChatOverrides,
+  type KnowledgeGraphBeforeLastRole,
+  type KnowledgeGraphInjectPosition,
   type Settings,
   type MvuMode,
   type StateVariables,
@@ -906,6 +908,16 @@ function ensureOverrides(v?: Partial<ChatOverrides> | null): ChatOverrides {
     groupMvuEnabled: v?.groupMvuEnabled ?? null,
     groupMvuAnchorCharacterId: v?.groupMvuAnchorCharacterId ?? null,
     groupMvuTemplateCharacterId: v?.groupMvuTemplateCharacterId ?? null,
+    knowledgeGraphEnabled: v?.knowledgeGraphEnabled ?? null,
+    knowledgeGraphInjectPosition: v?.knowledgeGraphInjectPosition ?? null,
+    knowledgeGraphInjectDepth:
+      typeof v?.knowledgeGraphInjectDepth === 'number' && v.knowledgeGraphInjectDepth >= 0
+        ? Math.floor(v.knowledgeGraphInjectDepth)
+        : 5,
+    knowledgeGraphBeforeLastRole:
+      v?.knowledgeGraphBeforeLastRole === 'system' || v?.knowledgeGraphBeforeLastRole === 'user'
+        ? v.knowledgeGraphBeforeLastRole
+        : 'assistant',
   }
 }
 
@@ -3109,6 +3121,10 @@ interface ComparableChatOverrides {
   groupMvuEnabled: boolean | null
   groupMvuAnchorCharacterId: string | null
   groupMvuTemplateCharacterId: string | null
+  knowledgeGraphEnabled: boolean | null
+  knowledgeGraphInjectPosition: KnowledgeGraphInjectPosition | null
+  knowledgeGraphInjectDepth: number
+  knowledgeGraphBeforeLastRole: KnowledgeGraphBeforeLastRole
 }
 
 function normalizeWorldBookGlobalExclusions(ids: string[] | undefined): string[] {
@@ -3170,6 +3186,10 @@ function normalizeComparableChatOverrides(source?: Partial<ChatOverrides> | null
     groupMvuEnabled: overrides.groupMvuEnabled ?? null,
     groupMvuAnchorCharacterId: overrides.groupMvuAnchorCharacterId ?? null,
     groupMvuTemplateCharacterId: overrides.groupMvuTemplateCharacterId ?? null,
+    knowledgeGraphEnabled: overrides.knowledgeGraphEnabled ?? null,
+    knowledgeGraphInjectPosition: overrides.knowledgeGraphInjectPosition ?? null,
+    knowledgeGraphInjectDepth: overrides.knowledgeGraphInjectDepth ?? 5,
+    knowledgeGraphBeforeLastRole: overrides.knowledgeGraphBeforeLastRole ?? 'assistant',
   }
 }
 
@@ -3222,6 +3242,10 @@ function applyNormalizedComparableToDraft(source: ComparableChatOverrides) {
   chatDraft.value.groupMvuEnabled = source.groupMvuEnabled
   chatDraft.value.groupMvuAnchorCharacterId = source.groupMvuAnchorCharacterId
   chatDraft.value.groupMvuTemplateCharacterId = source.groupMvuTemplateCharacterId
+  chatDraft.value.knowledgeGraphEnabled = source.knowledgeGraphEnabled
+  chatDraft.value.knowledgeGraphInjectPosition = source.knowledgeGraphInjectPosition
+  chatDraft.value.knowledgeGraphInjectDepth = source.knowledgeGraphInjectDepth
+  chatDraft.value.knowledgeGraphBeforeLastRole = source.knowledgeGraphBeforeLastRole
 }
 
 async function ensureCharactersLoadedForSave() {
@@ -5689,6 +5713,16 @@ async function checkUpdate() {
                   <div class="text-sm font-medium text-[var(--color-text-secondary)]">知识图谱</div>
                   <p class="mt-1 text-xs text-[var(--color-text-muted)]">{{ kgStatsSummary }}</p>
                 </div>
+                <label class="inline-flex items-center gap-2 text-sm text-[var(--color-text-secondary)] cursor-pointer select-none">
+                  <ThemedCheckbox
+                    :checked="chatDraft?.knowledgeGraphEnabled !== false"
+                    @update:checked="(v) => { if (chatDraft) chatDraft.knowledgeGraphEnabled = v }"
+                  />
+                  <span>启用知识图谱</span>
+                </label>
+                <p class="text-xs text-[var(--color-text-muted)]">
+                  关闭后不注入 RP 上下文，MVU 也不会自动维护图谱；仍可手动打开图谱编辑。
+                </p>
                 <div class="flex flex-wrap gap-2">
                   <button type="button" class="btn btn-sm btn-primary" @click="emit('open-knowledge-graph')">
                     打开图谱
