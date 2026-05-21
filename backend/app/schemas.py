@@ -595,6 +595,14 @@ RegexMatchMode = Literal["global", "first"]
 RegexExtractSource = Literal["whole_match", "capture_group"]
 
 MvuMode = Literal["regex", "directive"]
+KnowledgeGraphInjectPosition = Literal[
+    "before_system",
+    "after_system",
+    "depth",
+    "before_last",
+    "legacy",
+]
+KnowledgeGraphBeforeLastRole = Literal["assistant", "system", "user"]
 GroupMvuPreset = Literal["off", "inherit_member", "fork_session"]
 MvuStateSource = Literal["mvu_agent", "chat_assistant"]
 MvuWorkLogEventType = Literal["triggered", "planning", "tool_call", "commit", "error"]
@@ -945,6 +953,23 @@ class ChatOverrides(BaseModel):
     groupMvuTemplateCharacterId: str | None = Field(
         default=None,
         description="沿用或 fork 会话 MVU 时选用的模板成员角色 ID",
+    )
+    knowledgeGraphEnabled: bool | None = Field(
+        default=None,
+        description="会话级知识图谱开关；None 视为启用；False 关闭 RP 注入与 MVU 自动维护",
+    )
+    knowledgeGraphInjectPosition: KnowledgeGraphInjectPosition | None = Field(
+        default=None,
+        description="RP 注入位置；None 使用 legacy（追加到最后一条 assistant 末尾）",
+    )
+    knowledgeGraphInjectDepth: int = Field(
+        default=5,
+        ge=0,
+        description="深度插入时从对话末尾向前计数的条数",
+    )
+    knowledgeGraphBeforeLastRole: KnowledgeGraphBeforeLastRole = Field(
+        default="assistant",
+        description="最新消息前模式所锚定的消息角色",
     )
 
     @model_validator(mode="after")
