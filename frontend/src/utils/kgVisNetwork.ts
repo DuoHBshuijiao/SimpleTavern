@@ -13,11 +13,26 @@ const TYPE_COLOR_VAR: Record<KgEntityType, string> = {
   事件: '--color-text-muted',
 }
 
+/** 读取已解析的主题 CSS 变量（vis-network canvas 无法识别 var() 字符串） */
+export function getThemeColor(varName: string): string {
+  if (typeof document === 'undefined') return ''
+  const name = varName.startsWith('--') ? varName : `--${varName}`
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+}
+
+/** vis-network 全局字体/边线色（需在运行时解析为具体颜色值） */
+export function getKgVisNetworkTheme() {
+  return {
+    nodeFontColor: getThemeColor('--color-on-brand'),
+    edgeFontColor: getThemeColor('--color-brand-light'),
+    edgeColor: getThemeColor('--color-border'),
+    edgeHighlightColor: getThemeColor('--color-brand'),
+  }
+}
+
 /** 从 CSS 变量读取实体类型对应颜色（深浅主题自适应） */
 export function getKgEntityColor(type: KgEntityType): string {
-  if (typeof document === 'undefined') return ''
-  const v = getComputedStyle(document.documentElement).getPropertyValue(TYPE_COLOR_VAR[type]).trim()
-  return v || ''
+  return getThemeColor(TYPE_COLOR_VAR[type])
 }
 
 export interface KgVisNode {
