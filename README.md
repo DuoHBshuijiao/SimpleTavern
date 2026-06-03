@@ -1,3 +1,4 @@
+## 程序已停更，类酒馆形态上限太低，正在创建专为角色扮演设计的Agent框架，敬请期待。
 <div align="center">
 
 <img src="frontend/public/image1.jpeg" alt="SimpleTavern" />
