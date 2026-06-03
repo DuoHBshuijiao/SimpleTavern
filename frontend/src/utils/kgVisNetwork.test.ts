@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { KnowledgeGraph } from '../types/models'
-import { countActiveEntities, getKgEntityColor, knowledgeGraphToVisData } from './kgVisNetwork'
+import {
+  countActiveEntities,
+  getKgEntityColor,
+  getKgVisNetworkTheme,
+  getThemeColor,
+  knowledgeGraphToVisData,
+} from './kgVisNetwork'
 
 describe('kgVisNetwork', () => {
   it('filters deleted entities from vis nodes', () => {
@@ -24,5 +30,12 @@ describe('kgVisNetwork', () => {
   it('maps entity type to color field when document exists', () => {
     const c = getKgEntityColor('人物')
     expect(typeof c).toBe('string')
+  })
+
+  it('resolves theme tokens for vis-network canvas', () => {
+    const theme = getKgVisNetworkTheme()
+    expect(typeof theme.nodeFontColor).toBe('string')
+    expect(typeof theme.edgeFontColor).toBe('string')
+    expect(getThemeColor('color-brand-light')).toBe(getThemeColor('--color-brand-light'))
   })
 })
