@@ -14,6 +14,7 @@ from app.storage import (
     list_characters,
     list_chats,
     list_group_chats,
+    load_character,
     load_settings,
 )
 
@@ -110,6 +111,20 @@ def _scannable_message_indexes(chat: Any, rules: list[Any]) -> set[int]:
     return set(indexes)
 
 
+def _resolve_chat_mvu_scan_mode(chat: Any) -> str:
+    """Return the MVU mode relevant to regex scanner enqueue behavior."""
+    overrides = getattr(chat, "overrides", None)
+    override_mode = getattr(overrides, "mvuMode", None) if overrides is not None else None
+    if override_mode in ("regex", "directive"):
+        return str(override_mode)
+    try:
+        character = load_character(getattr(chat, "characterId", ""))
+    except Exception:
+        return "regex"
+    character_mode = getattr(character, "mvuMode", None)
+    return str(character_mode) if character_mode in ("regex", "directive") else "regex"
+
+
 def _scan_once() -> None:
     settings = load_settings()
     for chat in _chat_iter():
@@ -120,6 +135,7 @@ def _scan_once() -> None:
 
         # 检查会话是否启用 MVU（单聊看角色卡；群聊看显式开关与兼容逻辑）
         mvu_enabled = is_chat_mvu_runtime_enabled(chat)
+        mvu_mode = _resolve_chat_mvu_scan_mode(chat) if mvu_enabled else "regex"
 
         # 定位 MVU 已消费标记所在的消息索引（-1 表示无标记）
         last_processed_idx: int = -1
@@ -158,7 +174,7 @@ def _scan_once() -> None:
             result = apply_content_regex_pipeline(msg.content, rules)
 
             # MVU 入队：仅当角色开启 MVU 且消息符合过滤条件
-            if mvu_enabled and result.extracted_items:
+            if mvu_enabled and mvu_mode == "regex" and result.extracted_items:
                 should_enqueue = False
                 if last_processed_idx >= 0:
                     if idx > last_processed_idx:

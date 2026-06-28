@@ -32,9 +32,9 @@ curl http://127.0.0.1:9091/api/data-integrity/issues
 
 ## 本地验证结果
 
-- `cd frontend && npm run test`：通过，9 个测试文件 / 48 条用例。
+- `cd frontend && npm run test`：通过，9 个测试文件 / 49 条用例。
 - `cd frontend && npm run build`：通过，Vite 输出 chunk size warning，非失败。
-- `cd backend && python -m pytest tests/ -q`：通过，103 条用例。
+- `cd backend && python -m pytest tests/ -q`：通过，104 条用例。
 
 ## Release body 草稿
 

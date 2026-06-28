@@ -14,7 +14,7 @@ interface CompiledRule {
   matchMode: string
 }
 
-const SAFE_LITERAL_FLAGS = new Set(['i', 'm', 's', 'u'])
+const SAFE_LITERAL_FLAGS = new Set(['g', 'i', 'm', 's', 'u'])
 
 function splitRegexLiteral(raw: string): { body: string; flags: string } | null {
   const text = (raw || '').trim()

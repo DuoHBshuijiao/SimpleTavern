@@ -48,6 +48,14 @@ describe('applyContentRegexDisplay', () => {
     expect(result).toBe('X b-c')
   })
 
+  it('accepts JS slash literal global flag for display-time rules', () => {
+    const result = applyContentRegexDisplay('foo foo bar', [
+      rule({ pattern: '/foo/g', action: 'replace', replacement: 'baz' }),
+    ])
+
+    expect(result).toBe('baz baz bar')
+  })
+
   it('applies first match mode once', () => {
     const result = applyContentRegexDisplay('one two two', [
       rule({ pattern: 'two', action: 'remove', matchMode: 'first' }),
