@@ -1,4 +1,4 @@
-## 程序已停更，类酒馆形态上限太低，正在创建专为角色扮演设计的Agent框架，敬请期待。
+> **维护状态**：SimpleTavern 已进入 **v1.0 稳定化阶段**。本仓库不再追求类酒馆式大型功能扩张，但会持续接受 bug 修复、数据可靠性、体验一致性、性能优化与文档/测试补强。任务与版本计划见 `docs/00-INDEX.md`。
 <div align="center">
 
 <img src="frontend/public/image1.jpeg" alt="SimpleTavern" />
@@ -150,6 +150,9 @@ npm run build
 - **WebGPU 动态背景（进阶）**：聊天页/全屏等场景支持可编程背景，**WGSL** 语法的 **WebGPU 着色器** 与预设管理，可按需开启动效（详见设置与相关 Shader 入口）。不懂着色器时保持默认即可，不影响正常使用。
 - **智能聊天助手**：内置可调用工具的 Agent 流程，支持长记忆摘要、角色卡生成等。
 - **群聊独有定制**：每个群成员可以拥有独立的模型、系统提示和温度设置。
+- **MVU 状态变量与知识图谱**：支持由后台 Agent 或正文正则提取结果维护状态表，并可在会话中查看、编辑和注入知识图谱。
+- **正文正则后处理**：会话可配置 remove / replace / extract / extract_and_replace 规则，用于清理显示文本、提取状态变量线索，并与 MVU 队列联动。
+- **会话分叉与数据完整性检查**：支持从历史消息创建分支会话，并提供数据完整性扫描与修复接口，降低 JSON 文件长期使用后的维护成本。
 - **语音 TTS：云端 + 本机（可选）**：在应用内即可接入**云端 TTS**；需要**本机托管**时，在设置里填写你自行部署的网关地址。本机语音**不在**本仓库里一键装好——需**单独**运行与 SimpleTavern 对接的 **FastAPI 网关**，与主程序分进程部署即可。
   - 自部署网关（进阶，按需打开）：[GLM TTS FastAPI 网关](https://github.com/DuoHBshuijiao/GLM-TTS-FastAPI_Gateway) · [Qwen3 TTS 流式 FastAPI 网关](https://github.com/DuoHBshuijiao/Qwen3-TTS-streaming-FastAPI_Gateway) · [OmniVoice FastAPI 网关](https://github.com/DuoHBshuijiao/OmniVoice-FastAPI_Gateway)
 - **纯 JSON 持久化**：无数据库依赖，所有数据（角色、会话、设置）以 JSON 文件形式存放在 `data/` 下，备份与迁移极其简单。
@@ -181,10 +184,12 @@ npm run build
 | 健康检查 | `GET /api/health` | 服务存活（见 `main.py`） |
 | 应用设置 | `GET` / `PUT /api/settings` | 全局设置读写 |
 | 角色 | `GET` / `POST /api/characters`；`GET` / `PUT` / `DELETE /api/characters/{character_id}` | 角色卡 CRUD |
-| 聊天 | `GET` / `POST /api/chats`；`GET /api/chats/groups`；`POST /api/chats/{source_chat_id}/promote-to-group`；`GET` / `PUT` / `DELETE /api/chats/{chat_id}`；`GET /api/chats/{chat_id}/search`；`POST /api/chats/{chat_id}/messages`；`PUT` / `DELETE /api/chats/{chat_id}/messages/{message_id}`；`POST /api/chats/{chat_id}/images`；`GET /api/chats/{chat_id}/images/{image_id}`；`POST` / `DELETE /api/chats/{chat_id}/members/{member_id}` | 列表、建群、单聊转群、搜索、消息与图片、群成员等（见 `routes/chats.py`） |
+| 聊天 | `GET` / `POST /api/chats`；`GET /api/chats/groups`；`POST /api/chats/{source_chat_id}/promote-to-group`；`POST /api/chats/{source_chat_id}/fork`；`GET /api/chats/{chat_id}/fork-lineage`；`GET` / `PUT` / `DELETE /api/chats/{chat_id}`；`GET /api/chats/{chat_id}/search`；`POST /api/chats/{chat_id}/messages`；`PUT` / `DELETE /api/chats/{chat_id}/messages/{message_id}`；`POST /api/chats/{chat_id}/images`；`GET /api/chats/{chat_id}/images/{image_id}`；`POST` / `DELETE /api/chats/{chat_id}/members/{member_id}` | 列表、建群、单聊转群、分叉、分叉溯源、搜索、消息与图片、群成员等（见 `routes/chats.py`） |
 | 世界书 | `GET` / `POST /api/worldbooks`；`GET` / `PUT` / `DELETE /api/worldbooks/{worldbook_id}` | 世界书 CRUD（`routes/worldbooks.py`） |
 | 对话生成 | `POST /api/generate/stream`；`POST /api/generate/draft-help`；`POST /api/generate/group`；`POST /api/generate/interject` | 主聊天流式、草稿辅助、群聊、插话等（`routes/generate.py`） |
 | LLM 辅助 | `GET /api/llm/models`；`POST /api/llm/test-models` | 模型列表与连通性（`routes/llm.py`） |
+| MVU 与知识图谱 | `GET /api/mvu/{chat_id}/stream`；`GET` / `PUT /api/mvu/{chat_id}/state`；`GET /api/mvu/{chat_id}/knowledge-graph`；实体与关系的新增、更新、删除端点 | MVU 工作日志 SSE、状态变量读写、知识图谱查看与维护（`routes/mvu.py`） |
+| 网络搜索状态 | `GET /api/web-search/status` | 查询 Tavily / Bocha 等搜索服务的本地配置与用量/余额状态（`routes/web_search.py`） |
 | 头像 | `POST /api/avatars`；`GET` / `DELETE /api/avatars/{filename}` | 上传、读取、删除（`routes/avatars.py`） |
 | 字体 | `GET /api/fonts`；`GET /api/fonts/{filename}`；`POST /api/fonts` | 字体列表、文件与上传（`routes/font.py`） |
 | 页面背景 | `GET /api/page-backgrounds/{filename}`；`POST /api/page-backgrounds`；`DELETE /api/page-backgrounds/{filename}` | 聊页背景图（`routes/page_backgrounds.py`） |

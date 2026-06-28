@@ -229,7 +229,18 @@ let pendingAlignAfterHeightFlush = false
 /** scrollToBottomAfterLayout 请求强制贴底，不受上一会话 wasNearBottom 影响 */
 let pendingAlignForce = false
 
+const MARKDOWN_HTML_CACHE_LIMIT = 400
 const markdownHtmlCache = new Map<string, string>()
+
+function rememberMarkdownHtml(key: string, html: string) {
+  if (markdownHtmlCache.has(key)) markdownHtmlCache.delete(key)
+  markdownHtmlCache.set(key, html)
+  while (markdownHtmlCache.size > MARKDOWN_HTML_CACHE_LIMIT) {
+    const oldestKey = markdownHtmlCache.keys().next().value
+    if (typeof oldestKey !== 'string') break
+    markdownHtmlCache.delete(oldestKey)
+  }
+}
 
 // 删除确认状态
 const deleteConfirm = ref<{
@@ -500,9 +511,12 @@ function renderMarkdown(m: ChatMessage) {
   if (isStreaming) return renderChatMarkdownStreaming(text)
   const key = markdownCacheKey(m)
   const cached = markdownHtmlCache.get(key)
-  if (cached != null) return cached
+  if (cached != null) {
+    rememberMarkdownHtml(key, cached)
+    return cached
+  }
   const html = renderChatMarkdown(text)
-  markdownHtmlCache.set(key, html)
+  rememberMarkdownHtml(key, html)
   return html
 }
 

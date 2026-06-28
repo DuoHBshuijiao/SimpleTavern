@@ -579,8 +579,8 @@ def create_chat(req: CreateChatRequest) -> Chat:
                         greetingVariantIndex=0,
                     ),
                 )
-        except FileNotFoundError:
-            pass
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="character not found") from exc
     else:
         _rebuild_group_content_regex_from_members(chat)
         if req.firstMessageCharacterId:

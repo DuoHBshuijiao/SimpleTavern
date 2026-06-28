@@ -33,6 +33,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.content_regex_scanner import ensure_content_regex_scanner_started
 from app.llm.openai_compat import chat_completions, chat_completions_message, stream_chat_completions
+from app.llm.preset_resolve import LlmPresetResolveError, resolve_llm_preset_credentials
 from app.placeholders import replace_placeholders_in_text
 from app.prompt_xml import (
     wrap_acting_as,
@@ -69,6 +70,14 @@ from app.tokenizer_service import (
 
 router = APIRouter(tags=["generate"])
 ensure_content_regex_scanner_started()
+
+
+def _resolve_generation_credentials(settings: Any, *, model: str, preset_id: str | None) -> tuple[str, str]:
+    try:
+        credentials = resolve_llm_preset_credentials(settings, model=model, explicit_preset_id=preset_id)
+    except LlmPresetResolveError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message}) from exc
+    return credentials.base_url, credentials.api_key
 
 
 def _omit_message_ids_from_request(req: Any) -> set[str]:
@@ -1069,14 +1078,7 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
     elif chat.overrides.presetId:
         preset_id = chat.overrides.presetId
     
-    base_url = settings.llm.baseUrl
-    api_key = settings.llm.apiKey
-
-    if preset_id:
-        found_preset = next((p for p in settings.apiPresets if p.id == preset_id), None)
-        if found_preset:
-            base_url = found_preset.baseUrl
-            api_key = found_preset.apiKey
+    base_url, api_key = _resolve_generation_credentials(settings, model=model, preset_id=preset_id)
 
     _apply_placeholder_rewrite_to_history(
         chat,
@@ -1429,13 +1431,7 @@ async def generate_draft_help(req: DraftHelpRequest) -> StreamingResponse:
     recent_dialog = _render_draft_help_history_text(recent_dialog_messages) or "（暂无可用对话上下文）"
     messages.append({"role": "user", "content": f"最近对话如下：\n{recent_dialog}"})
     preset_id = chat.overrides.presetId
-    base_url = settings.llm.baseUrl
-    api_key = settings.llm.apiKey
-    if preset_id:
-        found = next((p for p in settings.apiPresets if p.id == preset_id), None)
-        if found:
-            base_url = found.baseUrl
-            api_key = found.apiKey
+    base_url, api_key = _resolve_generation_credentials(settings, model=model, preset_id=preset_id)
 
     reasoning_cfg = build_reasoning_request_config(settings)
     thinking_enabled = reasoning_cfg["thinking_enabled"]
@@ -1687,14 +1683,7 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
     elif chat.overrides.presetId:
         preset_id = chat.overrides.presetId
     
-    base_url = settings.llm.baseUrl
-    api_key = settings.llm.apiKey
-
-    if preset_id:
-        found_preset = next((p for p in settings.apiPresets if p.id == preset_id), None)
-        if found_preset:
-            base_url = found_preset.baseUrl
-            api_key = found_preset.apiKey
+    base_url, api_key = _resolve_generation_credentials(settings, model=model, preset_id=preset_id)
 
     _apply_placeholder_rewrite_to_history(
         chat,
@@ -2153,14 +2142,7 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
     elif chat.overrides.presetId:
         preset_id = chat.overrides.presetId
     
-    base_url = settings.llm.baseUrl
-    api_key = settings.llm.apiKey
-
-    if preset_id:
-        found_preset = next((p for p in settings.apiPresets if p.id == preset_id), None)
-        if found_preset:
-            base_url = found_preset.baseUrl
-            api_key = found_preset.apiKey
+    base_url, api_key = _resolve_generation_credentials(settings, model=model, preset_id=preset_id)
 
     _apply_placeholder_rewrite_to_history(
         chat,

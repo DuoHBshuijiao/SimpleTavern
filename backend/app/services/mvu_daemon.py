@@ -2,10 +2,10 @@
 
 触发器：
   1. generate done  → signal_generate_done(chat_id)  立即唤醒
-  2. 队列堆积      → daemon 每 5s 轮询检查
+  2. 队列堆积      → signal_queue_threshold(chat_id) 唤醒，5s 轮询兜底
 
 共用同一互斥锁，1 秒冷却防止高频重复触发。signal_queue_threshold 保留
-供未来扩展，当前由轮询覆盖。
+由 content regex scanner 在入队后调用。
 """
 
 from __future__ import annotations
@@ -17,8 +17,9 @@ from typing import Literal
 
 logger = logging.getLogger(__name__)
 
-from app.content_regex_queue import clear_queue, dequeue_by_message_id, get_content_regex_queue_size
+from app.content_regex_queue import dequeue_by_message_id, get_content_regex_queue_size
 from app.group_mvu import is_chat_mvu_runtime_enabled
+from app.llm.preset_resolve import LlmPresetResolveError, resolve_llm_preset_credentials
 from app.mvu_model_resolve import resolve_mvu_model_from_settings
 from app.mvu_system_prompt import load_mvu_system_prompt
 from app.schemas import (
@@ -131,9 +132,6 @@ def ensure_mvu_worker(chat_id: str) -> bool:
     if existing is not None and not existing.done():
         return True
 
-    # 首次启动 worker：入口清理——清空队列残留，scanner 下轮按规则正确入队
-    clear_queue(chat_id)
-
     _tasks[chat_id] = asyncio.create_task(_mvu_loop(chat_id))
     return True
 
@@ -172,6 +170,7 @@ async def _mvu_loop(chat_id: str) -> None:
             try:
                 await _run_once(chat_id)
             except Exception:
+                logger.exception("chat %s: MVU worker run failed", chat_id)
                 continue
 
             _last_run[chat_id] = time.monotonic()
@@ -192,17 +191,11 @@ async def _run_once(chat_id: str) -> None:
 
     settings = load_settings()
 
-    # 解析 API 端点：优先使用会话 preset，否则全局设置
+    # 解析 API 端点：与主生成路径共享 fast-fail 规则，避免 MVU 使用不同预设。
     preset_id = getattr(chat.overrides, "presetId", None)
-    base_url = settings.llm.baseUrl
-    api_key = settings.llm.apiKey
-
     found_preset = None
     if preset_id:
         found_preset = next((p for p in settings.apiPresets if p.id == preset_id), None)
-        if found_preset:
-            base_url = found_preset.baseUrl
-            api_key = found_preset.apiKey
 
     # 模型名称多级回退：
     #   1) 全局 settings.mvuModel → defaultModel → modelCandidates（见 mvu_model_resolve）
@@ -217,6 +210,15 @@ async def _run_once(chat_id: str) -> None:
             "message": "MVU 模型未配置，请在全局设置中指定 MVU 模型或默认模型",
         }))
         return
+
+    try:
+        credentials = resolve_llm_preset_credentials(settings, model=model, explicit_preset_id=preset_id)
+    except LlmPresetResolveError as exc:
+        logger.error("chat %s: MVU preset resolution failed: %s", chat_id, exc.message)
+        await _broadcast(chat_id, MvuAgentEvent("error", {"code": exc.code, "message": exc.message}))
+        return
+    base_url = credentials.base_url
+    api_key = credentials.api_key
 
     reasoning_cfg = build_reasoning_request_config(settings)
     extra_body = filter_reasoning_extra_body_for_upstream(model, reasoning_cfg["extra_body"])

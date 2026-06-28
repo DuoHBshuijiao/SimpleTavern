@@ -14,30 +14,78 @@ interface CompiledRule {
   matchMode: string
 }
 
+const SAFE_LITERAL_FLAGS = new Set(['i', 'm', 's', 'u'])
+
+function splitRegexLiteral(raw: string): { body: string; flags: string } | null {
+  const text = (raw || '').trim()
+  if (text.length < 2 || !text.startsWith('/')) return null
+
+  let inClass = false
+  let index = 1
+  while (index < text.length) {
+    const ch = text[index]
+    if (ch === '\\') {
+      index += 2
+      continue
+    }
+    if (ch === '[' && !inClass) {
+      inClass = true
+      index += 1
+      continue
+    }
+    if (ch === ']' && inClass) {
+      inClass = false
+      index += 1
+      continue
+    }
+    if (ch === '/' && !inClass) {
+      const body = text.slice(1, index)
+      const flags = text.slice(index + 1).toLowerCase()
+      if (flags && !/^[a-z]+$/.test(flags)) return null
+      const seen = new Set<string>()
+      for (const flag of flags) {
+        if (seen.has(flag) || !SAFE_LITERAL_FLAGS.has(flag)) return null
+        seen.add(flag)
+      }
+      return { body, flags }
+    }
+    index += 1
+  }
+  return null
+}
+
+function withRuntimeFlags(flags: string, matchMode: string): string {
+  const out = new Set<string>(['m', 's'])
+  for (const flag of flags) out.add(flag)
+  if ((matchMode || 'global') === 'global') out.add('g')
+  return [...out].join('')
+}
+
+function toJsReplacement(replacement: string): string {
+  return (replacement || '').replace(/\\g<(\d+)>/g, '$$$1')
+}
+
 function compileRule(rule: ChatContentRegexRule): CompiledRule | null {
   const pattern = (rule.pattern || '').trim()
   if (!pattern) return null
+  const matchMode = rule.matchMode || 'global'
   try {
-    if (pattern.startsWith('/')) {
-      const lastSlash = pattern.lastIndexOf('/')
-      if (lastSlash > 0) {
-        const flags = pattern.slice(lastSlash + 1)
-        const body = pattern.slice(1, lastSlash)
-        return {
-          regex: new RegExp(body, flags),
-          action: rule.action || 'remove',
-          replacement: rule.replacement || '',
-          matchMode: rule.matchMode || 'global',
-        }
+    const literal = splitRegexLiteral(pattern)
+    if (literal) {
+      return {
+        regex: new RegExp(literal.body, withRuntimeFlags(literal.flags, matchMode)),
+        action: rule.action || 'remove',
+        replacement: toJsReplacement(rule.replacement || ''),
+        matchMode,
       }
     }
   } catch { /* invalid regex */ }
   try {
     return {
-      regex: new RegExp(pattern, 'gims'),
+      regex: new RegExp(pattern, withRuntimeFlags('', matchMode)),
       action: rule.action || 'remove',
-      replacement: rule.replacement || '',
-      matchMode: rule.matchMode || 'global',
+      replacement: toJsReplacement(rule.replacement || ''),
+      matchMode,
     }
   } catch {
     return null
@@ -74,10 +122,8 @@ export function applyContentRegexDisplay(
     const start = performance.now()
     try {
       if (matchMode === 'first') {
-        const match = regex.exec(working)
-        if (match) {
-          working = working.slice(0, match.index) + match[0].replace(regex, replacement) + working.slice(match.index + match[0].length)
-        }
+        regex.lastIndex = 0
+        working = working.replace(regex, replacement)
       } else {
         if (performance.now() - start > RULE_TIMEOUT_MS) continue
         regex.lastIndex = 0

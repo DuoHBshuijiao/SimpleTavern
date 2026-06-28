@@ -3,7 +3,7 @@
  * 全局通知宿主：Teleport 到 body，与 useNotify 共用队列。
  * 流式错误仍由 ChatPage 的 useErrorStack + ErrorModal 处理（方案 A）。
  */
-import { computed } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useNotifyHost } from '../composables/useNotify'
 import { useSettingsStore } from '../stores'
 import { normalizeThemeId } from '../types/models'
@@ -13,6 +13,7 @@ const settingsStore = useSettingsStore()
 const appThemeId = computed(() => normalizeThemeId(settingsStore.settings?.themeId))
 
 const { current, dismissAlert, confirmYes, confirmNo } = useNotifyHost()
+const primaryButtonRef = ref<HTMLButtonElement | null>(null)
 
 const headerTitle = computed(() => {
   const c = current.value
@@ -27,6 +28,33 @@ function onBackdropClick() {
   if (c.kind === 'alert') dismissAlert()
   else confirmNo()
 }
+
+function closeCurrentFromKeyboard() {
+  const c = current.value
+  if (!c) return
+  if (c.kind === 'alert') dismissAlert()
+  else confirmNo()
+}
+
+function handleKeydown(event: KeyboardEvent) {
+  if (!current.value || event.key !== 'Escape') return
+  event.preventDefault()
+  closeCurrentFromKeyboard()
+}
+
+watch(current, async (item) => {
+  if (!item) return
+  await nextTick()
+  primaryButtonRef.value?.focus()
+})
+
+onMounted(() => {
+  window.addEventListener('keydown', handleKeydown)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeydown)
+})
 </script>
 
 <template>
@@ -45,10 +73,11 @@ function onBackdropClick() {
         class="app-notify-panel relative mt-[min(15vh,6rem)] w-[min(560px,calc(100vw-2rem))] max-h-[min(70vh,520px)] flex flex-col rounded-2xl border border-[var(--color-border)] overflow-hidden"
         role="dialog"
         aria-modal="true"
+        :aria-labelledby="`app-notify-title-${current.id}`"
         @click.stop
       >
         <div class="px-4 pt-4 pb-2 border-b border-[var(--color-border-subtle)] shrink-0">
-          <h2 class="text-base font-semibold text-[var(--color-text)]">
+          <h2 :id="`app-notify-title-${current.id}`" class="text-base font-semibold text-[var(--color-text)]">
             {{ headerTitle }}
           </h2>
         </div>
@@ -64,7 +93,7 @@ function onBackdropClick() {
           v-if="current.kind === 'alert'"
           class="px-4 py-3 flex justify-end gap-2 border-t border-[var(--color-border-subtle)] shrink-0"
         >
-          <button type="button" class="btn btn-sm btn-primary" @click="dismissAlert">确定</button>
+          <button ref="primaryButtonRef" type="button" class="btn btn-sm btn-primary" @click="dismissAlert">确定</button>
         </div>
         <div
           v-else
@@ -73,13 +102,14 @@ function onBackdropClick() {
           <button type="button" class="btn btn-sm btn-secondary" @click="confirmNo">取消</button>
           <button
             v-if="current.variant === 'danger'"
+            ref="primaryButtonRef"
             type="button"
             class="btn btn-sm btn-danger"
             @click="confirmYes"
           >
             确定
           </button>
-          <button v-else type="button" class="btn btn-sm btn-primary" @click="confirmYes">确定</button>
+          <button v-else ref="primaryButtonRef" type="button" class="btn btn-sm btn-primary" @click="confirmYes">确定</button>
         </div>
       </div>
     </div>

@@ -4,6 +4,7 @@ import type { ChatMessage } from '../types/models'
 
 function msg(id: string): ChatMessage {
   return {
+    version: 1,
     id,
     role: 'user',
     content: 'hello',

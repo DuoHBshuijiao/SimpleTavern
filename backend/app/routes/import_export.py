@@ -2123,8 +2123,11 @@ def _import_from_zip(payload: bytes) -> dict[str, Any]:
                 content = (content or "").strip()
                 if content:
                     save_chat_memory(character_id_from_path, chat_id_from_path, content)
-            except Exception:
-                continue
+            except Exception as exc:
+                detail = str(exc).strip() or type(exc).__name__
+                if len(detail) > 160:
+                    detail = detail[:157] + "..."
+                warnings.append(f"{name}: 长期记忆恢复失败（{detail}）")
     return {"imported": imported, "warnings": warnings}
 
 

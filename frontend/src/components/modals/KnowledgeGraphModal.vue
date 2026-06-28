@@ -24,6 +24,7 @@ import {
   knowledgeGraphToVisData,
 } from '../../utils/kgVisNetwork'
 import { useViewportNarrowPortrait } from '../../composables/useViewportNarrowPortrait'
+import { notifyConfirm } from '../../composables/useNotify'
 import ModernSelect from '../ModernSelect.vue'
 
 const props = defineProps<{
@@ -273,7 +274,12 @@ async function saveEntity() {
 
 async function deleteSelectedEntity() {
   if (!props.chatId || !selectedEntityId.value) return
-  if (!confirm('确定删除该实体？相关关系将一并移除。')) return
+  const ok = await notifyConfirm({
+    title: '删除实体',
+    message: '确定删除该实体？相关关系将一并移除。',
+    variant: 'danger',
+  })
+  if (!ok) return
   saveError.value = ''
   try {
     await apiDelete(`/api/mvu/${props.chatId}/knowledge-graph/entities/${selectedEntityId.value}`)

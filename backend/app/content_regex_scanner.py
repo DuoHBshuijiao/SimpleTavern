@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import threading
 import time
 from typing import Any
@@ -15,8 +16,11 @@ from app.storage import (
     list_group_chats,
     load_settings,
 )
-    # 扫描间隔时间，之前出于性能考虑从0.5s改为5s，但实际进行性能检查后发现前端渲染瓶颈不在于此，因此改为0.5s
-_SCAN_INTERVAL_SECONDS = 0.5
+
+logger = logging.getLogger(__name__)
+
+_SCAN_INTERVAL_SECONDS = 5.0
+_SCAN_DEPTH_HARD_LIMIT = 50
 _scanner_started = False
 _scanner_lock = threading.Lock()
 _processed_signatures: dict[tuple[str, str], str] = {}
@@ -79,6 +83,33 @@ def _chat_iter():
             yield chat
 
 
+def _scan_depth(chat: Any, rules: list[Any]) -> int:
+    overrides = getattr(chat, "overrides", None)
+    depth = getattr(overrides, "contentRegexScanDepthDefault", None)
+    if not isinstance(depth, int) or depth < 1:
+        depth = _SCAN_DEPTH_HARD_LIMIT
+    for rule in rules:
+        override = getattr(rule, "scanDepthOverride", None)
+        if isinstance(override, int) and override >= 1:
+            depth = max(depth, override)
+    return max(1, min(_SCAN_DEPTH_HARD_LIMIT, depth))
+
+
+def _scannable_message_indexes(chat: Any, rules: list[Any]) -> set[int]:
+    depth = _scan_depth(chat, rules)
+    indexes: list[int] = []
+    for idx in range(len(chat.messages) - 1, -1, -1):
+        msg = chat.messages[idx]
+        if msg.role not in ("assistant", "user"):
+            continue
+        if not (msg.content or "").strip():
+            continue
+        indexes.append(idx)
+        if len(indexes) >= depth:
+            break
+    return set(indexes)
+
+
 def _scan_once() -> None:
     settings = load_settings()
     for chat in _chat_iter():
@@ -98,6 +129,8 @@ def _scan_once() -> None:
                     last_processed_idx = i
                     break
 
+        scannable_indexes = _scannable_message_indexes(chat, rules)
+
         # 找到最新一条有效消息（assistant/user，有内容）的索引
         last_valid_idx: int = -1
         for i in range(len(chat.messages) - 1, -1, -1):
@@ -107,7 +140,11 @@ def _scan_once() -> None:
                 break
 
         for idx, msg in enumerate(chat.messages):
+            if idx not in scannable_indexes:
+                continue
             if msg.role not in ("assistant", "user"):
+                continue
+            if idx == 0 and msg.role == "assistant":
                 continue
             content = (msg.content or "").strip()
             if not content:
@@ -134,15 +171,21 @@ def _scan_once() -> None:
                     for item in result.extracted_items:
                         item["messageId"] = msg.id
                     enqueue_content_regex_items(chat.id, result.extracted_items)
+                    from app.services.mvu_daemon import signal_queue_threshold
+
+                    signal_queue_threshold(chat.id)
 
 
 def _scanner_loop() -> None:
+    failure_count = 0
     while True:
         try:
             _scan_once()
+            failure_count = 0
         except Exception:
-            pass
-        time.sleep(_SCAN_INTERVAL_SECONDS)
+            failure_count += 1
+            logger.exception("content regex scanner failed")
+        time.sleep(min(60.0, _SCAN_INTERVAL_SECONDS * max(1, failure_count)))
 
 
 def ensure_content_regex_scanner_started() -> None:

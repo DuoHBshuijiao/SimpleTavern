@@ -55,6 +55,7 @@ from app.services.assistant_agent import (
     AssistantAgentRunContext,
     AssistantAgentService,
 )
+from app.llm.preset_resolve import LlmPresetResolveError, resolve_llm_preset_credentials
 from app.services.user_message_content import build_user_message_content
 from app.schemas import (
     AssistantAppendRole,
@@ -101,6 +102,14 @@ from app.tokenizer_service import trim_assistant_openai_messages_to_context
 
 
 router = APIRouter(tags=["assistant"])
+
+
+def _resolve_assistant_credentials(settings: Any, *, model: str, preset_id: str | None) -> tuple[str, str]:
+    try:
+        credentials = resolve_llm_preset_credentials(settings, model=model, explicit_preset_id=preset_id)
+    except LlmPresetResolveError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message}) from exc
+    return credentials.base_url, credentials.api_key
 
 
 class AssistantStreamRequest(BaseModel):
@@ -810,29 +819,8 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
     if thinking_enabled:
         temperature = None
 
-    base_url = settings.llm.baseUrl
-    api_key = settings.llm.apiKey
-
     preset_id = assistant_settings.presetId
-    found_preset = None
-    if preset_id and settings.apiPresets:
-        found_preset = next((p for p in settings.apiPresets if p.id == preset_id), None)
-        if found_preset:
-            base_url = found_preset.baseUrl
-            api_key = found_preset.apiKey
-    # 当未关联预设或未找到时，根据当前模型在预设列表中查找所属预设，避免错误使用顺位第一的预设
-    if not found_preset and model and settings.apiPresets:
-        found_preset = next(
-            (p for p in settings.apiPresets if p.models and model in p.models),
-            None,
-        )
-        if found_preset:
-            base_url = found_preset.baseUrl
-            api_key = found_preset.apiKey
-    if not base_url and settings.apiPresets:
-        first_preset = settings.apiPresets[0]
-        base_url = first_preset.baseUrl
-        api_key = first_preset.apiKey
+    base_url, api_key = _resolve_assistant_credentials(settings, model=model, preset_id=preset_id)
 
     existing_messages = chat.messages or []
     

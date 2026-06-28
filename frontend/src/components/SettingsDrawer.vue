@@ -220,6 +220,8 @@ const webSearchStatusFetchSeq = ref(0)
 const chatDraft = ref<ChatOverrides | null>(null)
 /** 会话设置抽屉里编辑的初始状态栏（顶层 chat.stateVariables.tables） */
 const chatStateTablesDraft = ref<StatusTableDef[]>([])
+const cleanGlobalDraftSnapshot = ref('')
+const cleanChatDraftSnapshot = ref('')
 const isSaving = ref(false)
 const regexEditorOpen = ref(false)
 const regexEditorIndex = ref<number | null>(null)
@@ -627,7 +629,6 @@ async function fetchTtsCacheStats() {
   try {
     const res = await apiGet<{ usedBytes: number; limitBytes: number; lastPatrolAt: string; prunedFiles: number }>('/api/tts/cache/stats')
     ttsCacheStats.value = res
-    console.log('[TTS][cache]', JSON.stringify(res))
   } catch { /* ignore when TTS disabled */ }
 }
 const ttsCachePercent = computed(() => {
@@ -690,13 +691,77 @@ const suppressTokenEstimates = ref(false)
 let memoryDebounceTimer: ReturnType<typeof setTimeout> | null = null
 const worldbookTokenEstimateCache = new Map<string, { updatedAt: string | null; tokens: number | null }>()
 
-/**
- * 关闭抽屉
- *
- * 触发update:show事件，传递false。
- */
-function close() {
+function closeWithoutConfirm() {
   emit('update:show', false)
+}
+
+function stableDraftString(value: unknown): string {
+  return JSON.stringify(value ?? null)
+}
+
+function currentGlobalDraftSnapshot(): string {
+  return stableDraftString(globalDraft.value)
+}
+
+function currentChatDraftSnapshot(): string {
+  return stableDraftString({
+    overrides: chatDraft.value ? normalizeComparableChatOverrides(chatDraft.value) : null,
+    stateTables: chatStateTablesDraft.value,
+  })
+}
+
+function markDraftsClean() {
+  cleanGlobalDraftSnapshot.value = currentGlobalDraftSnapshot()
+  cleanChatDraftSnapshot.value = currentChatDraftSnapshot()
+}
+
+function isChatDraftDirty(): boolean {
+  return currentChatDraftSnapshot() !== cleanChatDraftSnapshot.value
+}
+
+const hasUnsavedChanges = computed(() => {
+  if (!props.show) return false
+  return currentGlobalDraftSnapshot() !== cleanGlobalDraftSnapshot.value || isChatDraftDirty()
+})
+
+async function close() {
+  if (isSaving.value) return
+  if (hasUnsavedChanges.value) {
+    const ok = await notifyConfirm({
+      title: '放弃未保存更改？',
+      message: '设置抽屉中还有未保存的修改。关闭后这些修改会被丢弃。',
+      variant: 'danger',
+    })
+    if (!ok) return
+    await deletePendingPageBackgrounds(savedPageBackgroundImage.value)
+  }
+  closeWithoutConfirm()
+}
+
+function hasActiveNotifyHost(): boolean {
+  return typeof document !== 'undefined' && document.querySelector('.app-notify-host') !== null
+}
+
+function handleDrawerKeydown(event: KeyboardEvent) {
+  if (!props.show || event.key !== 'Escape' || hasActiveNotifyHost()) return
+  if (showWebGpuShaderEditorModal.value) return
+  if (sessionAttachModalShow.value) return
+  if (showWorldBookEditor.value) return
+  if (showHttpLogViewer.value) return
+  event.preventDefault()
+  if (regexEditorOpen.value) {
+    regexEditorOpen.value = false
+    return
+  }
+  if (showModelSelector.value) {
+    showModelSelector.value = false
+    return
+  }
+  if (showVoiceSelector.value) {
+    showVoiceSelector.value = false
+    return
+  }
+  void close()
 }
 
 async function deletePageBackgroundFile(filename: string | null | undefined) {
@@ -729,7 +794,12 @@ function formatSaveError(prefix: string, error: unknown): string {
 async function clearKnowledgeGraph() {
   const chat = props.chat
   if (!chat) return
-  if (!confirm('确定清空本会话的知识图谱？此操作不可撤销。')) return
+  const ok = await notifyConfirm({
+    title: '清空知识图谱',
+    message: '确定清空本会话的知识图谱？此操作不可撤销。',
+    variant: 'danger',
+  })
+  if (!ok) return
   try {
     await apiDelete(`/api/mvu/${chat.id}/knowledge-graph`)
     mvuStore.knowledgeGraph = null
@@ -750,7 +820,8 @@ async function handleSaveAll() {
     await saveGlobal()
     await saveChatOverrides()
     await saveChatStateVariables()
-    close()
+    markDraftsClean()
+    closeWithoutConfirm()
   } catch (error) {
     await notifyMessage(formatSaveError('保存设置失败', error))
   } finally {
@@ -1626,6 +1697,7 @@ async function fetchChatTokenCount() {
 }
 
 onMounted(() => {
+  window.addEventListener('keydown', handleDrawerKeydown)
   setTimeout(async () => {
     if (!settingsStore.settings) await settingsStore.load()
     await ensureWebGpuAvailability()
@@ -1803,6 +1875,7 @@ watch(
     if (props.chat && chatDraft.value) {
       mergeGlobalWorldBooksIntoDraft()
     }
+    markDraftsClean()
 
     if (s.apiPresets.length > 0 && !editingPresetId.value) {
         editingPresetId.value = s.apiPresets[0]?.id ?? null
@@ -1844,6 +1917,7 @@ watch(
     chatDraft.value = ensureOverrides(clone(props.chat.overrides))
     chatStateTablesDraft.value = cloneStateTables(props.chat.stateVariables?.tables)
     mergeGlobalWorldBooksIntoDraft()
+    markDraftsClean()
   },
 )
 
@@ -1858,11 +1932,13 @@ watch(
   ] as const,
   ([gEnabled, gAnchor, gTemplate, mMode, mDirective]) => {
     if (!props.show || !chatDraft.value) return
+    if (isChatDraftDirty()) return
     chatDraft.value.groupMvuEnabled = gEnabled as ChatOverrides['groupMvuEnabled']
     chatDraft.value.groupMvuAnchorCharacterId = gAnchor as string | null
     chatDraft.value.groupMvuTemplateCharacterId = gTemplate as string | null
     chatDraft.value.mvuMode = mMode as ChatOverrides['mvuMode']
     chatDraft.value.mvuDirective = mDirective as string | null
+    markDraftsClean()
   },
 )
 
@@ -2115,6 +2191,7 @@ watch([() => props.show, tab, preloaded], () => {
 }, { flush: 'post' })
 
 onUnmounted(() => {
+  window.removeEventListener('keydown', handleDrawerKeydown)
   teardownPresetListHeightObservers()
 })
 
@@ -3819,7 +3896,7 @@ async function checkUpdate() {
 
 <template>
   <div>
-  <div class="drawer-wrapper fixed inset-0 z-50 flex justify-end" :class="{ 'is-open': show }">
+  <div class="drawer-wrapper fixed inset-0 z-[var(--z-modal)] flex justify-end" :class="{ 'is-open': show }">
     <!-- Backdrop -->
     <div
       class="drawer-backdrop absolute inset-0 bg-overlay backdrop-blur-sm"
@@ -6142,7 +6219,7 @@ async function checkUpdate() {
   </div>
 
   <Teleport to="body">
-    <div v-if="regexEditorOpen && regexEditorDraft" class="fixed inset-0 z-[60] flex items-center justify-center">
+    <div v-if="regexEditorOpen && regexEditorDraft" class="fixed inset-0 z-[var(--z-popover)] flex items-center justify-center">
       <div class="modal-backdrop" @click="regexEditorOpen = false"></div>
       <div
         class="relative m-4 flex max-h-[85vh] w-[min(92vw,560px)] flex-col rounded-2xl theme-panel-bg border border-[var(--color-border)] shadow-xl backdrop-saturate-[1.8]"
@@ -6255,7 +6332,7 @@ async function checkUpdate() {
 
   <!-- Model Selector Modal（Teleport 到 body 避免被父级 flex/窄容器限制宽度） -->
   <Teleport to="body">
-    <div v-if="showModelSelector" class="fixed inset-0 z-[60] flex items-center justify-center">
+    <div v-if="showModelSelector" class="fixed inset-0 z-[var(--z-popover)] flex items-center justify-center">
       <!-- Backdrop -->
       <div class="absolute inset-0 bg-overlay-heavy backdrop-blur-sm" @click="showModelSelector = false"></div>
       
@@ -6315,7 +6392,7 @@ async function checkUpdate() {
   </Teleport>
 
   <Teleport to="body">
-    <div v-if="showVoiceSelector" class="fixed inset-0 z-[60] flex items-center justify-center">
+    <div v-if="showVoiceSelector" class="fixed inset-0 z-[var(--z-popover)] flex items-center justify-center">
       <div class="absolute inset-0 bg-overlay-heavy backdrop-blur-sm" @click="showVoiceSelector = false"></div>
 
       <div class="relative m-4 flex max-h-[85vh] min-h-0 w-full max-w-lg min-w-[400px] flex-col rounded-2xl glass-panel shadow-2xl">

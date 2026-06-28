@@ -44,6 +44,19 @@ def _build_mvu_tools(*, include_knowledge_graph: bool = True) -> list[dict[str, 
     return tools
 
 
+def _normalize_tool_calls_ids(tool_calls: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    if not tool_calls:
+        return []
+    out: list[dict[str, Any]] = []
+    for index, tc in enumerate(tool_calls):
+        normalized = dict(tc)
+        if not str(normalized.get("id") or "").strip():
+            fn_name = str((normalized.get("function") or {}).get("name") or "tool")
+            normalized["id"] = f"call_mvu_{index}_{fn_name}"
+        out.append(normalized)
+    return out
+
+
 @dataclass(frozen=True)
 class MvuAgentJob:
     """MVU agent 单次运行的输入，由 daemon 组装。"""
@@ -176,7 +189,7 @@ class MvuAgentService:
                     extra_body=self._ctx.extra_body if self._ctx.extra_body else None,
                 )
 
-                tool_calls = resp.tool_calls
+                tool_calls = _normalize_tool_calls_ids(resp.tool_calls)
 
                 assistant_msg: dict[str, Any] = {
                     "role": resp.role or "assistant",

@@ -6,3 +6,4 @@ pydantic>=2.6
 jsonschema>=4.20
 python-multipart>=0.0.6
 tokenizers>=0.15
+pytest>=8.0

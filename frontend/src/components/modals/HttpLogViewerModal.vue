@@ -21,6 +21,7 @@ import {
   type HttpLogListItem,
 } from '../../api/httpLog'
 import { useViewportNarrowPortrait } from '../../composables/useViewportNarrowPortrait'
+import { notifyConfirm, notifyMessage } from '../../composables/useNotify'
 import HttpLogDetailPane from '../http-log/HttpLogDetailPane.vue'
 
 const props = defineProps<{
@@ -137,7 +138,12 @@ onBeforeUnmount(() => {
 })
 
 async function onClear() {
-  if (!confirm('确定清空本地全部 HTTP 请求日志？')) return
+  const ok = await notifyConfirm({
+    title: '清空 HTTP 请求日志',
+    message: '确定清空本地全部 HTTP 请求日志？',
+    variant: 'danger',
+  })
+  if (!ok) return
   try {
     await clearHttpLog()
     items.value = []
@@ -145,7 +151,7 @@ async function onClear() {
     selectedId.value = null
     detailPanelOpen.value = false
   } catch (e) {
-    alert('清空失败：' + String(e))
+    await notifyMessage('清空失败：' + String(e))
   }
 }
 

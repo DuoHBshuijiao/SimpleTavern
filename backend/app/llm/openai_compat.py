@@ -296,6 +296,22 @@ class ChatCompletionMessage:
     tool_calls: list[dict[str, Any]] | None
 
 
+def _message_content_to_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                text = item.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "".join(parts)
+    return ""
+
+
 def _build_payload(
     *,
     model: str,
@@ -334,6 +350,7 @@ def _build_payload(
         payload["top_p"] = top_p
     if max_tokens is not None:
         payload["max_tokens"] = max_tokens
+        payload.setdefault("max_completion_tokens", max_tokens)
     if tools:
         payload["tools"] = tools
     if extra_body:
@@ -411,7 +428,7 @@ async def chat_completions(
             if not choices:
                 return ChatCompletionResult(text="")
             message = choices[0].get("message") or {}
-            content = message.get("content") or ""
+            content = _message_content_to_text(message.get("content"))
             return ChatCompletionResult(text=content)
 
 
@@ -487,7 +504,7 @@ async def chat_completions_message(
             reasoning_content = message.get("reasoning_content") or message.get("reasoning")
             return ChatCompletionMessage(
                 role=message.get("role"),
-                content=message.get("content"),
+                content=_message_content_to_text(message.get("content")) or None,
                 reasoning_content=reasoning_content,
                 tool_calls=message.get("tool_calls"),
             )

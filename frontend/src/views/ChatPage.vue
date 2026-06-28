@@ -2737,8 +2737,86 @@ function handleHeaderPointerdown(e: PointerEvent) {
   closeHeaderMoreMenu()
 }
 
+function hasActiveNotifyHost(): boolean {
+  return typeof document !== 'undefined' && document.querySelector('.app-notify-host') !== null
+}
+
+function closeTopOverlayFromEscape(): boolean {
+  if (hasActiveNotifyHost()) return true
+  const latestError = errorStack.items.value[errorStack.items.value.length - 1]
+  if (latestError) {
+    errorStack.removeError(latestError.id)
+    return true
+  }
+  if (imageFallbackDialog.value.visible) {
+    imageFallbackDialog.value.visible = false
+    return true
+  }
+  if (actions.showCharacterAvatarCropper.value) {
+    actions.showCharacterAvatarCropper.value = false
+    return true
+  }
+  if (actions.showPersonaAvatarCropper.value) {
+    actions.showPersonaAvatarCropper.value = false
+    return true
+  }
+  if (actions.showMessageEditor.value) {
+    actions.showMessageEditor.value = false
+    return true
+  }
+  if (assistant.showAssistantMessageEditor.value) {
+    assistant.showAssistantMessageEditor.value = false
+    return true
+  }
+  if (actions.editingMemberId.value) {
+    actions.closeMemberSettingsEditor()
+    return true
+  }
+  if (showGroupSettings.value) {
+    showGroupSettings.value = false
+    return true
+  }
+  if (showGroupCreator.value) {
+    onGroupCreatorShow(false)
+    return true
+  }
+  if (showExportModal.value) {
+    showExportModal.value = false
+    return true
+  }
+  if (showImportModal.value) {
+    showImportModal.value = false
+    return true
+  }
+  if (knowledgeGraphModalOpen.value) {
+    knowledgeGraphModalOpen.value = false
+    return true
+  }
+  if (showEmbeddedCardConfirmModal.value) {
+    clearEmbeddedCardPreviewState()
+    return true
+  }
+  if (actions.showPersonaSwitchConfirm.value) {
+    actions.cancelSwitchPersona()
+    return true
+  }
+  if (actions.showPersonaEditor.value) {
+    actions.showPersonaEditor.value = false
+    return true
+  }
+  if (actions.showCharacterEditor.value) {
+    cancelCharacterEdit()
+    return true
+  }
+  return false
+}
+
 function handleGlobalKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') {
+    if (closeTopOverlayFromEscape()) {
+      e.preventDefault()
+      return
+    }
     closeHeaderMoreMenu()
     if (showChatSearch.value) closeChatSearchBar()
     return
