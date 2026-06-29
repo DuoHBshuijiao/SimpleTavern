@@ -167,7 +167,7 @@ watch(dropdownOpen, (open) => {
 
     <div
       v-if="dropdownOpen"
-      class="absolute left-0 right-0 z-30 overflow-hidden rounded-xl border border-[var(--color-border-subtle)] bg-surface-overlay shadow-xl backdrop-blur-[var(--glass-blur-popover)]"
+      class="glass-l6 absolute left-0 right-0 z-30 overflow-hidden rounded-xl"
       :class="
         dropdownPlacement === 'down'
           ? 'top-[calc(100%+0.375rem)] bottom-auto'

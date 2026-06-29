@@ -3990,7 +3990,7 @@ async function checkUpdate() {
       class="drawer-panel drawer-surface absolute right-4 top-4 bottom-4 w-[min(500px,calc(100vw-2rem))] border border-[var(--color-border)] rounded-2xl flex flex-col shadow-xl"
     >
         <!-- Header -->
-        <div class="flex items-center justify-between px-6 py-4 border-b border-[var(--color-border-subtle)] bg-[var(--color-border-subtle)] rounded-t-2xl">
+        <div class="flex items-center justify-between px-6 py-4 border-b border-[var(--color-border-subtle)] bg-[var(--color-settings-panel-bg)] rounded-t-2xl">
           <h2 :id="drawerTitleId" class="text-lg text-[var(--color-text)]">设置</h2>
           <button
             type="button"
@@ -4003,7 +4003,7 @@ async function checkUpdate() {
         </div>
 
         <!-- Tabs：整块可点；底层滑块平移承载高光，与 gap-1 / px-2 对齐 -->
-        <div class="relative flex gap-1 border-b border-[var(--color-border-subtle)] bg-[var(--color-border-subtle)] px-2 py-2">
+        <div class="relative flex gap-1 border-b border-[var(--color-border-subtle)] bg-[var(--color-settings-control-bg)] px-2 py-2">
           <div
             class="pointer-events-none absolute left-2 top-2 bottom-2 rounded-lg bg-brand-a10 transition-transform duration-[400ms] ease-out"
             :style="{
@@ -6278,7 +6278,7 @@ async function checkUpdate() {
           </div>
         </div>
 
-        <div class="shrink-0 flex justify-end gap-3 border-t border-[var(--color-border-subtle)] px-6 py-4 bg-[var(--color-border-subtle)] rounded-b-2xl">
+        <div class="shrink-0 flex justify-end gap-3 border-t border-[var(--color-border-subtle)] px-6 py-4 bg-[var(--color-settings-panel-bg)] rounded-b-2xl">
           <button
             type="button"
             class="btn btn-secondary min-h-11 whitespace-nowrap"

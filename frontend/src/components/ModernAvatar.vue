@@ -175,8 +175,8 @@ const bgColor = computed(() => {
       class="absolute inset-0 bg-surface-muted animate-pulse"
     ></div>
     
-    <!-- 半透明玻璃覆盖层 -->
-    <div class="modern-avatar__glaze absolute inset-0 pointer-events-none" aria-hidden="true"></div>
+    <!-- 仅在文字占位头像上增加轻玻璃层，避免压暗真实头像图片。 -->
+    <div v-if="!src || hasError" class="modern-avatar__glaze absolute inset-0 pointer-events-none" aria-hidden="true"></div>
   </div>
 </template>
 

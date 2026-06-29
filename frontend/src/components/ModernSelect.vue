@@ -446,7 +446,7 @@ onUnmounted(() => {
         <div
           v-if="isOpen"
           ref="dropdownRef"
-          class="z-dropdown select-dropdown theme-panel-bg rounded-xl shadow-glass-panel overflow-hidden flex flex-col max-h-[320px] border border-[var(--color-border)] backdrop-blur-[var(--glass-blur-popover)] backdrop-saturate-[1.8]"
+          class="z-dropdown select-dropdown glass-l6 rounded-xl overflow-hidden flex flex-col max-h-[320px]"
           :class="placement === 'top' ? 'select-dropdown-pop--top' : 'select-dropdown-pop--bottom'"
           :style="dropdownStyle"
         >
