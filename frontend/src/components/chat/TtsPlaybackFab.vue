@@ -498,19 +498,11 @@ defineExpose({ getRect: getTtsFabRect, setTtsTopPx: setTopPxFromSeparation })
 }
 
 .tts-top-bar-btn__glow--queue {
-  background: radial-gradient(
-    120% 80% at 0% 50%,
-    color-mix(in srgb, var(--color-brand) 28%, transparent),
-    transparent 62%
-  );
+  background-color: var(--color-brand-a20);
 }
 
 .tts-top-bar-btn__glow--transport {
-  background: radial-gradient(
-    120% 80% at 100% 40%,
-    color-mix(in srgb, var(--color-purple) 26%, transparent),
-    transparent 62%
-  );
+  background-color: var(--color-purple-bg);
 }
 
 .tts-top-bar-btn__icon {

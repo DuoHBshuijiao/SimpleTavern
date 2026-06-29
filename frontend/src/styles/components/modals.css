@@ -84,9 +84,11 @@
   .modal-backdrop {
     position: absolute;
     inset: 0;
-    background-color: var(--color-overlay);
-    opacity: 0.72;
+    background-color: var(--color-modal-backdrop);
+    opacity: 1;
     color: transparent;
+    backdrop-filter: blur(var(--glass-blur-soft));
+    -webkit-backdrop-filter: blur(var(--glass-blur-soft));
   }
 
   .modal-content {
@@ -94,10 +96,12 @@
     max-height: calc(100vh - 2rem);
     
     /* Liquid Glass Style */
-    background-color: var(--color-surface-panel);
+    background-color: var(--color-modal-surface);
     background-image: none;
-    border: 1px solid var(--color-border);
-    box-shadow: var(--shadow-heavy);
+    border: 1px solid var(--color-glass-border-strong);
+    box-shadow: var(--shadow-glass-modal);
+    backdrop-filter: blur(var(--glass-blur-modal));
+    -webkit-backdrop-filter: blur(var(--glass-blur-modal));
     
     border-radius: var(--radius-2xl);
     
@@ -118,11 +122,22 @@
     outline-offset: 2px;
   }
 
-  .modal-surface,
+  .modal-surface {
+    background-color: var(--color-modal-surface);
+    background-image: none;
+    border-color: var(--color-glass-border-strong);
+    box-shadow: var(--shadow-glass-modal);
+    backdrop-filter: blur(var(--glass-blur-modal));
+    -webkit-backdrop-filter: blur(var(--glass-blur-modal));
+  }
+
   .drawer-surface {
-    background-color: var(--color-surface-panel);
-    border-color: var(--color-border);
-    box-shadow: var(--shadow-heavy);
+    background-color: var(--color-settings-drawer-bg);
+    background-image: none;
+    border-color: var(--color-glass-border);
+    box-shadow: var(--shadow-settings-drawer);
+    backdrop-filter: blur(var(--glass-blur-panel));
+    -webkit-backdrop-filter: blur(var(--glass-blur-panel));
   }
 
   .modal-header {
@@ -216,9 +231,12 @@
     bottom: 0;
     width: 400px;
     max-width: 90vw;
-    background-color: var(--color-surface-panel);
-    border-left: 1px solid var(--color-border-default);
-    box-shadow: var(--shadow-xl);
+    background-color: var(--color-settings-drawer-bg);
+    background-image: none;
+    border-left: 1px solid var(--color-glass-border);
+    box-shadow: var(--shadow-settings-drawer);
+    backdrop-filter: blur(var(--glass-blur-panel));
+    -webkit-backdrop-filter: blur(var(--glass-blur-panel));
     transform: translateX(100%);
     transition: transform var(--transition-slow);
     will-change: transform; /* 性能优化 */
@@ -234,9 +252,12 @@
     bottom: 0;
     width: 400px;
     max-width: 90vw;
-    background-color: var(--color-surface-panel);
-    border-right: 1px solid var(--color-border-default);
-    box-shadow: var(--shadow-xl);
+    background-color: var(--color-settings-drawer-bg);
+    background-image: none;
+    border-right: 1px solid var(--color-glass-border);
+    box-shadow: var(--shadow-settings-drawer);
+    backdrop-filter: blur(var(--glass-blur-panel));
+    -webkit-backdrop-filter: blur(var(--glass-blur-panel));
     transform: translateX(-100%);
     transition: transform var(--transition-slow);
     will-change: transform; /* 性能优化 */
@@ -249,10 +270,13 @@
   /* ========== 弹出确认框 ========== */
   .popconfirm {
     padding: var(--spacing-md);
-    background-color: var(--color-surface-panel);
-    border: 1px solid var(--color-border-default);
+    background-color: var(--color-popover-surface);
+    background-image: none;
+    border: 1px solid var(--color-glass-border-strong);
     border-radius: var(--radius-xl);
-    box-shadow: var(--shadow-lg);
+    box-shadow: var(--shadow-glass-popover);
+    backdrop-filter: blur(var(--glass-blur-popover));
+    -webkit-backdrop-filter: blur(var(--glass-blur-popover));
   }
 
   .popconfirm-message {

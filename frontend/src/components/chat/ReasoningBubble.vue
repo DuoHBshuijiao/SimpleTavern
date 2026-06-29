@@ -473,16 +473,16 @@ onBeforeUnmount(() => {
   transition: none !important;
 }
 .reasoning-toggle-icon {
-  background: color-mix(in srgb, var(--color-reasoning-bubble-bg, rgba(30, 30, 30, 0.5)) 88%, transparent);
+  background: color-mix(in srgb, var(--color-reasoning-bubble-bg) 88%, transparent);
 }
 .reasoning-toggle-icon:hover {
-  background: color-mix(in srgb, var(--color-text, #fff) 12%, transparent);
+  background: color-mix(in srgb, var(--color-text) 12%, transparent);
 }
 .reasoning-scroll::-webkit-scrollbar {
   width: 4px;
 }
 .reasoning-scroll::-webkit-scrollbar-thumb {
-  background-color: color-mix(in srgb, var(--color-text-muted, #9ca3af) 24%, transparent);
+  background-color: color-mix(in srgb, var(--color-text-muted) 24%, transparent);
   border-radius: 4px;
 }
 .reasoning-tail-slot {
@@ -499,7 +499,7 @@ onBeforeUnmount(() => {
   min-width: 0;
   position: relative;
   z-index: 1;
-  background-color: var(--color-reasoning-bubble-bg, rgba(30, 30, 30, 0.5));
+  background-color: var(--color-reasoning-bubble-bg);
   border-top: 1px solid var(--color-reasoning-bubble-border, transparent);
 }
 .reasoning-tail-caption {
@@ -514,7 +514,7 @@ onBeforeUnmount(() => {
   font-weight: 400;
   font-size: 0.875rem;
   line-height: 1.25;
-  color: color-mix(in srgb, var(--color-text-muted, #9ca3af) 88%, var(--color-primary, #6366f1) 12%);
+  color: color-mix(in srgb, var(--color-text-muted) 88%, var(--color-primary) 12%);
 }
 .reasoning-tail-fade-enter-active,
 .reasoning-tail-fade-leave-active {
@@ -541,24 +541,14 @@ onBeforeUnmount(() => {
 .reasoning-mask-top {
   top: 0;
   height: 26px;
-  background: linear-gradient(
-    to bottom,
-    color-mix(in srgb, var(--color-reasoning-bubble-bg, rgba(30, 30, 30, 0.5)) 100%, transparent) 0%,
-    color-mix(in srgb, var(--color-reasoning-bubble-bg, rgba(30, 30, 30, 0.5)) 85%, transparent) 40%,
-    transparent 100%
-  );
-  box-shadow: inset 0 10px 14px -10px color-mix(in srgb, var(--color-primary, #6366f1) 32%, transparent);
+  background-color: color-mix(in srgb, var(--color-reasoning-bubble-bg) 82%, transparent);
+  box-shadow: inset 0 10px 14px -10px color-mix(in srgb, var(--color-primary) 32%, transparent);
 }
 .reasoning-mask-bottom {
   /* 底缘与尾槽顶对齐（兄弟尾槽在滚动区下） */
   bottom: var(--reasoning-mask-bottom);
   height: 32px;
-  background: linear-gradient(
-    to top,
-    color-mix(in srgb, var(--color-reasoning-bubble-bg, rgba(30, 30, 30, 0.5)) 100%, transparent) 0%,
-    color-mix(in srgb, var(--color-reasoning-bubble-bg, rgba(30, 30, 30, 0.5)) 85%, transparent) 45%,
-    transparent 100%
-  );
-  box-shadow: inset 0 -10px 14px -10px color-mix(in srgb, var(--color-primary, #6366f1) 32%, transparent);
+  background-color: color-mix(in srgb, var(--color-reasoning-bubble-bg) 82%, transparent);
+  box-shadow: inset 0 -10px 14px -10px color-mix(in srgb, var(--color-primary) 32%, transparent);
 }
 </style>

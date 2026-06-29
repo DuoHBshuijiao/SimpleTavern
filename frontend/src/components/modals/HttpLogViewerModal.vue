@@ -22,6 +22,8 @@ import {
 } from '../../api/httpLog'
 import { useViewportNarrowPortrait } from '../../composables/useViewportNarrowPortrait'
 import { notifyConfirm, notifyMessage } from '../../composables/useNotify'
+import { useDialogBehavior } from '../../composables/useDialogBehavior'
+import { dialogAria } from '../../utils/uiPrimitives'
 import HttpLogDetailPane from '../http-log/HttpLogDetailPane.vue'
 
 const props = defineProps<{
@@ -55,6 +57,11 @@ let refreshTimer: number | null = null
 function close() {
   emit('update:show', false)
 }
+
+const titleId = 'http-log-viewer-title'
+const dialogAttrs = dialogAria(titleId)
+const { dialogRef } = useDialogBehavior(() => props.show, close)
+void dialogRef
 
 async function loadList(keepSelection = true) {
   listLoading.value = true
@@ -221,11 +228,11 @@ function sourceLabel(src: string): string {
 }
 
 function statusClass(item: HttpLogListItem): string {
-  if (item.error) return 'text-rose-300'
+  if (item.error) return 'text-[var(--color-error-text)]'
   const s = item.responseStatus ?? 0
-  if (s >= 500) return 'text-rose-300'
-  if (s >= 400) return 'text-amber-300'
-  if (s >= 200 && s < 300) return 'text-emerald-300'
+  if (s >= 500) return 'text-[var(--color-error-text)]'
+  if (s >= 400) return 'text-[var(--color-warning-text)]'
+  if (s >= 200 && s < 300) return 'text-[var(--color-success-text)]'
   return 'text-[var(--color-text-muted)]'
 }
 
@@ -233,11 +240,11 @@ function sourceBadgeClass(src: string): string {
   const base = 'inline-flex items-center rounded px-1 py-0.5 text-[10px] font-semibold'
   switch (src) {
     case 'llm':
-      return `${base} bg-emerald-500/15 text-emerald-300`
+      return `${base} bg-[var(--color-success-bg)] text-[var(--color-success-text)]`
     case 'update':
-      return `${base} bg-sky-500/15 text-sky-300`
+      return `${base} bg-[var(--color-info-bg)] text-[var(--color-info-text)]`
     default:
-      return `${base} bg-zinc-500/20 text-[var(--color-text-secondary)]`
+      return `${base} bg-surface-muted text-[var(--color-text-secondary)]`
   }
 }
 
@@ -259,8 +266,11 @@ function detailEmbedId(itemId: string) {
 <template>
   <Transition name="modal">
     <div v-if="show" class="modal">
-      <div class="modal-backdrop backdrop-blur-[var(--blur-heavy)]" @click="close"></div>
+      <div class="modal-backdrop" @click="close"></div>
       <div
+        ref="dialogRef"
+        v-bind="dialogAttrs"
+        tabindex="-1"
         class="modal-content modal-surface chat-modal-width-1200-90 flex flex-col min-h-0"
         style="max-height: 88vh"
       >
@@ -274,7 +284,7 @@ function detailEmbedId(itemId: string) {
               isNarrowPortrait ? 'w-full justify-between' : 'min-w-0 flex-1'
             "
           >
-            <h3 class="modal-title min-w-0 truncate text-[var(--color-text)]">HTTP 请求查看</h3>
+            <h3 :id="titleId" class="modal-title min-w-0 truncate text-[var(--color-text)]">HTTP 请求查看</h3>
             <button
               v-if="isNarrowPortrait"
               type="button"
@@ -308,7 +318,7 @@ function detailEmbedId(itemId: string) {
             </button>
             <button
               type="button"
-              class="inline-flex min-h-9 items-center gap-1 rounded-lg border border-rose-500/30 bg-rose-500/10 px-2.5 py-1.5 text-xs text-rose-300 transition-colors hover:bg-rose-500/20"
+              class="inline-flex min-h-9 items-center gap-1 rounded-lg border border-[var(--color-error)]/30 bg-[var(--color-error-bg)] px-2.5 py-1.5 text-xs text-[var(--color-error-text)] transition-colors hover:bg-[var(--color-danger-hover)]"
               @click="onClear"
             >
               <Trash2 class="h-3.5 w-3.5" />

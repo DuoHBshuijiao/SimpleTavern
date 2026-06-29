@@ -69,7 +69,7 @@ onBeforeUnmount(() => {
       v-if="startupUpdate"
       class="fixed right-4 bottom-4 z-[120] w-[min(560px,calc(100vw-2rem))] max-h-[min(40vh,316px)] flex flex-col min-h-0 overflow-hidden pointer-events-auto"
     >
-      <section class="theme-panel-bg backdrop-blur-xl backdrop-saturate-[1.8] border border-[var(--color-border)] shadow-glass-panel rounded-2xl overflow-hidden flex flex-col flex-1 min-h-0">
+      <section class="theme-panel-bg backdrop-blur-[var(--glass-blur-panel)] backdrop-saturate-[1.8] border border-[var(--color-border)] shadow-glass-panel rounded-2xl overflow-hidden flex flex-col flex-1 min-h-0">
         <header class="px-4 pt-4 pb-3 border-b border-[var(--color-border-subtle)] shrink-0 flex items-start justify-between gap-3">
           <div class="min-w-0">
             <div class="inline-flex items-center gap-2 rounded-full border border-[var(--color-brand-a30)] bg-[var(--color-brand-a10)] px-2.5 py-1 text-[11px] font-medium tracking-[0.08em] uppercase text-[var(--color-brand-fg-soft)]">

@@ -1877,11 +1877,11 @@ onBeforeUnmount(() => {
   background: transparent;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--color-border);
   border-radius: 2px;
 }
 .custom-scrollbar:hover::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--color-border-strong);
 }
 
 .scroll-to-bottom-btn {
@@ -1937,7 +1937,7 @@ onBeforeUnmount(() => {
   overflow-x: auto;
   max-width: 100%;
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+  scrollbar-color: var(--color-border) transparent;
 }
 .message-bubble .md :deep(pre)::-webkit-scrollbar {
   height: 6px;
@@ -1946,11 +1946,11 @@ onBeforeUnmount(() => {
   background: transparent;
 }
 .message-bubble .md :deep(pre)::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--color-border);
   border-radius: 3px;
 }
 .message-bubble .md :deep(pre):hover::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.25);
+  background: var(--color-border-strong);
 }
 .message-bubble .md :deep(pre code) {
   display: block;

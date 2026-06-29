@@ -119,6 +119,8 @@ import { resolveRichPaste } from '../utils/richPaste'
 import { formatApiError } from '../utils/worldBookValidation'
 import { resolveBumpCharacterId } from '../utils/characterSidebarBump'
 import { isChatMvuRuntimeEnabled } from '../utils/groupMvu'
+import { useDialogBehavior } from '../composables/useDialogBehavior'
+import { dialogAria } from '../utils/uiPrimitives'
 import {
   HEADER_EXPAND_MS,
   HEADER_LIFT_EASE,
@@ -5136,6 +5138,52 @@ async function cancelCharacterEdit() {
   actions.cancelCharacterEdit()
 }
 
+const characterEditorTitleId = 'character-editor-title'
+const characterEditorDialogAttrs = dialogAria(characterEditorTitleId)
+const { dialogRef: characterEditorDialogRef } = useDialogBehavior(
+  () => actions.showCharacterEditor.value,
+  () => { void cancelCharacterEdit() },
+)
+
+const personaEditorTitleId = 'persona-editor-title'
+const personaEditorDialogAttrs = dialogAria(personaEditorTitleId)
+function closePersonaEditor() {
+  actions.showPersonaEditor.value = false
+}
+const { dialogRef: personaEditorDialogRef } = useDialogBehavior(
+  () => actions.showPersonaEditor.value,
+  closePersonaEditor,
+)
+
+const personaSwitchTitleId = 'persona-switch-title'
+const personaSwitchDialogAttrs = dialogAria(personaSwitchTitleId)
+const { dialogRef: personaSwitchDialogRef } = useDialogBehavior(
+  () => actions.showPersonaSwitchConfirm.value,
+  () => actions.cancelSwitchPersona(),
+)
+
+const assistantSettingsTitleId = 'assistant-settings-title'
+const assistantSettingsDialogAttrs = dialogAria(assistantSettingsTitleId)
+function closeAssistantSettings() {
+  assistant.showAssistantSettings.value = false
+}
+const { dialogRef: assistantSettingsDialogRef } = useDialogBehavior(
+  () => assistant.showAssistantSettings.value,
+  closeAssistantSettings,
+)
+
+const embeddedCardConfirmTitleId = 'embedded-card-confirm-title'
+const embeddedCardConfirmDialogAttrs = dialogAria(embeddedCardConfirmTitleId)
+const { dialogRef: embeddedCardConfirmDialogRef } = useDialogBehavior(
+  () => showEmbeddedCardConfirmModal.value,
+  clearEmbeddedCardPreviewState,
+)
+void characterEditorDialogRef
+void personaEditorDialogRef
+void personaSwitchDialogRef
+void assistantSettingsDialogRef
+void embeddedCardConfirmDialogRef
+
 /**
  * 删除角色
  *
@@ -5554,7 +5602,7 @@ const editingPersonaAvatarUrl = computed(() => {
             :style="chatHeaderStyle"
           >
             <div
-              class="pointer-events-none absolute inset-0 z-0 overflow-hidden theme-header-bg backdrop-blur-[var(--blur-heavy)] backdrop-saturate-[1.75]"
+              class="pointer-events-none absolute inset-0 z-0 overflow-hidden theme-header-bg backdrop-blur-[var(--glass-blur-soft)] backdrop-saturate-[1.75]"
               :style="{
                 borderRadius: chatHeaderStyle.borderRadius,
                 transition: chatHeaderStyle.transition,
@@ -5637,7 +5685,7 @@ const editingPersonaAvatarUrl = computed(() => {
                       v-if="showHeaderMoreMenu"
                       key="hdr-more-menu"
                       ref="headerMoreMenuRef"
-                      class="header-more-menu backdrop-blur-[var(--blur-heavy)]"
+                      class="header-more-menu backdrop-blur-[var(--glass-blur-popover)]"
                       role="menu"
                       aria-label="更多操作"
                     >
@@ -6010,8 +6058,8 @@ const editingPersonaAvatarUrl = computed(() => {
     />
 
     <div v-if="imageFallbackDialog.visible" class="fixed inset-0 z-[1400] flex items-center justify-center">
-      <div class="absolute inset-0 bg-overlay-heavy backdrop-blur-sm" @click="imageFallbackDialog.visible = false"></div>
-      <div class="relative w-[min(640px,calc(100vw-2rem))] rounded-xl border border-red-500/30 bg-red-500/10 p-4">
+      <div class="absolute inset-0 bg-overlay-heavy backdrop-blur-[var(--glass-blur-soft)]" @click="imageFallbackDialog.visible = false"></div>
+      <div class="relative w-[min(640px,calc(100vw-2rem))] rounded-xl border border-[var(--color-error)]/30 bg-[var(--color-error-bg)] p-4">
         <h3 class="text-sm font-bold text-red-200 mb-2">模型不支持图片或图片请求失败</h3>
         <pre class="text-xs text-red-100 whitespace-pre-wrap break-words max-h-[260px] overflow-auto">{{ imageFallbackDialog.error }}</pre>
         <div class="mt-4 flex justify-end gap-2">
@@ -6127,9 +6175,9 @@ const editingPersonaAvatarUrl = computed(() => {
 <!-- 角色编辑弹窗 -->
   <div v-if="actions.showCharacterEditor.value" class="modal">
     <div class="modal-backdrop" @click="cancelCharacterEdit"></div>
-    <div class="modal-content chat-modal-width-1200-90 glass-panel theme-panel-bg backdrop-blur-2xl backdrop-saturate-[1.8] border border-[var(--color-border)]" role="dialog" aria-modal="true" aria-labelledby="character-editor-title">
+    <div ref="characterEditorDialogRef" v-bind="characterEditorDialogAttrs" tabindex="-1" class="modal-content modal-surface chat-modal-width-1200-90">
       <div class="modal-header">
-        <h3 id="character-editor-title" class="modal-title">{{ actions.isNewCharacter.value ? '新建角色' : '编辑角色' }}</h3>
+        <h3 :id="characterEditorTitleId" class="modal-title">{{ actions.isNewCharacter.value ? '新建角色' : '编辑角色' }}</h3>
         <button type="button" class="modal-close" aria-label="关闭角色编辑弹窗" @click="cancelCharacterEdit">
             <X class="w-5 h-5" />
         </button>
@@ -6462,7 +6510,8 @@ const editingPersonaAvatarUrl = computed(() => {
                     <img :src="buildAssistantAttachmentUrl('workspace', attachment)" :alt="getAssistantAttachmentLabel(attachment)" class="h-full w-full object-cover" />
                     <button
                       type="button"
-                      class="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white"
+                      class="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full border border-[var(--color-border-subtle)] bg-overlay-heavy text-[var(--color-text)]"
+                      aria-label="移除图片附件"
                       @click="assistant.removeDraftAttachment('workspace', attachment.id)"
                     >
                       <X class="h-3 w-3" />
@@ -6474,7 +6523,7 @@ const editingPersonaAvatarUrl = computed(() => {
                     class="group relative flex max-w-[220px] items-start gap-2 rounded-xl border border-[var(--color-border)] bg-surface-muted px-3 py-2 text-left"
                     @click="assistant.removeDraftAttachment('workspace', attachment.id)"
                   >
-                    <span class="rounded bg-black/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-[var(--color-text-secondary)]">{{ getAssistantAttachmentExt(attachment) }}</span>
+                    <span class="rounded bg-surface-overlay px-1.5 py-0.5 text-[10px] font-semibold uppercase text-[var(--color-text-secondary)]">{{ getAssistantAttachmentExt(attachment) }}</span>
                     <span class="truncate text-xs text-[var(--color-text)]">{{ getAssistantAttachmentLabel(attachment) }}</span>
                     <X class="ml-auto mt-0.5 h-3 w-3 shrink-0 text-[var(--color-text-muted)] transition-colors group-hover:text-[var(--color-text)]" />
                   </button>
@@ -6517,7 +6566,7 @@ const editingPersonaAvatarUrl = computed(() => {
               </div>
               <div
                 v-show="isWorkspaceAssistantDragOver"
-                class="pointer-events-none absolute inset-0 z-[21] rounded-xl bg-white/25 backdrop-blur-[2px] ring-1 ring-inset ring-white/40 transition-opacity duration-150"
+                class="pointer-events-none absolute inset-0 z-[21] rounded-xl bg-[var(--color-brand-a20)] backdrop-blur-[var(--glass-blur-soft)] ring-1 ring-inset ring-[var(--color-brand-a40)] transition-opacity duration-150"
                 aria-hidden="true"
               />
             </div>
@@ -6535,9 +6584,9 @@ const editingPersonaAvatarUrl = computed(() => {
   <!-- Persona 编辑弹窗 -->
   <div v-if="actions.showPersonaEditor.value" class="modal">
     <div class="modal-backdrop" @click="actions.showPersonaEditor.value = false"></div>
-    <div class="modal-content chat-modal-width-500-90 glass-panel theme-panel-bg backdrop-blur-2xl backdrop-saturate-[1.8] border border-[var(--color-border)]" role="dialog" aria-modal="true" aria-labelledby="persona-editor-title">
+    <div ref="personaEditorDialogRef" v-bind="personaEditorDialogAttrs" tabindex="-1" class="modal-content modal-surface chat-modal-width-500-90">
       <div class="modal-header">
-        <h3 id="persona-editor-title" class="modal-title">{{ actions.isNewPersona.value ? '新建身份' : '编辑身份' }}</h3>
+        <h3 :id="personaEditorTitleId" class="modal-title">{{ actions.isNewPersona.value ? '新建身份' : '编辑身份' }}</h3>
         <button type="button" class="modal-close" aria-label="关闭身份编辑弹窗" @click="actions.showPersonaEditor.value = false">
             <X class="w-5 h-5" />
         </button>
@@ -6580,9 +6629,9 @@ const editingPersonaAvatarUrl = computed(() => {
   <!-- Persona 切换确认弹窗 -->
   <div v-if="actions.showPersonaSwitchConfirm.value" class="modal">
     <div class="modal-backdrop" @click="actions.cancelSwitchPersona"></div>
-    <div class="modal-content chat-modal-width-520-92" role="dialog" aria-modal="true" aria-labelledby="persona-switch-title">
+    <div ref="personaSwitchDialogRef" v-bind="personaSwitchDialogAttrs" tabindex="-1" class="modal-content modal-surface chat-modal-width-520-92">
       <div class="modal-header">
-        <h3 id="persona-switch-title" class="modal-title">切换用户身份</h3>
+        <h3 :id="personaSwitchTitleId" class="modal-title">切换用户身份</h3>
         <button type="button" class="modal-close" aria-label="关闭身份切换确认弹窗" @click="actions.cancelSwitchPersona">
             <X class="w-5 h-5" />
         </button>
@@ -6609,13 +6658,13 @@ const editingPersonaAvatarUrl = computed(() => {
   <div v-if="assistant.showAssistantSettings.value" class="modal">
     <div class="modal-backdrop" @click="assistant.showAssistantSettings.value = false"></div>
     <div
+      ref="assistantSettingsDialogRef"
+      v-bind="assistantSettingsDialogAttrs"
+      tabindex="-1"
       class="modal-content modal-surface chat-modal-width-520-92"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="assistant-settings-title"
     >
       <div class="modal-header">
-        <h3 id="assistant-settings-title" class="modal-title">聊天助手设置</h3>
+        <h3 :id="assistantSettingsTitleId" class="modal-title">聊天助手设置</h3>
         <button type="button" class="modal-close" aria-label="关闭聊天助手设置弹窗" @click="assistant.showAssistantSettings.value = false">
             <X class="w-5 h-5" />
         </button>
@@ -6746,9 +6795,9 @@ const editingPersonaAvatarUrl = computed(() => {
 
   <div v-if="showEmbeddedCardConfirmModal" class="modal">
     <div class="modal-backdrop" @click="clearEmbeddedCardPreviewState"></div>
-    <div class="modal-content chat-modal-width-568-90 min-w-0 glass-panel theme-panel-bg backdrop-blur-2xl backdrop-saturate-[1.8] border border-[var(--color-border)]" role="dialog" aria-modal="true" aria-labelledby="embedded-card-confirm-title">
+    <div ref="embeddedCardConfirmDialogRef" v-bind="embeddedCardConfirmDialogAttrs" tabindex="-1" class="modal-content modal-surface chat-modal-width-568-90 min-w-0">
       <div class="modal-header border-b border-[var(--color-border-subtle)]">
-        <h3 id="embedded-card-confirm-title" class="modal-title text-[var(--color-text)]">检测到 PNG 内嵌角色卡</h3>
+        <h3 :id="embeddedCardConfirmTitleId" class="modal-title text-[var(--color-text)]">检测到 PNG 内嵌角色卡</h3>
         <button type="button" class="modal-close" aria-label="关闭 PNG 内嵌角色卡确认弹窗" @click="clearEmbeddedCardPreviewState">×</button>
       </div>
       <div class="modal-body max-h-[min(70vh,520px)] overflow-y-auto pr-1 space-y-3">
@@ -6838,7 +6887,8 @@ const editingPersonaAvatarUrl = computed(() => {
   padding: 0.4rem 0.7rem;
   border-radius: 0.85rem;
   border: 1px solid var(--color-border-subtle);
-  background: color-mix(in srgb, var(--color-surface-overlay, rgba(18, 22, 30, 0.72)) 88%, transparent);
+  background-color: var(--color-chrome-widget);
+  background-image: none;
   color: var(--color-text-secondary);
   font-size: 0.75rem;
   line-height: 1;
@@ -6859,7 +6909,7 @@ const editingPersonaAvatarUrl = computed(() => {
 
 .header-action-chip:hover:not(:disabled),
 .header-action-chip:focus-visible {
-  background: color-mix(in srgb, var(--color-surface-overlay, rgba(18, 22, 30, 0.72)) 96%, var(--color-border-subtle) 4%);
+  background-color: var(--color-popover-surface);
   border-color: var(--color-border);
   color: var(--color-text);
 }
@@ -6876,13 +6926,13 @@ const editingPersonaAvatarUrl = computed(() => {
 .header-action-chip--active {
   border-color: var(--color-border);
   color: var(--color-text);
-  background: color-mix(in srgb, var(--color-surface-overlay, rgba(18, 22, 30, 0.72)) 92%, var(--color-border-subtle) 8%);
+  background-color: var(--color-chat-dock);
 }
 
 .header-action-shortcut {
   padding: 0.15rem 0.35rem;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.04);
+  background-color: var(--color-surface-muted);
   color: var(--color-text-muted);
   font-size: 0.65rem;
   letter-spacing: 0.04em;
@@ -6897,10 +6947,11 @@ const editingPersonaAvatarUrl = computed(() => {
   padding: 0.45rem;
   border-radius: 1rem;
   border: 1px solid var(--color-border);
-  background: color-mix(in srgb, var(--color-surface-overlay, rgba(18, 22, 30, 0.86)) 94%, transparent);
-  box-shadow: var(--shadow-glass-panel, 0 16px 40px rgba(0, 0, 0, 0.24));
+  background-color: var(--color-popover-surface);
+  background-image: none;
+  box-shadow: var(--shadow-glass-popover);
   transform-origin: top right;
-  /* 磨砂用模板上的 backdrop-blur-[var(--blur-heavy)]（避免手写 backdrop-filter 经构建压缩失效，且勿嵌套在父级 backdrop 内） */
+  /* 磨砂用模板上的 glass blur token（避免手写 backdrop-filter 经构建压缩失效，且勿嵌套在父级 backdrop 内） */
 }
 
 /* 与顶栏吸顶 morph（320 / 420 / 520ms）同气质的过渡：分层入场 / 退场 */
@@ -7080,7 +7131,7 @@ const editingPersonaAvatarUrl = computed(() => {
 
 .header-more-menu__item:hover:not(:disabled),
 .header-more-menu__item:focus-visible {
-  background: rgba(255, 255, 255, 0.045);
+  background-color: var(--color-surface-hover);
   color: var(--color-text);
 }
 
@@ -7105,10 +7156,10 @@ const editingPersonaAvatarUrl = computed(() => {
   background: transparent;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--color-border);
   border-radius: 2px;
 }
 .custom-scrollbar:hover::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--color-border-strong);
 }
 </style>

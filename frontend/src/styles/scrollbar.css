@@ -85,10 +85,10 @@
 
   /* ========== 品牌色滚动条变体 ========== */
   .scrollbar-brand::-webkit-scrollbar-thumb {
-    background: rgba(162, 48, 237, 0.3);
+    background: var(--color-brand-a30);
   }
 
   .scrollbar-brand::-webkit-scrollbar-thumb:hover {
-    background: rgba(162, 48, 237, 0.5);
+    background: var(--color-brand-a50);
   }
 }

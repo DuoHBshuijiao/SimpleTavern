@@ -39,7 +39,7 @@
   --app-color-border: rgba(255, 255, 255, 0.1);
   --app-color-border-subtle: rgba(255, 255, 255, 0.05);
   --app-color-border-strong: rgba(255, 255, 255, 0.15);
-  /* 页面与面板背景（主题切换用） */
+  /* 页面与面板背景（已弃用：仅保留兼容，不再用于渐变背景） */
   --app-bg-from: #0f172a;
   --app-bg-to: #1e293b;
   --app-panel-from: rgba(30, 41, 59, 0.7);
@@ -339,7 +339,7 @@
 }
 
 [data-theme="sunset"] {
-  /* 落日紫：傍晚蓝为空间底色，晚霞紫为交互主色，落日黄作高光与金边；面板蓝紫→暖紫褐渐变叠出多层玻璃景深 */
+  /* 落日紫：傍晚蓝为空间底色，晚霞紫为交互主色，落日黄作高光与金边；多层纯色叠片表达玻璃景深 */
   --app-color-primary: #c9b4ec;
   --app-color-primary-hover: #dfd0f7;
   --app-color-surface: #0f1026;
@@ -408,9 +408,6 @@
   /* 替代误用的 brand-100 / brand-300 色阶（原为固定蓝色） */
   --color-brand-fg-soft: color-mix(in srgb, var(--color-brand-light) 72%, var(--color-text-muted));
   --color-brand-fg-dim: color-mix(in srgb, var(--color-brand-light) 40%, var(--color-text-muted));
-  /* 玻璃侧栏/面板的统一浮起阴影（直接引用 app 令牌，避免 @theme 内前向引用） */
-  --shadow-glass-panel: var(--app-shadow-heavy);
-
   /* ========== 背景色 (Liquid Glass Dark) ========== */
   --color-dark-bg: var(--app-color-surface);
   --color-dark-surface: var(--app-color-surface-soft);
@@ -418,6 +415,34 @@
   --color-dark-elevated: var(--app-color-surface-elevated);
   --color-surface: var(--app-color-surface);
   --color-surface-elevated: var(--app-color-surface-elevated);
+
+  /* ========== 纯色玻璃景深语义层 ==========
+   * L0 canvas -> L1 layout rail -> L2 chat chrome -> L3 chrome widget
+   * -> L4 chat dock/settings drawer -> L5 modal -> L6 popover
+   */
+  --color-glass-l0: var(--app-color-surface);
+  --color-glass-l1: color-mix(in srgb, var(--app-color-surface) 86%, transparent);
+  --color-glass-l2: color-mix(in srgb, var(--app-color-surface-soft) 72%, transparent);
+  --color-glass-l3: color-mix(in srgb, var(--app-color-surface-soft) 86%, transparent);
+  --color-glass-l4: color-mix(in srgb, var(--app-color-surface-elevated) 90%, transparent);
+  --color-glass-l5: color-mix(in srgb, var(--app-color-surface-elevated) 96%, transparent);
+  --color-glass-l6: color-mix(in srgb, var(--app-color-surface-elevated) 92%, var(--app-color-primary) 8%);
+  --color-glass-border-soft: var(--app-color-border-subtle);
+  --color-glass-border: var(--app-color-border);
+  --color-glass-border-strong: var(--app-color-border-strong);
+  --color-page-canvas: var(--color-glass-l0);
+  --color-layout-rail: var(--color-glass-l1);
+  --color-chat-chrome: var(--color-glass-l2);
+  --color-chrome-widget: var(--color-glass-l3);
+  --color-chat-dock: var(--color-glass-l4);
+  --color-modal-surface: var(--color-glass-l5);
+  --color-popover-surface: var(--color-glass-l6);
+  --color-modal-backdrop: color-mix(in srgb, var(--app-overlay-heavy) 82%, transparent);
+  --color-sidebar-sandwich-outer: var(--color-glass-l1);
+  --color-sidebar-sandwich-middle: var(--color-glass-l3);
+  --color-settings-drawer-bg: var(--color-glass-l2);
+  --color-settings-panel-bg: var(--color-glass-l4);
+  --color-settings-control-bg: var(--color-glass-l5);
   
   /* ========== 文字色 (Slate) ========== */
   --color-text: var(--app-color-text);
@@ -460,9 +485,9 @@
   --color-surface-muted: var(--app-surface-muted);
   --color-surface-overlay: var(--app-surface-overlay);
   --color-surface-hover: var(--app-surface-hover);
-  --color-surface-card: color-mix(in srgb, var(--app-color-surface-elevated) 72%, transparent);
-  --color-surface-panel: color-mix(in srgb, var(--app-color-surface-soft) 86%, transparent);
-  --color-surface-inset: color-mix(in srgb, var(--app-color-surface) 44%, transparent);
+  --color-surface-card: var(--color-glass-l3);
+  --color-surface-panel: var(--color-glass-l4);
+  --color-surface-inset: var(--color-glass-l1);
   --color-surface-selected: color-mix(in srgb, var(--app-color-primary) 16%, transparent);
   --color-focus-ring: color-mix(in srgb, var(--app-color-primary) 42%, transparent);
   --color-danger-hover: color-mix(in srgb, var(--app-color-error) 28%, transparent);
@@ -502,10 +527,28 @@
   --shadow-success: var(--app-shadow-success);
   --shadow-error: var(--app-shadow-error);
   --shadow-purple: var(--app-shadow-purple);
+  --shadow-glass-l0: none;
+  --shadow-glass-l1: var(--app-shadow-light);
+  --shadow-glass-l2: 0 8px 24px rgba(0, 0, 0, 0.18);
+  --shadow-glass-l3: 0 12px 32px rgba(0, 0, 0, 0.22);
+  --shadow-glass-l4: var(--app-shadow-heavy);
+  --shadow-glass-l5: 0 18px 56px rgba(0, 0, 0, 0.34);
+  --shadow-glass-l6: 0 20px 64px rgba(0, 0, 0, 0.38);
+  --shadow-glass-soft: var(--shadow-glass-l2);
+  --shadow-glass-panel: var(--shadow-glass-l4);
+  --shadow-glass-modal: var(--shadow-glass-l5);
+  --shadow-glass-popover: var(--shadow-glass-l6);
+  --shadow-sidebar-sandwich: var(--shadow-glass-l2);
+  --shadow-settings-drawer: var(--shadow-glass-l4);
 
   /* ========== 模糊 ========== */
-  --blur-light: 4px;
-  --blur-heavy: 16px;
+  --glass-blur-none: 0px;
+  --glass-blur-soft: 6px;
+  --glass-blur-panel: 12px;
+  --glass-blur-modal: 18px;
+  --glass-blur-popover: 24px;
+  --blur-light: var(--glass-blur-soft);
+  --blur-heavy: var(--glass-blur-modal);
 
   /* 思考链气泡：暗色表面 + 低不透明度叠层 + 文字用 app 静音色（与 data-theme 同步） */
   --color-reasoning-bubble-bg: color-mix(in srgb, var(--app-color-surface-soft) 26%, transparent);
@@ -591,6 +634,30 @@
   --color-surface: var(--app-color-surface);
   --color-surface-elevated: var(--app-color-surface-elevated);
 
+  --color-glass-l0: var(--app-color-surface);
+  --color-glass-l1: color-mix(in srgb, var(--app-color-surface) 86%, transparent);
+  --color-glass-l2: color-mix(in srgb, var(--app-color-surface-soft) 72%, transparent);
+  --color-glass-l3: color-mix(in srgb, var(--app-color-surface-soft) 86%, transparent);
+  --color-glass-l4: color-mix(in srgb, var(--app-color-surface-elevated) 90%, transparent);
+  --color-glass-l5: color-mix(in srgb, var(--app-color-surface-elevated) 96%, transparent);
+  --color-glass-l6: color-mix(in srgb, var(--app-color-surface-elevated) 92%, var(--app-color-primary) 8%);
+  --color-glass-border-soft: var(--app-color-border-subtle);
+  --color-glass-border: var(--app-color-border);
+  --color-glass-border-strong: var(--app-color-border-strong);
+  --color-page-canvas: var(--color-glass-l0);
+  --color-layout-rail: var(--color-glass-l1);
+  --color-chat-chrome: var(--color-glass-l2);
+  --color-chrome-widget: var(--color-glass-l3);
+  --color-chat-dock: var(--color-glass-l4);
+  --color-modal-surface: var(--color-glass-l5);
+  --color-popover-surface: var(--color-glass-l6);
+  --color-modal-backdrop: color-mix(in srgb, var(--app-overlay-heavy) 82%, transparent);
+  --color-sidebar-sandwich-outer: var(--color-glass-l1);
+  --color-sidebar-sandwich-middle: var(--color-glass-l3);
+  --color-settings-drawer-bg: var(--color-glass-l2);
+  --color-settings-panel-bg: var(--color-glass-l4);
+  --color-settings-control-bg: var(--color-glass-l5);
+
   --color-text: var(--app-color-text);
   --color-text-primary: var(--app-color-text);
   --color-text-secondary: var(--app-color-text-muted);
@@ -622,9 +689,9 @@
   --color-surface-muted: var(--app-surface-muted);
   --color-surface-overlay: var(--app-surface-overlay);
   --color-surface-hover: var(--app-surface-hover);
-  --color-surface-card: color-mix(in srgb, var(--app-color-surface-elevated) 72%, transparent);
-  --color-surface-panel: color-mix(in srgb, var(--app-color-surface-soft) 86%, transparent);
-  --color-surface-inset: color-mix(in srgb, var(--app-color-surface) 44%, transparent);
+  --color-surface-card: var(--color-glass-l3);
+  --color-surface-panel: var(--color-glass-l4);
+  --color-surface-inset: var(--color-glass-l1);
   --color-surface-selected: color-mix(in srgb, var(--app-color-primary) 16%, transparent);
   --color-focus-ring: color-mix(in srgb, var(--app-color-primary) 42%, transparent);
   --color-danger-hover: color-mix(in srgb, var(--app-color-error) 28%, transparent);
@@ -642,7 +709,26 @@
   --shadow-success: var(--app-shadow-success);
   --shadow-error: var(--app-shadow-error);
   --shadow-purple: var(--app-shadow-purple);
-  --shadow-glass-panel: var(--app-shadow-heavy);
+  --shadow-glass-l0: none;
+  --shadow-glass-l1: var(--app-shadow-light);
+  --shadow-glass-l2: 0 8px 24px rgba(0, 0, 0, 0.18);
+  --shadow-glass-l3: 0 12px 32px rgba(0, 0, 0, 0.22);
+  --shadow-glass-l4: var(--app-shadow-heavy);
+  --shadow-glass-l5: 0 18px 56px rgba(0, 0, 0, 0.34);
+  --shadow-glass-l6: 0 20px 64px rgba(0, 0, 0, 0.38);
+  --shadow-glass-soft: var(--shadow-glass-l2);
+  --shadow-glass-panel: var(--shadow-glass-l4);
+  --shadow-glass-modal: var(--shadow-glass-l5);
+  --shadow-glass-popover: var(--shadow-glass-l6);
+  --shadow-sidebar-sandwich: var(--shadow-glass-l2);
+  --shadow-settings-drawer: var(--shadow-glass-l4);
+  --glass-blur-none: 0px;
+  --glass-blur-soft: 6px;
+  --glass-blur-panel: 12px;
+  --glass-blur-modal: 18px;
+  --glass-blur-popover: 24px;
+  --blur-light: var(--glass-blur-soft);
+  --blur-heavy: var(--glass-blur-modal);
 
   --color-reasoning-bubble-bg: color-mix(in srgb, var(--app-color-surface-soft) 26%, transparent);
   --color-reasoning-bubble-border: var(--app-color-border-subtle);

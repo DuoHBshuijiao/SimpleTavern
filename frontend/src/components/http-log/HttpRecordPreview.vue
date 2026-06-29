@@ -423,19 +423,19 @@ const visibleMessageCards = computed(() => parsedRequest.value.messageCards.filt
 function roleBarColor(role: Role): string {
   switch (role) {
     case 'system':
-      return 'bg-yellow-500'
+      return 'bg-[var(--color-warning)]'
     case 'user':
       return 'bg-[var(--color-brand)]'
     case 'assistant':
-      return 'bg-emerald-400'
+      return 'bg-[var(--color-success)]'
     case 'program':
-      return 'bg-zinc-400'
+      return 'bg-[var(--color-text-muted)]'
     case 'response':
-      return 'bg-sky-400'
+      return 'bg-[var(--color-info)]'
     case 'tool':
-      return 'bg-violet-400'
+      return 'bg-[var(--color-purple)]'
     default:
-      return 'bg-zinc-400'
+      return 'bg-[var(--color-text-muted)]'
   }
 }
 
@@ -443,17 +443,17 @@ function roleLabelClass(role: Role): string {
   const common = 'inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wider'
   switch (role) {
     case 'system':
-      return `${common} bg-yellow-500/15 text-yellow-400`
+      return `${common} bg-[var(--color-warning-bg)] text-[var(--color-warning-text)]`
     case 'user':
       return `${common} bg-brand-a20 text-[var(--color-brand)]`
     case 'assistant':
-      return `${common} bg-emerald-500/15 text-emerald-300`
+      return `${common} bg-[var(--color-success-bg)] text-[var(--color-success-text)]`
     case 'program':
-      return `${common} bg-zinc-500/20 text-[var(--color-text-secondary)]`
+      return `${common} bg-surface-muted text-[var(--color-text-secondary)]`
     case 'response':
-      return `${common} bg-sky-500/15 text-sky-300`
+      return `${common} bg-[var(--color-info-bg)] text-[var(--color-info-text)]`
     case 'tool':
-      return `${common} bg-violet-500/15 text-violet-300`
+      return `${common} bg-[var(--color-purple-bg)] text-[var(--color-purple-text)]`
     default:
       return common
   }

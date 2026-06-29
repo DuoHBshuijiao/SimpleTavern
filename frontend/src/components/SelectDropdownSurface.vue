@@ -168,7 +168,7 @@ onUnmounted(() => {
       <div
         v-if="open"
         ref="dropdownRef"
-        class="z-dropdown select-dropdown theme-panel-bg rounded-xl shadow-glass-panel overflow-hidden flex flex-col border border-[var(--color-border)] backdrop-blur-xl backdrop-saturate-[1.8]"
+        class="z-dropdown select-dropdown theme-panel-bg rounded-xl shadow-glass-panel overflow-hidden flex flex-col border border-[var(--color-border)] backdrop-blur-[var(--glass-blur-popover)] backdrop-saturate-[1.8]"
         :class="[
           autoWidth ? 'w-max min-w-0' : '',
           maxHeightClass,
@@ -189,23 +189,13 @@ onUnmounted(() => {
 
 <style scoped>
 .select-dropdown {
-  background:
-    linear-gradient(
-      to bottom right,
-      color-mix(in srgb, var(--color-brand-a20) 55%, var(--app-panel-from)),
-      color-mix(in srgb, var(--color-brand-a10) 45%, var(--app-panel-to))
-    );
+  background-color: var(--color-popover-surface);
+  background-image: none;
 }
 
 .select-dropdown-options {
-  background:
-    linear-gradient(
-      to bottom,
-      color-mix(in srgb, var(--color-brand-a10) 55%, transparent),
-      transparent 18%,
-      transparent 82%,
-      color-mix(in srgb, var(--color-brand-a10) 35%, transparent)
-    );
+  background-color: color-mix(in srgb, var(--color-popover-surface) 72%, transparent);
+  background-image: none;
 }
 
 .custom-scrollbar::-webkit-scrollbar {

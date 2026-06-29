@@ -14,7 +14,7 @@
           v-for="(cap, i) in capsules"
           :key="capsuleRowKey(cap, i)"
           data-svbar-pill
-          class="relative inline-flex max-w-[min(100vw,20rem)] shrink-0 select-none items-center gap-1.5 overflow-hidden rounded-full border px-2.5 py-1 backdrop-blur-[var(--blur-heavy)] backdrop-saturate-[1.45] transition-colors duration-300"
+          class="relative inline-flex max-w-[min(100vw,20rem)] shrink-0 select-none items-center gap-1.5 overflow-hidden rounded-full border px-2.5 py-1 backdrop-blur-[var(--glass-blur-modal)] backdrop-saturate-[1.45] transition-colors duration-300"
           :class="[
             cap.flashing
               ? 'border-[var(--color-brand-a50)] bg-[var(--color-brand-a30)]'

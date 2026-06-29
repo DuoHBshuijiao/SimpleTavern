@@ -11,7 +11,6 @@
  *    - 旋转动画：用于加载图标
  *    - 弹跳动画：用于强调元素
  *    - 滑入动画：从右侧或左侧滑入
- *    - 骨架屏闪烁：用于加载占位
  *    - 打字机光标：闪烁光标效果
  *
  * 设计元素：
@@ -22,7 +21,6 @@
  *    - 旋转动画：spin类，360度旋转
  *    - 弹跳动画：bounce类，上下移动
  *    - 滑入动画：slide-in-right、slide-in-left类
- *    - 骨架屏闪烁：shimmer类，使用渐变背景实现闪烁效果
  *    - 打字机光标：blink类，闪烁效果
  *
  * 原理：
@@ -199,27 +197,6 @@
     animation: slide-in-left var(--transition-slow) ease;
   }
 
-  /* ========== 骨架屏闪烁 ========== */
-  @keyframes shimmer {
-    0% {
-      background-position: -200% 0;
-    }
-    100% {
-      background-position: 200% 0;
-    }
-  }
-
-  .animate-shimmer {
-    background: linear-gradient(
-      90deg,
-      var(--color-dark-surface) 25%,
-      var(--color-dark-lighter) 50%,
-      var(--color-dark-surface) 75%
-    );
-    background-size: 200% 100%;
-    animation: shimmer 1.5s infinite;
-  }
-
   /* ========== 打字机光标 ========== */
   @keyframes blink {
     0%, 50% {
@@ -248,7 +225,6 @@
     .animate-scale-in,
     .animate-slide-in-right,
     .animate-slide-in-left,
-    .animate-shimmer,
     .animate-blink {
       animation-duration: 1ms !important;
       animation-iteration-count: 1 !important;

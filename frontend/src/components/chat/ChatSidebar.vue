@@ -136,7 +136,7 @@ function asidePresetClass(collapsed: boolean) {
 
 const asideBaseClass = computed(() => {
   const shared =
-    'surface-panel flex flex-col border border-[var(--color-border)] rounded-2xl'
+    'glass-l1 flex flex-col border border-[var(--color-border)] rounded-2xl'
   if (props.isNarrowPortrait) {
     return [
       shared,
@@ -373,7 +373,7 @@ function confirmDelete() {
     <div class="flex flex-col h-full overflow-hidden rounded-2xl">
       
       <!-- 用户身份区域 (头部)：滚动区全宽使滚动条贴侧栏右缘，内容用 px-4 与标题对齐 -->
-      <div class="bg-surface-overlay border-b border-[var(--color-border-subtle)] shrink-0">
+      <div class="bg-[var(--color-sidebar-sandwich-outer)] border-b border-[var(--color-border-subtle)] shrink-0">
         <div class="flex items-center justify-between mb-3 px-4 pt-4">
           <span class="text-xs text-[var(--color-text-secondary)] uppercase tracking-wider">我的身份</span>
           <button 
@@ -423,7 +423,7 @@ function confirmDelete() {
       </div>
 
       <!-- 角色列表区域 (中间，弹性伸缩) -->
-      <div ref="characterListScrollRef" class="flex-1 overflow-y-auto min-h-0 custom-scrollbar p-3">
+      <div ref="characterListScrollRef" class="flex-1 overflow-y-auto min-h-0 custom-scrollbar bg-[var(--color-sidebar-sandwich-middle)] p-3">
         <div class="flex items-center justify-between mb-2 px-1">
           <span class="text-xs text-[var(--color-text-secondary)] uppercase tracking-wider">角色列表</span>
           <button 
@@ -482,7 +482,7 @@ function confirmDelete() {
       </div>
 
       <!-- 会话列表区域 (底部) -->
-      <div class="h-1/3 min-h-[150px] border-t border-[var(--color-border-subtle)] bg-surface-overlay flex flex-col">
+      <div class="h-1/3 min-h-[150px] border-t border-[var(--color-border-subtle)] bg-[var(--color-sidebar-sandwich-outer)] flex flex-col">
         <div class="p-3 pb-1 shrink-0 flex items-center justify-between">
           <span class="text-xs text-[var(--color-text-secondary)] uppercase tracking-wider">历史会话</span>
           <div class="flex gap-2">
@@ -716,10 +716,10 @@ function confirmDelete() {
   background: transparent;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--color-border);
   border-radius: 2px;
 }
 .custom-scrollbar:hover::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--color-border-strong);
 }
 </style>

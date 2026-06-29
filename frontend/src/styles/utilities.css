@@ -106,18 +106,96 @@
 
   /* ========== 主题背景（随 data-theme 切换） ========== */
   .theme-page-bg {
-    background: linear-gradient(to bottom right, var(--app-bg-from), var(--app-bg-to));
+    background-color: var(--color-page-canvas);
+    background-image: none;
     color: var(--color-text);
   }
+
   .theme-panel-bg {
-    background: linear-gradient(to bottom right, var(--app-panel-from), var(--app-panel-to));
+    background-color: var(--color-chrome-widget);
+    background-image: none;
+    backdrop-filter: blur(var(--glass-blur-panel));
+    -webkit-backdrop-filter: blur(var(--glass-blur-panel));
   }
+
+  /* ========== 纯色玻璃景深工具类 ========== */
+  .glass-l0,
+  .glass-l1,
+  .glass-l2,
+  .glass-l3,
+  .glass-l4,
+  .glass-l5,
+  .glass-l6 {
+    background-image: none;
+    transform: translateZ(0);
+    backface-visibility: hidden;
+  }
+
+  .glass-l0 {
+    background-color: var(--color-glass-l0);
+    border: 1px solid transparent;
+    box-shadow: var(--shadow-glass-l0);
+    backdrop-filter: blur(var(--glass-blur-none));
+    -webkit-backdrop-filter: blur(var(--glass-blur-none));
+  }
+
+  .glass-l1 {
+    background-color: var(--color-glass-l1);
+    border: 1px solid var(--color-glass-border-soft);
+    box-shadow: var(--shadow-glass-l1);
+    backdrop-filter: blur(var(--glass-blur-soft));
+    -webkit-backdrop-filter: blur(var(--glass-blur-soft));
+  }
+
+  .glass-l2 {
+    background-color: var(--color-glass-l2);
+    border: 1px solid var(--color-glass-border-soft);
+    box-shadow: var(--shadow-glass-l2);
+    backdrop-filter: blur(var(--glass-blur-soft));
+    -webkit-backdrop-filter: blur(var(--glass-blur-soft));
+  }
+
+  .glass-l3 {
+    background-color: var(--color-glass-l3);
+    border: 1px solid var(--color-glass-border);
+    box-shadow: var(--shadow-glass-l3);
+    backdrop-filter: blur(var(--glass-blur-panel));
+    -webkit-backdrop-filter: blur(var(--glass-blur-panel));
+  }
+
+  .glass-l4 {
+    background-color: var(--color-glass-l4);
+    border: 1px solid var(--color-glass-border);
+    box-shadow: var(--shadow-glass-l4);
+    backdrop-filter: blur(var(--glass-blur-panel));
+    -webkit-backdrop-filter: blur(var(--glass-blur-panel));
+  }
+
+  .glass-l5 {
+    background-color: var(--color-glass-l5);
+    border: 1px solid var(--color-glass-border-strong);
+    box-shadow: var(--shadow-glass-l5);
+    backdrop-filter: blur(var(--glass-blur-modal));
+    -webkit-backdrop-filter: blur(var(--glass-blur-modal));
+  }
+
+  .glass-l6 {
+    background-color: var(--color-glass-l6);
+    border: 1px solid var(--color-glass-border-strong);
+    box-shadow: var(--shadow-glass-l6);
+    backdrop-filter: blur(var(--glass-blur-popover));
+    -webkit-backdrop-filter: blur(var(--glass-blur-popover));
+  }
+
   /* 聊天顶栏：半透明磨砂玻璃，圆角胶囊条，无投影 */
   .theme-header-bg {
-    background: color-mix(in srgb, var(--color-surface) 38%, transparent);
+    background-color: var(--color-chat-chrome);
+    background-image: none;
     box-shadow: none;
-    border: 1px solid var(--color-border-subtle);
+    border: 1px solid var(--color-glass-border-soft);
     border-radius: var(--radius-2xl);
+    backdrop-filter: blur(var(--glass-blur-soft));
+    -webkit-backdrop-filter: blur(var(--glass-blur-soft));
     transform: translateZ(0);
     backface-visibility: hidden;
   }
@@ -139,18 +217,28 @@
 
   /* 主聊天可拖动 FAB（助手 / TTS）：统一中性底与悬停；助手色令牌保留在 variables 中但不在此使用 */
   .chat-fab-surface {
-    background-color: var(--color-border-subtle);
+    background-color: var(--color-chat-dock);
+    background-image: none;
     color: var(--color-text);
+    border-color: var(--color-glass-border);
+    box-shadow: var(--shadow-glass-panel);
+    backdrop-filter: blur(var(--glass-blur-panel));
+    -webkit-backdrop-filter: blur(var(--glass-blur-panel));
   }
+
   .chat-fab-surface:hover {
-    background-color: var(--color-surface-hover);
+    background-color: var(--color-glass-l5);
   }
 
   /* TTS 队列等浮层：与 chat-fab-surface 同底与边框，无整容器悬停变色 */
   .chat-fab-panel {
-    background-color: var(--color-border-subtle);
+    background-color: var(--color-chat-dock);
+    background-image: none;
     color: var(--color-text);
-    border: 1px solid var(--color-border);
+    border: 1px solid var(--color-glass-border);
+    box-shadow: var(--shadow-glass-panel);
+    backdrop-filter: blur(var(--glass-blur-panel));
+    -webkit-backdrop-filter: blur(var(--glass-blur-panel));
   }
 
   /* ========== Flex 工具类 ========== */

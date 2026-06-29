@@ -594,12 +594,7 @@ defineExpose({
       class="chat-input-float-stack relative z-10"
       :class="{ 'chat-input-float-stack--sink': sinkMorphed }"
     >
-    <!-- 
-      Refactored Container:
-      - Uses bg-slate-900/70 and backdrop-blur-xl for strong glass effect
-      - Uses border-white/10 for subtle border
-      - Removed hardcoded hex colors
-    -->
+    <!-- 主输入区使用统一 surface-panel 玻璃层级，具体背景/模糊/边框由样式基座控制。 -->
     <div
       class="chat-input-card-morph surface-panel relative z-0 p-3 flex flex-col gap-2 focus-within:border-brand-a40 focus-within:ring-1 focus-within:ring-[var(--color-focus-ring)]"
       style="opacity: 1;"
@@ -1056,7 +1051,8 @@ defineExpose({
   padding: 0.3rem 0.6rem;
   border-radius: 0.75rem;
   border: 1px solid var(--color-border-subtle);
-  background: color-mix(in srgb, var(--color-surface-overlay, rgba(18, 22, 30, 0.72)) 88%, transparent);
+  background-color: var(--color-chrome-widget);
+  background-image: none;
   color: var(--color-text-secondary);
   font-size: 0.6875rem;
   line-height: 1;
@@ -1064,7 +1060,7 @@ defineExpose({
   overflow: hidden;
   backdrop-filter: blur(var(--blur-light));
   -webkit-backdrop-filter: blur(var(--blur-light));
-  box-shadow: var(--shadow-glass-panel, 0 8px 24px rgba(0, 0, 0, 0.18));
+  box-shadow: var(--shadow-glass-panel);
   transition:
     background-color 200ms cubic-bezier(0.25, 1, 0.5, 1),
     border-color 200ms cubic-bezier(0.25, 1, 0.5, 1),
@@ -1082,11 +1078,7 @@ defineExpose({
   inset: 0;
   opacity: 0.32;
   pointer-events: none;
-  background: radial-gradient(
-    120% 80% at 30% 40%,
-    color-mix(in srgb, var(--color-brand, #6366f1) 26%, transparent),
-    transparent 62%
-  );
+  background-color: var(--color-brand-a20);
 }
 
 .agent-top-bar-btn__icon {
@@ -1107,7 +1099,7 @@ defineExpose({
 }
 
 .agent-top-bar-btn:hover {
-  background: color-mix(in srgb, var(--color-surface-overlay, rgba(18, 22, 30, 0.72)) 96%, var(--color-border-subtle) 4%);
+  background-color: var(--color-popover-surface);
   border-color: var(--color-border);
   color: var(--color-text);
 }

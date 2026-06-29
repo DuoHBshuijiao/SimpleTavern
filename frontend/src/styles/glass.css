@@ -12,11 +12,12 @@
   /* 核心玻璃拟态类 */
   .glass-panel,
   .glass-morphism {
-    background-color: var(--color-dark-surface);
-    backdrop-filter: blur(var(--blur-heavy));
-    -webkit-backdrop-filter: blur(var(--blur-heavy));
-    border: 1px solid var(--color-border-subtle);
-    box-shadow: var(--shadow-heavy);
+    background-color: var(--color-glass-l4);
+    background-image: none;
+    backdrop-filter: blur(var(--glass-blur-panel));
+    -webkit-backdrop-filter: blur(var(--glass-blur-panel));
+    border: 1px solid var(--color-glass-border);
+    box-shadow: var(--shadow-glass-panel);
     
     /* 性能优化：开启硬件加速 */
     transform: translateZ(0);
@@ -33,21 +34,22 @@
 
   /* 玻璃按钮 */
   .glass-button {
-    background-color: var(--color-surface-muted);
-    backdrop-filter: blur(var(--blur-light));
-    -webkit-backdrop-filter: blur(var(--blur-light));
-    border: 1px solid var(--color-border-subtle);
+    background-color: var(--color-glass-l3);
+    background-image: none;
+    backdrop-filter: blur(var(--glass-blur-soft));
+    -webkit-backdrop-filter: blur(var(--glass-blur-soft));
+    border: 1px solid var(--color-glass-border-soft);
     color: var(--color-text-primary);
     transition: all var(--transition-fast);
   }
 
   .glass-button:hover {
-    background-color: var(--color-surface-hover);
-    border-color: var(--color-border-default);
+    background-color: var(--color-glass-l4);
+    border-color: var(--color-glass-border);
   }
 
   .glass-button:active {
-    background-color: var(--color-surface-overlay);
+    background-color: var(--color-glass-l2);
   }
 
   /*
@@ -58,15 +60,15 @@
    * 使 saturate 失效。Tailwind 的 backdrop-blur-*、backdrop-saturate-* 等工具类
    * 通过 CSS 变量组合生成最终样式，经构建后不会出现该问题。
    *
-   * 替代用法示例：
+   * 替代用法示例（半透明纯色 + backdrop 工具类，勿用渐变背景）：
    *
    * 悬浮玻璃面板 (.glass-panel-floating)：
-   *   class="bg-gradient-to-br from-slate-800/70 to-slate-700/50 backdrop-blur-xl
-   *          backdrop-saturate-[1.8] border border-white/10
-   *          shadow-[0_8px_32px_rgba(0,0,0,0.3)]"
+   *   class="bg-[var(--color-surface-panel)] backdrop-blur-[var(--glass-blur-panel)] backdrop-saturate-[1.8]
+   *          border border-[var(--color-border-subtle)]
+   *          shadow-[var(--shadow-heavy)]"
    *
    * 染色玻璃效果 (.stained-glass)：
-   *   class="bg-gradient-to-br from-slate-900/30 to-slate-800/25 backdrop-blur-2xl
-   *          backdrop-saturate-[1.8] border border-white/10"
+   *   class="bg-[var(--color-surface-muted)] backdrop-blur-[var(--glass-blur-modal)] backdrop-saturate-[1.8]
+   *          border border-[var(--color-border-subtle)]"
    */
 }

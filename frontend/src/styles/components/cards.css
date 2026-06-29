@@ -36,28 +36,38 @@
   .surface,
   .surface-card {
     background-color: var(--color-surface-card);
-    border: 1px solid var(--color-border-subtle);
+    background-image: none;
+    border: 1px solid var(--color-glass-border-soft);
     border-radius: var(--radius-2xl);
-    box-shadow: var(--shadow-light);
+    box-shadow: var(--shadow-glass-soft);
+    backdrop-filter: blur(var(--glass-blur-soft));
+    -webkit-backdrop-filter: blur(var(--glass-blur-soft));
   }
 
   .surface-panel {
     background-color: var(--color-surface-panel);
-    border: 1px solid var(--color-border);
+    background-image: none;
+    border: 1px solid var(--color-glass-border);
     border-radius: var(--radius-2xl);
-    box-shadow: var(--shadow-heavy);
+    box-shadow: var(--shadow-glass-panel);
+    backdrop-filter: blur(var(--glass-blur-panel));
+    -webkit-backdrop-filter: blur(var(--glass-blur-panel));
   }
 
   .surface-inset {
     background-color: var(--color-surface-inset);
-    border: 1px solid var(--color-border-subtle);
+    background-image: none;
+    border: 1px solid var(--color-glass-border-soft);
     border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-glass-l1);
   }
 
   .surface-muted {
-    background-color: var(--color-surface-muted);
-    border: 1px solid var(--color-border-subtle);
+    background-color: var(--color-glass-l2);
+    background-image: none;
+    border: 1px solid var(--color-glass-border-soft);
     border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-glass-l1);
   }
 
   .surface-selected {
@@ -81,7 +91,8 @@
 
   .card {
     background-color: var(--color-surface-card);
-    border: 1px solid var(--color-border-subtle);
+    background-image: none;
+    border: 1px solid var(--color-glass-border-soft);
     border-radius: var(--radius-2xl);
     overflow: hidden;
   }
@@ -146,14 +157,18 @@
   /* ========== 面板 ========== */
   .panel {
     background-color: var(--color-surface-panel);
-    border: 1px solid var(--color-border-default);
+    background-image: none;
+    border: 1px solid var(--color-glass-border);
     border-radius: var(--radius-xl);
     padding: var(--spacing-md);
+    backdrop-filter: blur(var(--glass-blur-panel));
+    -webkit-backdrop-filter: blur(var(--glass-blur-panel));
   }
 
   .panel-inset {
     background-color: var(--color-surface-inset);
-    border: 1px solid var(--color-border-subtle);
+    background-image: none;
+    border: 1px solid var(--color-glass-border-soft);
   }
 
   /* ========== 消息气泡 ========== */

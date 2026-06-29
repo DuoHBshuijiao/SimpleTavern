@@ -124,11 +124,11 @@ const initials = computed(() => {
 const bgColor = computed(() => {
   const colors = [
     'bg-brand-a20 text-brand',
-    'bg-blue-500/20 text-blue-400',
-    'bg-emerald-500/20 text-emerald-400',
-    'bg-orange-500/20 text-orange-400',
-    'bg-pink-500/20 text-pink-400',
-    'bg-cyan-500/20 text-cyan-400',
+    'bg-[var(--color-info-bg)] text-[var(--color-info-text)]',
+    'bg-[var(--color-success-bg)] text-[var(--color-success-text)]',
+    'bg-[var(--color-warning-bg)] text-[var(--color-warning-text)]',
+    'bg-[var(--color-purple-bg)] text-[var(--color-purple-text)]',
+    'bg-[var(--color-assistant-bg)] text-[var(--color-text)]',
   ]
   let hash = 0
   const str = props.name || '?'
@@ -146,8 +146,8 @@ const bgColor = computed(() => {
       rounded,
       bgColor,
       // Liquid Glass enhancement: default subtle border for glass feel
-      'border border-white/10', 
-      bordered ? 'ring-2 ring-white/20' : ''
+      'border border-[var(--color-border-subtle)]', 
+      bordered ? 'ring-2 ring-[var(--color-focus-ring)]' : ''
     ]"
     :style="style"
   >
@@ -172,10 +172,16 @@ const bgColor = computed(() => {
     <!-- Skeleton loader -->
     <div 
       v-if="src && !isLoaded && !hasError" 
-      class="absolute inset-0 bg-white/5 animate-pulse"
+      class="absolute inset-0 bg-surface-muted animate-pulse"
     ></div>
     
-    <!-- Glass overlay for shine effect -->
-    <div class="absolute inset-0 bg-gradient-to-tr from-white/5 to-transparent pointer-events-none"></div>
+    <!-- 半透明玻璃覆盖层 -->
+    <div class="modern-avatar__glaze absolute inset-0 pointer-events-none" aria-hidden="true"></div>
   </div>
 </template>
+
+<style scoped>
+.modern-avatar__glaze {
+  background-color: var(--color-surface-overlay);
+}
+</style>

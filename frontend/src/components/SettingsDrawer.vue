@@ -4012,7 +4012,7 @@ async function checkUpdate() {
               </div>
 
               <!-- 连接与默认模型（默认收起） -->
-              <div class="rounded-xl border border-[var(--color-border-subtle)] bg-surface-muted/40 overflow-hidden">
+              <div class="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-settings-panel-bg)] overflow-hidden">
                 <button
                   type="button"
                   class="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3.5 text-left text-sm text-[var(--color-text-secondary)] select-none hover:bg-surface-hover/40"
@@ -4157,7 +4157,7 @@ async function checkUpdate() {
               </div>
 
               <!-- 网络搜索（Tavily / 博查） -->
-              <div class="rounded-xl border border-[var(--color-border-subtle)] bg-surface-muted/40 overflow-hidden">
+              <div class="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-settings-panel-bg)] overflow-hidden">
                 <button
                   type="button"
                   class="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3.5 text-left text-sm text-[var(--color-text-secondary)] select-none hover:bg-surface-hover/40"
@@ -4253,7 +4253,7 @@ async function checkUpdate() {
                           </div>
                         </template>
                         <div
-                          class="rounded-lg border border-[var(--color-border-subtle)] bg-surface-muted/30 p-3 text-xs text-[var(--color-text-muted)] transition-opacity duration-200"
+                          class="rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-settings-control-bg)] p-3 text-xs text-[var(--color-text-muted)] transition-opacity duration-200"
                           :class="webSearchRemoteStatusFetching ? 'opacity-70' : ''"
                         >
                           <div class="mb-1 flex items-center justify-between gap-2 font-medium text-[var(--color-text-secondary)]">
@@ -4277,7 +4277,7 @@ async function checkUpdate() {
               </div>
 
               <!-- 提示词与生成参数（默认折叠） -->
-              <div class="rounded-xl border border-[var(--color-border-subtle)] bg-surface-muted/40 overflow-hidden">
+              <div class="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-settings-panel-bg)] overflow-hidden">
                 <button
                   type="button"
                   class="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3.5 text-left text-sm text-[var(--color-text-secondary)] select-none hover:bg-surface-hover/40"
@@ -4413,7 +4413,7 @@ async function checkUpdate() {
               </div>
 
               <!-- 外观与数据（默认折叠） -->
-              <div class="rounded-xl border border-[var(--color-border-subtle)] bg-surface-muted/40 overflow-hidden">
+              <div class="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-settings-panel-bg)] overflow-hidden">
                 <button
                   type="button"
                   class="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3.5 text-left text-sm text-[var(--color-text-secondary)] select-none hover:bg-surface-hover/40"
@@ -4432,7 +4432,7 @@ async function checkUpdate() {
                 >
                   <div class="min-h-0 overflow-hidden">
                     <div class="space-y-5 border-t border-[var(--color-border-subtle)] px-4 pb-4 pt-4">
-                  <div class="space-y-3 rounded-xl border border-[var(--color-border-subtle)] bg-surface-overlay/35 p-3.5">
+                  <div class="space-y-3 rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-settings-control-bg)] p-3.5">
                     <div class="flex flex-wrap items-start justify-between gap-3">
                       <div class="min-w-0 space-y-1">
                         <div class="text-sm font-medium text-[var(--color-text-secondary)]">页面背景</div>
@@ -4481,7 +4481,7 @@ async function checkUpdate() {
                     </div>
                     <div
                       v-else
-                      class="rounded-xl border border-dashed border-[var(--color-border-subtle)] bg-surface-muted/35 px-3 py-4 text-xs leading-relaxed text-[var(--color-text-muted)]"
+                      class="rounded-xl border border-dashed border-[var(--color-border-subtle)] bg-[var(--color-settings-control-bg)] px-3 py-4 text-xs leading-relaxed text-[var(--color-text-muted)]"
                     >
                       还未导入页面背景。聊天页将继续仅使用当前主题渐变。
                     </div>
@@ -4521,7 +4521,7 @@ async function checkUpdate() {
                     </div>
                   </div>
 
-                  <div class="space-y-3 rounded-xl border border-[var(--color-border-subtle)] bg-surface-overlay/35 p-3.5">
+                  <div class="space-y-3 rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-settings-control-bg)] p-3.5">
                     <div class="space-y-2">
                       <div class="text-sm font-medium text-[var(--color-text-secondary)]">WebGPU 着色器背景</div>
                       <p class="text-xs leading-relaxed text-[var(--color-text-muted)]">
@@ -4586,7 +4586,7 @@ async function checkUpdate() {
                       >
                         编译失败，请使用对应预设行的「编辑」查看详情。
                       </p>
-                      <div class="space-y-2 rounded-lg border border-[var(--color-border-subtle)] bg-surface-muted/35 p-2">
+                      <div class="space-y-2 rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-settings-control-bg)] p-2">
                         <template v-for="item in webgpuPresets" :key="item.id">
                           <div
                             class="flex w-full min-h-9 flex-wrap items-center gap-1.5 rounded-md px-1 py-0.5 text-xs transition-colors outline-none focus-visible:ring-2 focus-visible:ring-brand-a40"
@@ -4845,7 +4845,7 @@ async function checkUpdate() {
               </div>
 
               <!-- 应用与更新（默认折叠） -->
-              <div class="rounded-xl border border-[var(--color-border-subtle)] bg-surface-muted/40 overflow-hidden">
+              <div class="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-settings-panel-bg)] overflow-hidden">
                 <button
                   type="button"
                   class="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3.5 text-left text-sm text-[var(--color-text-secondary)] select-none hover:bg-surface-hover/40"
@@ -4932,7 +4932,7 @@ async function checkUpdate() {
               </div>
 
               <!-- 应用与更新（默认折叠） -->
-              <div class="rounded-xl border border-[var(--color-border-subtle)] bg-surface-muted/40 overflow-hidden">
+              <div class="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-settings-panel-bg)] overflow-hidden">
                 <button
                   type="button"
                   class="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3.5 text-left text-sm text-[var(--color-text-secondary)] select-none hover:bg-surface-hover/40"
@@ -5181,7 +5181,7 @@ async function checkUpdate() {
                                          :key="`${idx}-${m}`"
                                          role="button"
                                          tabindex="0"
-                                         class="group relative inline-flex max-w-full cursor-pointer items-center gap-1 rounded-md border border-[var(--color-border-subtle)] bg-surface-overlay/55 px-2 py-1 text-xs text-[var(--color-text-secondary)] backdrop-blur-sm transition-[box-shadow,border-color] hover:bg-surface-overlay/80"
+                                         class="group relative inline-flex max-w-full cursor-pointer items-center gap-1 rounded-md border border-[var(--color-border-subtle)] bg-surface-overlay/55 px-2 py-1 text-xs text-[var(--color-text-secondary)] backdrop-blur-[var(--glass-blur-soft)] transition-[box-shadow,border-color] hover:bg-surface-overlay/80"
                                          :class="presetModelListSelection.has(m) ? 'ring-1 ring-brand/50 border-brand/35 shadow-[0_0_0_1px_color-mix(in_srgb,var(--color-brand)_25%,transparent)]' : ''"
                                          @click="togglePresetModelListSelection(m)"
                                          @keydown.enter.prevent="togglePresetModelListSelection(m)"
@@ -5219,7 +5219,7 @@ async function checkUpdate() {
                                 </div>
                           </div>
 
-                          <div v-if="isTtsPreset(editingPreset)" class="space-y-3 rounded-xl border border-[var(--color-border-subtle)] bg-surface-muted/35 p-3">
+                          <div v-if="isTtsPreset(editingPreset)" class="space-y-3 rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-settings-control-bg)] p-3">
                             <p class="text-[11px] text-[var(--color-text-muted)]">
                               当前提供商：{{ formatTtsProviderLabel(editingPresetTtsProvider) }}
                             </p>
@@ -5369,7 +5369,7 @@ async function checkUpdate() {
                                   v-for="voice in editingPresetVoiceCatalog"
                                   :key="voice.voiceId"
                                   type="button"
-                                  class="group relative inline-flex max-w-full cursor-pointer items-center gap-1 rounded-md border border-[var(--color-border-subtle)] bg-surface-overlay/55 px-2 py-1 text-xs text-[var(--color-text-secondary)] backdrop-blur-sm transition-[box-shadow,border-color] hover:bg-surface-overlay/80"
+                                  class="group relative inline-flex max-w-full cursor-pointer items-center gap-1 rounded-md border border-[var(--color-border-subtle)] bg-surface-overlay/55 px-2 py-1 text-xs text-[var(--color-text-secondary)] backdrop-blur-[var(--glass-blur-soft)] transition-[box-shadow,border-color] hover:bg-surface-overlay/80"
                                   :class="presetVoiceListSelection.has(voice.voiceId) ? 'ring-1 ring-brand/50 border-brand/35 shadow-[0_0_0_1px_color-mix(in_srgb,var(--color-brand)_25%,transparent)]' : ''"
                                   @click="togglePresetVoiceSelection(voice.voiceId)"
                                 >
@@ -6070,7 +6070,7 @@ async function checkUpdate() {
                 </div>
               </div>
 
-              <div class="space-y-3 rounded-xl border border-[var(--color-border-subtle)] bg-surface-muted/35 p-4">
+              <div class="space-y-3 rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-settings-control-bg)] p-4">
                 <div class="flex items-center justify-between gap-3">
                   <div>
                     <div class="text-sm font-medium text-[var(--color-text-secondary)]">文字转语音</div>
@@ -6270,11 +6270,10 @@ async function checkUpdate() {
     <div v-if="regexEditorOpen && regexEditorDraft" class="fixed inset-0 z-[var(--z-popover)] flex items-center justify-center">
       <div class="modal-backdrop" @click="regexEditorOpen = false"></div>
       <div
-        class="relative m-4 flex max-h-[85vh] w-[min(92vw,560px)] flex-col rounded-2xl theme-panel-bg border border-[var(--color-border)] shadow-xl backdrop-saturate-[1.8]"
+        class="glass-l5 relative m-4 flex max-h-[85vh] w-[min(92vw,560px)] flex-col rounded-2xl border border-[var(--color-border)] shadow-xl"
         role="dialog"
         aria-modal="true"
         aria-labelledby="regex-editor-title"
-        style="backdrop-filter: blur(var(--blur-heavy)); -webkit-backdrop-filter: blur(var(--blur-heavy))"
       >
         <div class="flex items-center justify-between rounded-t-2xl border-b border-[var(--color-border)] bg-surface-muted p-4">
           <h3 id="regex-editor-title" class="text-[var(--color-text)]">正文正则规则</h3>
@@ -6385,10 +6384,10 @@ async function checkUpdate() {
   <Teleport to="body">
     <div v-if="showModelSelector" class="fixed inset-0 z-[var(--z-popover)] flex items-center justify-center">
       <!-- Backdrop -->
-      <div class="absolute inset-0 bg-overlay-heavy backdrop-blur-sm" @click="showModelSelector = false"></div>
+      <div class="absolute inset-0 bg-overlay-heavy backdrop-blur-[var(--glass-blur-soft)]" @click="showModelSelector = false"></div>
       
       <!-- Modal -->
-      <div class="relative w-full max-w-lg min-w-[400px] glass-panel rounded-2xl shadow-2xl flex flex-col max-h-[85vh] m-4" role="dialog" aria-modal="true" aria-labelledby="model-selector-title">
+      <div class="glass-l6 relative w-full max-w-lg min-w-[400px] rounded-2xl shadow-2xl flex flex-col max-h-[85vh] m-4" role="dialog" aria-modal="true" aria-labelledby="model-selector-title">
       <div class="p-4 border-b border-[var(--color-border)] flex justify-between items-center bg-surface-muted rounded-t-2xl">
         <h3 id="model-selector-title" class="text-[var(--color-text)]">选择模型</h3>
         <button
@@ -6445,9 +6444,9 @@ async function checkUpdate() {
 
   <Teleport to="body">
     <div v-if="showVoiceSelector" class="fixed inset-0 z-[var(--z-popover)] flex items-center justify-center">
-      <div class="absolute inset-0 bg-overlay-heavy backdrop-blur-sm" @click="showVoiceSelector = false"></div>
+      <div class="absolute inset-0 bg-overlay-heavy backdrop-blur-[var(--glass-blur-soft)]" @click="showVoiceSelector = false"></div>
 
-      <div class="relative m-4 flex max-h-[85vh] min-h-0 w-full max-w-lg min-w-[400px] flex-col rounded-2xl glass-panel shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="voice-selector-title">
+      <div class="glass-l6 relative m-4 flex max-h-[85vh] min-h-0 w-full max-w-lg min-w-[400px] flex-col rounded-2xl shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="voice-selector-title">
         <div class="flex items-center justify-between rounded-t-2xl border-b border-[var(--color-border)] bg-surface-muted p-4">
           <h3 id="voice-selector-title" class="text-[var(--color-text)]">选择音色</h3>
           <button
