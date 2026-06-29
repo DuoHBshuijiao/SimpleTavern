@@ -108,13 +108,19 @@
 
   /* ========== 颜色变体 ========== */
   .btn-primary {
-    background-color: var(--color-primary);
+    background-color: var(--color-primary-action);
     color: var(--color-on-brand);
     box-shadow: var(--shadow-brand);
+    border-color: color-mix(in srgb, var(--color-primary) 34%, transparent);
   }
 
   .btn-primary:hover:not(:disabled) {
-    background-color: var(--color-primary-hover);
+    background-color: var(--color-primary-action-hover);
+    border-color: color-mix(in srgb, var(--color-primary) 46%, transparent);
+  }
+
+  .btn-primary:active:not(:disabled) {
+    background-color: var(--color-primary-action-active);
   }
 
   .btn-secondary {
@@ -198,14 +204,14 @@
   }
 
   .chat-action-button--primary {
-    background-color: var(--color-primary);
+    background-color: var(--color-primary-action);
     color: var(--color-on-brand);
     box-shadow: var(--shadow-brand);
     border-color: color-mix(in srgb, var(--color-brand-light) 20%, transparent);
   }
 
   .chat-action-button--primary:hover:not(:disabled) {
-    background-color: var(--color-primary-hover);
+    background-color: var(--color-primary-action-hover);
     border-color: color-mix(in srgb, var(--color-brand-light) 30%, transparent);
   }
 

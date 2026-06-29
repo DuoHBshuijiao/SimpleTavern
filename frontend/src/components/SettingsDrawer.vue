@@ -238,6 +238,7 @@ const cleanChatDraftSnapshot = ref('')
 const isSaving = ref(false)
 const restoringChatId = ref<string | null>(null)
 let chatSwitchConfirmSeq = 0
+const savedThemePreviewId = ref(normalizeThemeId(null))
 const regexEditorOpen = ref(false)
 const regexEditorIndex = ref<number | null>(null)
 const regexEditorDraft = ref<ChatContentRegexRule | null>(null)
@@ -710,6 +711,19 @@ function closeWithoutConfirm() {
   emit('update:show', false)
 }
 
+function setDocumentTheme(themeId: string) {
+  if (typeof document === 'undefined') return
+  const normalized = normalizeThemeId(themeId)
+  document.documentElement.setAttribute('data-theme', normalized)
+  document.body.setAttribute('data-theme', normalized)
+  const appRoot = document.querySelector<HTMLElement>('#app > [data-theme]')
+  appRoot?.setAttribute('data-theme', normalized)
+}
+
+function restoreSavedThemePreview() {
+  setDocumentTheme(savedThemePreviewId.value)
+}
+
 function stableDraftString(value: unknown): string {
   return JSON.stringify(value ?? null)
 }
@@ -848,6 +862,8 @@ async function handleSaveAll() {
     await saveChatOverrides()
     await saveChatStateVariables()
     markDraftsClean()
+    savedThemePreviewId.value = normalizeThemeId(settingsStore.settings?.themeId ?? globalDraft.value?.themeId)
+    setDocumentTheme(savedThemePreviewId.value)
     closeWithoutConfirm()
   } catch (error) {
     await notifyMessage(formatSaveError('保存设置失败', error))
@@ -1853,6 +1869,7 @@ watch(
     if (!open) return
     if (!settingsStore.settings) await settingsStore.load()
     const s = clone(settingsStore.settings!)
+    savedThemePreviewId.value = normalizeThemeId((s as Settings).themeId)
     if (s.streamEnabled === undefined) s.streamEnabled = true
     if ((s as Settings).pureAiMode === undefined) (s as Settings).pureAiMode = false
     ;(s as Settings).reasoningEffort = normalizeReasoningEffort(
@@ -1886,6 +1903,7 @@ watch(
     markSavedPageBackground((s as Settings).pageBackgroundImage ?? null)
     ensureWebSearchSettingsShape(s as Settings)
     globalDraft.value = s
+    setDocumentTheme(normalizeThemeId((s as Settings).themeId))
     await loadWebGpuPresetSource((s as Settings).webgpuBackgroundActivePresetId ?? null)
     chatDraft.value = ensureOverrides(props.chat ? clone(props.chat.overrides) : undefined)
     chatStateTablesDraft.value = cloneStateTables(props.chat?.stateVariables?.tables)
@@ -1916,6 +1934,21 @@ watch(
       fetchMemoryTokenCount()
       if (props.chat?.id) fetchChatTokenCount()
     }
+  },
+)
+
+watch(
+  () => globalDraft.value?.themeId,
+  (themeId) => {
+    if (!props.show || themeId === undefined) return
+    setDocumentTheme(normalizeThemeId(themeId))
+  },
+)
+
+watch(
+  () => props.show,
+  (open) => {
+    if (!open) restoreSavedThemePreview()
   },
 )
 
@@ -4437,7 +4470,7 @@ async function checkUpdate() {
                       <div class="min-w-0 space-y-1">
                         <div class="text-sm font-medium text-[var(--color-text-secondary)]">页面背景</div>
                         <p class="text-xs leading-relaxed text-[var(--color-text-muted)]">
-                          图片只叠在主题底色之上；调低透明度时，底部主题渐变会继续透出。
+                          图片只叠在主题底色之上；调低透明度时，底部纯色玻璃底会继续透出。
                         </p>
                       </div>
                       <div class="flex flex-wrap gap-2">
@@ -4483,7 +4516,7 @@ async function checkUpdate() {
                       v-else
                       class="rounded-xl border border-dashed border-[var(--color-border-subtle)] bg-[var(--color-settings-control-bg)] px-3 py-4 text-xs leading-relaxed text-[var(--color-text-muted)]"
                     >
-                      还未导入页面背景。聊天页将继续仅使用当前主题渐变。
+                      还未导入页面背景。聊天页将继续仅使用当前主题底色。
                     </div>
 
                     <div class="grid gap-3 md:grid-cols-2">

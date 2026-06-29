@@ -393,6 +393,9 @@
   /* ========== 品牌色 ========== */
   --color-primary: var(--app-color-primary);
   --color-primary-hover: var(--app-color-primary-hover);
+  --color-primary-action: color-mix(in srgb, var(--app-color-primary) 76%, var(--app-color-surface) 24%);
+  --color-primary-action-hover: color-mix(in srgb, var(--app-color-primary) 84%, var(--app-color-surface) 16%);
+  --color-primary-action-active: color-mix(in srgb, var(--app-color-primary) 68%, var(--app-color-surface) 32%);
   --color-brand: var(--color-primary);
   --color-brand-hover: var(--color-primary-hover);
   --color-brand-dark: var(--app-color-brand-dark);
@@ -613,6 +616,9 @@
 [data-theme="sunset"] {
   --color-primary: var(--app-color-primary);
   --color-primary-hover: var(--app-color-primary-hover);
+  --color-primary-action: color-mix(in srgb, var(--app-color-primary) 76%, var(--app-color-surface) 24%);
+  --color-primary-action-hover: color-mix(in srgb, var(--app-color-primary) 84%, var(--app-color-surface) 16%);
+  --color-primary-action-active: color-mix(in srgb, var(--app-color-primary) 68%, var(--app-color-surface) 32%);
   --color-brand: var(--app-color-primary);
   --color-brand-hover: var(--app-color-primary-hover);
   --color-brand-dark: var(--app-color-brand-dark);
