@@ -2800,6 +2800,10 @@ function closeTopOverlayFromEscape(): boolean {
     actions.cancelSwitchPersona()
     return true
   }
+  if (assistant.showAssistantSettings.value) {
+    assistant.showAssistantSettings.value = false
+    return true
+  }
   if (actions.showPersonaEditor.value) {
     actions.showPersonaEditor.value = false
     return true
@@ -4936,6 +4940,15 @@ async function selectChat(chat: Chat) {
   await afterChatReload(chat.id)
 }
 
+async function restoreSettingsDrawerChat(chatId: string) {
+  try {
+    await chats.load(chatId)
+    await afterChatReload(chatId)
+  } catch (e: unknown) {
+    await notifyMessage(e instanceof Error ? e.message : String(e), { title: '无法恢复原会话' })
+  }
+}
+
 async function handleJanitorImported(payload: { chatId: string; characterId: string | null; openAfterImport: boolean }) {
   janitorPendingId.value = null
   try {
@@ -6053,6 +6066,7 @@ const editingPersonaAvatarUrl = computed(() => {
       :initial-tab="settingsTab" 
       @open-member-settings="actions.openMemberSettingsEditor"
       @open-knowledge-graph="openKnowledgeGraphModal"
+      @restore-chat-selection="restoreSettingsDrawerChat"
     />
 
     <ChatExportModal
@@ -6113,10 +6127,10 @@ const editingPersonaAvatarUrl = computed(() => {
 <!-- 角色编辑弹窗 -->
   <div v-if="actions.showCharacterEditor.value" class="modal">
     <div class="modal-backdrop" @click="cancelCharacterEdit"></div>
-    <div class="modal-content chat-modal-width-1200-90 glass-panel theme-panel-bg backdrop-blur-2xl backdrop-saturate-[1.8] border border-[var(--color-border)]">
+    <div class="modal-content chat-modal-width-1200-90 glass-panel theme-panel-bg backdrop-blur-2xl backdrop-saturate-[1.8] border border-[var(--color-border)]" role="dialog" aria-modal="true" aria-labelledby="character-editor-title">
       <div class="modal-header">
-        <h3 class="modal-title">{{ actions.isNewCharacter.value ? '新建角色' : '编辑角色' }}</h3>
-        <button class="modal-close" @click="cancelCharacterEdit">
+        <h3 id="character-editor-title" class="modal-title">{{ actions.isNewCharacter.value ? '新建角色' : '编辑角色' }}</h3>
+        <button type="button" class="modal-close" aria-label="关闭角色编辑弹窗" @click="cancelCharacterEdit">
             <X class="w-5 h-5" />
         </button>
       </div>
@@ -6521,10 +6535,10 @@ const editingPersonaAvatarUrl = computed(() => {
   <!-- Persona 编辑弹窗 -->
   <div v-if="actions.showPersonaEditor.value" class="modal">
     <div class="modal-backdrop" @click="actions.showPersonaEditor.value = false"></div>
-    <div class="modal-content chat-modal-width-500-90 glass-panel theme-panel-bg backdrop-blur-2xl backdrop-saturate-[1.8] border border-[var(--color-border)]">
+    <div class="modal-content chat-modal-width-500-90 glass-panel theme-panel-bg backdrop-blur-2xl backdrop-saturate-[1.8] border border-[var(--color-border)]" role="dialog" aria-modal="true" aria-labelledby="persona-editor-title">
       <div class="modal-header">
-        <h3 class="modal-title">{{ actions.isNewPersona.value ? '新建身份' : '编辑身份' }}</h3>
-        <button class="modal-close" @click="actions.showPersonaEditor.value = false">
+        <h3 id="persona-editor-title" class="modal-title">{{ actions.isNewPersona.value ? '新建身份' : '编辑身份' }}</h3>
+        <button type="button" class="modal-close" aria-label="关闭身份编辑弹窗" @click="actions.showPersonaEditor.value = false">
             <X class="w-5 h-5" />
         </button>
       </div>
@@ -6566,10 +6580,10 @@ const editingPersonaAvatarUrl = computed(() => {
   <!-- Persona 切换确认弹窗 -->
   <div v-if="actions.showPersonaSwitchConfirm.value" class="modal">
     <div class="modal-backdrop" @click="actions.cancelSwitchPersona"></div>
-    <div class="modal-content chat-modal-width-520-92">
+    <div class="modal-content chat-modal-width-520-92" role="dialog" aria-modal="true" aria-labelledby="persona-switch-title">
       <div class="modal-header">
-        <h3 class="modal-title">切换用户身份</h3>
-        <button class="modal-close" @click="actions.cancelSwitchPersona">
+        <h3 id="persona-switch-title" class="modal-title">切换用户身份</h3>
+        <button type="button" class="modal-close" aria-label="关闭身份切换确认弹窗" @click="actions.cancelSwitchPersona">
             <X class="w-5 h-5" />
         </button>
       </div>
@@ -6595,11 +6609,14 @@ const editingPersonaAvatarUrl = computed(() => {
   <div v-if="assistant.showAssistantSettings.value" class="modal">
     <div class="modal-backdrop" @click="assistant.showAssistantSettings.value = false"></div>
     <div
-      class="modal-content chat-modal-width-520-92 glass-panel bg-gradient-to-br from-slate-900/30 to-slate-800/25 backdrop-blur-2xl backdrop-saturate-[1.8] border border-white/10"
+      class="modal-content modal-surface chat-modal-width-520-92"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="assistant-settings-title"
     >
       <div class="modal-header">
-        <h3 class="modal-title text-slate-50">聊天助手设置</h3>
-        <button class="modal-close" @click="assistant.showAssistantSettings.value = false">
+        <h3 id="assistant-settings-title" class="modal-title">聊天助手设置</h3>
+        <button type="button" class="modal-close" aria-label="关闭聊天助手设置弹窗" @click="assistant.showAssistantSettings.value = false">
             <X class="w-5 h-5" />
         </button>
       </div>
@@ -6729,10 +6746,10 @@ const editingPersonaAvatarUrl = computed(() => {
 
   <div v-if="showEmbeddedCardConfirmModal" class="modal">
     <div class="modal-backdrop" @click="clearEmbeddedCardPreviewState"></div>
-    <div class="modal-content chat-modal-width-568-90 min-w-0 glass-panel theme-panel-bg backdrop-blur-2xl backdrop-saturate-[1.8] border border-[var(--color-border)]">
+    <div class="modal-content chat-modal-width-568-90 min-w-0 glass-panel theme-panel-bg backdrop-blur-2xl backdrop-saturate-[1.8] border border-[var(--color-border)]" role="dialog" aria-modal="true" aria-labelledby="embedded-card-confirm-title">
       <div class="modal-header border-b border-[var(--color-border-subtle)]">
-        <h3 class="modal-title text-[var(--color-text)]">检测到 PNG 内嵌角色卡</h3>
-        <button class="modal-close text-[var(--color-text-muted)] hover:text-[var(--color-text)]" @click="clearEmbeddedCardPreviewState">×</button>
+        <h3 id="embedded-card-confirm-title" class="modal-title text-[var(--color-text)]">检测到 PNG 内嵌角色卡</h3>
+        <button type="button" class="modal-close" aria-label="关闭 PNG 内嵌角色卡确认弹窗" @click="clearEmbeddedCardPreviewState">×</button>
       </div>
       <div class="modal-body max-h-[min(70vh,520px)] overflow-y-auto pr-1 space-y-3">
         <div class="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface-muted)] p-4 text-sm text-[var(--color-text-secondary)] space-y-2">

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { usePreferHoverChrome } from '../../composables/usePreferHoverChrome'
 import { renderChatMarkdown } from '../../utils/markdownIt'
 import type { AssistantMessage } from '../../composables/useAssistant'
@@ -98,7 +98,7 @@ const imagePreviews = ref<ImagePreviewWindow[]>([])
 const activeDraggingPreviewId = ref<number | null>(null)
 let activePreviewPointerId: number | null = null
 let previewWindowIdSeed = 0
-let previewWindowZSeed = 1450
+let previewWindowZSeed = 1300
 
 function isReasoningExpanded(messageId: string) {
   return expandedReasoningMessageId.value === messageId
@@ -235,6 +235,13 @@ function closeImagePreview(id: number) {
   imagePreviews.value = imagePreviews.value.filter((item) => item.id !== id)
 }
 
+function closeTopImagePreviewFromEscape(event: KeyboardEvent) {
+  if (event.key !== 'Escape' || imagePreviews.value.length === 0) return
+  event.preventDefault()
+  const top = [...imagePreviews.value].sort((a, b) => b.zIndex - a.zIndex)[0]
+  if (top) closeImagePreview(top.id)
+}
+
 function getPreviewDialogStyle(preview: ImagePreviewWindow) {
   return {
     zIndex: preview.zIndex,
@@ -360,8 +367,8 @@ function getToolStatusLabel(message: AssistantMessage): string {
 
 function getToolStatusClass(message: AssistantMessage): string {
   return isToolOk(message)
-    ? 'bg-emerald-500/15 text-emerald-200 border border-emerald-400/30'
-    : 'bg-amber-500/15 text-amber-100 border border-amber-400/30'
+    ? 'bg-[var(--color-success-bg)] text-[var(--color-success-text)] border border-[color-mix(in_srgb,var(--color-success)_30%,transparent)]'
+    : 'bg-[var(--color-warning-bg)] text-[var(--color-warning-text)] border border-[color-mix(in_srgb,var(--color-warning)_30%,transparent)]'
 }
 
 function getToolDetailContent(message: AssistantMessage): string {
@@ -379,6 +386,11 @@ const showStreamingOverlay = () =>
 
 onBeforeUnmount(() => {
   removePreviewDragListeners()
+  window.removeEventListener('keydown', closeTopImagePreviewFromEscape)
+})
+
+onMounted(() => {
+  window.addEventListener('keydown', closeTopImagePreviewFromEscape)
 })
 </script>
 
@@ -409,26 +421,26 @@ onBeforeUnmount(() => {
 
     <template v-else-if="message.role === 'tool'">
       <div
-        class="min-w-0 max-w-[90%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed shadow-sm border transition-colors bg-yellow-500/10 border-yellow-500/20 text-gray-300 rounded-lg text-xs"
+        class="surface-muted min-w-0 max-w-[90%] px-4 py-2.5 text-sm leading-relaxed shadow-sm transition-colors text-secondary rounded-lg text-xs"
       >
         <div class="flex items-start justify-between gap-3 mb-2">
           <div class="min-w-0">
-            <div class="text-[10px] uppercase tracking-wider text-yellow-500/80">工具步骤</div>
-            <div class="text-sm text-gray-100 break-words">{{ getToolStepTitle(message) }}</div>
+            <div class="text-[10px] uppercase tracking-wider text-warning">工具步骤</div>
+            <div class="text-sm text-primary break-words">{{ getToolStepTitle(message) }}</div>
           </div>
           <span class="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold" :class="getToolStatusClass(message)">
             {{ getToolStatusLabel(message) }}
           </span>
         </div>
-        <div v-if="getToolMessage(message)" class="text-xs text-gray-200 whitespace-pre-wrap break-words">
+        <div v-if="getToolMessage(message)" class="text-xs text-secondary whitespace-pre-wrap break-words">
           {{ getToolMessage(message) }}
         </div>
-        <div v-if="getToolArgsDigest(message)" class="mt-2 text-[10px] text-gray-400 break-all">
+        <div v-if="getToolArgsDigest(message)" class="mt-2 text-[10px] text-muted break-all">
           argsDigest: {{ getToolArgsDigest(message) }}
         </div>
-        <details class="mt-2 rounded-lg border border-white/8 bg-black/20 overflow-hidden">
-          <summary class="cursor-pointer px-3 py-2 text-[11px] text-gray-300 select-none">查看结果 JSON</summary>
-          <pre class="max-w-full overflow-x-auto px-3 pb-3 text-[11px] leading-relaxed text-gray-300 whitespace-pre-wrap break-all break-words">{{ getToolDetailContent(message) }}</pre>
+        <details class="surface-inset mt-2 overflow-hidden">
+          <summary class="cursor-pointer px-3 py-2 text-[11px] text-secondary select-none">查看结果 JSON</summary>
+          <pre class="max-w-full overflow-x-auto px-3 pb-3 text-[11px] leading-relaxed text-secondary whitespace-pre-wrap break-all break-words">{{ getToolDetailContent(message) }}</pre>
         </details>
       </div>
     </template>
@@ -451,12 +463,12 @@ onBeforeUnmount(() => {
       <div
         v-if="showMainBubble(message)"
         data-chat-bubble-shell
-        class="w-fit max-w-full min-w-0 px-4 py-2.5 rounded-2xl text-sm leading-relaxed shadow-sm border transition-colors"
+        class="message-bubble w-fit max-w-full min-w-0 px-4 py-2.5 text-sm leading-relaxed shadow-sm transition-colors"
         :class="message.role === 'user'
-          ? 'bg-brand-a20 backdrop-blur-sm border-brand-a20 text-gray-100 rounded-tr-sm'
+          ? 'message-bubble--user text-primary'
           : (message.role === 'system'
-            ? 'bg-yellow-500/10 border-yellow-500/20 text-gray-300 rounded-lg text-xs'
-            : 'bg-white/5 backdrop-blur-md border-white/10 text-gray-200 rounded-tl-sm')"
+            ? 'message-bubble--system rounded-lg text-xs'
+            : 'message-bubble--assistant text-primary')"
       >
         <AnimatedClipHeight mode="intrinsic-fullColumn">
           <div class="w-fit max-w-full min-w-0">
@@ -470,19 +482,19 @@ onBeforeUnmount(() => {
                 v-for="attachment in getTextAttachments(message)"
                 :key="attachment.id"
                 type="button"
-                class="group relative flex max-w-[220px] items-start gap-2 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-left"
+                class="group surface-inset relative flex max-w-[220px] items-start gap-2 px-3 py-2 text-left"
                 @click="toggleTextAttachment(attachment)"
               >
-                <span class="absolute right-2 top-1.5 rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-gray-300">{{ getAttachmentExt(attachment) }}</span>
-                <span class="truncate pr-10 text-xs text-gray-100">{{ getAttachmentLabel(attachment) }}</span>
+                <span class="absolute right-2 top-1.5 rounded bg-[var(--color-surface-muted)] px-1.5 py-0.5 text-[10px] font-semibold uppercase text-secondary">{{ getAttachmentExt(attachment) }}</span>
+                <span class="truncate pr-10 text-xs text-primary">{{ getAttachmentLabel(attachment) }}</span>
               </button>
             </div>
             <div
               v-if="expandedTextAttachmentId && getTextAttachments(message).some((attachment) => attachment.id === expandedTextAttachmentId)"
-              class="mt-3 h-48 overflow-auto rounded-xl border border-white/10 bg-black/25 p-3 text-xs leading-relaxed text-gray-200"
+              class="surface-inset mt-3 h-48 overflow-auto p-3 text-xs leading-relaxed text-secondary"
             >
               <div v-if="loadingTextAttachmentIds[expandedTextAttachmentId]">读取中...</div>
-              <div v-else-if="textAttachmentError[expandedTextAttachmentId]" class="text-amber-200">
+              <div v-else-if="textAttachmentError[expandedTextAttachmentId]" class="text-warning">
                 {{ textAttachmentError[expandedTextAttachmentId] }}
               </div>
               <pre v-else class="whitespace-pre-wrap break-words">{{ textAttachmentContent[expandedTextAttachmentId] }}</pre>
@@ -492,7 +504,8 @@ onBeforeUnmount(() => {
                 v-for="attachment in getImageAttachments(message)"
                 :key="attachment.id"
                 type="button"
-                class="block overflow-hidden rounded-lg border border-white/10 bg-black/20"
+                class="block overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-inset)]"
+                :aria-label="`预览图片 ${getAttachmentLabel(attachment)}`"
                 @click="openImagePreview(buildAttachmentUrl(attachment), getAttachmentLabel(attachment))"
               >
                 <img
@@ -516,18 +529,18 @@ onBeforeUnmount(() => {
                 <div
                   v-for="attachment in getTextAttachments(message)"
                   :key="attachment.id"
-                  class="group relative flex max-w-[220px] items-start gap-2 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-left"
+                  class="group surface-inset relative flex max-w-[220px] items-start gap-2 px-3 py-2 text-left"
                 >
-                  <span class="absolute right-2 top-1.5 rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-gray-300">{{ getAttachmentExt(attachment) }}</span>
-                  <span class="truncate pr-10 text-xs text-gray-100">{{ getAttachmentLabel(attachment) }}</span>
+                  <span class="absolute right-2 top-1.5 rounded bg-[var(--color-surface-muted)] px-1.5 py-0.5 text-[10px] font-semibold uppercase text-secondary">{{ getAttachmentExt(attachment) }}</span>
+                  <span class="truncate pr-10 text-xs text-primary">{{ getAttachmentLabel(attachment) }}</span>
                 </div>
               </div>
               <div
                 v-if="expandedTextAttachmentId && getTextAttachments(message).some((attachment) => attachment.id === expandedTextAttachmentId)"
-                class="mt-3 h-48 overflow-auto rounded-xl border border-white/10 bg-black/25 p-3 text-xs leading-relaxed text-gray-200"
+                class="surface-inset mt-3 h-48 overflow-auto p-3 text-xs leading-relaxed text-secondary"
               >
                 <div v-if="loadingTextAttachmentIds[expandedTextAttachmentId]">读取中...</div>
-                <div v-else-if="textAttachmentError[expandedTextAttachmentId]" class="text-amber-200">
+                <div v-else-if="textAttachmentError[expandedTextAttachmentId]" class="text-warning">
                   {{ textAttachmentError[expandedTextAttachmentId] }}
                 </div>
                 <pre v-else class="whitespace-pre-wrap break-words">{{ textAttachmentContent[expandedTextAttachmentId] }}</pre>
@@ -536,7 +549,7 @@ onBeforeUnmount(() => {
                 <div
                   v-for="attachment in getImageAttachments(message)"
                   :key="attachment.id"
-                  class="block overflow-hidden rounded-lg border border-white/10 bg-black/20"
+                  class="block overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-inset)]"
                 >
                   <img
                     :src="buildAttachmentUrl(attachment)"
@@ -561,21 +574,21 @@ onBeforeUnmount(() => {
     >
       <button
         v-if="message.role === 'assistant'"
-        class="text-[10px] text-gray-600 hover:text-blue-400 transition-colors"
+        class="btn btn-xs btn-ghost"
         :disabled="isGenerating"
         @click="emit('rewrite-message', message)"
       >
         重写
       </button>
       <button
-        class="text-[10px] text-gray-600 hover:text-brand transition-colors"
+        class="btn btn-xs btn-ghost"
         :disabled="isGenerating"
         @click="emit('edit-message', message)"
       >
         编辑
       </button>
       <button
-        class="text-[10px] text-gray-600 hover:text-red-400 transition-colors"
+        class="btn btn-xs btn-danger"
         :disabled="isGenerating"
         @click="confirmDelete(message, $event)"
       >
@@ -606,7 +619,7 @@ onBeforeUnmount(() => {
     <div
       v-if="(streamingContent ?? '') !== ''"
       data-chat-bubble-shell
-      class="w-fit max-w-full min-w-0 px-4 py-2.5 rounded-2xl text-sm leading-relaxed shadow-sm border transition-colors bg-white/5 backdrop-blur-md border-white/10 text-gray-200 rounded-tl-sm"
+      class="message-bubble message-bubble--assistant w-fit max-w-full min-w-0 px-4 py-2.5 text-sm leading-relaxed shadow-sm transition-colors text-primary"
     >
       <AnimatedClipHeight mode="intrinsic-fullColumn" :relax-height-dead-zone="true">
         <div class="w-fit max-w-full min-w-0">
@@ -645,6 +658,9 @@ onBeforeUnmount(() => {
           v-for="preview in imagePreviews"
           :key="preview.id"
           class="image-preview-modal"
+          role="dialog"
+          aria-modal="false"
+          :aria-label="`图片预览：${preview.alt}`"
           :class="preview.isDragging ? 'cursor-grabbing' : 'cursor-grab'"
           :style="getPreviewDialogStyle(preview)"
           @wheel.prevent="(event) => handlePreviewWheel(preview.id, event)"
@@ -675,7 +691,7 @@ onBeforeUnmount(() => {
   position: fixed;
   inset: 0;
   pointer-events: none;
-  z-index: 1450;
+  z-index: var(--z-image-preview);
 }
 
 .image-preview-modal {
@@ -683,10 +699,10 @@ onBeforeUnmount(() => {
   left: 50%;
   top: 50%;
   pointer-events: auto;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 12px;
-  background: rgba(15, 15, 18, 0.75);
-  box-shadow: 0 18px 56px rgba(0, 0, 0, 0.45);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  background: var(--color-surface-panel);
+  box-shadow: var(--shadow-heavy);
   padding: 12px;
   transform-origin: center center;
   user-select: none;
@@ -703,9 +719,9 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.55);
-  color: rgba(255, 255, 255, 0.95);
-  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: var(--color-overlay-heavy);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
 }
 
 .image-preview-img {

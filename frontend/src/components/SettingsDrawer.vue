@@ -98,6 +98,8 @@ import {
 } from '../utils/wgslCompilation'
 import { notifyConfirm, notifyMessage } from '../composables/useNotify'
 import type { LlmProviderPreset } from '../constants/llmProviderPresets'
+import { useDialogBehavior } from '../composables/useDialogBehavior'
+import { dialogAria } from '../utils/uiPrimitives'
 
 const { applyFont } = useAppFont()
 const { isNarrowPortrait } = useViewportNarrowPortrait()
@@ -115,7 +117,18 @@ const emit = defineEmits<{
   (e: 'update:show', v: boolean): void
   (e: 'open-member-settings', memberId: string): void
   (e: 'open-knowledge-graph'): void
+  (e: 'restore-chat-selection', chatId: string): void
 }>()
+
+const drawerTitleId = 'settings-drawer-title'
+const drawerA11yAttrs = dialogAria(drawerTitleId)
+
+const { dialogRef: drawerDialogRef } = useDialogBehavior(() => props.show, () => {
+  void close()
+}, {
+  closeOnEscape: false,
+})
+void drawerDialogRef
 
 const mvuStore = useMvuStore()
 
@@ -223,6 +236,8 @@ const chatStateTablesDraft = ref<StatusTableDef[]>([])
 const cleanGlobalDraftSnapshot = ref('')
 const cleanChatDraftSnapshot = ref('')
 const isSaving = ref(false)
+const restoringChatId = ref<string | null>(null)
+let chatSwitchConfirmSeq = 0
 const regexEditorOpen = ref(false)
 const regexEditorIndex = ref<number | null>(null)
 const regexEditorDraft = ref<ChatContentRegexRule | null>(null)
@@ -744,11 +759,23 @@ function hasActiveNotifyHost(): boolean {
 
 function handleDrawerKeydown(event: KeyboardEvent) {
   if (!props.show || event.key !== 'Escape' || hasActiveNotifyHost()) return
-  if (showWebGpuShaderEditorModal.value) return
-  if (sessionAttachModalShow.value) return
-  if (showWorldBookEditor.value) return
-  if (showHttpLogViewer.value) return
   event.preventDefault()
+  if (showWebGpuShaderEditorModal.value) {
+    showWebGpuShaderEditorModal.value = false
+    return
+  }
+  if (sessionAttachModalShow.value) {
+    sessionAttachModalShow.value = false
+    return
+  }
+  if (showWorldBookEditor.value) {
+    showWorldBookEditor.value = false
+    return
+  }
+  if (showHttpLogViewer.value) {
+    showHttpLogViewer.value = false
+    return
+  }
   if (regexEditorOpen.value) {
     regexEditorOpen.value = false
     return
@@ -1912,8 +1939,26 @@ watch(
 /** 抽屉已打开时切换当前会话，重载会话草稿，避免群聊 MVU 锚点等字段与 options 错位导致选择器空白 */
 watch(
   () => props.chat?.id,
-  (chatId, prevId) => {
+  async (chatId, prevId) => {
     if (!props.show || !chatId || chatId === prevId || !props.chat) return
+    if (restoringChatId.value === chatId) {
+      restoringChatId.value = null
+      return
+    }
+    if (prevId && isChatDraftDirty()) {
+      const seq = ++chatSwitchConfirmSeq
+      const ok = await notifyConfirm({
+        title: '放弃当前会话设置草稿？',
+        message: '当前会话设置还有未保存修改。切换到其他会话前需要先确认是否丢弃这些修改。',
+        variant: 'danger',
+      })
+      if (seq !== chatSwitchConfirmSeq || props.chat?.id !== chatId) return
+      if (!ok) {
+        restoringChatId.value = prevId
+        emit('restore-chat-selection', prevId)
+        return
+      }
+    }
     chatDraft.value = ensureOverrides(clone(props.chat.overrides))
     chatStateTablesDraft.value = cloneStateTables(props.chat.stateVariables?.tables)
     mergeGlobalWorldBooksIntoDraft()
@@ -3896,25 +3941,28 @@ async function checkUpdate() {
 
 <template>
   <div>
-  <div class="drawer-wrapper fixed inset-0 z-[var(--z-modal)] flex justify-end" :class="{ 'is-open': show }">
+  <div class="drawer-wrapper fixed inset-0 z-drawer flex justify-end" :class="{ 'is-open': show }">
     <!-- Backdrop -->
     <div
-      class="drawer-backdrop absolute inset-0 bg-overlay backdrop-blur-sm"
-      style="backdrop-filter: blur(2px); background-clip: unset; -webkit-background-clip: unset; color: rgba(255, 255, 255, 0);"
+      class="drawer-backdrop absolute inset-0 bg-overlay"
+      style="background-clip: unset; -webkit-background-clip: unset; color: transparent;"
       @click="close"
     ></div>
 
     <!-- Drawer Panel -->
     <div
-      class="drawer-panel absolute right-4 top-4 bottom-4 w-[min(500px,calc(100vw-2rem))] theme-panel-bg backdrop-saturate-[1.8] border border-[var(--color-border)] rounded-2xl flex flex-col shadow-xl"
-      style="backdrop-filter: blur(var(--blur-heavy)); -webkit-backdrop-filter: blur(var(--blur-heavy));"
+      ref="drawerDialogRef"
+      v-bind="drawerA11yAttrs"
+      tabindex="-1"
+      class="drawer-panel drawer-surface absolute right-4 top-4 bottom-4 w-[min(500px,calc(100vw-2rem))] border border-[var(--color-border)] rounded-2xl flex flex-col shadow-xl"
     >
         <!-- Header -->
         <div class="flex items-center justify-between px-6 py-4 border-b border-[var(--color-border-subtle)] bg-[var(--color-border-subtle)] rounded-t-2xl">
-          <h2 class="text-lg text-[var(--color-text)]">设置</h2>
+          <h2 :id="drawerTitleId" class="text-lg text-[var(--color-text)]">设置</h2>
           <button
             type="button"
-            class="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text)] touch-manipulation"
+            class="icon-button min-h-11 min-w-11 shrink-0 touch-manipulation"
+            aria-label="关闭设置抽屉"
             @click="close"
           >
             <X class="w-5 h-5" />
@@ -6200,7 +6248,7 @@ async function checkUpdate() {
         <div class="shrink-0 flex justify-end gap-3 border-t border-[var(--color-border-subtle)] px-6 py-4 bg-[var(--color-border-subtle)] rounded-b-2xl">
           <button
             type="button"
-            class="inline-flex min-h-11 items-center justify-center px-5 py-2 text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text)] touch-manipulation whitespace-nowrap"
+            class="btn btn-secondary min-h-11 whitespace-nowrap"
             :disabled="isSaving"
             @click="close"
           >
@@ -6208,7 +6256,7 @@ async function checkUpdate() {
           </button>
           <button
             type="button"
-            class="inline-flex min-h-11 items-center justify-center rounded-lg bg-brand px-6 py-2 font-medium text-on-brand shadow-brand transition-all touch-manipulation hover:bg-brand-hover whitespace-nowrap"
+            class="btn btn-primary min-h-11 whitespace-nowrap"
             :disabled="isSaving"
             @click="handleSaveAll"
           >
@@ -6223,11 +6271,14 @@ async function checkUpdate() {
       <div class="modal-backdrop" @click="regexEditorOpen = false"></div>
       <div
         class="relative m-4 flex max-h-[85vh] w-[min(92vw,560px)] flex-col rounded-2xl theme-panel-bg border border-[var(--color-border)] shadow-xl backdrop-saturate-[1.8]"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="regex-editor-title"
         style="backdrop-filter: blur(var(--blur-heavy)); -webkit-backdrop-filter: blur(var(--blur-heavy))"
       >
         <div class="flex items-center justify-between rounded-t-2xl border-b border-[var(--color-border)] bg-surface-muted p-4">
-          <h3 class="text-[var(--color-text)]">正文正则规则</h3>
-          <button type="button" class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)]" @click="regexEditorOpen = false">
+          <h3 id="regex-editor-title" class="text-[var(--color-text)]">正文正则规则</h3>
+          <button type="button" class="icon-button min-h-11 min-w-11" aria-label="关闭正文正则规则编辑弹窗" @click="regexEditorOpen = false">
             <X class="w-5 h-5" />
           </button>
         </div>
@@ -6337,12 +6388,13 @@ async function checkUpdate() {
       <div class="absolute inset-0 bg-overlay-heavy backdrop-blur-sm" @click="showModelSelector = false"></div>
       
       <!-- Modal -->
-      <div class="relative w-full max-w-lg min-w-[400px] glass-panel rounded-2xl shadow-2xl flex flex-col max-h-[85vh] m-4">
+      <div class="relative w-full max-w-lg min-w-[400px] glass-panel rounded-2xl shadow-2xl flex flex-col max-h-[85vh] m-4" role="dialog" aria-modal="true" aria-labelledby="model-selector-title">
       <div class="p-4 border-b border-[var(--color-border)] flex justify-between items-center bg-surface-muted rounded-t-2xl">
-        <h3 class="text-[var(--color-text)]">选择模型</h3>
+        <h3 id="model-selector-title" class="text-[var(--color-text)]">选择模型</h3>
         <button
           type="button"
-          class="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg text-[var(--color-text-muted)] touch-manipulation hover:text-[var(--color-text)]"
+          class="icon-button min-h-11 min-w-11 shrink-0 touch-manipulation"
+          aria-label="关闭模型选择弹窗"
           @click="showModelSelector = false"
         >
             <X class="w-5 h-5" />
@@ -6383,8 +6435,8 @@ async function checkUpdate() {
       <div class="p-4 border-t border-[var(--color-border)] flex justify-between items-center bg-surface-muted rounded-b-2xl">
         <div class="text-xs text-[var(--color-text-muted)]">已选 {{ selectedCandidateModels.size }} 个模型</div>
         <div class="flex gap-2">
-          <button type="button" class="inline-flex min-h-11 items-center justify-center px-4 py-2 text-sm text-[var(--color-text-muted)] touch-manipulation transition-colors hover:text-[var(--color-text)]" @click="showModelSelector = false">取消</button>
-          <button type="button" class="inline-flex min-h-11 items-center justify-center rounded-lg bg-brand px-4 py-2 text-sm text-on-brand shadow-brand transition-all touch-manipulation hover:bg-brand-hover" @click="saveModelSelection">确认</button>
+          <button type="button" class="btn btn-secondary min-h-11" @click="showModelSelector = false">取消</button>
+          <button type="button" class="btn btn-primary min-h-11" @click="saveModelSelection">确认</button>
         </div>
       </div>
     </div>
@@ -6395,12 +6447,13 @@ async function checkUpdate() {
     <div v-if="showVoiceSelector" class="fixed inset-0 z-[var(--z-popover)] flex items-center justify-center">
       <div class="absolute inset-0 bg-overlay-heavy backdrop-blur-sm" @click="showVoiceSelector = false"></div>
 
-      <div class="relative m-4 flex max-h-[85vh] min-h-0 w-full max-w-lg min-w-[400px] flex-col rounded-2xl glass-panel shadow-2xl">
+      <div class="relative m-4 flex max-h-[85vh] min-h-0 w-full max-w-lg min-w-[400px] flex-col rounded-2xl glass-panel shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="voice-selector-title">
         <div class="flex items-center justify-between rounded-t-2xl border-b border-[var(--color-border)] bg-surface-muted p-4">
-          <h3 class="text-[var(--color-text)]">选择音色</h3>
+          <h3 id="voice-selector-title" class="text-[var(--color-text)]">选择音色</h3>
           <button
             type="button"
-            class="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg text-[var(--color-text-muted)] touch-manipulation hover:text-[var(--color-text)]"
+            class="icon-button min-h-11 min-w-11 shrink-0 touch-manipulation"
+            aria-label="关闭音色选择弹窗"
             @click="showVoiceSelector = false"
           >
             <X class="w-5 h-5" />
@@ -6451,14 +6504,14 @@ async function checkUpdate() {
           <div class="flex gap-2">
             <button
               type="button"
-              class="inline-flex min-h-11 items-center justify-center px-4 py-2 text-sm text-[var(--color-text-muted)] touch-manipulation transition-colors hover:text-[var(--color-text)]"
+              class="btn btn-secondary min-h-11"
               @click="showVoiceSelector = false"
             >
               取消
             </button>
             <button
               type="button"
-              class="inline-flex min-h-11 items-center justify-center rounded-lg bg-brand px-4 py-2 text-sm text-on-brand shadow-brand transition-all touch-manipulation hover:bg-brand-hover"
+              class="btn btn-primary min-h-11"
               @click="saveVoiceSelection"
             >
               确认

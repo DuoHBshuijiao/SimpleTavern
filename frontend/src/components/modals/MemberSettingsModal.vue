@@ -117,14 +117,14 @@ function save() {
   <Transition name="modal">
     <div v-if="show && memberId" class="modal">
       <div class="modal-backdrop" @click="close"></div>
-      <div class="modal-content chat-modal-width-500-90 glass-panel">
+      <div class="modal-content modal-surface chat-modal-width-500-90" role="dialog" aria-modal="true" aria-labelledby="member-settings-title">
         <div class="modal-header">
-          <h3 class="modal-title text-slate-50">成员设置</h3>
-          <button class="modal-close" @click="close">×</button>
+          <h3 id="member-settings-title" class="modal-title">成员设置</h3>
+          <button type="button" class="modal-close" aria-label="关闭成员设置弹窗" @click="close">×</button>
         </div>
         <div class="modal-body space-y-6">
           <!-- 角色信息 -->
-          <div v-if="character" class="flex items-center gap-3 pb-4 border-b border-white/10">
+          <div v-if="character" class="flex items-center gap-3 pb-4 border-b border-[var(--color-border-subtle)]">
             <ModernAvatar 
               :src="character.avatar ? `/api/avatars/${character.avatar}` : null" 
               :name="character.name" 
@@ -133,8 +133,8 @@ function save() {
               rounded="rounded-lg"
             />
             <div>
-              <div class="font-bold text-lg text-gray-200">{{ character.name }}</div>
-              <div class="text-xs text-gray-500">独立设置（覆盖全局）</div>
+              <div class="font-bold text-lg text-primary">{{ character.name }}</div>
+              <div class="text-xs text-muted">独立设置（覆盖全局）</div>
             </div>
           </div>
 
@@ -172,7 +172,7 @@ function save() {
               type="number"
               :value="settings.temperature ?? ''"
               @input="updateField('temperature', ($event.target as HTMLInputElement).value ? parseFloat(($event.target as HTMLInputElement).value) : null)"
-              class="input bg-black/20 border-white/10 focus:border-brand-a50"
+              class="input"
               placeholder="使用全局设置"
               min="0"
               max="2"
@@ -187,7 +187,7 @@ function save() {
               type="number"
               :value="settings.top_p ?? ''"
               @input="updateField('top_p', ($event.target as HTMLInputElement).value ? parseFloat(($event.target as HTMLInputElement).value) : null)"
-              class="input bg-black/20 border-white/10 focus:border-brand-a50"
+              class="input"
               placeholder="使用全局设置"
               min="0"
               max="1"
@@ -203,20 +203,20 @@ function save() {
                 type="number"
                 :value="settings.probability"
                 @input="updateField('probability', parseFloat(($event.target as HTMLInputElement).value) || 1)"
-                class="input w-24 bg-black/20 border-white/10 focus:border-brand-a50"
+                class="input w-24"
                 min="0"
                 max="1"
                 step="0.1"
               />
               <div class="flex-1">
-                <div class="h-2 bg-white/10 rounded-full overflow-hidden">
+                <div class="h-2 bg-[var(--color-surface-muted)] rounded-full overflow-hidden">
                   <div 
-                    class="h-full bg-gradient-to-r from-yellow-500 to-green-500 transition-all"
+                    class="h-full bg-[var(--color-success)] transition-all"
                     :style="{ width: `${(settings.probability ?? 1) * 100}%` }"
                   ></div>
                 </div>
               </div>
-              <span class="text-sm text-gray-400 w-12 text-right">{{ Math.round((settings.probability ?? 1) * 100) }}%</span>
+              <span class="text-sm text-muted w-12 text-right">{{ Math.round((settings.probability ?? 1) * 100) }}%</span>
             </div>
             <div class="form-hint">设置为 100% 表示每轮必定发言，低于 100% 则按概率随机参与</div>
           </div>
@@ -225,14 +225,14 @@ function save() {
           <div class="form-group">
             <label class="label">system prompt 插入字段</label>
             <div class="flex flex-wrap gap-4">
-              <label class="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+              <label class="flex items-center gap-2 text-sm text-secondary cursor-pointer">
                 <ThemedCheckbox
                   :checked="settings.includePersonality !== false"
                   @update:checked="updateField('includePersonality', $event)"
                 />
                 插入 Personality
               </label>
-              <label class="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+              <label class="flex items-center gap-2 text-sm text-secondary cursor-pointer">
                 <ThemedCheckbox
                   :checked="settings.includeScenario !== false"
                   @update:checked="updateField('includeScenario', $event)"
@@ -246,7 +246,7 @@ function save() {
           </div>
         </div>
         <div class="modal-footer">
-          <button class="btn btn-secondary bg-white/5 hover:bg-white/10 text-gray-300 border border-white/5" @click="close">取消</button>
+          <button class="btn btn-secondary" @click="close">取消</button>
           <button class="btn btn-primary" @click="save">保存</button>
         </div>
       </div>

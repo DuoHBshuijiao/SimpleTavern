@@ -224,10 +224,10 @@ onUnmounted(() => {
   <Transition name="modal">
     <div v-if="show" class="modal">
       <div class="modal-backdrop" @click="handleCancel"></div>
-      <div class="modal-content chat-modal-width-500-90 glass-panel">
+      <div class="modal-content modal-surface chat-modal-width-500-90" role="dialog" aria-modal="true" aria-labelledby="avatar-cropper-title">
         <div class="modal-header">
-          <h3 class="modal-title text-slate-50">设置头像</h3>
-          <button class="modal-close" @click="handleCancel">×</button>
+          <h3 id="avatar-cropper-title" class="modal-title">设置头像</h3>
+          <button type="button" class="modal-close" aria-label="关闭头像设置弹窗" @click="handleCancel">×</button>
         </div>
         <div
           class="modal-body transition-colors"
@@ -249,16 +249,16 @@ onUnmounted(() => {
 
             <div 
               v-if="!imageSrc" 
-              class="upload-area border-2 border-dashed border-white/20 bg-white/5 hover:bg-white/10 hover:border-white/30 transition-all rounded-xl p-10 text-center cursor-pointer" 
+              class="upload-area border-2 border-dashed border-[var(--color-border)] bg-[var(--color-surface-muted)] hover:bg-[var(--color-surface-hover)] hover:border-[var(--color-border-strong)] transition-all rounded-xl p-10 text-center cursor-pointer" 
               @click="triggerFileInput"
             >
               <div class="upload-content pointer-events-none">
                 <div class="text-lg font-bold text-brand mb-2">点击选择图片</div>
-                <div class="text-xs text-gray-500">支持 JPG、PNG、GIF、WebP 格式（可拖拽到此区域）</div>
+                <div class="text-xs text-muted">支持 JPG、PNG、GIF、WebP 格式（可拖拽到此区域）</div>
               </div>
             </div>
 
-            <div v-else class="cropper-container bg-black/20 rounded-xl overflow-hidden max-h-[400px]">
+            <div v-else class="cropper-container bg-[var(--color-surface-inset)] rounded-xl overflow-hidden max-h-[400px]">
               <img ref="imageRef" :src="imageSrc" class="max-w-full block" />
             </div>
             <p v-if="imageSrc && preserveOriginal" class="text-xs text-[var(--color-text-muted)]">
@@ -267,8 +267,8 @@ onUnmounted(() => {
           </div>
         </div>
         <div class="modal-footer">
-          <button class="btn btn-secondary bg-white/5 hover:bg-white/10 text-gray-300 border border-white/5" @click="handleCancel">取消</button>
-          <button v-if="imageSrc" class="btn btn-secondary bg-white/5 hover:bg-white/10 text-gray-300 border border-white/5" @click="resetSelection">重新选择</button>
+          <button class="btn btn-secondary" @click="handleCancel">取消</button>
+          <button v-if="imageSrc" class="btn btn-secondary" @click="resetSelection">重新选择</button>
           <button class="btn btn-primary" :disabled="!imageSrc" @click="handleSave">
             保存头像
           </button>

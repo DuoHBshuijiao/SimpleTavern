@@ -266,7 +266,7 @@ const imagePreviews = ref<ImagePreviewWindow[]>([])
 const activeDraggingPreviewId = ref<number | null>(null)
 let activePreviewPointerId: number | null = null
 let previewWindowIdSeed = 0
-let previewWindowZSeed = 1200
+let previewWindowZSeed = 1300
 
 function isReasoningExpanded(messageId: string) {
   return expandedReasoningMessageId.value === messageId
@@ -315,6 +315,13 @@ function closeImagePreview(id: number) {
     removePreviewDragListeners()
   }
   imagePreviews.value = imagePreviews.value.filter((preview) => preview.id !== id)
+}
+
+function closeTopImagePreviewFromEscape(event: KeyboardEvent) {
+  if (event.key !== 'Escape' || imagePreviews.value.length === 0) return
+  event.preventDefault()
+  const top = [...imagePreviews.value].sort((a, b) => b.zIndex - a.zIndex)[0]
+  if (top) closeImagePreview(top.id)
 }
 
 function getPreviewDialogStyle(preview: ImagePreviewWindow) {
@@ -416,6 +423,7 @@ function openAvatarPreview(m: ChatMessage) {
 
 onBeforeUnmount(() => {
   removePreviewDragListeners()
+  window.removeEventListener('keydown', closeTopImagePreviewFromEscape)
   window.removeEventListener('resize', updateViewport)
   if (tailRafId != null) {
     cancelAnimationFrame(tailRafId)
@@ -1478,6 +1486,7 @@ defineExpose({
 })
 
 onMounted(() => {
+  window.addEventListener('keydown', closeTopImagePreviewFromEscape)
   updateViewport()
   window.addEventListener('resize', updateViewport)
   if (typeof ResizeObserver !== 'undefined') {
@@ -1573,6 +1582,7 @@ onBeforeUnmount(() => {
             class="rounded-xl transition-transform hover:scale-[1.03] active:scale-100"
             :class="getMessageAvatar(m) ? 'cursor-zoom-in' : 'cursor-default'"
             :disabled="!getMessageAvatar(m)"
+            :aria-label="getMessageAvatar(m) ? `预览 ${getMessageLabel(m)} 的头像` : `${getMessageLabel(m)} 头像`"
             @click="openAvatarPreview(m)"
           >
             <ModernAvatar 
@@ -1583,7 +1593,7 @@ onBeforeUnmount(() => {
               object-fit="cover"
               :object-position="getMessageAvatarObjectPosition(m)"
               rounded="rounded-xl"
-              class="shadow-sm bg-black/20"
+              class="shadow-sm bg-[var(--color-surface-inset)]"
             />
           </button>
         </div>
@@ -1651,13 +1661,13 @@ onBeforeUnmount(() => {
           <div
             v-if="shouldRenderMainBubble(m)"
             data-chat-bubble-shell
-            class="message-bubble relative w-fit max-w-full min-w-0 px-5 py-3.5 rounded-2xl text-[15px] leading-7 shadow-sm transition-[background-color,border-color,box-shadow] duration-200 border"
+            class="message-bubble relative w-fit max-w-full min-w-0 shadow-sm"
             :class="[
               m.role === 'user' 
-                ? 'bg-brand-a20 backdrop-blur-sm border-brand-a20 text-gray-100 rounded-tr-sm hover:border-brand-a30' 
+                ? 'message-bubble--user text-primary' 
                 : m.role === 'assistant'
-                  ? 'bg-white/5 backdrop-blur-md border-white/10 text-gray-200 rounded-tl-sm hover:bg-white/10'
-                  : 'bg-yellow-500/10 border-yellow-500/20 text-gray-300',
+                  ? 'message-bubble--assistant text-primary'
+                  : 'message-bubble--system',
               isUserSendEntering(m) ? 'message-bubble--user-send-enter' : '',
             ]"
           >
@@ -1669,7 +1679,7 @@ onBeforeUnmount(() => {
             >
               <div class="w-fit max-w-full min-w-0">
                 <div
-                  class="md prose prose-invert prose-sm max-w-none prose-p:my-1 prose-headings:my-2 prose-pre:bg-black/30 prose-pre:border prose-pre:border-white/5"
+                  class="md prose prose-invert prose-sm max-w-none prose-p:my-1 prose-headings:my-2 prose-pre:bg-[var(--color-surface-inset)] prose-pre:border prose-pre:border-[var(--color-border-subtle)]"
                   :style="messageContentFontSizeStyle"
                   :ref="(el) => setContentRef(m.id, el)"
                 >
@@ -1680,7 +1690,8 @@ onBeforeUnmount(() => {
                     v-for="img in m.images"
                     :key="img.id"
                     type="button"
-                    class="block rounded-lg overflow-hidden border border-[var(--color-border)] bg-black/20"
+                    class="block rounded-lg overflow-hidden border border-[var(--color-border)] bg-[var(--color-surface-inset)]"
+                    :aria-label="`预览图片 ${img.originalName || 'chat-image'}`"
                     @click="openImagePreview(getChatImageUrl(img.id), img.originalName || 'chat-image')"
                   >
                     <img
@@ -1696,7 +1707,7 @@ onBeforeUnmount(() => {
               <template #measure>
                 <div class="w-fit max-w-full min-w-0">
                   <div
-                    class="md prose prose-invert prose-sm max-w-none prose-p:my-1 prose-headings:my-2 prose-pre:bg-black/30 prose-pre:border prose-pre:border-white/5"
+                    class="md prose prose-invert prose-sm max-w-none prose-p:my-1 prose-headings:my-2 prose-pre:bg-[var(--color-surface-inset)] prose-pre:border prose-pre:border-[var(--color-border-subtle)]"
                     :style="messageContentFontSizeStyle"
                   >
                     <div class="stream-markdown" v-html="renderMarkdown(m)"></div>
@@ -1705,7 +1716,7 @@ onBeforeUnmount(() => {
                     <div
                       v-for="img in m.images"
                       :key="img.id"
-                      class="block rounded-lg overflow-hidden border border-[var(--color-border)] bg-black/20"
+                      class="block rounded-lg overflow-hidden border border-[var(--color-border)] bg-[var(--color-surface-inset)]"
                     >
                       <img
                         :src="getChatImageUrl(img.id)"
@@ -1725,25 +1736,25 @@ onBeforeUnmount(() => {
               class="absolute right-2 bottom-2 flex items-center gap-1 pointer-events-none"
               style="font-size: 10px; line-height: 1;"
             >
-              <span class="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" aria-hidden="true"></span>
-              <span class="text-gray-400" style="font-size: 10px;">已保存</span>
+              <span class="w-1.5 h-1.5 rounded-full bg-[var(--color-success)] shrink-0" aria-hidden="true"></span>
+              <span class="text-muted" style="font-size: 10px;">已保存</span>
             </div>
           </div>
 
           <!-- 版本切换箭头 -->
           <div v-if="m.role === 'assistant' && hasMultipleVersions(m)" class="flex items-center justify-center gap-2 mt-1 px-1">
             <button 
-              class="text-xs text-gray-500 hover:text-gray-300 transition-colors px-2 py-0.5 rounded hover:bg-white/5"
+              class="icon-button text-xs px-2 py-0.5"
               :aria-label="`上一个版本 (${getCurrentVersionIndex(m) + 1}/${getVersionCount(m)})`"
               @click="emit('switch-previous-version', m)"
             >
               <ChevronLeft class="w-3 h-3" />
             </button>
-            <span class="text-xs text-gray-500">
+            <span class="text-xs text-muted">
               {{ getCurrentVersionIndex(m) + 1 }}/{{ getVersionCount(m) }}
             </span>
             <button 
-              class="text-xs text-gray-500 hover:text-gray-300 transition-colors px-2 py-0.5 rounded hover:bg-white/5"
+              class="icon-button text-xs px-2 py-0.5"
               :aria-label="`下一个版本 (${getCurrentVersionIndex(m) + 1}/${getVersionCount(m)})`"
               @click="emit('switch-next-version', m)"
             >
@@ -1758,14 +1769,14 @@ onBeforeUnmount(() => {
           >
             <button
               v-if="settingsStore.settings?.ttsEnabled && (m.role === 'assistant' || m.role === 'user') && !m.id.startsWith('local_') && getDisplayContent(m).trim()"
-              class="text-xs text-gray-600 hover:text-brand transition-colors"
+              class="btn btn-xs btn-ghost"
               @click="emit('read-aloud-message', m)"
             >
               朗读
             </button>
             <button
               v-if="canForkMessage(m)"
-              class="text-xs text-gray-600 hover:text-brand transition-colors"
+              class="btn btn-xs btn-ghost"
               :disabled="isGenerating || isForking"
               @click="emit('fork-message', m)"
             >
@@ -1773,21 +1784,21 @@ onBeforeUnmount(() => {
             </button>
             <button 
               v-if="m.role === 'assistant' && !m.id.startsWith('local_')" 
-              class="text-xs text-gray-600 hover:text-blue-400 transition-colors" 
+              class="btn btn-xs btn-ghost" 
               @click="emit('rewrite-message', m)" 
               :disabled="isGenerating"
             >
               重写
             </button>
             <button 
-              class="text-xs text-gray-600 hover:text-brand transition-colors" 
+              class="btn btn-xs btn-ghost" 
               @click="emit('edit-message', m)" 
               :disabled="isGenerating"
             >
               编辑
             </button>
             <button 
-              class="text-xs text-gray-600 hover:text-red-400 transition-colors" 
+              class="btn btn-xs btn-danger" 
               :disabled="isGenerating"
               @click="confirmDelete(m, $event)"
             >
@@ -1828,6 +1839,9 @@ onBeforeUnmount(() => {
             v-for="preview in imagePreviews"
             :key="preview.id"
             class="image-preview-modal"
+            role="dialog"
+            aria-modal="false"
+            :aria-label="`图片预览：${preview.alt}`"
             :class="preview.isDragging ? 'cursor-grabbing' : 'cursor-grab'"
             :style="getPreviewDialogStyle(preview)"
             @wheel.prevent="(event) => handlePreviewWheel(preview.id, event)"
@@ -1903,7 +1917,7 @@ onBeforeUnmount(() => {
   margin-bottom: 0;
 }
 .md :deep(a) {
-  color: #a78bfa;
+  color: var(--color-purple-text);
   text-decoration: underline;
 }
 
@@ -1950,8 +1964,7 @@ onBeforeUnmount(() => {
   position: fixed;
   inset: 0;
   pointer-events: none;
-  /* 须高于 ChatPage 全屏背景图（含 blur/transform 的合成层），且低于 imageFallback(1400) 与通知(1500) */
-  z-index: 1300;
+  z-index: var(--z-image-preview);
 }
 
 .image-preview-modal {
@@ -1959,10 +1972,10 @@ onBeforeUnmount(() => {
   left: 50%;
   top: 50%;
   pointer-events: auto;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 12px;
-  background: rgba(15, 15, 18, 0.75);
-  box-shadow: 0 18px 56px rgba(0, 0, 0, 0.45);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  background: var(--color-surface-panel);
+  box-shadow: var(--shadow-heavy);
   padding: 12px;
   transform-origin: center center;
   user-select: none;
@@ -1979,14 +1992,14 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.55);
-  color: rgba(255, 255, 255, 0.95);
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  transition: background-color 0.2s ease;
+  background: var(--color-overlay-heavy);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 
 .image-preview-close:hover {
-  background: rgba(0, 0, 0, 0.78);
+  background: var(--color-surface-hover);
 }
 
 .image-preview-img {

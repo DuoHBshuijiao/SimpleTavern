@@ -460,6 +460,14 @@
   --color-surface-muted: var(--app-surface-muted);
   --color-surface-overlay: var(--app-surface-overlay);
   --color-surface-hover: var(--app-surface-hover);
+  --color-surface-card: color-mix(in srgb, var(--app-color-surface-elevated) 72%, transparent);
+  --color-surface-panel: color-mix(in srgb, var(--app-color-surface-soft) 86%, transparent);
+  --color-surface-inset: color-mix(in srgb, var(--app-color-surface) 44%, transparent);
+  --color-surface-selected: color-mix(in srgb, var(--app-color-primary) 16%, transparent);
+  --color-focus-ring: color-mix(in srgb, var(--app-color-primary) 42%, transparent);
+  --color-danger-hover: color-mix(in srgb, var(--app-color-error) 28%, transparent);
+  --color-success-hover: color-mix(in srgb, var(--app-color-success) 28%, transparent);
+  --color-warning-hover: color-mix(in srgb, var(--app-color-warning) 24%, transparent);
   --color-overlay: var(--app-overlay);
   --color-overlay-heavy: var(--app-overlay-heavy);
   --color-on-brand: #ffffff;
@@ -505,9 +513,10 @@
   --color-reasoning-bubble-text: var(--app-color-text-muted);
   
   /* ========== 过渡 ========== */
-  --transition-fast: 0.15s ease;
-  --transition-normal: 0.2s ease;
-  --transition-slow: 0.3s ease;
+  --ease-out-product: cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-fast: 0.15s var(--ease-out-product);
+  --transition-normal: 0.2s var(--ease-out-product);
+  --transition-slow: 0.3s var(--ease-out-product);
   
   /* ========== 字体 ========== */
   --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -522,11 +531,14 @@
   --text-2xl: 1.5rem;
   
   /* ========== Z-Index 层级 ========== */
-  --z-dropdown: 350; /* 高于 --z-modal(300)，保证在角色卡等弹窗内打开时下拉不被遮挡 */
   --z-sticky: 200;
-  --z-modal: 300;
-  --z-popover: 400;
-  --z-tooltip: 500;
+  --z-floating: 240;
+  --z-drawer: 300;
+  --z-modal: 320;
+  --z-dropdown: 380; /* 高于 --z-modal，保证在角色卡等弹窗内打开时下拉不被遮挡 */
+  --z-popover: 420;
+  --z-tooltip: 520;
+  --z-image-preview: 1300;
   /* 全局 useNotify 宿主：须高于 ChatPage ErrorModal(≥1200) 与 imageFallback(1400) */
   --z-notification: 1500;
 
@@ -610,6 +622,14 @@
   --color-surface-muted: var(--app-surface-muted);
   --color-surface-overlay: var(--app-surface-overlay);
   --color-surface-hover: var(--app-surface-hover);
+  --color-surface-card: color-mix(in srgb, var(--app-color-surface-elevated) 72%, transparent);
+  --color-surface-panel: color-mix(in srgb, var(--app-color-surface-soft) 86%, transparent);
+  --color-surface-inset: color-mix(in srgb, var(--app-color-surface) 44%, transparent);
+  --color-surface-selected: color-mix(in srgb, var(--app-color-primary) 16%, transparent);
+  --color-focus-ring: color-mix(in srgb, var(--app-color-primary) 42%, transparent);
+  --color-danger-hover: color-mix(in srgb, var(--app-color-error) 28%, transparent);
+  --color-success-hover: color-mix(in srgb, var(--app-color-success) 28%, transparent);
+  --color-warning-hover: color-mix(in srgb, var(--app-color-warning) 24%, transparent);
   --color-overlay: var(--app-overlay);
   --color-overlay-heavy: var(--app-overlay-heavy);
   --color-on-brand: #ffffff;

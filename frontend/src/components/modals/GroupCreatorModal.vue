@@ -311,10 +311,10 @@ function handleCreate() {
   <Transition name="modal">
     <div v-if="show" class="modal">
       <div class="modal-backdrop" @click="emit('update:show', false)"></div>
-      <div class="modal-content chat-modal-width-600-90 glass-panel">
+      <div class="modal-content modal-surface chat-modal-width-600-90" role="dialog" aria-modal="true" aria-labelledby="group-creator-title">
         <div class="modal-header">
-          <h3 class="modal-title text-slate-50">{{ isMigrateMode ? '从单聊转为群聊' : '创建群聊' }}</h3>
-          <button class="modal-close" @click="emit('update:show', false)">×</button>
+          <h3 id="group-creator-title" class="modal-title">{{ isMigrateMode ? '从单聊转为群聊' : '创建群聊' }}</h3>
+          <button type="button" class="modal-close" aria-label="关闭群聊创建弹窗" @click="emit('update:show', false)">×</button>
         </div>
         <div class="modal-body">
           <div class="space-y-6">
@@ -322,67 +322,67 @@ function handleCreate() {
               <label class="label">群聊名称</label>
               <input 
                 v-model="groupTitle" 
-                class="input bg-black/20 border-white/10 focus:border-brand-a50" 
+                class="input" 
                 placeholder="新群聊" 
               />
             </div>
 
-            <div class="bg-white/5 border border-white/10 rounded-xl p-3">
-              <div class="text-sm text-gray-300 font-medium mb-2">本次聊天设置</div>
+            <div class="surface-muted p-3">
+              <div class="text-sm text-secondary font-medium mb-2">本次聊天设置</div>
               <div class="flex items-center justify-between gap-3">
-                <div class="min-w-0 flex-1 text-sm text-gray-400">纯 AI 模式（不注入 Persona，用户发言将以 system 影响世界）</div>
+                <div class="min-w-0 flex-1 text-sm text-muted">纯 AI 模式（不注入 Persona，用户发言将以 system 影响世界）</div>
                 <button
                   type="button"
                   class="flex shrink-0 items-center gap-2"
                   @click="groupPureAiMode = !groupPureAiMode"
                 >
-                  <div class="w-10 h-5 rounded-full relative transition-colors duration-200" :class="groupPureAiMode ? 'bg-brand' : 'bg-gray-700'">
-                    <div class="absolute top-1 w-3 h-3 rounded-full bg-white transition-transform duration-200" :class="groupPureAiMode ? 'left-6' : 'left-1'"></div>
+                  <div class="w-10 h-5 rounded-full relative transition-colors duration-200" :class="groupPureAiMode ? 'bg-brand' : 'bg-surface-muted'">
+                    <div class="absolute top-1 w-3 h-3 rounded-full bg-[var(--color-text-primary)] transition-transform duration-200" :class="groupPureAiMode ? 'left-6' : 'left-1'"></div>
                   </div>
-                  <span class="min-w-[2.5rem] text-center text-xs text-gray-400">{{ groupPureAiMode ? '开启' : '关闭' }}</span>
+                  <span class="min-w-[2.5rem] text-center text-xs text-muted">{{ groupPureAiMode ? '开启' : '关闭' }}</span>
                 </button>
               </div>
-              <div class="mt-3 space-y-3 pt-2 border-t border-white/5">
+              <div class="mt-3 space-y-3 pt-2 border-t border-[var(--color-border-subtle)]">
                 <div class="flex items-center justify-between gap-3">
-                  <div class="min-w-0 flex-1 text-sm text-gray-400">永远在底部（默认）</div>
+                  <div class="min-w-0 flex-1 text-sm text-muted">永远在底部（默认）</div>
                   <button
                     type="button"
                     class="flex shrink-0 items-center gap-2"
                     @click="groupSystemAlwaysAtBottom = !groupSystemAlwaysAtBottom"
                   >
-                    <div class="w-10 h-5 rounded-full relative transition-colors duration-200" :class="groupSystemAlwaysAtBottom ? 'bg-brand' : 'bg-gray-700'">
-                      <div class="absolute top-1 w-3 h-3 rounded-full bg-white transition-transform duration-200" :class="groupSystemAlwaysAtBottom ? 'left-6' : 'left-1'"></div>
+                    <div class="w-10 h-5 rounded-full relative transition-colors duration-200" :class="groupSystemAlwaysAtBottom ? 'bg-brand' : 'bg-surface-muted'">
+                      <div class="absolute top-1 w-3 h-3 rounded-full bg-[var(--color-text-primary)] transition-transform duration-200" :class="groupSystemAlwaysAtBottom ? 'left-6' : 'left-1'"></div>
                     </div>
-                    <span class="min-w-[2.5rem] text-center text-xs text-gray-400">{{ groupSystemAlwaysAtBottom ? '开启' : '关闭' }}</span>
+                    <span class="min-w-[2.5rem] text-center text-xs text-muted">{{ groupSystemAlwaysAtBottom ? '开启' : '关闭' }}</span>
                   </button>
                 </div>
-                <p class="text-xs text-gray-500">开启时整段 system 在首条，与旧版一致；关闭后可用下方「注入深度」将整段 system 插入历史。</p>
+                <p class="text-xs text-muted">开启时整段 system 在首条，与旧版一致；关闭后可用下方「注入深度」将整段 system 插入历史。</p>
                 <div :class="{ 'opacity-50 pointer-events-none': groupSystemAlwaysAtBottom }">
-                  <label class="text-xs text-gray-500">系统提示词注入深度</label>
+                  <label class="text-xs text-muted">系统提示词注入深度</label>
                   <input
                     v-model.number="groupSystemInjectDepth"
                     type="number"
                     min="0"
-                    class="input mt-1 w-full bg-black/20 border-white/10 focus:border-brand-a50"
+                    class="input mt-1 w-full"
                     step="1"
                   />
                 </div>
               </div>
             </div>
 
-            <div v-if="!isMigrateMode" class="bg-white/5 border border-white/10 rounded-xl p-3">
-              <div class="text-sm text-gray-300 font-medium mb-2">群聊首句（故事背景）</div>
+            <div v-if="!isMigrateMode" class="surface-muted p-3">
+              <div class="text-sm text-secondary font-medium mb-2">群聊首句（故事背景）</div>
               <div class="flex items-center justify-between gap-3 mb-2">
-                <div class="min-w-0 flex-1 text-sm text-gray-400">启用某角色的 First Message 作为开场</div>
+                <div class="min-w-0 flex-1 text-sm text-muted">启用某角色的 First Message 作为开场</div>
                 <button type="button" class="flex shrink-0 items-center gap-2" @click="groupFirstMessageEnabled = !groupFirstMessageEnabled">
-                  <div class="w-10 h-5 rounded-full relative transition-colors duration-200" :class="groupFirstMessageEnabled ? 'bg-brand' : 'bg-gray-700'">
-                    <div class="absolute top-1 w-3 h-3 rounded-full bg-white transition-transform duration-200" :class="groupFirstMessageEnabled ? 'left-6' : 'left-1'"></div>
+                  <div class="w-10 h-5 rounded-full relative transition-colors duration-200" :class="groupFirstMessageEnabled ? 'bg-brand' : 'bg-surface-muted'">
+                    <div class="absolute top-1 w-3 h-3 rounded-full bg-[var(--color-text-primary)] transition-transform duration-200" :class="groupFirstMessageEnabled ? 'left-6' : 'left-1'"></div>
                   </div>
-                  <span class="min-w-[2.5rem] text-center text-xs text-gray-400">{{ groupFirstMessageEnabled ? '启用' : '关闭' }}</span>
+                  <span class="min-w-[2.5rem] text-center text-xs text-muted">{{ groupFirstMessageEnabled ? '启用' : '关闭' }}</span>
                 </button>
               </div>
               <div v-if="groupFirstMessageEnabled" class="flex items-center gap-2">
-                <span class="text-xs text-gray-500 shrink-0">选择角色：</span>
+                <span class="text-xs text-muted shrink-0">选择角色：</span>
                 <ModernSelect
                   :model-value="groupFirstMessageCharacterId || ''"
                   @update:model-value="(v) => groupFirstMessageCharacterId = v || null"
@@ -392,13 +392,13 @@ function handleCreate() {
                   class="flex-1"
                 />
               </div>
-              <div class="text-xs text-gray-500 mt-2">创建后会在聊天窗口内直接插入该角色的首句（会写入聊天记录）。</div>
+              <div class="text-xs text-muted mt-2">创建后会在聊天窗口内直接插入该角色的首句（会写入聊天记录）。</div>
             </div>
 
-            <div v-if="!isMigrateMode" class="bg-white/5 border border-white/10 rounded-xl p-3 space-y-3">
-              <div class="text-sm text-gray-300 font-medium">群聊 MVU</div>
+            <div v-if="!isMigrateMode" class="surface-muted p-3 space-y-3">
+              <div class="text-sm text-secondary font-medium">群聊 MVU</div>
               <div class="flex items-center justify-between gap-3">
-                <div class="min-w-0 flex-1 text-sm text-gray-400">启用群聊 MVU（状态栏 / 指令 / 正则队列）</div>
+                <div class="min-w-0 flex-1 text-sm text-muted">启用群聊 MVU（状态栏 / 指令 / 正则队列）</div>
                 <button
                   type="button"
                   class="flex shrink-0 items-center gap-2"
@@ -406,19 +406,19 @@ function handleCreate() {
                 >
                   <div
                     class="w-10 h-5 rounded-full relative transition-colors duration-200"
-                    :class="groupMvuEnabled ? 'bg-brand' : 'bg-gray-700'"
+                    :class="groupMvuEnabled ? 'bg-brand' : 'bg-surface-muted'"
                   >
                     <div
-                      class="absolute top-1 w-3 h-3 rounded-full bg-white transition-transform duration-200"
+                      class="absolute top-1 w-3 h-3 rounded-full bg-[var(--color-text-primary)] transition-transform duration-200"
                       :class="groupMvuEnabled ? 'left-6' : 'left-1'"
                     />
                   </div>
-                  <span class="min-w-[2.5rem] text-center text-xs text-gray-400">{{ groupMvuEnabled ? '开启' : '关闭' }}</span>
+                  <span class="min-w-[2.5rem] text-center text-xs text-muted">{{ groupMvuEnabled ? '开启' : '关闭' }}</span>
                 </button>
               </div>
-              <div v-if="groupMvuEnabled" class="space-y-3 pt-2 border-t border-white/5">
+              <div v-if="groupMvuEnabled" class="space-y-3 pt-2 border-t border-[var(--color-border-subtle)]">
                 <div class="space-y-1.5">
-                  <label class="block text-xs text-gray-500">MVU 来源</label>
+                  <label class="block text-xs text-muted">MVU 来源</label>
                   <ModernSelect
                     :model-value="groupMvuSourceKey"
                     @update:model-value="(v) => (groupMvuSourceKey = v)"
@@ -427,7 +427,7 @@ function handleCreate() {
                     placeholder="（请选择）"
                     class="w-full"
                   />
-                  <p v-if="selectedMemberIds.length < 2" class="text-xs text-gray-500">请先选择至少两名群成员后再选择 MVU 来源。</p>
+                  <p v-if="selectedMemberIds.length < 2" class="text-xs text-muted">请先选择至少两名群成员后再选择 MVU 来源。</p>
                 </div>
                 <MvuCapabilityEditor
                   v-if="groupMvuSourceKey"
@@ -446,7 +446,7 @@ function handleCreate() {
             </div>
             
             <div>
-              <div class="text-sm text-gray-400 mb-3">
+              <div class="text-sm text-muted mb-3">
                 {{ isMigrateMode ? '当前单聊角色已固定为首位，请再选择至少一名其他角色：' : '选择群成员 (至少选择2个角色):' }}
               </div>
               <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
@@ -454,7 +454,7 @@ function handleCreate() {
                   v-for="c in characters"
                   :key="c.id"
                   class="flex items-start gap-3 p-3 rounded-xl cursor-pointer transition-all border-2"
-                  :class="selectedMemberIds.includes(c.id) ? 'bg-brand-a10 border-brand-a20' : 'bg-white/5 border-transparent hover:bg-white/10'"
+                  :class="selectedMemberIds.includes(c.id) ? 'surface-selected' : 'surface-muted interactive-surface border-transparent'"
                   @click="toggleMemberSelection(c.id)"
                 >
                   <div class="relative shrink-0">
@@ -468,17 +468,17 @@ function handleCreate() {
                     />
                     <div 
                       v-if="selectedMemberIds.includes(c.id)"
-                      class="absolute -top-1 -right-1 w-5 h-5 bg-brand rounded-full flex items-center justify-center text-white text-xs font-bold"
+                      class="absolute -top-1 -right-1 w-5 h-5 bg-brand rounded-full flex items-center justify-center text-on-brand text-xs font-bold"
                     >
                       {{ selectedMemberIds.indexOf(c.id) + 1 }}
                     </div>
                   </div>
                   <div class="flex-1 min-w-0">
-                    <div class="font-medium text-sm truncate" :class="selectedMemberIds.includes(c.id) ? 'text-brand-light' : 'text-gray-300'">{{ c.name }}</div>
-                    <div class="text-xs text-gray-500 truncate">{{ c.description || '暂无简介' }}</div>
+                    <div class="font-medium text-sm truncate" :class="selectedMemberIds.includes(c.id) ? 'text-brand-light' : 'text-secondary'">{{ c.name }}</div>
+                    <div class="text-xs text-muted truncate">{{ c.description || '暂无简介' }}</div>
                     <div v-if="selectedMemberIds.includes(c.id)" class="mt-2 space-y-1" @click.stop>
-                      <div class="text-[10px] text-gray-500">system prompt 插入：</div>
-                      <div class="flex flex-wrap gap-3 text-xs text-gray-300">
+                      <div class="text-[10px] text-muted">system prompt 插入：</div>
+                      <div class="flex flex-wrap gap-3 text-xs text-secondary">
                         <label class="flex items-center gap-1 cursor-pointer">
                           <ThemedCheckbox
                             :checked="(groupMemberInclusions[c.id]?.includePersonality ?? true)"
@@ -502,11 +502,11 @@ function handleCreate() {
           </div>
         </div>
         <div class="modal-footer">
-          <div class="text-sm text-gray-500 mr-auto">
+          <div class="text-sm text-muted mr-auto">
             已选择 {{ selectedMemberIds.length }} 个角色
-            <span v-if="selectedMemberIds.length < 2" class="text-yellow-500">(至少需要2个)</span>
+            <span v-if="selectedMemberIds.length < 2" class="text-warning">(至少需要2个)</span>
           </div>
-          <button class="btn btn-secondary bg-white/5 hover:bg-white/10 text-gray-300 border border-white/5" @click="emit('update:show', false)">取消</button>
+          <button class="btn btn-secondary" @click="emit('update:show', false)">取消</button>
           <button
             class="btn btn-primary"
             :disabled="selectedMemberIds.length < 2 || (groupMvuEnabled && !groupMvuSourceKey)"
