@@ -85,8 +85,7 @@
     position: absolute;
     inset: 0;
     background-color: var(--color-overlay);
-    backdrop-filter: blur(var(--blur-light));
-    opacity: 0.6;
+    opacity: 0.72;
     color: transparent;
   }
 
@@ -95,23 +94,35 @@
     max-height: calc(100vh - 2rem);
     
     /* Liquid Glass Style */
-    background-color: var(--color-surface-overlay);
+    background-color: var(--color-surface-panel);
     background-image: none;
-    backdrop-filter: blur(var(--blur-light));
-    -webkit-backdrop-filter: blur(var(--blur-light));
     border: 1px solid var(--color-border);
     box-shadow: var(--shadow-heavy);
     
-    border-radius: 1rem; /* rounded-2xl */
+    border-radius: var(--radius-2xl);
     
     overflow: hidden;
     display: flex;
     flex-direction: column;
     opacity: 1;
 
-    /* 性能优化：提升合成层 */
     transform: translateZ(0);
-    will-change: transform, opacity;
+  }
+
+  .modal-content:focus {
+    outline: none;
+  }
+
+  .modal-content:focus-visible {
+    outline: 2px solid var(--color-focus-ring);
+    outline-offset: 2px;
+  }
+
+  .modal-surface,
+  .drawer-surface {
+    background-color: var(--color-surface-panel);
+    border-color: var(--color-border);
+    box-shadow: var(--shadow-heavy);
   }
 
   .modal-header {
@@ -129,6 +140,9 @@
   }
 
   .modal-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     padding: 0.25rem;
     color: var(--color-text-secondary);
     border-radius: var(--radius-md);
@@ -160,12 +174,12 @@
   /* ========== Vue Transition Animations ========== */
   .modal-enter-active,
   .modal-leave-active {
-    transition: opacity 0.3s ease, transform 0.3s ease;
+    transition: opacity var(--transition-normal);
   }
 
   .modal-enter-active .modal-content,
   .modal-leave-active .modal-content {
-    transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    transition: transform var(--transition-normal), opacity var(--transition-normal);
   }
 
   .modal-enter-from,
@@ -175,7 +189,8 @@
 
   .modal-enter-from .modal-content,
   .modal-leave-to .modal-content {
-    transform: scale(0.95) translateY(10px);
+    opacity: 0.92;
+    transform: scale(0.98) translateY(8px);
   }
 
   .modal-enter-to,
@@ -192,7 +207,7 @@
   /* ========== 抽屉样式 ========== */
   .drawer {
     position: fixed;
-    z-index: var(--z-modal);
+    z-index: var(--z-drawer);
   }
 
   .drawer-right {
@@ -201,7 +216,7 @@
     bottom: 0;
     width: 400px;
     max-width: 90vw;
-    background-color: var(--color-dark-surface);
+    background-color: var(--color-surface-panel);
     border-left: 1px solid var(--color-border-default);
     box-shadow: var(--shadow-xl);
     transform: translateX(100%);
@@ -219,7 +234,7 @@
     bottom: 0;
     width: 400px;
     max-width: 90vw;
-    background-color: var(--color-dark-surface);
+    background-color: var(--color-surface-panel);
     border-right: 1px solid var(--color-border-default);
     box-shadow: var(--shadow-xl);
     transform: translateX(-100%);
@@ -234,7 +249,7 @@
   /* ========== 弹出确认框 ========== */
   .popconfirm {
     padding: var(--spacing-md);
-    background-color: var(--color-dark-surface);
+    background-color: var(--color-surface-panel);
     border: 1px solid var(--color-border-default);
     border-radius: var(--radius-xl);
     box-shadow: var(--shadow-lg);
@@ -250,5 +265,21 @@
     display: flex;
     justify-content: flex-end;
     gap: var(--spacing-sm);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .modal-enter-active,
+    .modal-leave-active,
+    .modal-enter-active .modal-content,
+    .modal-leave-active .modal-content,
+    .drawer-right,
+    .drawer-left {
+      transition-duration: 1ms;
+    }
+
+    .modal-enter-from .modal-content,
+    .modal-leave-to .modal-content {
+      transform: none;
+    }
   }
 }

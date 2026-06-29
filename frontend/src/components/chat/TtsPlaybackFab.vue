@@ -254,7 +254,7 @@ defineExpose({ getRect: getTtsFabRect, setTtsTopPx: setTopPxFromSeparation })
       <button
         ref="queueBtnFabRef"
         type="button"
-        class="chat-fab-surface w-12 h-12 rounded-xl font-bold shadow-lg transition-[transform,background-color,box-shadow] border border-[var(--color-border)] hover:scale-105 active:scale-95 flex items-center justify-center backdrop-blur-sm cursor-pointer"
+        class="chat-fab-surface w-12 h-12 rounded-xl font-bold shadow-lg transition-[transform,background-color,box-shadow] border border-[var(--color-border)] hover:scale-105 active:scale-95 flex items-center justify-center cursor-pointer"
         aria-label="打开 TTS 队列"
         @click="handleQueueAction"
       >
@@ -277,7 +277,7 @@ defineExpose({ getRect: getTtsFabRect, setTtsTopPx: setTopPxFromSeparation })
       <!-- 播放控制按钮 -->
       <button
         type="button"
-        class="chat-fab-surface w-12 h-12 rounded-xl font-bold shadow-lg transition-[transform,background-color,box-shadow] border border-[var(--color-border)] hover:scale-105 active:scale-95 flex items-center justify-center backdrop-blur-sm cursor-pointer"
+        class="chat-fab-surface w-12 h-12 rounded-xl font-bold shadow-lg transition-[transform,background-color,box-shadow] border border-[var(--color-border)] hover:scale-105 active:scale-95 flex items-center justify-center cursor-pointer"
         :aria-label="isPlaying && !audioPaused ? '暂停播放' : '播放'"
         @click="handlePlayClick"
       >
@@ -300,7 +300,7 @@ defineExpose({ getRect: getTtsFabRect, setTtsTopPx: setTopPxFromSeparation })
     <Transition name="tts-top-bar-fade">
       <div
         v-if="showTopBarControls"
-        class="tts-top-bar-stack fixed z-[9] flex flex-col gap-2 pointer-events-none"
+        class="tts-top-bar-stack fixed z-10 flex flex-col gap-2 pointer-events-none"
         :style="topBarStackStyle"
       >
         <div class="pointer-events-auto flex flex-col gap-2">
@@ -358,7 +358,7 @@ defineExpose({ getRect: getTtsFabRect, setTtsTopPx: setTopPxFromSeparation })
         <div
           v-if="queuePanelOpen"
           ref="panelRef"
-          class="tts-queue-panel chat-fab-panel fixed z-[11] rounded-xl shadow-lg backdrop-blur-sm max-h-[min(40vh,280px)] flex flex-col overflow-hidden"
+          class="tts-queue-panel chat-fab-panel fixed z-floating rounded-xl shadow-lg max-h-[min(40vh,280px)] flex flex-col overflow-hidden"
           :style="panelStyle"
           role="region"
           aria-label="TTS 队列"
@@ -372,7 +372,7 @@ defineExpose({ getRect: getTtsFabRect, setTtsTopPx: setTopPxFromSeparation })
             >
               <button
                 type="button"
-                class="chat-fab-surface text-xs font-semibold px-2 py-1.5 rounded-lg border border-[var(--color-border)] transition-[transform,background-color,box-shadow] cursor-pointer"
+                class="btn btn-xs btn-danger"
                 aria-label="终止传输"
                 @click.stop="handleAbortInPanel"
               >
@@ -438,27 +438,27 @@ defineExpose({ getRect: getTtsFabRect, setTtsTopPx: setTopPxFromSeparation })
 }
 
 .tts-queue-dot--red {
-  background: #ef4444;
+  background: var(--color-error);
 }
 
 .tts-queue-dot--amber {
-  background: #fbbf24;
+  background: var(--color-warning);
 }
 
 .tts-queue-dot--blue {
-  background: #3b82f6;
+  background: var(--color-info);
 }
 
 .tts-queue-dot--green {
-  background: #22c55e;
+  background: var(--color-success);
 }
 
 .tts-queue-dot--gray {
-  background: var(--color-text-tertiary, #9ca3af);
+  background: var(--color-text-muted);
 }
 
 .tts-queue-dot--muted {
-  background: var(--color-text-tertiary, #9ca3af);
+  background: var(--color-text-muted);
 }
 
 /* 顶栏 chip：尺寸与 ChatInput Agent 胶囊一致 */
@@ -471,15 +471,13 @@ defineExpose({ getRect: getTtsFabRect, setTtsTopPx: setTopPxFromSeparation })
   padding: 0.3rem 0.6rem;
   border-radius: 0.75rem;
   border: 1px solid var(--color-border-subtle);
-  background: color-mix(in srgb, var(--color-surface-overlay, rgba(18, 22, 30, 0.72)) 88%, transparent);
+  background: color-mix(in srgb, var(--color-surface-overlay) 88%, transparent);
   color: var(--color-text-secondary);
   font-size: 0.6875rem;
   line-height: 1;
   cursor: pointer;
   overflow: hidden;
-  backdrop-filter: blur(var(--blur-light));
-  -webkit-backdrop-filter: blur(var(--blur-light));
-  box-shadow: var(--shadow-glass-panel, 0 8px 24px rgba(0, 0, 0, 0.18));
+  box-shadow: var(--shadow-glass-panel);
   transition:
     background-color 200ms cubic-bezier(0.25, 1, 0.5, 1),
     border-color 200ms cubic-bezier(0.25, 1, 0.5, 1),
@@ -502,7 +500,7 @@ defineExpose({ getRect: getTtsFabRect, setTtsTopPx: setTopPxFromSeparation })
 .tts-top-bar-btn__glow--queue {
   background: radial-gradient(
     120% 80% at 0% 50%,
-    color-mix(in srgb, var(--color-brand, #6366f1) 28%, transparent),
+    color-mix(in srgb, var(--color-brand) 28%, transparent),
     transparent 62%
   );
 }
@@ -510,7 +508,7 @@ defineExpose({ getRect: getTtsFabRect, setTtsTopPx: setTopPxFromSeparation })
 .tts-top-bar-btn__glow--transport {
   background: radial-gradient(
     120% 80% at 100% 40%,
-    color-mix(in srgb, var(--color-purple, #a855f7) 26%, transparent),
+    color-mix(in srgb, var(--color-purple) 26%, transparent),
     transparent 62%
   );
 }
@@ -533,15 +531,15 @@ defineExpose({ getRect: getTtsFabRect, setTtsTopPx: setTopPxFromSeparation })
 }
 
 .tts-top-bar-btn--queue {
-  border-color: color-mix(in srgb, var(--color-border-subtle) 70%, var(--color-brand, #6366f1) 30%);
+  border-color: color-mix(in srgb, var(--color-border-subtle) 70%, var(--color-brand) 30%);
 }
 
 .tts-top-bar-btn--transport {
-  border-color: color-mix(in srgb, var(--color-border-subtle) 72%, var(--color-purple, #a855f7) 28%);
+  border-color: color-mix(in srgb, var(--color-border-subtle) 72%, var(--color-purple) 28%);
 }
 
 .tts-top-bar-btn:hover {
-  background: color-mix(in srgb, var(--color-surface-overlay, rgba(18, 22, 30, 0.72)) 96%, var(--color-border-subtle) 4%);
+  background: color-mix(in srgb, var(--color-surface-overlay) 96%, var(--color-border-subtle) 4%);
   border-color: var(--color-border);
   color: var(--color-text);
 }

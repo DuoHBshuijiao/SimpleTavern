@@ -81,7 +81,7 @@ function close() {
       <div v-if="show && draft" class="modal">
         <div class="modal-backdrop" @click="close"></div>
         <div
-          class="modal-content w-[min(92vw,560px)] max-h-[90vh] theme-panel-bg border border-[var(--color-border)] rounded-2xl shadow-xl backdrop-saturate-[1.8]"
+          class="modal-content modal-surface w-[min(92vw,560px)] max-h-[90vh]"
           style="backdrop-filter: blur(var(--blur-heavy)); -webkit-backdrop-filter: blur(var(--blur-heavy))"
         >
           <div class="modal-header shrink-0">

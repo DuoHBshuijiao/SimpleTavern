@@ -1,14 +1,14 @@
 <template>
   <Teleport to="body">
     <aside
-      class="fixed right-4 top-4 bottom-4 theme-panel-bg backdrop-blur-xl backdrop-saturate-[1.8] border border-[var(--color-border)] shadow-glass-panel rounded-2xl transition-all duration-300 overflow-hidden flex flex-col z-[110] pointer-events-auto"
+      class="drawer-surface fixed right-4 top-4 bottom-4 border border-[var(--color-border)] rounded-2xl transition-all duration-300 overflow-hidden flex flex-col z-floating pointer-events-auto"
       :class="isOpen
         ? 'translate-x-0 w-[min(360px,calc(100vw-2rem))] opacity-100'
         : 'translate-x-[calc(100%+20px)] w-[min(360px,calc(100vw-2rem))] opacity-0 pointer-events-none'"
       style="contain: content; will-change: transform, opacity;"
     >
       <!-- 标题栏 -->
-      <header class="flex items-center justify-between px-4 py-2 border-b border-white/5 shrink-0 bg-white/5 backdrop-blur-md">
+      <header class="flex items-center justify-between px-4 py-2 border-b border-[var(--color-border-subtle)] shrink-0 bg-[var(--color-surface-muted)]">
         <div class="flex min-w-0 flex-1 items-center gap-2">
           <div
             role="button"
@@ -19,15 +19,15 @@
             @keydown.enter.prevent="$emit('switch-to-assistant')"
             @keydown.space.prevent="$emit('switch-to-assistant')"
           >
-            <span class="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2 flex-wrap min-w-0">
-              <span class="w-2 h-2 rounded-full bg-[#b76e79] shrink-0" :class="{ 'animate-pulse': running }" />
+            <span class="text-xs font-bold text-muted uppercase tracking-widest flex items-center gap-2 flex-wrap min-w-0">
+              <span class="w-2 h-2 rounded-full bg-[var(--color-assistant)] shrink-0" :class="{ 'animate-pulse': running }" />
               <span class="truncate">MVU 工作日志</span>
             </span>
           </div>
         </div>
         <button
           type="button"
-          class="inline-flex items-center justify-center w-7 h-7 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] transition-colors shrink-0"
+          class="icon-button w-7 h-7 shrink-0"
           aria-label="关闭"
           @click="$emit('update:isOpen', false)"
         >
@@ -52,7 +52,7 @@
         <button
           v-if="hasKnowledgeGraph"
           type="button"
-          class="w-full text-left text-xs text-[var(--color-brand)] hover:underline"
+          class="btn btn-xs btn-secondary w-full justify-start"
           @click="$emit('open-knowledge-graph')"
         >
           查看知识图谱
@@ -91,7 +91,7 @@
           dropdown-width="360"
           searchable
           allow-create
-          @select="(v: any) => $emit('select-mvu-model', v)"
+          @select="selectMvuModel"
         />
         <p
           v-if="resolvedMvuModel && !(mvuModel || '').trim()"
@@ -146,7 +146,7 @@ const props = withDefaults(defineProps<Props>(), {
   resolvedMvuModel: null,
 })
 
-defineEmits<{
+const emit = defineEmits<{
   'update:isOpen': [value: boolean]
   'update:knowledgeGraphEnabled': [value: boolean]
   'select-mvu-model': [value: { value: string; presetId?: string | null }]
@@ -187,13 +187,17 @@ function badgeLabel(et: MvuWorkLogEntry['eventType']): string {
 
 function badgeClass(et: MvuWorkLogEntry['eventType']): string {
   const map: Record<string, string> = {
-    triggered: 'bg-blue-500/20 text-blue-400',
-    planning: 'bg-yellow-500/20 text-yellow-400',
-    tool_call: 'bg-green-500/20 text-green-400',
-    commit:   'bg-purple-500/20 text-purple-400',
-    error:    'bg-red-500/20 text-red-400',
+    triggered: 'bg-[var(--color-info-bg)] text-[var(--color-info-text)]',
+    planning: 'bg-[var(--color-warning-bg)] text-[var(--color-warning-text)]',
+    tool_call: 'bg-[var(--color-success-bg)] text-[var(--color-success-text)]',
+    commit: 'bg-[var(--color-purple-bg)] text-[var(--color-purple-text)]',
+    error: 'bg-[var(--color-error-bg)] text-[var(--color-error-text)]',
   }
   return map[et] ?? 'bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]'
+}
+
+function selectMvuModel(value: unknown) {
+  emit('select-mvu-model', value as { value: string; presetId?: string | null })
 }
 
 watch(() => props.logs.length, async () => {

@@ -37,6 +37,8 @@ import ModernAvatar from '../ModernAvatar.vue'
 import ModernSelect from '../ModernSelect.vue'
 import MvuCapabilityEditor from '../chat/MvuCapabilityEditor.vue'
 import { GripVertical, X } from 'lucide-vue-next'
+import { useDialogBehavior } from '../../composables/useDialogBehavior'
+import { dialogAria } from '../../utils/uiPrimitives'
 
 const props = defineProps<{
   show: boolean
@@ -202,16 +204,21 @@ function save() {
     stateTables: stateTablesDraft.value,
   })
 }
+
+const titleId = 'group-settings-title'
+const dialogAttrs = dialogAria(titleId)
+const { dialogRef } = useDialogBehavior(() => props.show && !!props.chat, close)
+void dialogRef
 </script>
 
 <template>
   <Transition name="modal">
     <div v-if="show && chat" class="modal">
       <div class="modal-backdrop" @click="close"></div>
-      <div class="modal-content chat-modal-width-600-90 glass-panel bg-gradient-to-br from-slate-900/30 to-slate-800/25 backdrop-blur-2xl backdrop-saturate-[1.8] border border-white/10">
+      <div ref="dialogRef" v-bind="dialogAttrs" tabindex="-1" class="modal-content modal-surface chat-modal-width-600-90">
         <div class="modal-header">
-          <h3 class="modal-title text-slate-50">群聊设置 - {{ chat.title }}</h3>
-          <button class="modal-close" @click="close">
+          <h3 :id="titleId" class="modal-title">群聊设置 - {{ chat.title }}</h3>
+          <button type="button" class="modal-close" aria-label="关闭群聊设置弹窗" @click="close">
               <X class="w-5 h-5" />
           </button>
         </div>
@@ -219,11 +226,11 @@ function save() {
         <div class="modal-body space-y-6">
           <!-- 群聊发言延迟 -->
           <div class="form-group">
-            <label class="label text-brand-light">发言延迟 (ms)</label>
+            <label class="label">发言延迟 (ms)</label>
             <input 
               v-model.number="groupDelayDraft"
               type="number"
-              class="input bg-white/5 border-white/10 focus:border-brand-a50"
+              class="input"
               step="100"
               min="0"
             />
@@ -233,63 +240,65 @@ function save() {
           <div class="form-group">
             <label class="label text-brand-light">永远在底部（默认）</label>
             <div class="flex items-start justify-between gap-3">
-              <p class="min-w-0 flex-1 text-xs text-gray-500">
+              <p class="min-w-0 flex-1 text-xs text-muted">
                 开启时整段 system 在消息最前，与旧版一致；关闭后按下方深度将整段 system 插入历史，利于部分 KV 命中。
               </p>
               <button
                 type="button"
                 class="flex shrink-0 items-center gap-2"
+                :aria-pressed="groupSystemAlwaysAtBottomDraft"
                 @click="groupSystemAlwaysAtBottomDraft = !groupSystemAlwaysAtBottomDraft"
               >
                 <div
                   class="w-10 h-5 rounded-full relative transition-colors duration-200"
-                  :class="groupSystemAlwaysAtBottomDraft ? 'bg-brand' : 'bg-gray-700'"
+                  :class="groupSystemAlwaysAtBottomDraft ? 'bg-brand' : 'bg-surface-muted'"
                 >
                   <div
-                    class="absolute top-1 w-3 h-3 rounded-full bg-white transition-transform duration-200"
+                    class="absolute top-1 w-3 h-3 rounded-full bg-[var(--color-text-primary)] transition-transform duration-200"
                     :class="groupSystemAlwaysAtBottomDraft ? 'left-6' : 'left-1'"
                   />
                 </div>
-                <span class="min-w-[2.5rem] text-center text-xs text-gray-400">{{ groupSystemAlwaysAtBottomDraft ? '开启' : '关闭' }}</span>
+                <span class="min-w-[2.5rem] text-center text-xs text-muted">{{ groupSystemAlwaysAtBottomDraft ? '开启' : '关闭' }}</span>
               </button>
             </div>
           </div>
           <div class="form-group" :class="{ 'opacity-50 pointer-events-none': groupSystemAlwaysAtBottomDraft }">
-            <label class="label text-brand-light">系统提示词注入深度</label>
+            <label class="label">系统提示词注入深度</label>
             <input
               v-model.number="groupSystemInjectDepthDraft"
               type="number"
-              class="input bg-white/5 border-white/10 focus:border-brand-a50"
+              class="input"
               min="0"
               step="1"
             />
             <div class="form-hint">整段 system 将插在倒数第 N 条消息（含世界书产生条目）之前；仅关闭「永远在底部」时生效。</div>
           </div>
 
-          <div class="form-group rounded-xl border border-white/10 bg-white/5 p-3 space-y-3">
-            <div class="text-sm font-medium text-brand-light">MVU</div>
+          <div class="form-group surface-muted p-3 space-y-3">
+            <div class="text-sm font-medium text-brand">MVU</div>
             <div class="flex items-start justify-between gap-3">
-              <p class="min-w-0 flex-1 text-xs text-gray-500">启用后由锚定成员的状态栏与 MVU 模式（指令 / 正则）驱动；与会话设置抽屉写入同一套 overrides。</p>
+              <p class="min-w-0 flex-1 text-xs text-muted">启用后由锚定成员的状态栏与 MVU 模式（指令 / 正则）驱动；与会话设置抽屉写入同一套 overrides。</p>
               <button
                 type="button"
                 class="flex shrink-0 items-center gap-2"
+                :aria-pressed="groupMvuEnabledDraft"
                 @click="groupMvuEnabledDraft = !groupMvuEnabledDraft"
               >
                 <div
                   class="w-10 h-5 rounded-full relative transition-colors duration-200"
-                  :class="groupMvuEnabledDraft ? 'bg-brand' : 'bg-gray-700'"
+                  :class="groupMvuEnabledDraft ? 'bg-brand' : 'bg-surface-muted'"
                 >
                   <div
-                    class="absolute top-1 w-3 h-3 rounded-full bg-white transition-transform duration-200"
+                    class="absolute top-1 w-3 h-3 rounded-full bg-[var(--color-text-primary)] transition-transform duration-200"
                     :class="groupMvuEnabledDraft ? 'left-6' : 'left-1'"
                   />
                 </div>
-                <span class="min-w-[2.5rem] text-center text-xs text-gray-400">{{ groupMvuEnabledDraft ? '开启' : '关闭' }}</span>
+                <span class="min-w-[2.5rem] text-center text-xs text-muted">{{ groupMvuEnabledDraft ? '开启' : '关闭' }}</span>
               </button>
             </div>
             <div v-if="groupMvuEnabledDraft" class="space-y-3">
               <div class="space-y-1.5">
-                <label class="block text-xs text-gray-500">锚定成员（须在成员列表内）</label>
+                <label class="block text-xs text-muted">锚定成员（须在成员列表内）</label>
                 <ModernSelect
                   :model-value="groupMvuAnchorDraft || ''"
                   @update:model-value="(v) => (groupMvuAnchorDraft = v || null)"
@@ -299,7 +308,7 @@ function save() {
                 />
               </div>
               <div class="space-y-1.5">
-                <label class="block text-xs text-gray-500">模板成员（可选，仅作记录）</label>
+                <label class="block text-xs text-muted">模板成员（可选，仅作记录）</label>
                 <ModernSelect
                   :model-value="groupMvuTemplateDraft || ''"
                   @update:model-value="(v) => (groupMvuTemplateDraft = v || null)"
@@ -325,27 +334,27 @@ function save() {
 
           <!-- 成员列表与排序 -->
           <div class="form-group">
-            <label class="label text-brand-light">成员与发言顺序</label>
+            <label class="label">成员与发言顺序</label>
             <div class="form-hint mb-3">拖动成员卡片可更改在“自动发言”模式下的发言顺序</div>
             
             <div class="space-y-2">
               <div 
                 v-for="(id, idx) in memberIdsDraft" 
                 :key="id"
-                class="flex items-center gap-3 p-3 rounded-xl border transition-all group/item"
-                :class="draggingIdx === idx ? 'bg-brand-a10 border-brand-a50 opacity-40 scale-95' : 'bg-white/5 border-white/5 hover:bg-white/10 hover:border-white/20'"
+                class="surface-muted interactive-surface flex items-center gap-3 p-3 group/item"
+                :class="draggingIdx === idx ? 'surface-selected opacity-40 scale-95' : ''"
                 draggable="true"
                 @dragstart="handleDragStart(idx)"
                 @dragover="handleDragOver($event, idx)"
                 @dragend="handleDragEnd"
               >
                 <!-- 拖动手柄 -->
-                <div class="cursor-move text-gray-600 hover:text-gray-400 px-1">
+                <div class="cursor-move text-muted px-1">
                   <GripVertical class="w-5 h-5" />
                 </div>
 
                 <!-- 序号 -->
-                <div class="w-6 h-6 rounded-full bg-black/40 flex items-center justify-center text-[10px] text-gray-500 font-bold">
+                <div class="surface-inset w-6 h-6 rounded-full flex items-center justify-center text-[10px] text-muted font-bold">
                   {{ idx + 1 }}
                 </div>
 
@@ -360,15 +369,15 @@ function save() {
 
                 <!-- 名称 -->
                 <div class="flex-1 min-w-0">
-                  <div class="font-medium text-sm text-gray-200 truncate">{{ getCharacter(id)?.name || '未知角色' }}</div>
-                  <div v-if="chat.memberSettings?.[id]?.probability !== undefined && chat.memberSettings[id].probability < 1" class="text-[10px] text-yellow-500/80">
+                  <div class="font-medium text-sm text-primary truncate">{{ getCharacter(id)?.name || '未知角色' }}</div>
+                  <div v-if="chat.memberSettings?.[id]?.probability !== undefined && chat.memberSettings[id].probability < 1" class="text-[10px] text-warning">
                     参与概率: {{ Math.round(Number(chat.memberSettings?.[id]?.probability) * 100) }}%
                   </div>
                 </div>
 
                 <!-- 操作 -->
                 <button 
-                  class="text-xs text-brand hover:text-brand-hover px-2 py-1"
+                  class="btn btn-xs btn-ghost"
                   @click="emit('open-member-settings', id)"
                 >
                   详情设置
@@ -379,8 +388,8 @@ function save() {
         </div>
 
         <div class="modal-footer">
-          <button class="btn btn-secondary bg-white/5 hover:bg-white/10 text-gray-300 border border-white/5" @click="close">取消</button>
-          <button class="btn btn-primary" @click="save">保存并应用</button>
+          <button type="button" class="btn btn-secondary" @click="close">取消</button>
+          <button type="button" class="btn btn-primary" @click="save">保存并应用</button>
         </div>
       </div>
     </div>

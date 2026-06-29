@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue'
+import { ref, watch, nextTick, onUnmounted } from 'vue'
 
 const props = defineProps<{
   show: boolean
@@ -80,6 +80,24 @@ function handleClickOutside(e: MouseEvent) {
   
   emit('update:show', false)
 }
+
+function handleKeydown(e: KeyboardEvent) {
+  if (e.key !== 'Escape') return
+  e.preventDefault()
+  emit('update:show', false)
+}
+
+watch(() => props.show, (show) => {
+  if (show) {
+    document.addEventListener('keydown', handleKeydown)
+  } else {
+    document.removeEventListener('keydown', handleKeydown)
+  }
+})
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleKeydown)
+})
 </script>
 
 <template>
@@ -88,7 +106,10 @@ function handleClickOutside(e: MouseEvent) {
       <div 
         v-if="show"
         ref="popoverRef"
-        class="fixed z-popover min-w-[240px] max-w-[300px] p-4 rounded-xl theme-panel-bg backdrop-blur-xl backdrop-saturate-[1.8] border border-[var(--color-border)] shadow-glass-panel flex flex-col gap-3"
+        class="popconfirm fixed z-popover min-w-[240px] max-w-[300px] flex flex-col gap-3"
+        role="dialog"
+        aria-modal="false"
+        :aria-label="title || message"
         :style="{ 
           top: `${position.top}px`, 
           left: `${position.left}px`,
@@ -96,19 +117,19 @@ function handleClickOutside(e: MouseEvent) {
         }"
       >
         <div class="flex flex-col gap-1">
-          <div v-if="title" class="text-sm font-bold text-gray-200">{{ title }}</div>
-          <div class="text-xs text-gray-400 leading-relaxed">{{ message }}</div>
+          <div v-if="title" class="text-sm font-bold text-primary">{{ title }}</div>
+          <div class="text-xs text-muted leading-relaxed">{{ message }}</div>
         </div>
         
         <div class="flex justify-end gap-2 pt-1">
           <button 
-            class="px-3 py-1.5 text-xs font-medium rounded-lg hover:bg-white/10 text-gray-400 transition-colors" 
+            class="btn btn-xs btn-secondary" 
             @click="emit('cancel')"
           >
             {{ cancelText || '取消' }}
           </button>
           <button 
-            class="px-3 py-1.5 text-xs font-medium rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 transition-colors shadow-sm shadow-red-900/20 border border-red-500/20" 
+            class="btn btn-xs btn-danger" 
             @click="emit('confirm')"
           >
             {{ confirmText || '确认删除' }}

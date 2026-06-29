@@ -429,11 +429,11 @@ async function confirmJanitorImport() {
       <!-- 背景模糊须用 Tailwind backdrop-*（见 README / glass.css：手写 backdrop-filter 经 esbuild 压缩可能失效） -->
       <div class="modal-backdrop backdrop-blur-[var(--blur-heavy)]" @click="close"></div>
       <div
-        class="modal-content chat-modal-width-568-90 min-w-0 glass-panel theme-panel-bg backdrop-blur-[var(--blur-heavy)] backdrop-saturate-[1.8] border border-[var(--color-border)]"
+        class="modal-content modal-surface chat-modal-width-568-90 min-w-0"
       >
         <div class="modal-header border-b border-[var(--color-border-subtle)]">
           <h3 class="modal-title text-[var(--color-text)]">导入</h3>
-          <button class="modal-close text-[var(--color-text-muted)] hover:text-[var(--color-text)]" @click="close">×</button>
+          <button type="button" class="modal-close" aria-label="关闭导入弹窗" @click="close">×</button>
         </div>
         <div class="modal-body">
           <div class="max-h-[65vh] space-y-4 overflow-y-auto pr-1">

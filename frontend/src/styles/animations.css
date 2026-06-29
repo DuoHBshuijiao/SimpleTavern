@@ -233,4 +233,30 @@
   .animate-blink {
     animation: blink 1s step-end infinite;
   }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      scroll-behavior: auto !important;
+    }
+
+    .stream-chunk-fade,
+    .animate-fade-in,
+    .animate-fade-in-up,
+    .animate-fade-in-down,
+    .animate-scale-in,
+    .animate-slide-in-right,
+    .animate-slide-in-left,
+    .animate-shimmer,
+    .animate-blink {
+      animation-duration: 1ms !important;
+      animation-iteration-count: 1 !important;
+    }
+
+    .animate-pulse,
+    .animate-bounce {
+      animation: none !important;
+    }
+  }
 }

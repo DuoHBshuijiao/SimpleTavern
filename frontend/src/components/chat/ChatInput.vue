@@ -561,7 +561,7 @@ const textareaPlaceholderAttr = computed(() =>
 
   /** 顶栏 morph 变量挂在输入壳上，子树继承；与下沉负 margin 共用 transition（状态条已移至 MessageList 上方叠层） */
 const shellInlineStyle = computed(() => ({
-  color: 'rgba(229, 231, 235, 1)',
+  color: 'var(--color-text)',
   backgroundColor: 'unset',
   background: 'unset',
   opacity: 1,
@@ -601,7 +601,7 @@ defineExpose({
       - Removed hardcoded hex colors
     -->
     <div
-      class="chat-input-card-morph relative z-0 bg-surface-overlay backdrop-blur-xl border border-[var(--color-border)] rounded-2xl shadow-xl p-3 flex flex-col gap-2 focus-within:border-brand-a40 focus-within:ring-1 focus-within:ring-brand-a20 focus-within:bg-surface-overlay"
+      class="chat-input-card-morph surface-panel relative z-0 p-3 flex flex-col gap-2 focus-within:border-brand-a40 focus-within:ring-1 focus-within:ring-[var(--color-focus-ring)]"
       style="opacity: 1;"
       @dragenter.prevent="handleDragEnter"
       @dragover.prevent="handleDragOver"
@@ -635,7 +635,7 @@ defineExpose({
         :placeholder="textareaPlaceholderAttr"
         :aria-label="textareaAriaLabel"
         :disabled="inputDisabled"
-        class="input textarea !bg-transparent !border-0 text-base resize-none min-h-[80px] w-full text-primary placeholder-gray-500"
+        class="input textarea !bg-transparent !border-0 text-base resize-none min-h-[80px] w-full text-primary placeholder:text-muted"
         :class="inputDisabled ? 'opacity-50' : ''"
         @keydown="handleKeydown"
       ></textarea>
@@ -656,7 +656,9 @@ defineExpose({
         >
           <img :src="img.previewUrl" :alt="img.name" class="w-full h-full object-cover" />
           <button
-            class="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 text-white flex items-center justify-center"
+            type="button"
+            class="icon-button absolute top-1 right-1 w-5 h-5 rounded-full bg-[var(--color-overlay-heavy)] text-[var(--color-text)]"
+            aria-label="移除图片"
             @click="emit('remove-image', img.id)"
           >
             <X class="w-3 h-3" />
@@ -673,16 +675,18 @@ defineExpose({
                 <span>{{ groupMembers[currentSpeakerIndex]?.name || '角色' }} 正在发言...</span>
                 <span class="text-[var(--color-text-muted)]">({{ currentSpeakerIndex + 1 }}/{{ groupMembers.length }})</span>
                 <button 
-                  class="ml-1 px-2 py-0.5 text-xs bg-[var(--color-warning-bg)] hover:opacity-90 text-[var(--color-warning)] rounded transition-colors border border-[var(--color-warning)]/20"
+                  type="button"
+                  class="btn btn-xs btn-secondary text-warning"
                   @click="emit('pause-group')"
                 >
                   暂停
                 </button>
               </div>
-              <div v-else-if="showContinueButton && pendingMembersCount > 0" class="flex items-center gap-2 text-xs text-green-400 shrink-0">
+              <div v-else-if="showContinueButton && pendingMembersCount > 0" class="flex items-center gap-2 text-xs text-success shrink-0">
                 <span class="truncate">轮次已暂停，还有 {{ pendingMembersCount }} 位角色待发言</span>
                 <button 
-                  class="px-2 py-0.5 text-xs bg-green-500/20 hover:bg-green-500/30 text-green-400 rounded transition-colors font-medium border border-green-500/20 shrink-0"
+                  type="button"
+                  class="btn btn-xs btn-success shrink-0"
                   @click="emit('continue-group')"
                 >
                   继续轮次
@@ -716,7 +720,7 @@ defineExpose({
                     :size="22"
                     aspect="1"
                     rounded="rounded-lg"
-                    class="ring-2 ring-purple-500/50 hover:ring-purple-500"
+                    class="ring-2 ring-[var(--color-brand-a30)] hover:ring-[var(--color-brand-a50)]"
                   />
                 </div>
               </div>
@@ -766,7 +770,7 @@ defineExpose({
             class="chat-action-button shadow-lg transition-all active:scale-95"
             :class="
               webSearchEnabled
-                ? 'bg-brand/25 text-brand ring-2 ring-brand border border-brand/30'
+                ? 'bg-brand-a20 text-brand ring-2 ring-[var(--color-brand-a40)] border border-[var(--color-brand-a30)]'
                 : 'chat-action-button--secondary'
             "
             :disabled="isGenerating && !showContinueButton"
@@ -863,7 +867,7 @@ defineExpose({
       </div>
       <div
         v-show="isDragOverComposer"
-        class="pointer-events-none absolute inset-0 z-[21] rounded-2xl bg-white/25 backdrop-blur-[2px] ring-1 ring-inset ring-white/40 transition-opacity duration-150"
+        class="pointer-events-none absolute inset-0 z-[21] rounded-2xl bg-[var(--color-brand-a20)] ring-1 ring-inset ring-[var(--color-brand-a40)] transition-opacity duration-150"
         aria-hidden="true"
       />
     </div>
@@ -887,7 +891,8 @@ defineExpose({
       <button
         ref="assistantFabButtonRef"
         type="button"
-        class="chat-fab-surface w-12 h-12 rounded-xl font-bold shadow-lg transition-[transform,background-color,box-shadow] border border-[var(--color-border)] hover:scale-105 active:scale-95 flex items-center justify-center backdrop-blur-sm cursor-grab active:cursor-grabbing"
+        class="chat-fab-surface w-12 h-12 rounded-xl font-bold shadow-lg transition-[transform,background-color,box-shadow] border border-[var(--color-border)] hover:scale-105 active:scale-95 flex items-center justify-center cursor-grab active:cursor-grabbing"
+        aria-label="打开聊天助手"
         @pointerdown="assistantFabPointerDown"
         @pointermove="assistantFabPointerMove"
         @pointerup="assistantFabPointerUp"
@@ -900,7 +905,8 @@ defineExpose({
       <button
         v-if="mvuStore.isConnected"
         type="button"
-        class="chat-fab-surface w-12 h-12 rounded-xl font-bold shadow-lg transition-[transform,background-color,box-shadow] border border-[var(--color-border)] hover:scale-105 active:scale-95 flex items-center justify-center backdrop-blur-sm cursor-grab active:cursor-grabbing"
+        class="chat-fab-surface w-12 h-12 rounded-xl font-bold shadow-lg transition-[transform,background-color,box-shadow] border border-[var(--color-border)] hover:scale-105 active:scale-95 flex items-center justify-center cursor-grab active:cursor-grabbing"
+        aria-label="打开 MVU 工作日志"
         @pointerdown="assistantFabPointerDown"
         @pointermove="assistantFabPointerMove"
         @pointerup="assistantFabPointerUp"

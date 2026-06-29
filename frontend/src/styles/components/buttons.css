@@ -56,6 +56,7 @@
       transform var(--transition-fast);
     user-select: none;
     white-space: nowrap;
+    min-height: 2.25rem;
   }
 
   .btn:hover:not(:disabled) {
@@ -64,12 +65,25 @@
 
   .btn:active:not(:disabled) {
     transform: translateY(0);
+    box-shadow: none;
   }
 
-  .btn:disabled {
+  .btn:disabled,
+  .btn[aria-disabled="true"],
+  .btn[aria-busy="true"] {
     opacity: 0.5;
     cursor: not-allowed;
     box-shadow: none;
+    transform: none;
+  }
+
+  .btn:focus-visible {
+    outline: 2px solid var(--color-focus-ring);
+    outline-offset: 2px;
+  }
+
+  .btn[aria-busy="true"] {
+    pointer-events: none;
   }
 
   /* ========== 尺寸变体 ========== */
@@ -77,16 +91,19 @@
     padding: 0.25rem 0.5rem;
     font-size: var(--text-xs);
     border-radius: var(--radius-md);
+    min-height: 1.75rem;
   }
 
   .btn-sm {
     padding: 0.375rem 0.75rem;
     font-size: var(--text-sm);
+    min-height: 2rem;
   }
 
   .btn-lg {
     padding: 0.75rem 1.5rem;
     font-size: var(--text-base);
+    min-height: 2.75rem;
   }
 
   /* ========== 颜色变体 ========== */
@@ -125,7 +142,7 @@
   }
 
   .btn-danger:hover:not(:disabled) {
-    background-color: rgba(239, 68, 68, 0.3);
+    background-color: var(--color-danger-hover);
   }
 
   .btn-success {
@@ -135,7 +152,23 @@
   }
 
   .btn-success:hover:not(:disabled) {
-    background-color: rgba(34, 197, 94, 0.3);
+    background-color: var(--color-success-hover);
+  }
+
+  .btn-loading,
+  .btn[aria-busy="true"] {
+    position: relative;
+  }
+
+  .btn-loading::before,
+  .btn[aria-busy="true"]::before {
+    content: "";
+    width: 0.875em;
+    height: 0.875em;
+    border-radius: var(--radius-full);
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    animation: spin 0.8s linear infinite;
   }
 
   /* ========== 聊天操作按钮（保留原有类名以兼容） ========== */
@@ -145,7 +178,7 @@
     justify-content: center;
     gap: 0.35rem;
     padding: 0.375rem 1rem;
-    border-radius: 0.6rem;
+    border-radius: var(--radius-lg);
     font-size: var(--text-sm);
     font-weight: 600;
     color: var(--color-text);
@@ -179,7 +212,7 @@
   .chat-action-button--continue {
     background-color: var(--color-success-bg);
     color: var(--color-success-text);
-    border-color: rgba(74, 222, 128, 0.2); /* green-400/20 */
+    border-color: color-mix(in srgb, var(--color-success) 22%, transparent);
     box-shadow: var(--shadow-success);
     backdrop-filter: blur(var(--blur-light));
   }
@@ -192,7 +225,7 @@
   .chat-action-button--next {
     background-color: var(--color-purple-bg);
     color: var(--color-purple-text);
-    border-color: rgba(192, 132, 252, 0.2); /* purple-400/20 */
+    border-color: color-mix(in srgb, var(--color-purple) 22%, transparent);
     box-shadow: var(--shadow-purple);
     backdrop-filter: blur(var(--blur-light));
   }
@@ -205,7 +238,7 @@
   .chat-action-button--stop {
     background-color: var(--color-error-bg);
     color: var(--color-error-text);
-    border-color: rgba(248, 113, 113, 0.2); /* red-400/20 */
+    border-color: color-mix(in srgb, var(--color-error) 22%, transparent);
     box-shadow: var(--shadow-error);
     backdrop-filter: blur(var(--blur-light));
   }
@@ -219,16 +252,50 @@
   .btn-icon {
     padding: 0.5rem;
     border-radius: var(--radius-lg);
+    min-width: 2.25rem;
   }
 
   .btn-icon-sm {
     padding: 0.375rem;
     border-radius: var(--radius-md);
+    min-width: 2rem;
   }
 
   .btn-icon-lg {
     padding: 0.75rem;
     border-radius: var(--radius-xl);
+    min-width: 2.75rem;
+  }
+
+  .icon-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-lg);
+    color: var(--color-text-secondary);
+    background-color: transparent;
+    border: 1px solid transparent;
+    transition:
+      background-color var(--transition-fast),
+      color var(--transition-fast),
+      border-color var(--transition-fast),
+      transform var(--transition-fast);
+  }
+
+  .icon-button:hover:not(:disabled) {
+    color: var(--color-text);
+    background-color: var(--color-surface-hover);
+    border-color: var(--color-border-subtle);
+    transform: translateY(-1px);
+  }
+
+  .icon-button:active:not(:disabled) {
+    transform: translateY(0);
+  }
+
+  .icon-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   /* ========== 按钮组 ========== */

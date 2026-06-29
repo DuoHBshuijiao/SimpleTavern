@@ -38,6 +38,8 @@
 import type { MainChatRole } from '../../types/models'
 import ModernAvatar from '../ModernAvatar.vue'
 import { Settings, X } from 'lucide-vue-next'
+import { useDialogBehavior } from '../../composables/useDialogBehavior'
+import { dialogAria } from '../../utils/uiPrimitives'
 
 const props = defineProps<{
   show: boolean
@@ -56,43 +58,57 @@ const emit = defineEmits<{
   'save': []
   'save-and-send': []
 }>()
+
+const titleId = 'message-editor-title'
+const dialogAttrs = dialogAria(titleId)
+
+function close() {
+  emit('update:show', false)
+}
+
+function updateMessageContent(event: Event) {
+  emit('update:messageContent', (event.target as HTMLTextAreaElement | null)?.value ?? '')
+}
+
+const { dialogRef } = useDialogBehavior(() => props.show, close)
+void dialogRef
 </script>
 
 <template>
   <Transition name="modal">
     <div v-if="show" class="modal">
-      <div class="modal-backdrop" @click="emit('update:show', false)"></div>
-      <div class="modal-content chat-modal-width-700-92 bg-gradient-to-br from-slate-800/70 to-slate-700/50 backdrop-blur-xl backdrop-saturate-[1.8] border border-white/10 shadow-glass-panel">
-        <div class="modal-header border-b border-white/5">
-          <h3 class="modal-title text-gray-100 font-semibold tracking-wide">编辑消息</h3>
-          <button class="modal-close text-gray-400 hover:text-white transition-colors p-1 rounded-lg hover:bg-white/10" @click="emit('update:show', false)">
+      <div class="modal-backdrop" @click="close"></div>
+      <div ref="dialogRef" v-bind="dialogAttrs" tabindex="-1" class="modal-content modal-surface chat-modal-width-700-92">
+        <div class="modal-header">
+          <h3 :id="titleId" class="modal-title">编辑消息</h3>
+          <button type="button" class="modal-close" aria-label="关闭编辑消息弹窗" @click="close">
               <X class="w-5 h-5" />
           </button>
         </div>
         <div class="modal-body p-6">
           <div class="space-y-6">
             <div class="form-group">
-              <label class="label text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 block">发送者 / 头像</label>
+              <label class="label text-xs font-bold uppercase tracking-wider mb-2 block">发送者 / 头像</label>
               <div class="flex flex-wrap gap-3">
                 <div 
-                  class="cursor-pointer border rounded-xl p-2 px-4 flex items-center gap-2 transition-all duration-200"
-                  :class="messageRole === 'system' ? 'border-brand bg-brand-a20 shadow-sm shadow-brand' : 'border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20'"
+                  class="surface-muted interactive-surface cursor-pointer p-2 px-4 flex items-center gap-2"
+                  :class="messageRole === 'system' ? 'surface-selected' : ''"
                   @click="emit('update:messageRole', 'system')"
                 >
                   <Settings class="w-4 h-4" :class="messageRole === 'system' ? 'text-brand-fg-soft' : 'text-[var(--color-text-muted)]'" />
                   <span class="text-sm font-medium" :class="messageRole === 'system' ? 'text-brand-light' : 'text-[var(--color-text-secondary)]'">系统</span>
                 </div>
                 <div 
-                  class="cursor-pointer border rounded-xl p-2 px-4 flex items-center gap-2 transition-all duration-200"
-                  :class="messageRole === 'assistant' ? 'border-brand bg-brand-a20 shadow-sm shadow-brand' : 'border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20'"
+                  class="surface-muted interactive-surface cursor-pointer p-2 px-4 flex items-center gap-2"
+                  :class="messageRole === 'assistant' ? 'surface-selected' : ''"
                   @click="emit('update:messageRole', 'assistant')"
                 >
                   <ModernAvatar :src="characterAvatarUrl" :size="20" aspect="1" rounded="rounded-sm" />
                   <span class="text-sm font-medium" :class="messageRole === 'assistant' ? 'text-brand-light' : 'text-[var(--color-text-secondary)]'">角色</span>
                 </div>
                 <div 
-                  class="cursor-pointer border rounded-xl p-2 px-4 flex items-center gap-2 transition-all duration-200"
-                  :class="messageRole === 'user' ? 'border-brand bg-brand-a20 shadow-sm shadow-brand' : 'border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20'"
+                  class="surface-muted interactive-surface cursor-pointer p-2 px-4 flex items-center gap-2"
+                  :class="messageRole === 'user' ? 'surface-selected' : ''"
                   @click="emit('update:messageRole', 'user')"
                 >
                   <ModernAvatar :src="userAvatarUrl" :size="20" aspect="1" rounded="rounded-sm" />
@@ -102,21 +118,22 @@ const emit = defineEmits<{
             </div>
 
             <div class="form-group">
-              <label class="label text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 block">内容</label>
+              <label class="label text-xs font-bold uppercase tracking-wider mb-2 block">内容</label>
               <textarea
                 :value="messageContent"
-                @input="emit('update:messageContent', ($event.target as HTMLTextAreaElement).value)"
-                class="input textarea h-64 w-full rounded-xl p-4 bg-black/20 border border-white/10 focus:border-brand-a50 text-gray-200 placeholder-gray-500/50 resize-none outline-none transition-all custom-scrollbar leading-relaxed"
+                @input="updateMessageContent"
+                class="input textarea h-64 w-full resize-none custom-scrollbar leading-relaxed"
                 placeholder="输入消息内容（支持 Markdown）"
               ></textarea>
             </div>
           </div>
         </div>
-        <div class="modal-footer p-4 border-t border-white/5 bg-black/20 flex justify-end gap-3">
-          <button class="px-4 py-2 rounded-xl text-sm font-medium bg-white/5 hover:bg-white/10 text-gray-300 border border-white/5 transition-all whitespace-nowrap min-w-[80px]" @click="emit('update:show', false)">取消</button>
-          <button class="px-4 py-2 rounded-xl text-sm font-medium bg-white/5 hover:bg-white/10 text-gray-300 border border-white/5 transition-all whitespace-nowrap min-w-[80px]" :disabled="isGenerating" @click="emit('save')">仅保存</button>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary min-w-[80px]" @click="close">取消</button>
+          <button type="button" class="btn btn-secondary min-w-[80px]" :disabled="isGenerating" @click="emit('save')">仅保存</button>
           <button 
-            class="px-4 py-2 rounded-xl text-sm font-medium bg-brand hover:bg-brand-hover text-on-brand shadow-brand border border-brand-a20 transition-all flex items-center gap-2 whitespace-nowrap" 
+            type="button"
+            class="btn btn-primary" 
             :disabled="isGenerating || messageRole === 'assistant'" 
             @click="emit('save-and-send')"
           >

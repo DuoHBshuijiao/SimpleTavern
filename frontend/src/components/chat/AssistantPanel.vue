@@ -296,12 +296,12 @@ watch(
   <!-- Teleport 到 body，避免主聊天区（含 z-50 助手按钮等）的层叠上下文遮挡侧栏下半部分 -->
   <Teleport to="body">
   <aside
-    class="fixed right-4 top-4 bottom-4 theme-panel-bg backdrop-blur-xl backdrop-saturate-[1.8] border border-[var(--color-border)] shadow-glass-panel rounded-2xl transition-all duration-300 overflow-hidden flex flex-col z-[100] pointer-events-auto"
+    class="drawer-surface fixed right-4 top-4 bottom-4 border border-[var(--color-border)] rounded-2xl transition-all duration-300 overflow-hidden flex flex-col z-floating pointer-events-auto"
     :class="isOpen ? 'translate-x-0 w-[min(360px,calc(100vw-2rem))] opacity-100' : 'translate-x-[calc(100%+20px)] w-[min(360px,calc(100vw-2rem))] opacity-0 pointer-events-none'"
     style="contain: content; will-change: transform, opacity;"
   >
     <!-- 头部 -->
-    <div class="flex items-center justify-between px-4 py-2 border-b border-white/5 shrink-0 bg-white/5 backdrop-blur-md">
+    <div class="flex items-center justify-between px-4 py-2 border-b border-[var(--color-border-subtle)] shrink-0 bg-[var(--color-surface-muted)]">
       <div class="flex min-w-0 flex-1 items-center">
         <div
           role="button"
@@ -312,8 +312,8 @@ watch(
           @keydown.enter.prevent="emit('switch-to-mvu')"
           @keydown.space.prevent="emit('switch-to-mvu')"
         >
-          <span class="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2 flex-wrap min-w-0">
-            <span class="w-2 h-2 rounded-full bg-[#b76e79] animate-pulse shrink-0"></span>
+          <span class="text-xs font-bold text-muted uppercase tracking-widest flex items-center gap-2 flex-wrap min-w-0">
+            <span class="w-2 h-2 rounded-full bg-[var(--color-assistant)] animate-pulse shrink-0"></span>
             聊天助手
             <span
               v-if="allowWriteMemory"
@@ -339,7 +339,7 @@ watch(
       <div class="flex shrink-0 items-center gap-2">
         <button
           type="button"
-          class="inline-flex items-center justify-center w-7 h-7 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] transition-colors shrink-0"
+          class="icon-button w-7 h-7 shrink-0"
           aria-label="更多"
           @click="emit('open-settings')"
         >
@@ -347,7 +347,7 @@ watch(
         </button>
         <button
           type="button"
-          class="inline-flex items-center justify-center w-7 h-7 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] transition-colors shrink-0"
+          class="icon-button w-7 h-7 shrink-0"
           aria-label="关闭"
           @click="emit('update:isOpen', false)"
         >
@@ -362,8 +362,8 @@ watch(
         ref="messagesListEl"
         class="min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-auto custom-scrollbar space-y-4 px-4 pt-3 pb-14"
       >
-      <div v-if="messages.length === 0" class="text-xs text-gray-600 text-center py-12 flex flex-col items-center gap-3">
-        <div class="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center text-xl">
+        <div v-if="messages.length === 0" class="text-xs text-muted text-center py-12 flex flex-col items-center gap-3">
+        <div class="surface-muted w-12 h-12 rounded-full flex items-center justify-center text-xl">
             <Sparkles class="w-6 h-6 text-yellow-400" />
         </div>
         开始和助手对话以获得帮助
@@ -389,30 +389,30 @@ watch(
         <div class="pointer-events-auto flex flex-wrap gap-2">
           <button
             type="button"
-            class="text-xs px-2.5 py-1 rounded-lg border transition-colors shadow-lg backdrop-blur-sm"
+            class="btn btn-xs"
             :class="allowWriteMemory
-              ? 'bg-brand/30 border-brand text-brand-foreground shadow-[0_0_0_1px_rgba(183,110,121,0.35)]'
-              : 'border-white/15 bg-black/40 text-gray-300 hover:border-white/25'"
+              ? 'btn-primary'
+              : 'btn-secondary'"
             @click="emit('toggle-write-memory')"
           >
             记忆写入
           </button>
           <button
             type="button"
-            class="text-xs px-2.5 py-1 rounded-lg border transition-colors shadow-lg backdrop-blur-sm"
+            class="btn btn-xs"
             :class="allowDestructiveTools
-              ? 'bg-amber-500/25 border-amber-500/60 text-amber-100 shadow-[0_0_0_1px_rgba(245,158,11,0.35)]'
-              : 'border-white/15 bg-black/40 text-gray-300 hover:border-white/25'"
+              ? 'btn-danger'
+              : 'btn-secondary'"
             @click="emit('toggle-destructive')"
           >
             破坏性工具
           </button>
           <button
             type="button"
-            class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg border transition-colors shadow-lg backdrop-blur-sm"
+            class="btn btn-xs"
             :class="allowWebSearch
-              ? 'bg-brand/30 border-brand text-brand-foreground shadow-[0_0_0_1px_rgba(183,110,121,0.35)]'
-              : 'border-white/15 bg-black/40 text-gray-300 hover:border-white/25'"
+              ? 'btn-primary'
+              : 'btn-secondary'"
             @click="emit('toggle-web-search')"
           >
             <Globe class="h-3 w-3" />
@@ -424,7 +424,7 @@ watch(
 
     <!-- 输入区域 -->
     <div
-      class="shrink-0 pt-4 pb-4 px-4 border-t border-white/5 bg-black/10 backdrop-blur-sm shadow-[0_-12px_32px_-8px_rgba(0,0,0,0.35)] relative z-10"
+      class="shrink-0 pt-4 pb-4 px-4 border-t border-[var(--color-border-subtle)] bg-[var(--color-surface-inset)] relative z-10"
       @dragenter.prevent="handleDragEnter"
       @dragover.prevent="handleDragOver"
       @dragleave="handleDragLeave"
@@ -434,12 +434,13 @@ watch(
         <div v-for="attachment in draftAttachments" :key="attachment.id">
           <div
             v-if="attachment.kind === 'image'"
-            class="relative h-20 w-20 overflow-hidden rounded-lg border border-white/10 bg-white/5"
+            class="relative h-20 w-20 overflow-hidden rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-surface-muted)]"
           >
             <img :src="buildAttachmentUrl(attachment)" :alt="getAttachmentLabel(attachment)" class="h-full w-full object-cover" />
             <button
               type="button"
-              class="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white"
+              class="icon-button absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-[var(--color-overlay-heavy)] text-[var(--color-text)]"
+              aria-label="移除附件"
               @click="emit('remove-attachment', attachment.id)"
             >
               <X class="h-3 w-3" />
@@ -448,12 +449,12 @@ watch(
           <button
             v-else
             type="button"
-            class="group relative flex max-w-[220px] items-start gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-left"
+            class="group surface-muted relative flex max-w-[220px] items-start gap-2 px-3 py-2 text-left"
             @click="emit('remove-attachment', attachment.id)"
           >
-            <span class="rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-gray-300">{{ getAttachmentExt(attachment) }}</span>
-            <span class="truncate text-xs text-gray-200">{{ getAttachmentLabel(attachment) }}</span>
-            <X class="ml-auto mt-0.5 h-3 w-3 shrink-0 text-gray-500 transition-colors group-hover:text-white" />
+            <span class="rounded bg-[var(--color-surface-inset)] px-1.5 py-0.5 text-[10px] font-semibold uppercase text-secondary">{{ getAttachmentExt(attachment) }}</span>
+            <span class="truncate text-xs text-primary">{{ getAttachmentLabel(attachment) }}</span>
+            <X class="ml-auto mt-0.5 h-3 w-3 shrink-0 text-muted transition-colors group-hover:text-primary" />
           </button>
         </div>
       </div>
@@ -463,7 +464,7 @@ watch(
           :value="draft"
           @input="handleDraftInput"
           @paste="handlePaste"
-          class="input textarea h-24 !bg-white/5 !border-white/10 focus:!border-brand-a40 focus:!bg-white/10 backdrop-blur-md"
+          class="input textarea h-24"
           placeholder="输入建议或要求 (Ctrl + Enter)..."
           :disabled="isGenerating"
           @keydown="handleKeydown"
@@ -500,7 +501,7 @@ watch(
       </div>
       <div
         v-show="isDragOverComposer"
-        class="pointer-events-none absolute inset-0 z-[21] bg-white/25 backdrop-blur-[2px] ring-1 ring-inset ring-white/40 transition-opacity duration-150"
+        class="pointer-events-none absolute inset-0 z-[21] bg-[var(--color-brand-a20)] ring-1 ring-inset ring-[var(--color-brand-a40)] transition-opacity duration-150"
         aria-hidden="true"
       />
     </div>

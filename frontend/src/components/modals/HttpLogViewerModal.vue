@@ -261,7 +261,7 @@ function detailEmbedId(itemId: string) {
     <div v-if="show" class="modal">
       <div class="modal-backdrop backdrop-blur-[var(--blur-heavy)]" @click="close"></div>
       <div
-        class="modal-content chat-modal-width-1200-90 glass-panel theme-panel-bg backdrop-blur-[var(--blur-heavy)] backdrop-saturate-[1.8] border border-[var(--color-border)] flex flex-col min-h-0"
+        class="modal-content modal-surface chat-modal-width-1200-90 flex flex-col min-h-0"
         style="max-height: 88vh"
       >
         <div

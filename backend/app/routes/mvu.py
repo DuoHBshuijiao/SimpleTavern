@@ -29,16 +29,37 @@ from app.storage import load_chat, load_knowledge_graph, load_mvu_logs, save_cha
 router = APIRouter(tags=["mvu"])
 
 
+def _load_chat_or_404(chat_id: str):
+    normalized = (chat_id or "").strip()
+    if not normalized:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "invalid_chat_id",
+                "message": "会话 ID 不能为空",
+                "chatId": chat_id,
+            },
+        )
+    try:
+        return load_chat(normalized)
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "chat_not_found",
+                "message": f"会话不存在：{normalized}",
+                "chatId": normalized,
+            },
+        ) from exc
+
+
 def _sse(event: str, data_obj: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data_obj, ensure_ascii=False)}\n\n"
 
 
 @router.get("/mvu/{chat_id}/stream")
 async def stream_mvu_work_log(chat_id: str) -> StreamingResponse:
-    try:
-        chat = load_chat(chat_id)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="chat not found")
+    chat = _load_chat_or_404(chat_id)
 
     ensure_mvu_worker(chat_id)
 
@@ -88,10 +109,7 @@ async def stream_mvu_work_log(chat_id: str) -> StreamingResponse:
 
 @router.get("/mvu/{chat_id}/state")
 def get_mvu_state(chat_id: str):
-    try:
-        chat = load_chat(chat_id)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="chat not found")
+    chat = _load_chat_or_404(chat_id)
     state = chat.stateVariables
     return {
         "ok": True,
@@ -101,10 +119,7 @@ def get_mvu_state(chat_id: str):
 
 @router.put("/mvu/{chat_id}/state")
 def update_mvu_state(chat_id: str, body: StateVariables):
-    try:
-        load_chat(chat_id)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="chat not found")
+    _load_chat_or_404(chat_id)
     body.source = "chat_assistant"
     updated = save_chat_state_variables(chat_id, body)
     return {
@@ -123,20 +138,14 @@ def _kg_response(kg):
 
 @router.get("/mvu/{chat_id}/knowledge-graph")
 def get_knowledge_graph(chat_id: str):
-    try:
-        load_chat(chat_id)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="chat not found")
+    _load_chat_or_404(chat_id)
     kg = load_knowledge_graph(chat_id)
     return _kg_response(kg)
 
 
 @router.delete("/mvu/{chat_id}/knowledge-graph")
 def clear_knowledge_graph(chat_id: str):
-    try:
-        load_chat(chat_id)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="chat not found")
+    _load_chat_or_404(chat_id)
     try:
         kg_svc.clear_graph(chat_id)
     except KnowledgeGraphError as e:
@@ -146,10 +155,7 @@ def clear_knowledge_graph(chat_id: str):
 
 @router.post("/mvu/{chat_id}/knowledge-graph/entities")
 def upsert_knowledge_graph_entity(chat_id: str, body: KgEntityUpsertBody):
-    try:
-        load_chat(chat_id)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="chat not found")
+    _load_chat_or_404(chat_id)
     try:
         kg, entity_id = kg_svc.upsert_entity(
             chat_id,
@@ -169,10 +175,7 @@ def upsert_knowledge_graph_entity(chat_id: str, body: KgEntityUpsertBody):
 
 @router.delete("/mvu/{chat_id}/knowledge-graph/entities/{entity_id}")
 def delete_knowledge_graph_entity(chat_id: str, entity_id: str, expectedVersion: int | None = None):
-    try:
-        load_chat(chat_id)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="chat not found")
+    _load_chat_or_404(chat_id)
     try:
         kg = kg_svc.delete_entity(
             chat_id,
@@ -187,10 +190,7 @@ def delete_knowledge_graph_entity(chat_id: str, entity_id: str, expectedVersion:
 
 @router.post("/mvu/{chat_id}/knowledge-graph/relations")
 def upsert_knowledge_graph_relation(chat_id: str, body: KgRelationUpsertBody):
-    try:
-        load_chat(chat_id)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="chat not found")
+    _load_chat_or_404(chat_id)
     try:
         kg = kg_svc.upsert_relation(
             chat_id,
@@ -208,10 +208,7 @@ def upsert_knowledge_graph_relation(chat_id: str, body: KgRelationUpsertBody):
 
 @router.delete("/mvu/{chat_id}/knowledge-graph/relations")
 def delete_knowledge_graph_relation(chat_id: str, body: KgRelationDeleteBody):
-    try:
-        load_chat(chat_id)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="chat not found")
+    _load_chat_or_404(chat_id)
     try:
         kg = kg_svc.delete_relation(
             chat_id,

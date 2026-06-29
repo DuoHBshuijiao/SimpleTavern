@@ -136,7 +136,7 @@ function asidePresetClass(collapsed: boolean) {
 
 const asideBaseClass = computed(() => {
   const shared =
-    'flex flex-col theme-panel-bg backdrop-blur-xl backdrop-saturate-[1.8] border border-[var(--color-border)] shadow-glass-panel rounded-2xl'
+    'surface-panel flex flex-col border border-[var(--color-border)] rounded-2xl'
   if (props.isNarrowPortrait) {
     return [
       shared,
@@ -377,7 +377,7 @@ function confirmDelete() {
         <div class="flex items-center justify-between mb-3 px-4 pt-4">
           <span class="text-xs text-[var(--color-text-secondary)] uppercase tracking-wider">我的身份</span>
           <button 
-            class="text-xs text-brand hover:text-brand-hover transition-colors px-2 py-0.5 rounded hover:bg-brand-a10" 
+            class="btn btn-xs btn-ghost text-brand" 
             @click="emit('create-persona')"
           >
             + 新建
@@ -389,7 +389,7 @@ function confirmDelete() {
             <div 
               v-for="p in personas"
               :key="p.id"
-              class="group flex items-center gap-3 p-2 rounded-xl transition-all duration-200 border-y border-r border-transparent border-l-2"
+              class="group surface-muted interactive-surface flex items-center gap-3 p-2 transition-all duration-200"
               :class="selectedPersonaId === p.id ? 'bg-brand-a10 border-l-brand' : 'border-l-transparent hover:bg-surface-muted'"
               style="border: 1px solid var(--color-border);"
               @click="emit('select-persona', p.id)"
@@ -399,17 +399,17 @@ function confirmDelete() {
                 <div class="text-sm truncate" :class="selectedPersonaId === p.id ? 'text-brand' : 'text-[var(--color-text-secondary)]'">{{ p.name }}</div>
               </div>
               <div
-                class="flex gap-1 transition-opacity ml-auto bg-surface-overlay rounded-lg backdrop-blur-sm p-0.5"
+                class="flex gap-1 transition-opacity ml-auto surface-inset p-0.5"
                 :class="
                   !preferHoverChrome && selectedPersonaId === p.id
                     ? 'opacity-100'
                     : 'opacity-0 group-hover:opacity-100'
                 "
               >
-                <button class="p-1 hover:text-[var(--color-text)] text-[var(--color-text-muted)] transition-colors" @click.stop="emit('edit-persona', p)">
+                <button class="icon-button p-1" aria-label="编辑身份" @click.stop="emit('edit-persona', p)">
                   <Pencil class="w-3.5 h-3.5" />
                 </button>
-                <button class="p-1 hover:text-error text-[var(--color-text-muted)] transition-colors" @click.stop="confirmDeletePersona(p, $event)">
+                <button class="icon-button p-1 hover:text-error" aria-label="删除身份" @click.stop="confirmDeletePersona(p, $event)">
                   <Trash2 class="w-3.5 h-3.5" />
                 </button>
               </div>
@@ -427,7 +427,7 @@ function confirmDelete() {
         <div class="flex items-center justify-between mb-2 px-1">
           <span class="text-xs text-[var(--color-text-secondary)] uppercase tracking-wider">角色列表</span>
           <button 
-            class="text-xs text-brand hover:text-brand-hover transition-colors px-2 py-0.5 rounded hover:bg-brand-a10" 
+            class="btn btn-xs btn-ghost text-brand" 
             @click="emit('create-character')"
           >
             + 新建
@@ -439,8 +439,8 @@ function confirmDelete() {
             v-for="c in characters"
             :key="c.id"
             :data-character-id="c.id"
-            class="group relative flex items-start gap-3 p-3 rounded-2xl transition-all duration-200 border-y border-r border-transparent border-l-2"
-            :class="selectedCharacterId === c.id ? 'bg-brand-a10 border-l-brand shadow-sm' : 'border-l-transparent hover:bg-surface-muted'"
+            class="group surface-muted interactive-surface relative flex items-start gap-3 p-3 transition-all duration-200"
+            :class="selectedCharacterId === c.id ? 'surface-selected' : ''"
             style="border: 1px solid var(--color-border);"
             @click="emit('update:selectedCharacterId', c.id)"
           >
@@ -463,17 +463,17 @@ function confirmDelete() {
             </div>
 
             <div
-              class="absolute top-3 right-2 transition-opacity bg-surface-overlay rounded-lg backdrop-blur-sm p-0.5 flex gap-1"
+              class="absolute top-3 right-2 transition-opacity surface-inset p-0.5 flex gap-1"
               :class="
                 !preferHoverChrome && selectedCharacterId === c.id
                   ? 'opacity-100'
                   : 'opacity-0 group-hover:opacity-100'
               "
             >
-              <button class="p-1.5 hover:text-[var(--color-text)] text-[var(--color-text-muted)] transition-colors" @click.stop="emit('edit-character', c)">
+              <button class="icon-button p-1.5" aria-label="编辑角色" @click.stop="emit('edit-character', c)">
                 <Pencil class="w-4 h-4" />
               </button>
-              <button class="p-1.5 hover:text-error text-[var(--color-text-muted)] transition-colors" @click.stop="confirmDeleteCharacter(c, $event)">
+              <button class="icon-button p-1.5 hover:text-error" aria-label="删除角色" @click.stop="confirmDeleteCharacter(c, $event)">
                 <Trash2 class="w-4 h-4" />
               </button>
             </div>
@@ -487,14 +487,14 @@ function confirmDelete() {
           <span class="text-xs text-[var(--color-text-secondary)] uppercase tracking-wider">历史会话</span>
           <div class="flex gap-2">
             <button 
-              class="text-xs bg-[var(--color-purple-bg)] hover:opacity-90 text-[var(--color-purple)] px-2 py-1 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed" 
+              class="btn btn-xs btn-secondary text-[var(--color-purple)]" 
               :disabled="characters.length < 2" 
               @click="emit('create-group')"
             >
               + 群聊
             </button>
             <button 
-              class="text-xs bg-brand-a20 hover:bg-brand-a30 text-brand px-2 py-1 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              class="btn btn-xs btn-primary"
               :disabled="!selectedCharacterId" 
               @click="emit('create-chat')"
             >
@@ -562,7 +562,7 @@ function confirmDelete() {
               
               <div
                 v-if="editingChatId !== c.id"
-                class="flex gap-1 shrink-0 ml-auto bg-surface-overlay rounded-md backdrop-blur-sm transition-opacity"
+                class="surface-inset flex gap-1 shrink-0 ml-auto transition-opacity"
                 :class="
                   !preferHoverChrome && activeChatId === c.id
                     ? 'opacity-100'
@@ -576,10 +576,10 @@ function confirmDelete() {
                 >
                   <Copy class="w-3.5 h-3.5" />
                 </button>
-                <button class="p-1 hover:text-[var(--color-text)] text-[var(--color-text-secondary)] transition-colors" @click.stop="emit('start-edit-title', c.id, c.title)">
+                <button class="icon-button p-1" aria-label="重命名会话" @click.stop="emit('start-edit-title', c.id, c.title)">
                   <Pencil class="w-3.5 h-3.5" />
                 </button>
-                <button class="p-1 hover:text-error text-[var(--color-text-secondary)] transition-colors" @click.stop="confirmDeleteChat(c, $event)">
+                <button class="icon-button p-1 hover:text-error" aria-label="删除会话" @click.stop="confirmDeleteChat(c, $event)">
                   <Trash2 class="w-3.5 h-3.5" />
                 </button>
               </div>
@@ -643,7 +643,7 @@ function confirmDelete() {
               
               <div
                 v-if="editingChatId !== c.id"
-                class="flex gap-1 shrink-0 ml-auto bg-surface-overlay rounded-md backdrop-blur-sm transition-opacity"
+                class="surface-inset flex gap-1 shrink-0 ml-auto transition-opacity"
                 :class="
                   !preferHoverChrome && activeChatId === c.id
                     ? 'opacity-100'
@@ -664,10 +664,10 @@ function confirmDelete() {
                 >
                   <Copy class="w-3.5 h-3.5" />
                 </button>
-                <button class="p-1 hover:text-[var(--color-text)] text-[var(--color-text-secondary)] transition-colors" @click.stop="emit('start-edit-title', c.id, c.title)">
+                <button class="icon-button p-1" aria-label="重命名群聊" @click.stop="emit('start-edit-title', c.id, c.title)">
                   <Pencil class="w-3.5 h-3.5" />
                 </button>
-                <button class="p-1 hover:text-error text-[var(--color-text-secondary)] transition-colors" @click.stop="confirmDeleteChat(c, $event)">
+                <button class="icon-button p-1 hover:text-error" aria-label="删除群聊" @click.stop="confirmDeleteChat(c, $event)">
                   <Trash2 class="w-3.5 h-3.5" />
                 </button>
               </div>
@@ -695,7 +695,7 @@ function confirmDelete() {
 
   <!-- 侧边栏开关 -->
   <div 
-    class="fixed top-1/2 -translate-y-1/2 z-50 cursor-pointer p-2 bg-brand-a30 hover:bg-brand-a50 rounded-r-lg backdrop-blur-sm transition-all duration-300 border border-l-0 border-brand-a40 shadow-heavy"
+    class="fixed top-1/2 -translate-y-1/2 z-floating cursor-pointer p-2 bg-brand-a30 hover:bg-brand-a50 rounded-r-lg transition-all duration-300 border border-l-0 border-brand-a40 shadow-heavy"
     :class="collapsed ? 'left-0' : 'left-[21rem]'"
     role="button"
     tabindex="0"

@@ -111,7 +111,7 @@ watch(
     <div v-if="show" class="modal">
       <div class="modal-backdrop backdrop-blur-[var(--blur-heavy)]" @click="close"></div>
       <div
-        class="modal-content w-[80vw] max-w-[80vw] glass-panel theme-panel-bg backdrop-blur-[var(--blur-heavy)] backdrop-saturate-[1.8] border border-[var(--color-border)] flex flex-col min-h-0"
+        class="modal-content modal-surface w-[80vw] max-w-[80vw] flex flex-col min-h-0"
       >
         <div class="modal-header border-b border-[var(--color-border-subtle)] shrink-0">
           <h3 class="modal-title text-[var(--color-text)]">编辑 WGSL 着色器</h3>

@@ -26,6 +26,8 @@ import {
 import { useViewportNarrowPortrait } from '../../composables/useViewportNarrowPortrait'
 import { notifyConfirm } from '../../composables/useNotify'
 import ModernSelect from '../ModernSelect.vue'
+import { useDialogBehavior } from '../../composables/useDialogBehavior'
+import { dialogAria } from '../../utils/uiPrimitives'
 
 const props = defineProps<{
   show: boolean
@@ -107,6 +109,11 @@ function close() {
   emit('update:show', false)
 }
 
+const titleId = 'knowledge-graph-title'
+const dialogAttrs = dialogAria(titleId)
+const { dialogRef } = useDialogBehavior(() => props.show, close)
+void dialogRef
+
 function syncInjectUiFromChat() {
   const ov = chatsStore.activeChat?.overrides
   if (!ov) {
@@ -158,6 +165,10 @@ function onBeforeLastRoleSelect(opt: unknown) {
   const v = typeof opt === 'string' ? opt : String((opt as { value?: string })?.value ?? 'assistant')
   beforeLastRoleUi.value = v as KnowledgeGraphBeforeLastRole
   scheduleInjectSave()
+}
+
+function onEntityTypeSelect(opt: unknown) {
+  editType.value = (typeof opt === 'string' ? opt : String((opt as { value?: string })?.value ?? '人物')) as KgEntityType
 }
 
 function applyKgFromResponse(data: KnowledgeGraphResponse) {
@@ -398,21 +409,21 @@ onUnmounted(() => destroyNetwork())
   <Teleport to="body">
     <div
       v-if="show"
-      class="fixed inset-0 z-[200] flex items-center justify-center p-4 pointer-events-auto"
-      role="dialog"
-      aria-modal="true"
-      aria-label="知识图谱"
+      class="modal pointer-events-auto"
     >
       <div
-        class="absolute inset-0 bg-black/50"
+        class="modal-backdrop"
         @click="close"
       />
       <div
-        class="relative flex flex-col w-[min(1100px,calc(100vw-2rem))] h-[min(720px,calc(100vh-2rem))] theme-panel-bg border border-[var(--color-border)] rounded-2xl shadow-glass-panel overflow-hidden"
+        ref="dialogRef"
+        v-bind="dialogAttrs"
+        tabindex="-1"
+        class="modal-content modal-surface relative flex flex-col w-[min(1100px,calc(100vw-2rem))] h-[min(720px,calc(100vh-2rem))] overflow-hidden"
       >
         <header class="flex items-center justify-between gap-3 px-4 py-3 border-b border-[var(--color-border-subtle)] shrink-0">
           <div class="min-w-0">
-            <h2 class="text-sm font-semibold text-[var(--color-text)]">知识图谱</h2>
+            <h2 :id="titleId" class="text-sm font-semibold text-[var(--color-text)]">知识图谱</h2>
             <p class="text-xs text-[var(--color-text-muted)] mt-0.5">{{ statsLabel }}</p>
           </div>
           <div class="flex items-center gap-2 shrink-0">
@@ -432,7 +443,7 @@ onUnmounted(() => destroyNetwork())
             >
               新建关系
             </button>
-            <button type="button" class="p-1.5 rounded-lg text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)]" aria-label="关闭" @click="close">
+            <button type="button" class="modal-close" aria-label="关闭知识图谱弹窗" @click="close">
               <X class="w-4 h-4" />
             </button>
           </div>
@@ -446,7 +457,7 @@ onUnmounted(() => destroyNetwork())
         >
           <div
             ref="graphContainer"
-            class="bg-[var(--color-surface-muted)]"
+            class="bg-[var(--color-surface-inset)]"
             :class="
               isNarrowPortrait
                 ? 'w-full min-h-[38vh] shrink-0 border-b border-[var(--color-border-subtle)]'
@@ -512,7 +523,7 @@ onUnmounted(() => destroyNetwork())
                   :model-value="editType"
                   :options="KG_ENTITY_TYPES.map((t) => ({ label: t, value: t }))"
                   class="w-full"
-                  @select="(opt) => { editType = (typeof opt === 'string' ? opt : String(opt.value)) as KgEntityType }"
+                  @select="onEntityTypeSelect"
                 />
               </label>
               <label class="block space-y-1">

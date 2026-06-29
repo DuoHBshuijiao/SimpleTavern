@@ -37,18 +37,15 @@ async function copyMessage() {
     @mouseenter="emit('pause', item.id)"
     @mouseleave="emit('resume', item.id)"
   >
-    <div
-      class="rounded-xl border border-red-400/30 bg-red-500/10 shadow-lg overflow-hidden"
-      style="backdrop-filter: blur(var(--blur-light)); -webkit-backdrop-filter: blur(var(--blur-light));"
-    >
-      <div class="flex items-center justify-between px-3 py-2 border-b border-red-400/20">
-        <div class="text-sm font-semibold text-red-200">{{ item.title }}</div>
-        <button class="p-1 rounded text-red-200/80 hover:text-red-100 hover:bg-white/10 transition-colors" @click="emit('close', item.id)">
+    <div class="surface-panel overflow-hidden border-[color-mix(in_srgb,var(--color-error)_30%,transparent)] bg-[var(--color-error-bg)]">
+      <div class="flex items-center justify-between px-3 py-2 border-b border-[color-mix(in_srgb,var(--color-error)_20%,transparent)]">
+        <div class="text-sm font-semibold text-[var(--color-error-text)]">{{ item.title }}</div>
+        <button type="button" class="icon-button p-1 text-[var(--color-error-text)]" aria-label="关闭错误提示" @click="emit('close', item.id)">
           <X class="w-4 h-4" />
         </button>
       </div>
       <div class="px-3 py-2">
-        <pre class="text-xs leading-5 text-red-100/95 whitespace-pre-wrap break-words max-h-44 overflow-auto">{{ item.message }}</pre>
+        <pre class="text-xs leading-5 text-[var(--color-error-text)] whitespace-pre-wrap break-words max-h-44 overflow-auto">{{ item.message }}</pre>
       </div>
       <div class="px-3 pb-3 flex justify-end">
         <button class="btn btn-xs btn-secondary" @click="copyMessage">
