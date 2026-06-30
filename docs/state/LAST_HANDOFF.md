@@ -1,7 +1,7 @@
 # Last Handoff
 
-- last_task: `T-210-composables-phase2b` + `T-211-teleport-modals`
-- status: in-progress（v0.700 约 68%）
-- summary: T-210 完成 `useChatHeaderLayout`、`useChatFabSeparation` + 单测并接入 ChatPage。T-211 首批：SettingsDrawer 三个 Teleport 弹层拆为独立子组件（正文正则编辑、模型选择、音色选择），草稿与 save 逻辑仍留父组件。
-- verify: frontend 23 文件 102 tests + build 通过。
-- next_read: `docs/tasks/T-211-v0700-settings-drawer-split.md`（Global Tab accordion）
+- last_task: `T-211-global-accordion-batch1`
+- status: in-progress（v0.700 约 72%）
+- summary: SettingsDrawer Global Tab 首批 accordion 拆出：共用 `SettingsDrawerGlobalAccordion` + 网络搜索 / TTS 全局 / 应用与更新（检查更新）三节；草稿与 `handleSaveAll` 仍留父组件。
+- verify: frontend 102 tests + build 通过。
+- next_read: `docs/tasks/T-211-v0700-settings-drawer-split.md`（Presets Tab 或其余 Global accordion）

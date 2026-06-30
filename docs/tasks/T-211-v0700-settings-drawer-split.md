@@ -6,13 +6,18 @@
 
 ## 已完成
 
-1. Teleport 子组件：`SettingsDrawerRegexRuleEditorModal`、`SettingsDrawerModelSelectorModal`、`SettingsDrawerVoiceSelectorModal`（草稿/保存逻辑仍留父组件）
+1. Teleport 子组件：`SettingsDrawerRegexRuleEditorModal`、`SettingsDrawerModelSelectorModal`、`SettingsDrawerVoiceSelectorModal`
+2. Global Tab accordion（首批）：
+   - `SettingsDrawerGlobalAccordion`（共用折叠壳）
+   - `SettingsDrawerGlobalWebSearchSection`
+   - `SettingsDrawerGlobalTtsSection`
+   - `SettingsDrawerGlobalAppSection`（含检查更新 / HTTP 日志入口）
 
 ## 待做
 
-2. Global Tab accordion：Web Search、TTS 全局、检查更新
-3. Presets Tab 整体
-4. Chat Tab：世界书、正文正则列表、TTS 会话
+3. Global Tab 其余 accordion：连接、提示词、外观与数据（可复用 `SettingsDrawerGlobalAccordion`）
+4. Presets Tab 整体
+5. Chat Tab：世界书、正文正则列表、TTS 会话
 
 ## 约束
 

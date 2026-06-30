@@ -36,7 +36,7 @@
 
 ### SettingsDrawer 拆分（T-211 进行中）
 
-- 正文正则编辑、模型选择、音色选择三个 Teleport 弹层拆至 `components/settings-drawer/` 子组件。
+- Teleport 三弹层 + Global Tab accordion 首批（网络搜索、TTS 全局、应用与更新）拆至 `components/settings-drawer/`。
 
 ### 测试
 
