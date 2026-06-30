@@ -1,16 +1,18 @@
 # 当前任务
 
 - current: `v0.700`
-- status: done
-- next_read: `docs/01-ROADMAP.md`
-- goal: v0.700 完成——组件化/可观测性 + UI/UX 一致性批次（Impeccable 检测通过 ChatPage/ChatSidebar 关键项）。
+- status: in-progress
+- next_read: `docs/tasks/T-210-v0700-chat-composables-phase2.md`（中风险 composable）→ `T-211` SettingsDrawer 拆分
+- goal: v0.700 全量完成——前端拆分 + 全面 UI/动画 + 可观测性；v0.800 专责后端性能。
 
-## 验证
+## 完成度（约 62%）
 
-- `cd frontend && npm run test` 通过，18 文件 88 tests；`npm run build` 通过。
-- `cd backend && python -m pytest tests/ -q` 通过，114 tests。
-- `npx impeccable detect frontend/src/views/ChatPage.vue frontend/src/components/chat/ChatSidebar.vue` 无 anti-pattern。
+- 已完成：T-201~209（测试基座、6 composable、数据完整性、import warning、UI/Impeccable 扫尾）
+- 进行中：T-210 第二批 composable（入场动画/Esc/思考链已完成；顶栏布局/FAB 待做）
+- 待做：T-211~214（SettingsDrawer/ChatPage 拆分、ChatInput 动效、收尾）
 
-## 完成后
+## 验证（每批后）
 
-下一轮 AI 读 `docs/01-ROADMAP.md` 的 v0.800+ 方向。
+- `cd frontend && npm run test && npm run build`
+- `npx impeccable detect src/components/chat`（ChatInput margin 属 T-213）
+- `cd backend && python -m pytest tests/ -q`（可观测性改动时）

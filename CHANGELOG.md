@@ -24,6 +24,20 @@
 - 图片回退弹层对齐 `modal-surface` 与语义 error token，去除硬编码 red-* 色值。
 - 会话搜索区补 `role="search"` 与导航按钮 `aria-label`；数据完整性巡检展示 kind 标签并优化文案。
 
+### UI/动画扫尾（T-209）
+
+- 新增 `--radius-scrollbar`、`--radius-xs`；全局 `.custom-scrollbar` 收束至 `scrollbar.css`，删除各组件重复 scoped 块。
+- SettingsDrawer 正文正则列表移除 `border-l-4` side-tab，改用 `surface-selected`。
+- Impeccable detect 通过 chat/modals/SettingsDrawer（ChatInput `margin-top` 动画留 T-213）。
+
+### ChatPage composable 扩展（T-210 进行中）
+
+- 新增 `useMessageListEnterAnimations`、`useGlobalEscapeStack`、`useMainChatReasoning` 及单测；ChatPage 接入。
+
+### 测试
+
+- 截至 T-209/T-210a：前端 97 测试、后端 114 测试全通过。
+
 ## v0.601
 
 ### 无障碍

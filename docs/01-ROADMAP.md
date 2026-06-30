@@ -27,34 +27,45 @@
 
 ## v0.700 定位
 
-`v0.700` 是“组件化与可观测性强化版本”。在不改变现有行为的前提下，建立前端组件测试基座、把 `ChatPage.vue` 中最内聚的低风险逻辑块提炼为 composable，并扩展后端数据完整性扫描与导入/导出可观测性，使长会话维护与数据修复更透明。
+`v0.700` 是「前端组件化 + 全面 UI/动画 + 可观测性」版本。在本版本内完成：
 
-### v0.700 已完成
+1. **组件化**：ChatPage / SettingsDrawer 渐进拆分与 composable 提炼（含生成流前的中低风险块；生成/SSE orchestration 在本版内排期但次于 UI 与低风险 composable）。
+2. **UI/动画**：Impeccable 全量扫尾——圆角/滚动条 token 化、消除 side-tab、弹层/error surface 统一、动效 150–250ms 与 `prefers-reduced-motion`。
+3. **可观测性**：数据完整性扩展、导入/导出 warning（已完成首批）。
 
-- 前端组件测试基座：引入 `@vue/test-utils` + `happy-dom`，建立可挂载 SFC 的组件测试模式与 `ThemedCheckbox` 示例。
-- ChatPage composable 提炼（第一批，低风险、template 不变）：`useChatSearch`、`useImageStickyBinding`、`useForkLineage`，各配 composable 单测，类型检查 + 单测双重保护。
-- 数据完整性扫描扩展：从仅 chat/assistant JSON 扩展到 `settings.json`、`assistant_settings.json`、`characters/`、`worldbooks/`，并新增 chat.characterId 的 orphan 引用检测；新增类别一律“仅检测、不自动修复”（repairAction=none），孤儿会话不会被按 chat 规则自动删除；前端巡检区分自动清理与人工处理。
-- 导入/导出可观测性：修复导入提示互斥丢失 MVU 兼容 warning；TXT(Version 2) 会话导入透传此前被静默丢弃的逐行 warning。
-- UI/UX 一致性（Impeccable 批次）：收束顶栏 chip / 更多菜单圆角到 `--radius-*` token；新增 `--radius-track` 统一细滚动条；ChatSidebar 会话列表移除 side-tab `border-l-2`，改用 `surface-selected` + 透明边框选中态；图片回退弹层对齐 `modal-surface` + 语义 error token；会话搜索区补 `role="search"` 与按钮 `aria-label`；数据完整性巡检文案展示 kind 标签并提取 `dataIntegrityNotify` 纯函数 + 测试。
+**v0.800** 专注**后端性能改进**（索引、扫描、生成路径优化等），不再承担前端拆分与 UI 主责。
 
-### v0.700 未纳入（顺延 v0.800+）
+### v0.700 已完成（约 45%）
 
-- card.attachedWorldBookIds 悬空等更多 orphan 类型、导出跳过项告知、JSONL 之外更多导入路径的 warning 透传。
+- 前端组件测试基座（`@vue/test-utils` + `happy-dom`）。
+- ChatPage composable 第一批：`useChatSearch`、`useImageStickyBinding`、`useForkLineage` + 单测。
+- 数据完整性扫描扩展 + 导入 warning 修复。
+- UI/UX 首批：ChatPage 顶栏 + ChatSidebar 选中态 + 图片回退弹层 + 搜索 a11y + 完整性巡检文案。
 
-### v0.700 边界（推迟到 v0.800+）
+### v0.700 进行中 / 待完成
 
-- 不拆分 `ChatPage.vue` 的生成/SSE orchestration（共享 defer/reasoning/stream 状态，风险极高）。
-- 不做 `SettingsDrawer.vue` 大规模 Tab 拆分（统一草稿 + 单次保存耦合深）。
+| 批次 | 任务卡 | 内容 |
+|------|--------|------|
+| UI/动画 | T-209 | chat/modals/SettingsDrawer Impeccable 扫尾、`.custom-scrollbar` 全局化、side-tab 消除 |
+| 组件化 | T-210 | ChatPage composable 第二批（入场动画、Esc 栈、reasoning、顶栏布局…） |
+| 拆分 | T-211 | SettingsDrawer 渐进拆分 |
+| 组件化 | T-212+ | ChatPage 角色编辑/导入导出子模块；`GenerationDeferState` 后拆生成/SSE |
+| UI/动画 | T-213 | ChatInput sink 动效（去 margin transition）、全站 motion audit |
+| 可观测性 | T-214 | orphan 扩展、导出 warning 等剩余项 |
+
+### v0.700 边界
+
 - 不新增原生 Responses / Anthropic / Gemini 协议栈。
-- 不做 Playwright E2E、不做后端全局 chatId 索引迁移。
+- Playwright E2E 可推迟至 v0.900+，但组件测试基座在本版内继续扩展。
 
-## v0.800+ 方向
+## v0.800 定位
 
-- 继续提炼 ChatPage 顶栏布局、TTS 策略、角色编辑等中风险块。
-- 设计统一 `GenerationDeferState` 接口后再拆生成/SSE orchestration。
-- 渐进拆分 SettingsDrawer（先 Teleport/Modal，再 Presets/Chat Tab）。
-- 逐步建立协议层抽象，为 Responses、Anthropic、Gemini 原生协议做准备。
-- 关键路径 E2E。
+**后端性能改进版本**：chatId 索引、扫描/加载路径优化、生成与 MVU 热路径 profiling、缓存与 I/O 批量化等。前端仅做性能相关的小幅配合（若必要），**不承担** SettingsDrawer/ChatPage 大拆与 UI 全面扫尾。
+
+## v0.900+ / v1.000
+
+- 协议层抽象（Responses / Anthropic / Gemini）。
+- Playwright E2E、后端全局索引迁移（若未在 v0.800 完成）。
 
 ## v1.000 发布定义
 
