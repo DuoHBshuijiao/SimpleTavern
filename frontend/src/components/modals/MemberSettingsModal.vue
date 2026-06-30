@@ -35,6 +35,8 @@ import type { GroupMemberSettings, CharacterCard } from '../../types/models'
 import ModernAvatar from '../ModernAvatar.vue'
 import ModernSelect from '../ModernSelect.vue'
 import ThemedCheckbox from '../ThemedCheckbox.vue'
+import { useDialogBehavior } from '../../composables/useDialogBehavior'
+import { dialogAria } from '../../utils/uiPrimitives'
 
 interface ModelOption {
   label: string
@@ -103,6 +105,11 @@ function close() {
   emit('update:show', false)
 }
 
+const titleId = 'member-settings-title'
+const dialogAttrs = dialogAria(titleId)
+const { dialogRef } = useDialogBehavior(() => props.show && !!props.memberId, close)
+void dialogRef
+
 /**
  * 保存设置
  *
@@ -117,9 +124,9 @@ function save() {
   <Transition name="modal">
     <div v-if="show && memberId" class="modal">
       <div class="modal-backdrop" @click="close"></div>
-      <div class="modal-content modal-surface chat-modal-width-500-90" role="dialog" aria-modal="true" aria-labelledby="member-settings-title">
+      <div ref="dialogRef" v-bind="dialogAttrs" tabindex="-1" class="modal-content modal-surface chat-modal-width-500-90">
         <div class="modal-header">
-          <h3 id="member-settings-title" class="modal-title">成员设置</h3>
+          <h3 :id="titleId" class="modal-title">成员设置</h3>
           <button type="button" class="modal-close" aria-label="关闭成员设置弹窗" @click="close">×</button>
         </div>
         <div class="modal-body space-y-6">

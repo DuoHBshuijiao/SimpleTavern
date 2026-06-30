@@ -36,6 +36,8 @@ import ModernSelect from '../ModernSelect.vue'
 import ThemedCheckbox from '../ThemedCheckbox.vue'
 import MvuCapabilityEditor from '../chat/MvuCapabilityEditor.vue'
 import { characterHasMvuProfileData } from '../../utils/groupMvu'
+import { useDialogBehavior } from '../../composables/useDialogBehavior'
+import { dialogAria } from '../../utils/uiPrimitives'
 
 const props = defineProps<{
   show: boolean
@@ -305,16 +307,26 @@ function handleCreate() {
   })
   emit('update:show', false)
 }
+
+const titleId = 'group-creator-title'
+const dialogAttrs = dialogAria(titleId)
+
+function close() {
+  emit('update:show', false)
+}
+
+const { dialogRef } = useDialogBehavior(() => props.show, close)
+void dialogRef
 </script>
 
 <template>
   <Transition name="modal">
     <div v-if="show" class="modal">
-      <div class="modal-backdrop" @click="emit('update:show', false)"></div>
-      <div class="modal-content modal-surface chat-modal-width-600-90" role="dialog" aria-modal="true" aria-labelledby="group-creator-title">
+      <div class="modal-backdrop" @click="close"></div>
+      <div ref="dialogRef" v-bind="dialogAttrs" tabindex="-1" class="modal-content modal-surface chat-modal-width-600-90">
         <div class="modal-header">
-          <h3 id="group-creator-title" class="modal-title">{{ isMigrateMode ? '从单聊转为群聊' : '创建群聊' }}</h3>
-          <button type="button" class="modal-close" aria-label="关闭群聊创建弹窗" @click="emit('update:show', false)">×</button>
+          <h3 :id="titleId" class="modal-title">{{ isMigrateMode ? '从单聊转为群聊' : '创建群聊' }}</h3>
+          <button type="button" class="modal-close" aria-label="关闭群聊创建弹窗" @click="close">×</button>
         </div>
         <div class="modal-body">
           <div class="space-y-6">
@@ -528,7 +540,7 @@ function handleCreate() {
   background: transparent;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--color-border);
   border-radius: 2px;
 }
 </style>

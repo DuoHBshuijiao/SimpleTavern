@@ -4,6 +4,8 @@
  */
 import { ref, watch } from 'vue'
 import { X } from 'lucide-vue-next'
+import { useDialogBehavior } from '../../composables/useDialogBehavior'
+import { dialogAria } from '../../utils/uiPrimitives'
 
 const props = defineProps<{
   show: boolean
@@ -46,6 +48,11 @@ function close() {
   emit('update:show', false)
 }
 
+const titleId = 'world-book-session-attach-title'
+const dialogAttrs = dialogAria(titleId)
+const { dialogRef } = useDialogBehavior(() => props.show, close)
+void dialogRef
+
 function save() {
   let sd: number | null = null
   // type="number" 的 v-model 可能得到 number，不能对数字调用 .trim()
@@ -66,11 +73,13 @@ function save() {
       <div v-if="show" class="modal">
         <div class="modal-backdrop" @click="close"></div>
         <div
+          ref="dialogRef"
+          v-bind="dialogAttrs"
+          tabindex="-1"
           class="modal-content modal-surface w-[min(92vw,400px)]"
-          style="backdrop-filter: blur(var(--blur-heavy)); -webkit-backdrop-filter: blur(var(--blur-heavy))"
         >
           <div class="modal-header shrink-0">
-            <h3 class="modal-title">会话世界书参数</h3>
+            <h3 :id="titleId" class="modal-title">会话世界书参数</h3>
             <button type="button" class="modal-close" aria-label="关闭" @click="close">
               <X class="w-5 h-5" />
             </button>

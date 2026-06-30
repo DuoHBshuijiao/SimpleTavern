@@ -6,6 +6,8 @@ import { notifyMessage } from '../../composables/useNotify'
 import type { CharacterCard, Chat, MvuMode, UserPersona } from '../../types/models'
 import ModernSelect from '../ModernSelect.vue'
 import ThemedCheckbox from '../ThemedCheckbox.vue'
+import { useDialogBehavior } from '../../composables/useDialogBehavior'
+import { dialogAria } from '../../utils/uiPrimitives'
 
 declare global {
   interface Window {
@@ -178,6 +180,11 @@ watch(
 function close() {
   emit('update:show', false)
 }
+
+const titleId = 'chat-import-title'
+const dialogAttrs = dialogAria(titleId)
+const { dialogRef } = useDialogBehavior(() => props.show, close)
+void dialogRef
 
 function triggerImport() {
   importInputRef.value?.click()
@@ -427,12 +434,15 @@ async function confirmJanitorImport() {
   <Transition name="modal">
     <div v-if="show" class="modal">
       <!-- 背景模糊须用 Tailwind backdrop-*（见 README / glass.css：手写 backdrop-filter 经 esbuild 压缩可能失效） -->
-      <div class="modal-backdrop backdrop-blur-[var(--blur-heavy)]" @click="close"></div>
+      <div class="modal-backdrop" @click="close"></div>
       <div
+        ref="dialogRef"
+        v-bind="dialogAttrs"
+        tabindex="-1"
         class="modal-content modal-surface chat-modal-width-568-90 min-w-0"
       >
         <div class="modal-header border-b border-[var(--color-border-subtle)]">
-          <h3 class="modal-title text-[var(--color-text)]">导入</h3>
+          <h3 :id="titleId" class="modal-title text-[var(--color-text)]">导入</h3>
           <button type="button" class="modal-close" aria-label="关闭导入弹窗" @click="close">×</button>
         </div>
         <div class="modal-body">

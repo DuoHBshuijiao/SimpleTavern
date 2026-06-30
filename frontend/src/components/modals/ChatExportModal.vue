@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { useDialogBehavior } from '../../composables/useDialogBehavior'
+import { dialogAria } from '../../utils/uiPrimitives'
+
 const props = defineProps<{
   show: boolean
   disabled?: boolean
@@ -9,9 +12,15 @@ const emit = defineEmits<{
   (e: 'export', format: 'txt' | 'json' | 'jsonl' | 'character' | 'character_with_worldbooks'): void
 }>()
 
+const titleId = 'chat-export-title'
+const dialogAttrs = dialogAria(titleId)
+
 function close() {
   emit('update:show', false)
 }
+
+const { dialogRef } = useDialogBehavior(() => props.show, close)
+void dialogRef
 
 function handleExport(format: 'txt' | 'json' | 'jsonl' | 'character' | 'character_with_worldbooks') {
   if (props.disabled) return
@@ -23,12 +32,15 @@ function handleExport(format: 'txt' | 'json' | 'jsonl' | 'character' | 'characte
   <Transition name="modal">
     <div v-if="show" class="modal">
       <!-- 背景模糊须用 Tailwind backdrop-*（见 README / glass.css：手写 backdrop-filter 经 esbuild 压缩可能失效） -->
-      <div class="modal-backdrop backdrop-blur-[var(--blur-heavy)]" @click="close"></div>
+      <div class="modal-backdrop" @click="close"></div>
       <div
+        ref="dialogRef"
+        v-bind="dialogAttrs"
+        tabindex="-1"
         class="modal-content modal-surface chat-modal-width-600-90"
       >
         <div class="modal-header border-b border-[var(--color-border-subtle)]">
-          <h3 class="modal-title text-[var(--color-text)]">导出</h3>
+          <h3 :id="titleId" class="modal-title text-[var(--color-text)]">导出</h3>
           <button type="button" class="modal-close" aria-label="关闭导出弹窗" @click="close">×</button>
         </div>
         <div class="modal-body">

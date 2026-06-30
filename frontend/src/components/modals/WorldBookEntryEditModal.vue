@@ -8,6 +8,8 @@ import type { WorldBookEntry } from '../../types/models'
 import ThemedCheckbox from '../ThemedCheckbox.vue'
 import { buildRegexFromInput } from '../../utils/regexCompat'
 import { validateWorldBookEntry } from '../../utils/worldBookValidation'
+import { useDialogBehavior } from '../../composables/useDialogBehavior'
+import { dialogAria } from '../../utils/uiPrimitives'
 
 const props = defineProps<{
   show: boolean
@@ -73,6 +75,11 @@ function apply() {
 function close() {
   emit('update:show', false)
 }
+
+const titleId = 'world-book-entry-edit-title'
+const dialogAttrs = dialogAria(titleId)
+const { dialogRef } = useDialogBehavior(() => props.show && !!props.entry, close)
+void dialogRef
 </script>
 
 <template>
@@ -81,11 +88,13 @@ function close() {
       <div v-if="show && draft" class="modal">
         <div class="modal-backdrop" @click="close"></div>
         <div
+          ref="dialogRef"
+          v-bind="dialogAttrs"
+          tabindex="-1"
           class="modal-content modal-surface w-[min(92vw,560px)] max-h-[90vh]"
-          style="backdrop-filter: blur(var(--blur-heavy)); -webkit-backdrop-filter: blur(var(--blur-heavy))"
         >
           <div class="modal-header shrink-0">
-            <h3 class="modal-title">编辑条目</h3>
+            <h3 :id="titleId" class="modal-title">编辑条目</h3>
             <button type="button" class="modal-close" aria-label="关闭" @click="close">
               <X class="w-5 h-5" />
             </button>
@@ -158,7 +167,7 @@ function close() {
   width: 4px;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: var(--color-border, rgba(255, 255, 255, 0.2));
+  background: var(--color-border);
   border-radius: 2px;
 }
 </style>

@@ -10,6 +10,8 @@ import type { WorldBook, WorldBookEntry } from '../../types/models'
 import { formatApiError, validateWorldBookEntry } from '../../utils/worldBookValidation'
 import ConfirmPopover from '../ConfirmPopover.vue'
 import WorldBookEntryEditModal from './WorldBookEntryEditModal.vue'
+import { useDialogBehavior } from '../../composables/useDialogBehavior'
+import { dialogAria } from '../../utils/uiPrimitives'
 
 const props = defineProps<{
   show: boolean
@@ -132,6 +134,11 @@ watch(
 function close() {
   emit('update:show', false)
 }
+
+const titleId = 'world-book-editor-title'
+const dialogAttrs = dialogAria(titleId)
+const { dialogRef } = useDialogBehavior(() => props.show, close)
+void dialogRef
 
 function reindexEntries() {
   if (!book.value) return
@@ -317,11 +324,13 @@ async function save() {
       <div v-if="show" class="modal">
         <div class="modal-backdrop" @click="close"></div>
         <div
+          ref="dialogRef"
+          v-bind="dialogAttrs"
+          tabindex="-1"
           class="modal-content modal-surface w-[min(92vw,560px)] max-h-[90vh]"
-          style="backdrop-filter: blur(var(--blur-heavy)); -webkit-backdrop-filter: blur(var(--blur-heavy))"
         >
           <div class="modal-header shrink-0">
-            <h3 class="modal-title">编辑世界书</h3>
+            <h3 :id="titleId" class="modal-title">编辑世界书</h3>
             <button type="button" class="modal-close" aria-label="关闭" @click="close">
               <X class="w-5 h-5" />
             </button>
@@ -465,7 +474,7 @@ async function save() {
   width: 4px;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: var(--color-border, rgba(255, 255, 255, 0.2));
+  background: var(--color-border);
   border-radius: 2px;
 }
 </style>

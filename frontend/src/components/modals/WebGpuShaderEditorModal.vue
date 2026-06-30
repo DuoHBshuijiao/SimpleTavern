@@ -4,6 +4,8 @@ import { X } from 'lucide-vue-next'
 import WgslMonospaceEditor from '../WgslMonospaceEditor.vue'
 import type { WgslDiagnostic } from '../../utils/wgslCompilation'
 import { errorLineNumbersFromDiagnostics } from '../../utils/wgslCompilation'
+import { useDialogBehavior } from '../../composables/useDialogBehavior'
+import { dialogAria } from '../../utils/uiPrimitives'
 
 const props = defineProps<{
   show: boolean
@@ -46,6 +48,11 @@ const hasCompileIssue = computed(
 function close() {
   emit('update:show', false)
 }
+
+const titleId = 'webgpu-shader-editor-title'
+const dialogAttrs = dialogAria(titleId)
+const { dialogRef } = useDialogBehavior(() => props.show, close)
+void dialogRef
 
 function onInput(v: string) {
   emit('update:modelValue', v)
@@ -109,12 +116,15 @@ watch(
 <template>
   <Transition name="modal">
     <div v-if="show" class="modal">
-      <div class="modal-backdrop backdrop-blur-[var(--blur-heavy)]" @click="close"></div>
+      <div class="modal-backdrop" @click="close"></div>
       <div
+        ref="dialogRef"
+        v-bind="dialogAttrs"
+        tabindex="-1"
         class="modal-content modal-surface w-[80vw] max-w-[80vw] flex flex-col min-h-0"
       >
         <div class="modal-header border-b border-[var(--color-border-subtle)] shrink-0">
-          <h3 class="modal-title text-[var(--color-text)]">编辑 WGSL 着色器</h3>
+          <h3 :id="titleId" class="modal-title text-[var(--color-text)]">编辑 WGSL 着色器</h3>
           <button
             type="button"
             class="modal-close inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)] touch-manipulation"
