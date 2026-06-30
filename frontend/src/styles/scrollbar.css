@@ -61,7 +61,7 @@
   }
 
   .scrollbar-thin::-webkit-scrollbar-thumb {
-    border-radius: 2px;
+    border-radius: var(--radius-track);
   }
 
   /* ========== 隐藏滚动条（保留滚动功能） ========== */

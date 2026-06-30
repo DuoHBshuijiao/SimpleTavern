@@ -511,8 +511,8 @@ function confirmDelete() {
             <div 
               v-for="c in groupList"
               :key="c.id"
-              class="group flex items-center justify-between p-2 rounded-lg cursor-pointer text-sm mb-1 transition-colors border-l-2"
-              :class="activeChatId === c.id ? 'bg-[var(--color-purple-bg)] text-[var(--color-purple)] border-l-[var(--color-purple)]' : 'text-[var(--color-text-muted)] border-l-transparent hover:bg-surface-muted hover:text-[var(--color-text)]'"
+              class="group flex items-center justify-between p-2 rounded-lg cursor-pointer text-sm mb-1 transition-colors border border-transparent interactive-surface"
+              :class="activeChatId === c.id ? 'surface-selected bg-[var(--color-purple-bg)] text-[var(--color-purple)] border-[color-mix(in_srgb,var(--color-purple)_35%,transparent)]' : 'text-[var(--color-text-muted)] hover:bg-surface-muted hover:text-[var(--color-text)]'"
               @click="emit('select-group', c)"
             >
               <div class="flex items-center gap-2 flex-1 min-w-0 pr-2 max-w-[calc(100%-60px)]">
@@ -594,8 +594,8 @@ function confirmDelete() {
             <div 
               v-for="c in chatList.filter(chat => !chat.isGroup)"
               :key="c.id"
-              class="group flex items-center justify-between p-2 rounded-lg cursor-pointer text-sm mb-1 transition-colors border-l-2"
-              :class="activeChatId === c.id ? 'bg-brand-a10 text-brand border-l-brand' : 'text-[var(--color-text-muted)] border-l-transparent hover:bg-surface-muted hover:text-[var(--color-text)]'"
+              class="group flex items-center justify-between p-2 rounded-lg cursor-pointer text-sm mb-1 transition-colors border border-transparent interactive-surface"
+              :class="activeChatId === c.id ? 'surface-selected bg-brand-a10 text-brand border-brand-a40' : 'text-[var(--color-text-muted)] hover:bg-surface-muted hover:text-[var(--color-text)]'"
               @click="emit('select-chat', c)"
             >
               <div class="flex items-center gap-2 flex-1 min-w-0 pr-2 max-w-[calc(100%-60px)]">
@@ -717,7 +717,7 @@ function confirmDelete() {
 }
 .custom-scrollbar::-webkit-scrollbar-thumb {
   background: var(--color-border);
-  border-radius: 2px;
+  border-radius: var(--radius-track);
 }
 .custom-scrollbar:hover::-webkit-scrollbar-thumb {
   background: var(--color-border-strong);

@@ -5324,6 +5324,8 @@ const editingPersonaAvatarUrl = computed(() => {
             <div
               v-if="showChatSearch"
               class="px-6 pb-2 pointer-events-auto"
+              role="search"
+              aria-label="会话内搜索"
             >
               <div
                 class="chat-header-search-expand"
@@ -5357,13 +5359,14 @@ const editingPersonaAvatarUrl = computed(() => {
                         v-model="chatSearchQuery"
                         class="min-w-0 flex-1 bg-transparent text-sm outline-none"
                         placeholder="搜索当前会话"
+                        aria-label="搜索当前会话"
                         @keydown.enter.prevent="runChatSearch"
                         @keydown.esc.prevent="closeChatSearchBar"
                       />
 
-                      <button class="btn btn-xs btn-secondary shrink-0" @click="goToPrevSearchResult">上一个</button>
-                      <button class="btn btn-xs btn-secondary shrink-0" @click="goToNextSearchResult">下一个</button>
-                      <button class="btn btn-xs btn-secondary shrink-0" @click="closeChatSearchBar">
+                      <button type="button" class="btn btn-xs btn-secondary shrink-0" aria-label="上一个搜索结果" @click="goToPrevSearchResult">上一个</button>
+                      <button type="button" class="btn btn-xs btn-secondary shrink-0" aria-label="下一个搜索结果" @click="goToNextSearchResult">下一个</button>
+                      <button type="button" class="btn btn-xs btn-secondary shrink-0" aria-label="关闭会话搜索" @click="closeChatSearchBar">
                         关闭
                       </button>
                     </div>
@@ -5675,14 +5678,24 @@ const editingPersonaAvatarUrl = computed(() => {
       @resume="errorStack.resumeTimer"
     />
 
-    <div v-if="imageFallbackDialog.visible" class="fixed inset-0 z-[1400] flex items-center justify-center">
+    <div v-if="imageFallbackDialog.visible" class="fixed inset-0 z-[1400] flex items-center justify-center p-4">
       <div class="absolute inset-0 bg-overlay-heavy backdrop-blur-[var(--glass-blur-soft)]" @click="imageFallbackDialog.visible = false"></div>
-      <div class="relative w-[min(640px,calc(100vw-2rem))] rounded-xl border border-[var(--color-error)]/30 bg-[var(--color-error-bg)] p-4">
-        <h3 class="text-sm font-bold text-red-200 mb-2">模型不支持图片或图片请求失败</h3>
-        <pre class="text-xs text-red-100 whitespace-pre-wrap break-words max-h-[260px] overflow-auto">{{ imageFallbackDialog.error }}</pre>
-        <div class="mt-4 flex justify-end gap-2">
-          <button class="btn btn-sm btn-secondary" @click="imageFallbackDialog.visible = false">返回</button>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="image-fallback-title"
+        class="modal-content modal-surface relative w-[min(640px,calc(100vw-2rem))] border-[color-mix(in_srgb,var(--color-error)_30%,transparent)]"
+      >
+        <div class="px-4 py-3 border-b border-[color-mix(in_srgb,var(--color-error)_20%,transparent)]">
+          <h3 id="image-fallback-title" class="text-sm font-semibold text-[var(--color-error-text)]">模型不支持图片或图片请求失败</h3>
+        </div>
+        <div class="px-4 py-3">
+          <pre class="text-xs leading-5 text-[var(--color-error-text)] whitespace-pre-wrap break-words max-h-[260px] overflow-auto custom-scrollbar">{{ imageFallbackDialog.error }}</pre>
+        </div>
+        <div class="px-4 pb-4 flex justify-end gap-2">
+          <button type="button" class="btn btn-sm btn-secondary" @click="imageFallbackDialog.visible = false">返回</button>
           <button
+            type="button"
             class="btn btn-sm btn-primary"
             @click="imageFallbackDialog.retryAction && imageFallbackDialog.retryAction()"
           >
@@ -6503,7 +6516,7 @@ const editingPersonaAvatarUrl = computed(() => {
   gap: 0.45rem;
   min-height: 2rem;
   padding: 0.4rem 0.7rem;
-  border-radius: 0.85rem;
+  border-radius: var(--radius-lg);
   border: 1px solid var(--color-border-subtle);
   background-color: var(--color-chrome-widget);
   background-image: none;
@@ -6563,7 +6576,7 @@ const editingPersonaAvatarUrl = computed(() => {
   right: 0;
   width: 14rem;
   padding: 0.45rem;
-  border-radius: 1rem;
+  border-radius: var(--radius-xl);
   border: 1px solid var(--color-border);
   background-color: var(--color-popover-surface);
   background-image: none;
@@ -6741,7 +6754,7 @@ const editingPersonaAvatarUrl = computed(() => {
   align-items: flex-start;
   gap: 0.1rem;
   padding: 0.65rem 0.75rem;
-  border-radius: 0.8rem;
+  border-radius: var(--radius-lg);
   color: var(--color-text-secondary);
   text-align: left;
   transition: background-color 160ms ease, color 160ms ease;
@@ -6775,7 +6788,7 @@ const editingPersonaAvatarUrl = computed(() => {
 }
 .custom-scrollbar::-webkit-scrollbar-thumb {
   background: var(--color-border);
-  border-radius: 2px;
+  border-radius: var(--radius-track);
 }
 .custom-scrollbar:hover::-webkit-scrollbar-thumb {
   background: var(--color-border-strong);

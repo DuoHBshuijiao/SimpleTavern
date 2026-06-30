@@ -9,6 +9,7 @@
 - [x] `T-205-data-integrity-expand`：后端数据完整性扫描扩展到 settings/characters/worldbooks + characterId orphan 引用（仅检测），补测试与前端区分展示。
 - [x] `T-206-import-export-warnings`：修复 MVU 兼容 warning 互斥丢失、TXT(V2) 导入 warning 透传，补前后端测试。
 - [x] `T-207-v0700-final-verify`：全套验证 + 文档/版本/state/changelog 更新。
+- [x] `T-208-ui-ux-impeccable`：Impeccable 批次——顶栏圆角 token、ChatSidebar 选中态、图片回退弹层、搜索 a11y、完整性巡检文案。
 
 ### v0.700 推迟（→ v0.800+）
 

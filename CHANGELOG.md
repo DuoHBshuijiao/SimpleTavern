@@ -15,7 +15,14 @@
 
 ### 测试
 
-- 新增前端 `ThemedCheckbox`、`useChatSearch`、`useImageStickyBinding`、`useForkLineage`、`formatImportResultMessage` 测试；新增后端数据完整性扩展、导入 warning 透传测试。前端 83 测试、后端 114 测试全通过。
+- 新增前端 `ThemedCheckbox`、`useChatSearch`、`useImageStickyBinding`、`useForkLineage`、`formatImportResultMessage`、`dataIntegrityNotify` 测试；新增后端数据完整性扩展、导入 warning 透传测试。前端 88 测试、后端 114 测试全通过。
+
+### UI/UX
+
+- 收束 ChatPage 顶栏 chip / 更多菜单圆角到设计 token；新增 `--radius-track` 统一细滚动条滑块。
+- ChatSidebar 群聊/单聊列表移除 side-tab 左侧色条，改用 `surface-selected` 选中态（符合 DESIGN.md 禁止 side-stripe 规则）。
+- 图片回退弹层对齐 `modal-surface` 与语义 error token，去除硬编码 red-* 色值。
+- 会话搜索区补 `role="search"` 与导航按钮 `aria-label`；数据完整性巡检展示 kind 标签并优化文案。
 
 ## v0.601
 

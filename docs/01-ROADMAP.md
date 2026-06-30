@@ -35,6 +35,7 @@
 - ChatPage composable 提炼（第一批，低风险、template 不变）：`useChatSearch`、`useImageStickyBinding`、`useForkLineage`，各配 composable 单测，类型检查 + 单测双重保护。
 - 数据完整性扫描扩展：从仅 chat/assistant JSON 扩展到 `settings.json`、`assistant_settings.json`、`characters/`、`worldbooks/`，并新增 chat.characterId 的 orphan 引用检测；新增类别一律“仅检测、不自动修复”（repairAction=none），孤儿会话不会被按 chat 规则自动删除；前端巡检区分自动清理与人工处理。
 - 导入/导出可观测性：修复导入提示互斥丢失 MVU 兼容 warning；TXT(Version 2) 会话导入透传此前被静默丢弃的逐行 warning。
+- UI/UX 一致性（Impeccable 批次）：收束顶栏 chip / 更多菜单圆角到 `--radius-*` token；新增 `--radius-track` 统一细滚动条；ChatSidebar 会话列表移除 side-tab `border-l-2`，改用 `surface-selected` + 透明边框选中态；图片回退弹层对齐 `modal-surface` + 语义 error token；会话搜索区补 `role="search"` 与按钮 `aria-label`；数据完整性巡检文案展示 kind 标签并提取 `dataIntegrityNotify` 纯函数 + 测试。
 
 ### v0.700 未纳入（顺延 v0.800+）
 
