@@ -84,6 +84,8 @@ import { useForkLineage } from '../composables/useForkLineage'
 import { useMessageListEnterAnimations } from '../composables/useMessageListEnterAnimations'
 import { useMainChatReasoning } from '../composables/useMainChatReasoning'
 import { createCloseTopOverlayHandler, useGlobalEscapeStack } from '../composables/useGlobalEscapeStack'
+import { useChatHeaderLayout } from '../composables/useChatHeaderLayout'
+import { useChatFabSeparation } from '../composables/useChatFabSeparation'
 
 // 子组件
 import { ChatSidebar, MessageList, ChatInput, AssistantPanel, AssistantThread, MvuCapabilityEditor, MvuPanel } from '../components/chat'
@@ -106,12 +108,6 @@ import ModernSelect from '../components/ModernSelect.vue'
 import ThemedCheckbox from '../components/ThemedCheckbox.vue'
 import TtsPlaybackFab from '../components/chat/TtsPlaybackFab.vue'
 import { useTtsPlaybackQueue } from '../composables/useTtsPlaybackQueue'
-import {
-  computeAssistantNonOverlapTop,
-  computeTtsNonOverlapTop,
-  FAB_COLLISION_GAP_PX,
-  rectsOverlap,
-} from '../composables/useFabCollision'
 import { Users, Settings, Sparkles, Loader2, X, MoreHorizontal, GripVertical, Check, Plus, Search, Globe } from 'lucide-vue-next'
 
 // API
@@ -127,14 +123,6 @@ import { resolveBumpCharacterId } from '../utils/characterSidebarBump'
 import { isChatMvuRuntimeEnabled } from '../utils/groupMvu'
 import { useDialogBehavior } from '../composables/useDialogBehavior'
 import { dialogAria } from '../utils/uiPrimitives'
-import {
-  HEADER_EXPAND_MS,
-  HEADER_LIFT_EASE,
-  HEADER_LIFT_MS,
-  HEADER_SQUEEZE_EASE,
-  HEADER_SQUEEZE_MS,
-  MAIN_LAYOUT_TRANSITION_MS,
-} from '../constants/chatHeaderMorph'
 
 // ========== Stores ==========
 const settings = useSettingsStore()
@@ -217,49 +205,42 @@ const isGenerating = ref(false)
 const streamError = ref<string | null>(null)
 const sidebarCollapsed = ref(false)
 const { isNarrowPortrait } = useViewportNarrowPortrait()
-/** 主内容区左缘（用于助手 FAB 左贴边），随侧栏折叠与窗口变化测量 */
+/** 主内容区与 FAB 宿主 ref（须在 composable 前声明） */
 const chatMainRef = ref<HTMLElement | null>(null)
-const contentAreaLeftPx = ref(0)
-let contentAreaLeftRaf = 0
-let contentAreaLeftLayoutRaf = 0
-let contentAreaLeftSepDebounce: ReturnType<typeof setTimeout> | null = null
-function updateContentAreaLeft() {
-  contentAreaLeftPx.value = chatMainRef.value?.getBoundingClientRect().left ?? 0
-}
-function scheduleContentAreaLeft() {
-  if (contentAreaLeftRaf) cancelAnimationFrame(contentAreaLeftRaf)
-  contentAreaLeftRaf = requestAnimationFrame(() => {
-    contentAreaLeftRaf = 0
-    updateContentAreaLeft()
-  })
-}
-function cancelContentAreaLeftLayoutSync() {
-  if (contentAreaLeftLayoutRaf) {
-    cancelAnimationFrame(contentAreaLeftLayoutRaf)
-    contentAreaLeftLayoutRaf = 0
-  }
-}
-/** 侧栏 padding 过渡期间每帧测量主区左缘，贴左 FAB 与主区同帧，避免对 left 做 CSS 插值带来的相位差 */
-function syncContentAreaLeftDuringLayoutTransition() {
-  cancelContentAreaLeftLayoutSync()
-  const start = performance.now()
-  const duration = MAIN_LAYOUT_TRANSITION_MS + 40
-  const tick = () => {
-    updateContentAreaLeft()
-    if (performance.now() - start < duration) {
-      contentAreaLeftLayoutRaf = requestAnimationFrame(() => {
-        contentAreaLeftLayoutRaf = 0
-        tick()
-      })
-    } else {
-      updateContentAreaLeft()
-      runChatFabSeparation()
-    }
-  }
-  tick()
-}
-/** 顶栏变形：inset 悬浮条 → lifting 仅上移贴顶 → full 拉满宽并直角 */
-const headerMorphPhase = ref<'inset' | 'lifting' | 'full'>('inset')
+const chatInputRef = ref<InstanceType<typeof ChatInput> | null>(null)
+const ttsPlaybackFabRef = ref<InstanceType<typeof TtsPlaybackFab> | null>(null)
+
+const chatHeaderLayout = useChatHeaderLayout({
+  sidebarCollapsed,
+  isNarrowPortrait,
+  isTtsEnabled: () => settings.settings?.ttsEnabled === true,
+})
+
+const {
+  headerMorphPhase,
+  chatHeaderStyle,
+  chatHeaderHeightPx,
+  chatAssistantFabMinTopPx,
+  ttsInputSinkActive,
+  ttsTopBarControlsVisible,
+  agentTopBarControlsVisible,
+} = chatHeaderLayout
+
+const {
+  contentAreaLeftPx,
+  updateContentAreaLeft,
+  runChatFabSeparation,
+} = useChatFabSeparation({
+  chatMainRef,
+  chatInputRef,
+  ttsPlaybackFabRef,
+  chatAssistantFabMinTopPx,
+  sidebarCollapsed,
+  isNarrowPortrait,
+  isTtsEnabled: () => settings.settings?.ttsEnabled === true,
+})
+
+/** 顶栏变形阶段供 WebGPU 背景同步 */
 let webgpuUnavailablePrompted = false
 const webgpuBackground = useWebGpuBackground({
   canvasRef: webgpuCanvasRef,
@@ -284,99 +265,6 @@ const webgpuPaintVisible = computed(
   () => effectiveWebgpuEnabled.value && webgpuBackground.isSupported.value === true,
 )
 const showImageLayer = computed(() => pageBackground.hasImage.value && !webgpuPaintVisible.value)
-
-/** 展开侧栏时恢复原状用较短过渡（ms） */
-const headerEasingMs = ref(320)
-
-let headerCompactDelayTimer: ReturnType<typeof setTimeout> | null = null
-let headerLiftChainTimer: ReturnType<typeof setTimeout> | null = null
-
-watch(sidebarCollapsed, (collapsed) => {
-  if (headerCompactDelayTimer) {
-    clearTimeout(headerCompactDelayTimer)
-    headerCompactDelayTimer = null
-  }
-  if (headerLiftChainTimer) {
-    clearTimeout(headerLiftChainTimer)
-    headerLiftChainTimer = null
-  }
-  if (!collapsed) {
-    headerEasingMs.value = HEADER_EXPAND_MS
-    headerMorphPhase.value = 'inset'
-    window.setTimeout(() => {
-      headerEasingMs.value = 320
-    }, 220)
-    return
-  }
-  headerMorphPhase.value = 'inset'
-  headerCompactDelayTimer = window.setTimeout(() => {
-    headerMorphPhase.value = 'lifting'
-    headerCompactDelayTimer = null
-    headerLiftChainTimer = window.setTimeout(() => {
-      headerMorphPhase.value = 'full'
-      headerLiftChainTimer = null
-    }, HEADER_LIFT_MS)
-  }, 1000)
-})
-
-watch(sidebarCollapsed, () => {
-  nextTick(() => {
-    updateContentAreaLeft()
-    runChatFabSeparation()
-    syncContentAreaLeftDuringLayoutTransition()
-  })
-})
-
-watch(isNarrowPortrait, () => {
-  nextTick(() => scheduleContentAreaLeft())
-})
-
-const chatHeaderStyle = computed(() => {
-  const phase = headerMorphPhase.value
-  const collapsed = sidebarCollapsed.value
-  const ms = headerEasingMs.value
-  /** 竖屏 overlay：顶栏 left 用收起态量级；宽屏且侧栏展开仍用 21rem 与流式侧栏对齐 */
-  const insetLeft =
-    collapsed || isNarrowPortrait.value ? 'calc(1rem + 0.75rem)' : 'calc(21rem + 0.75rem)'
-  const insetRight = '0.75rem'
-  const insetTop = '0.75rem'
-  const radiusOpen = 'var(--radius-2xl)'
-
-  if (phase === 'full') {
-    return {
-      position: 'fixed' as const,
-      left: '0',
-      right: '0',
-      top: '0',
-      zIndex: 10,
-      borderRadius: '0',
-      transition: `left ${HEADER_SQUEEZE_MS}ms ${HEADER_SQUEEZE_EASE}, right ${HEADER_SQUEEZE_MS}ms ${HEADER_SQUEEZE_EASE}, border-radius ${HEADER_SQUEEZE_MS}ms ${HEADER_SQUEEZE_EASE}`,
-    }
-  }
-
-  if (phase === 'lifting') {
-    return {
-      position: 'fixed' as const,
-      left: insetLeft,
-      right: insetRight,
-      top: '0',
-      zIndex: 10,
-      borderRadius: radiusOpen,
-      transition: `top ${HEADER_LIFT_MS}ms ${HEADER_LIFT_EASE}`,
-    }
-  }
-
-  const transition = `left ${ms}ms ease, right ${ms}ms ease, top ${ms}ms ease, border-radius ${ms}ms ease`
-  return {
-    position: 'fixed' as const,
-    left: insetLeft,
-    right: insetRight,
-    top: insetTop,
-    zIndex: 10,
-    borderRadius: radiusOpen,
-    transition,
-  }
-})
 
 const editingChatId = ref<string | null>(null)
 const editingTitle = ref('')
@@ -1320,147 +1208,9 @@ const {
 const showHeaderMoreMenu = ref(false)
 const headerMoreMenuRef = ref<HTMLElement | null>(null)
 const headerMoreButtonRef = ref<HTMLElement | null>(null)
-/** 固定顶栏实际高度（px），供消息列表滚动区顶部留白，使滚动条从顶栏下缘起算 */
-const chatHeaderRef = ref<HTMLElement | null>(null)
-const chatHeaderHeightPx = ref(72)
-/** 顶栏下缘视口 y（px）+ 间距，助手 FAB 的 top 不得小于此值（顶栏展开变高时自动下移） */
-const chatAssistantFabMinTopPx = ref(0)
-let chatHeaderResizeObserver: ResizeObserver | null = null
 
-const ASSISTANT_FAB_HEADER_GAP_PX = 8
-
-watch(
-  () => chatHeaderRef.value,
-  (el) => {
-    chatHeaderResizeObserver?.disconnect()
-    chatHeaderResizeObserver = null
-    if (!el) return
-    const apply = () => {
-      const rect = el.getBoundingClientRect()
-      const h = rect.height
-      if (h > 0) chatHeaderHeightPx.value = Math.round(h * 100) / 100
-      chatAssistantFabMinTopPx.value = Math.round((rect.bottom + ASSISTANT_FAB_HEADER_GAP_PX) * 100) / 100
-    }
-    apply()
-    chatHeaderResizeObserver = new ResizeObserver(() => {
-      apply()
-    })
-    chatHeaderResizeObserver.observe(el)
-  },
-  { flush: 'post' }
-)
-
-/** 助手 FAB 与 TTS FAB 碰撞分离（useFabCollision 需在页面层调用两组件 getRect） */
-const chatInputRef = ref<InstanceType<typeof ChatInput> | null>(null)
 /** 主聊天网络搜索开关：为 true 时每次生成请求挂载搜索工具，直至用户关闭；需全局配置 Tavily/博查 API Key */
 const webSearchSessionEnabled = ref(false)
-const ttsPlaybackFabRef = ref<InstanceType<typeof TtsPlaybackFab> | null>(null)
-
-/**
- * 重叠时只移动「被锚定」的一侧：拖动助手则只挪助手，拖动 TTS 则只挪 TTS；布局类事件（挂载、resize、顶栏）默认只挪 TTS。
- */
-function runChatFabSeparation(anchor: 'assistant' | 'tts' | null = null) {
-  if (!settings.settings?.ttsEnabled) return
-  nextTick(() => {
-    const a = chatInputRef.value?.getAssistantFabRect?.()
-    const t = ttsPlaybackFabRef.value?.getRect?.()
-    if (!a || !t) return
-    if (!rectsOverlap(a, t, FAB_COLLISION_GAP_PX)) return
-    const minTop = chatAssistantFabMinTopPx.value
-
-    if (anchor === 'assistant') {
-      const newTop = computeAssistantNonOverlapTop(t, a, minTop)
-      if (Math.abs(newTop - a.top) < 0.5) return
-      chatInputRef.value?.setAssistantTopPx?.(newTop)
-      return
-    }
-    const newTop = computeTtsNonOverlapTop(a, t, minTop)
-    if (Math.abs(newTop - t.top) < 0.5) return
-    ttsPlaybackFabRef.value?.setTtsTopPx?.(newTop)
-  })
-}
-
-watch(contentAreaLeftPx, () => {
-  if (contentAreaLeftSepDebounce) clearTimeout(contentAreaLeftSepDebounce)
-  contentAreaLeftSepDebounce = setTimeout(() => {
-    contentAreaLeftSepDebounce = null
-    runChatFabSeparation()
-  }, 48)
-})
-watch(chatAssistantFabMinTopPx, () => runChatFabSeparation())
-watch(
-  () => settings.settings?.ttsEnabled,
-  () => {
-    nextTick(() => nextTick(runChatFabSeparation))
-  },
-)
-
-/** TTS FAB：与输入栏下沉同相；顶栏 full 且 squeeze 结束后显示顶栏下替代控制条 */
-const ttsInputSinkActive = computed(
-  () =>
-    sidebarCollapsed.value &&
-    (headerMorphPhase.value === 'lifting' || headerMorphPhase.value === 'full')
-)
-
-const ttsTopBarControlsVisible = ref(false)
-let ttsTopBarRevealTimer: ReturnType<typeof setTimeout> | null = null
-
-function clearTtsTopBarRevealTimer() {
-  if (ttsTopBarRevealTimer != null) {
-    clearTimeout(ttsTopBarRevealTimer)
-    ttsTopBarRevealTimer = null
-  }
-}
-
-watch(
-  () => [sidebarCollapsed.value, headerMorphPhase.value, settings.settings?.ttsEnabled] as const,
-  () => {
-    clearTtsTopBarRevealTimer()
-    if (!sidebarCollapsed.value || !settings.settings?.ttsEnabled) {
-      ttsTopBarControlsVisible.value = false
-      return
-    }
-    if (headerMorphPhase.value === 'full') {
-      ttsTopBarRevealTimer = setTimeout(() => {
-        ttsTopBarControlsVisible.value = true
-        ttsTopBarRevealTimer = null
-      }, HEADER_SQUEEZE_MS + 40)
-    } else {
-      ttsTopBarControlsVisible.value = false
-    }
-  },
-  { flush: 'post' },
-)
-
-const agentTopBarControlsVisible = ref(false)
-let agentTopBarRevealTimer: ReturnType<typeof setTimeout> | null = null
-
-function clearAgentTopBarRevealTimer() {
-  if (agentTopBarRevealTimer != null) {
-    clearTimeout(agentTopBarRevealTimer)
-    agentTopBarRevealTimer = null
-  }
-}
-
-watch(
-  () => [sidebarCollapsed.value, headerMorphPhase.value] as const,
-  () => {
-    clearAgentTopBarRevealTimer()
-    if (!sidebarCollapsed.value) {
-      agentTopBarControlsVisible.value = false
-      return
-    }
-    if (headerMorphPhase.value === 'full') {
-      agentTopBarRevealTimer = setTimeout(() => {
-        agentTopBarControlsVisible.value = true
-        agentTopBarRevealTimer = null
-      }, HEADER_SQUEEZE_MS + 40)
-    } else {
-      agentTopBarControlsVisible.value = false
-    }
-  },
-  { flush: 'post' },
-)
 
 watch(streamError, (value) => {
   if (!value) return
@@ -1492,12 +1242,7 @@ onBeforeUnmount(() => {
   errorStack.clearAll()
   window.removeEventListener('keydown', handleGlobalKeydown)
   window.removeEventListener('pointerdown', handleHeaderPointerdown)
-  if (headerCompactDelayTimer) clearTimeout(headerCompactDelayTimer)
-  if (headerLiftChainTimer) clearTimeout(headerLiftChainTimer)
-  clearTtsTopBarRevealTimer()
-  clearAgentTopBarRevealTimer()
-  chatHeaderResizeObserver?.disconnect()
-  chatHeaderResizeObserver = null
+  mvuStore.disconnect()
 })
 
 /**
@@ -2524,15 +2269,6 @@ onMounted(async () => {
       runChatFabSeparation()
     }, 320)
   })
-  window.addEventListener('resize', scheduleContentAreaLeft, { passive: true })
-})
-
-onBeforeUnmount(() => {
-  mvuStore.disconnect()
-  window.removeEventListener('resize', scheduleContentAreaLeft)
-  if (contentAreaLeftRaf) cancelAnimationFrame(contentAreaLeftRaf)
-  cancelContentAreaLeftLayoutSync()
-  if (contentAreaLeftSepDebounce) clearTimeout(contentAreaLeftSepDebounce)
 })
 
 /**
@@ -5129,7 +4865,7 @@ const editingPersonaAvatarUrl = computed(() => {
           <!-- 顶部标题栏 -->
           <!-- 磨砂仅放在独立底层；下拉菜单在上层，否则嵌套在父级 backdrop-filter 内时子级 backdrop 往往完全不生效 -->
           <header 
-            ref="chatHeaderRef"
+            :ref="(el) => { chatHeaderLayout.chatHeaderRef.value = el as HTMLElement | null }"
             class="relative flex flex-col pointer-events-none"
             :style="chatHeaderStyle"
           >
