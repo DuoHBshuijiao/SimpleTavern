@@ -34,7 +34,7 @@
  *    - 依赖：依赖vue、stores、api/http.ts
  *    - 位置：组件层，提供设置管理功能
  */
-import { computed, onMounted, onUnmounted, provide, reactive, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, provide, reactive, ref, watch, type ComponentPublicInstance } from 'vue'
 import { useChatsStore, useCharactersStore, useMvuStore, useSettingsStore } from '../stores'
 import { isChatMvuRuntimeEnabled } from '../utils/groupMvu'
 import { countActiveEntities, countRelations } from '../utils/kgVisNetwork'
@@ -59,10 +59,6 @@ import {
   type WorldBook,
   type WorldBookAttachment,
 } from '../types/models'
-import ModernSelect from './ModernSelect.vue'
-import MvuCapabilityEditor from './chat/MvuCapabilityEditor.vue'
-import ThemedCheckbox from './ThemedCheckbox.vue'
-import TtsVoiceInput from './TtsVoiceInput.vue'
 import { apiDelete, apiGet, apiPost, apiPostFormData, apiPut } from '../api/http'
 import { downloadUpdate, getManualUpdateCheck, runUpdate } from '../api/update'
 import { useAppFont } from '../composables/useAppFont'
@@ -74,7 +70,7 @@ import {
   readWebGpuDraftSource,
   writeWebGpuDraftSource,
 } from '../composables/useWebGpuBackgroundRuntime'
-import { X, GripVertical } from 'lucide-vue-next'
+import { X } from 'lucide-vue-next'
 import WorldBookEditorModal from './modals/WorldBookEditorModal.vue'
 import WebGpuShaderEditorModal from './modals/WebGpuShaderEditorModal.vue'
 import WorldBookSessionAttachModal from './modals/WorldBookSessionAttachModal.vue'
@@ -89,10 +85,12 @@ import SettingsDrawerGlobalAppearanceSection from './settings-drawer/SettingsDra
 import SettingsDrawerGlobalTtsSection from './settings-drawer/SettingsDrawerGlobalTtsSection.vue'
 import SettingsDrawerGlobalAppSection from './settings-drawer/SettingsDrawerGlobalAppSection.vue'
 import SettingsDrawerPresetsTab from './settings-drawer/SettingsDrawerPresetsTab.vue'
+import SettingsDrawerChatTab from './settings-drawer/SettingsDrawerChatTab.vue'
 import { isTtsApiPreset, resolveTtsProvider } from '../utils/apiPresetKind'
 import { normalizeVoiceCatalog } from '../utils/voiceCatalog'
 import { useSettingsDrawerPresetListHeight } from '../composables/useSettingsDrawerPresetListHeight'
 import { SETTINGS_DRAWER_PRESETS_KEY } from '../composables/settingsDrawerPresetsKey'
+import { SETTINGS_DRAWER_CHAT_KEY } from '../composables/settingsDrawerChatKey'
 import { getWebGpuUnavailableMessage, probeWebGpuAdapter } from '../utils/webgpuProbe'
 import type { WebGpuUnavailableReason } from '../utils/webgpuProbe'
 import { concatEnabledWorldBookContents, countTokensForText } from '../utils/tokenEstimate'
@@ -2648,6 +2646,18 @@ function pickTtsClonePromptFile() {
   ttsClonePromptInputRef.value?.click()
 }
 
+function bindPresetListHeader(el: Element | ComponentPublicInstance | null) {
+  presetListHeaderRef.value = el instanceof HTMLElement ? el : null
+}
+
+function bindTtsCloneSourceInput(el: Element | ComponentPublicInstance | null) {
+  ttsCloneSourceInputRef.value = el instanceof HTMLInputElement ? el : null
+}
+
+function bindTtsClonePromptInput(el: Element | ComponentPublicInstance | null) {
+  ttsClonePromptInputRef.value = el instanceof HTMLInputElement ? el : null
+}
+
 function onTtsCloneSourceChange(event: Event) {
   const input = event.target as HTMLInputElement | null
   ttsCloneSourceFile.value = input?.files?.[0] ?? null
@@ -2927,14 +2937,14 @@ provide(
     presetVoicesLoading,
     presetModelListSelection,
     presetVoiceListSelection,
-    presetListHeaderRef,
     presetListMaxHeightPx,
+    bindPresetListHeader,
+    bindTtsCloneSourceInput,
+    bindTtsClonePromptInput,
     apiPresetOrderDraggingIdx,
     glmLocalVoiceDraft,
     qwen3LocalVoiceDraft,
     omniVoiceLocalVoiceDraft,
-    ttsCloneSourceInputRef,
-    ttsClonePromptInputRef,
     ttsCloneSourceFile,
     ttsClonePromptFile,
     ttsCloneLoading,
@@ -2997,6 +3007,14 @@ provide(
     updateOmniVoiceLocalVoiceField,
   }),
 )
+
+function setChatStateTablesDraft(value: StatusTableDef[]) {
+  chatStateTablesDraft.value = value
+}
+
+function openKnowledgeGraphFromChatTab() {
+  emit('open-knowledge-graph')
+}
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleDrawerKeydown)
@@ -3934,6 +3952,96 @@ async function checkUpdate() {
     checkUpdateLoading.value = false
   }
 }
+
+provide(
+  SETTINGS_DRAWER_CHAT_KEY,
+  reactive({
+    chat: computed(() => props.chat),
+    globalDraft,
+    chatDraft,
+    chatStateTablesDraft,
+    setChatStateTablesDraft,
+    isNarrowPortrait,
+    memoryTokenDisplay,
+    chatTokenDisplay,
+    messagesSinceLastMemoryUpdate,
+    tokensSinceLastMemoryUpdate,
+    hideSavedFloors,
+    resetHiddenFloors,
+    onContextStartKeepBeforeMessagesInput,
+    setAutoMemorySummarySilent,
+    onAutoMemorySummaryEveryNInput,
+    chatModelOptions,
+    handleChatModelSelect,
+    handleChatDraftHelpLimitInput,
+    groupChatMvuAnchorSelectOptions,
+    chatMvuRuntimeEnabled,
+    kgStatsSummary,
+    mvuStore,
+    clearKnowledgeGraph,
+    openKnowledgeGraph: openKnowledgeGraphFromChatTab,
+    chatRegexAccordionOpen,
+    contentRegexRulesSorted,
+    toggleAllRegexRules,
+    openRegexRuleEditor,
+    isRegexRuleEnabled,
+    setRegexRuleEnabled,
+    handleRegexRuleDragStart,
+    handleRegexRuleDragOver,
+    handleRegexRuleDragEnd,
+    regexActionLabel,
+    regexMatchModeLabel,
+    regexExtractSourceLabel,
+    moveRegexRule,
+    removeRegexRule,
+    worldBookCreateExpanded,
+    worldBookNewNameDraft,
+    confirmCreateWorldBook,
+    cancelWorldBookCreate,
+    addWorldBookId,
+    worldBookAddOptions,
+    addWorldBookToOrder,
+    currentChatWorldbooks,
+    setWorldBookGlobalActive,
+    detachWorldBookFromCurrentChat,
+    openWorldBookEditor,
+    toggleAllWorldBooksSection,
+    allWorldBooksSectionOpen,
+    worldbooks,
+    worldBooksListVisible,
+    worldbookTokenHint,
+    allWorldBooksListExpanded,
+    worldBookOrderDraggingIdx,
+    handleWorldBookOrderDragStart,
+    handleWorldBookOrderDragOver,
+    handleWorldBookOrderDragEnd,
+    worldBookName,
+    scanDepthDisplay,
+    openSessionAttachEdit,
+    moveWorldBookOrder,
+    clearWorldBookSessionActivationById,
+    TTS_AUTO_READ_OPTIONS,
+    ttsSessionModelOptions,
+    ttsPreprocessModelOptions,
+    selectedChatTtsPreset,
+    selectedChatTtsProvider,
+    formatTtsProviderLabel,
+    updateChatTtsModel,
+    updateChatTtsAutoReadScope,
+    updateChatTtsReadGapSeconds,
+    updateChatTtsPreprocessEnabled,
+    updateChatTtsInjectEmotionTags,
+    updateChatTtsPreprocessTargetLanguage,
+    updateChatTtsPreprocessModel,
+    currentChatCharacterVoiceRows,
+    getCharacterVoiceValue,
+    availableTtsVoices,
+    updateCharacterVoiceValue,
+    currentChatPersonaVoiceRows,
+    getPersonaVoiceValue,
+    updatePersonaVoiceValue,
+  }),
+)
 </script>
 
 <template>
@@ -4103,673 +4211,7 @@ async function checkUpdate() {
 
           <SettingsDrawerPresetsTab v-if="preloaded" v-show="tab === 'presets'" />
 
-          <!-- Chat Specific Settings -->
-          <div v-if="chatTabEverOpened" v-show="tab === 'chat'" class="space-y-6">
-            <div v-if="!chat" class="text-center text-[var(--color-text-muted)] py-8">请先选择一个会话</div>
-            <div v-else-if="chatDraft && globalDraft" class="space-y-5">
-               <div class="text-xs text-[var(--color-text-muted)] bg-surface-muted p-3 rounded-lg border border-[var(--color-border-subtle)]">
-                这些设置仅应用于当前会话，并会覆盖全局设置。模型选择将自动关联对应的 API 预设。
-              </div>
-
-              <div class="space-y-2">
-                <div class="flex items-center justify-between gap-3">
-                  <label class="block text-sm font-medium text-[var(--color-text-secondary)]">会话系统提示</label>
-                  <div class="relative inline-flex shrink-0 gap-1 rounded-lg border border-[var(--color-border-subtle)] bg-surface-muted p-1">
-                    <div
-                      class="pointer-events-none absolute left-1 top-1 bottom-1 rounded-md bg-brand shadow-sm transition-transform duration-[400ms] ease-out"
-                      :style="{
-                        width: 'calc((100% - 0.75rem) / 2)',
-                        transform: `translateX(calc(${chatDraft.sessionSystemPromptMode === 'override' ? 1 : 0} * (100% + 0.25rem)))`,
-                      }"
-                    />
-                    <button
-                      type="button"
-                      class="relative z-10 min-w-[4.25rem] flex-1 rounded-md px-2 py-1 text-center text-xs font-medium transition-colors duration-[400ms] ease-out touch-manipulation"
-                      :class="
-                        chatDraft.sessionSystemPromptMode === 'append'
-                          ? 'text-[var(--color-on-brand)]'
-                          : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'
-                      "
-                      @click="chatDraft.sessionSystemPromptMode = 'append'"
-                    >追加全局</button>
-                    <button
-                      type="button"
-                      class="relative z-10 min-w-[4.25rem] flex-1 rounded-md px-2 py-1 text-center text-xs font-medium transition-colors duration-[400ms] ease-out touch-manipulation"
-                      :class="
-                        chatDraft.sessionSystemPromptMode === 'override'
-                          ? 'text-[var(--color-on-brand)]'
-                          : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'
-                      "
-                      @click="chatDraft.sessionSystemPromptMode = 'override'"
-                    >覆盖全局</button>
-                  </div>
-                </div>
-                <p class="text-xs text-[var(--color-text-muted)]">
-                  追加全局会保留全局系统提示并在后面附加本会话内容；覆盖全局会在本会话提示非空时跳过全局系统提示。
-                </p>
-                <textarea 
-                  v-model="chatDraft.prompt" 
-                  rows="4"
-                  placeholder="留空则使用角色默认提示词"
-                  class="input textarea w-full resize-y"
-                ></textarea>
-              </div>
-
-              <div class="space-y-1.5">
-                <div class="flex items-center justify-between gap-4">
-                  <label class="block text-sm font-medium text-[var(--color-text-secondary)]">长期记忆</label>
-                  <div class="text-right text-xs text-[var(--color-text-secondary)] shrink-0">
-                    <div>记忆长度估算：{{ memoryTokenDisplay }} tokens</div>
-                    <div>对话长度估算：{{ chatTokenDisplay }} tokens</div>
-                    <div
-                      v-if="messagesSinceLastMemoryUpdate != null && tokensSinceLastMemoryUpdate != null"
-                      class="text-[var(--color-text-muted)]"
-                    >
-                      距离上次保存记忆已过去了：
-                      <br v-if="isNarrowPortrait" />
-                      ~{{ messagesSinceLastMemoryUpdate }} 条消息，约 {{ tokensSinceLastMemoryUpdate }} tokens
-                    </div>
-                  </div>
-                </div>
-                <div class="memory-cutoff-row flex flex-wrap items-center gap-2 pb-1">
-                  <button class="btn btn-xs btn-secondary" @click="hideSavedFloors">从已存记忆处截断</button>
-                  <button class="btn btn-xs btn-secondary" @click="resetHiddenFloors">恢复完整上下文</button>
-                  <div
-                    class="memory-keep-control flex items-center gap-1 text-xs text-[var(--color-text-secondary)]"
-                    :class="isNarrowPortrait ? 'basis-full justify-start order-3' : 'ml-auto justify-end order-3'"
-                  >
-                    <span>向前保留</span>
-                    <input
-                      :value="chatDraft.contextStartKeepBeforeMessages ?? ''"
-                      type="number"
-                      min="2"
-                      step="1"
-                      placeholder="N"
-                      class="input h-7 w-20 px-2 text-xs"
-                      @input="onContextStartKeepBeforeMessagesInput"
-                    />
-                    <span>条</span>
-                  </div>
-                  <span v-if="chatDraft.contextStartMessageId" class="memory-anchor-hint order-2 text-xs text-[var(--color-text-muted)]">
-                    当前已设置上下文起点
-                  </span>
-                </div>
-                <textarea 
-                  v-model="chatDraft.longTermMemory"
-                  rows="4"
-                  placeholder="会插入系统提示词，留空则不启用"
-                  class="input textarea w-full resize-y"
-                ></textarea>
-                <div class="flex flex-wrap items-end gap-3 pt-1">
-                  <div class="space-y-1 min-w-[12rem] flex-1">
-                    <label class="block text-xs font-medium text-[var(--color-text-secondary)]">每隔几条消息自动总结</label>
-                    <input
-                      :value="chatDraft.autoMemorySummaryEveryN ?? ''"
-                      type="number"
-                      min="1"
-                      step="1"
-                      placeholder="关闭"
-                      class="input w-full"
-                      @input="onAutoMemorySummaryEveryNInput"
-                    />
-                  </div>
-                  <label class="flex items-center gap-2 cursor-pointer select-none pb-1.5 shrink-0">
-                    <ThemedCheckbox
-                      :checked="chatDraft.autoMemorySummarySilent === true"
-                      @update:checked="setAutoMemorySummarySilent"
-                    />
-                    <span class="text-sm text-[var(--color-text-secondary)]">静默总结</span>
-                  </label>
-                </div>
-                <p class="text-xs text-[var(--color-text-muted)]">
-                  关闭「静默总结」时，达到阈值会先询问；若拒绝则下次在 n×2、n×3… 条时再问。达到条件时若主聊仍在生成回复，会等生成结束后再判断。
-                </p>
-              </div>
-
-               <div class="space-y-1.5">
-                <label class="block text-sm font-medium text-[var(--color-text-secondary)]">模型覆盖</label>
-                <ModernSelect
-                  v-model="chatDraft.params.model"
-                  :selected-preset-id="chatDraft?.presetId ?? null"
-                  :options="chatModelOptions"
-                  searchable
-                  allow-create
-                  placeholder="选择模型 (自动关联预设)..."
-                  @select="handleChatModelSelect"
-                />
-                <div v-if="chatDraft?.presetId" class="text-xs text-brand mt-1 flex items-center gap-1">
-                    <span>🔗 已关联 API 预设:</span>
-                    <span>{{ globalDraft?.apiPresets.find(p => p.id === chatDraft?.presetId)?.name || '未知预设' }}</span>
-                </div>
-              </div>
-
-               <div class="grid grid-cols-2 gap-4">
-                <div class="space-y-1.5">
-                  <label class="block text-sm font-medium text-[var(--color-text-secondary)]">Temperature</label>
-                  <input 
-                    v-model.number="chatDraft.params.temperature" 
-                    type="number" 
-                    step="0.1" min="0" max="2"
-                    placeholder="使用全局"
-                    class="input w-full"
-                  />
-                </div>
-                <div class="space-y-1.5">
-                  <label class="block text-sm font-medium text-[var(--color-text-secondary)]">Top P</label>
-                  <input 
-                    v-model.number="chatDraft.params.top_p" 
-                    type="number" 
-                    step="0.1" min="0" max="1"
-                    placeholder="使用全局"
-                    class="input w-full"
-                  />
-                </div>
-                <div class="space-y-1.5">
-                  <label class="block text-sm font-medium text-[var(--color-text-secondary)]">最大输出长度</label>
-                  <input 
-                    v-model.number="chatDraft.params.max_tokens" 
-                    type="number" 
-                    step="128" min="1"
-                    placeholder="使用全局"
-                    class="input w-full"
-                  />
-                </div>
-              </div>
-              <div class="space-y-2">
-                <div class="text-sm font-medium text-[var(--color-text-secondary)]">上下文</div>
-                <div class="grid grid-cols-2 gap-4">
-                <div class="space-y-1.5">
-                  <label class="block text-sm font-medium text-[var(--color-text-secondary)]">上下文长度</label>
-                  <input 
-                    v-model.number="chatDraft.params.context_size" 
-                    type="number" 
-                    min="0"
-                    placeholder="未启用（使用全局）"
-                    class="input w-full"
-                  />
-                </div>
-                  <div class="space-y-1.5">
-                    <label class="block text-sm font-medium text-[var(--color-text-secondary)]">草稿助手上下文条数限制</label>
-                    <input
-                      :value="chatDraft.draftHelp?.context_message_limit ?? ''"
-                      type="text"
-                      inputmode="numeric"
-                      pattern="[0-9]*"
-                      placeholder="使用全局；留空则继续回退"
-                      class="input w-full"
-                      @input="handleChatDraftHelpLimitInput"
-                    />
-                  </div>
-                </div>
-              </div>
-              <p class="text-xs text-[var(--color-text-muted)] mt-2">实际上下文总限制长度为该「上下文长度」限制加上角色卡、用户信息、自定义系统提示词。草稿助手优先使用当前会话的条数限制，其次全局，最后回退到现有上下文逻辑。</p>
-
-              <div v-if="chatDraft && props.chat?.isGroup" class="space-y-3 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay p-3">
-                <div class="text-sm font-medium text-[var(--color-text-secondary)]">群聊 MVU</div>
-                <label class="inline-flex items-center gap-2 text-sm text-[var(--color-text-secondary)] cursor-pointer select-none">
-                  <ThemedCheckbox
-                    :checked="chatDraft?.groupMvuEnabled === true"
-                    @update:checked="(v) => { if (chatDraft) chatDraft.groupMvuEnabled = v }"
-                  />
-                  <span>启用群聊 MVU</span>
-                </label>
-                <div v-if="chatDraft?.groupMvuEnabled === true" class="w-full min-w-0 space-y-3">
-                  <div class="block w-full min-w-[12rem] max-w-md space-y-1.5">
-                    <label class="block w-full min-w-0 text-xs font-medium text-[var(--color-text-secondary)]">锚定成员</label>
-                    <ModernSelect
-                      :model-value="chatDraft?.groupMvuAnchorCharacterId || ''"
-                      @update:model-value="(v) => { if (chatDraft) chatDraft.groupMvuAnchorCharacterId = v || null }"
-                      :options="groupChatMvuAnchorSelectOptions"
-                      placeholder="选择成员"
-                      class="w-full"
-                    />
-                  </div>
-                  <div class="block w-full min-w-[12rem] max-w-md space-y-1.5">
-                    <label class="block w-full min-w-0 text-xs font-medium text-[var(--color-text-secondary)]">模板成员（可选）</label>
-                    <ModernSelect
-                      :model-value="chatDraft?.groupMvuTemplateCharacterId || ''"
-                      @update:model-value="(v) => { if (chatDraft) chatDraft.groupMvuTemplateCharacterId = v || null }"
-                      :options="groupChatMvuAnchorSelectOptions"
-                      placeholder="可选"
-                      class="w-full"
-                    />
-                  </div>
-                  <p class="text-xs text-[var(--color-text-muted)]">与「群聊设置」弹窗写入同一字段。</p>
-                </div>
-              </div>
-
-              <div class="space-y-3 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay p-3">
-                <div>
-                  <div class="text-sm font-medium text-[var(--color-text-secondary)]">MVU 模式覆盖</div>
-                  <div class="mt-1 text-xs text-[var(--color-text-muted)]">只覆盖当前会话的 MVU 模式、指令、正则规则与初始状态栏。MVU 所用模型在全局「连接与默认模型」中配置。</div>
-                </div>
-                <MvuCapabilityEditor
-                  :mvu-mode="chatDraft.mvuMode ?? null"
-                  :mvu-directive="chatDraft.mvuDirective ?? ''"
-                  :content-regex-rules="chatDraft.contentRegexRules || []"
-                  :initial-state-tables="chatStateTablesDraft"
-                  :allow-inherit="true"
-                  tables-empty-hint="暂无状态表格。点击「新建表格」开始配置。"
-                  @update:mvu-mode="(v) => { if (chatDraft) chatDraft.mvuMode = v }"
-                  @update:mvu-directive="(v) => { if (chatDraft) chatDraft.mvuDirective = v }"
-                  @update:content-regex-rules="(v) => { if (chatDraft) chatDraft.contentRegexRules = v }"
-                  @update:initial-state-tables="(v) => { chatStateTablesDraft = v }"
-                />
-              </div>
-
-              <div
-                v-if="chatMvuRuntimeEnabled"
-                class="space-y-3 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay p-3"
-              >
-                <div>
-                  <div class="text-sm font-medium text-[var(--color-text-secondary)]">知识图谱</div>
-                  <p class="mt-1 text-xs text-[var(--color-text-muted)]">{{ kgStatsSummary }}</p>
-                </div>
-                <label class="inline-flex items-center gap-2 text-sm text-[var(--color-text-secondary)] cursor-pointer select-none">
-                  <ThemedCheckbox
-                    :checked="chatDraft?.knowledgeGraphEnabled !== false"
-                    @update:checked="(v) => { if (chatDraft) chatDraft.knowledgeGraphEnabled = v }"
-                  />
-                  <span>启用知识图谱</span>
-                </label>
-                <p class="text-xs text-[var(--color-text-muted)]">
-                  关闭后不注入 RP 上下文，MVU 也不会自动维护图谱；仍可手动打开图谱编辑。
-                </p>
-                <div class="flex flex-wrap gap-2">
-                  <button type="button" class="btn btn-sm btn-primary" @click="emit('open-knowledge-graph')">
-                    打开图谱
-                  </button>
-                  <button
-                    v-if="mvuStore.hasKnowledgeGraph"
-                    type="button"
-                    class="btn btn-sm btn-secondary"
-                    @click="clearKnowledgeGraph"
-                  >
-                    清空图谱
-                  </button>
-                </div>
-              </div>
-
-              <div class="space-y-2 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay overflow-hidden">
-                <button
-                  type="button"
-                  class="w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-sm font-medium text-[var(--color-text-secondary)] hover:bg-surface-muted transition-colors"
-                  @click="chatRegexAccordionOpen = !chatRegexAccordionOpen"
-                >
-                  <span>正文正则后处理（规则全局可见，会话独立启用）</span>
-                  <span class="text-[var(--color-text-muted)]">{{ chatRegexAccordionOpen ? '收起' : '展开' }}</span>
-                </button>
-                <div v-show="chatRegexAccordionOpen" class="space-y-3 border-t border-[var(--color-border-subtle)] p-3">
-                  <div class="text-xs text-[var(--color-text-muted)]">规则定义全局共享；本会话仅保存启用状态。assistant 与 user 正文均参与扫描。</div>
-                  <div class="grid grid-cols-2 gap-3">
-                    <div class="space-y-1.5">
-                      <label class="block text-xs font-medium text-[var(--color-text-secondary)]">默认扫描深度（最近 assistant 条数）</label>
-                      <input
-                        v-model.number="chatDraft.contentRegexScanDepthDefault"
-                        type="number"
-                        min="1"
-                        max="50"
-                        class="input w-full"
-                      />
-                    </div>
-                    <div class="flex items-end justify-end gap-2">
-                      <button type="button" class="btn btn-xs btn-secondary" @click="toggleAllRegexRules(true)">全部启用</button>
-                      <button type="button" class="btn btn-xs btn-secondary" @click="toggleAllRegexRules(false)">全部禁用</button>
-                    </div>
-                  </div>
-                  <div class="flex items-center justify-between gap-2">
-                    <div class="text-xs text-[var(--color-text-muted)]">共 {{ contentRegexRulesSorted.length }} 条</div>
-                    <button type="button" class="btn btn-sm btn-primary" @click="openRegexRuleEditor(null)">新建规则</button>
-                  </div>
-                  <div v-if="contentRegexRulesSorted.length === 0" class="rounded-lg border border-dashed border-[var(--color-border-subtle)] bg-surface-muted p-3 text-xs text-[var(--color-text-muted)]">
-                    当前会话暂无正文正则规则。点击「新建规则」开始配置。
-                  </div>
-                  <div v-else class="space-y-2">
-                    <div
-                      v-for="(rule, idx) in contentRegexRulesSorted"
-                      :key="rule.id"
-                      class="rounded-lg border border-[var(--color-border-subtle)] bg-surface-muted p-2 interactive-surface"
-                      :class="isRegexRuleEnabled(rule) ? 'surface-selected border-brand-a40' : 'opacity-70'"
-                      draggable="true"
-                      @dragstart="handleRegexRuleDragStart(idx)"
-                      @dragover="handleRegexRuleDragOver($event, idx)"
-                      @dragend="handleRegexRuleDragEnd"
-                    >
-                      <div class="flex items-start justify-between gap-2">
-                        <div class="min-w-0 flex-1 cursor-grab active:cursor-grabbing">
-                          <div class="text-xs font-medium text-[var(--color-text)] break-all">
-                            {{ rule.name || rule.pattern.slice(0, 50) }}
-                            <span v-if="rule._origin === 'character'" class="inline-block text-[10px] px-1 py-px rounded-full bg-[var(--color-brand-a15)] text-[var(--color-brand)] align-middle ml-1">角色自带</span>
-                          </div>
-                          <div class="mt-1 text-[11px] text-[var(--color-text-muted)] break-all">{{ rule.pattern }}</div>
-                          <div class="mt-1 text-[11px] text-[var(--color-text-muted)]">
-                            {{ regexActionLabel(rule.action) }} / {{ regexMatchModeLabel(rule.matchMode) }} / 深度 {{ rule.scanDepthOverride ?? chatDraft.contentRegexScanDepthDefault ?? 50 }}
-                          </div>
-                          <div v-if="rule.action === 'extract' || rule.action === 'extract_and_replace'" class="mt-1 text-[11px] text-[var(--color-text-muted)]">
-                            提取来源：{{ regexExtractSourceLabel(rule.extractSource) }}
-                          </div>
-                          <div v-if="rule.action === 'replace' || rule.action === 'extract_and_replace'" class="mt-1 text-[11px] text-[var(--color-text-muted)] break-all">
-                            {{ (rule.replacement || '').slice(0, 80) }}
-                          </div>
-                        </div>
-                        <div class="flex items-center gap-1 shrink-0">
-                          <ThemedCheckbox
-                            :checked="isRegexRuleEnabled(rule)"
-                            @update:checked="(checked) => setRegexRuleEnabled(idx, checked)"
-                          />
-                          <button type="button" class="btn btn-xs btn-secondary" @click="openRegexRuleEditor(idx)">编辑</button>
-                          <button type="button" class="btn btn-xs btn-secondary" @click="moveRegexRule(idx, -1)">上移</button>
-                          <button type="button" class="btn btn-xs btn-secondary" @click="moveRegexRule(idx, 1)">下移</button>
-                          <button type="button" class="btn btn-xs btn-secondary" @click="removeRegexRule(idx)">删除</button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div class="space-y-2">
-                <div class="flex flex-wrap items-center justify-between gap-2">
-                  <div class="text-sm font-medium text-[var(--color-text-secondary)]">世界书</div>
-                  <template v-if="!worldBookCreateExpanded">
-                    <button type="button" class="btn btn-xs btn-secondary" @click="worldBookCreateExpanded = true">
-                      新建世界书
-                    </button>
-                  </template>
-                  <div v-else class="flex flex-wrap items-center gap-2 justify-end flex-1 min-w-0">
-                    <input
-                      v-model="worldBookNewNameDraft"
-                      type="text"
-                      class="input input-sm flex-1 min-w-[140px] max-w-[240px]"
-                      placeholder="世界书名称"
-                      @keydown.enter.prevent="confirmCreateWorldBook"
-                    />
-                    <button type="button" class="btn btn-xs btn-primary" @click="confirmCreateWorldBook">创建</button>
-                    <button type="button" class="btn btn-xs btn-secondary" @click="cancelWorldBookCreate">取消</button>
-                  </div>
-                </div>
-                <div class="rounded-lg border border-[var(--color-border-subtle)] bg-surface-muted p-3 text-xs text-[var(--color-text-muted)]">
-                  全局激活的世界书会自动对当前会话生效；你也可以把世界书仅绑定到当前会话。会话内顺序用于预算淘汰优先级（靠后更先被丢弃）。
-                </div>
-                <div class="flex items-center gap-2">
-                  <ModernSelect
-                    v-model="addWorldBookId"
-                    :options="worldBookAddOptions"
-                    placeholder="选择世界书加入会话顺序..."
-                    class="flex-1"
-                  />
-                  <button class="btn btn-sm btn-secondary" @click="addWorldBookToOrder">加入顺序</button>
-                </div>
-                <div class="drawer-scroll max-h-[180px] space-y-2 overflow-y-auto rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay p-2">
-                  <div
-                    v-for="book in currentChatWorldbooks"
-                    :key="book.id"
-                    class="rounded-lg border border-[var(--color-border-subtle)] bg-surface-muted p-2"
-                  >
-                    <div class="flex items-center justify-between gap-2">
-                      <div class="text-sm text-[var(--color-text)]">
-                        {{ book.name }}
-                        <span v-if="book.globalActive" class="ml-1 text-xs text-brand">{{
-                          (chatDraft?.worldBookGlobalExclusions || []).includes(book.id)
-                            ? '（全局，该会话禁用）'
-                            : '（全局）'
-                        }}</span>
-                      </div>
-                      <div class="flex items-center gap-1">
-                        <button class="btn btn-xs btn-secondary" @click="setWorldBookGlobalActive(book, !book.globalActive)">
-                          {{ book.globalActive ? '改为会话' : '设为全局' }}
-                        </button>
-                        <button class="btn btn-xs btn-secondary" @click="detachWorldBookFromCurrentChat(book)">移除会话</button>
-                        <button class="btn btn-xs btn-secondary" @click="openWorldBookEditor(book.id)">编辑</button>
-                      </div>
-                    </div>
-                  </div>
-                  <div v-if="currentChatWorldbooks.length === 0" class="text-xs text-[var(--color-text-muted)]">
-                    当前会话暂无已激活世界书。
-                  </div>
-                </div>
-                <div class="rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay overflow-hidden">
-                  <button
-                    type="button"
-                    class="w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-xs font-medium text-[var(--color-text-secondary)] hover:bg-surface-muted transition-colors"
-                    @click="toggleAllWorldBooksSection"
-                  >
-                    <span>全部世界书（{{ worldbooks.length }} 本）</span>
-                    <span class="text-[var(--color-text-muted)]">{{ allWorldBooksSectionOpen ? '收起' : '展开' }}</span>
-                  </button>
-                  <div v-show="allWorldBooksSectionOpen" class="px-2 pb-2 space-y-1.5 border-t border-[var(--color-border-subtle)] pt-2">
-                    <div
-                      v-for="book in worldBooksListVisible"
-                      :key="book.id"
-                      class="flex items-center justify-between gap-2 rounded-md border border-[var(--color-border-subtle)] bg-surface-muted px-2 py-1.5"
-                    >
-                      <div class="min-w-0 flex-1">
-                        <div class="text-xs text-[var(--color-text)] truncate">{{ book.name || book.id }}</div>
-                        <div class="text-[10px] text-[var(--color-text-muted)] leading-tight mt-0.5">
-                          {{ worldbookTokenHint(book.id) }}
-                        </div>
-                      </div>
-                      <button type="button" class="btn btn-xs btn-secondary shrink-0" @click="openWorldBookEditor(book.id)">
-                        编辑
-                      </button>
-                    </div>
-                    <div v-if="worldbooks.length === 0" class="text-xs text-[var(--color-text-muted)] px-1 py-1">暂无世界书。</div>
-                    <div v-else-if="worldbooks.length > 5" class="flex justify-center pt-1">
-                      <button type="button" class="btn btn-xs btn-secondary" @click="allWorldBooksListExpanded = !allWorldBooksListExpanded">
-                        {{ allWorldBooksListExpanded ? '收起列表' : `展开全部（${worldbooks.length} 本）` }}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-                <div class="space-y-1 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay p-2">
-                  <div class="text-xs text-[var(--color-text-muted)]">会话世界书顺序</div>
-                  <p class="text-[10px] text-[var(--color-text-muted)] mb-1 leading-snug">
-                    拖动条目或用上移/下移调整顺序（预算淘汰时靠后的书先被丢弃）。扫描深度与插入深度在「编辑」中设置（按会话）。
-                  </p>
-                  <div
-                    v-for="(att, idx) in (chatDraft.worldBookAttachments || [])"
-                    :key="`${att.worldBookId}-${idx}`"
-                    class="flex items-center justify-between gap-2 rounded-md border border-[var(--color-border-subtle)] bg-surface-muted px-2 py-1 transition-all"
-                    :class="worldBookOrderDraggingIdx === idx ? 'opacity-50 border-brand-a50' : ''"
-                    draggable="true"
-                    @dragstart="handleWorldBookOrderDragStart(idx)"
-                    @dragover="handleWorldBookOrderDragOver($event, idx)"
-                    @dragend="handleWorldBookOrderDragEnd"
-                  >
-                    <div class="flex min-w-0 flex-1 items-center gap-1.5">
-                      <span class="shrink-0 cursor-grab text-[var(--color-text-muted)] active:cursor-grabbing" aria-hidden="true">
-                        <GripVertical class="w-4 h-4" />
-                      </span>
-                      <div class="flex min-w-0 flex-1 flex-col gap-0.5">
-                        <span class="truncate text-xs text-[var(--color-text)]">{{ idx + 1 }}. {{ worldBookName(att.worldBookId) }}</span>
-                        <div class="text-[10px] text-[var(--color-text-muted)] leading-tight">
-                          扫描：{{ scanDepthDisplay(att.scanDepth) }}　深度：{{ att.insertDepth ?? 5 }}
-                        </div>
-                      </div>
-                    </div>
-                    <div class="flex shrink-0 flex-wrap items-center gap-1 justify-end">
-                      <button type="button" class="btn btn-xs btn-secondary" @click.stop="openSessionAttachEdit(idx)">编辑</button>
-                      <button type="button" class="btn btn-xs btn-secondary" @click.stop="moveWorldBookOrder(att.worldBookId, -1)">上移</button>
-                      <button type="button" class="btn btn-xs btn-secondary" @click.stop="moveWorldBookOrder(att.worldBookId, 1)">下移</button>
-                      <button type="button" class="btn btn-xs btn-secondary" @click.stop="clearWorldBookSessionActivationById(att.worldBookId)">删除</button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div class="space-y-3 rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-settings-control-bg)] p-4">
-                <div class="flex items-center justify-between gap-3">
-                  <div>
-                    <div class="text-sm font-medium text-[var(--color-text-secondary)]">文字转语音</div>
-                    <p class="mt-1 text-xs text-[var(--color-text-muted)]">
-                      会话级 TTS 设置挂在世界书之后保存；自动朗读范围使用“角色 / 用户 / 全部”语义。
-                    </p>
-                  </div>
-                  <span
-                    class="shrink-0 whitespace-nowrap rounded-full px-2 py-1 text-[11px] font-medium"
-                    :class="globalDraft.ttsEnabled ? 'bg-brand-a20 text-brand' : 'bg-surface-overlay text-[var(--color-text-muted)]'"
-                  >
-                    {{ globalDraft.ttsEnabled ? '启用' : '禁用' }}
-                  </span>
-                </div>
-
-                <div
-                  class="space-y-3"
-                  :class="globalDraft.ttsEnabled ? '' : 'opacity-55 pointer-events-none select-none'"
-                >
-                  <div v-if="!globalDraft.ttsEnabled" class="rounded-lg border border-dashed border-[var(--color-border-subtle)] bg-surface-overlay px-3 py-2 text-xs text-[var(--color-text-muted)]">
-                    请先在“全局设置 → 文字转语音（TTS）”里开启 TTS，当前会话配置才会生效。
-                  </div>
-
-                  <div class="space-y-1.5">
-                    <label class="block text-sm font-medium text-[var(--color-text-secondary)]">TTS 模型</label>
-                    <ModernSelect
-                      v-model="chatDraft.tts!.model"
-                      :selected-preset-id="chatDraft.tts?.presetId ?? null"
-                      :options="ttsSessionModelOptions"
-                      searchable
-                      allow-create
-                      placeholder="选择 TTS 模型..."
-                      :disabled="!globalDraft.ttsEnabled || ttsSessionModelOptions.length === 0"
-                      @select="updateChatTtsModel"
-                    />
-                    <p class="text-xs text-[var(--color-text-muted)]">
-                      先选模型，预设会自动关联到对应的 TTS 服务。
-                      <span v-if="selectedChatTtsPreset" class="text-brand">当前预设：{{ selectedChatTtsPreset.name }} · {{ formatTtsProviderLabel(selectedChatTtsProvider) }}</span>
-                    </p>
-                    <p v-if="ttsSessionModelOptions.length === 0" class="text-xs text-[var(--color-text-muted)]">
-                      还没有可用的 TTS 模型。请先在 API 预设中把目标预设标记为 TTS 服务并获取模型列表。
-                    </p>
-                  </div>
-
-                  <div class="space-y-2">
-                    <div class="text-sm font-medium text-[var(--color-text-secondary)]">自动朗读范围</div>
-                    <div class="relative inline-flex w-full gap-1 rounded-lg border border-[var(--color-border-subtle)] bg-surface-muted p-1">
-                      <div
-                        class="pointer-events-none absolute left-1 top-1 bottom-1 rounded-md bg-brand shadow-sm transition-transform duration-[400ms] ease-out"
-                        :style="{
-                          width: 'calc((100% - 1.25rem) / 4)',
-                          transform: `translateX(calc(${Math.max(0, TTS_AUTO_READ_OPTIONS.findIndex((option) => option.value === (chatDraft!.tts?.autoReadScope ?? 'off')))} * (100% + 0.25rem)))`,
-                        }"
-                      />
-                      <button
-                        v-for="option in TTS_AUTO_READ_OPTIONS"
-                        :key="option.value"
-                        type="button"
-                        class="relative z-10 min-h-[2.25rem] flex-1 rounded-md px-2 py-1 text-xs font-medium transition-colors duration-[400ms] ease-out"
-                        :class="(chatDraft.tts?.autoReadScope ?? 'off') === option.value ? 'text-[var(--color-on-brand)]' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'"
-                        @click="updateChatTtsAutoReadScope(option.value as AutoReadScope)"
-                      >
-                        {{ option.label }}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div class="space-y-1.5">
-                    <label class="block text-sm font-medium text-[var(--color-text-secondary)]">朗读间隔（秒）</label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.1"
-                      class="input w-full"
-                      :value="chatDraft.tts?.readGapSeconds ?? 0"
-                      @input="updateChatTtsReadGapSeconds(($event.target as HTMLInputElement).value)"
-                    />
-                  </div>
-
-                  <div class="space-y-2 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay px-3 py-3">
-                    <div class="text-sm font-medium text-[var(--color-text-secondary)]">文本后处理</div>
-                    <div class="flex flex-wrap gap-4 text-xs text-[var(--color-text-secondary)]">
-                      <button type="button" class="inline-flex items-center gap-2 transition-colors hover:text-[var(--color-text)]" @click="updateChatTtsPreprocessEnabled(!(chatDraft.tts?.preprocessEnabled === true))">
-                        <ThemedCheckbox :checked="chatDraft.tts?.preprocessEnabled === true" />
-                        <span>启用文本后处理</span>
-                      </button>
-                      <button type="button" class="inline-flex items-center gap-2 transition-colors hover:text-[var(--color-text)]" :disabled="!(chatDraft.tts?.preprocessEnabled === true)" @click="updateChatTtsInjectEmotionTags(!(chatDraft.tts?.injectEmotionTags === true))">
-                        <ThemedCheckbox :checked="chatDraft.tts?.injectEmotionTags === true" :disabled="!(chatDraft.tts?.preprocessEnabled === true)" />
-                        <span>注入英文情绪标签</span>
-                      </button>
-                    </div>
-                    <div v-if="chatDraft.tts?.preprocessEnabled" class="space-y-1.5">
-                      <label class="block text-xs font-medium text-[var(--color-text-secondary)]">后处理目标语言</label>
-                      <input
-                        type="text"
-                        class="input w-full"
-                        :value="chatDraft.tts?.preprocessTargetLanguage ?? ''"
-                        placeholder="例如 简体中文、English（留空则不按语言翻译）"
-                        @input="updateChatTtsPreprocessTargetLanguage(($event.target as HTMLInputElement).value)"
-                      />
-                    </div>
-                    <ModernSelect
-                      v-if="chatDraft.tts?.preprocessEnabled"
-                      v-model="chatDraft.tts!.preprocessModel"
-                      :selected-preset-id="chatDraft.tts?.preprocessPresetId ?? null"
-                      :options="ttsPreprocessModelOptions"
-                      searchable
-                      allow-create
-                      placeholder="选择文本后处理模型..."
-                      :disabled="ttsPreprocessModelOptions.length === 0"
-                      @select="updateChatTtsPreprocessModel"
-                    />
-                    <p class="text-xs text-[var(--color-text-muted)]">
-                      后处理请求会以 JSON 发送 language、raw_text、inject_emotion_tags；目标语言同时写入提示词占位符。留空则不翻译。模型从普通文本预设里选。若开启「注入语气相关标签」，请确认当前 TTS 模型文档是否支持，否则可能产生异常或怪音。
-                    </p>
-                  </div>
-
-                  <div class="space-y-2">
-                    <div class="text-sm font-medium text-[var(--color-text-secondary)]">角色音色</div>
-                    <div v-if="currentChatCharacterVoiceRows.length" class="space-y-2">
-                      <div
-                        v-for="row in currentChatCharacterVoiceRows"
-                        :key="row.id"
-                        class="grid items-center gap-2 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay px-3 py-2 md:grid-cols-[minmax(0,11rem)_1fr]"
-                      >
-                        <div class="flex min-h-8 items-center text-xs text-[var(--color-text-secondary)]">{{ row.name }}</div>
-                        <TtsVoiceInput
-                          :model-value="getCharacterVoiceValue(row.id)"
-                          :voices="availableTtsVoices"
-                          placeholder="输入或下拉选择 voice_id"
-                          @update:model-value="updateCharacterVoiceValue(row.id, $event)"
-                        />
-                      </div>
-                    </div>
-                    <div v-else class="text-xs text-[var(--color-text-muted)]">当前会话没有可配置的角色。</div>
-                  </div>
-
-                  <div class="space-y-2">
-                    <div class="text-sm font-medium text-[var(--color-text-secondary)]">用户音色</div>
-                    <div v-if="currentChatPersonaVoiceRows.length" class="space-y-2">
-                      <div
-                        v-for="row in currentChatPersonaVoiceRows"
-                        :key="row.id"
-                        class="grid items-center gap-2 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay px-3 py-2 md:grid-cols-[minmax(0,11rem)_1fr]"
-                      >
-                        <div class="flex min-h-8 items-center text-xs text-[var(--color-text-secondary)]">{{ row.name }}</div>
-                        <TtsVoiceInput
-                          :model-value="getPersonaVoiceValue(row.id)"
-                          :voices="availableTtsVoices"
-                          placeholder="输入或下拉选择 voice_id"
-                          @update:model-value="updatePersonaVoiceValue(row.id, $event)"
-                        />
-                      </div>
-                    </div>
-                    <div
-                      v-else-if="chat && !chat.userPersonaId"
-                      class="text-xs text-[var(--color-text-muted)]"
-                    >
-                      当前会话未绑定用户身份，请先在侧栏选择用户身份后再配置音色。
-                    </div>
-                    <div v-else class="text-xs text-[var(--color-text-muted)]">当前没有可用的用户身份音色入口。</div>
-                    <p v-if="availableTtsVoices.length === 0" class="text-xs text-[var(--color-text-muted)]">
-                      当前预设还没有已拉取的音色列表。你可以回到 API 预设里点击「从 API 获取并筛选」勾选音色，也可以直接手输 voice_id。
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Group Member Settings (Removed, moved to independent GroupSettingsModal) -->
-
-            </div>
-          </div>
+          <SettingsDrawerChatTab v-if="chatTabEverOpened" v-show="tab === 'chat'" />
         </div>
 
         <div class="shrink-0 flex justify-end gap-3 border-t border-[var(--color-border-subtle)] px-6 py-4 bg-[var(--color-settings-panel-bg)] rounded-b-2xl">
