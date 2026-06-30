@@ -15,11 +15,15 @@
    - `SettingsDrawerGlobalAppearanceSection`
    - `SettingsDrawerGlobalTtsSection`
    - `SettingsDrawerGlobalAppSection`（含检查更新 / HTTP 日志入口）
+3. Presets Tab：
+   - `SettingsDrawerPresetsTab.vue`（列表 + 编辑器 UI，inject 上下文）
+   - `useSettingsDrawerPresetListHeight.ts`（左栏列表高度）
+   - `utils/voiceCatalog.ts`（`normalizeVoiceCatalog` 共享）
 
 ## 待做
 
-3. Presets Tab 整体
 4. Chat Tab：世界书、正文正则列表、TTS 会话
+5. （可选）Presets 逻辑迁入 `useSettingsDrawerPresets.ts`，弱化 provide/inject
 
 ## 约束
 
