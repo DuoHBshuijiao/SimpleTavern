@@ -21,6 +21,10 @@
 - 不做完整 Playwright E2E 或组件测试体系。
 - 不做后端全局 chatId 索引迁移。
 
+## v0.601 无障碍约束补强
+
+- 固化“禁止原生元素裸用 `title` 属性，仅允许 `aria-label`（或可见文本 / `aria-labelledby`）”为设计规范（`DESIGN.md` / `PRODUCT.md`），并以前端测试守卫扫描全部 `.vue` 防止回归（PascalCase 组件 `title` prop 豁免）。
+
 ## v0.700+ 方向
 
 - 拆分巨型前端组件，提炼 settings/chat 专用子组件。

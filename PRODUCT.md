@@ -35,4 +35,4 @@ The interface should feel like a polished local tool with a layered glass materi
 
 ## Accessibility & Inclusion
 
-Target WCAG AA contrast for text and controls. Respect `prefers-reduced-motion`; animations should communicate state changes rather than decorate. Preserve keyboard access for dialogs, drawers, popovers, and major settings workflows. Prioritize readable text over glass effects whenever the two conflict.
+Target WCAG AA contrast for text and controls. Respect `prefers-reduced-motion`; animations should communicate state changes rather than decorate. Preserve keyboard access for dialogs, drawers, popovers, and major settings workflows. Prioritize readable text over glass effects whenever the two conflict. Do not rely on the native `title` attribute to name or describe controls, since it is not reliably exposed to keyboard or assistive technology; use `aria-label` (or visible text / `aria-labelledby`) for accessible names instead.

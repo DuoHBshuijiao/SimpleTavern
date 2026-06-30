@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.601
+
+### 无障碍
+
+- 新增设计规范约束：禁止在原生元素上使用裸 `title` 属性作为提示或可访问标签，统一改用 `aria-label`（或可见文本 / `aria-labelledby`），并写入 `DESIGN.md` 与 `PRODUCT.md`。
+- 新增前端测试守卫 `frontend/src/utils/noBareTitleAttr.test.ts`：扫描全部 `.vue`，断言原生元素不出现 `title` / `:title` 属性（PascalCase 组件的 `title` prop 不受影响），防止该约束回归；当前代码 0 违规。
+
 ## v0.600
 
 ### 系统性升级

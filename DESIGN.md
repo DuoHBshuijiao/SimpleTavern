@@ -207,6 +207,7 @@ SimpleTavern uses tonal glass layering as the primary elevation model. Shadows s
 - **Do** preserve the mature, immersive, restrained product tone from `PRODUCT.md`.
 - **Do** respect `prefers-reduced-motion`; motion should communicate state changes.
 - **Do** make deep interaction layers clearer and more readable than their parent surfaces.
+- **Do** give every icon-only or otherwise ambiguous control an accessible name through `aria-label` (or visible text / `aria-labelledby`).
 
 ### Don't:
 
@@ -217,3 +218,4 @@ SimpleTavern uses tonal glass layering as the primary elevation model. Shadows s
 - **Don't** use visual background gradients, except the MVU scanning animation.
 - **Don't** add colored side-stripe borders to cards, list items, callouts, or alerts.
 - **Don't** use gradient text.
+- **Don't** use the bare native `title` attribute as a tooltip or accessible label on controls; it is not reliably exposed to keyboard or assistive technology, so always use `aria-label` (or visible text) instead.
