@@ -1,0 +1,181 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-06-29T11:55:00.000Z",
+  "title": "Design System: SimpleTavern",
+  "extensions": {
+    "colorMeta": {
+      "rose-mist-primary": {
+        "role": "primary",
+        "displayName": "Rose Mist Primary",
+        "canonical": "#c58aa2",
+        "tonalRamp": ["#21171c", "#3a242d", "#593746", "#7b4f61", "#9f6c7e", "#c58aa2", "#dfb0c2", "#f3dce6"]
+      },
+      "canvas-deep": {
+        "role": "neutral",
+        "displayName": "Canvas Deep",
+        "canonical": "#151217",
+        "tonalRamp": ["#0a080b", "#151217", "#211b24", "#302735", "#46394d", "#675570", "#98859f", "#d4c8d8"]
+      },
+      "surface-elevated-glass": {
+        "role": "neutral",
+        "displayName": "Elevated Glass Surface",
+        "canonical": "#271f2ae6",
+        "tonalRamp": ["#0f0c10", "#1a151c", "#271f2a", "#372c3c", "#4d4053", "#716079", "#a393aa", "#ddd4e0"]
+      },
+      "text-main": {
+        "role": "neutral",
+        "displayName": "Text Main",
+        "canonical": "#fcf7fa",
+        "tonalRamp": ["#241f22", "#443b41", "#665961", "#8f8089", "#bcaeb7", "#ded4da", "#f2ebef", "#fcf7fa"]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Rare page and modal titles only."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Dense product UI copy, settings, and data-heavy panels."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "IDs, model names, code, logs, and shader/source snippets."
+      }
+    },
+    "shadows": [
+      {
+        "name": "glass-soft",
+        "value": "0 8px 24px rgba(0, 0, 0, 0.18)",
+        "purpose": "Low lift for cards and subtle surfaces."
+      },
+      {
+        "name": "glass-panel",
+        "value": "var(--app-shadow-heavy)",
+        "purpose": "Dock panels, drawers, and major floating regions."
+      },
+      {
+        "name": "glass-modal",
+        "value": "0 18px 56px rgba(0, 0, 0, 0.34)",
+        "purpose": "Committed modal surfaces."
+      },
+      {
+        "name": "glass-popover",
+        "value": "0 20px 64px rgba(0, 0, 0, 0.38)",
+        "purpose": "Dropdowns, popovers, and confirmation surfaces."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease-out-product",
+        "value": "cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "Default product easing for responsive state changes."
+      },
+      {
+        "name": "transition-fast",
+        "value": "0.15s var(--ease-out-product)",
+        "purpose": "Buttons, focus, hover, and compact controls."
+      },
+      {
+        "name": "transition-normal",
+        "value": "0.2s var(--ease-out-product)",
+        "purpose": "Modal fades and ordinary surface changes."
+      },
+      {
+        "name": "transition-slow",
+        "value": "0.3s var(--ease-out-product)",
+        "purpose": "Drawer movement and larger surface transitions."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "narrow-portrait",
+        "value": "runtime viewport composable"
+      },
+      {
+        "name": "modal-safe",
+        "value": "90vw-92vw max width caps"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Primary committed action with controlled accent brightness.",
+      "html": "<button class=\"ds-btn-primary\">保存设置</button>",
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; justify-content: center; min-height: 2.25rem; padding: 0.5rem 1rem; border-radius: var(--radius-lg); border: 1px solid color-mix(in srgb, var(--color-primary) 34%, transparent); background: var(--color-primary-action); color: var(--color-on-brand); font: 500 var(--text-sm)/1.5 var(--font-sans); box-shadow: var(--shadow-brand); transition: background-color var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast); } .ds-btn-primary:hover { background: var(--color-primary-action-hover); border-color: color-mix(in srgb, var(--color-primary) 46%, transparent); transform: translateY(-1px); } .ds-btn-primary:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Neutral glass action for non-primary choices.",
+      "html": "<button class=\"ds-btn-secondary\">取消</button>",
+      "css": ".ds-btn-secondary { display: inline-flex; align-items: center; justify-content: center; min-height: 2.25rem; padding: 0.5rem 1rem; border-radius: var(--radius-lg); border: 1px solid var(--color-border-default); background: var(--color-dark-lighter); color: var(--color-text-primary); font: 500 var(--text-sm)/1.5 var(--font-sans); transition: background-color var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast); } .ds-btn-secondary:hover { background: var(--color-dark-elevated); border-color: var(--color-border-strong); transform: translateY(-1px); }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Compact glass input with token focus ring.",
+      "html": "<label class=\"ds-field\"><span>模型名称</span><input class=\"ds-input\" placeholder=\"输入模型名称\" /></label>",
+      "css": ".ds-field { display: grid; gap: var(--spacing-sm); color: var(--color-text-secondary); font: 500 var(--text-sm)/1.35 var(--font-sans); } .ds-input { width: 100%; box-sizing: border-box; padding: 0.5rem 0.75rem; border-radius: var(--radius-lg); border: 1px solid var(--color-border-default); background: var(--color-dark-surface); color: var(--color-text-primary); font: 400 var(--text-sm)/1.5 var(--font-sans); transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background-color var(--transition-fast); } .ds-input::placeholder { color: var(--color-text-muted); } .ds-input:focus { outline: none; border-color: var(--color-brand); box-shadow: 0 0 0 3px var(--color-focus-ring); }"
+    },
+    {
+      "name": "Glass Modal",
+      "kind": "card",
+      "refersTo": "modal-surface",
+      "description": "Committed top-level dialog surface.",
+      "html": "<section class=\"ds-modal\"><header>设置</header><p>多层玻璃表面，文本保持清晰。</p></section>",
+      "css": ".ds-modal { max-width: 28rem; padding: var(--spacing-lg); border-radius: var(--radius-2xl); border: 1px solid var(--color-glass-border-strong); background: var(--color-modal-surface); color: var(--color-text); box-shadow: var(--shadow-glass-modal); backdrop-filter: blur(var(--glass-blur-modal)); font-family: var(--font-sans); } .ds-modal header { font-size: var(--text-lg); font-weight: 600; margin-bottom: var(--spacing-md); } .ds-modal p { margin: 0; color: var(--color-text-secondary); line-height: 1.5; }"
+    },
+    {
+      "name": "Popover Surface",
+      "kind": "custom",
+      "refersTo": "popover-surface",
+      "description": "Deepest interaction surface for dropdowns and confirmation popovers.",
+      "html": "<div class=\"ds-popover\"><button>选项一</button><button>选项二</button></div>",
+      "css": ".ds-popover { display: grid; gap: 0.25rem; min-width: 12rem; padding: 0.45rem; border-radius: var(--radius-xl); border: 1px solid var(--color-glass-border-strong); background: var(--color-popover-surface); box-shadow: var(--shadow-glass-popover); backdrop-filter: blur(var(--glass-blur-popover)); } .ds-popover button { border: 0; border-radius: var(--radius-lg); padding: 0.5rem 0.75rem; background: transparent; color: var(--color-text-secondary); text-align: left; font: 400 var(--text-sm)/1.4 var(--font-sans); } .ds-popover button:hover { background: var(--color-surface-hover); color: var(--color-text); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "Quiet Roleplay Cockpit",
+    "overview": "SimpleTavern is a dense local product surface for long AI roleplay sessions, not a decorative landing page. Its visual system should feel like a quiet cockpit: many controls, panels, logs, and states are available, but the interface stays calm, layered, and legible.",
+    "keyCharacteristics": [
+      "Restrained dark product UI with one theme accent at a time.",
+      "Layered glass depth from page canvas to popover.",
+      "Compact but readable controls for settings-heavy workflows.",
+      "Consistent product interaction patterns."
+    ],
+    "rules": [
+      {
+        "name": "The No Gradient Background Rule",
+        "body": "Visual backgrounds must be translucent solid color. The only allowed gradient is the MVU state bar scanning animation.",
+        "section": "colors"
+      },
+      {
+        "name": "The Depth Ladder Rule",
+        "body": "Never choose surface color by eye alone. Map the surface to L0-L6 first, then use the matching token.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Product Sans Rule",
+        "body": "Do not introduce display fonts into labels, buttons, data, settings, or logs.",
+        "section": "typography"
+      }
+    ],
+    "dos": [
+      "Do use translucent solid color surfaces, blur, border, and shadow to express hierarchy.",
+      "Do keep every primary action, selection, focus state, and danger state tied to semantic tokens.",
+      "Do respect prefers-reduced-motion; motion should communicate state changes."
+    ],
+    "donts": [
+      "Don't use generic SaaS dashboards with bright gradient cards, decorative glow, and inconsistent button vocabularies.",
+      "Don't make the app feel like an overly playful chat app that sacrifices dense configuration clarity.",
+      "Don't use glassmorphism as decoration without readability, hierarchy, or performance discipline.",
+      "Don't use visual background gradients, except the MVU scanning animation."
+    ]
+  }
+}
