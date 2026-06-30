@@ -63,7 +63,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick, type Compon
 import { useRoute, useRouter } from 'vue-router'
 import { useCharacterSidebarRecencyStore, useCharactersStore, useChatsStore, useSettingsStore, useUiStore, useMvuStore } from '../stores'
 import type { SettingsDrawerTab } from '../stores/ui'
-import type { ApiPreset, AssistantAttachment, CharacterCard, ChatContentRegexRule, ChatImageAttachment, ChatMessage, ChatOverrides, ChatMvuMode, GroupMemberSettings, Chat, MainChatRole, MvuMode, TtsSessionConfig, WorldBook, GroupMvuPreset } from '../types/models'
+import type { ApiPreset, AssistantAttachment, CharacterCard, ChatContentRegexRule, ChatImageAttachment, ChatMessage, ChatOverrides, ChatMvuMode, GroupMemberSettings, Chat, MainChatRole, TtsSessionConfig, GroupMvuPreset } from '../types/models'
 // Composables
 import { 
   useStreamOutput, 
@@ -73,7 +73,7 @@ import {
   useChatActions,
   useSettingsImport,
 } from '../composables'
-import type { SillyTavernImportPreview } from '../composables/useSettingsImport'
+import { useEmbeddedAvatarImport, type AvatarCropSavePayload } from '../composables/useEmbeddedAvatarImport'
 import { usePageBackground } from '../composables/usePageBackground'
 import { useWebGpuBackground } from '../composables/useWebGpuBackground'
 import { useWebGpuBackgroundRuntime } from '../composables/useWebGpuBackgroundRuntime'
@@ -101,21 +101,21 @@ import {
   CharacterEditorModal,
   PersonaEditorModal,
   PersonaSwitchConfirmModal,
+  EmbeddedCardConfirmModal,
+  AssistantSettingsModal,
 } from '../components/modals'
 import ErrorModal from '../components/modals/ErrorModal.vue'
 import KnowledgeGraphModal from '../components/modals/KnowledgeGraphModal.vue'
 import SettingsDrawer from '../components/SettingsDrawer.vue'
 import AvatarCropper from '../components/AvatarCropper.vue'
 import ModernAvatar from '../components/ModernAvatar.vue'
-import ModernSelect from '../components/ModernSelect.vue'
-import ThemedCheckbox from '../components/ThemedCheckbox.vue'
 import TtsPlaybackFab from '../components/chat/TtsPlaybackFab.vue'
 import { useTtsPlaybackQueue } from '../composables/useTtsPlaybackQueue'
-import { Users, Settings, X, MoreHorizontal, Search } from 'lucide-vue-next'
+import { Users, Settings, MoreHorizontal, Search } from 'lucide-vue-next'
 
 // API
 import { postAndConsumeSse } from '../api/sse'
-import { apiPost, apiGet, apiPut } from '../api/http'
+import { apiPost, apiGet } from '../api/http'
 import { useErrorStack } from '../composables/useErrorStack'
 import { notifyConfirm, notifyMessage } from '../composables/useNotify'
 import { isTtsApiPreset, resolveTtsProvider } from '../utils/apiPresetKind'
@@ -124,8 +124,6 @@ import { resolveRichPaste } from '../utils/richPaste'
 import { formatApiError } from '../utils/worldBookValidation'
 import { resolveBumpCharacterId } from '../utils/characterSidebarBump'
 import { isChatMvuRuntimeEnabled } from '../utils/groupMvu'
-import { useDialogBehavior } from '../composables/useDialogBehavior'
-import { dialogAria } from '../utils/uiPrimitives'
 
 // ========== Stores ==========
 const settings = useSettingsStore()
@@ -135,7 +133,7 @@ const characterSidebarRecency = useCharacterSidebarRecencyStore()
 const uiStore = useUiStore()
 const route = useRoute()
 const router = useRouter()
-const { refreshDataAfterImport, previewSillyTavernImport, materializeSillyTavernPending } = useSettingsImport()
+const { refreshDataAfterImport } = useSettingsImport()
 const pageBackground = usePageBackground(() => settings.settings)
 const webgpuCanvasRef = ref<HTMLCanvasElement | null>(null)
 const { runtimeState: webgpuRuntimeState } = useWebGpuBackgroundRuntime()
@@ -180,15 +178,6 @@ interface DraftImageItem {
   file: File
   name: string
   previewUrl: string
-}
-interface EmbeddedCharacterCardPreview {
-  card: CharacterCard
-  worldbook?: WorldBook | null
-}
-interface AvatarCropSavePayload {
-  imageData: string
-  focusX?: number
-  focusY?: number
 }
 const draftImages = ref<DraftImageItem[]>([])
 const workspaceAssistantTextareaRef = ref<HTMLTextAreaElement | null>(null)
@@ -301,52 +290,6 @@ const saveSendDeferCtx = ref<{
   singleAssistantTailMergeId?: string | null
   mode: 'single' | 'group'
 } | null>(null)
-
-const showEmbeddedCardConfirmModal = ref(false)
-const embeddedCardPreview = ref<EmbeddedCharacterCardPreview | null>(null)
-const embeddedCardImporting = ref(false)
-/** 头像裁剪上传 PNG 后，与完整 ST 导入一致的预览 pending（用于 MVU 选项） */
-const avatarEmbeddedStPendingId = ref('')
-const avatarEmbeddedStExpiresAt = ref('')
-const avatarEmbeddedStPreview = ref<SillyTavernImportPreview | null>(null)
-const avatarEmbeddedEnableMvu = ref(false)
-const avatarEmbeddedMvuMode = ref<MvuMode>('regex')
-const avatarEmbeddedMvuModeOptions = [
-  { label: 'Regex 兼容', value: 'regex' },
-  { label: '指令模式', value: 'directive' },
-] as const
-
-const avatarEmbeddedDetectedMvu = computed(() => {
-  const mvu = avatarEmbeddedStPreview.value?.mvu
-  return Boolean(mvu?.hasTavernHelper || mvu?.hasRegexScripts || mvu?.characterBookCandidateCount)
-})
-
-const embeddedCardConfirmLabel = computed(() => {
-  if (!embeddedCardImporting.value) return '覆盖当前编辑'
-  return avatarEmbeddedEnableMvu.value && avatarEmbeddedMvuMode.value === 'directive'
-    ? 'MVU Agent 分析中...'
-    : '导入中...'
-})
-
-function imageDataUrlToPngFile(imageData: string, filename: string): File {
-  const base64 = imageData.includes(',') ? imageData.split(',')[1]! : imageData
-  const bin = atob(base64)
-  const bytes = new Uint8Array(bin.length)
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
-  return new File([bytes], filename, { type: 'image/png' })
-}
-
-function resetAvatarEmbeddedStState() {
-  avatarEmbeddedStPendingId.value = ''
-  avatarEmbeddedStExpiresAt.value = ''
-  avatarEmbeddedStPreview.value = null
-  avatarEmbeddedEnableMvu.value = false
-  avatarEmbeddedMvuMode.value = 'regex'
-}
-
-function updateAvatarEmbeddedMvuMode(value: string) {
-  avatarEmbeddedMvuMode.value = value === 'directive' ? 'directive' : 'regex'
-}
 
 watch(() => uiStore.settingsDrawerRequestNonce, (nonce) => {
   if (!nonce) return
@@ -1597,106 +1540,34 @@ const actions = useChatActions({
   charactersStore: characters as any,
 })
 
-function clearEmbeddedCardPreviewState() {
-  showEmbeddedCardConfirmModal.value = false
-  embeddedCardPreview.value = null
-  embeddedCardImporting.value = false
-  resetAvatarEmbeddedStState()
-}
+const embeddedAvatarImport = useEmbeddedAvatarImport({
+  getEditingCharacter: () => actions.editingCharacter.value,
+  saveCharacterAvatar: (imageData, focusX, focusY) =>
+    actions.handleCharacterAvatarSave(imageData, focusX, focusY),
+  applyAssistantCard: (card) => actions.applyAssistantCard(card),
+  reloadWorldbooks: () => characterEditorModalRef.value?.reloadWorldbooks(),
+  pushError: (payload) => errorStack.pushError(payload),
+})
 
-async function handleCharacterAvatarSave(payload: AvatarCropSavePayload) {
-  resetAvatarEmbeddedStState()
-  const embedded = await actions.handleCharacterAvatarSave(payload.imageData, payload.focusX ?? null, payload.focusY ?? null)
-  if (embedded?.card) {
-    embeddedCardPreview.value = embedded
-    try {
-      const file = imageDataUrlToPngFile(payload.imageData, 'avatar.png')
-      const prev = await previewSillyTavernImport(file)
-      avatarEmbeddedStPendingId.value = prev.pendingId
-      avatarEmbeddedStExpiresAt.value = prev.expiresAt
-      avatarEmbeddedStPreview.value = prev.preview
-      avatarEmbeddedMvuMode.value = prev.preview.mvu.suggestedMode || 'regex'
-      avatarEmbeddedEnableMvu.value = Boolean(
-        prev.preview.mvu.hasTavernHelper
-        || prev.preview.mvu.hasRegexScripts
-        || prev.preview.mvu.characterBookCandidateCount,
-      )
-    } catch {
-      resetAvatarEmbeddedStState()
-    }
-    showEmbeddedCardConfirmModal.value = true
-  }
-}
+const {
+  showEmbeddedCardConfirmModal,
+  embeddedCardPreview,
+  embeddedCardImporting,
+  avatarEmbeddedStPreview,
+  avatarEmbeddedStExpiresAt,
+  avatarEmbeddedEnableMvu,
+  avatarEmbeddedMvuMode,
+  avatarEmbeddedMvuModeOptions,
+  avatarEmbeddedDetectedMvu,
+  embeddedCardConfirmLabel,
+  clearEmbeddedCardPreviewState,
+  handleCharacterAvatarSave,
+  confirmImportEmbeddedCard,
+  updateAvatarEmbeddedMvuMode,
+} = embeddedAvatarImport
 
 async function handlePersonaAvatarSave(payload: AvatarCropSavePayload) {
   await actions.handlePersonaAvatarSave(payload.imageData)
-}
-
-async function confirmImportEmbeddedCard() {
-  if (!actions.editingCharacter.value || !embeddedCardPreview.value?.card) {
-    clearEmbeddedCardPreviewState()
-    return
-  }
-  embeddedCardImporting.value = true
-  try {
-    const current = actions.editingCharacter.value
-    let incoming: CharacterCard
-    let worldbookPayload: WorldBook | undefined
-    let mergeWarnings: string[] | undefined
-
-    if (avatarEmbeddedStPendingId.value) {
-      const built = await materializeSillyTavernPending({
-        pendingId: avatarEmbeddedStPendingId.value,
-        enableMvuCompatibility: avatarEmbeddedEnableMvu.value,
-        mvuMode: avatarEmbeddedMvuMode.value,
-        avatarFilename: current.avatar || null,
-      })
-      incoming = built.character as unknown as CharacterCard
-      worldbookPayload = built.worldbook ? (built.worldbook as unknown as WorldBook) : undefined
-      mergeWarnings = built.warnings
-    } else {
-      incoming = embeddedCardPreview.value.card
-      worldbookPayload = embeddedCardPreview.value.worldbook ?? undefined
-    }
-
-    let attachedWorldBookIds: string[] = []
-    if (worldbookPayload) {
-      const savedBook = await apiPost<WorldBook>('/api/worldbooks', worldbookPayload)
-      attachedWorldBookIds = [savedBook.id]
-      await characterEditorModalRef.value?.reloadWorldbooks()
-    }
-    const mergedCard: CharacterCard = {
-      ...current,
-      name: incoming.name,
-      description: incoming.description,
-      personality: incoming.personality,
-      scenario: incoming.scenario,
-      firstMessage: incoming.firstMessage,
-      exampleDialogue: incoming.exampleDialogue,
-      systemPrompt: incoming.systemPrompt,
-      extraFirstMessageEntries: Array.isArray(incoming.extraFirstMessageEntries) ? incoming.extraFirstMessageEntries : [],
-      mvuEnabled: incoming.mvuEnabled === true,
-      mvuMode: incoming.mvuMode === 'directive' ? 'directive' : 'regex',
-      mvuDirective: typeof incoming.mvuDirective === 'string' ? incoming.mvuDirective : null,
-      contentRegexRules: Array.isArray(incoming.contentRegexRules) ? incoming.contentRegexRules : [],
-      initialStateTables: Array.isArray(incoming.initialStateTables)
-        ? incoming.initialStateTables
-        : current.initialStateTables,
-      attachedWorldBookIds,
-      avatar: current.avatar || incoming.avatar,
-      avatarFocusX: current.avatarFocusX ?? incoming.avatarFocusX ?? null,
-      avatarFocusY: current.avatarFocusY ?? incoming.avatarFocusY ?? null,
-    }
-    await apiPut<CharacterCard>('/api/assistant/workspace/character-card', mergedCard)
-    actions.applyAssistantCard(mergedCard)
-    clearEmbeddedCardPreviewState()
-    if (mergeWarnings?.length) {
-      void notifyMessage(mergeWarnings.join('；'), { title: '内嵌卡合并提示' })
-    }
-  } catch (error) {
-    errorStack.pushError({ message: error, source: 'main', title: '导入 PNG 内嵌角色数据失败' })
-    embeddedCardImporting.value = false
-  }
 }
 
 /**
@@ -4268,24 +4139,9 @@ function closePersonaEditor() {
   actions.showPersonaEditor.value = false
 }
 
-const assistantSettingsTitleId = 'assistant-settings-title'
-const assistantSettingsDialogAttrs = dialogAria(assistantSettingsTitleId)
 function closeAssistantSettings() {
   assistant.showAssistantSettings.value = false
 }
-const { dialogRef: assistantSettingsDialogRef } = useDialogBehavior(
-  () => assistant.showAssistantSettings.value,
-  closeAssistantSettings,
-)
-
-const embeddedCardConfirmTitleId = 'embedded-card-confirm-title'
-const embeddedCardConfirmDialogAttrs = dialogAria(embeddedCardConfirmTitleId)
-const { dialogRef: embeddedCardConfirmDialogRef } = useDialogBehavior(
-  () => showEmbeddedCardConfirmModal.value,
-  clearEmbeddedCardPreviewState,
-)
-void assistantSettingsDialogRef
-void embeddedCardConfirmDialogRef
 
 /**
  * 删除角色
@@ -5335,207 +5191,36 @@ const editingPersonaAvatarUrl = computed(() => {
       @new-session="confirmSwitchPersonaNewSession"
     />
 
-  <!-- 助手设置弹窗 -->
-  <div v-if="assistant.showAssistantSettings.value" class="modal">
-    <div class="modal-backdrop" @click="assistant.showAssistantSettings.value = false"></div>
-    <div
-      ref="assistantSettingsDialogRef"
-      v-bind="assistantSettingsDialogAttrs"
-      tabindex="-1"
-      class="modal-content modal-surface chat-modal-width-520-92"
-    >
-      <div class="modal-header">
-        <h3 :id="assistantSettingsTitleId" class="modal-title">聊天助手设置</h3>
-        <button type="button" class="modal-close" aria-label="关闭聊天助手设置弹窗" @click="assistant.showAssistantSettings.value = false">
-            <X class="w-5 h-5" />
-        </button>
-      </div>
-      <div class="modal-body">
-        <div class="space-y-6">
-          <div class="form-group">
-            <label class="label">温度</label>
-            <input
-              v-model.number="assistant.assistantSettings.value.temperature"
-              type="number"
-              min="0"
-              max="2"
-              step="0.1"
-              class="input w-full"
-            />
-          </div>
-          <div class="form-group">
-            <label class="label">上下文长度</label>
-            <input
-              v-model.number="assistant.assistantSettings.value.context_size"
-              type="number"
-              min="0"
-              class="input w-full"
-              placeholder="未启用（不限制）"
-            />
-            <p class="text-xs text-[var(--color-text-muted)] mt-1">填 0 或留空表示未启用。实际上下文总限制长度为该「上下文长度」限制加上角色卡、用户信息、自定义系统提示词。</p>
-          </div>
-          <div class="form-group">
-            <label class="label">助手读取消息条数上限</label>
-            <input
-              v-model.number="assistant.assistantSettings.value.tool_read_max_messages"
-              type="number"
-              min="1"
-              class="input w-full"
-              placeholder="未限制（仅受服务端硬上限）"
-            />
-            <p class="text-xs text-[var(--color-text-muted)] mt-1">限制「读取会话」工具返回的最大消息条数；留空表示不额外限制。</p>
-          </div>
-          <div class="form-group">
-            <label class="label">助手读取消息 token 上限（估算）</label>
-            <input
-              v-model.number="assistant.assistantSettings.value.tool_read_max_tokens"
-              type="number"
-              min="1"
-              class="input w-full"
-              placeholder="未限制"
-            />
-            <p class="text-xs text-[var(--color-text-muted)] mt-1">对返回的消息列表做 token 估算裁剪（保留最新）；留空表示不启用。</p>
-          </div>
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div class="form-group">
-              <label class="label">最大工具轮次</label>
-              <input
-                v-model.number="assistant.assistantSettings.value.maxToolTurns"
-                type="number"
-                min="1"
-                class="input w-full"
-                placeholder="默认 8"
-              />
-              <p class="text-xs text-[var(--color-text-muted)] mt-1">限制单次助手请求可进入多少轮 tool_calls。</p>
-            </div>
-            <div class="form-group">
-              <label class="label">单轮工具数上限</label>
-              <input
-                v-model.number="assistant.assistantSettings.value.maxToolsPerTurn"
-                type="number"
-                min="1"
-                class="input w-full"
-                placeholder="未限制"
-              />
-              <p class="text-xs text-[var(--color-text-muted)] mt-1">超出部分会写入「超出限制」占位结果并跳过执行。</p>
-            </div>
-          </div>
-          <div class="form-group border-t border-[var(--color-border-subtle)] pt-6">
-            <p class="label mb-3">工具权限</p>
-            <p class="text-xs text-[var(--color-text-muted)] mb-4">
-              以下开关与侧栏消息列表底部的权限按钮同步，变更后立即写入本机偏好。
-            </p>
-            <label class="flex items-start gap-3 cursor-pointer mb-4">
-              <ThemedCheckbox
-                class="mt-0.5"
-                :checked="assistant.allowWebSearchEnabled.value"
-                @update:checked="assistant.setAllowWebSearch"
-              />
-              <span>
-                <span class="text-sm text-[var(--color-text)]">允许网络搜索</span>
-                <span class="block text-xs text-[var(--color-text-muted)] mt-1">
-                  开启后聊天助手与工具区助手可调用全局设置里的 Tavily / 博查搜索；MVU Agent 不会挂载此工具。
-                </span>
-              </span>
-            </label>
-            <label class="flex items-start gap-3 cursor-pointer mb-4">
-              <ThemedCheckbox
-                class="mt-0.5"
-                :checked="assistant.allowWriteMemoryEnabled.value"
-                @update:checked="setAssistantWriteMemoryEnabled"
-              />
-              <span>
-                <span class="text-sm text-[var(--color-text)]">允许记忆写入</span>
-                <span class="block text-xs text-[var(--color-text-muted)] mt-1">
-                  开启后助手可在当前聊天会话中追加或覆盖长期记忆；仅作用于「聊天助手」，工作区助手不可用。
-                </span>
-              </span>
-            </label>
-            <label class="flex items-start gap-3 cursor-pointer">
-              <ThemedCheckbox
-                class="mt-0.5"
-                :checked="assistant.allowDestructiveToolsEnabled.value"
-                @update:checked="setAssistantDestructiveToolsEnabled"
-              />
-              <span>
-                <span class="text-sm text-[var(--color-text)]">允许破坏性工具</span>
-                <span class="block text-xs text-[var(--color-text-muted)] mt-1">
-                  开启后助手可执行删除文件、删除世界书、覆盖整卡与覆盖全部记忆等不可逆操作。
-                </span>
-              </span>
-            </label>
-          </div>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" @click="assistant.showAssistantSettings.value = false">取消</button>
-        <button class="btn btn-primary" @click="assistant.saveSettingsAndClose">保存</button>
-      </div>
-    </div>
-  </div>
+    <AssistantSettingsModal
+      :show="assistant.showAssistantSettings.value"
+      :settings="assistant.assistantSettings.value"
+      :allow-web-search="assistant.allowWebSearchEnabled.value"
+      :allow-write-memory="assistant.allowWriteMemoryEnabled.value"
+      :allow-destructive-tools="assistant.allowDestructiveToolsEnabled.value"
+      @cancel="closeAssistantSettings"
+      @save="assistant.saveSettingsAndClose"
+      @update:allow-web-search="assistant.setAllowWebSearch"
+      @update:allow-write-memory="setAssistantWriteMemoryEnabled"
+      @update:allow-destructive-tools="setAssistantDestructiveToolsEnabled"
+    />
 
-  <div v-if="showEmbeddedCardConfirmModal" class="modal">
-    <div class="modal-backdrop" @click="clearEmbeddedCardPreviewState"></div>
-    <div ref="embeddedCardConfirmDialogRef" v-bind="embeddedCardConfirmDialogAttrs" tabindex="-1" class="modal-content modal-surface chat-modal-width-568-90 min-w-0">
-      <div class="modal-header border-b border-[var(--color-border-subtle)]">
-        <h3 :id="embeddedCardConfirmTitleId" class="modal-title text-[var(--color-text)]">检测到 PNG 内嵌角色卡</h3>
-        <button type="button" class="modal-close" aria-label="关闭 PNG 内嵌角色卡确认弹窗" @click="clearEmbeddedCardPreviewState">×</button>
-      </div>
-      <div class="modal-body max-h-[min(70vh,520px)] overflow-y-auto pr-1 space-y-3">
-        <div class="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface-muted)] p-4 text-sm text-[var(--color-text-secondary)] space-y-2">
-          <p>是否用内嵌角色数据覆盖当前编辑内容？</p>
-          <p class="text-xs text-[var(--color-text-muted)]">
-            确认后将覆盖简介、Personality、Scenario、首句、示例对话、系统提示词、额外首句与 MVU 相关字段，并重置世界书绑定为内嵌角色卡对应世界书（若存在）；当前上传图片会保留为头像。
-          </p>
-          <p class="text-xs text-[var(--color-text-muted)]">
-            检测结果：角色名「{{ avatarEmbeddedStPreview?.characterName || embeddedCardPreview?.card?.name || '未命名角色' }}」，
-            世界书：{{
-              embeddedCardPreview?.worldbook || (avatarEmbeddedStPreview && avatarEmbeddedStPreview.worldBookEntryCount > 0)
-                ? '有（将新建并绑定）'
-                : '无（将清空绑定）'
-            }}。
-          </p>
-        </div>
-        <div
-          v-if="avatarEmbeddedStPreview"
-          class="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface-overlay)] p-4 text-xs text-[var(--color-text-muted)] space-y-2"
-        >
-          <div class="text-[var(--color-text-secondary)]">SillyTavern / MVU 预览</div>
-          <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            <div>世界书条目：<span class="text-[var(--color-text)]">{{ avatarEmbeddedStPreview.worldBookEntryCount }}</span></div>
-            <div>tavern_helper：<span class="text-[var(--color-text)]">{{ avatarEmbeddedStPreview.mvu.hasTavernHelper ? '已检测到' : '未检测到' }}</span></div>
-            <div>regex_scripts：<span class="text-[var(--color-text)]">{{ avatarEmbeddedStPreview.mvu.regexScriptCount }}</span></div>
-          </div>
-          <label class="flex items-center gap-2">
-            <ThemedCheckbox :checked="avatarEmbeddedEnableMvu" @update:checked="avatarEmbeddedEnableMvu = $event" />
-            启用 MVU 兼容
-            <span v-if="avatarEmbeddedDetectedMvu" class="text-[var(--color-text-secondary)]">已检测到候选结构</span>
-          </label>
-          <p class="text-[var(--color-text-muted)]">
-            指令模式会把完整 ST 卡上下文交给 MVU Agent，生成角色卡 MVU 指令与初始状态栏后再合并到当前编辑内容。
-          </p>
-          <div>
-            <div class="mb-1 text-[var(--color-text-muted)]">MVU 模式</div>
-            <ModernSelect
-              :model-value="avatarEmbeddedMvuMode"
-              :options="[...avatarEmbeddedMvuModeOptions]"
-              placeholder="选择 MVU 模式"
-              @update:model-value="updateAvatarEmbeddedMvuMode"
-            />
-          </div>
-          <p v-if="avatarEmbeddedStExpiresAt" class="text-[var(--color-text-muted)]">预览暂存至：{{ avatarEmbeddedStExpiresAt }}</p>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" :disabled="embeddedCardImporting" @click="clearEmbeddedCardPreviewState">仅使用头像</button>
-        <button class="btn btn-primary" :disabled="embeddedCardImporting" @click="confirmImportEmbeddedCard">
-          {{ embeddedCardConfirmLabel }}
-        </button>
-      </div>
-    </div>
-  </div>
+    <EmbeddedCardConfirmModal
+      :show="showEmbeddedCardConfirmModal"
+      :embedded-card-preview="embeddedCardPreview"
+      :st-preview="avatarEmbeddedStPreview"
+      :st-expires-at="avatarEmbeddedStExpiresAt"
+      :enable-mvu="avatarEmbeddedEnableMvu"
+      :mvu-mode="avatarEmbeddedMvuMode"
+      :mvu-mode-options="avatarEmbeddedMvuModeOptions"
+      :detected-mvu="avatarEmbeddedDetectedMvu"
+      :importing="embeddedCardImporting"
+      :confirm-label="embeddedCardConfirmLabel"
+      @cancel="clearEmbeddedCardPreviewState"
+      @confirm="confirmImportEmbeddedCard"
+      @update:enable-mvu="avatarEmbeddedEnableMvu = $event"
+      @update:mvu-mode="updateAvatarEmbeddedMvuMode"
+    />
 
-  <!-- 头像裁剪 -->
   <AvatarCropper
     v-model:show="actions.showCharacterAvatarCropper.value"
     :preserve-original="true"
