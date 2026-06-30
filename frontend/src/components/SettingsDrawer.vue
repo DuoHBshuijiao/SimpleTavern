@@ -58,7 +58,6 @@ import {
   type StatusTableDef,
   type TtsProvider,
   type TtsSessionConfig,
-  type WebSearchProvider,
   type WorldBook,
   type WorldBookAttachment,
 } from '../types/models'
@@ -79,7 +78,6 @@ import {
   writeWebGpuDraftSource,
 } from '../composables/useWebGpuBackgroundRuntime'
 import { X, Eye, EyeOff, Loader2, GripVertical, ChevronDown } from 'lucide-vue-next'
-import WebSearchQuotaSummary from './WebSearchQuotaSummary.vue'
 import WorldBookEditorModal from './modals/WorldBookEditorModal.vue'
 import WebGpuShaderEditorModal from './modals/WebGpuShaderEditorModal.vue'
 import WorldBookSessionAttachModal from './modals/WorldBookSessionAttachModal.vue'
@@ -87,6 +85,9 @@ import HttpLogViewerModal from './modals/HttpLogViewerModal.vue'
 import SettingsDrawerModelSelectorModal from './settings-drawer/SettingsDrawerModelSelectorModal.vue'
 import SettingsDrawerVoiceSelectorModal from './settings-drawer/SettingsDrawerVoiceSelectorModal.vue'
 import SettingsDrawerRegexRuleEditorModal from './settings-drawer/SettingsDrawerRegexRuleEditorModal.vue'
+import SettingsDrawerGlobalWebSearchSection from './settings-drawer/SettingsDrawerGlobalWebSearchSection.vue'
+import SettingsDrawerGlobalTtsSection from './settings-drawer/SettingsDrawerGlobalTtsSection.vue'
+import SettingsDrawerGlobalAppSection from './settings-drawer/SettingsDrawerGlobalAppSection.vue'
 import { isTtsApiPreset, resolveTtsProvider } from '../utils/apiPresetKind'
 import { getWebGpuUnavailableMessage, probeWebGpuAdapter } from '../utils/webgpuProbe'
 import type { WebGpuUnavailableReason } from '../utils/webgpuProbe'
@@ -617,11 +618,6 @@ const TTS_PROVIDER_OPTIONS: Array<{ label: string; value: TtsProvider }> = [
   { label: '硅基流动', value: 'siliconflow' },
 ]
 
-const WEB_SEARCH_PROVIDER_OPTIONS: Array<{ label: string; value: WebSearchProvider }> = [
-  { label: 'Tavily', value: 'tavily' },
-  { label: '博查（国内）', value: 'bocha' },
-]
-
 function formatTtsProviderLabel(provider: TtsProvider): string {
   switch (provider) {
     case 'glm_local':
@@ -653,10 +649,16 @@ const ttsCachePercent = computed(() => {
   if (!ttsCacheStats.value || !ttsCacheStats.value.limitBytes) return 0
   return Math.min(100, Math.max(0, (ttsCacheStats.value.usedBytes / ttsCacheStats.value.limitBytes) * 100))
 })
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / 1048576).toFixed(1)} MB`
+
+function toggleGlobalTtsEnabled() {
+  if (!globalDraft.value) return
+  globalDraft.value.ttsEnabled = !globalDraft.value.ttsEnabled
+  if (globalDraft.value.ttsEnabled) void fetchTtsCacheStats()
+}
+
+async function clearTtsCacheAndRefresh() {
+  await apiDelete('/api/tts/cache/clear')
+  await fetchTtsCacheStats()
 }
 
 // 打开设置抽屉时从后端获取版本号（仅请求一次）
@@ -4191,125 +4193,13 @@ async function checkUpdate() {
                 </div>
               </div>
 
-              <!-- 网络搜索（Tavily / 博查） -->
-              <div class="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-settings-panel-bg)] overflow-hidden">
-                <button
-                  type="button"
-                  class="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3.5 text-left text-sm text-[var(--color-text-secondary)] select-none hover:bg-surface-hover/40"
-                  :aria-expanded="globalAccordionOpen.webSearch"
-                  @click="globalAccordionOpen.webSearch = !globalAccordionOpen.webSearch"
-                >
-                  <span>网络搜索</span>
-                  <ChevronDown
-                    class="h-4 w-4 shrink-0 text-[var(--color-text-muted)] transition-transform duration-[800ms] ease-in-out"
-                    :class="globalAccordionOpen.webSearch ? 'rotate-180' : ''"
-                  />
-                </button>
-                <div
-                  class="grid transition-[grid-template-rows] duration-[800ms] ease-in-out"
-                  :class="globalAccordionOpen.webSearch ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'"
-                >
-                  <div class="min-h-0 overflow-hidden">
-                    <div class="space-y-5 border-t border-[var(--color-border-subtle)] px-4 pb-4 pt-4">
-                      <p class="text-xs text-[var(--color-text-muted)]">
-                        主聊天输入区可通过开关启用搜索（开启后每次发送均生效，直至关闭）；此处配置第三方 Search API。用量与余额在打开本抽屉时自动查询。
-                      </p>
-                      <div v-if="globalDraft.webSearch" class="space-y-4">
-                        <div class="space-y-1.5">
-                          <label class="block text-sm font-medium text-[var(--color-text-secondary)]">提供方</label>
-                          <ModernSelect
-                            v-model="globalDraft.webSearch.provider"
-                            :options="WEB_SEARCH_PROVIDER_OPTIONS"
-                            placeholder="选择搜索提供方…"
-                            class="w-full"
-                          />
-                        </div>
-                        <template v-if="globalDraft.webSearch.provider === 'tavily' && globalDraft.webSearch.tavily">
-                          <div class="space-y-1.5">
-                            <label class="block text-sm font-medium text-[var(--color-text-secondary)]">Tavily API Key</label>
-                            <input
-                              v-model="globalDraft.webSearch.tavily.apiKey"
-                              type="password"
-                              autocomplete="off"
-                              class="input w-full"
-                              placeholder="tvly-..."
-                            />
-                          </div>
-                          <div class="grid grid-cols-2 gap-3">
-                            <div class="space-y-1.5">
-                              <label class="block text-xs text-[var(--color-text-muted)]">max_results（0–20）</label>
-                              <input
-                                v-model.number="globalDraft.webSearch.tavily.max_results"
-                                type="number"
-                                min="0"
-                                max="20"
-                                class="input w-full"
-                              />
-                            </div>
-                            <div class="space-y-1.5">
-                              <label class="block text-xs text-[var(--color-text-muted)]">search_depth</label>
-                              <input
-                                v-model="globalDraft.webSearch.tavily.search_depth"
-                                type="text"
-                                class="input w-full"
-                                placeholder="basic / advanced / fast …"
-                              />
-                            </div>
-                          </div>
-                        </template>
-                        <template v-else-if="globalDraft.webSearch.bocha">
-                          <div class="space-y-1.5">
-                            <label class="block text-sm font-medium text-[var(--color-text-secondary)]">博查 API Key</label>
-                            <input
-                              v-model="globalDraft.webSearch.bocha.apiKey"
-                              type="password"
-                              autocomplete="off"
-                              class="input w-full"
-                            />
-                          </div>
-                          <div class="space-y-1.5">
-                            <label class="block text-sm font-medium text-[var(--color-text-secondary)]">API 根地址</label>
-                            <input
-                              v-model="globalDraft.webSearch.bocha.baseUrl"
-                              type="text"
-                              class="input w-full"
-                              placeholder="https://api.bocha.cn"
-                            />
-                          </div>
-                          <div class="space-y-1.5">
-                            <label class="block text-sm font-medium text-[var(--color-text-secondary)]">count（1–50）</label>
-                            <input
-                              v-model.number="globalDraft.webSearch.bocha.count"
-                              type="number"
-                              min="1"
-                              max="50"
-                              class="input w-full"
-                            />
-                          </div>
-                        </template>
-                        <div
-                          class="rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-settings-control-bg)] p-3 text-xs text-[var(--color-text-muted)] transition-opacity duration-200"
-                          :class="webSearchRemoteStatusFetching ? 'opacity-70' : ''"
-                        >
-                          <div class="mb-1 flex items-center justify-between gap-2 font-medium text-[var(--color-text-secondary)]">
-                            <span>用量 / 余额</span>
-                            <span
-                              v-if="webSearchRemoteStatusFetching"
-                              class="text-[11px] font-normal text-[var(--color-text-muted)]"
-                            >
-                              刷新中…
-                            </span>
-                          </div>
-                          <WebSearchQuotaSummary
-                            :status="webSearchRemoteStatus"
-                            :provider="globalDraft.webSearch.provider"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <SettingsDrawerGlobalWebSearchSection
+                v-if="globalDraft"
+                v-model:open="globalAccordionOpen.webSearch"
+                :draft="globalDraft"
+                :remote-status="webSearchRemoteStatus"
+                :remote-status-fetching="webSearchRemoteStatusFetching"
+              />
 
               <!-- 提示词与生成参数（默认折叠） -->
               <div class="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-settings-panel-bg)] overflow-hidden">
@@ -4879,154 +4769,24 @@ async function checkUpdate() {
                 </div>
               </div>
 
-              <!-- 应用与更新（默认折叠） -->
-              <div class="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-settings-panel-bg)] overflow-hidden">
-                <button
-                  type="button"
-                  class="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3.5 text-left text-sm text-[var(--color-text-secondary)] select-none hover:bg-surface-hover/40"
-                  :aria-expanded="globalAccordionOpen.tts"
-                  @click="globalAccordionOpen.tts = !globalAccordionOpen.tts"
-                >
-                  <span>文字转语音（TTS）</span>
-                  <ChevronDown
-                    class="h-4 w-4 shrink-0 text-[var(--color-text-muted)] transition-transform duration-[800ms] ease-in-out"
-                    :class="globalAccordionOpen.tts ? 'rotate-180' : ''"
-                  />
-                </button>
-                <div
-                  class="grid transition-[grid-template-rows] duration-[800ms] ease-in-out"
-                  :class="globalAccordionOpen.tts ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'"
-                >
-                  <div class="min-h-0 overflow-hidden">
-                    <div class="space-y-3 border-t border-[var(--color-border-subtle)] px-4 pb-4 pt-4">
-                      <!-- TTS 总开关 -->
-                      <div class="space-y-2">
-                        <label class="block text-sm font-medium text-[var(--color-text-secondary)]">启用文字转语音</label>
-                        <button
-                          type="button"
-                          class="flex min-h-11 w-full cursor-pointer items-center gap-3 py-1 text-left group"
-                          @click="globalDraft!.ttsEnabled = !globalDraft!.ttsEnabled; if (globalDraft!.ttsEnabled) void fetchTtsCacheStats()"
-                        >
-                          <div
-                            class="relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200 ease-out"
-                            :class="globalDraft!.ttsEnabled ? 'bg-brand' : 'bg-[var(--color-track)]'"
-                          >
-                            <div
-                              class="absolute left-1 top-1 h-4 w-4 rounded-full bg-[var(--color-on-brand)]"
-                              :style="{
-                                transform: globalDraft!.ttsEnabled ? 'translateX(1.25rem)' : 'translateX(0)',
-                                transition: 'transform 200ms ease-out',
-                              }"
-                            ></div>
-                          </div>
-                          <span class="text-xs text-[var(--color-text-secondary)]">
-                            {{ globalDraft!.ttsEnabled ? '已开启：启用语音合成功能' : '已关闭' }}
-                          </span>
-                        </button>
-                      </div>
+              <SettingsDrawerGlobalTtsSection
+                v-if="globalDraft"
+                v-model:open="globalAccordionOpen.tts"
+                :draft="globalDraft"
+                :cache-stats="ttsCacheStats"
+                :cache-percent="ttsCachePercent"
+                @toggle-enabled="toggleGlobalTtsEnabled"
+                @clear-cache="clearTtsCacheAndRefresh"
+              />
 
-                      <!-- 缓存上限 -->
-                      <div v-if="globalDraft!.ttsEnabled" class="space-y-2">
-                        <label class="block text-sm font-medium text-[var(--color-text-secondary)]">缓存上限（MB）</label>
-                        <input
-                          v-model.number="globalDraft!.ttsAudioCacheLimitMb"
-                          type="number"
-                          min="10"
-                          max="10000"
-                          class="input w-full"
-                        />
-                        <!-- 缓存占比条 -->
-                        <div class="space-y-1">
-                          <div class="h-2 w-full rounded-full bg-[var(--color-track)] overflow-hidden">
-                            <div
-                              class="h-full rounded-full transition-[width] duration-500 ease-out"
-                              :class="ttsCachePercent > 90 ? 'bg-red-500' : ttsCachePercent > 70 ? 'bg-amber-500' : 'bg-brand'"
-                              :style="{ width: (ttsCacheStats ? ttsCachePercent : 0) + '%' }"
-                            ></div>
-                          </div>
-                          <div class="flex items-center justify-between text-xs text-[var(--color-text-muted)]">
-                            <span>{{ ttsCacheStats ? `${formatBytes(ttsCacheStats.usedBytes)} / ${formatBytes(ttsCacheStats.limitBytes)}` : '正在读取缓存占用...' }}</span>
-                            <button
-                              type="button"
-                              class="rounded px-2 py-0.5 text-xs text-[var(--color-text-secondary)] hover:bg-surface-hover transition-colors"
-                              :disabled="!ttsCacheStats"
-                              @click="apiDelete('/api/tts/cache/clear').then(() => fetchTtsCacheStats())"
-                            >
-                              清空缓存
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-
-                      <p class="text-xs text-[var(--color-text-muted)]">
-                        开启后可在聊天界面使用语音合成功能。需在 API 预设中至少配置一个 TTS 服务预设（MiniMax、GLM TTS、OpenRouter TTS、硅基流动等）。
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <!-- 应用与更新（默认折叠） -->
-              <div class="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-settings-panel-bg)] overflow-hidden">
-                <button
-                  type="button"
-                  class="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3.5 text-left text-sm text-[var(--color-text-secondary)] select-none hover:bg-surface-hover/40"
-                  :aria-expanded="globalAccordionOpen.app"
-                  @click="globalAccordionOpen.app = !globalAccordionOpen.app"
-                >
-                  <span>应用与更新</span>
-                  <ChevronDown
-                    class="h-4 w-4 shrink-0 text-[var(--color-text-muted)] transition-transform duration-[800ms] ease-in-out"
-                    :class="globalAccordionOpen.app ? 'rotate-180' : ''"
-                  />
-                </button>
-                <div
-                  class="grid transition-[grid-template-rows] duration-[800ms] ease-in-out"
-                  :class="globalAccordionOpen.app ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'"
-                >
-                  <div class="min-h-0 overflow-hidden">
-                    <div class="space-y-3 border-t border-[var(--color-border-subtle)] px-4 pb-4 pt-4">
-                      <div class="flex flex-wrap items-center gap-2">
-                        <a
-                          href="https://duohbshuijiao.github.io/SumOrNot/"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          class="min-h-10 inline-flex items-center rounded-lg bg-surface-muted px-4 py-2 text-sm text-[var(--color-text)] transition-colors whitespace-nowrap hover:bg-surface-hover"
-                        >
-                          成本计算器
-                        </a>
-                      </div>
-                      <div class="flex flex-wrap items-center gap-2">
-                        <button
-                          type="button"
-                          class="min-h-10 rounded-lg bg-surface-muted px-4 py-2 text-sm text-[var(--color-text)] transition-colors whitespace-nowrap hover:bg-surface-hover"
-                          @click="showHttpLogViewer = true"
-                        >
-                          查看 HTTP 请求
-                        </button>
-                        <span class="text-xs text-[var(--color-text-muted)]">最近 30 分钟云端请求</span>
-                      </div>
-                      <div class="flex flex-wrap items-center gap-2">
-                        <button
-                          type="button"
-                          class="min-h-10 rounded-lg bg-surface-muted px-4 py-2 text-sm text-[var(--color-text)] transition-colors whitespace-nowrap hover:bg-surface-hover"
-                          :disabled="checkUpdateLoading"
-                          @click="checkUpdate"
-                        >
-                          检查更新
-                        </button>
-                        <span v-if="checkUpdateMessage" class="text-xs text-[var(--color-text-secondary)]">{{ checkUpdateMessage }}</span>
-                      </div>
-                      <a
-                        href="https://github.com/DuoHBshuijiao/SimpleTavern/releases"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        class="block cursor-pointer text-center text-xs text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text-secondary)] hover:underline"
-                      >{{ appVersion || '…' }}</a>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <SettingsDrawerGlobalAppSection
+                v-model:open="globalAccordionOpen.app"
+                :app-version="appVersion"
+                :check-update-loading="checkUpdateLoading"
+                :check-update-message="checkUpdateMessage"
+                @check-update="checkUpdate"
+                @open-http-log="showHttpLogViewer = true"
+              />
             </div>
           </div>
 
