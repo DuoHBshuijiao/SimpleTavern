@@ -143,3 +143,75 @@ def test_repair_skips_manual_kinds(monkeypatch, tmp_path):
     assert broken.exists()
     assert report["repaired"] == []
     assert any("人工" in item.get("reason", "") for item in report["skipped"])
+
+
+def test_list_issues_refreshes_stale_orphan(monkeypatch, tmp_path):
+    _data, chars, _wbs, chats = _patch_paths(monkeypatch, tmp_path)
+
+    ghost_dir = chats / "ghost" / "c1"
+    ghost_dir.mkdir(parents=True, exist_ok=True)
+    ghost_chat = ghost_dir / "chat.json"
+    ghost_chat.write_text(json.dumps({"id": "c1", "characterId": "ghost", "messages": []}), encoding="utf-8")
+
+    svc = DataIntegrityService()
+
+    async def _run():
+        target = ScanTarget(path=ghost_chat.resolve(), kind="chat_record")
+        valid = svc._collect_character_ids()
+        scan = await svc._scan_target(target, valid)
+        assert scan is not None and scan[1].code == "orphan_reference"
+        await svc._upsert_issue(target, scan)
+        before = await svc.list_issues()
+        assert before["hasIssues"] is True
+
+        (chars / "ghost.json").write_text(
+            json.dumps({"id": "ghost", "name": "Ghost"}), encoding="utf-8"
+        )
+        after = await svc.list_issues()
+        return after
+
+    report = asyncio.run(_run())
+    assert report["hasIssues"] is False
+    assert report["issues"] == []
+
+
+def test_list_issues_refreshes_stale_corruption(monkeypatch, tmp_path):
+    _data, chars, _wbs, _chats = _patch_paths(monkeypatch, tmp_path)
+    broken = chars / "broken.json"
+    broken.write_text("not json", encoding="utf-8")
+
+    svc = DataIntegrityService()
+
+    async def _run():
+        target = ScanTarget(path=broken.resolve(), kind="character_card")
+        scan = await svc._scan_target(target)
+        assert scan is not None and scan[1].code == "invalid_json"
+        await svc._upsert_issue(target, scan)
+        assert (await svc.list_issues())["hasIssues"] is True
+
+        broken.write_text(json.dumps({"id": "broken", "name": "Fixed"}), encoding="utf-8")
+        return await svc.list_issues()
+
+    report = asyncio.run(_run())
+    assert report["hasIssues"] is False
+    assert report["issues"] == []
+
+
+def test_repair_manual_kind_clears_cache_when_fixed(monkeypatch, tmp_path):
+    _data, chars, _wbs, _chats = _patch_paths(monkeypatch, tmp_path)
+    broken = chars / "broken.json"
+    broken.write_text("not json", encoding="utf-8")
+
+    svc = DataIntegrityService()
+
+    async def _run():
+        target = ScanTarget(path=broken.resolve(), kind="character_card")
+        scan = await svc._scan_target(target)
+        await svc._upsert_issue(target, scan)
+        broken.write_text(json.dumps({"id": "broken", "name": "Fixed"}), encoding="utf-8")
+        return await svc.repair_issues()
+
+    report = asyncio.run(_run())
+    assert report["hasIssues"] is False
+    assert report["remainingIssues"] == []
+    assert report["skipped"] == []

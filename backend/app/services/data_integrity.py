@@ -472,7 +472,36 @@ class DataIntegrityService:
             if index < len(targets) - 1:
                 await asyncio.sleep(SCAN_INTERVAL_SEC)
 
+    async def _refresh_cached_issues(self) -> None:
+        """Re-scan paths currently in the in-memory cache so polling reflects manual fixes."""
+        async with self._lock:
+            cached = list(self._issues.values())
+
+        if not cached:
+            return
+
+        needs_character_ids = any(
+            item.target.kind in {"chat_record", "legacy_chat"} for item in cached
+        )
+        valid_character_ids = (
+            await asyncio.to_thread(self._collect_character_ids) if needs_character_ids else None
+        )
+
+        for recorded in cached:
+            refreshed_target = self._build_target(recorded.target.path) or recorded.target
+            if not refreshed_target.path.exists():
+                await self._upsert_issue(refreshed_target, None)
+                continue
+            char_ids = (
+                valid_character_ids
+                if refreshed_target.kind in {"chat_record", "legacy_chat"}
+                else None
+            )
+            result = await self._scan_target(refreshed_target, char_ids)
+            await self._upsert_issue(refreshed_target, result)
+
     async def list_issues(self) -> dict[str, Any]:
+        await self._refresh_cached_issues()
         async with self._lock:
             items = sorted(self._issues.values(), key=lambda item: self._relative_path(item.target.path))
 
@@ -517,7 +546,12 @@ class DataIntegrityService:
         if not self._snapshot_matches(recorded, stable.snapshot):
             return {"path": rel_path, "status": "skipped", "reason": "文件自发现后已变化"}
 
-        current_issue = await self._scan_target(recorded.target)
+        current_issue = await self._scan_target(
+            recorded.target,
+            await asyncio.to_thread(self._collect_character_ids)
+            if recorded.target.kind in {"chat_record", "legacy_chat"}
+            else None,
+        )
         if current_issue is None:
             return {"path": rel_path, "status": "skipped", "reason": "文件已恢复正常"}
 
@@ -545,11 +579,20 @@ class DataIntegrityService:
             action = _effective_repair_action(recorded.target.kind, recorded.issue.code)
             if action == "none":
                 # 设置/角色/世界书/孤儿引用仅检测，保留在列表中等待人工处理，绝不自动删除。
-                skipped.append({
-                    "path": self._relative_path(recorded.target.path),
-                    "status": "skipped",
-                    "reason": "需人工检查处理（不自动修复）",
-                })
+                refreshed_target = self._build_target(recorded.target.path) or recorded.target
+                char_ids = (
+                    await asyncio.to_thread(self._collect_character_ids)
+                    if refreshed_target.kind in {"chat_record", "legacy_chat"}
+                    else None
+                )
+                refreshed_issue = await self._scan_target(refreshed_target, char_ids)
+                await self._upsert_issue(refreshed_target, refreshed_issue)
+                if refreshed_issue is not None:
+                    skipped.append({
+                        "path": self._relative_path(recorded.target.path),
+                        "status": "skipped",
+                        "reason": "需人工检查处理（不自动修复）",
+                    })
                 continue
 
             if not self._is_allowed_target(recorded.target.path):
