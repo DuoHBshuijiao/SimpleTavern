@@ -65,7 +65,6 @@ import {
 import ModernSelect from './ModernSelect.vue'
 import MvuCapabilityEditor from './chat/MvuCapabilityEditor.vue'
 import ThemedCheckbox from './ThemedCheckbox.vue'
-import ThemedRadioTags from './ThemedRadioTags.vue'
 import TtsVoiceInput from './TtsVoiceInput.vue'
 import LlmPresetNameCombobox from './LlmPresetNameCombobox.vue'
 import { apiDelete, apiGet, apiPost, apiPostFormData, apiPut } from '../api/http'
@@ -79,12 +78,15 @@ import {
   readWebGpuDraftSource,
   writeWebGpuDraftSource,
 } from '../composables/useWebGpuBackgroundRuntime'
-import { X, Eye, EyeOff, Check, Loader2, GripVertical, ChevronDown } from 'lucide-vue-next'
+import { X, Eye, EyeOff, Loader2, GripVertical, ChevronDown } from 'lucide-vue-next'
 import WebSearchQuotaSummary from './WebSearchQuotaSummary.vue'
 import WorldBookEditorModal from './modals/WorldBookEditorModal.vue'
 import WebGpuShaderEditorModal from './modals/WebGpuShaderEditorModal.vue'
 import WorldBookSessionAttachModal from './modals/WorldBookSessionAttachModal.vue'
 import HttpLogViewerModal from './modals/HttpLogViewerModal.vue'
+import SettingsDrawerModelSelectorModal from './settings-drawer/SettingsDrawerModelSelectorModal.vue'
+import SettingsDrawerVoiceSelectorModal from './settings-drawer/SettingsDrawerVoiceSelectorModal.vue'
+import SettingsDrawerRegexRuleEditorModal from './settings-drawer/SettingsDrawerRegexRuleEditorModal.vue'
 import { isTtsApiPreset, resolveTtsProvider } from '../utils/apiPresetKind'
 import { getWebGpuUnavailableMessage, probeWebGpuAdapter } from '../utils/webgpuProbe'
 import type { WebGpuUnavailableReason } from '../utils/webgpuProbe'
@@ -6299,260 +6301,34 @@ async function checkUpdate() {
       </div>
   </div>
 
-  <Teleport to="body">
-    <div v-if="regexEditorOpen && regexEditorDraft" class="fixed inset-0 z-[var(--z-popover)] flex items-center justify-center">
-      <div class="modal-backdrop" @click="regexEditorOpen = false"></div>
-      <div
-        class="glass-l5 relative m-4 flex max-h-[85vh] w-[min(92vw,560px)] flex-col rounded-2xl border border-[var(--color-border)] shadow-xl"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="regex-editor-title"
-      >
-        <div class="flex items-center justify-between rounded-t-2xl border-b border-[var(--color-border)] bg-surface-muted p-4">
-          <h3 id="regex-editor-title" class="text-[var(--color-text)]">正文正则规则</h3>
-          <button type="button" class="icon-button min-h-11 min-w-11" aria-label="关闭正文正则规则编辑弹窗" @click="regexEditorOpen = false">
-            <X class="w-5 h-5" />
-          </button>
-        </div>
-        <div class="drawer-scroll min-h-0 flex-1 overflow-y-auto p-4 space-y-3">
-          <div class="space-y-1.5">
-            <label class="block text-xs font-medium text-[var(--color-text-secondary)]">规则名称（可选）</label>
-            <input v-model="regexEditorDraft.name" type="text" class="input w-full" placeholder="留空将使用 pattern 前缀" />
-          </div>
-          <div class="space-y-1.5">
-            <label class="block text-xs font-medium text-[var(--color-text-secondary)]">Pattern</label>
-            <textarea v-model="regexEditorDraft.pattern" rows="3" class="input textarea w-full resize-y" placeholder="支持 /pattern/imsu 或普通正则"></textarea>
-          </div>
-          <div class="grid grid-cols-1 gap-3">
-            <div class="space-y-1.5">
-              <label class="block text-xs font-medium text-[var(--color-text-secondary)]">动作</label>
-              <ModernSelect
-                v-model="regexEditorDraft.action"
-                :options="[
-                  { label: '删除命中内容', value: 'remove' },
-                  { label: '替换命中内容', value: 'replace' },
-                  { label: '提取到队列', value: 'extract' },
-                  { label: '提取并替换显示', value: 'extract_and_replace' },
-                ]"
-              />
-            </div>
-            <div v-if="regexEditorDraft.action === 'replace' || regexEditorDraft.action === 'extract_and_replace'" class="space-y-1.5">
-              <label class="block text-xs font-medium text-[var(--color-text-secondary)]">Replacement</label>
-              <textarea v-model="regexEditorDraft.replacement" rows="3" class="input textarea w-full resize-y" placeholder="支持 $1 / $<name>，保存后会归一化"></textarea>
-            </div>
-            <div v-if="regexEditorDraft.action === 'extract' || regexEditorDraft.action === 'extract_and_replace'" class="space-y-1.5">
-              <label class="block text-xs font-medium text-[var(--color-text-secondary)]">提取来源</label>
-              <ModernSelect
-                v-model="regexEditorDraft.extractSource"
-                :options="[
-                  { label: '整段匹配', value: 'whole_match' },
-                  { label: '捕获分组', value: 'capture_group' },
-                ]"
-              />
-            </div>
-            <div v-if="(regexEditorDraft.action === 'extract' || regexEditorDraft.action === 'extract_and_replace') && regexEditorDraft.extractSource === 'capture_group'" class="space-y-1.5">
-              <label class="block text-xs font-medium text-[var(--color-text-secondary)]">提取分组下标</label>
-              <input v-model.number="regexEditorDraft.extractGroupIndex" type="number" min="0" class="input w-full" placeholder="默认 1" />
-            </div>
-            <div class="space-y-1.5">
-              <label class="block text-xs font-medium text-[var(--color-text-secondary)]">匹配模式</label>
-              <ModernSelect
-                v-model="regexEditorDraft.matchMode"
-                :options="[{ label: '全局命中', value: 'global' }, { label: '首个命中', value: 'first' }]"
-              />
-            </div>
-            <div class="space-y-1.5">
-              <label class="block text-xs font-medium text-[var(--color-text-secondary)]">覆盖扫描深度（可选）</label>
-              <input v-model.number="regexEditorDraft.scanDepthOverride" type="number" min="1" max="50" class="input w-full" placeholder="留空使用会话默认深度" />
-            </div>
-          </div>
+  <SettingsDrawerRegexRuleEditorModal
+    v-model:show="regexEditorOpen"
+    v-model:draft="regexEditorDraft"
+    v-model:trial-source-mode="regexTrialSourceMode"
+    v-model:trial-manual-text="regexTrialManualText"
+    :trial-result="regexTrialResult"
+    :trial-source-options="regexTrialSourceOptions"
+    @save="saveRegexRuleEditor"
+    @run-trial="runRegexRuleTrial"
+  />
 
-          <div class="rounded-lg border border-[var(--color-border-subtle)] bg-surface-muted p-3 space-y-2">
-            <div class="text-xs font-medium text-[var(--color-text-secondary)]">试运行</div>
-            <div>
-              <ThemedRadioTags
-                v-model="regexTrialSourceMode"
-                :options="[...regexTrialSourceOptions]"
-                aria-label="试运行来源"
-              />
-            </div>
-            <textarea
-              v-if="regexTrialSourceMode === 'manual'"
-              v-model="regexTrialManualText"
-              rows="4"
-              maxlength="10000"
-              class="input textarea w-full resize-y"
-              placeholder="输入测试文本（最多 10000 字符）"
-            />
-            <button type="button" class="btn btn-xs btn-secondary" @click="runRegexRuleTrial">试运行</button>
-            <div v-if="regexTrialResult" class="grid grid-cols-1 gap-2 text-xs">
-              <div>
-                <div class="text-[var(--color-text-secondary)] mb-1">处理前</div>
-                <pre class="whitespace-pre-wrap rounded border border-[var(--color-border-subtle)] bg-surface-overlay p-2">{{ regexTrialResult.beforeText }}</pre>
-              </div>
-              <div>
-                <div class="text-[var(--color-text-secondary)] mb-1">持久化正文（处理后）</div>
-                <pre class="whitespace-pre-wrap rounded border border-[var(--color-border-subtle)] bg-surface-overlay p-2">{{ regexTrialResult.afterText }}</pre>
-              </div>
-              <div>
-                <div class="text-[var(--color-text-secondary)] mb-1">显示正文（处理后）</div>
-                <pre class="whitespace-pre-wrap rounded border border-[var(--color-border-subtle)] bg-surface-overlay p-2">{{ regexTrialResult.displayText }}</pre>
-              </div>
-              <div>
-                <div class="text-[var(--color-text-secondary)] mb-1">提取队列预览</div>
-                <pre class="whitespace-pre-wrap rounded border border-[var(--color-border-subtle)] bg-surface-overlay p-2">{{ regexTrialResult.extractedItems.map((x) => x.value).join('\n') || '（空）' }}</pre>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="flex items-center justify-end gap-2 rounded-b-2xl border-t border-[var(--color-border)] bg-surface-muted p-4">
-          <button type="button" class="btn btn-secondary" @click="regexEditorOpen = false">取消</button>
-          <button type="button" class="btn btn-primary" @click="saveRegexRuleEditor">保存</button>
-        </div>
-      </div>
-    </div>
-  </Teleport>
+  <SettingsDrawerModelSelectorModal
+    v-model:show="showModelSelector"
+    v-model:query="modelSelectorQuery"
+    :candidates="filteredCandidates"
+    :selected="selectedCandidateModels"
+    @toggle="toggleCandidate"
+    @confirm="saveModelSelection"
+  />
 
-  <!-- Model Selector Modal（Teleport 到 body 避免被父级 flex/窄容器限制宽度） -->
-  <Teleport to="body">
-    <div v-if="showModelSelector" class="fixed inset-0 z-[var(--z-popover)] flex items-center justify-center">
-      <!-- Backdrop -->
-      <div class="absolute inset-0 bg-overlay-heavy backdrop-blur-[var(--glass-blur-soft)]" @click="showModelSelector = false"></div>
-      
-      <!-- Modal -->
-      <div class="glass-l6 relative w-full max-w-lg min-w-[400px] rounded-2xl shadow-2xl flex flex-col max-h-[85vh] m-4" role="dialog" aria-modal="true" aria-labelledby="model-selector-title">
-      <div class="p-4 border-b border-[var(--color-border)] flex justify-between items-center bg-surface-muted rounded-t-2xl">
-        <h3 id="model-selector-title" class="text-[var(--color-text)]">选择模型</h3>
-        <button
-          type="button"
-          class="icon-button min-h-11 min-w-11 shrink-0 touch-manipulation"
-          aria-label="关闭模型选择弹窗"
-          @click="showModelSelector = false"
-        >
-            <X class="w-5 h-5" />
-        </button>
-      </div>
-      
-      <div class="p-3 border-b border-[var(--color-border)] bg-transparent">
-        <input 
-          v-model="modelSelectorQuery" 
-          placeholder="筛选模型..." 
-          class="input w-full"
-          autoFocus
-        />
-      </div>
-      
-      <div class="drawer-scroll flex-1 overflow-y-auto bg-transparent p-2">
-        <div v-if="filteredCandidates.length === 0" class="text-center text-[var(--color-text-muted)] py-8 text-sm">
-          未找到模型
-        </div>
-        <div v-else class="space-y-1">
-          <div 
-            v-for="m in filteredCandidates" 
-            :key="m"
-            class="flex min-h-11 cursor-pointer items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-surface-muted touch-manipulation"
-            @click="toggleCandidate(m)"
-          >
-            <div 
-              class="w-4 h-4 rounded border flex items-center justify-center transition-colors"
-              :class="selectedCandidateModels.has(m) ? 'bg-brand border-brand' : 'border-[var(--color-border)]'"
-            >
-              <Check v-if="selectedCandidateModels.has(m)" class="text-on-brand w-2.5 h-2.5" />
-            </div>
-            <span class="text-sm text-[var(--color-text-secondary)]" :class="selectedCandidateModels.has(m) ? 'text-[var(--color-text)] font-medium' : ''">{{ m }}</span>
-          </div>
-        </div>
-      </div>
-      
-      <div class="p-4 border-t border-[var(--color-border)] flex justify-between items-center bg-surface-muted rounded-b-2xl">
-        <div class="text-xs text-[var(--color-text-muted)]">已选 {{ selectedCandidateModels.size }} 个模型</div>
-        <div class="flex gap-2">
-          <button type="button" class="btn btn-secondary min-h-11" @click="showModelSelector = false">取消</button>
-          <button type="button" class="btn btn-primary min-h-11" @click="saveModelSelection">确认</button>
-        </div>
-      </div>
-    </div>
-  </div>
-  </Teleport>
-
-  <Teleport to="body">
-    <div v-if="showVoiceSelector" class="fixed inset-0 z-[var(--z-popover)] flex items-center justify-center">
-      <div class="absolute inset-0 bg-overlay-heavy backdrop-blur-[var(--glass-blur-soft)]" @click="showVoiceSelector = false"></div>
-
-      <div class="glass-l6 relative m-4 flex max-h-[85vh] min-h-0 w-full max-w-lg min-w-[400px] flex-col rounded-2xl shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="voice-selector-title">
-        <div class="flex items-center justify-between rounded-t-2xl border-b border-[var(--color-border)] bg-surface-muted p-4">
-          <h3 id="voice-selector-title" class="text-[var(--color-text)]">选择音色</h3>
-          <button
-            type="button"
-            class="icon-button min-h-11 min-w-11 shrink-0 touch-manipulation"
-            aria-label="关闭音色选择弹窗"
-            @click="showVoiceSelector = false"
-          >
-            <X class="w-5 h-5" />
-          </button>
-        </div>
-
-        <div class="border-b border-[var(--color-border)] bg-transparent p-3">
-          <input v-model="voiceSelectorQuery" placeholder="筛选音色（名称、ID、类型）..." class="input w-full" autofocus />
-        </div>
-
-        <div class="drawer-scroll min-h-0 flex-1 overflow-y-auto bg-transparent p-2">
-          <div v-if="filteredVoiceCandidates.length === 0" class="py-8 text-center text-sm text-[var(--color-text-muted)]">
-            未找到音色
-          </div>
-          <div v-else class="space-y-1">
-            <div
-              v-for="v in filteredVoiceCandidates"
-              :key="v.voiceId"
-              class="flex min-h-11 cursor-pointer items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-surface-muted touch-manipulation"
-              @click="toggleCandidateVoice(v.voiceId)"
-            >
-              <div
-                class="flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors"
-                :class="selectedCandidateVoiceIds.has(v.voiceId) ? 'border-brand bg-brand' : 'border-[var(--color-border)]'"
-              >
-                <Check v-if="selectedCandidateVoiceIds.has(v.voiceId)" class="h-2.5 w-2.5 text-on-brand" />
-              </div>
-              <div class="min-w-0 flex-1">
-                <div
-                  class="truncate text-sm text-[var(--color-text-secondary)]"
-                  :class="selectedCandidateVoiceIds.has(v.voiceId) ? 'font-medium text-[var(--color-text)]' : ''"
-                >
-                  {{ v.name }}
-                </div>
-                <div class="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-[var(--color-text-muted)]">
-                  <span class="font-mono truncate">{{ v.voiceId }}</span>
-                  <span
-                    class="shrink-0 rounded-full bg-surface-muted px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)]"
-                  >{{ v.voiceType }}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="flex items-center justify-between rounded-b-2xl border-t border-[var(--color-border)] bg-surface-muted p-4">
-          <div class="text-xs text-[var(--color-text-muted)]">已选 {{ selectedCandidateVoiceIds.size }} 个音色</div>
-          <div class="flex gap-2">
-            <button
-              type="button"
-              class="btn btn-secondary min-h-11"
-              @click="showVoiceSelector = false"
-            >
-              取消
-            </button>
-            <button
-              type="button"
-              class="btn btn-primary min-h-11"
-              @click="saveVoiceSelection"
-            >
-              确认
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </Teleport>
+  <SettingsDrawerVoiceSelectorModal
+    v-model:show="showVoiceSelector"
+    v-model:query="voiceSelectorQuery"
+    :candidates="filteredVoiceCandidates"
+    :selected="selectedCandidateVoiceIds"
+    @toggle="toggleCandidateVoice"
+    @confirm="saveVoiceSelection"
+  />
 
   <WebGpuShaderEditorModal
     :show="showWebGpuShaderEditorModal"
