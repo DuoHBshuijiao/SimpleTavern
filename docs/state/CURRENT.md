@@ -1,10 +1,15 @@
 # 当前任务
 
-- current: `v0.601`
+- current: `v0.700`
 - status: done
 - next_read: `docs/01-ROADMAP.md`
-- goal: 无障碍约束补强已完成——禁止原生元素裸用 `title` 属性、统一 `aria-label`，并加前端测试守卫；下一步从 v0.700+ 拆分与 E2E 方向选择任务。
+- goal: 组件化与可观测性强化已完成——前端组件测试基座、ChatPage 三个低风险 composable 提炼、后端数据完整性扩展与导入可观测性修复。
+
+## 验证
+
+- `cd frontend && npm run test` 通过，17 文件 83 tests；`npm run build` 通过。
+- `cd backend && python -m pytest tests/ -q` 通过，114 tests。
 
 ## 完成后
 
-下一轮 AI 应先读 `docs/01-ROADMAP.md` 和 `docs/02-BACKLOG.md`，再选择 v0.700+ 拆分任务。
+下一轮 AI 读 `docs/01-ROADMAP.md` 的 v0.800+ 方向：继续提炼 ChatPage 中风险块、设计 `GenerationDeferState` 后再拆生成流、渐进拆分 SettingsDrawer。

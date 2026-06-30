@@ -1,7 +1,13 @@
 import { apiGet, apiPost } from './http'
 
-export type DataIntegrityIssueCode = 'empty' | 'all_zero' | 'invalid_utf8' | 'invalid_json' | 'schema_mismatch'
-export type DataIntegrityRepairAction = 'delete' | 'reset_json'
+export type DataIntegrityIssueCode =
+  | 'empty'
+  | 'all_zero'
+  | 'invalid_utf8'
+  | 'invalid_json'
+  | 'schema_mismatch'
+  | 'orphan_reference'
+export type DataIntegrityRepairAction = 'delete' | 'reset_json' | 'none'
 
 export type DataIntegrityIssue = {
   path: string

@@ -1480,7 +1480,7 @@ def _parse_character_text(content: str) -> CharacterCard:
     return card
 
 
-def _parse_chat_text(content: str) -> Chat:
+def _parse_chat_text(content: str) -> tuple[Chat, list[str]]:
     """
     解析 SimpleTavern Chat Export 文本。
 
@@ -1546,7 +1546,7 @@ def _parse_chat_text(content: str) -> Chat:
         participants_str = header.get("Participants") or ""
         participants = [p.strip() for p in participants_str.split(",") if p.strip()]
         settings = load_settings()
-        chat, _warnings = _build_chat_from_transcript_rows(
+        chat, warnings = _build_chat_from_transcript_rows(
             chat_id=header.get("ChatId"),
             title=header.get("Title") or "新对话",
             is_group=header.get("IsGroup", "false").lower() == "true",
@@ -1554,7 +1554,7 @@ def _parse_chat_text(content: str) -> Chat:
             rows=transcript_rows,
             settings=settings,
         )
-        return chat
+        return chat, warnings
 
     if not header.get("CharacterId"):
         raise HTTPException(status_code=400, detail="missing CharacterId in text import")
@@ -1575,7 +1575,7 @@ def _parse_chat_text(content: str) -> Chat:
         chat_data["groupSystemAlwaysAtBottom"] = str(gsb_h).lower() == "true"
     if header.get("ChatId"):
         chat_data["id"] = header.get("ChatId")
-    return Chat.model_validate(chat_data)
+    return Chat.model_validate(chat_data), []
 
 
 def _extract_png_text_map(payload: bytes) -> dict[str, list[str]]:
@@ -2418,9 +2418,9 @@ async def import_data(file: UploadFile = File(...)) -> dict:
             return {"ok": True, **result}
         text = payload.decode("utf-8")
         if "SimpleTavern Chat Export" in text or "[Message]" in text:
-            chat = _parse_chat_text(text)
+            chat, warnings = _parse_chat_text(text)
             save_chat(chat)
-            return {"ok": True, "imported": ["chat"], "warnings": []}
+            return {"ok": True, "imported": ["chat"], "warnings": warnings}
         if "角色名称" in text or "【简介】" in text:
             card = _parse_character_text(text)
             save_character(card)

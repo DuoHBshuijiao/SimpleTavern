@@ -63,7 +63,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useCharacterSidebarRecencyStore, useCharactersStore, useChatsStore, useSettingsStore, useUiStore, useMvuStore } from '../stores'
 import type { SettingsDrawerTab } from '../stores/ui'
-import type { ApiPreset, AssistantAttachment, CharacterCard, ChatContentRegexRule, ChatImageAttachment, ChatMessage, ChatOverrides, ChatMvuMode, ExtraFirstMessageEntry, ForkLineageResponse, ForkSiblingSummary, GroupMemberSettings, Chat, MainChatRole, MvuMode, TtsSessionConfig, WorldBook, GroupMvuPreset } from '../types/models'
+import type { ApiPreset, AssistantAttachment, CharacterCard, ChatContentRegexRule, ChatImageAttachment, ChatMessage, ChatOverrides, ChatMvuMode, ExtraFirstMessageEntry, GroupMemberSettings, Chat, MainChatRole, MvuMode, TtsSessionConfig, WorldBook, GroupMvuPreset } from '../types/models'
 // Composables
 import { 
   useStreamOutput, 
@@ -78,6 +78,9 @@ import { usePageBackground } from '../composables/usePageBackground'
 import { useWebGpuBackground } from '../composables/useWebGpuBackground'
 import { useWebGpuBackgroundRuntime } from '../composables/useWebGpuBackgroundRuntime'
 import { useViewportNarrowPortrait } from '../composables/useViewportNarrowPortrait'
+import { useChatSearch } from '../composables/useChatSearch'
+import { useImageStickyBinding } from '../composables/useImageStickyBinding'
+import { useForkLineage } from '../composables/useForkLineage'
 
 // 子组件
 import { ChatSidebar, MessageList, ChatInput, AssistantPanel, AssistantThread, MvuCapabilityEditor, MvuPanel } from '../components/chat'
@@ -548,107 +551,16 @@ const selectedCharacter = computed(() => {
 const activeChat = computed(() => chats.activeChat)
 
 /** 占位符重试成功后：在同一会话且同模型+同 API 预设下自动对上游使用 [image] 占位，直到切换模型/预设或换会话（localStorage 按 chatId 持久化） */
-const IMAGE_STICKY_STORAGE_KEY = 'SimpleTavern:imageStickyBinding:v1'
-
-type ImageStickyPersistRow = { model: string; presetId: string | null }
-
-function loadImageStickyMap(): Record<string, ImageStickyPersistRow> {
-  if (typeof window === 'undefined') return {}
-  try {
-    const raw = localStorage.getItem(IMAGE_STICKY_STORAGE_KEY)
-    if (!raw) return {}
-    const o = JSON.parse(raw) as unknown
-    if (!o || typeof o !== 'object' || Array.isArray(o)) return {}
-    return o as Record<string, ImageStickyPersistRow>
-  } catch {
-    return {}
-  }
-}
-
-function persistImageStickyMap(map: Record<string, ImageStickyPersistRow>) {
-  if (typeof window === 'undefined') return
-  try {
-    localStorage.setItem(IMAGE_STICKY_STORAGE_KEY, JSON.stringify(map))
-  } catch {
-    /* quota / 隐私模式 */
-  }
-}
-
-function saveImageStickyBindingRow(bind: { chatId: string; model: string; presetId: string | null }) {
-  const map = loadImageStickyMap()
-  map[bind.chatId] = { model: bind.model, presetId: bind.presetId }
-  persistImageStickyMap(map)
-}
-
-function removeImageStickyBindingRow(chatId: string) {
-  const map = loadImageStickyMap()
-  if (!(chatId in map)) return
-  delete map[chatId]
-  persistImageStickyMap(map)
-}
-
-function parseImageBindingWatchKey(key: string): { chatId: string; model: string; preset: string } | null {
-  if (!key) return null
-  const parts = key.split('\0')
-  if (parts.length < 2) return null
-  const chatId = parts[0] ?? ''
-  const model = parts[1] ?? ''
-  const preset = parts[2] ?? ''
-  return { chatId, model, preset }
-}
-
-const imageStickyBinding = ref<{ chatId: string; model: string; presetId: string | null } | null>(null)
-
-function resolveImageBindingKey(): { chatId: string; model: string; presetId: string | null } | null {
-  const chat = activeChat.value
-  if (!chat?.id) return null
-  const model = chat.overrides?.params?.model || settings.settings?.llm?.defaultModel || ''
-  const presetId = chat.overrides?.presetId ?? null
-  return { chatId: chat.id, model, presetId }
-}
-
-function isImageStickyActive(): boolean {
-  const cur = resolveImageBindingKey()
-  const sticky = imageStickyBinding.value
-  if (!cur || !sticky) return false
-  return sticky.chatId === cur.chatId && sticky.model === cur.model && sticky.presetId === cur.presetId
-}
-
-function hydrateImageStickyFromStorage() {
-  if (typeof window === 'undefined') return
-  const cur = resolveImageBindingKey()
-  if (!cur) return
-  const map = loadImageStickyMap()
-  const row = map[cur.chatId]
-  if (!row || typeof row.model !== 'string') return
-  const p = row.presetId == null || row.presetId === '' ? null : String(row.presetId)
-  if (cur.model === row.model && cur.presetId === p) {
-    imageStickyBinding.value = { chatId: cur.chatId, model: row.model, presetId: p }
-  } else {
-    delete map[cur.chatId]
-    persistImageStickyMap(map)
-  }
-}
-
-const imageBindingWatchKey = computed(() => {
-  const chat = activeChat.value
-  if (!chat) return ''
-  return `${chat.id}\0${chat.overrides?.params?.model ?? ''}\0${chat.overrides?.presetId ?? ''}`
-})
-
-watch(imageBindingWatchKey, (newKey, oldKey) => {
-  imageStickyBinding.value = null
-  const oldP = oldKey ? parseImageBindingWatchKey(oldKey) : null
-  const newP = newKey ? parseImageBindingWatchKey(newKey) : null
-  if (
-    oldP &&
-    newP &&
-    oldP.chatId === newP.chatId &&
-    (oldP.model !== newP.model || oldP.preset !== newP.preset)
-  ) {
-    removeImageStickyBindingRow(newP.chatId)
-  }
-  hydrateImageStickyFromStorage()
+const {
+  imageStickyBinding,
+  resolveImageBindingKey,
+  isImageStickyActive,
+  saveImageStickyBindingRow,
+  imageFallbackDialog,
+  openImageFallback,
+} = useImageStickyBinding({
+  getActiveChat: () => activeChat.value,
+  getDefaultModel: () => settings.settings?.llm?.defaultModel,
 })
 
 /** MessageList 用：延后删除时在 UI 中隐藏仍会占上下文的消息 */
@@ -1397,16 +1309,6 @@ async function setAssistantDestructiveToolsEnabled(checked: boolean) {
   await assistant.setAllowDestructiveTools(checked)
 }
 
-const imageFallbackDialog = ref<{
-  visible: boolean
-  error: string
-  retryAction: null | (() => Promise<void>)
-}>({
-  visible: false,
-  error: '',
-  retryAction: null,
-})
-
 const draftHelper = ref<{
   mode: 'write' | 'enhance' | null
   status: 'reasoning' | 'writing' | 'done' | null
@@ -1435,117 +1337,37 @@ function buildDraftHelperConversation(): DraftHelpConversationMessage[] {
   }))
 }
 
-const showChatSearch = ref(false)
-/** 关闭搜索栏时先跑完面板离场动画再显示「搜索」chip，避免与收起动画抢布局造成顿挫 */
-const holdSearchChipUntilSearchPanelClosed = ref(false)
-/** 顶栏搜索区向下拓展（grid 0fr→1fr） */
-const chatSearchExpandOpen = ref(false)
-/** 拓展占位完成后「带出」搜索 UI（opacity / translate） */
-const chatSearchContentRevealed = ref(false)
-
-const SEARCH_OPEN_EXPAND_MS = 320
-const SEARCH_REVEAL_DELAY_MS = 500
-const SEARCH_CLOSE_CONTENT_MS = 280
-const SEARCH_EXPAND_COLLAPSE_MS = 320
-
-let chatSearchOpenRevealTimer: ReturnType<typeof setTimeout> | null = null
-let chatSearchCloseTimers: ReturnType<typeof setTimeout>[] = []
-
-function prefersReducedMotion(): boolean {
-  if (typeof window === 'undefined') return false
-  return window.matchMedia('(prefers-reduced-motion: reduce)').matches
-}
-
-/** 仅清理搜索面板展开/收起与 reveal 的定时器，不碰 chip 状态（关闭动画需与 chip 同场） */
-function clearChatSearchPanelAnimTimers() {
-  if (chatSearchOpenRevealTimer != null) {
-    clearTimeout(chatSearchOpenRevealTimer)
-    chatSearchOpenRevealTimer = null
-  }
-  chatSearchCloseTimers.forEach(clearTimeout)
-  chatSearchCloseTimers = []
-}
-
-/** 面板定时器 + chip 展开状态，用于切会话、卸载等完整重置 */
-function clearChatSearchAnimTimers() {
-  clearChatSearchPanelAnimTimers()
-  clearChatSearchChipsExpandState()
-}
-const chatSearchQuery = ref('')
-const chatSearchLoading = ref(false)
-const chatSearchResults = ref<Array<{ messageId: string; messageIndex: number; snippet: string }>>([])
-/** 当前高亮的搜索结果 chip；-1 表示未选中（搜索成功后不再默认选中首条） */
-const chatSearchCursor = ref(-1)
-/** chip 行：grid 展开；清空结果时先收起再延迟清 DOM，以便高度过渡 */
-const chatSearchChipsGridOpen = ref(false)
-const chatSearchChipsCollapsing = ref(false)
-const chatSearchChipsDisplayHits = ref<Array<{ messageId: string; messageIndex: number; snippet: string }>>([])
-let chatSearchChipsClearTimer: ReturnType<typeof setTimeout> | null = null
-
-function clearChatSearchChipsExpandState() {
-  if (chatSearchChipsClearTimer != null) {
-    clearTimeout(chatSearchChipsClearTimer)
-    chatSearchChipsClearTimer = null
-  }
-  chatSearchChipsDisplayHits.value = []
-  chatSearchChipsGridOpen.value = false
-  chatSearchChipsCollapsing.value = false
-}
-
-function syncChatSearchChipsRow(options?: { forceExpandAnimation?: boolean }) {
-  const hits = chatSearchResults.value
-  if (hits.length > 0) {
-    if (chatSearchChipsClearTimer != null) {
-      clearTimeout(chatSearchChipsClearTimer)
-      chatSearchChipsClearTimer = null
-    }
-    chatSearchChipsCollapsing.value = false
-    const wasEmpty = chatSearchChipsDisplayHits.value.length === 0
-    chatSearchChipsDisplayHits.value = hits.map((h) => ({ ...h }))
-    const shouldAnimateExpand =
-      !prefersReducedMotion() && (options?.forceExpandAnimation === true || wasEmpty)
-    if (shouldAnimateExpand) {
-      chatSearchChipsGridOpen.value = false
-      nextTick(() => {
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            chatSearchChipsGridOpen.value = true
-          })
-        })
-      })
-    } else {
-      chatSearchChipsGridOpen.value = true
-    }
-  } else {
-    if (chatSearchChipsDisplayHits.value.length === 0) {
-      chatSearchChipsGridOpen.value = false
-      return
-    }
-    if (prefersReducedMotion()) {
-      clearChatSearchChipsExpandState()
-      return
-    }
-    chatSearchChipsCollapsing.value = true
-    chatSearchChipsGridOpen.value = false
-    if (chatSearchChipsClearTimer != null) {
-      clearTimeout(chatSearchChipsClearTimer)
-      chatSearchChipsClearTimer = null
-    }
-    chatSearchChipsClearTimer = setTimeout(() => {
-      chatSearchChipsDisplayHits.value = []
-      chatSearchChipsCollapsing.value = false
-      chatSearchChipsClearTimer = null
-    }, SEARCH_CLOSE_CONTENT_MS)
-  }
-}
-
-const chatSearchHitsForNav = computed(() =>
-  chatSearchResults.value.length > 0 ? chatSearchResults.value : chatSearchChipsDisplayHits.value
-)
-
-watch(chatSearchResults, () => syncChatSearchChipsRow(), { deep: true })
-
 const chatSearchInputRef = ref<HTMLInputElement | null>(null)
+const {
+  showChatSearch,
+  holdSearchChipUntilSearchPanelClosed,
+  chatSearchExpandOpen,
+  chatSearchContentRevealed,
+  SEARCH_OPEN_EXPAND_MS,
+  SEARCH_CLOSE_CONTENT_MS,
+  SEARCH_EXPAND_COLLAPSE_MS,
+  chatSearchQuery,
+  chatSearchLoading,
+  chatSearchCursor,
+  chatSearchChipsGridOpen,
+  chatSearchChipsCollapsing,
+  chatSearchChipsDisplayHits,
+  chatSearchHitsForNav,
+  runChatSearch,
+  goToNextSearchResult,
+  goToPrevSearchResult,
+  jumpToSearchResult,
+  openChatSearchBar,
+  closeChatSearchBar,
+  resetChatSearchForChatSwitch,
+} = useChatSearch({
+  getActiveChat: () => activeChat.value,
+  jumpToMessageIndex,
+  chatSearchInputRef,
+  beforeOpen: () => {
+    showHeaderMoreMenu.value = false
+  },
+})
 const showHeaderMoreMenu = ref(false)
 const headerMoreMenuRef = ref<HTMLElement | null>(null)
 const headerMoreButtonRef = ref<HTMLElement | null>(null)
@@ -1722,12 +1544,10 @@ onBeforeUnmount(() => {
   errorStack.clearAll()
   window.removeEventListener('keydown', handleGlobalKeydown)
   window.removeEventListener('pointerdown', handleHeaderPointerdown)
-  if (chatSearchTimer) clearTimeout(chatSearchTimer)
   if (headerCompactDelayTimer) clearTimeout(headerCompactDelayTimer)
   if (headerLiftChainTimer) clearTimeout(headerLiftChainTimer)
   clearTtsTopBarRevealTimer()
   clearAgentTopBarRevealTimer()
-  clearChatSearchChipsExpandState()
   chatHeaderResizeObserver?.disconnect()
   chatHeaderResizeObserver = null
 })
@@ -1880,10 +1700,6 @@ function clearDraftImages() {
     URL.revokeObjectURL(img.previewUrl)
   }
   draftImages.value = []
-}
-
-function openImageFallback(error: string, retryAction: () => Promise<void>) {
-  imageFallbackDialog.value = { visible: true, error, retryAction }
 }
 
 async function runDraftHelper(mode: 'write' | 'enhance', sourceDraft: string) {
@@ -2609,121 +2425,6 @@ function jumpToMessageIndex(index: number) {
   })
 }
 
-async function runChatSearch() {
-  const chat = activeChat.value
-  const q = chatSearchQuery.value.trim()
-  if (!chat || !q) {
-    chatSearchResults.value = []
-    chatSearchCursor.value = -1
-    return
-  }
-  chatSearchLoading.value = true
-  try {
-    const res = await apiGet<{ query: string; total: number; hits: Array<{ messageId: string; messageIndex: number; snippet: string }> }>(
-      `/api/chats/${encodeURIComponent(chat.id)}/search?q=${encodeURIComponent(q)}`
-    )
-    chatSearchResults.value = Array.isArray(res?.hits) ? res.hits : []
-    chatSearchCursor.value = -1
-  } finally {
-    chatSearchLoading.value = false
-  }
-}
-
-let chatSearchTimer: ReturnType<typeof setTimeout> | null = null
-
-function goToNextSearchResult() {
-  const list = chatSearchHitsForNav.value
-  const total = list.length
-  if (!total) return
-  if (chatSearchCursor.value < 0) {
-    chatSearchCursor.value = 0
-  } else {
-    chatSearchCursor.value = (chatSearchCursor.value + 1) % total
-  }
-  jumpToMessageIndex(list[chatSearchCursor.value]!.messageIndex)
-}
-
-function goToPrevSearchResult() {
-  const list = chatSearchHitsForNav.value
-  const total = list.length
-  if (!total) return
-  if (chatSearchCursor.value < 0) {
-    chatSearchCursor.value = total - 1
-  } else {
-    chatSearchCursor.value = (chatSearchCursor.value - 1 + total) % total
-  }
-  jumpToMessageIndex(list[chatSearchCursor.value]!.messageIndex)
-}
-
-function jumpToSearchResult(idx: number) {
-  const hit = chatSearchHitsForNav.value[idx]
-  if (!hit) return
-  chatSearchCursor.value = idx
-  jumpToMessageIndex(hit.messageIndex)
-}
-
-function openChatSearchBar() {
-  holdSearchChipUntilSearchPanelClosed.value = false
-  showHeaderMoreMenu.value = false
-  clearChatSearchPanelAnimTimers()
-  chatSearchExpandOpen.value = false
-  chatSearchContentRevealed.value = false
-  showChatSearch.value = true
-  nextTick(() => {
-    if (prefersReducedMotion()) {
-      chatSearchExpandOpen.value = true
-      chatSearchContentRevealed.value = true
-      nextTick(() => {
-        if (chatSearchResults.value.length > 0) {
-          syncChatSearchChipsRow({ forceExpandAnimation: true })
-        }
-        chatSearchInputRef.value?.focus()
-        chatSearchInputRef.value?.select()
-      })
-      return
-    }
-    chatSearchExpandOpen.value = true
-    chatSearchOpenRevealTimer = window.setTimeout(() => {
-      chatSearchContentRevealed.value = true
-      chatSearchOpenRevealTimer = null
-      nextTick(() => {
-        if (chatSearchResults.value.length > 0) {
-          syncChatSearchChipsRow({ forceExpandAnimation: true })
-        }
-        chatSearchInputRef.value?.focus()
-        chatSearchInputRef.value?.select()
-      })
-    }, SEARCH_REVEAL_DELAY_MS)
-  })
-}
-
-function closeChatSearchBar() {
-  if (!showChatSearch.value) return
-  clearChatSearchPanelAnimTimers()
-  holdSearchChipUntilSearchPanelClosed.value = true
-  if (prefersReducedMotion()) {
-    chatSearchExpandOpen.value = false
-    chatSearchContentRevealed.value = false
-    showChatSearch.value = false
-    holdSearchChipUntilSearchPanelClosed.value = false
-    return
-  }
-  chatSearchContentRevealed.value = false
-  const half = SEARCH_CLOSE_CONTENT_MS / 2
-  const tExpand = window.setTimeout(() => {
-    chatSearchExpandOpen.value = false
-  }, half)
-  const totalEnd = Math.max(SEARCH_CLOSE_CONTENT_MS, half + SEARCH_EXPAND_COLLAPSE_MS)
-  const tDone = window.setTimeout(() => {
-    showChatSearch.value = false
-    holdSearchChipUntilSearchPanelClosed.value = false
-    chatSearchExpandOpen.value = false
-    chatSearchContentRevealed.value = false
-    chatSearchCloseTimers = []
-  }, totalEnd)
-  chatSearchCloseTimers = [tExpand, tDone]
-}
-
 function toggleHeaderMoreMenu() {
   showHeaderMoreMenu.value = !showHeaderMoreMenu.value
 }
@@ -2908,13 +2609,10 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   mvuStore.disconnect()
-  clearChatSearchAnimTimers()
   window.removeEventListener('resize', scheduleContentAreaLeft)
   if (contentAreaLeftRaf) cancelAnimationFrame(contentAreaLeftRaf)
   cancelContentAreaLeftLayoutSync()
   if (contentAreaLeftSepDebounce) clearTimeout(contentAreaLeftSepDebounce)
-  if (forkLineageDebounceTimer) clearTimeout(forkLineageDebounceTimer)
-  forkLineageAbort?.abort()
 })
 
 /**
@@ -3133,14 +2831,7 @@ watch(
     }
     // 切换会话时自动关闭搜索面板并重置搜索状态
     showHeaderMoreMenu.value = false
-    clearChatSearchAnimTimers()
-    holdSearchChipUntilSearchPanelClosed.value = false
-    chatSearchExpandOpen.value = false
-    chatSearchContentRevealed.value = false
-    showChatSearch.value = false
-    chatSearchQuery.value = ''
-    chatSearchResults.value = []
-    chatSearchCursor.value = -1
+    resetChatSearchForChatSwitch()
   },
 )
 
@@ -3177,14 +2868,6 @@ watch(
     }
   },
 )
-
-watch(chatSearchQuery, () => {
-  if (!showChatSearch.value || !chatSearchContentRevealed.value) return
-  if (chatSearchTimer) clearTimeout(chatSearchTimer)
-  chatSearchTimer = setTimeout(() => {
-    void runChatSearch()
-  }, 180)
-})
 
 async function cleanupCharacterEditorAssistantContext() {
   await assistant.cleanupWorkspaceSession()
@@ -4805,89 +4488,24 @@ async function handleBranchChat(chat: Chat) {
 }
 
 const forkSubmitting = ref(false)
-const forkLineage = ref<ForkLineageResponse | null>(null)
-const forkLineageLoading = ref(false)
-let forkLineageAbort: AbortController | null = null
-let forkLineageDebounceTimer: ReturnType<typeof setTimeout> | null = null
-const forkLineageCache = new Map<string, { value: ForkLineageResponse; expiresAt: number }>()
-const FORK_LINEAGE_CACHE_TTL_MS = 30_000
-
-const outgoingForksByMessageId = computed(() => {
-  const map: Record<string, { count: number; chats: ForkSiblingSummary[] }> = {}
-  for (const g of forkLineage.value?.outgoingForks ?? []) {
-    map[g.messageId] = { count: g.count, chats: g.chats }
-  }
-  return map
+const {
+  forkLineage,
+  forkLineageLoading,
+  outgoingForksByMessageId,
+  refreshForkLineage,
+  syncForkLineageForLoadedChat,
+  resetForkLineage,
+} = useForkLineage({
+  getActiveChat: () => activeChat.value,
+  fetchForkLineage: (chatId, signal) => chats.fetchForkLineage(chatId, signal),
 })
-
-async function refreshForkLineage(chatId: string) {
-  forkLineageAbort?.abort()
-  const ac = new AbortController()
-  forkLineageAbort = ac
-  forkLineageLoading.value = true
-  try {
-    const lineage = await chats.fetchForkLineage(chatId, ac.signal)
-    forkLineageCache.set(chatId, {
-      value: lineage,
-      expiresAt: Date.now() + FORK_LINEAGE_CACHE_TTL_MS,
-    })
-    forkLineage.value = lineage
-  } catch (e: unknown) {
-    if (e instanceof DOMException && e.name === 'AbortError') return
-    forkLineage.value = null
-  } finally {
-    if (forkLineageAbort === ac) {
-      forkLineageLoading.value = false
-      forkLineageAbort = null
-    }
-  }
-}
-
-function cancelPendingForkLineage() {
-  if (forkLineageDebounceTimer) {
-    clearTimeout(forkLineageDebounceTimer)
-    forkLineageDebounceTimer = null
-  }
-  forkLineageAbort?.abort()
-  forkLineageAbort = null
-  forkLineageLoading.value = false
-}
-
-function scheduleRefreshForkLineage(chatId: string, delayMs = 400) {
-  if (forkLineageDebounceTimer) clearTimeout(forkLineageDebounceTimer)
-  forkLineageDebounceTimer = setTimeout(() => {
-    forkLineageDebounceTimer = null
-    void refreshForkLineage(chatId)
-  }, delayMs)
-}
-
-function syncForkLineageForLoadedChat(chatId: string) {
-  const chat = activeChat.value
-  if (!chat || chat.id !== chatId) return
-  cancelPendingForkLineage()
-
-  const cached = forkLineageCache.get(chatId)
-  if (cached && cached.expiresAt > Date.now()) {
-    forkLineage.value = cached.value
-    return
-  }
-
-  // 普通会话不主动拉 lineage，避免切换任意会话都产生慢请求。
-  if (!chat.forkedFromChatId) {
-    forkLineage.value = null
-    return
-  }
-
-  scheduleRefreshForkLineage(chatId)
-}
 
 watch(
   () => chats.activeChatId,
   () => {
     cancelDeferredPostSwitchWork()
     cancelDeferredMvuConnect()
-    cancelPendingForkLineage()
-    forkLineage.value = null
+    resetForkLineage()
   },
 )
 

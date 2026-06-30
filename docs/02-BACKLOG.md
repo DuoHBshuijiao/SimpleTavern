@@ -1,4 +1,22 @@
-# v0.600 Backlog
+# Backlog
+
+## v0.700 任务（已完成）
+
+- [x] `T-201-component-test-base`：引入 `@vue/test-utils` + `happy-dom`，新增可挂载 SFC 的组件测试与 `ThemedCheckbox` 示例。
+- [x] `T-202-use-chat-search`：从 `ChatPage.vue` 提炼 `useChatSearch`（会话内搜索状态机）+ 单测。
+- [x] `T-203-use-image-sticky`：从 `ChatPage.vue` 提炼 `useImageStickyBinding`（图片粘性绑定/回退）+ 单测。
+- [x] `T-204-use-fork-lineage`：从 `ChatPage.vue` 提炼 `useForkLineage`（分叉血缘）+ 单测。
+- [x] `T-205-data-integrity-expand`：后端数据完整性扫描扩展到 settings/characters/worldbooks + characterId orphan 引用（仅检测），补测试与前端区分展示。
+- [x] `T-206-import-export-warnings`：修复 MVU 兼容 warning 互斥丢失、TXT(V2) 导入 warning 透传，补前后端测试。
+- [x] `T-207-v0700-final-verify`：全套验证 + 文档/版本/state/changelog 更新。
+
+### v0.700 推迟（→ v0.800+）
+
+- ChatPage 生成/SSE orchestration 拆分、SettingsDrawer 大拆。
+- 更多 orphan 类型（attachedWorldBookIds 悬空）、导出跳过项告知、更多导入路径 warning 透传。
+- 原生 Responses / Anthropic / Gemini 协议层、Playwright E2E、后端全局 chatId 索引迁移。
+
+## v0.600 Backlog
 
 ## P0 已完成
 

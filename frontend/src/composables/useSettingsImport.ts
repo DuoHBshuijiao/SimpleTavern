@@ -75,6 +75,28 @@ export interface SillyTavernMaterializeResult {
   mvu?: SillyTavernConfirmResult['mvu']
 }
 
+export function normalizeImportNoticeText(text: string): string {
+  return text.replace(/L4\s*暂不生成\s*regex\s*模式规则；?/g, '未生成正文正则规则；')
+}
+
+export function formatImportResultMessage(result: SettingsImportResult): string {
+  const imported = (result.imported || []).join(', ') || '无'
+  const compat = result.mvuCompat
+  const rulesSummary = typeof compat?.rules === 'number' ? `生成 regex 规则 ${compat.rules} 条。` : ''
+  const mvuSummaryText = compat?.summary || rulesSummary
+  const mvuSummary = compat
+    ? `\nMVU 兼容：${compat.mode} / ${compat.applied ? '已应用' : '未应用'}${mvuSummaryText ? `，${mvuSummaryText}` : ''}`
+    : ''
+  const warnings = result.warnings?.length
+    ? `\n警告：${result.warnings.map(normalizeImportNoticeText).join('; ')}`
+    : ''
+  // 顶层 warnings 与 MVU 兼容 warnings 同时存在时都要展示，避免互斥丢失任一来源。
+  const mvuWarnings = compat?.warnings?.length
+    ? `\nMVU 警告：${compat.warnings.map(normalizeImportNoticeText).join('; ')}`
+    : ''
+  return `导入完成：${imported}${mvuSummary}${warnings}${mvuWarnings}`
+}
+
 export function useSettingsImport() {
   const settingsStore = useSettingsStore()
   const chatsStore = useChatsStore()
@@ -136,23 +158,6 @@ export function useSettingsImport() {
     if (chatsStore.characterId) {
       await chatsStore.loadList(chatsStore.characterId)
     }
-  }
-
-  function normalizeImportNoticeText(text: string): string {
-    return text.replace(/L4\s*暂不生成\s*regex\s*模式规则；?/g, '未生成正文正则规则；')
-  }
-
-  function formatImportResultMessage(result: SettingsImportResult) {
-    const imported = (result.imported || []).join(', ') || '无'
-    const compat = result.mvuCompat
-    const rulesSummary = typeof compat?.rules === 'number' ? `生成 regex 规则 ${compat.rules} 条。` : ''
-    const mvuSummaryText = compat?.summary || rulesSummary
-    const mvuSummary = compat
-      ? `\nMVU 兼容：${compat.mode} / ${compat.applied ? '已应用' : '未应用'}${mvuSummaryText ? `，${mvuSummaryText}` : ''}`
-      : ''
-    const warnings = result.warnings?.length ? `\n警告：${result.warnings.map(normalizeImportNoticeText).join('; ')}` : ''
-    const mvuWarnings = !warnings && compat?.warnings?.length ? `\nMVU 警告：${compat.warnings.map(normalizeImportNoticeText).join('; ')}` : ''
-    return `导入完成：${imported}${mvuSummary}${warnings}${mvuWarnings}`
   }
 
   return {

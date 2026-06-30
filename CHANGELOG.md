@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.700
+
+### 组件化与测试基座
+
+- 引入前端组件测试基座：新增 `@vue/test-utils` + `happy-dom`，建立可挂载 SFC 的组件测试模式与 `ThemedCheckbox` 示例。
+- 从 `ChatPage.vue`（约 7166 行）提炼 3 个低风险 composable，行为不变并各配单测：`useChatSearch`（会话内搜索状态机/动画时序/导航）、`useImageStickyBinding`（图片占位粘性绑定 + 生成失败回退对话框）、`useForkLineage`（分叉血缘加载/缓存/防抖/切会话清理）。
+
+### 数据完整性与导入可观测性
+
+- 数据完整性扫描从仅 chat/assistant JSON 扩展到 `settings.json`、`assistant_settings.json`、`characters/`、`worldbooks/`，并新增 chat.characterId 的 orphan 引用检测。新增类别一律“仅检测、不自动修复”（repairAction=none），孤儿会话所在文件不会被按 chat 规则自动删除。
+- 启动巡检前端区分“可自动清理”与“需人工处理”两类，绝不自动改动设置/角色/世界书。
+- 修复导入结果提示在存在顶层 warning 时丢失 MVU 兼容 warning 的互斥问题；TXT(Version 2) 会话导入透传此前被静默丢弃的逐行 warning。
+
+### 测试
+
+- 新增前端 `ThemedCheckbox`、`useChatSearch`、`useImageStickyBinding`、`useForkLineage`、`formatImportResultMessage` 测试；新增后端数据完整性扩展、导入 warning 透传测试。前端 83 测试、后端 114 测试全通过。
+
 ## v0.601
 
 ### 无障碍
