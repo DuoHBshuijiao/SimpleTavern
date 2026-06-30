@@ -99,6 +99,8 @@ import {
   ChatExportModal,
   ChatImportModal,
   CharacterEditorModal,
+  PersonaEditorModal,
+  PersonaSwitchConfirmModal,
 } from '../components/modals'
 import ErrorModal from '../components/modals/ErrorModal.vue'
 import KnowledgeGraphModal from '../components/modals/KnowledgeGraphModal.vue'
@@ -4262,22 +4264,9 @@ async function cancelCharacterEdit() {
   actions.cancelCharacterEdit()
 }
 
-const personaEditorTitleId = 'persona-editor-title'
-const personaEditorDialogAttrs = dialogAria(personaEditorTitleId)
 function closePersonaEditor() {
   actions.showPersonaEditor.value = false
 }
-const { dialogRef: personaEditorDialogRef } = useDialogBehavior(
-  () => actions.showPersonaEditor.value,
-  closePersonaEditor,
-)
-
-const personaSwitchTitleId = 'persona-switch-title'
-const personaSwitchDialogAttrs = dialogAria(personaSwitchTitleId)
-const { dialogRef: personaSwitchDialogRef } = useDialogBehavior(
-  () => actions.showPersonaSwitchConfirm.value,
-  () => actions.cancelSwitchPersona(),
-)
 
 const assistantSettingsTitleId = 'assistant-settings-title'
 const assistantSettingsDialogAttrs = dialogAria(assistantSettingsTitleId)
@@ -4295,8 +4284,6 @@ const { dialogRef: embeddedCardConfirmDialogRef } = useDialogBehavior(
   () => showEmbeddedCardConfirmModal.value,
   clearEmbeddedCardPreviewState,
 )
-void personaEditorDialogRef
-void personaSwitchDialogRef
 void assistantSettingsDialogRef
 void embeddedCardConfirmDialogRef
 
@@ -5330,78 +5317,23 @@ const editingPersonaAvatarUrl = computed(() => {
       @open-assistant-settings="assistant.showAssistantSettings.value = true"
     />
 
-  <!-- Persona 编辑弹窗 -->
-  <div v-if="actions.showPersonaEditor.value" class="modal">
-    <div class="modal-backdrop" @click="actions.showPersonaEditor.value = false"></div>
-    <div ref="personaEditorDialogRef" v-bind="personaEditorDialogAttrs" tabindex="-1" class="modal-content modal-surface chat-modal-width-500-90">
-      <div class="modal-header">
-        <h3 :id="personaEditorTitleId" class="modal-title">{{ actions.isNewPersona.value ? '新建身份' : '编辑身份' }}</h3>
-        <button type="button" class="modal-close" aria-label="关闭身份编辑弹窗" @click="actions.showPersonaEditor.value = false">
-            <X class="w-5 h-5" />
-        </button>
-      </div>
-      <div class="modal-body">
-        <div v-if="actions.editingPersona.value" class="space-y-6">
-          <div class="flex items-center gap-4 mb-2">
-            <ModernAvatar 
-              :src="editingPersonaAvatarUrl"
-              :size="80"
-              aspect="1"
-              rounded="rounded-xl"
-              class="border-2 border-brand-a40"
-            />
-            <button class="btn btn-sm btn-secondary" @click="actions.showPersonaAvatarCropper.value = true">更换头像</button>
-          </div>
+    <PersonaEditorModal
+      :show="actions.showPersonaEditor.value"
+      :is-new-persona="actions.isNewPersona.value"
+      :persona="actions.editingPersona.value"
+      :avatar-url="editingPersonaAvatarUrl"
+      :user-name="userName"
+      @cancel="closePersonaEditor"
+      @save="actions.savePersona"
+      @open-avatar-cropper="actions.showPersonaAvatarCropper.value = true"
+    />
 
-          <div class="form-group">
-            <label class="label">姓名（{{userName}}）</label>
-            <input v-model="actions.editingPersona.value.name" class="input" placeholder="你的角色名称" />
-          </div>
-
-          <div class="form-group">
-            <label class="label">简介</label>
-            <textarea
-              v-model="actions.editingPersona.value.description"
-              class="input textarea h-32"
-              placeholder="你的角色身份、背景等"
-            ></textarea>
-          </div>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" @click="actions.showPersonaEditor.value = false">取消</button>
-        <button class="btn btn-primary" @click="actions.savePersona">保存</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Persona 切换确认弹窗 -->
-  <div v-if="actions.showPersonaSwitchConfirm.value" class="modal">
-    <div class="modal-backdrop" @click="actions.cancelSwitchPersona"></div>
-    <div ref="personaSwitchDialogRef" v-bind="personaSwitchDialogAttrs" tabindex="-1" class="modal-content modal-surface chat-modal-width-520-92">
-      <div class="modal-header">
-        <h3 :id="personaSwitchTitleId" class="modal-title">切换用户身份</h3>
-        <button type="button" class="modal-close" aria-label="关闭身份切换确认弹窗" @click="actions.cancelSwitchPersona">
-            <X class="w-5 h-5" />
-        </button>
-      </div>
-      <div class="modal-body">
-        <div class="space-y-4">
-          <div class="text-sm text-[var(--color-text-secondary)]">
-            你正在尝试切换用户身份，请选择"新建会话"或"仍然继续对话"。
-          </div>
-          <div class="text-xs text-[var(--color-text-muted)]">
-            提示：继续对话时，历史消息会保持原身份显示；后续新发送的 user 消息将使用新身份。
-          </div>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" @click="actions.cancelSwitchPersona">取消</button>
-        <button class="btn btn-secondary" @click="confirmSwitchPersonaContinue">仍然继续对话</button>
-        <button class="btn btn-primary" @click="confirmSwitchPersonaNewSession">新建会话</button>
-      </div>
-    </div>
-  </div>
+    <PersonaSwitchConfirmModal
+      :show="actions.showPersonaSwitchConfirm.value"
+      @cancel="actions.cancelSwitchPersona"
+      @continue-chat="confirmSwitchPersonaContinue"
+      @new-session="confirmSwitchPersonaNewSession"
+    />
 
   <!-- 助手设置弹窗 -->
   <div v-if="assistant.showAssistantSettings.value" class="modal">
