@@ -59,11 +59,11 @@
  *    - 依赖：依赖vue、stores、composables、components、api
  *    - 位置：视图层，作为聊天页面的主组件
  */
-import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick, type ComponentPublicInstance } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useCharacterSidebarRecencyStore, useCharactersStore, useChatsStore, useSettingsStore, useUiStore, useMvuStore } from '../stores'
 import type { SettingsDrawerTab } from '../stores/ui'
-import type { ApiPreset, AssistantAttachment, CharacterCard, ChatContentRegexRule, ChatImageAttachment, ChatMessage, ChatOverrides, ChatMvuMode, ExtraFirstMessageEntry, GroupMemberSettings, Chat, MainChatRole, MvuMode, TtsSessionConfig, WorldBook, GroupMvuPreset } from '../types/models'
+import type { ApiPreset, AssistantAttachment, CharacterCard, ChatContentRegexRule, ChatImageAttachment, ChatMessage, ChatOverrides, ChatMvuMode, GroupMemberSettings, Chat, MainChatRole, MvuMode, TtsSessionConfig, WorldBook, GroupMvuPreset } from '../types/models'
 // Composables
 import { 
   useStreamOutput, 
@@ -88,7 +88,7 @@ import { useChatHeaderLayout } from '../composables/useChatHeaderLayout'
 import { useChatFabSeparation } from '../composables/useChatFabSeparation'
 
 // 子组件
-import { ChatSidebar, MessageList, ChatInput, AssistantPanel, AssistantThread, MvuCapabilityEditor, MvuPanel } from '../components/chat'
+import { ChatSidebar, MessageList, ChatInput, AssistantPanel, MvuPanel } from '../components/chat'
 import ForkLineageBanner from '../components/chat/ForkLineageBanner.vue'
 import StateVariablesBar from '../components/chat/StateVariablesBar.vue'
 import {
@@ -98,6 +98,7 @@ import {
   GroupSettingsModal,
   ChatExportModal,
   ChatImportModal,
+  CharacterEditorModal,
 } from '../components/modals'
 import ErrorModal from '../components/modals/ErrorModal.vue'
 import KnowledgeGraphModal from '../components/modals/KnowledgeGraphModal.vue'
@@ -108,7 +109,7 @@ import ModernSelect from '../components/ModernSelect.vue'
 import ThemedCheckbox from '../components/ThemedCheckbox.vue'
 import TtsPlaybackFab from '../components/chat/TtsPlaybackFab.vue'
 import { useTtsPlaybackQueue } from '../composables/useTtsPlaybackQueue'
-import { Users, Settings, Sparkles, Loader2, X, MoreHorizontal, GripVertical, Check, Plus, Search, Globe } from 'lucide-vue-next'
+import { Users, Settings, X, MoreHorizontal, Search } from 'lucide-vue-next'
 
 // API
 import { postAndConsumeSse } from '../api/sse'
@@ -191,6 +192,15 @@ const draftImages = ref<DraftImageItem[]>([])
 const workspaceAssistantTextareaRef = ref<HTMLTextAreaElement | null>(null)
 /** 角色编辑页内嵌助手消息列表滚动容器（与侧栏 AssistantPanel 分离） */
 const workspaceAssistantMessagesListRef = ref<HTMLElement | null>(null)
+const characterEditorModalRef = ref<InstanceType<typeof CharacterEditorModal> | null>(null)
+
+function bindWorkspaceMessagesListRef(el: Element | ComponentPublicInstance | null) {
+  workspaceAssistantMessagesListRef.value = el instanceof HTMLElement ? el : null
+}
+
+function bindWorkspaceTextareaRef(el: Element | ComponentPublicInstance | null) {
+  workspaceAssistantTextareaRef.value = el instanceof HTMLTextAreaElement ? el : null
+}
 const isWorkspaceAssistantDragOver = ref(false)
 const showSettings = ref(false)
 const showGroupSettings = ref(false)
@@ -1585,71 +1595,11 @@ const actions = useChatActions({
   charactersStore: characters as any,
 })
 
-/** 角色编辑弹窗：绑定世界书（attachedWorldBookIds），供「角色+世界书」ZIP 等使用 */
-const characterEditorWorldbooks = ref<WorldBook[]>([])
-const addCharacterEditorWbId = ref('')
-const characterEditorWbDraggingIdx = ref<number | null>(null)
-/** 角色编辑：额外首句草稿（对号/加号写入列表，底部保存才持久化） */
-const extraFirstMessageDraft = ref('')
-
-/** 全部额外首句条目（含 chip:false 与空文本），便于删除错误数据 */
-const extraFirstMessageEntriesIndexed = computed(() => {
-  const ec = actions.editingCharacter.value
-  if (!ec?.extraFirstMessageEntries?.length) return [] as Array<ExtraFirstMessageEntry & { index: number }>
-  return ec.extraFirstMessageEntries.map((e, index) => ({ ...e, index }))
-})
-
-const hasAnyExtraFirstEntries = computed(() => extraFirstMessageEntriesIndexed.value.length > 0)
-
-function displayExtraEntryLabel(entry: ExtraFirstMessageEntry): string {
-  const t = (entry.text ?? '').trim()
-  return t || '（空）'
-}
-
-function extraEntryIsEmpty(entry: ExtraFirstMessageEntry): boolean {
-  return !(entry.text ?? '').trim()
-}
-
-function appendExtraFirstMessageCheck() {
-  const ec = actions.editingCharacter.value
-  if (!ec) return
-  const t = extraFirstMessageDraft.value.trim()
-  if (!t) return
-  if (!Array.isArray(ec.extraFirstMessageEntries)) ec.extraFirstMessageEntries = []
-  ec.extraFirstMessageEntries.push({ text: t, chip: false })
-}
-
-function appendExtraFirstMessagePlus() {
-  const ec = actions.editingCharacter.value
-  if (!ec) return
-  const t = extraFirstMessageDraft.value.trim()
-  if (!t) return
-  if (!Array.isArray(ec.extraFirstMessageEntries)) ec.extraFirstMessageEntries = []
-  ec.extraFirstMessageEntries.push({ text: t, chip: true })
-  extraFirstMessageDraft.value = ''
-}
-
-function removeExtraFirstMessageAt(index: number) {
-  const ec = actions.editingCharacter.value
-  if (!ec?.extraFirstMessageEntries) return
-  ec.extraFirstMessageEntries.splice(index, 1)
-}
-
-function fillExtraFirstDraft(text: string) {
-  extraFirstMessageDraft.value = text
-}
-
 function clearEmbeddedCardPreviewState() {
   showEmbeddedCardConfirmModal.value = false
   embeddedCardPreview.value = null
   embeddedCardImporting.value = false
   resetAvatarEmbeddedStState()
-}
-
-function avatarObjectPositionByFocus(focusX?: number | null, focusY?: number | null): string {
-  const x = typeof focusX === 'number' ? focusX : 50
-  const y = typeof focusY === 'number' ? focusY : 50
-  return `${x}% ${y}%`
 }
 
 async function handleCharacterAvatarSave(payload: AvatarCropSavePayload) {
@@ -1711,7 +1661,7 @@ async function confirmImportEmbeddedCard() {
     if (worldbookPayload) {
       const savedBook = await apiPost<WorldBook>('/api/worldbooks', worldbookPayload)
       attachedWorldBookIds = [savedBook.id]
-      await loadCharacterEditorWorldbooks()
+      await characterEditorModalRef.value?.reloadWorldbooks()
     }
     const mergedCard: CharacterCard = {
       ...current,
@@ -1745,87 +1695,6 @@ async function confirmImportEmbeddedCard() {
     errorStack.pushError({ message: error, source: 'main', title: '导入 PNG 内嵌角色数据失败' })
     embeddedCardImporting.value = false
   }
-}
-
-async function loadCharacterEditorWorldbooks() {
-  try {
-    characterEditorWorldbooks.value = await apiGet<WorldBook[]>('/api/worldbooks')
-  } catch {
-    characterEditorWorldbooks.value = []
-  }
-}
-
-function ensureCharacterAttachedWbIds() {
-  const c = actions.editingCharacter.value
-  if (!c) return
-  if (!Array.isArray(c.attachedWorldBookIds)) c.attachedWorldBookIds = []
-}
-
-function characterEditorWorldBookName(id: string) {
-  return characterEditorWorldbooks.value.find((b) => b.id === id)?.name || id
-}
-
-const characterEditorWorldBookSelectOptions = computed(() => {
-  const c = actions.editingCharacter.value
-  if (!c) return []
-  const taken = new Set(c.attachedWorldBookIds || [])
-  return characterEditorWorldbooks.value
-    .filter((b) => !taken.has(b.id))
-    .map((b) => ({ label: b.name || b.id, value: b.id }))
-})
-
-function addCharacterEditorWorldBook() {
-  if (!actions.editingCharacter.value || !addCharacterEditorWbId.value) return
-  ensureCharacterAttachedWbIds()
-  const ids = actions.editingCharacter.value.attachedWorldBookIds!
-  if (!ids.includes(addCharacterEditorWbId.value)) ids.push(addCharacterEditorWbId.value)
-  addCharacterEditorWbId.value = ''
-}
-
-function removeCharacterEditorWorldBook(worldbookId: string) {
-  if (!actions.editingCharacter.value?.attachedWorldBookIds) return
-  actions.editingCharacter.value.attachedWorldBookIds = actions.editingCharacter.value.attachedWorldBookIds.filter(
-    (id) => id !== worldbookId,
-  )
-}
-
-function moveCharacterEditorWorldBook(worldbookId: string, direction: -1 | 1) {
-  const c = actions.editingCharacter.value
-  if (!c?.attachedWorldBookIds) return
-  const ids = [...c.attachedWorldBookIds]
-  const idx = ids.indexOf(worldbookId)
-  if (idx < 0) return
-  const next = idx + direction
-  if (next < 0 || next >= ids.length) return
-  const a = ids[idx]
-  const b = ids[next]
-  if (a == null || b == null) return
-  ids[idx] = b
-  ids[next] = a
-  c.attachedWorldBookIds = ids
-}
-
-function handleCharacterEditorWbDragStart(idx: number) {
-  characterEditorWbDraggingIdx.value = idx
-}
-
-function handleCharacterEditorWbDragOver(e: DragEvent, idx: number) {
-  e.preventDefault()
-  const c = actions.editingCharacter.value
-  if (!c?.attachedWorldBookIds) return
-  const from = characterEditorWbDraggingIdx.value
-  if (from === null || from === idx) return
-  const ids = [...c.attachedWorldBookIds]
-  const item = ids.splice(from, 1)[0]
-  if (item) {
-    ids.splice(idx, 0, item)
-    c.attachedWorldBookIds = ids
-    characterEditorWbDraggingIdx.value = idx
-  }
-}
-
-function handleCharacterEditorWbDragEnd() {
-  characterEditorWbDraggingIdx.value = null
 }
 
 /**
@@ -2537,22 +2406,9 @@ watch(actions.showCharacterEditor, (next, prev) => {
     void cleanupCharacterEditorAssistantContext()
     actions.editingCharacter.value = null
     actions.isNewCharacter.value = false
-    characterEditorWbDraggingIdx.value = null
-    addCharacterEditorWbId.value = ''
     clearEmbeddedCardPreviewState()
   }
 })
-
-watch(
-  () => actions.showCharacterEditor.value,
-  (open) => {
-    if (open && actions.editingCharacter.value) {
-      ensureCharacterAttachedWbIds()
-      void loadCharacterEditorWorldbooks()
-      extraFirstMessageDraft.value = ''
-    }
-  },
-)
 
 /**
  * 根据当前聊天窗口动态更新页面标题
@@ -4406,13 +4262,6 @@ async function cancelCharacterEdit() {
   actions.cancelCharacterEdit()
 }
 
-const characterEditorTitleId = 'character-editor-title'
-const characterEditorDialogAttrs = dialogAria(characterEditorTitleId)
-const { dialogRef: characterEditorDialogRef } = useDialogBehavior(
-  () => actions.showCharacterEditor.value,
-  () => { void cancelCharacterEdit() },
-)
-
 const personaEditorTitleId = 'persona-editor-title'
 const personaEditorDialogAttrs = dialogAria(personaEditorTitleId)
 function closePersonaEditor() {
@@ -4446,7 +4295,6 @@ const { dialogRef: embeddedCardConfirmDialogRef } = useDialogBehavior(
   () => showEmbeddedCardConfirmModal.value,
   clearEmbeddedCardPreviewState,
 )
-void characterEditorDialogRef
 void personaEditorDialogRef
 void personaSwitchDialogRef
 void assistantSettingsDialogRef
@@ -5453,414 +5301,34 @@ const editingPersonaAvatarUrl = computed(() => {
     </div>
   </div>
 
-<!-- 角色编辑弹窗 -->
-  <div v-if="actions.showCharacterEditor.value" class="modal">
-    <div class="modal-backdrop" @click="cancelCharacterEdit"></div>
-    <div ref="characterEditorDialogRef" v-bind="characterEditorDialogAttrs" tabindex="-1" class="modal-content modal-surface chat-modal-width-1200-90">
-      <div class="modal-header">
-        <h3 :id="characterEditorTitleId" class="modal-title">{{ actions.isNewCharacter.value ? '新建角色' : '编辑角色' }}</h3>
-        <button type="button" class="modal-close" aria-label="关闭角色编辑弹窗" @click="cancelCharacterEdit">
-            <X class="w-5 h-5" />
-        </button>
-      </div>
-      <div
-        class="modal-body"
-        :class="isNarrowPortrait ? 'max-h-[min(90dvh,800px)] min-h-0 overflow-x-hidden overflow-y-auto' : ''"
-      >
-        <div
-          v-if="actions.editingCharacter.value"
-          class="flex min-h-0 min-w-0"
-          :class="isNarrowPortrait ? 'flex-col gap-4' : 'gap-6 h-[70vh]'"
-        >
-          <div
-            class="min-h-0 min-w-0 pr-2 custom-scrollbar"
-            :class="
-              isNarrowPortrait
-                ? 'shrink-0'
-                : 'min-w-[min(50%,18rem)] flex-1 basis-0 overflow-y-auto'
-            "
-          >
-            <div class="space-y-6">
-              <div class="flex gap-6">
-                <div class="flex flex-col items-center gap-3">
-                  <ModernAvatar 
-                    :src="editingCharacterAvatarUrl"
-                    :size="120"
-                    aspect="auto"
-                    object-fit="cover"
-                    :object-position="avatarObjectPositionByFocus(actions.editingCharacter.value.avatarFocusX, actions.editingCharacter.value.avatarFocusY)"
-                    rounded="rounded-xl"
-                    class="border-2 border-brand-a40 shadow-heavy bg-surface-overlay"
-                  />
-                  <button class="btn btn-sm btn-secondary" @click="actions.showCharacterAvatarCropper.value = true">更换头像</button>
-                </div>
-                <div class="flex-1 space-y-4">
-                  <div class="form-group">
-                    <label class="label">
-                      <span>名称</span>
-                      <span class="opacity-60 text-xs ml-2 text-brand">该项参与对话</span>
-                    </label>
-                    <input v-model="actions.editingCharacter.value.name" class="input" placeholder="角色名称" />
-                  </div>
-                  <div class="form-group">
-                    <label class="label">简介</label>
-                    <textarea v-model="actions.editingCharacter.value.description" class="input textarea h-20" placeholder="简短描述"></textarea>
-                  </div>
-                </div>
-              </div>
-
-              <div class="form-group">
-                <label class="label">
-                  <span>Personality（性格/外貌）</span>
-                  <span class="opacity-60 text-xs ml-2 text-brand">该项参与对话</span>
-                </label>
-                <textarea v-model="actions.editingCharacter.value.personality" class="input textarea h-32" placeholder="详细设定..."></textarea>
-              </div>
-
-              <div class="form-group">
-                <label class="label">
-                  <span>Scenario（情景/世界观）</span>
-                  <span class="opacity-60 text-xs ml-2 text-brand">该项参与对话</span>
-                </label>
-                <textarea v-model="actions.editingCharacter.value.scenario" class="input textarea h-24" placeholder="世界背景..."></textarea>
-              </div>
-
-              <div class="form-group">
-                <label class="label">
-                  <span>系统提示词</span>
-                  <span class="opacity-60 text-xs ml-2 text-brand">该项参与对话</span>
-                </label>
-                <textarea v-model="actions.editingCharacter.value.systemPrompt" class="input textarea h-32" placeholder="回复格式要求..."></textarea>
-              </div>
-
-              <div class="form-group rounded-xl border border-[var(--color-border-subtle)] bg-surface-overlay/80 p-4 space-y-3">
-                <label class="label">
-                  <span>MVU 能力</span>
-                </label>
-                <label class="inline-flex items-center gap-2 text-sm text-[var(--color-text-secondary)] cursor-pointer select-none">
-                  <ThemedCheckbox
-                    :checked="actions.editingCharacter.value.mvuEnabled === true"
-                    @update:checked="(v) => (actions.editingCharacter.value!.mvuEnabled = v)"
-                  />
-                  <span>启用 MVU 管线</span>
-                </label>
-                <MvuCapabilityEditor
-                  :mvu-mode="actions.editingCharacter.value.mvuMode ?? 'regex'"
-                  :mvu-directive="actions.editingCharacter.value.mvuDirective ?? ''"
-                  :content-regex-rules="actions.editingCharacter.value.contentRegexRules || []"
-                  :initial-state-tables="actions.editingCharacter.value.initialStateTables || []"
-                  :allow-inherit="false"
-                  tables-subtitle="新会话自动写入"
-                  tables-empty-hint="暂无状态表格。新建表格后，新会话将自带初始状态栏。"
-                  @update:mvu-mode="(v) => { if (actions.editingCharacter.value) actions.editingCharacter.value.mvuMode = (v ?? 'regex') as MvuMode }"
-                  @update:mvu-directive="(v) => { if (actions.editingCharacter.value) actions.editingCharacter.value.mvuDirective = v }"
-                  @update:content-regex-rules="(v) => { if (actions.editingCharacter.value) actions.editingCharacter.value.contentRegexRules = v }"
-                  @update:initial-state-tables="(v) => { if (actions.editingCharacter.value) actions.editingCharacter.value.initialStateTables = v }"
-                />
-              </div>
-
-              <div class="form-group">
-                <label class="label">
-                  <span>首句</span>
-                  <span class="opacity-60 text-xs ml-2" v-pre>支持 {{user}} 占位符</span>
-                  <span class="opacity-60 text-xs ml-2 text-brand">该项参与对话</span>
-                </label>
-                <textarea v-model="actions.editingCharacter.value.firstMessage" class="input textarea h-24" placeholder="开场白..."></textarea>
-              </div>
-
-              <div class="form-group">
-                <label class="label">
-                  <span>额外首句</span>
-                  <span class="opacity-60 text-xs ml-2" v-pre>支持 {{user}} 占位符</span>
-                  <span class="opacity-60 text-xs ml-2 text-brand">该项参与对话</span>
-                </label>
-                <div class="overflow-x-auto custom-scrollbar rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay/50 p-2">
-                  <div class="flex w-full min-w-0 min-h-[6.5rem] flex-nowrap items-stretch gap-2">
-                    <textarea
-                      v-model="extraFirstMessageDraft"
-                      class="input textarea h-24 max-w-full shrink-0"
-                      :style="{
-                        width: hasAnyExtraFirstEntries ? 'min(50%, 18rem)' : 'min(70%, 28rem)',
-                      }"
-                      placeholder="其他开场情景..."
-                    />
-                    <div class="flex shrink-0 flex-col justify-center gap-1.5">
-                      <button
-                        type="button"
-                        class="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[var(--color-border-subtle)] bg-surface-overlay text-[var(--color-text-secondary)] hover:bg-surface-muted transition-colors"
-                        aria-label="追加为草稿（保留输入框）"
-                        @click="appendExtraFirstMessageCheck"
-                      >
-                        <Check class="w-[18px] h-[18px]" />
-                      </button>
-                      <button
-                        type="button"
-                        class="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[var(--color-border-subtle)] bg-surface-overlay text-[var(--color-text-secondary)] hover:bg-surface-muted transition-colors"
-                        aria-label="追加为已保存并清空输入"
-                        @click="appendExtraFirstMessagePlus"
-                      >
-                        <Plus class="w-[18px] h-[18px]" />
-                      </button>
-                    </div>
-                    <div
-                      v-if="extraFirstMessageEntriesIndexed.length"
-                      class="flex shrink-0 items-stretch gap-2"
-                    >
-                      <div
-                        v-for="entry in extraFirstMessageEntriesIndexed"
-                        :key="entry.index"
-                        class="flex shrink-0 items-start gap-1"
-                      >
-                        <button
-                          type="button"
-                          class="shrink-0 inline-flex flex-col items-start text-left px-3 py-2 text-xs border rounded-md hover:bg-surface-muted transition-colors w-[200px] min-h-[4.5rem] max-h-28 overflow-y-auto custom-scrollbar bg-surface-muted/80 text-[var(--color-text)]"
-                          :class="
-                            extraEntryIsEmpty(entry)
-                              ? 'border-dashed border-[var(--color-border)] text-[var(--color-text-muted)]'
-                              : 'border-[var(--color-border-subtle)]'
-                          "
-                          @click="fillExtraFirstDraft(entry.text)"
-                        >
-                          <span
-                            v-if="entry.chip"
-                            class="mb-1 shrink-0 rounded px-1 py-0.5 text-[10px] bg-brand-a10 text-brand border border-brand-a20"
-                          >已保存</span>
-                          <span
-                            v-else
-                            class="mb-1 shrink-0 rounded px-1 py-0.5 text-[10px] text-[var(--color-text-muted)] border border-[var(--color-border-subtle)]"
-                          >草稿</span>
-                          <span class="whitespace-pre-wrap break-words">{{ displayExtraEntryLabel(entry) }}</span>
-                        </button>
-                        <button
-                          type="button"
-                          class="shrink-0 inline-flex h-7 w-7 items-center justify-center rounded border border-[var(--color-border-subtle)] text-[var(--color-text-muted)] hover:bg-surface-muted hover:text-[var(--color-text)]"
-                          aria-label="从列表移除此条"
-                          @click.stop="removeExtraFirstMessageAt(entry.index)"
-                        >
-                          <X class="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <p class="text-xs text-[var(--color-text-muted)] mt-1.5 leading-relaxed">
-                  对号：追加为草稿并保留输入；加号：追加为「已保存」并清空输入。仅「已保存」的额外首句会进入单聊开场变体；草稿仅本地编辑用。下方列出全部条目（含「（空）」），均可删除。保存角色时会去掉空文本；占位符替换后为空也不会写入变体。
-                </p>
-              </div>
-
-              <div class="form-group">
-                <label class="label">
-                  <span>示例对话</span>
-                  <span class="opacity-60 text-xs ml-2 text-brand">该项参与对话</span>
-                </label>
-                <textarea v-model="actions.editingCharacter.value.exampleDialogue" class="input textarea h-48" placeholder="示例对话..."></textarea>
-              </div>
-
-              <div class="form-group rounded-xl border border-[var(--color-border-subtle)] bg-surface-overlay/80 p-4">
-                <label class="label">
-                  <span>绑定世界书</span>
-                  <span class="opacity-60 text-xs ml-2 text-brand">随角色保存；「角色+世界书」ZIP 导出用此顺序</span>
-                </label>
-                <p class="text-xs text-[var(--color-text-muted)] mb-3 leading-relaxed">
-                  与「设置 → 当前会话」中的会话世界书顺序独立；保存后写入角色卡上的绑定列表，供含世界书 ZIP 等使用。
-                </p>
-                <div class="flex flex-wrap items-center gap-2 mb-3">
-                  <ModernSelect
-                    v-model="addCharacterEditorWbId"
-                    :options="characterEditorWorldBookSelectOptions"
-                    placeholder="选择世界书加入列表..."
-                    class="flex-1 min-w-[200px]"
-                  />
-                  <button type="button" class="btn btn-sm btn-secondary shrink-0" @click="addCharacterEditorWorldBook">加入</button>
-                </div>
-                <div class="space-y-1.5 max-h-[200px] overflow-y-auto custom-scrollbar pr-1">
-                  <div
-                    v-for="(wbId, idx) in (actions.editingCharacter.value.attachedWorldBookIds || [])"
-                    :key="`${wbId}-${idx}`"
-                    class="flex items-center justify-between gap-2 rounded-lg border border-[var(--color-border-subtle)] bg-surface-muted px-2 py-1.5 transition-all"
-                    :class="characterEditorWbDraggingIdx === idx ? 'opacity-50 border-brand-a50' : ''"
-                    draggable="true"
-                    @dragstart="handleCharacterEditorWbDragStart(idx)"
-                    @dragover="handleCharacterEditorWbDragOver($event, idx)"
-                    @dragend="handleCharacterEditorWbDragEnd"
-                  >
-                    <div class="flex min-w-0 flex-1 items-center gap-1.5">
-                      <span class="shrink-0 cursor-grab text-[var(--color-text-muted)] active:cursor-grabbing" aria-hidden="true">
-                        <GripVertical class="w-4 h-4" />
-                      </span>
-                      <span class="truncate text-xs text-[var(--color-text)]">{{ idx + 1 }}. {{ characterEditorWorldBookName(wbId) }}</span>
-                    </div>
-                    <div class="flex shrink-0 items-center gap-1">
-                      <button type="button" class="btn btn-xs btn-secondary" @click.stop="moveCharacterEditorWorldBook(wbId, -1)">上移</button>
-                      <button type="button" class="btn btn-xs btn-secondary" @click.stop="moveCharacterEditorWorldBook(wbId, 1)">下移</button>
-                      <button type="button" class="btn btn-xs btn-secondary" @click.stop="removeCharacterEditorWorldBook(wbId)">移除</button>
-                    </div>
-                  </div>
-                  <div v-if="!(actions.editingCharacter.value.attachedWorldBookIds || []).length" class="text-xs text-[var(--color-text-muted)] py-2 text-center border border-dashed border-[var(--color-border-subtle)] rounded-lg">
-                    未绑定世界书
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- 角色编辑助手 -->
-          <div
-            class="flex min-h-0 min-w-0 flex-col glass-panel rounded-2xl p-4 shadow-inner"
-            :class="
-              isNarrowPortrait
-                ? 'min-h-[28rem] h-[min(36rem,72vh)] shrink-0 max-h-[min(576px,72vh)]'
-                : 'max-w-[50%] flex-[0.66] basis-0'
-            "
-          >
-            <div class="flex items-center justify-between mb-4 px-1">
-              <span class="text-sm font-bold text-[var(--color-text-secondary)] uppercase tracking-widest flex items-center gap-2">
-                <span class="w-2 h-2 rounded-full bg-brand animate-pulse"></span>
-                聊天助手
-              </span>
-              <button class="text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors" @click="assistant.showAssistantSettings.value = true">
-                <MoreHorizontal class="w-4 h-4" />
-              </button>
-            </div>
-            <div
-              ref="workspaceAssistantMessagesListRef"
-              class="min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-auto custom-scrollbar space-y-4 pr-2 mb-4"
-            >
-              <div v-if="assistant.workspaceAssistantMessages.value.length === 0" class="text-xs text-[var(--color-text-muted)] text-center py-12 flex flex-col items-center gap-3">
-                <div class="w-12 h-12 rounded-full bg-surface-muted flex items-center justify-center text-xl">
-                    <Sparkles class="w-6 h-6 text-[var(--color-warning)]" />
-                </div>
-                开始和助手对话以完善你的角色卡
-              </div>
-              <AssistantThread
-                :messages="assistant.workspaceAssistantMessages.value"
-                :is-generating="assistant.isWorkspaceAssistantGenerating.value"
-                :attachment-scope="'workspace'"
-                :streaming-content="assistant.workspaceStreamingContent.value"
-                :streaming-reasoning="assistant.workspaceStreamingReasoning.value"
-                :reasoning-stream-phase-active="assistant.workspaceReasoningStreamPhaseActive.value"
-                :reasoning-elapsed-sec="assistant.workspaceReasoningElapsedSec.value"
-                :show-message-actions="false"
-              />
-            </div>
-            <div
-              class="relative pt-4 border-t border-[var(--color-border-subtle)] transition-colors"
-              @dragenter.prevent="handleWorkspaceAssistantDragEnter"
-              @dragover.prevent="handleWorkspaceAssistantDragOver"
-              @dragleave="handleWorkspaceAssistantDragLeave"
-              @drop.prevent="handleWorkspaceAssistantDrop"
-            >
-              <div class="flex flex-wrap gap-2 mb-2 items-center">
-                <button
-                  type="button"
-                  disabled
-                  aria-label="记忆写入，仅聊天会话中可用"
-                  class="text-xs px-2.5 py-1 rounded-lg border cursor-not-allowed opacity-50 border-[var(--color-border-subtle)] text-[var(--color-text-muted)]"
-                >
-                  记忆写入
-                </button>
-                <button
-                  type="button"
-                  class="text-xs px-2.5 py-1 rounded-lg border transition-colors"
-                  :class="assistant.allowDestructiveToolsEnabled.value
-                    ? 'bg-amber-500/15 border-amber-500/50 text-amber-200'
-                    : 'border-[var(--color-border-subtle)] text-[var(--color-text-muted)]'"
-                  @click="assistant.toggleAllowDestructiveTools"
-                >
-                  破坏性工具
-                </button>
-                <button
-                  type="button"
-                  class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg border transition-colors"
-                  :class="assistant.allowWebSearchEnabled.value
-                    ? 'bg-brand/15 border-brand/50 text-brand-foreground'
-                    : 'border-[var(--color-border-subtle)] text-[var(--color-text-muted)]'"
-                  @click="assistant.toggleAllowWebSearch"
-                >
-                  <Globe class="h-3 w-3" />
-                  网络搜索
-                </button>
-                <span class="text-[10px] text-[var(--color-text-muted)]">工作区不写长期记忆</span>
-              </div>
-              <div v-if="assistant.workspaceAssistantDraftAttachments.value.length" class="mb-3 flex flex-wrap gap-2">
-                <template v-for="attachment in assistant.workspaceAssistantDraftAttachments.value" :key="attachment.id">
-                  <div
-                    v-if="attachment.kind === 'image'"
-                    class="relative h-20 w-20 overflow-hidden rounded-lg border border-[var(--color-border)] bg-surface-muted"
-                  >
-                    <img :src="buildAssistantAttachmentUrl('workspace', attachment)" :alt="getAssistantAttachmentLabel(attachment)" class="h-full w-full object-cover" />
-                    <button
-                      type="button"
-                      class="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full border border-[var(--color-border-subtle)] bg-overlay-heavy text-[var(--color-text)]"
-                      aria-label="移除图片附件"
-                      @click="assistant.removeDraftAttachment('workspace', attachment.id)"
-                    >
-                      <X class="h-3 w-3" />
-                    </button>
-                  </div>
-                  <button
-                    v-else
-                    type="button"
-                    class="group relative flex max-w-[220px] items-start gap-2 rounded-xl border border-[var(--color-border)] bg-surface-muted px-3 py-2 text-left"
-                    @click="assistant.removeDraftAttachment('workspace', attachment.id)"
-                  >
-                    <span class="rounded bg-surface-overlay px-1.5 py-0.5 text-[10px] font-semibold uppercase text-[var(--color-text-secondary)]">{{ getAssistantAttachmentExt(attachment) }}</span>
-                    <span class="truncate text-xs text-[var(--color-text)]">{{ getAssistantAttachmentLabel(attachment) }}</span>
-                    <X class="ml-auto mt-0.5 h-3 w-3 shrink-0 text-[var(--color-text-muted)] transition-colors group-hover:text-[var(--color-text)]" />
-                  </button>
-                </template>
-              </div>
-              <textarea
-                ref="workspaceAssistantTextareaRef"
-                v-model="assistant.workspaceAssistantDraft.value"
-                class="input textarea h-24"
-                placeholder="输入建议或要求 (Ctrl + Enter)..."
-                :disabled="assistant.isWorkspaceAssistantGenerating.value"
-                @paste="handleWorkspaceAssistantPaste"
-                @keydown.ctrl.enter="assistant.sendMessage('workspace', true, actions.applyAssistantCard)"
-              ></textarea>
-              <div class="flex items-center justify-between mt-3 gap-3">
-                <ModernSelect
-                  :model-value="assistantCurrentModel"
-                  :selected-preset-id="assistant.assistantSettings.value.presetId ?? null"
-                  :options="chatModelOptions"
-                  placement="top"
-                  placeholder="模型..."
-                  class="!w-[160px] !text-xs"
-                  dropdown-width="410"
-                  searchable
-                  allow-create
-                  @select="assistant.handleModelSelect"
-                />
-                <button 
-                  class="btn btn-primary relative px-6" 
-                  :disabled="(!assistant.workspaceAssistantDraft.value.trim() && !assistant.workspaceAssistantDraftAttachments.value.length) || assistant.isWorkspaceAssistantGenerating.value" 
-                  :aria-busy="assistant.isWorkspaceAssistantGenerating.value"
-                  @click="assistant.sendMessage('workspace', true, actions.applyAssistantCard)"
-                >
-                  <Loader2
-                    v-if="assistant.isWorkspaceAssistantGenerating.value"
-                    class="pointer-events-none absolute left-3 top-1/2 h-3 w-3 -translate-y-1/2 animate-spin"
-                  />
-                  发送
-                </button>
-              </div>
-              <div
-                v-show="isWorkspaceAssistantDragOver"
-                class="pointer-events-none absolute inset-0 z-[21] rounded-xl bg-[var(--color-brand-a20)] backdrop-blur-[var(--glass-blur-soft)] ring-1 ring-inset ring-[var(--color-brand-a40)] transition-opacity duration-150"
-                aria-hidden="true"
-              />
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" @click="actions.exportCharacterCard" :disabled="!actions.editingCharacter.value">导出角色 JSON</button>
-        <button class="btn btn-secondary" @click="cancelCharacterEdit">取消</button>
-        <button class="btn btn-primary" @click="saveCharacter">保存</button>
-      </div>
-    </div>
-  </div>
+    <CharacterEditorModal
+      ref="characterEditorModalRef"
+      :show="actions.showCharacterEditor.value"
+      :is-new-character="actions.isNewCharacter.value"
+      :character="actions.editingCharacter.value"
+      :avatar-url="editingCharacterAvatarUrl"
+      :is-narrow-portrait="isNarrowPortrait"
+      :assistant="assistant"
+      :assistant-current-model="assistantCurrentModel"
+      :chat-model-options="chatModelOptions"
+      :is-workspace-assistant-drag-over="isWorkspaceAssistantDragOver"
+      :build-assistant-attachment-url="buildAssistantAttachmentUrl"
+      :get-assistant-attachment-label="getAssistantAttachmentLabel"
+      :get-assistant-attachment-ext="getAssistantAttachmentExt"
+      :bind-workspace-messages-list-ref="bindWorkspaceMessagesListRef"
+      :bind-workspace-textarea-ref="bindWorkspaceTextareaRef"
+      :on-workspace-paste="handleWorkspaceAssistantPaste"
+      :on-workspace-drag-enter="handleWorkspaceAssistantDragEnter"
+      :on-workspace-drag-leave="handleWorkspaceAssistantDragLeave"
+      :on-workspace-drag-over="handleWorkspaceAssistantDragOver"
+      :on-workspace-drop="handleWorkspaceAssistantDrop"
+      :apply-assistant-card="actions.applyAssistantCard"
+      @cancel="cancelCharacterEdit"
+      @save="saveCharacter"
+      @export="actions.exportCharacterCard"
+      @open-avatar-cropper="actions.showCharacterAvatarCropper.value = true"
+      @open-assistant-settings="assistant.showAssistantSettings.value = true"
+    />
 
   <!-- Persona 编辑弹窗 -->
   <div v-if="actions.showPersonaEditor.value" class="modal">
