@@ -6,7 +6,7 @@
 
 - 建立统一的 Surface/Card/Button/Input/Modal/Drawer/Popover 视觉语言，补齐焦点环、loading、danger、secondary、disabled、active 与 reduced-motion 状态。
 - 收束主要页面和面板中的硬编码颜色、阴影、圆角、z-index 与多层 `backdrop-blur`，让聊天列表、消息气泡、输入区、侧栏、设置抽屉、助手/MVU/TTS 面板、知识图谱和 HTTP Log 的视觉层级更一致。
-- 统一导入导出、群聊设置、消息编辑、WebGPU、世界书、知识图谱等弹窗外层 surface，并补充关键关闭按钮 `aria-label`、dialog 标题关联、Esc 与焦点恢复工具。
+- 统一导入导出、群聊设置、消息编辑、WebGPU、世界书、知识图谱等弹窗外层 surface，并补充关键关闭按钮 `aria-label`、dialog 标题关联、Esc 与焦点恢复工具；全量弹层接入 `useDialogBehavior` / `dialogAria`。
 - 优化高频交互的微动效与性能表现，减少重面板模糊叠层，保留列表渲染、Markdown 缓存、KG/WebGPU/TTS 面板的轻量更新策略。
 
 ### 稳定性与测试

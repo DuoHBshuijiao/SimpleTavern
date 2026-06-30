@@ -9,7 +9,7 @@
 - 设计系统：新增/强化 Surface、Card、Button、Input、Modal、Drawer、Popover、Focus Ring、Z-Index 与 reduced-motion 基座。
 - 高频主路径：统一聊天输入、消息气泡、聊天侧栏、助手面板、MVU 面板、TTS 浮层的 surface 与按钮状态。
 - 设置与弹层：统一设置抽屉、导入导出、群聊设置、消息编辑、知识图谱、WebGPU、HTTP Log、世界书等弹窗外层与关闭按钮语义。
-- 无障碍：补关键图标按钮 `aria-label`，新增通用 dialog Esc/焦点恢复工具并接入关键弹层。
+- 无障碍：补关键图标按钮 `aria-label`，新增通用 dialog Esc/焦点恢复工具并全量接入弹层（含 ChatPage 内联编辑弹层）。
 - 性能：减少叠层 `backdrop-blur`，统一面板层级，保留列表/Markdown/KG/WebGPU/TTS 的轻量更新策略。
 - 稳定性：MVU/知识图谱路由集中 chat fast-fail，404 返回结构化 `code/message/chatId`。
 - 测试：补 UI primitive 与 dialog focus 工具测试，保留正文正则显示测试，新增 MVU route 错误测试。

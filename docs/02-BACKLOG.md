@@ -14,7 +14,6 @@
 - 将 `SettingsDrawer.vue` 拆分为 API 预设、TTS、WebGPU、Web Search、会话覆盖等子组件。
 - 将 `ChatPage.vue` 拆分为角色/身份编辑、导入导出、生成流和会话管理子模块。
 - 为 modal/drawer 建立组件测试或轻量 Vue 测试基座。
-- 将剩余低频 modal 全量接入 `dialogAria` / `useDialogBehavior`，包括导入导出、HTTP Log、WebGPU、世界书与 ChatPage 内联弹层。
 - 扩展数据完整性扫描到损坏角色、世界书和设置。
 - 为 import/export 增加更多 warning 汇总。
 
