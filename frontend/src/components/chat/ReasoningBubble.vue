@@ -483,7 +483,7 @@ onBeforeUnmount(() => {
 }
 .reasoning-scroll::-webkit-scrollbar-thumb {
   background-color: color-mix(in srgb, var(--color-text-muted) 24%, transparent);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 .reasoning-tail-slot {
   flex-shrink: 0;

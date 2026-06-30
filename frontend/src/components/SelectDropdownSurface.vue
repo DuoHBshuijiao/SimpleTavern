@@ -198,20 +198,6 @@ onUnmounted(() => {
   background-image: none;
 }
 
-.custom-scrollbar::-webkit-scrollbar {
-  width: 4px;
-}
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
-}
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: var(--color-border);
-  border-radius: 2px;
-}
-.custom-scrollbar:hover::-webkit-scrollbar-thumb {
-  background: var(--color-border-strong);
-}
-
 .select-dropdown-pop-enter-active,
 .select-dropdown-pop-leave-active {
   transition:

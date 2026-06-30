@@ -515,20 +515,6 @@ onUnmounted(() => {
   background-image: none;
 }
 
-.custom-scrollbar::-webkit-scrollbar {
-  width: 4px;
-}
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
-}
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: var(--color-border);
-  border-radius: 2px;
-}
-.custom-scrollbar:hover::-webkit-scrollbar-thumb {
-  background: var(--color-border-strong);
-}
-
 /* 下拉：自上方滑入；上拉：自下方滑入（与 placement 一致） */
 .select-dropdown-pop-enter-active,
 .select-dropdown-pop-leave-active {

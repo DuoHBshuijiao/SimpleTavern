@@ -41,7 +41,7 @@
 
   ::-webkit-scrollbar-thumb {
     background: var(--color-track);
-    border-radius: 3px;
+    border-radius: var(--radius-scrollbar);
   }
 
   ::-webkit-scrollbar-thumb:hover {
@@ -90,5 +90,24 @@
 
   .scrollbar-brand::-webkit-scrollbar-thumb:hover {
     background: var(--color-brand-a50);
+  }
+
+  /* ========== 组件内常用 custom-scrollbar（4px 宽，与 sidebar/modal 一致） ========== */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: var(--color-border);
+    border-radius: var(--radius-track);
+  }
+
+  .custom-scrollbar:hover::-webkit-scrollbar-thumb {
+    background: var(--color-border-strong);
   }
 }

@@ -1870,20 +1870,6 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.custom-scrollbar::-webkit-scrollbar {
-  width: 4px;
-}
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
-}
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: var(--color-border);
-  border-radius: 2px;
-}
-.custom-scrollbar:hover::-webkit-scrollbar-thumb {
-  background: var(--color-border-strong);
-}
-
 .scroll-to-bottom-btn {
   position: absolute;
   right: 16px;
@@ -1947,7 +1933,7 @@ onBeforeUnmount(() => {
 }
 .message-bubble .md :deep(pre)::-webkit-scrollbar-thumb {
   background: var(--color-border);
-  border-radius: 3px;
+  border-radius: var(--radius-scrollbar);
 }
 .message-bubble .md :deep(pre):hover::-webkit-scrollbar-thumb {
   background: var(--color-border-strong);

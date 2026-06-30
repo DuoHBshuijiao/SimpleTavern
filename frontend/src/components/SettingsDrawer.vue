@@ -5934,8 +5934,8 @@ async function checkUpdate() {
                     <div
                       v-for="(rule, idx) in contentRegexRulesSorted"
                       :key="rule.id"
-                      class="rounded-lg border border-[var(--color-border-subtle)] bg-surface-muted p-2"
-                      :class="isRegexRuleEnabled(rule) ? 'border-l-4 border-l-brand' : 'opacity-70 border-l-4 border-l-[var(--color-border)]'"
+                      class="rounded-lg border border-[var(--color-border-subtle)] bg-surface-muted p-2 interactive-surface"
+                      :class="isRegexRuleEnabled(rule) ? 'surface-selected border-brand-a40' : 'opacity-70'"
                       draggable="true"
                       @dragstart="handleRegexRuleDragStart(idx)"
                       @dragover="handleRegexRuleDragOver($event, idx)"
@@ -6623,20 +6623,6 @@ async function checkUpdate() {
 }
 .drawer-wrapper:not(.is-open) .drawer-backdrop {
   opacity: 0;
-}
-
-.custom-scrollbar::-webkit-scrollbar {
-  width: 4px;
-}
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
-}
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: var(--color-border);
-  border-radius: 2px;
-}
-.custom-scrollbar:hover::-webkit-scrollbar-thumb {
-  background: var(--color-border-strong);
 }
 
 /* 触摸：纵向滚动更顺手，减少与页面手势冲突；iOS 惯性滚动 */

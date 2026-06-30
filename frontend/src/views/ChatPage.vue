@@ -81,6 +81,9 @@ import { useViewportNarrowPortrait } from '../composables/useViewportNarrowPortr
 import { useChatSearch } from '../composables/useChatSearch'
 import { useImageStickyBinding } from '../composables/useImageStickyBinding'
 import { useForkLineage } from '../composables/useForkLineage'
+import { useMessageListEnterAnimations } from '../composables/useMessageListEnterAnimations'
+import { useMainChatReasoning } from '../composables/useMainChatReasoning'
+import { createCloseTopOverlayHandler, useGlobalEscapeStack } from '../composables/useGlobalEscapeStack'
 
 // 子组件
 import { ChatSidebar, MessageList, ChatInput, AssistantPanel, AssistantThread, MvuCapabilityEditor, MvuPanel } from '../components/chat'
@@ -444,36 +447,6 @@ function resetAvatarEmbeddedStState() {
 function updateAvatarEmbeddedMvuMode(value: string) {
   avatarEmbeddedMvuMode.value = value === 'directive' ? 'directive' : 'regex'
 }
-/** 主聊天当前展示思考链的消息 ID（仅前端临时，刷新后消失） */
-const chatReasoningMessageId = ref<string | null>(null)
-/** 主聊天思考链内容（当前正在流式接收的一条） */
-const chatReasoningContent = ref('')
-/** 主聊天多轮思考链块：每项为 { messageId, content }，仅前端临时展示，不写进上下文 */
-const chatReasoningBlocks = ref<Array<{ messageId: string; content: string }>>([])
-/** 首条正文 delta 之前为 true；收到 delta 或 done/清空后为 false（用于 ReasoningBubble 流式态） */
-const chatReasoningStreamActive = ref(false)
-/** 本条流式思考阶段开始时间（ms），用于收起小卡时显示「已思考 x.x 秒」 */
-const reasoningPhaseStartedAt = ref<number | null>(null)
-/** 思考阶段结束时写入的秒数（1 位小数），供 MessageList 覆盖直至消息持久化带 reasoningDurationSec */
-const chatReasoningElapsedSec = ref<number | null>(null)
-
-function markReasoningStreamPhaseStart() {
-  reasoningPhaseStartedAt.value = Date.now()
-  chatReasoningElapsedSec.value = null
-}
-
-function clearReasoningPhaseTiming() {
-  reasoningPhaseStartedAt.value = null
-  chatReasoningElapsedSec.value = null
-}
-
-/** 首条正文 delta：结束思考流式阶段并写入已用时长（秒） */
-function onAssistantContentDeltaStarted() {
-  if (chatReasoningStreamActive.value && reasoningPhaseStartedAt.value != null) {
-    chatReasoningElapsedSec.value = Math.round((Date.now() - reasoningPhaseStartedAt.value) / 100) / 10
-  }
-  chatReasoningStreamActive.value = false
-}
 
 watch(() => uiStore.settingsDrawerRequestNonce, (nonce) => {
   if (!nonce) return
@@ -483,54 +456,6 @@ watch(() => uiStore.settingsDrawerRequestNonce, (nonce) => {
 
 function shouldIgnoreStreamingEventWhileStopping(eventName: string): boolean {
   return stopRequested.value && eventName === 'delta'
-}
-
-/** 将当前思考内容写入 blocks 并清空当前（在 stream done 或非流响应后调用，便于多轮保留） */
-function pushCurrentReasoningToBlocks(finalMessageId?: string | null, localAliasId?: string | null) {
-  const primary = finalMessageId ?? chatReasoningMessageId.value
-  const content = chatReasoningContent.value.trim()
-  const ids = new Set<string>()
-  if (primary) ids.add(primary)
-  if (localAliasId && localAliasId !== primary) ids.add(localAliasId)
-
-  const elapsed = chatReasoningElapsedSec.value
-  if (typeof elapsed === 'number' && Number.isFinite(elapsed) && chats.activeChat && ids.size > 0) {
-    for (const messageId of ids) {
-      const msg = chats.activeChat.messages.find((m) => m.id === messageId)
-      if (msg && msg.role === 'assistant') {
-        msg.reasoningDurationSec = elapsed
-      }
-    }
-  }
-
-  if (content && ids.size > 0 && chats.activeChat) {
-    for (const messageId of ids) {
-      const msg = chats.activeChat.messages.find((m) => m.id === messageId)
-      if (msg && msg.role === 'assistant') {
-        msg.reasoningContent = content
-      }
-    }
-    let blocks = chatReasoningBlocks.value
-    for (const messageId of ids) {
-      blocks = [...blocks, { messageId, content }]
-    }
-    chatReasoningBlocks.value = blocks
-  }
-  chatReasoningContent.value = ''
-  chatReasoningMessageId.value = null
-  chatReasoningStreamActive.value = false
-  clearReasoningPhaseTiming()
-}
-
-/** 根据消息 ID 获取当前关联的思考内容（流式当前条或 blocks 中已保存的） */
-function getReasoningForMessageId(messageId: string): string {
-  if (messageId === chatReasoningMessageId.value && chatReasoningContent.value) {
-    return chatReasoningContent.value
-  }
-  const block = chatReasoningBlocks.value.find((b) => b.messageId === messageId)
-  if (block?.content?.trim()) return block.content.trim()
-  const msg = activeChat.value?.messages.find((m) => m.id === messageId)
-  return msg?.reasoningContent?.trim() ?? ''
 }
 
 /**
@@ -549,6 +474,23 @@ const selectedCharacter = computed(() => {
  * 从chatsStore获取当前激活的聊天会话。
  */
 const activeChat = computed(() => chats.activeChat)
+
+const {
+  chatReasoningMessageId,
+  chatReasoningContent,
+  chatReasoningBlocks,
+  chatReasoningStreamActive,
+  chatReasoningElapsedSec,
+  markReasoningStreamPhaseStart,
+  clearReasoningPhaseTiming,
+  onAssistantContentDeltaStarted,
+  finalizeReasoningElapsedBeforeStop,
+  pushCurrentReasoningToBlocks,
+  getReasoningForMessageId,
+  clearReasoningForChatSwitch,
+} = useMainChatReasoning({
+  getActiveChat: () => activeChat.value,
+})
 
 /** 占位符重试成功后：在同一会话且同模型+同 API 预设下自动对上游使用 [image] 占位，直到切换模型/预设或换会话（localStorage 按 chatId 持久化） */
 const {
@@ -1368,6 +1310,13 @@ const {
     showHeaderMoreMenu.value = false
   },
 })
+const {
+  entrancingUserMessageId,
+  entrancingAssistantMessageId,
+  armUserMessageEnterAnimation,
+  armAssistantRowEnterAnimation,
+  clearMessageListEnterAnimations,
+} = useMessageListEnterAnimations()
 const showHeaderMoreMenu = ref(false)
 const headerMoreMenuRef = ref<HTMLElement | null>(null)
 const headerMoreButtonRef = ref<HTMLElement | null>(null)
@@ -1538,7 +1487,6 @@ watch(
 )
 
 onBeforeUnmount(() => {
-  clearMessageListEnterAnimations()
   draftHelperAborter.value?.abort()
   clearDraftImages()
   errorStack.clearAll()
@@ -2346,55 +2294,6 @@ watch(
   },
 )
 
-/** 本次发送的用户消息 id，供 MessageList 播放一次性入场动画 */
-const entrancingUserMessageId = ref<string | null>(null)
-let entrancingUserClearTimer: ReturnType<typeof setTimeout> | null = null
-const USER_BUBBLE_ENTER_ANIM_MS = 480
-
-function armUserMessageEnterAnimation(messageId: string) {
-  entrancingUserMessageId.value = messageId
-  if (entrancingUserClearTimer != null) clearTimeout(entrancingUserClearTimer)
-  entrancingUserClearTimer = setTimeout(() => {
-    entrancingUserClearTimer = null
-    if (entrancingUserMessageId.value === messageId) entrancingUserMessageId.value = null
-  }, USER_BUBBLE_ENTER_ANIM_MS)
-}
-
-function clearUserMessageEnterAnimation() {
-  if (entrancingUserClearTimer != null) {
-    clearTimeout(entrancingUserClearTimer)
-    entrancingUserClearTimer = null
-  }
-  entrancingUserMessageId.value = null
-}
-
-/** 重写 / 保存并发送等路径插入的助手占位行，弱化整行挂载跳变 */
-const entrancingAssistantMessageId = ref<string | null>(null)
-let entrancingAssistantClearTimer: ReturnType<typeof setTimeout> | null = null
-const ASSISTANT_ROW_ENTER_ANIM_MS = 480
-
-function armAssistantRowEnterAnimation(messageId: string) {
-  entrancingAssistantMessageId.value = messageId
-  if (entrancingAssistantClearTimer != null) clearTimeout(entrancingAssistantClearTimer)
-  entrancingAssistantClearTimer = setTimeout(() => {
-    entrancingAssistantClearTimer = null
-    if (entrancingAssistantMessageId.value === messageId) entrancingAssistantMessageId.value = null
-  }, ASSISTANT_ROW_ENTER_ANIM_MS)
-}
-
-function clearAssistantRowEnterAnimation() {
-  if (entrancingAssistantClearTimer != null) {
-    clearTimeout(entrancingAssistantClearTimer)
-    entrancingAssistantClearTimer = null
-  }
-  entrancingAssistantMessageId.value = null
-}
-
-function clearMessageListEnterAnimations() {
-  clearUserMessageEnterAnimation()
-  clearAssistantRowEnterAnimation()
-}
-
 function scrollToBottom(instant = false, force = false) {
   nextTick(() => {
     messageListRef.value?.scrollToBottom(instant, force)
@@ -2444,88 +2343,109 @@ function hasActiveNotifyHost(): boolean {
   return typeof document !== 'undefined' && document.querySelector('.app-notify-host') !== null
 }
 
-function closeTopOverlayFromEscape(): boolean {
-  if (hasActiveNotifyHost()) return true
-  const latestError = errorStack.items.value[errorStack.items.value.length - 1]
-  if (latestError) {
+const closeTopOverlayFromEscape = createCloseTopOverlayHandler({
+  hasActiveNotifyHost,
+  tryCloseErrorStack: () => {
+    const latestError = errorStack.items.value[errorStack.items.value.length - 1]
+    if (!latestError) return false
     errorStack.removeError(latestError.id)
     return true
-  }
-  if (imageFallbackDialog.value.visible) {
-    imageFallbackDialog.value.visible = false
-    return true
-  }
-  if (actions.showCharacterAvatarCropper.value) {
-    actions.showCharacterAvatarCropper.value = false
-    return true
-  }
-  if (actions.showPersonaAvatarCropper.value) {
-    actions.showPersonaAvatarCropper.value = false
-    return true
-  }
-  if (actions.showMessageEditor.value) {
-    actions.showMessageEditor.value = false
-    return true
-  }
-  if (assistant.showAssistantMessageEditor.value) {
-    assistant.showAssistantMessageEditor.value = false
-    return true
-  }
-  if (actions.editingMemberId.value) {
-    actions.closeMemberSettingsEditor()
-    return true
-  }
-  if (showGroupSettings.value) {
-    showGroupSettings.value = false
-    return true
-  }
-  if (showGroupCreator.value) {
-    onGroupCreatorShow(false)
-    return true
-  }
-  if (showExportModal.value) {
-    showExportModal.value = false
-    return true
-  }
-  if (showImportModal.value) {
-    showImportModal.value = false
-    return true
-  }
-  if (knowledgeGraphModalOpen.value) {
-    knowledgeGraphModalOpen.value = false
-    return true
-  }
-  if (showEmbeddedCardConfirmModal.value) {
-    clearEmbeddedCardPreviewState()
-    return true
-  }
-  if (actions.showPersonaSwitchConfirm.value) {
-    actions.cancelSwitchPersona()
-    return true
-  }
-  if (assistant.showAssistantSettings.value) {
-    assistant.showAssistantSettings.value = false
-    return true
-  }
-  if (actions.showPersonaEditor.value) {
-    actions.showPersonaEditor.value = false
-    return true
-  }
-  if (actions.showCharacterEditor.value) {
-    cancelCharacterEdit()
-    return true
-  }
-  return false
-}
+  },
+  overlayClosers: [
+    () => {
+      if (!imageFallbackDialog.value.visible) return false
+      imageFallbackDialog.value.visible = false
+      return true
+    },
+    () => {
+      if (!actions.showCharacterAvatarCropper.value) return false
+      actions.showCharacterAvatarCropper.value = false
+      return true
+    },
+    () => {
+      if (!actions.showPersonaAvatarCropper.value) return false
+      actions.showPersonaAvatarCropper.value = false
+      return true
+    },
+    () => {
+      if (!actions.showMessageEditor.value) return false
+      actions.showMessageEditor.value = false
+      return true
+    },
+    () => {
+      if (!assistant.showAssistantMessageEditor.value) return false
+      assistant.showAssistantMessageEditor.value = false
+      return true
+    },
+    () => {
+      if (!actions.editingMemberId.value) return false
+      actions.closeMemberSettingsEditor()
+      return true
+    },
+    () => {
+      if (!showGroupSettings.value) return false
+      showGroupSettings.value = false
+      return true
+    },
+    () => {
+      if (!showGroupCreator.value) return false
+      onGroupCreatorShow(false)
+      return true
+    },
+    () => {
+      if (!showExportModal.value) return false
+      showExportModal.value = false
+      return true
+    },
+    () => {
+      if (!showImportModal.value) return false
+      showImportModal.value = false
+      return true
+    },
+    () => {
+      if (!knowledgeGraphModalOpen.value) return false
+      knowledgeGraphModalOpen.value = false
+      return true
+    },
+    () => {
+      if (!showEmbeddedCardConfirmModal.value) return false
+      clearEmbeddedCardPreviewState()
+      return true
+    },
+    () => {
+      if (!actions.showPersonaSwitchConfirm.value) return false
+      actions.cancelSwitchPersona()
+      return true
+    },
+    () => {
+      if (!assistant.showAssistantSettings.value) return false
+      assistant.showAssistantSettings.value = false
+      return true
+    },
+    () => {
+      if (!actions.showPersonaEditor.value) return false
+      actions.showPersonaEditor.value = false
+      return true
+    },
+    () => {
+      if (!actions.showCharacterEditor.value) return false
+      cancelCharacterEdit()
+      return true
+    },
+  ],
+})
+
+const { handleGlobalKeydown: handleGlobalEscapeKeydown } = useGlobalEscapeStack({
+  closeTopOverlay: closeTopOverlayFromEscape,
+  onEscapeFallback: () => {
+    closeHeaderMoreMenu()
+    if (showChatSearch.value) closeChatSearchBar()
+  },
+})
 
 function handleGlobalKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') {
-    if (closeTopOverlayFromEscape()) {
-      e.preventDefault()
-      return
-    }
-    closeHeaderMoreMenu()
-    if (showChatSearch.value) closeChatSearchBar()
+    handleGlobalEscapeKeydown(e)
     return
   }
   if (!(e.ctrlKey && (e.key === 'f' || e.key === 'F'))) return
@@ -2818,11 +2738,7 @@ watch(
     }
     if (prev != null && next !== prev) {
       clearMessageListEnterAnimations()
-      chatReasoningBlocks.value = []
-      chatReasoningContent.value = ''
-      chatReasoningMessageId.value = null
-      chatReasoningStreamActive.value = false
-      clearReasoningPhaseTiming()
+      clearReasoningForChatSwitch()
       versions.clearAll()
       streamHiddenMessageIds.value = []
       streamDeferDeleteIds.value = []
@@ -3680,9 +3596,7 @@ function stopStreaming() {
   aborter.value.abort()
   stream.flushAll()
   /** 与首条正文 delta 一致：在 isGenerating 仍为 true 时结束思考阶段，便于 ReasoningBubble 闭合过渡 */
-  if (chatReasoningStreamActive.value && reasoningPhaseStartedAt.value != null) {
-    chatReasoningElapsedSec.value = Math.round((Date.now() - reasoningPhaseStartedAt.value) / 100) / 10
-  }
+  finalizeReasoningElapsedBeforeStop()
   const rid = chatReasoningMessageId.value
   const sec = chatReasoningElapsedSec.value
   if (rid && typeof sec === 'number' && Number.isFinite(sec) && chats.activeChat) {
@@ -6778,19 +6692,5 @@ const editingPersonaAvatarUrl = computed(() => {
 .header-more-menu__meta {
   font-size: 0.68rem;
   color: var(--color-text-muted);
-}
-
-.custom-scrollbar::-webkit-scrollbar {
-  width: 4px;
-}
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
-}
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: var(--color-border);
-  border-radius: var(--radius-track);
-}
-.custom-scrollbar:hover::-webkit-scrollbar-thumb {
-  background: var(--color-border-strong);
 }
 </style>

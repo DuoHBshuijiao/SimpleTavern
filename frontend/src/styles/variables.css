@@ -510,8 +510,10 @@
   --radius-2xl: 1.5rem; /* Increased */
   --radius-3xl: 2rem;
   --radius-full: 9999px;
-  /* 细滚动条滑块（scrollbar-thin / custom-scrollbar） */
+  /* 细滚动条 / 微元素圆角（Impeccable 设计 token 扩展） */
   --radius-track: 2px;
+  --radius-scrollbar: 3px;
+  --radius-xs: 0.25rem;
   
   /* ========== 间距 ========== */
   --spacing-xs: 0.25rem;
