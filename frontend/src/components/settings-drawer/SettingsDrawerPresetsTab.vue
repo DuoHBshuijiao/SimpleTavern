@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { inject, type ComponentPublicInstance } from 'vue'
+import { inject } from 'vue'
 import { Eye, EyeOff, Loader2, X } from 'lucide-vue-next'
 import ModernSelect from '../ModernSelect.vue'
 import ThemedCheckbox from '../ThemedCheckbox.vue'
@@ -7,24 +7,6 @@ import LlmPresetNameCombobox from '../LlmPresetNameCombobox.vue'
 import { SETTINGS_DRAWER_PRESETS_KEY } from '../../composables/settingsDrawerPresetsKey'
 
 const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
-
-function bindPresetListHeader(el: Element | ComponentPublicInstance | null) {
-  const headerRef = presets.presetListHeaderRef as { value: HTMLElement | null } | undefined
-  if (!headerRef) return
-  headerRef.value = el instanceof HTMLElement ? el : null
-}
-
-function bindTtsCloneSourceInput(el: Element | ComponentPublicInstance | null) {
-  const inputRef = presets.ttsCloneSourceInputRef as { value: HTMLInputElement | null } | undefined
-  if (!inputRef) return
-  inputRef.value = el instanceof HTMLInputElement ? el : null
-}
-
-function bindTtsClonePromptInput(el: Element | ComponentPublicInstance | null) {
-  const inputRef = presets.ttsClonePromptInputRef as { value: HTMLInputElement | null } | undefined
-  if (!inputRef) return
-  inputRef.value = el instanceof HTMLInputElement ? el : null
-}
 </script>
 
 <template>
@@ -35,7 +17,7 @@ function bindTtsClonePromptInput(el: Element | ComponentPublicInstance | null) {
                 <div
                   class="sticky top-0 z-10 flex min-w-0 flex-[0_0_min(11rem,34%)] flex-col self-start border-r border-[var(--color-border-subtle)] pr-3"
                 >
-                    <div :ref="bindPresetListHeader" class="mb-2 flex items-center justify-between gap-1.5">
+                    <div :ref="presets.bindPresetListHeader" class="mb-2 flex items-center justify-between gap-1.5">
                         <span class="shrink-0 text-xs text-[var(--color-text-secondary)] sm:text-sm">预设列表</span>
                         <button
                           type="button"
@@ -518,7 +500,7 @@ function bindTtsClonePromptInput(el: Element | ComponentPublicInstance | null) {
                                 <button type="button" class="btn btn-xs btn-secondary" @click="presets.pickTtsCloneSourceFile">选择参考音频</button>
                                 <span class="text-[10px] text-[var(--color-text-muted)]">{{ presets.ttsCloneSourceFile?.name || '未选择文件' }}</span>
                               </div>
-                              <input :ref="bindTtsCloneSourceInput" type="file" class="hidden" accept=".mp3,.wav,.m4a,.opus" @change="presets.onTtsCloneSourceChange" />
+                              <input :ref="presets.bindTtsCloneSourceInput" type="file" class="hidden" accept=".mp3,.wav,.m4a,.opus" @change="presets.onTtsCloneSourceChange" />
                               <input v-model="presets.ttsCloneDraft.voiceId" type="text" class="input input-sm w-full" placeholder="自定义音色名称（customName）" />
                               <ModernSelect
                                 v-model="presets.ttsCloneDraft.model"
@@ -553,7 +535,7 @@ function bindTtsClonePromptInput(el: Element | ComponentPublicInstance | null) {
                                 <button type="button" class="btn btn-xs btn-secondary" @click="presets.pickTtsCloneSourceFile">选择源音频</button>
                                 <span class="text-[10px] text-[var(--color-text-muted)]">{{ presets.ttsCloneSourceFile?.name || '未选择文件' }}</span>
                               </div>
-                              <input :ref="bindTtsCloneSourceInput" type="file" class="hidden" accept=".mp3,.wav,.m4a" @change="presets.onTtsCloneSourceChange" />
+                              <input :ref="presets.bindTtsCloneSourceInput" type="file" class="hidden" accept=".mp3,.wav,.m4a" @change="presets.onTtsCloneSourceChange" />
                               <input v-model="presets.ttsCloneDraft.voiceId" type="text" class="input input-sm w-full" placeholder="voice_id" />
                               <ModernSelect
                                 v-model="presets.ttsCloneDraft.model"
@@ -568,7 +550,7 @@ function bindTtsClonePromptInput(el: Element | ComponentPublicInstance | null) {
                                 <button type="button" class="btn btn-xs btn-secondary" @click="presets.pickTtsClonePromptFile">选择示例音频</button>
                                 <span class="text-[10px] text-[var(--color-text-muted)]">{{ presets.ttsClonePromptFile?.name || '可选' }}</span>
                               </div>
-                              <input v-if="presets.editingPresetSupportsPromptAudio" :ref="bindTtsClonePromptInput" type="file" class="hidden" accept=".mp3,.wav,.m4a" @change="presets.onTtsClonePromptChange" />
+                              <input v-if="presets.editingPresetSupportsPromptAudio" :ref="presets.bindTtsClonePromptInput" type="file" class="hidden" accept=".mp3,.wav,.m4a" @change="presets.onTtsClonePromptChange" />
                               <input v-model="presets.ttsCloneDraft.promptText" type="text" class="input input-sm w-full" :placeholder="presets.editingPresetTtsProvider === 'glm' ? '示例音频文本（可选）' : '示例音频对应文本（可选）'" />
                               <div v-if="presets.editingPresetSupportsPromptAudio" class="flex flex-wrap gap-4 text-xs text-[var(--color-text-secondary)]">
                                 <button type="button" class="inline-flex items-center gap-2 transition-colors hover:text-[var(--color-text)]" @click="presets.ttsCloneDraft.needNoiseReduction = !presets.ttsCloneDraft.needNoiseReduction">
