@@ -41,8 +41,6 @@ import { countActiveEntities, countRelations } from '../utils/kgVisNetwork'
 import {
   normalizeReasoningEffort,
   normalizeThemeId,
-  REASONING_EFFORT_OPTIONS,
-  THEME_OPTIONS,
   type AutoReadScope,
   type ApiPreset,
   type ApiPresetVoice,
@@ -77,7 +75,7 @@ import {
   readWebGpuDraftSource,
   writeWebGpuDraftSource,
 } from '../composables/useWebGpuBackgroundRuntime'
-import { X, Eye, EyeOff, Loader2, GripVertical, ChevronDown } from 'lucide-vue-next'
+import { X, Eye, EyeOff, Loader2, GripVertical } from 'lucide-vue-next'
 import WorldBookEditorModal from './modals/WorldBookEditorModal.vue'
 import WebGpuShaderEditorModal from './modals/WebGpuShaderEditorModal.vue'
 import WorldBookSessionAttachModal from './modals/WorldBookSessionAttachModal.vue'
@@ -86,6 +84,9 @@ import SettingsDrawerModelSelectorModal from './settings-drawer/SettingsDrawerMo
 import SettingsDrawerVoiceSelectorModal from './settings-drawer/SettingsDrawerVoiceSelectorModal.vue'
 import SettingsDrawerRegexRuleEditorModal from './settings-drawer/SettingsDrawerRegexRuleEditorModal.vue'
 import SettingsDrawerGlobalWebSearchSection from './settings-drawer/SettingsDrawerGlobalWebSearchSection.vue'
+import SettingsDrawerGlobalConnectionSection from './settings-drawer/SettingsDrawerGlobalConnectionSection.vue'
+import SettingsDrawerGlobalPromptsSection from './settings-drawer/SettingsDrawerGlobalPromptsSection.vue'
+import SettingsDrawerGlobalAppearanceSection from './settings-drawer/SettingsDrawerGlobalAppearanceSection.vue'
 import SettingsDrawerGlobalTtsSection from './settings-drawer/SettingsDrawerGlobalTtsSection.vue'
 import SettingsDrawerGlobalAppSection from './settings-drawer/SettingsDrawerGlobalAppSection.vue'
 import { isTtsApiPreset, resolveTtsProvider } from '../utils/apiPresetKind'
@@ -179,7 +180,6 @@ const {
 const tab = ref<'global' | 'presets' | 'chat'>('global')
 const preloaded = ref(false)
 const chatTabEverOpened = ref(false)
-const pageBackgroundInputRef = ref<HTMLInputElement | null>(null)
 const savedPageBackgroundImage = ref<string | null>(null)
 const pendingPageBackgroundUploads = new Set<string>()
 const { setRuntime: setWebGpuRuntime, clearRuntime: clearWebGpuRuntime, runtimeState: webgpuRuntimeState } =
@@ -338,8 +338,6 @@ const presetVoicesLoading = ref(false)
 /** 预设「模型列表」区内多选，仅用于批量删除（非通用 API 工具） */
 const presetModelListSelection = ref<Set<string>>(new Set())
 const presetVoiceListSelection = ref<Set<string>>(new Set())
-const importInputRef = ref<HTMLInputElement | null>(null)
-const stImportInputRef = ref<HTMLInputElement | null>(null)
 const stPendingId = ref('')
 const stExpiresAt = ref('')
 const stPreview = ref<Awaited<ReturnType<typeof previewSillyTavernImport>>['preview'] | null>(null)
@@ -373,10 +371,6 @@ function resetStImportPreview() {
   stMvuMode.value = 'regex'
 }
 
-function updateStImportMvuMode(value: string) {
-  stMvuMode.value = value === 'directive' ? 'directive' : 'regex'
-}
-
 async function loadStImportPreviewFromFile(file: File): Promise<void> {
   stPreviewLoading.value = true
   try {
@@ -393,10 +387,6 @@ async function loadStImportPreviewFromFile(file: File): Promise<void> {
   } finally {
     stPreviewLoading.value = false
   }
-}
-
-function triggerStImport() {
-  stImportInputRef.value?.click()
 }
 
 async function handleStImportPick(e: Event) {
@@ -686,7 +676,6 @@ const checkUpdateMessage = ref('')
 // HTTP 请求查看
 const showHttpLogViewer = ref(false)
 const fontList = ref<string[]>([])
-const fontInputRef = ref<HTMLInputElement | null>(null)
 
 // Model Selector Modal State
 const showModelSelector = ref(false)
@@ -3798,26 +3787,6 @@ async function downloadSettingsBackup(scope: 'basic' | 'with_characters' | 'with
 }
 
 /**
- * 触发导入
- *
- * 程序化触发隐藏的文件输入框点击事件。
- */
-function triggerImport() {
-  importInputRef.value?.click()
-}
-
-/**
- * 触发导入字体
- */
-function triggerFontImport() {
-  fontInputRef.value?.click()
-}
-
-function triggerPageBackgroundImport() {
-  pageBackgroundInputRef.value?.click()
-}
-
-/**
  * 处理导入字体：上传到 data/fonts，刷新列表并设为当前选中，实时应用。
  * 字体不随备份导出。
  */
@@ -4048,150 +4017,14 @@ async function checkUpdate() {
                 这里配置全局默认的 API 参数。如果配置了 "API 预设"，建议优先使用预设功能以便管理不同服务商。
               </div>
 
-              <!-- 连接与默认模型（默认收起） -->
-              <div class="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-settings-panel-bg)] overflow-hidden">
-                <button
-                  type="button"
-                  class="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3.5 text-left text-sm text-[var(--color-text-secondary)] select-none hover:bg-surface-hover/40"
-                  :aria-expanded="globalAccordionOpen.connection"
-                  @click="globalAccordionOpen.connection = !globalAccordionOpen.connection"
-                >
-                  <span>连接与默认模型</span>
-                  <ChevronDown
-                    class="h-4 w-4 shrink-0 text-[var(--color-text-muted)] transition-transform duration-[800ms] ease-in-out"
-                    :class="globalAccordionOpen.connection ? 'rotate-180' : ''"
-                  />
-                </button>
-                <div
-                  class="grid transition-[grid-template-rows] duration-[800ms] ease-in-out"
-                  :class="globalAccordionOpen.connection ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'"
-                >
-                  <div class="min-h-0 overflow-hidden">
-                    <div class="space-y-5 border-t border-[var(--color-border-subtle)] px-4 pb-4 pt-4">
-                  <!-- Stream Toggle -->
-                  <div class="space-y-2">
-                    <label class="block text-sm font-medium text-[var(--color-text-secondary)]">流式传输</label>
-                    <button
-                      type="button"
-                      class="flex min-h-11 w-full cursor-pointer items-center gap-3 py-1 text-left group"
-                      @click="globalDraft.streamEnabled = !globalDraft.streamEnabled"
-                    >
-                      <div
-                        class="relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200 ease-out"
-                        :class="globalDraft.streamEnabled ? 'bg-brand' : 'bg-[var(--color-track)]'"
-                      >
-                        <div
-                          class="absolute left-1 top-1 h-4 w-4 rounded-full bg-[var(--color-on-brand)]"
-                          :style="{
-                            transform: globalDraft.streamEnabled ? 'translateX(1.25rem)' : 'translateX(0)',
-                            transition: 'transform 200ms ease-out',
-                          }"
-                        ></div>
-                      </div>
-                      <span class="text-xs text-[var(--color-text-secondary)]">
-                        {{ globalDraft.streamEnabled ? '已开启' : '已关闭' }}
-                      </span>
-                    </button>
-                  </div>
-
-                  <!-- Pure AI Mode Toggle -->
-                  <div class="space-y-2">
-                    <label class="block text-sm font-medium text-[var(--color-text-secondary)]">纯 AI 模式</label>
-                    <button
-                      type="button"
-                      class="flex min-h-11 w-full cursor-pointer items-center gap-3 py-1 text-left group"
-                      @click="globalDraft.pureAiMode = !globalDraft.pureAiMode"
-                    >
-                      <div
-                        class="relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200 ease-out"
-                        :class="globalDraft.pureAiMode ? 'bg-brand' : 'bg-[var(--color-track)]'"
-                      >
-                        <div
-                          class="absolute left-1 top-1 h-4 w-4 rounded-full bg-[var(--color-on-brand)]"
-                          :style="{
-                            transform: globalDraft.pureAiMode ? 'translateX(1.25rem)' : 'translateX(0)',
-                            transition: 'transform 200ms ease-out',
-                          }"
-                        ></div>
-                      </div>
-                      <span class="text-xs text-[var(--color-text-secondary)]">
-                        {{ globalDraft.pureAiMode ? '已开启：不注入用户 Persona，用户发言将以「系统」角色影响世界' : '已关闭：正常对话模式' }}
-                      </span>
-                    </button>
-                  </div>
-
-                  <!-- Reasoning Effort -->
-                  <div class="space-y-1.5">
-                    <label class="block text-sm font-medium text-[var(--color-text-secondary)]">思考模式</label>
-                    <ModernSelect
-                      v-model="globalDraft.reasoningEffort"
-                      :options="[...REASONING_EFFORT_OPTIONS]"
-                      placeholder="选择思考深度..."
-                      class="w-full"
-                    />
-                    <p class="text-xs text-[var(--color-text-muted)]">选「无」则关闭思考；其他档位会开启思考并请求更高推理深度。</p>
-                  </div>
-
-                  <!-- Base URL -->
-                  <div class="space-y-1.5">
-                    <label class="block text-sm font-medium text-[var(--color-text-secondary)]">默认 API 基础地址</label>
-                    <input
-                      v-model="globalDraft.llm.baseUrl"
-                      type="text"
-                      placeholder="https://api.openai.com 或 …/v1/chat/completions"
-                      class="input w-full"
-                    />
-                    <p class="text-xs text-[var(--color-text-muted)]">支持 Base（如 https://api.openai.com 或 …/v1）或完整 chat/completions 地址；末尾有无 / 均可。</p>
-                  </div>
-
-                  <!-- API Key -->
-                  <div class="space-y-1.5">
-                    <label class="block text-sm font-medium text-[var(--color-text-secondary)]">默认 API Key</label>
-                    <div class="relative">
-                      <input
-                        v-model="globalDraft.llm.apiKey"
-                        :type="showApiKey ? 'text' : 'password'"
-                        class="input w-full pr-11"
-                      />
-                      <button
-                        type="button"
-                        class="absolute right-1 top-1/2 flex min-h-10 min-w-10 -translate-y-1/2 items-center justify-center rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
-                        @click="showApiKey = !showApiKey"
-                      >
-                        <component :is="showApiKey ? Eye : EyeOff" class="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
-
-                  <div class="space-y-1.5">
-                    <label class="block text-sm font-medium text-[var(--color-text-secondary)]">默认模型名称</label>
-                    <input
-                      v-model="globalDraft.llm.defaultModel"
-                      type="text"
-                      class="input w-full"
-                      placeholder="例如: gpt-3.5-turbo"
-                    />
-                  </div>
-
-                  <div class="space-y-1.5">
-                    <label class="block text-sm font-medium text-[var(--color-text-secondary)]">MVU Agent 模型</label>
-                    <ModernSelect
-                      :model-value="globalDraft.mvuModel ?? ''"
-                      :options="globalMvuModelOptions"
-                      placeholder="留空则使用默认模型名称与候选回退"
-                      class="w-full"
-                      searchable
-                      allow-create
-                      @select="handleGlobalMvuModelSelect"
-                    />
-                    <p class="text-xs text-[var(--color-text-muted)]">
-                      MVU 后台与 SillyTavern directive 导入兼容共用此模型；无需进入会话即可配置。
-                    </p>
-                  </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <SettingsDrawerGlobalConnectionSection
+                v-if="globalDraft"
+                v-model:open="globalAccordionOpen.connection"
+                v-model:show-api-key="showApiKey"
+                :draft="globalDraft"
+                :mvu-model-options="globalMvuModelOptions"
+                @mvu-model-select="handleGlobalMvuModelSelect"
+              />
 
               <SettingsDrawerGlobalWebSearchSection
                 v-if="globalDraft"
@@ -4201,573 +4034,60 @@ async function checkUpdate() {
                 :remote-status-fetching="webSearchRemoteStatusFetching"
               />
 
-              <!-- 提示词与生成参数（默认折叠） -->
-              <div class="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-settings-panel-bg)] overflow-hidden">
-                <button
-                  type="button"
-                  class="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3.5 text-left text-sm text-[var(--color-text-secondary)] select-none hover:bg-surface-hover/40"
-                  :aria-expanded="globalAccordionOpen.prompts"
-                  @click="globalAccordionOpen.prompts = !globalAccordionOpen.prompts"
-                >
-                  <span>提示词与生成参数</span>
-                  <ChevronDown
-                    class="h-4 w-4 shrink-0 text-[var(--color-text-muted)] transition-transform duration-[800ms] ease-in-out"
-                    :class="globalAccordionOpen.prompts ? 'rotate-180' : ''"
-                  />
-                </button>
-                <div
-                  class="grid transition-[grid-template-rows] duration-[800ms] ease-in-out"
-                  :class="globalAccordionOpen.prompts ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'"
-                >
-                  <div class="min-h-0 overflow-hidden">
-                    <div class="space-y-5 border-t border-[var(--color-border-subtle)] px-4 pb-4 pt-4">
-                  <!-- Global System Prompt -->
-                  <div class="space-y-1.5">
-                    <label class="block text-sm font-medium text-[var(--color-text-secondary)]">全局系统提示词</label>
-                    <textarea
-                      v-model="globalDraft.prompts.globalSystem"
-                      rows="4"
-                      class="input textarea w-full resize-y"
-                    ></textarea>
-                  </div>
+              <SettingsDrawerGlobalPromptsSection
+                v-if="globalDraft"
+                v-model:open="globalAccordionOpen.prompts"
+                :draft="globalDraft"
+                @draft-help-limit-input="handleGlobalDraftHelpLimitInput"
+              />
 
-                  <div class="space-y-2">
-                    <div class="flex items-center justify-between gap-3">
-                      <label class="block text-sm font-medium text-[var(--color-text-secondary)]">预填内容</label>
-                      <button
-                        type="button"
-                        class="flex min-h-11 cursor-pointer items-center gap-3 py-1 text-left group"
-                        @click="globalDraft.prompts.globalPrefillEnabled = !globalDraft.prompts.globalPrefillEnabled"
-                      >
-                        <div
-                          class="relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200 ease-out"
-                          :class="globalDraft.prompts.globalPrefillEnabled ? 'bg-brand' : 'bg-[var(--color-track)]'"
-                        >
-                          <div
-                            class="absolute left-1 top-1 h-4 w-4 rounded-full bg-[var(--color-on-brand)]"
-                            :style="{
-                              transform: globalDraft.prompts.globalPrefillEnabled ? 'translateX(1.25rem)' : 'translateX(0)',
-                              transition: 'transform 200ms ease-out',
-                            }"
-                          ></div>
-                        </div>
-                        <span class="text-xs text-[var(--color-text-secondary)]">
-                          {{ globalDraft.prompts.globalPrefillEnabled ? '已开启：发送请求时附加预填' : '已关闭：保留文案但暂不生效' }}
-                        </span>
-                      </button>
-                    </div>
-                    <textarea
-                      v-model="globalDraft.prompts.globalPrefill"
-                      rows="2"
-                      class="input textarea w-full resize-y"
-                      placeholder="以助手身份附加在请求末尾，模型在其后续写；留空则不启用"
-                    ></textarea>
-                  </div>
-
-                  <!-- Parameters (Ensured Visibility) -->
-                  <div class="grid grid-cols-2 gap-4 pt-2">
-                    <div class="space-y-1.5">
-                      <label class="block text-sm font-medium text-[var(--color-text-secondary)]">Temperature</label>
-                      <input
-                        v-model.number="globalDraft.generationDefaults.temperature"
-                        type="number"
-                        step="0.1"
-                        min="0"
-                        max="2"
-                        placeholder="默认"
-                        class="input w-full"
-                      />
-                    </div>
-                    <div class="space-y-1.5">
-                      <label class="block text-sm font-medium text-[var(--color-text-secondary)]">Top P</label>
-                      <input
-                        v-model.number="globalDraft.generationDefaults.top_p"
-                        type="number"
-                        step="0.1"
-                        min="0"
-                        max="1"
-                        placeholder="默认"
-                        class="input w-full"
-                      />
-                    </div>
-                    <div class="space-y-1.5">
-                      <label class="block text-sm font-medium text-[var(--color-text-secondary)]">最大输出长度</label>
-                      <input
-                        v-model.number="globalDraft.generationDefaults.max_tokens"
-                        type="number"
-                        step="128"
-                        min="1"
-                        placeholder="默认"
-                        class="input w-full"
-                      />
-                    </div>
-                  </div>
-                  <div class="space-y-2 pt-2">
-                    <div class="text-sm font-medium text-[var(--color-text-secondary)]">上下文</div>
-                    <div class="grid grid-cols-2 gap-4">
-                      <div class="space-y-1.5">
-                        <label class="block text-sm font-medium text-[var(--color-text-secondary)]">上下文长度</label>
-                        <input
-                          v-model.number="globalDraft.generationDefaults.context_size"
-                          type="number"
-                          min="0"
-                          placeholder="未启用（默认不限制）"
-                          class="input w-full"
-                        />
-                      </div>
-                      <div class="space-y-1.5">
-                        <label class="block text-sm font-medium text-[var(--color-text-secondary)]">草稿助手上下文条数限制</label>
-                        <input
-                          :value="globalDraft.draftHelpDefaults?.context_message_limit ?? ''"
-                          type="text"
-                          inputmode="numeric"
-                          pattern="[0-9]*"
-                          placeholder="未启用（跟随当前逻辑）"
-                          class="input w-full"
-                          @input="handleGlobalDraftHelpLimitInput"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                  <p class="text-xs text-[var(--color-text-muted)]">
-                    实际上下文总限制长度为该「上下文长度」限制加上角色卡、用户信息、自定义系统提示词。草稿助手条数限制只统计最近消息条数，留空则回退到现有上下文逻辑。
-                  </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <!-- 外观与数据（默认折叠） -->
-              <div class="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-settings-panel-bg)] overflow-hidden">
-                <button
-                  type="button"
-                  class="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3.5 text-left text-sm text-[var(--color-text-secondary)] select-none hover:bg-surface-hover/40"
-                  :aria-expanded="globalAccordionOpen.appearance"
-                  @click="globalAccordionOpen.appearance = !globalAccordionOpen.appearance"
-                >
-                  <span>外观与数据</span>
-                  <ChevronDown
-                    class="h-4 w-4 shrink-0 text-[var(--color-text-muted)] transition-transform duration-[800ms] ease-in-out"
-                    :class="globalAccordionOpen.appearance ? 'rotate-180' : ''"
-                  />
-                </button>
-                <div
-                  class="grid transition-[grid-template-rows] duration-[800ms] ease-in-out"
-                  :class="globalAccordionOpen.appearance ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'"
-                >
-                  <div class="min-h-0 overflow-hidden">
-                    <div class="space-y-5 border-t border-[var(--color-border-subtle)] px-4 pb-4 pt-4">
-                  <div class="space-y-3 rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-settings-control-bg)] p-3.5">
-                    <div class="flex flex-wrap items-start justify-between gap-3">
-                      <div class="min-w-0 space-y-1">
-                        <div class="text-sm font-medium text-[var(--color-text-secondary)]">页面背景</div>
-                        <p class="text-xs leading-relaxed text-[var(--color-text-muted)]">
-                          图片只叠在主题底色之上；调低透明度时，底部纯色玻璃底会继续透出。
-                        </p>
-                      </div>
-                      <div class="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          class="min-h-10 rounded-lg bg-surface-muted px-4 py-2 text-sm text-[var(--color-text)] transition-colors whitespace-nowrap hover:bg-surface-hover"
-                          @click="triggerPageBackgroundImport"
-                        >
-                          导入图片
-                        </button>
-                        <button
-                          v-if="globalDraft.pageBackgroundImage"
-                          type="button"
-                          class="min-h-10 rounded-lg border border-[var(--color-border-subtle)] bg-transparent px-4 py-2 text-sm text-[var(--color-text-secondary)] transition-colors whitespace-nowrap hover:bg-surface-hover/30 hover:text-[var(--color-text)]"
-                          @click="clearPageBackground"
-                        >
-                          清除
-                        </button>
-                      </div>
-                      <input
-                        ref="pageBackgroundInputRef"
-                        type="file"
-                        class="hidden"
-                        accept="image/*,.png,.jpg,.jpeg,.webp,.gif"
-                        @change="handlePageBackgroundImport"
-                      />
-                    </div>
-
-                    <div
-                      v-if="pageBackground.imageUrl.value"
-                      class="w-1/2 min-w-[12rem] max-w-[22rem] overflow-hidden rounded-xl border border-[var(--color-border-subtle)] bg-surface-muted/70"
-                    >
-                      <div class="h-32 overflow-hidden">
-                        <img
-                          :src="pageBackground.imageUrl.value || ''"
-                          alt="页面背景预览"
-                          class="h-full w-full object-cover object-center"
-                          :style="pageBackground.imageStyle.value"
-                        />
-                      </div>
-                    </div>
-                    <div
-                      v-else
-                      class="rounded-xl border border-dashed border-[var(--color-border-subtle)] bg-[var(--color-settings-control-bg)] px-3 py-4 text-xs leading-relaxed text-[var(--color-text-muted)]"
-                    >
-                      还未导入页面背景。聊天页将继续仅使用当前主题底色。
-                    </div>
-
-                    <div class="grid gap-3 md:grid-cols-2">
-                      <label class="space-y-2">
-                        <div class="flex items-center justify-between gap-2 text-xs text-[var(--color-text-secondary)]">
-                          <span>透明度</span>
-                          <span>{{ pageBackgroundOpacityModel }}%</span>
-                        </div>
-                        <input
-                          v-model="pageBackgroundOpacityModel"
-                          type="range"
-                          min="0"
-                          max="100"
-                          step="1"
-                          class="input-range"
-                        />
-                        <p class="text-xs text-[var(--color-text-muted)]">100% 为完整显示图片，降低后可透出主题底色。</p>
-                      </label>
-
-                      <label class="space-y-2">
-                        <div class="flex items-center justify-between gap-2 text-xs text-[var(--color-text-secondary)]">
-                          <span>模糊</span>
-                          <span>{{ pageBackgroundBlurModel }} px</span>
-                        </div>
-                        <input
-                          v-model="pageBackgroundBlurModel"
-                          type="range"
-                          min="0"
-                          max="64"
-                          step="1"
-                          class="input-range"
-                        />
-                        <p class="text-xs text-[var(--color-text-muted)]">仅作用于图片层，不会影响主题底色与界面内容。</p>
-                      </label>
-                    </div>
-                  </div>
-
-                  <div class="space-y-3 rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-settings-control-bg)] p-3.5">
-                    <div class="space-y-2">
-                      <div class="text-sm font-medium text-[var(--color-text-secondary)]">WebGPU 着色器背景</div>
-                      <p class="text-xs leading-relaxed text-[var(--color-text-muted)]">
-                        运行态可先编译并应用，不会自动写入后端；仅「保存设置」才持久化。
-                      </p>
-                      <label class="block text-sm font-medium text-[var(--color-text-secondary)]">启用着色器背景</label>
-                      <button
-                        type="button"
-                        class="flex min-h-11 w-full cursor-pointer items-center gap-3 py-1 text-left group"
-                        @click="globalDraft!.webgpuBackgroundEnabled = !globalDraft!.webgpuBackgroundEnabled"
-                      >
-                        <div
-                          class="relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200 ease-out"
-                          :class="globalDraft!.webgpuBackgroundEnabled ? 'bg-brand' : 'bg-[var(--color-track)]'"
-                        >
-                          <div
-                            class="absolute left-1 top-1 h-4 w-4 rounded-full bg-[var(--color-on-brand)]"
-                            :style="{
-                              transform: globalDraft!.webgpuBackgroundEnabled ? 'translateX(1.25rem)' : 'translateX(0)',
-                              transition: 'transform 200ms ease-out',
-                            }"
-                          ></div>
-                        </div>
-                        <span class="text-xs text-[var(--color-text-secondary)]">
-                          {{ globalDraft!.webgpuBackgroundEnabled ? '已启用' : '已关闭' }}
-                        </span>
-                      </button>
-                    </div>
-
-                    <div class="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        class="min-h-9 rounded-lg bg-surface-muted px-3 py-1.5 text-xs transition-colors hover:bg-surface-hover disabled:opacity-50"
-                        :disabled="webgpuPresetCreateBusy"
-                        @click="createWebGpuPreset"
-                      >
-                        新建预设
-                      </button>
-                    </div>
-
-                    <div class="space-y-2">
-                      <div class="flex items-center justify-between gap-3">
-                        <span class="text-xs text-[var(--color-text-secondary)]">活动预设</span>
-                        <div class="flex items-center gap-1.5 shrink-0">
-                          <span class="text-[11px] text-[var(--color-text-muted)] whitespace-nowrap">渲染性能</span>
-                          <ModernSelect
-                            v-model="webgpuTargetFpsModel"
-                            :options="webgpuTargetFpsOptions"
-                            placement="top"
-                            class="w-[96px] min-w-0"
-                          />
-                        </div>
-                      </div>
-                      <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-snug text-[var(--color-text-muted)]">
-                        <span>适配器：{{ webgpuAvailability === 'available' ? '可用' : webgpuAvailability === 'unavailable' ? '不可用' : '检测中' }}</span>
-                        <span v-if="webgpuRuntimeState.hasOverride">· 运行态覆盖</span>
-                        <span v-if="webgpuPresetSourceDirty">· 未保存</span>
-                      </div>
-                      <p
-                        v-if="webgpuPresetCompileDiagnostics.length > 0 || webgpuPresetCompileMessage"
-                        class="text-xs text-[var(--color-error-text)]"
-                      >
-                        编译失败，请使用对应预设行的「编辑」查看详情。
-                      </p>
-                      <div class="space-y-2 rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-settings-control-bg)] p-2">
-                        <template v-for="item in webgpuPresets" :key="item.id">
-                          <div
-                            class="flex w-full min-h-9 flex-wrap items-center gap-1.5 rounded-md px-1 py-0.5 text-xs transition-colors outline-none focus-visible:ring-2 focus-visible:ring-brand-a40"
-                            :class="
-                              item.id === activeWebgpuPresetId
-                                ? 'cursor-pointer bg-brand-a20 text-brand ring-1 ring-brand-a30'
-                                : 'cursor-pointer hover:bg-surface-hover/40'
-                            "
-                            tabindex="0"
-                            @click="activeWebgpuPresetId = item.id"
-                            @keydown.enter.prevent="activeWebgpuPresetId = item.id"
-                            @keydown.space.prevent="activeWebgpuPresetId = item.id"
-                          >
-                            <div class="flex min-h-9 min-w-0 flex-1 basis-[min(100%,10rem)] items-center px-2 py-1">
-                              <span class="truncate">{{ item.name }}</span>
-                            </div>
-                            <div class="flex flex-wrap items-center gap-1.5" @click.stop>
-                              <button
-                                type="button"
-                                class="shrink-0 min-h-8 rounded-md border border-[var(--color-border-subtle)] px-2 py-1 text-[11px] text-[var(--color-text-secondary)] transition-colors hover:bg-surface-hover/40 hover:text-[var(--color-text)]"
-                                :class="item.id === activeWebgpuPresetId ? 'border-[var(--color-border-subtle)]/80' : ''"
-                                @click="openWebGpuShaderEditorForPreset(item.id)"
-                              >
-                                编辑
-                              </button>
-                              <template v-if="item.id === activeWebgpuPresetId">
-                                <button
-                                  type="button"
-                                  class="shrink-0 min-h-8 rounded-md border border-[var(--color-border-subtle)] px-2 py-1 text-[11px] transition-colors hover:bg-surface-hover/30"
-                                  @click="runWebGpuPresetFromList"
-                                >
-                                  运行
-                                </button>
-                                <button
-                                  type="button"
-                                  class="shrink-0 min-h-8 rounded-md border border-red-500/40 px-2 py-1 text-[11px] text-red-300 transition-colors hover:bg-red-500/10 disabled:opacity-50"
-                                  :disabled="webgpuPresetDeleteBusy"
-                                  @click="deleteActiveWebGpuPreset"
-                                >
-                                  删除
-                                </button>
-                              </template>
-                            </div>
-                          </div>
-                        </template>
-                        <div v-if="webgpuPresets.length === 0" class="px-2 py-2 text-xs text-[var(--color-text-muted)]">
-                          暂无预设
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <!-- 界面色系 -->
-                  <div class="space-y-1.5">
-                    <label class="block text-sm font-medium text-[var(--color-text-secondary)]">界面色系</label>
-                    <ModernSelect
-                      v-model="globalDraft.themeId"
-                      :options="[...THEME_OPTIONS]"
-                      placeholder="选择色系..."
-                      class="w-full"
-                    />
-                    <p class="text-xs text-[var(--color-text-muted)]">暗色玻璃底，仅强调色随主题变化；未设置时默认为雾玫瑰。</p>
-                  </div>
-
-                  <!-- 字体自定义 -->
-                  <div class="space-y-3">
-                    <div class="text-sm font-medium text-[var(--color-text-secondary)]">字体</div>
-                    <div
-                      class="gap-2"
-                      :class="isNarrowPortrait ? 'flex flex-col' : 'flex flex-wrap items-center'"
-                    >
-                      <div
-                        class="relative group min-w-0"
-                        :class="
-                          isNarrowPortrait ? 'w-full' : 'max-w-[172px] flex-1'
-                        "
-                      >
-                        <ModernSelect
-                          v-model="fontModel"
-                          :options="fontOptions"
-                          placement="top"
-                          searchable
-                          placeholder="选择字体..."
-                          class="w-full min-w-0"
-                        />
-                      </div>
-                      <div
-                        class="flex flex-wrap items-center gap-2"
-                        :class="isNarrowPortrait ? 'w-full' : ''"
-                      >
-                        <div class="flex h-10 items-center gap-0.5 rounded-lg border border-[var(--color-border)] bg-surface-muted px-1 py-0.5">
-                          <button
-                            type="button"
-                            class="flex min-h-9 min-w-9 items-center justify-center rounded-md p-2 text-[var(--color-text-muted)] transition-colors hover:bg-surface-hover hover:text-[var(--color-text)]"
-                            aria-label="减小字号"
-                            @click="stepMessageFontSize(-1)"
-                          >
-                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                          </button>
-                          <input
-                            v-model.number="messageFontSizeModel"
-                            type="number"
-                            min="8"
-                            max="72"
-                            placeholder=""
-                            class="w-10 bg-transparent border-0 text-center text-sm text-[var(--color-text)] focus:outline-none focus:ring-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                          />
-                          <button
-                            type="button"
-                            class="flex min-h-9 min-w-9 items-center justify-center rounded-md p-2 text-[var(--color-text-muted)] transition-colors hover:bg-surface-hover hover:text-[var(--color-text)]"
-                            aria-label="增大字号"
-                            @click="stepMessageFontSize(1)"
-                          >
-                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                          </button>
-                        </div>
-                        <button
-                          type="button"
-                          class="min-h-10 rounded-lg bg-surface-muted px-4 py-2 text-sm text-[var(--color-text)] transition-colors whitespace-nowrap hover:bg-surface-hover"
-                          @click="triggerFontImport"
-                        >
-                          导入字体
-                        </button>
-                        <input
-                          ref="fontInputRef"
-                          type="file"
-                          class="hidden"
-                          accept=".ttf,.otf,.woff,.woff2"
-                          @change="handleFontImport"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div class="space-y-3">
-                    <div class="text-sm font-medium text-[var(--color-text-secondary)]">数据备份与导入</div>
-                    <div class="flex flex-col gap-2">
-                      <div class="grid grid-cols-2 gap-2">
-                        <button
-                          type="button"
-                          class="min-h-10 rounded-lg bg-surface-muted px-3 py-2 text-center text-sm leading-tight text-[var(--color-text)] transition-colors min-w-0 hover:bg-surface-hover"
-                          @click="downloadSettingsBackup('basic')"
-                        >
-                          基本设置
-                        </button>
-                        <button
-                          type="button"
-                          class="min-h-10 rounded-lg bg-surface-muted px-3 py-2 text-center text-sm leading-tight text-[var(--color-text)] transition-colors min-w-0 hover:bg-surface-hover"
-                          @click="downloadSettingsBackup('with_characters')"
-                        >
-                          包含角色卡
-                        </button>
-                      </div>
-                      <div class="grid grid-cols-2 gap-2">
-                        <button
-                          type="button"
-                          class="min-h-10 rounded-lg bg-surface-muted px-3 py-2 text-center text-sm leading-tight text-[var(--color-text)] transition-colors min-w-0 hover:bg-surface-hover"
-                          @click="downloadSettingsBackup('with_chats')"
-                        >
-                          包含全部聊天记录
-                        </button>
-                        <button
-                          type="button"
-                          class="min-h-10 rounded-lg bg-surface-muted px-3 py-2 text-center text-sm leading-tight text-[var(--color-text)] transition-colors min-w-0 hover:bg-surface-hover"
-                          :disabled="stPreviewLoading"
-                          @click="triggerImport"
-                        >
-                          {{ stPreviewLoading ? '读取预览中…' : '导入数据' }}
-                        </button>
-                      </div>
-                      <button
-                        type="button"
-                        class="min-h-10 w-full rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-surface-overlay)] px-3 py-2 text-center text-sm leading-tight text-[var(--color-text-secondary)] transition-colors hover:bg-surface-hover"
-                        :disabled="stPreviewLoading"
-                        @click="triggerStImport"
-                      >
-                        {{ stPreviewLoading ? '读取预览中…' : '仅选择 SillyTavern 角色卡（PNG / JSON）' }}
-                      </button>
-                      <input
-                        ref="importInputRef"
-                        type="file"
-                        class="hidden"
-                        accept=".txt,.json,.jsonl,.zip,.png"
-                        @change="handleImportChange"
-                      />
-                      <input
-                        ref="stImportInputRef"
-                        type="file"
-                        class="hidden"
-                        accept=".png,.json"
-                        @change="handleStImportPick"
-                      />
-                      <div
-                        v-if="stPreview"
-                        class="rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-surface-overlay)] p-3 text-xs text-[var(--color-text-muted)]"
-                      >
-                        <div class="flex flex-wrap items-center justify-between gap-2">
-                          <div class="text-[var(--color-text-secondary)]">SillyTavern 预览</div>
-                          <button
-                            type="button"
-                            class="min-h-8 rounded-md bg-surface-muted px-2 py-1 text-[var(--color-text)] hover:bg-surface-hover"
-                            @click="resetStImportPreview"
-                          >
-                            清除
-                          </button>
-                        </div>
-                        <div class="mt-2">
-                          角色名：<span class="text-[var(--color-text)]">{{ stPreview.characterName || '未知' }}</span>
-                        </div>
-                        <div class="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                          <div>世界书：<span class="text-[var(--color-text)]">{{ stPreview.worldBookName || '未检测到' }}</span></div>
-                          <div>世界书条目：<span class="text-[var(--color-text)]">{{ stPreview.worldBookEntryCount }}</span></div>
-                          <div>tavern_helper：<span class="text-[var(--color-text)]">{{ stPreview.mvu.hasTavernHelper ? '已检测到' : '未检测到' }}</span></div>
-                          <div>regex_scripts：<span class="text-[var(--color-text)]">{{ stPreview.mvu.regexScriptCount }}</span></div>
-                        </div>
-                        <label class="mt-3 flex items-center gap-2 text-[var(--color-text-muted)]">
-                          <ThemedCheckbox :checked="stEnableMvuCompatibility" @update:checked="stEnableMvuCompatibility = $event" />
-                          启用 MVU 兼容
-                          <span v-if="stDetectedMvu" class="text-[var(--color-text-secondary)]">已检测到候选结构</span>
-                        </label>
-                        <p class="text-[var(--color-text-muted)]">
-                          指令模式会把完整 ST 卡上下文交给 MVU Agent，生成角色卡 MVU 指令与初始状态栏后再完成导入。
-                        </p>
-                        <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
-                          <div>
-                            <div class="mb-1 text-[var(--color-text-muted)]">MVU 模式</div>
-                            <ModernSelect
-                              :model-value="stMvuMode"
-                              :options="stMvuModeOptions"
-                              placeholder="选择 MVU 模式"
-                              @update:model-value="updateStImportMvuMode"
-                            />
-                          </div>
-                          <button
-                            type="button"
-                            class="btn btn-sm btn-primary min-h-10 w-full sm:w-auto"
-                            :disabled="!stPendingId || stConfirming"
-                            @click="confirmStImportFromSettings"
-                          >
-                            {{ stImportConfirmLabel }}
-                          </button>
-                        </div>
-                        <div v-if="stExpiresAt" class="mt-2 text-[var(--color-text-muted)]">预览暂存至：{{ stExpiresAt }}</div>
-                      </div>
-                    </div>
-                    <div class="text-xs text-[var(--color-text-muted)]">
-                      PNG 或 SillyTavern 形状 JSON 会先显示预览并可勾选 MVU；普通备份 JSON 仍走一键导入。
-                    </div>
-                    <div class="text-xs text-[var(--color-text-muted)]">
-                      备份会导出全部系统设置（含用户 Persona 头像）；“包含角色卡/包含全部聊天记录”同时包含世界书数据。
-                    </div>
-                  </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <SettingsDrawerGlobalAppearanceSection
+                v-if="globalDraft"
+                v-model:open="globalAccordionOpen.appearance"
+                v-model:page-background-opacity="pageBackgroundOpacityModel"
+                v-model:page-background-blur="pageBackgroundBlurModel"
+                v-model:active-webgpu-preset-id="activeWebgpuPresetId"
+                v-model:webgpu-target-fps="webgpuTargetFpsModel"
+                v-model:font-model="fontModel"
+                v-model:message-font-size-model="messageFontSizeModel"
+                v-model:st-enable-mvu-compatibility="stEnableMvuCompatibility"
+                v-model:st-mvu-mode="stMvuMode"
+                :draft="globalDraft"
+                :is-narrow-portrait="isNarrowPortrait"
+                :page-background-image-url="pageBackground.imageUrl.value"
+                :page-background-image-style="pageBackground.imageStyle.value"
+                :webgpu-presets="webgpuPresets"
+                :webgpu-target-fps-options="webgpuTargetFpsOptions"
+                :webgpu-availability="webgpuAvailability"
+                :webgpu-has-runtime-override="webgpuRuntimeState.hasOverride"
+                :webgpu-preset-source-dirty="webgpuPresetSourceDirty"
+                :webgpu-preset-compile-diagnostics-count="webgpuPresetCompileDiagnostics.length"
+                :webgpu-preset-compile-message="webgpuPresetCompileMessage"
+                :webgpu-preset-create-busy="webgpuPresetCreateBusy"
+                :webgpu-preset-delete-busy="webgpuPresetDeleteBusy"
+                :font-options="fontOptions"
+                :st-preview="stPreview"
+                :st-preview-loading="stPreviewLoading"
+                :st-detected-mvu="stDetectedMvu"
+                :st-mvu-mode-options="stMvuModeOptions"
+                :st-pending-id="stPendingId"
+                :st-confirming="stConfirming"
+                :st-import-confirm-label="stImportConfirmLabel"
+                :st-expires-at="stExpiresAt"
+                @clear-page-background="clearPageBackground"
+                @page-background-file="handlePageBackgroundImport"
+                @create-webgpu-preset="createWebGpuPreset"
+                @open-webgpu-editor="openWebGpuShaderEditorForPreset"
+                @run-webgpu-preset="runWebGpuPresetFromList"
+                @delete-webgpu-preset="deleteActiveWebGpuPreset"
+                @step-font-size="stepMessageFontSize"
+                @font-file="handleFontImport"
+                @backup="downloadSettingsBackup"
+                @import-file="handleImportChange"
+                @st-import-file="handleStImportPick"
+                @reset-st-preview="resetStImportPreview"
+                @confirm-st-import="confirmStImportFromSettings"
+              />
 
               <SettingsDrawerGlobalTtsSection
                 v-if="globalDraft"
