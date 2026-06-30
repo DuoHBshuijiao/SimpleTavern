@@ -44,7 +44,7 @@
 | useImageStickyBinding | ✅ |
 | useForkLineage | ✅ |
 | useCharacterEditor | ❌ 待补 |
-| useEmbeddedAvatarImport | ❌ 待补 |
+| useEmbeddedAvatarImport | ✅（Bugbot #2 失败路径） |
 
 ## v0.700 剩余大项
 

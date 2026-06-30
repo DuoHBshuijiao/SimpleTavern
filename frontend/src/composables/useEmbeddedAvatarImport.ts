@@ -43,6 +43,35 @@ function imageDataUrlToPngFile(imageData: string, filename: string): File {
   return new File([bytes], filename, { type: 'image/png' })
 }
 
+function buildMergedEmbeddedCard(
+  current: CharacterCard,
+  incoming: CharacterCard,
+  attachedWorldBookIds: string[],
+): CharacterCard {
+  return {
+    ...current,
+    name: incoming.name,
+    description: incoming.description,
+    personality: incoming.personality,
+    scenario: incoming.scenario,
+    firstMessage: incoming.firstMessage,
+    exampleDialogue: incoming.exampleDialogue,
+    systemPrompt: incoming.systemPrompt,
+    extraFirstMessageEntries: Array.isArray(incoming.extraFirstMessageEntries) ? incoming.extraFirstMessageEntries : [],
+    mvuEnabled: incoming.mvuEnabled === true,
+    mvuMode: incoming.mvuMode === 'directive' ? 'directive' : 'regex',
+    mvuDirective: typeof incoming.mvuDirective === 'string' ? incoming.mvuDirective : null,
+    contentRegexRules: Array.isArray(incoming.contentRegexRules) ? incoming.contentRegexRules : [],
+    initialStateTables: Array.isArray(incoming.initialStateTables)
+      ? incoming.initialStateTables
+      : current.initialStateTables,
+    attachedWorldBookIds,
+    avatar: current.avatar || incoming.avatar,
+    avatarFocusX: current.avatarFocusX ?? incoming.avatarFocusX ?? null,
+    avatarFocusY: current.avatarFocusY ?? incoming.avatarFocusY ?? null,
+  }
+}
+
 /** PNG 头像内嵌角色卡 / ST 预览确认流（角色编辑弹窗内使用）。 */
 export function useEmbeddedAvatarImport(options: UseEmbeddedAvatarImportOptions) {
   const { previewSillyTavernImport, materializeSillyTavernPending } = useSettingsImport()
@@ -120,11 +149,13 @@ export function useEmbeddedAvatarImport(options: UseEmbeddedAvatarImportOptions)
       return
     }
     embeddedCardImporting.value = true
+    let incoming: CharacterCard | null = null
+    let attachedWorldBookIds: string[] = []
+    let mergeWarnings: string[] | undefined
+
     try {
       const current = options.getEditingCharacter()!
-      let incoming: CharacterCard
       let worldbookPayload: WorldBook | undefined
-      let mergeWarnings: string[] | undefined
 
       if (avatarEmbeddedStPendingId.value) {
         const built = await materializeSillyTavernPending({
@@ -133,6 +164,8 @@ export function useEmbeddedAvatarImport(options: UseEmbeddedAvatarImportOptions)
           mvuMode: avatarEmbeddedMvuMode.value,
           avatarFilename: current.avatar || null,
         })
+        // pending 单次消费；materialize 成功后立即清掉，避免失败重试 404
+        avatarEmbeddedStPendingId.value = ''
         incoming = built.character as unknown as CharacterCard
         worldbookPayload = built.worldbook ? (built.worldbook as unknown as WorldBook) : undefined
         mergeWarnings = built.warnings
@@ -141,34 +174,12 @@ export function useEmbeddedAvatarImport(options: UseEmbeddedAvatarImportOptions)
         worldbookPayload = embeddedCardPreview.value.worldbook ?? undefined
       }
 
-      let attachedWorldBookIds: string[] = []
       if (worldbookPayload) {
         const savedBook = await apiPost<WorldBook>('/api/worldbooks', worldbookPayload)
         attachedWorldBookIds = [savedBook.id]
         await options.reloadWorldbooks()
       }
-      const mergedCard: CharacterCard = {
-        ...current,
-        name: incoming.name,
-        description: incoming.description,
-        personality: incoming.personality,
-        scenario: incoming.scenario,
-        firstMessage: incoming.firstMessage,
-        exampleDialogue: incoming.exampleDialogue,
-        systemPrompt: incoming.systemPrompt,
-        extraFirstMessageEntries: Array.isArray(incoming.extraFirstMessageEntries) ? incoming.extraFirstMessageEntries : [],
-        mvuEnabled: incoming.mvuEnabled === true,
-        mvuMode: incoming.mvuMode === 'directive' ? 'directive' : 'regex',
-        mvuDirective: typeof incoming.mvuDirective === 'string' ? incoming.mvuDirective : null,
-        contentRegexRules: Array.isArray(incoming.contentRegexRules) ? incoming.contentRegexRules : [],
-        initialStateTables: Array.isArray(incoming.initialStateTables)
-          ? incoming.initialStateTables
-          : current.initialStateTables,
-        attachedWorldBookIds,
-        avatar: current.avatar || incoming.avatar,
-        avatarFocusX: current.avatarFocusX ?? incoming.avatarFocusX ?? null,
-        avatarFocusY: current.avatarFocusY ?? incoming.avatarFocusY ?? null,
-      }
+      const mergedCard = buildMergedEmbeddedCard(current, incoming, attachedWorldBookIds)
       await apiPut<CharacterCard>('/api/assistant/workspace/character-card', mergedCard)
       options.applyAssistantCard(mergedCard)
       clearEmbeddedCardPreviewState()
@@ -176,8 +187,13 @@ export function useEmbeddedAvatarImport(options: UseEmbeddedAvatarImportOptions)
         void notifyMessage(mergeWarnings.join('；'), { title: '内嵌卡合并提示' })
       }
     } catch (error) {
+      // 已 materialize / 已建世界书但 workspace 落库失败时，尽量把合并结果写回本地编辑草稿
+      const editing = options.getEditingCharacter()
+      if (incoming && editing) {
+        options.applyAssistantCard(buildMergedEmbeddedCard(editing, incoming, attachedWorldBookIds))
+      }
+      clearEmbeddedCardPreviewState()
       options.pushError({ message: error, source: 'main', title: '导入 PNG 内嵌角色数据失败' })
-      embeddedCardImporting.value = false
     }
   }
 
