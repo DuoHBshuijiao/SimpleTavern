@@ -1,18 +1,16 @@
 # T-210 v0.700 ChatPage composable 第二批
 
-- status: in-progress
+- status: done
 - area: frontend
-- theme: 低风险 composable 继续提炼（行为不变）
+- theme: 低风险 + 中风险 composable 提炼（行为不变）
 
 ## 已完成
 
 1. `useMessageListEnterAnimations` + 单测
 2. `useGlobalEscapeStack` / `createCloseTopOverlayHandler` + 单测
 3. `useMainChatReasoning` + 单测
-
-## 待做
-
-4. `useChatHeaderLayout` / `useChatFabSeparation`（中风险）
+4. `useChatHeaderLayout` + 单测（顶栏 morph、高度测量、TTS/Agent 顶栏控件）
+5. `useChatFabSeparation` + 单测（主区左缘测量、FAB 碰撞分离）
 
 ## 边界
 

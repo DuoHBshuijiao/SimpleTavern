@@ -30,13 +30,17 @@
 - SettingsDrawer 正文正则列表移除 `border-l-4` side-tab，改用 `surface-selected`。
 - Impeccable detect 通过 chat/modals/SettingsDrawer（ChatInput `margin-top` 动画留 T-213）。
 
-### ChatPage composable 扩展（T-210 进行中）
+### ChatPage composable 扩展（T-210 完成）
 
-- 新增 `useMessageListEnterAnimations`、`useGlobalEscapeStack`、`useMainChatReasoning` 及单测；ChatPage 接入。
+- 新增 `useMessageListEnterAnimations`、`useGlobalEscapeStack`、`useMainChatReasoning`、`useChatHeaderLayout`、`useChatFabSeparation` 及单测；ChatPage 接入。
+
+### SettingsDrawer 拆分（T-211 进行中）
+
+- 正文正则编辑、模型选择、音色选择三个 Teleport 弹层拆至 `components/settings-drawer/` 子组件。
 
 ### 测试
 
-- 截至 T-209/T-210a：前端 97 测试、后端 114 测试全通过。
+- 截至本轮：前端 102 测试、后端 114 测试全通过。
 
 ## v0.601
 

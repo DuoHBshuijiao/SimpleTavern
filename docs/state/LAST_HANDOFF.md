@@ -1,7 +1,7 @@
 # Last Handoff
 
-- last_task: `T-209-ui-animation-sweep` + `T-210-composables-phase2a`
-- status: in-progress（v0.700 约 62%）
-- summary: 文档重划 v0.700（含 UI/拆分全量）与 v0.800（后端性能）。T-209：全局 `.custom-scrollbar`、token `--radius-scrollbar`/`--radius-xs`、消除 SettingsDrawer 正文正则 side-tab、Impeccable chat/modals/SettingsDrawer 通过（ChatInput margin 留 T-213）。T-210 首批：提炼 `useMessageListEnterAnimations`、`useGlobalEscapeStack`、`useMainChatReasoning` + 单测。
-- verify: frontend 21 文件 97 tests + build 通过。
-- next_read: `docs/tasks/T-210-v0700-chat-composables-phase2.md` → `T-211`
+- last_task: `T-210-composables-phase2b` + `T-211-teleport-modals`
+- status: in-progress（v0.700 约 68%）
+- summary: T-210 完成 `useChatHeaderLayout`、`useChatFabSeparation` + 单测并接入 ChatPage。T-211 首批：SettingsDrawer 三个 Teleport 弹层拆为独立子组件（正文正则编辑、模型选择、音色选择），草稿与 save 逻辑仍留父组件。
+- verify: frontend 23 文件 102 tests + build 通过。
+- next_read: `docs/tasks/T-211-v0700-settings-drawer-split.md`（Global Tab accordion）
