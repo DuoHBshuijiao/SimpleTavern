@@ -22,7 +22,7 @@
 
 | 区域 | 行数量级 | 说明 |
 |------|----------|------|
-| 主流式生成 / SSE | ~1500+ | T-212#6 后拆；含 `saveSendDeferCtx` |
+| 主流式生成 / SSE | ~1500+ | T-212#8 后拆；含 `saveSendDefer` 已迁 `useGenerationDeferState` |
 | 群聊轮次 / 插话 | ~800+ | 与生成流耦合 |
 | 草稿助手 / TTS 预处理 | ~400+ | 可后续 composable |
 | MVU Panel 绑定 | ~200 | 与 store 强耦合 |
@@ -45,9 +45,10 @@
 | useForkLineage | ✅ |
 | useCharacterEditor | ❌ 待补 |
 | useEmbeddedAvatarImport | ✅（Bugbot #2 失败路径） |
+| useGenerationDeferState | ✅ |
 
 ## v0.700 剩余大项
 
-- T-212#6：生成/SSE orchestration composable（低风险块先拆）
+- T-212#8：生成/SSE orchestration composable（主体仍留 ChatPage）
 - T-213：ChatInput sink 动效 + motion audit
 - T-214：可观测性收尾（orphan 扩展等）

@@ -13,10 +13,11 @@
 4. `PersonaEditorModal.vue`、`PersonaSwitchConfirmModal.vue`：身份编辑与切换确认弹窗
 5. `useEmbeddedAvatarImport.ts` + `EmbeddedCardConfirmModal.vue`：PNG 内嵌卡 / ST 预览确认流
 6. `AssistantSettingsModal.vue`：聊天助手设置弹窗
+7. `useGenerationDeferState.ts`：流式延后删除 / 重写合并 / 保存并发送上下文（低风险块，T-212#7 首批）
 
 ## 待做
 
-7. 生成/SSE orchestration 后拆（`GenerationDeferState`，低风险 composable 优先）
+8. 生成/SSE orchestration 主体后拆（`sendUserMessage`、`handleRewriteMessage` SSE 回调等仍留 ChatPage）
 
 ## 约束
 

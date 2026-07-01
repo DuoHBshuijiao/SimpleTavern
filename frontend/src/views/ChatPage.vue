@@ -74,6 +74,7 @@ import {
   useSettingsImport,
 } from '../composables'
 import { useEmbeddedAvatarImport, type AvatarCropSavePayload } from '../composables/useEmbeddedAvatarImport'
+import { useGenerationDeferState } from '../composables/useGenerationDeferState'
 import { usePageBackground } from '../composables/usePageBackground'
 import { useWebGpuBackground } from '../composables/useWebGpuBackground'
 import { useWebGpuBackgroundRuntime } from '../composables/useWebGpuBackgroundRuntime'
@@ -272,24 +273,18 @@ const editingTitle = ref('')
 const aborter = ref<AbortController | null>(null)
 const stopRequested = ref(false)
 const stopStreamingHold = ref(false)
-/** 流式延后删除期间从列表隐藏的磁盘消息 id（与 omitMessageIds 对齐） */
-const streamHiddenMessageIds = ref<string[]>([])
-/** 流式成功后应从磁盘删除的消息 id（非 local_*） */
-const streamDeferDeleteIds = ref<string[]>([])
-/** 重写中断：local_rewrite 半截合并到该锚点气泡 */
-const rewriteMergeCtx = ref<{
-  chatId: string
-  anchorId: string
-  anchorTs: string
-  originalMessageId: string
-} | null>(null)
-/** 保存并发送：已更新用户消息后延后截断尾巴；中断时按尾巴形态保留半成品 */
-const saveSendDeferCtx = ref<{
-  chatId: string
-  tailIdsToDeleteOnSuccess: string[]
-  singleAssistantTailMergeId?: string | null
-  mode: 'single' | 'group'
-} | null>(null)
+const {
+  rewriteMergeCtx,
+  clearAll: clearGenerationDeferState,
+  beginSaveSendDefer,
+  beginRewriteDefer,
+  getSaveSendDeferForChat,
+  clearSaveSendDeferForChat,
+  clearRewriteAndVisibility,
+  takeDeferDeleteIdsAfterRewrite,
+  filterVisibleMessages,
+  finalizeSaveSendAfterGeneration,
+} = useGenerationDeferState()
 
 watch(() => uiStore.settingsDrawerRequestNonce, (nonce) => {
   if (!nonce) return
@@ -352,10 +347,7 @@ const {
 const messageListMessages = computed((): ChatMessage[] => {
   const chat = activeChat.value
   if (!chat?.messages?.length) return []
-  const hid = streamHiddenMessageIds.value
-  if (!hid.length) return chat.messages
-  const hide = new Set(hid)
-  return chat.messages.filter((m) => !hide.has(m.id))
+  return filterVisibleMessages(chat.messages)
 })
 
 /** 侧栏角色列表：按会话活跃度置顶（与 characters.list 内容一致，仅顺序不同） */
@@ -2218,10 +2210,7 @@ watch(
       clearMessageListEnterAnimations()
       clearReasoningForChatSwitch()
       versions.clearAll()
-      streamHiddenMessageIds.value = []
-      streamDeferDeleteIds.value = []
-      rewriteMergeCtx.value = null
-      saveSendDeferCtx.value = null
+      clearGenerationDeferState()
     }
     // 切换会话时自动关闭搜索面板并重置搜索状态
     showHeaderMoreMenu.value = false
@@ -2928,8 +2917,7 @@ async function triggerInterject(characterId: string) {
   aborter.value = new AbortController()
   
   const useStream = settings.settings?.streamEnabled !== false
-  const deferredForInterject =
-    saveSendDeferCtx.value?.chatId === chatId ? saveSendDeferCtx.value : null
+  const deferredForInterject = getSaveSendDeferForChat(chatId)
   const omitMessageIds = deferredForInterject?.tailIdsToDeleteOnSuccess ?? []
   
   const localAssistantId = `local_interject_${Date.now()}`
@@ -3031,17 +3019,9 @@ async function triggerInterject(characterId: string) {
     } else {
       await chats.load(chatId)
       await afterChatReload(chatId)
-      const ss = saveSendDeferCtx.value
-      if (ss?.chatId === chatId && !streamError.value) {
-        saveSendDeferCtx.value = null
-        streamHiddenMessageIds.value = []
-        streamDeferDeleteIds.value = []
-        await finalizeDeferredTailDelete(chatId, ss.tailIdsToDeleteOnSuccess)
-      } else if (ss?.chatId === chatId) {
-        saveSendDeferCtx.value = null
-        streamHiddenMessageIds.value = []
-        streamDeferDeleteIds.value = []
-      } else if (!streamError.value) {
+      const hadSaveSendDefer = !!getSaveSendDeferForChat(chatId)
+      await finalizeSaveSendAfterGeneration(chatId, !!streamError.value, finalizeDeferredTailDelete)
+      if (!hadSaveSendDefer && !streamError.value) {
         bumpSidebarForActiveChat()
       }
     }
@@ -3081,7 +3061,7 @@ async function persistLocalStreamingMessages(chatId: string) {
   const chat = activeChat.value
   if (!chat?.messages?.length) return
 
-  const saveSendSnapshot = saveSendDeferCtx.value?.chatId === chatId ? saveSendDeferCtx.value : null
+  const saveSendSnapshot = getSaveSendDeferForChat(chatId)
   const capturedReasoningMessageId = chatReasoningMessageId.value
   const capturedReasoningFromRef = chatReasoningContent.value.trim()
   const blocksSnapshot = [...chatReasoningBlocks.value]
@@ -3129,9 +3109,7 @@ async function persistLocalStreamingMessages(chatId: string) {
   const rewriteSnapshot = rewriteMergeCtx.value
 
   if (saveSendSnapshot) {
-    saveSendDeferCtx.value = null
-    streamHiddenMessageIds.value = []
-    streamDeferDeleteIds.value = []
+    clearSaveSendDeferForChat(chatId)
 
     if (!saveSendSnapshot.singleAssistantTailMergeId) {
       for (const id of saveSendSnapshot.tailIdsToDeleteOnSuccess) {
@@ -3189,9 +3167,7 @@ async function persistLocalStreamingMessages(chatId: string) {
         reasoningForThis,
         durationForThis,
       })
-      rewriteMergeCtx.value = null
-      streamHiddenMessageIds.value = []
-      streamDeferDeleteIds.value = []
+      clearRewriteAndVisibility()
       serverMessages = activeChat.value?.messages ?? []
       continue
     }
@@ -3264,9 +3240,7 @@ async function persistLocalStreamingMessages(chatId: string) {
   chatReasoningContent.value = ''
   chatReasoningMessageId.value = null
   chatReasoningStreamActive.value = false
-  rewriteMergeCtx.value = null
-  streamHiddenMessageIds.value = []
-  streamDeferDeleteIds.value = []
+  clearRewriteAndVisibility()
   clearReasoningPhaseTiming()
   await chats.load(chatId)
   await afterChatReload(chatId)
@@ -3548,9 +3522,11 @@ async function handleRewriteMessage(m: ChatMessage) {
     .slice(messageIndex + 1)
     .map((x) => x.id)
     .filter((id) => !id.startsWith('local_'))
-  streamDeferDeleteIds.value = tailDeleteIds
-  streamHiddenMessageIds.value = [...omitMessageIds]
-  rewriteMergeCtx.value = { chatId, anchorId, anchorTs, originalMessageId }
+  beginRewriteDefer(
+    { chatId, anchorId, anchorTs, originalMessageId },
+    [...omitMessageIds],
+    tailDeleteIds,
+  )
 
   const listElBeforeLoad = messageListRef.value?.scrollRef ?? null
   const oldListScrollHeight = listElBeforeLoad?.scrollHeight ?? 0
@@ -3780,10 +3756,7 @@ async function handleRewriteMessage(m: ChatMessage) {
           anchorMsg.greetingVariantReasoningDurations ?? null,
         )
       }
-      const drop = [...streamDeferDeleteIds.value]
-      streamDeferDeleteIds.value = []
-      streamHiddenMessageIds.value = []
-      rewriteMergeCtx.value = null
+      const drop = takeDeferDeleteIdsAfterRewrite()
       if (drop.length) {
         await finalizeDeferredTailDelete(chatId, drop)
       }
@@ -4286,14 +4259,12 @@ async function handleSaveAndSend() {
       : null
 
   if (isGroup) {
-    saveSendDeferCtx.value = {
+    beginSaveSendDefer({
       chatId,
       tailIdsToDeleteOnSuccess,
       singleAssistantTailMergeId,
       mode: 'group',
-    }
-    streamDeferDeleteIds.value = tailIdsToDeleteOnSuccess
-    streamHiddenMessageIds.value = [...tailIdsToDeleteOnSuccess]
+    })
 
     await chats.updateMessage(chatId, messageId, editedRole, editedContent, originalMessage.characterId, {
       images: originalMessage.images ?? [],
@@ -4320,14 +4291,12 @@ async function handleSaveAndSend() {
 
   const omitMessageIds = tailIdsToDeleteOnSuccess
 
-  saveSendDeferCtx.value = {
+  beginSaveSendDefer({
     chatId,
     tailIdsToDeleteOnSuccess,
     singleAssistantTailMergeId,
     mode: 'single',
-  }
-  streamDeferDeleteIds.value = tailIdsToDeleteOnSuccess
-  streamHiddenMessageIds.value = [...tailIdsToDeleteOnSuccess]
+  })
 
   await chats.updateMessage(chatId, messageId, editedRole, editedContent, originalMessage.characterId, {
     images: originalMessage.images ?? [],
@@ -4442,22 +4411,7 @@ async function handleSaveAndSend() {
       await chats.load(chatId)
       await afterChatReload(chatId)
 
-      const ss = saveSendDeferCtx.value
-      if (
-        ss &&
-        ss.chatId === chatId &&
-        ss.tailIdsToDeleteOnSuccess.length &&
-        !streamError.value
-      ) {
-        saveSendDeferCtx.value = null
-        streamHiddenMessageIds.value = []
-        streamDeferDeleteIds.value = []
-        await finalizeDeferredTailDelete(chatId, ss.tailIdsToDeleteOnSuccess)
-      } else if (saveSendDeferCtx.value?.chatId === chatId) {
-        saveSendDeferCtx.value = null
-        streamHiddenMessageIds.value = []
-        streamDeferDeleteIds.value = []
-      }
+      await finalizeSaveSendAfterGeneration(chatId, !!streamError.value, finalizeDeferredTailDelete)
     }
     await settings.load()
   }
