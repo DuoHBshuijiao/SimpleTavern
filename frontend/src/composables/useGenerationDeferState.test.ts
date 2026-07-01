@@ -91,6 +91,35 @@ describe('useGenerationDeferState', () => {
     app.unmount()
   })
 
+  it('finalizeRewriteAfterGeneration 出错时只清状态不删尾部', async () => {
+    const { api, app } = withSetup()
+    const finalizeTailDelete = vi.fn(async () => {})
+    api.beginRewriteDefer(
+      { chatId: 'c1', anchorId: 'a1', anchorTs: 't', originalMessageId: 'orig' },
+      ['a1', 'm2'],
+      ['m2'],
+    )
+    await api.finalizeRewriteAfterGeneration('c1', true, finalizeTailDelete)
+    expect(finalizeTailDelete).not.toHaveBeenCalled()
+    expect(api.rewriteMergeCtx.value).toBeNull()
+    expect(api.streamHiddenMessageIds.value).toEqual([])
+    app.unmount()
+  })
+
+  it('finalizeRewriteAfterGeneration 成功时删除尾部', async () => {
+    const { api, app } = withSetup()
+    const finalizeTailDelete = vi.fn(async () => {})
+    api.beginRewriteDefer(
+      { chatId: 'c1', anchorId: 'a1', anchorTs: 't', originalMessageId: 'orig' },
+      ['a1'],
+      ['m2'],
+    )
+    await api.finalizeRewriteAfterGeneration('c1', false, finalizeTailDelete)
+    expect(finalizeTailDelete).toHaveBeenCalledWith('c1', ['m2'])
+    expect(api.rewriteMergeCtx.value).toBeNull()
+    app.unmount()
+  })
+
   it('clearAll 重置全部上下文', () => {
     const { api, app } = withSetup()
     api.beginRewriteDefer(

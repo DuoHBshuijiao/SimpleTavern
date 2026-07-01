@@ -281,7 +281,7 @@ const {
   getSaveSendDeferForChat,
   clearSaveSendDeferForChat,
   clearRewriteAndVisibility,
-  takeDeferDeleteIdsAfterRewrite,
+  finalizeRewriteAfterGeneration,
   filterVisibleMessages,
   finalizeSaveSendAfterGeneration,
 } = useGenerationDeferState()
@@ -2936,6 +2936,7 @@ async function triggerInterject(characterId: string) {
   chats.addLocalMessage(localMsg)
   scrollToBottom()
   
+  let generationHadError = false
   try {
     if (useStream) {
       stream.registerStreamMessage(localAssistantId)
@@ -2969,6 +2970,7 @@ async function triggerInterject(characterId: string) {
               chatReasoningStreamActive.value = false
               clearReasoningPhaseTiming()
               const data = evt.data as { message?: string } | undefined
+              generationHadError = true
               streamError.value = String(data?.message ?? 'unknown error')
             }
           },
@@ -3004,11 +3006,13 @@ async function triggerInterject(characterId: string) {
         scrollToBottom()
         void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
       } else {
+        generationHadError = true
         streamError.value = res.error || 'unknown error'
       }
     }
   } catch (e: any) {
     if (!isAbortError(e)) {
+      generationHadError = true
       streamError.value = e?.message ?? String(e)
     }
   } finally {
@@ -3020,8 +3024,8 @@ async function triggerInterject(characterId: string) {
       await chats.load(chatId)
       await afterChatReload(chatId)
       const hadSaveSendDefer = !!getSaveSendDeferForChat(chatId)
-      await finalizeSaveSendAfterGeneration(chatId, !!streamError.value, finalizeDeferredTailDelete)
-      if (!hadSaveSendDefer && !streamError.value) {
+      await finalizeSaveSendAfterGeneration(chatId, generationHadError, finalizeDeferredTailDelete)
+      if (!hadSaveSendDefer && !generationHadError) {
         bumpSidebarForActiveChat()
       }
     }
@@ -3541,6 +3545,7 @@ async function handleRewriteMessage(m: ChatMessage) {
   const isGroup = activeChat.value.isGroup
   const characterId = m.characterId || activeChat.value.characterId || ''
 
+  let generationHadError = false
   try {
     const localAssistantId = `local_rewrite_${Date.now()}`
     chatReasoningMessageId.value = localAssistantId
@@ -3604,6 +3609,7 @@ async function handleRewriteMessage(m: ChatMessage) {
                 chatReasoningStreamActive.value = false
                 clearReasoningPhaseTiming()
                 const data = evt.data as { message?: string } | undefined
+                generationHadError = true
                 streamError.value = String(data?.message ?? 'unknown error')
               }
             },
@@ -3638,6 +3644,7 @@ async function handleRewriteMessage(m: ChatMessage) {
           scrollToBottom()
           void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
         } else {
+          generationHadError = true
           streamError.value = res.error || 'unknown error'
         }
       }
@@ -3686,6 +3693,7 @@ async function handleRewriteMessage(m: ChatMessage) {
                 chatReasoningStreamActive.value = false
                 clearReasoningPhaseTiming()
                 const data = evt.data as { message?: string } | undefined
+                generationHadError = true
                 streamError.value = String(data?.message ?? 'unknown error')
               }
             },
@@ -3723,12 +3731,14 @@ async function handleRewriteMessage(m: ChatMessage) {
           scrollToBottom()
           void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
         } else {
+          generationHadError = true
           streamError.value = res.error || 'unknown error'
         }
       }
     }
   } catch (e: any) {
     if (!isAbortError(e)) {
+      generationHadError = true
       streamError.value = e?.message ?? String(e)
     }
   } finally {
@@ -3756,10 +3766,7 @@ async function handleRewriteMessage(m: ChatMessage) {
           anchorMsg.greetingVariantReasoningDurations ?? null,
         )
       }
-      const drop = takeDeferDeleteIdsAfterRewrite()
-      if (drop.length) {
-        await finalizeDeferredTailDelete(chatId, drop)
-      }
+      await finalizeRewriteAfterGeneration(chatId, generationHadError, finalizeDeferredTailDelete)
     }
   }
 }
@@ -4314,6 +4321,7 @@ async function handleSaveAndSend() {
   aborter.value?.abort()
   aborter.value = new AbortController()
 
+  let generationHadError = false
   try {
     const localAssistantId = `local_assistant_${Date.now()}`
     chatReasoningMessageId.value = localAssistantId
@@ -4364,6 +4372,7 @@ async function handleSaveAndSend() {
                 chatReasoningStreamActive.value = false
                 clearReasoningPhaseTiming()
                 const data = evt.data as { message?: string } | undefined
+                generationHadError = true
                 streamError.value = String(data?.message ?? 'unknown error')
               }
             },
@@ -4394,11 +4403,13 @@ async function handleSaveAndSend() {
           scrollToBottom()
           void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
         } else {
+          generationHadError = true
           streamError.value = res.error || 'unknown error'
         }
       }
   } catch (e: any) {
     if (!isAbortError(e)) {
+      generationHadError = true
       streamError.value = e?.message ?? String(e)
     }
   } finally {
@@ -4411,7 +4422,7 @@ async function handleSaveAndSend() {
       await chats.load(chatId)
       await afterChatReload(chatId)
 
-      await finalizeSaveSendAfterGeneration(chatId, !!streamError.value, finalizeDeferredTailDelete)
+      await finalizeSaveSendAfterGeneration(chatId, generationHadError, finalizeDeferredTailDelete)
     }
     await settings.load()
   }

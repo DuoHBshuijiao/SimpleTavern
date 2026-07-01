@@ -82,6 +82,22 @@ export function useGenerationDeferState() {
     return drop
   }
 
+  /** 重写流结束后处理延后删除（失败时仅恢复可见性，不删尾部） */
+  async function finalizeRewriteAfterGeneration(
+    chatId: string,
+    hasError: boolean,
+    finalizeTailDelete: (chatId: string, tailIds: string[]) => Promise<void>,
+  ): Promise<void> {
+    const ctx = rewriteMergeCtx.value
+    if (!ctx || ctx.chatId !== chatId) return
+    const drop = [...streamDeferDeleteIds.value]
+    rewriteMergeCtx.value = null
+    clearVisibilityState()
+    if (!hasError && drop.length) {
+      await finalizeTailDelete(chatId, drop)
+    }
+  }
+
   function filterVisibleMessages(messages: ChatMessage[]): ChatMessage[] {
     const hid = streamHiddenMessageIds.value
     if (!hid.length) return messages
@@ -118,6 +134,7 @@ export function useGenerationDeferState() {
     clearSaveSendDeferForChat,
     clearRewriteAndVisibility,
     takeDeferDeleteIdsAfterRewrite,
+    finalizeRewriteAfterGeneration,
     filterVisibleMessages,
     finalizeSaveSendAfterGeneration,
   }
