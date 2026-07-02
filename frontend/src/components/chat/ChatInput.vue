@@ -559,7 +559,7 @@ const textareaPlaceholderAttr = computed(() =>
   showPlaceholderReveal.value ? '' : inputPlaceholder.value
 )
 
-  /** 顶栏 morph 变量挂在输入壳上，子树继承；与下沉负 margin 共用 transition（状态条已移至 MessageList 上方叠层） */
+  /** 顶栏 morph 变量挂在输入壳上，子树继承；下沉仅 transform morph-wrap（无 margin transition） */
 const shellInlineStyle = computed(() => ({
   color: 'var(--color-text)',
   backgroundColor: 'unset',
@@ -592,7 +592,6 @@ defineExpose({
     <div class="chat-input-morph-wrap pointer-events-auto relative">
     <div
       class="chat-input-float-stack relative z-10"
-      :class="{ 'chat-input-float-stack--sink': sinkMorphed }"
     >
     <!-- 主输入区使用统一 surface-panel 玻璃层级，具体背景/模糊/边框由样式基座控制。 -->
     <div
@@ -953,26 +952,19 @@ defineExpose({
 }
 
 /*
- * 下沉：transform 不占布局，会在壳顶留下与 translateY 等高的空隙。
- * 外壳用等量负 margin-top 上移，与卡片下移相抵，消除与消息区之间的多余缝，且不挤占 flex-1 列表高度。
- * margin 的 transition 必须挂在壳基类上：仅写在 --sink 上时，侧栏展开去掉类后元素失去 transition，margin 会瞬间归零而 transform 仍在过渡，造成底部「截断」感。
- * --chat-input-sink-shift：输入卡下移与壳负 margin 必须同值；略大于原 1.125rem，以盖住底部提示行（mt-2 + text-xs）并略有余量。
+ * 下沉：卡片 + 底部提示作为 morph-wrap 整体 translateY，transition 始终挂在 wrap 上，
+ * 侧栏展开/收起时不会丢失过渡属性（避免 margin + transform 双轨不同步的截断感）。
+ * --chat-input-sink-shift：略大于原 1.125rem，以盖住底部提示行（mt-2 + text-xs）并略有余量。
  */
 .chat-input-shell {
   --chat-input-sink-shift: 1.75rem;
-  margin-top: 0;
-  transition: margin-top var(--chat-input-trans-dur, 320ms) var(--chat-input-trans-ease, ease);
 }
 
-.chat-input-shell--sink {
-  margin-top: calc(-1 * var(--chat-input-sink-shift));
-}
-
-.chat-input-float-stack {
+.chat-input-morph-wrap {
   transition: transform var(--chat-input-trans-dur, 320ms) var(--chat-input-trans-ease, ease);
 }
 
-.chat-input-float-stack--sink {
+.chat-input-shell--sink .chat-input-morph-wrap {
   transform: translateY(var(--chat-input-sink-shift));
 }
 
@@ -1001,16 +993,8 @@ defineExpose({
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .chat-input-shell {
+  .chat-input-morph-wrap {
     transition: none !important;
-  }
-  .chat-input-shell--sink {
-    margin-top: 0 !important;
-  }
-  .chat-input-float-stack {
-    transition: none !important;
-  }
-  .chat-input-float-stack--sink {
     transform: none !important;
   }
   .chat-input-card-morph {

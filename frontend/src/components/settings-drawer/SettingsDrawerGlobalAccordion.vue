@@ -20,12 +20,12 @@ const open = defineModel<boolean>('open', { required: true })
     >
       <span>{{ title }}</span>
       <ChevronDown
-        class="h-4 w-4 shrink-0 text-[var(--color-text-muted)] transition-transform duration-[800ms] ease-in-out"
+        class="h-4 w-4 shrink-0 text-[var(--color-text-muted)] transition-transform duration-[var(--motion-duration-expand)] ease-out"
         :class="open ? 'rotate-180' : ''"
       />
     </button>
     <div
-      class="grid transition-[grid-template-rows] duration-[800ms] ease-in-out"
+      class="grid transition-[grid-template-rows] duration-[var(--motion-duration-expand)] ease-out"
       :class="open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'"
     >
       <div class="min-h-0 overflow-hidden">

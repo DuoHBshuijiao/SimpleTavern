@@ -31,7 +31,7 @@ const linkedChatPresetName = computed(() => {
     <label class="block text-sm font-medium text-[var(--color-text-secondary)]">会话系统提示</label>
     <div class="relative inline-flex shrink-0 gap-1 rounded-lg border border-[var(--color-border-subtle)] bg-surface-muted p-1">
       <div
-        class="pointer-events-none absolute left-1 top-1 bottom-1 rounded-md bg-brand shadow-sm transition-transform duration-[400ms] ease-out"
+        class="pointer-events-none absolute left-1 top-1 bottom-1 rounded-md bg-brand shadow-sm transition-transform duration-[var(--motion-duration-moderate)] ease-out"
         :style="{
           width: 'calc((100% - 0.75rem) / 2)',
           transform: `translateX(calc(${chat.chatDraft.sessionSystemPromptMode === 'override' ? 1 : 0} * (100% + 0.25rem)))`,
@@ -39,7 +39,7 @@ const linkedChatPresetName = computed(() => {
       />
       <button
         type="button"
-        class="relative z-10 min-w-[4.25rem] flex-1 rounded-md px-2 py-1 text-center text-xs font-medium transition-colors duration-[400ms] ease-out touch-manipulation"
+        class="relative z-10 min-w-[4.25rem] flex-1 rounded-md px-2 py-1 text-center text-xs font-medium transition-colors duration-[var(--motion-duration-moderate)] ease-out touch-manipulation"
         :class="
           chat.chatDraft.sessionSystemPromptMode === 'append'
             ? 'text-[var(--color-on-brand)]'
@@ -49,7 +49,7 @@ const linkedChatPresetName = computed(() => {
       >追加全局</button>
       <button
         type="button"
-        class="relative z-10 min-w-[4.25rem] flex-1 rounded-md px-2 py-1 text-center text-xs font-medium transition-colors duration-[400ms] ease-out touch-manipulation"
+        class="relative z-10 min-w-[4.25rem] flex-1 rounded-md px-2 py-1 text-center text-xs font-medium transition-colors duration-[var(--motion-duration-moderate)] ease-out touch-manipulation"
         :class="
           chat.chatDraft.sessionSystemPromptMode === 'override'
             ? 'text-[var(--color-on-brand)]'

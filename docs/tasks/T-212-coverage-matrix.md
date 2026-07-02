@@ -50,5 +50,4 @@
 ## v0.700 剩余大项
 
 - T-212#8：生成/SSE orchestration composable（主体仍留 ChatPage）
-- T-213：ChatInput sink 动效 + motion audit
 - T-214：可观测性收尾（orphan 扩展等）

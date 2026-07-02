@@ -4077,7 +4077,7 @@ provide(
         <!-- Tabs：整块可点；底层滑块平移承载高光，与 gap-1 / px-2 对齐 -->
         <div class="relative flex gap-1 border-b border-[var(--color-border-subtle)] bg-[var(--color-settings-control-bg)] px-2 py-2">
           <div
-            class="pointer-events-none absolute left-2 top-2 bottom-2 rounded-lg bg-brand-a10 transition-transform duration-[400ms] ease-out"
+            class="pointer-events-none absolute left-2 top-2 bottom-2 rounded-lg bg-brand-a10 transition-transform duration-[var(--motion-duration-moderate)] ease-out"
             :style="{
               width: 'calc((100% - 1.5rem) / 3)',
               transform: `translateX(calc(${tab === 'global' ? 0 : tab === 'presets' ? 1 : 2} * (100% + 0.25rem)))`,
@@ -4087,11 +4087,11 @@ provide(
             v-for="t in ['global', 'presets', 'chat']"
             :key="t"
             type="button"
-            class="group relative z-10 flex min-h-11 min-w-0 flex-1 touch-manipulation items-center justify-center px-0.5 py-0.5 text-sm font-medium transition-colors duration-[400ms]"
+            class="group relative z-10 flex min-h-11 min-w-0 flex-1 touch-manipulation items-center justify-center px-0.5 py-0.5 text-sm font-medium transition-colors duration-[var(--motion-duration-moderate)]"
             @click="tab = t as any"
           >
             <span
-              class="block min-h-10 w-full rounded-lg py-2 text-center transition-colors duration-[400ms]"
+              class="block min-h-10 w-full rounded-lg py-2 text-center transition-colors duration-[var(--motion-duration-moderate)]"
               :class="
                 tab === t
                   ? 'text-brand'

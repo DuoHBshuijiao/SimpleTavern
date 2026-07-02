@@ -50,7 +50,7 @@
 | 组件化 | T-210 | ChatPage composable 第二批（入场动画、Esc 栈、reasoning、顶栏布局…） |
 | 拆分 | T-211 | SettingsDrawer 渐进拆分 |
 | 组件化 | T-212+ | ChatPage 角色编辑/导入导出子模块；`GenerationDeferState` 后拆生成/SSE |
-| UI/动画 | T-213 | ChatInput sink 动效（去 margin transition）、全站 motion audit |
+| UI/动画 | T-213 | ✅ ChatInput sink（transform-only）+ motion audit |
 | 可观测性 | T-214 | orphan 扩展、导出 warning 等剩余项 |
 
 ### v0.700 边界

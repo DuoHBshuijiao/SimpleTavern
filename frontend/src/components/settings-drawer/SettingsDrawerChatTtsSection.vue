@@ -65,7 +65,7 @@ const autoReadSlideIndex = computed(() => {
       <div class="text-sm font-medium text-[var(--color-text-secondary)]">自动朗读范围</div>
       <div class="relative inline-flex w-full gap-1 rounded-lg border border-[var(--color-border-subtle)] bg-surface-muted p-1">
         <div
-          class="pointer-events-none absolute left-1 top-1 bottom-1 rounded-md bg-brand shadow-sm transition-transform duration-[400ms] ease-out"
+          class="pointer-events-none absolute left-1 top-1 bottom-1 rounded-md bg-brand shadow-sm transition-transform duration-[var(--motion-duration-moderate)] ease-out"
           :style="{
             width: 'calc((100% - 1.25rem) / 4)',
             transform: `translateX(calc(${autoReadSlideIndex} * (100% + 0.25rem)))`,
@@ -75,7 +75,7 @@ const autoReadSlideIndex = computed(() => {
           v-for="option in chat.TTS_AUTO_READ_OPTIONS"
           :key="option.value"
           type="button"
-          class="relative z-10 min-h-[2.25rem] flex-1 rounded-md px-2 py-1 text-xs font-medium transition-colors duration-[400ms] ease-out"
+          class="relative z-10 min-h-[2.25rem] flex-1 rounded-md px-2 py-1 text-xs font-medium transition-colors duration-[var(--motion-duration-moderate)] ease-out"
           :class="(chat.chatDraft.tts?.autoReadScope ?? 'off') === option.value ? 'text-[var(--color-on-brand)]' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'"
           @click="chat.updateChatTtsAutoReadScope(option.value as AutoReadScope)"
         >

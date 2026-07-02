@@ -12,7 +12,7 @@
 - [x] **T-210** ChatPage composable 第二批（含顶栏布局/FAB）
 - [ ] **T-211** SettingsDrawer 渐进拆分（Teleport 三弹层已完成；accordion/Tab 待做）
 - [ ] **T-212** ChatPage 子模块拆分（角色编辑、导入导出壳层）
-- [ ] **T-213** ChatInput 动效与全站 motion audit
+- [x] **T-213** ChatInput 动效与全站 motion audit
 - [ ] **T-214** 可观测性剩余项 + v0.700 收尾验证
 
 ### v0.700 顺序

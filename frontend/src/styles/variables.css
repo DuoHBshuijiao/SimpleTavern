@@ -567,6 +567,13 @@
   --transition-fast: 0.15s var(--ease-out-product);
   --transition-normal: 0.2s var(--ease-out-product);
   --transition-slow: 0.3s var(--ease-out-product);
+
+  /* ========== 动效（常规 UI 150–250ms；顶栏 morph / FLIP 等编排动画见 chatHeaderMorph.ts） ========== */
+  --motion-duration-fast: 150ms;
+  --motion-duration-normal: 200ms;
+  --motion-duration-moderate: 250ms;
+  --motion-duration-expand: 280ms;
+  --motion-ease-product: var(--ease-out-product);
   
   /* ========== 字体 ========== */
   --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
