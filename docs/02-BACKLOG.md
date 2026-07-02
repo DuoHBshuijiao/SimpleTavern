@@ -1,32 +1,32 @@
 # Backlog
 
-## v0.700 任务
-
-### 已完成
+## v0.700 任务（已完成）
 
 - [x] T-201 ~ T-208（测试基座、3 composable、数据完整性、import warning、UI 首批）
+- [x] T-209 UI/动画全面收束
+- [x] T-210 ChatPage composable 第二批
+- [x] T-211 SettingsDrawer 渐进拆分
+- [x] T-212 ChatPage 弹层/composable 拆分（SSE 主体 → v0.800）
+- [x] T-213 ChatInput 动效与 motion audit
+- [x] T-214 可观测性前端收尾 + 版本文档收口
 
-### 进行中
+## v0.800 任务（下一版）
 
-- [x] **T-209** UI/动画全面收束（Impeccable chat/modals/SettingsDrawer；ChatInput margin 另开 T-213）
-- [x] **T-210** ChatPage composable 第二批（含顶栏布局/FAB）
-- [ ] **T-211** SettingsDrawer 渐进拆分（Teleport 三弹层已完成；accordion/Tab 待做）
-- [ ] **T-212** ChatPage 子模块拆分（角色编辑、导入导出壳层）
-- [x] **T-213** ChatInput 动效与全站 motion audit
-- [ ] **T-214** 可观测性剩余项 + v0.700 收尾验证
+- [ ] **T-800** 总卡：见 `docs/tasks/T-800-v0800-backend-performance.md`
+- [ ] T-801 ChatPage SSE / `useChatGeneration` composable
+- [ ] T-802~803 后端索引与生成/MVU 热路径
+- [ ] T-804 完整性 orphan 扩展 + 导出 warnings API
+- [ ] T-805 全链路验证
 
-### v0.700 顺序
+### v0.800 合并推进（与 T-801 同批）
 
-T-209 → T-210 → T-211 → T-212 → T-213 → T-214
+- SSE composable 与后端生成路径共用边界，避免 v0.700 前后端重复改接口
+- 数据完整性 worldbook orphan、导出跳过项需后端 API
 
-### 推迟到 v0.800（后端性能）
+## v0.900+
 
-- chatId 全局索引、后端扫描/加载路径优化、生成/MVU 热路径 profiling
-- **不再**承担 SettingsDrawer/ChatPage 大拆与 UI 全面扫尾
-
-### 推迟到 v0.900+
-
-- 原生 Responses / Anthropic / Gemini 协议层、Playwright E2E
+- 原生 Responses / Anthropic / Gemini 多厂商对话协议层
+- Playwright E2E
 
 ## v0.600 Backlog
 
@@ -41,24 +41,14 @@ T-209 → T-210 → T-211 → T-212 → T-213 → T-214
 
 ## P1 后续强化
 
-- 将 `SettingsDrawer.vue` 拆分为 API 预设、TTS、WebGPU、Web Search、会话覆盖等子组件。
-- 将 `ChatPage.vue` 拆分为角色/身份编辑、导入导出、生成流和会话管理子模块。
-- 为 modal/drawer 建立组件测试或轻量 Vue 测试基座。
-- 扩展数据完整性扫描到损坏角色、世界书和设置。
-- 为 import/export 增加更多 warning 汇总。
+- 将 `SettingsDrawer.vue` 拆分为 API 预设、TTS、WebGPU、Web Search、会话覆盖等子组件。→ **v0.700 已完成 Tab 级拆分**
+- 将 `ChatPage.vue` 拆分为角色/身份编辑、导入导出、生成流和会话管理子模块。→ **弹层已完成；生成流 v0.800**
+- 为 modal/drawer 建立组件测试或轻量 Vue 测试基座。→ **v0.700 已建**
+- 扩展数据完整性扫描到损坏角色、世界书和设置。→ **v0.700 已完成；worldbook orphan v0.800**
+- 为 import/export 增加更多 warning 汇总。→ **导入 v0.700；导出 API v0.800**
 
 ## P2 推迟
 
-- 原生 Responses / Anthropic / Gemini 协议层。
+- 原生 Responses / Anthropic / Gemini 协议层。→ **v0.900+**
 - Playwright E2E。
-- 后端全局 chatId 索引迁移。
-
-## 当前顺序
-
-1. `T-101-ui-foundation`
-2. `T-102-chat-main-path`
-3. `T-103-settings-panels`
-4. `T-104-modal-a11y`
-5. `T-105-backend-fast-fail`
-6. `T-106-tests-docs-version`
-7. `T-107-final-verify`
+- 后端全局 chatId 索引迁移。→ **v0.800**

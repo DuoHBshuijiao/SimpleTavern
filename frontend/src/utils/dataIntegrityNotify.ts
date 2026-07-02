@@ -26,7 +26,9 @@ export const ISSUE_KIND_LABELS: Record<string, string> = {
 export function formatIssueLine(issue: DataIntegrityIssue): string {
   const codeLabel = ISSUE_CODE_LABELS[issue.code] ?? issue.code
   const kindLabel = ISSUE_KIND_LABELS[issue.kind] ?? issue.kind
-  return `- ${codeLabel}（${kindLabel}）：${issue.path}`
+  const detailSuffix =
+    issue.detail && issue.detail.trim() ? ` — ${issue.detail.trim()}` : ''
+  return `- ${codeLabel}（${kindLabel}）：${issue.path}${detailSuffix}`
 }
 
 export function formatIssueLines(issues: DataIntegrityIssue[], max = 6): string[] {

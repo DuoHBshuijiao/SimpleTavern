@@ -1,7 +1,7 @@
 # Last Handoff
 
-- last_task: `T-211-global-accordion-batch1`
-- status: in-progress（v0.700 约 72%）
-- summary: SettingsDrawer Global Tab 首批 accordion 拆出：共用 `SettingsDrawerGlobalAccordion` + 网络搜索 / TTS 全局 / 应用与更新（检查更新）三节；草稿与 `handleSaveAll` 仍留父组件。
-- verify: frontend 102 tests + build 通过。
-- next_read: `docs/tasks/T-211-v0700-settings-drawer-split.md`（Presets Tab 或其余 Global accordion）
+- last_task: `T-214-v0700-observability-wrapup`
+- status: completed（**v0.700 前端范围收口**）
+- summary: T-214 前端可观测性收尾（integrity detail 文案、Janitor 导入统一 `formatImportResultMessage`）；文档明确 SSE composable / 后端性能 / orphan 扩展 → v0.800，多厂商协议 → v0.900+。
+- verify: frontend 113 tests + build；backend pytest 117 通过。
+- next_read: `docs/tasks/T-800-v0800-backend-performance.md`（T-801 SSE composable 为首项）

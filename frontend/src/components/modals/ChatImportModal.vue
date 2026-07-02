@@ -413,9 +413,7 @@ async function confirmJanitorImport() {
     }
     const result = (await r.json()) as JanitorConfirmResult
     await refreshDataAfterImport()
-    await notifyMessage(
-      `导入完成：${(result.imported || []).join(', ') || '无'}${result.warnings?.length ? '\n警告：' + result.warnings.join('; ') : ''}`,
-    )
+    await notifyMessage(formatImportResultMessage(result))
     emit('janitor-imported', {
       chatId: result.chat.id,
       characterId: result.chat.characterId ?? null,

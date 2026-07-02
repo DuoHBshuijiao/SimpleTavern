@@ -34,13 +34,27 @@
 
 - 新增 `useMessageListEnterAnimations`、`useGlobalEscapeStack`、`useMainChatReasoning`、`useChatHeaderLayout`、`useChatFabSeparation` 及单测；ChatPage 接入。
 
-### SettingsDrawer 拆分（T-211 进行中）
+### SettingsDrawer 拆分（T-211 完成）
 
-- Teleport 三弹层 + Global Tab accordion 首批（网络搜索、TTS 全局、应用与更新）拆至 `components/settings-drawer/`。
+- Global / Presets / Chat 三 Tab 拆至 `components/settings-drawer/`；Presets ref 绑定 Bugbot 修复。
+
+### ChatPage 拆分（T-212 完成，SSE 留 v0.800）
+
+- 角色/Persona/PNG-ST/助手设置弹层 + `useCharacterEditor` / `useEmbeddedAvatarImport` / `useGenerationDeferState`。
+- 生成/SSE 主体 composable 推迟 v0.800（与后端性能同批）。
+
+### UI/动画（T-213）
+
+- ChatInput sink 改为 morph-wrap 单轨 `transform`（去 margin transition）；SettingsDrawer 动效收束至 motion token。
+
+### 可观测性收尾（T-214）
+
+- 完整性巡检 `formatIssueLine` 展示 `detail`（如 orphan characterId）；Janitor 导入统一 `formatImportResultMessage`。
+- v0.700 文档收口；worldbook orphan / 导出 API warnings / SSE composable → v0.800；多厂商协议 → v0.900+。
 
 ### 测试
 
-- 截至本轮：前端 102 测试、后端 114 测试全通过。
+- 截至 v0.700 收尾：前端 113 测试、后端 117 测试全通过。
 
 ## v0.601
 

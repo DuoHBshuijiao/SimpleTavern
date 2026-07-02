@@ -50,6 +50,19 @@ describe('dataIntegrityNotify', () => {
     expect(text).toContain('data/chats/a/chat.json')
   })
 
+  it('formatIssueLine 在存在 detail 时附加说明', () => {
+    const line = formatIssueLine(
+      issue({
+        code: 'orphan_reference',
+        kind: 'chat_record',
+        path: 'data/chats/ghost/c1/chat.json',
+        detail: 'characterId=ghost 无对应角色卡',
+      }),
+    )
+    expect(line).toContain('角色缺失')
+    expect(line).toContain('characterId=ghost')
+  })
+
   it('summarizeManualOnly 仅展示人工异常', () => {
     const text = summarizeManualOnly([issue({ code: 'orphan_reference' })])
     expect(text).toContain('角色缺失')

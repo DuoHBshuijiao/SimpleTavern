@@ -49,5 +49,6 @@
 
 ## v0.700 剩余大项
 
-- T-212#8：生成/SSE orchestration composable（主体仍留 ChatPage）
-- T-214：可观测性收尾（orphan 扩展等）
+- ~~T-213~~ ✅
+- ~~T-214~~ ✅（前端）；后端 orphan/导出 → v0.800
+- v0.800：T-801 SSE composable + 后端性能（见 `docs/tasks/T-800-v0800-backend-performance.md`）

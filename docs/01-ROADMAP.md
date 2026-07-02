@@ -42,25 +42,33 @@
 - 数据完整性扫描扩展 + 导入 warning 修复。
 - UI/UX 首批：ChatPage 顶栏 + ChatSidebar 选中态 + 图片回退弹层 + 搜索 a11y + 完整性巡检文案。
 
-### v0.700 进行中 / 待完成
+### 进行中 / 待完成
 
 | 批次 | 任务卡 | 内容 |
 |------|--------|------|
-| UI/动画 | T-209 | chat/modals/SettingsDrawer Impeccable 扫尾、`.custom-scrollbar` 全局化、side-tab 消除 |
-| 组件化 | T-210 | ChatPage composable 第二批（入场动画、Esc 栈、reasoning、顶栏布局…） |
-| 拆分 | T-211 | SettingsDrawer 渐进拆分 |
-| 组件化 | T-212+ | ChatPage 角色编辑/导入导出子模块；`GenerationDeferState` 后拆生成/SSE |
-| UI/动画 | T-213 | ✅ ChatInput sink（transform-only）+ motion audit |
-| 可观测性 | T-214 | orphan 扩展、导出 warning 等剩余项 |
+| UI/动画 | T-209 | ✅ chat/modals/SettingsDrawer Impeccable 扫尾 |
+| 组件化 | T-210 | ✅ ChatPage composable 第二批 |
+| 拆分 | T-211 | ✅ SettingsDrawer Tab 拆分 |
+| 组件化 | T-212 | ✅ ChatPage 弹层/composable（SSE 主体 → v0.800） |
+| UI/动画 | T-213 | ✅ ChatInput sink transform-only + motion audit |
+| 可观测性 | T-214 | ✅ 前端收尾（orphan 扩展/导出 API → v0.800） |
 
-### v0.700 边界
+### v0.700 边界（已关闭）
 
-- 不新增原生 Responses / Anthropic / Gemini 协议栈。
-- Playwright E2E 可推迟至 v0.900+，但组件测试基座在本版内继续扩展。
+- 不新增原生 Responses / Anthropic / Gemini 协议栈（**v0.900+**）。
+- **不在 v0.700**：ChatPage SSE 主体 composable、后端性能、世界书 orphan 扩展、导出跳过 API warnings。
+- Playwright E2E 可推迟至 v0.900+；组件测试基座已扩展。
 
 ## v0.800 定位
 
-**后端性能改进版本**：chatId 索引、扫描/加载路径优化、生成与 MVU 热路径 profiling、缓存与 I/O 批量化等。前端仅做性能相关的小幅配合（若必要），**不承担** SettingsDrawer/ChatPage 大拆与 UI 全面扫尾。
+**后端性能 + 生成流 composable + 可观测性后端扩展**（见 `docs/tasks/T-800-v0800-backend-performance.md`）：
+
+- chatId 索引、扫描/加载路径优化、生成与 MVU 热路径 profiling
+- `useChatGeneration`（T-212#8 遗留 SSE 编排）
+- 数据完整性 worldbook orphan、导出 warnings API
+- 前端仅做上述 API 的配套 UI
+
+**v0.900+**：原生 Responses / Anthropic / Gemini 多厂商对话协议层。
 
 ## v0.900+ / v1.000
 
