@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 /**
  * TtsPlaybackFab - TTS 播放/下载双按钮浮动控件
  *
@@ -473,7 +473,7 @@ defineExpose({ getRect: getTtsFabRect, setTtsTopPx: setTopPxFromSeparation })
   border: 1px solid var(--color-border-subtle);
   background: color-mix(in srgb, var(--color-surface-overlay) 88%, transparent);
   color: var(--color-text-secondary);
-  font-size: 0.6875rem;
+  font-size: var(--text-2xs);
   line-height: 1;
   cursor: pointer;
   overflow: hidden;

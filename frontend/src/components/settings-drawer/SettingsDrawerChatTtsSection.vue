@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, inject } from 'vue'
 import type { AutoReadScope } from '../../types/models'
 import { SETTINGS_DRAWER_CHAT_KEY } from '../../composables/settingsDrawerChatKey'
@@ -25,7 +25,7 @@ const autoReadSlideIndex = computed(() => {
       </p>
     </div>
     <span
-      class="shrink-0 whitespace-nowrap rounded-full px-2 py-1 text-[11px] font-medium"
+      class="shrink-0 whitespace-nowrap rounded-full px-2 py-1 text-2xs font-medium"
       :class="chat.globalDraft.ttsEnabled ? 'bg-brand-a20 text-brand' : 'bg-surface-overlay text-[var(--color-text-muted)]'"
     >
       {{ chat.globalDraft.ttsEnabled ? '启用' : '禁用' }}

@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 /**
  * HttpRecordPreview - HTTP 请求记录的 Pretty 预览
  *
@@ -440,7 +440,7 @@ function roleBarColor(role: Role): string {
 }
 
 function roleLabelClass(role: Role): string {
-  const common = 'inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wider'
+  const common = 'inline-flex items-center rounded px-1.5 py-0.5 text-2xs font-semibold tracking-wider'
   switch (role) {
     case 'system':
       return `${common} bg-[var(--color-warning-bg)] text-[var(--color-warning-text)]`
@@ -515,7 +515,7 @@ function parameterProperties(parameters: unknown): Array<{ key: string; type: st
       <div class="http-card-body">
         <div class="mb-1.5 flex flex-wrap items-center gap-2">
           <span :class="roleLabelClass('program')">PROGRAM</span>
-          <span class="font-mono text-[11px] text-[var(--color-text-secondary)]">{{ parsedRequest.programCard.method }}</span>
+          <span class="font-mono text-2xs text-[var(--color-text-secondary)]">{{ parsedRequest.programCard.method }}</span>
           <span class="break-all text-xs text-[var(--color-text)]">{{ parsedRequest.programCard.url }}</span>
         </div>
         <div v-if="Object.keys(parsedRequest.programCard.summary).length > 0">
@@ -539,8 +539,8 @@ function parameterProperties(parameters: unknown): Array<{ key: string; type: st
       <div class="http-card-body">
         <div class="mb-1.5 flex flex-wrap items-center gap-2">
           <span :class="roleLabelClass(card.role)">{{ card.label }}</span>
-          <span v-if="card.name" class="text-[11px] text-[var(--color-text-secondary)]">name: {{ card.name }}</span>
-          <span v-if="card.tool_call_id" class="text-[11px] text-[var(--color-text-muted)]">tool_call_id: {{ card.tool_call_id }}</span>
+          <span v-if="card.name" class="text-2xs text-[var(--color-text-secondary)]">name: {{ card.name }}</span>
+          <span v-if="card.tool_call_id" class="text-2xs text-[var(--color-text-muted)]">tool_call_id: {{ card.tool_call_id }}</span>
         </div>
         <div v-if="card.parts.length === 0" class="text-xs italic text-[var(--color-text-muted)]">（空内容）</div>
         <div v-for="(part, pi) in card.parts" :key="'p-' + pi" class="mb-1.5 last:mb-0">
@@ -561,7 +561,7 @@ function parameterProperties(parameters: unknown): Array<{ key: string; type: st
                 style="max-width: 220px; max-height: 160px; object-fit: contain"
                 @click="openImage(part.url)"
               />
-              <span class="text-[11px] text-[var(--color-text-muted)]">
+              <span class="text-2xs text-[var(--color-text-muted)]">
                 <ImageIcon class="inline h-3 w-3" />
                 {{ describeImage(part.url, part.mime, part.bytesHint) }}
               </span>
@@ -572,12 +572,12 @@ function parameterProperties(parameters: unknown): Array<{ key: string; type: st
               <div class="mb-1 flex items-center gap-1.5 text-xs text-[var(--color-text)]">
                 <FileText class="h-3.5 w-3.5 text-[var(--color-text-secondary)]" />
                 <span class="font-medium">{{ part.placeholder.name || '&lt;unnamed&gt;' }}</span>
-                <span class="text-[11px] text-[var(--color-text-muted)]">
+                <span class="text-2xs text-[var(--color-text-muted)]">
                   {{ part.placeholder.mime || '—' }} · {{ formatBytes(part.placeholder.bytes ?? null) }}
                 </span>
               </div>
-              <pre class="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-[var(--color-dark-surface)] px-2 py-1 font-mono text-[11px] text-[var(--color-text-secondary)]">{{ part.placeholder.headPreview || '' }}</pre>
-              <div class="mt-0.5 text-right text-[10px] text-[var(--color-text-muted)]">
+              <pre class="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-[var(--color-dark-surface)] px-2 py-1 font-mono text-2xs text-[var(--color-text-secondary)]">{{ part.placeholder.headPreview || '' }}</pre>
+              <div class="mt-0.5 text-right text-2xs text-[var(--color-text-muted)]">
                 …内容已截断（隐私保护）
               </div>
             </div>
@@ -602,12 +602,12 @@ function parameterProperties(parameters: unknown): Array<{ key: string; type: st
           <span :class="roleLabelClass('response')">RESPONSE</span>
           <span
             v-if="record.responseStatus != null"
-            class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold"
-            :class="(record.responseStatus ?? 0) >= 400 ? 'bg-rose-500/15 text-rose-300' : 'bg-emerald-500/10 text-emerald-300'"
+            class="inline-flex items-center rounded px-1.5 py-0.5 text-2xs font-semibold"
+            :class="(record.responseStatus ?? 0) >= 400 ? 'bg-[var(--color-error-bg)] text-[var(--color-error-text)]' : 'bg-[var(--color-success-bg)] text-[var(--color-success-text)]'"
           >HTTP {{ record.responseStatus }}</span>
-          <span v-if="parsedResponse.kind === 'assistant'" class="text-[11px] text-[var(--color-text-secondary)]">assistant</span>
-          <span v-if="parsedResponse.kind === 'error'" class="text-[11px] text-rose-300">error</span>
-          <span v-if="record.durationMs != null" class="text-[11px] text-[var(--color-text-muted)]">{{ record.durationMs }} ms</span>
+          <span v-if="parsedResponse.kind === 'assistant'" class="text-2xs text-[var(--color-text-secondary)]">assistant</span>
+          <span v-if="parsedResponse.kind === 'error'" class="text-2xs text-[var(--color-error-text)]">error</span>
+          <span v-if="record.durationMs != null" class="text-2xs text-[var(--color-text-muted)]">{{ record.durationMs }} ms</span>
         </div>
 
         <div v-if="parsedResponse.parts.length === 0" class="text-xs italic text-[var(--color-text-muted)]">
@@ -649,12 +649,12 @@ function parameterProperties(parameters: unknown): Array<{ key: string; type: st
       <div class="mb-1.5 flex items-center gap-1.5 text-xs text-[var(--color-text-secondary)]">
         <Wrench class="h-3.5 w-3.5" />
         <span>工具区</span>
-        <span class="text-[10px] text-[var(--color-text-muted)]">（从请求与响应中提取，人类可读）</span>
+        <span class="text-2xs text-[var(--color-text-muted)]">（从请求与响应中提取，人类可读）</span>
       </div>
 
       <!-- 已挂载工具 -->
       <div v-if="parsedRequest.toolDefs.length > 0" class="mb-2 flex flex-col gap-1.5">
-        <div class="text-[11px] text-[var(--color-text-muted)]">已挂载工具 · {{ parsedRequest.toolDefs.length }}</div>
+        <div class="text-2xs text-[var(--color-text-muted)]">已挂载工具 · {{ parsedRequest.toolDefs.length }}</div>
         <div
           v-for="(tool, ti) in parsedRequest.toolDefs"
           :key="'td-' + ti"
@@ -671,12 +671,12 @@ function parameterProperties(parameters: unknown): Array<{ key: string; type: st
               <div
                 v-for="(p, pi) in parameterProperties(tool.parameters)"
                 :key="'pp-' + pi"
-                class="flex flex-wrap items-center gap-1.5 text-[11px]"
+                class="flex flex-wrap items-center gap-1.5 text-2xs"
               >
                 <span class="font-mono text-[var(--color-brand)]">{{ p.key }}</span>
                 <span class="text-[var(--color-text-muted)]">:</span>
                 <span class="font-mono text-emerald-300">{{ p.type }}</span>
-                <span v-if="p.required" class="rounded bg-rose-500/15 px-1 text-[10px] text-rose-300">required</span>
+                <span v-if="p.required" class="rounded bg-[var(--color-error-bg)] px-1 text-2xs text-[var(--color-error-text)]">required</span>
                 <span v-if="p.description" class="text-[var(--color-text-secondary)]">— {{ p.description }}</span>
               </div>
             </div>
@@ -697,7 +697,7 @@ function parameterProperties(parameters: unknown): Array<{ key: string; type: st
         v-if="assistantToolCallCards.length > 0 || parsedResponse.toolCalls.length > 0"
         class="mb-2 flex flex-col gap-1.5"
       >
-        <div class="text-[11px] text-[var(--color-text-muted)]">工具调用</div>
+        <div class="text-2xs text-[var(--color-text-muted)]">工具调用</div>
         <div
           v-for="(call, ci) in [...assistantToolCallCards, ...parsedResponse.toolCalls]"
           :key="'tc-' + ci"
@@ -708,7 +708,7 @@ function parameterProperties(parameters: unknown): Array<{ key: string; type: st
             <div class="mb-1 flex flex-wrap items-center gap-2">
               <span :class="roleLabelClass('tool')">TOOL CALL</span>
               <span class="font-mono text-xs text-[var(--color-text-primary)]">{{ call.name }}()</span>
-              <span v-if="call.id" class="text-[10px] text-[var(--color-text-muted)]">id: {{ call.id }}</span>
+              <span v-if="call.id" class="text-2xs text-[var(--color-text-muted)]">id: {{ call.id }}</span>
             </div>
             <CodeViewer
               :model-value="formatToolArgs(call)"
@@ -722,7 +722,7 @@ function parameterProperties(parameters: unknown): Array<{ key: string; type: st
 
       <!-- 工具返回 -->
       <div v-if="toolReturnCards.length > 0" class="flex flex-col gap-1.5">
-        <div class="text-[11px] text-[var(--color-text-muted)]">工具返回</div>
+        <div class="text-2xs text-[var(--color-text-muted)]">工具返回</div>
         <div
           v-for="(ret, ri) in toolReturnCards"
           :key="'tr-' + ri"
@@ -733,7 +733,7 @@ function parameterProperties(parameters: unknown): Array<{ key: string; type: st
             <div class="mb-1 flex flex-wrap items-center gap-2">
               <span :class="roleLabelClass('tool')">TOOL RETURN</span>
               <span v-if="ret.name" class="font-mono text-xs text-[var(--color-text-primary)]">{{ ret.name }}</span>
-              <span v-if="ret.tool_call_id" class="text-[10px] text-[var(--color-text-muted)]">call id: {{ ret.tool_call_id }}</span>
+              <span v-if="ret.tool_call_id" class="text-2xs text-[var(--color-text-muted)]">call id: {{ ret.tool_call_id }}</span>
             </div>
             <div v-for="(part, pi) in ret.parts" :key="'tr-p-' + pi" class="mb-1 last:mb-0">
               <template v-if="part.kind === 'text'">
@@ -749,10 +749,10 @@ function parameterProperties(parameters: unknown): Array<{ key: string; type: st
                   <div class="mb-1 flex items-center gap-1.5 text-xs">
                     <FileText class="h-3.5 w-3.5" />
                     <span class="font-medium">{{ part.placeholder.name || '&lt;unnamed&gt;' }}</span>
-                    <span class="text-[11px] text-[var(--color-text-muted)]">{{ part.placeholder.mime || '—' }} · {{ formatBytes(part.placeholder.bytes ?? null) }}</span>
+                    <span class="text-2xs text-[var(--color-text-muted)]">{{ part.placeholder.mime || '—' }} · {{ formatBytes(part.placeholder.bytes ?? null) }}</span>
                   </div>
-                  <pre class="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-[var(--color-dark-surface)] px-2 py-1 font-mono text-[11px] text-[var(--color-text-secondary)]">{{ part.placeholder.headPreview || '' }}</pre>
-                  <div class="mt-0.5 text-right text-[10px] text-[var(--color-text-muted)]">…内容已截断（隐私保护）</div>
+                  <pre class="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-[var(--color-dark-surface)] px-2 py-1 font-mono text-2xs text-[var(--color-text-secondary)]">{{ part.placeholder.headPreview || '' }}</pre>
+                  <div class="mt-0.5 text-right text-2xs text-[var(--color-text-muted)]">…内容已截断（隐私保护）</div>
                 </div>
               </template>
               <template v-else>

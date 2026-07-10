@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { renderChatMarkdown } from '../utils/markdownIt'
 import type { StartupUpdateCheckResponse } from '../api/update'
@@ -72,7 +72,7 @@ onBeforeUnmount(() => {
       <section class="theme-panel-bg backdrop-blur-[var(--glass-blur-panel)] backdrop-saturate-[1.8] border border-[var(--color-border)] shadow-glass-panel rounded-2xl overflow-hidden flex flex-col flex-1 min-h-0">
         <header class="px-4 pt-4 pb-3 border-b border-[var(--color-border-subtle)] shrink-0 flex items-start justify-between gap-3">
           <div class="min-w-0">
-            <div class="inline-flex items-center gap-2 rounded-full border border-[var(--color-brand-a30)] bg-[var(--color-brand-a10)] px-2.5 py-1 text-[11px] font-medium tracking-[0.08em] uppercase text-[var(--color-brand-fg-soft)]">
+            <div class="inline-flex items-center gap-2 rounded-full border border-[var(--color-brand-a30)] bg-[var(--color-brand-a10)] px-2.5 py-1 text-2xs font-medium tracking-[0.08em] uppercase text-[var(--color-brand-fg-soft)]">
               启动检查
             </div>
             <h2 class="mt-3 text-base font-semibold text-[var(--color-text)]">发现新版本 {{ startupUpdate.latestVersion }}</h2>

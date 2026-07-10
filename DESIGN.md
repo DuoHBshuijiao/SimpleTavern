@@ -37,6 +37,11 @@ typography:
     fontSize: "0.75rem"
     fontWeight: 500
     lineHeight: 1.25
+  caption-xs:
+    fontFamily: "Inter, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
+    fontSize: "0.625rem"
+    fontWeight: 500
+    lineHeight: 1.2
   mono:
     fontFamily: "JetBrains Mono, Fira Code, Consolas, Monaco, Courier New, monospace"
     fontSize: "0.75rem"
@@ -135,6 +140,7 @@ The palette is a restrained dark glass system with theme-driven accents. The def
 - **Title** (600, 1.125rem, 1.35): panel headings, drawer titles, modal headings.
 - **Body** (400, 0.875rem, 1.5): settings copy, labels with supporting text, list metadata.
 - **Label** (500, 0.75rem, 1.25): compact controls, chips, captions, status labels.
+- **Caption XS** (500, 0.625rem / `text-2xs`, 1.2): dense cockpit badges, SYSTEM tags, micro metadata. Prefer this over arbitrary `text-[10px]`.
 - **Mono** (0.75rem): IDs, model names, code, HTTP details, shader/source snippets.
 
 ### Named Rules

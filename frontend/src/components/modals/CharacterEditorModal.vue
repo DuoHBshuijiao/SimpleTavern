@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { X, Sparkles, Loader2, MoreHorizontal, GripVertical, Check, Plus, Globe } from 'lucide-vue-next'
 import type { AssistantAttachment, CharacterCard, MvuMode } from '../../types/models'
 import ModernAvatar from '../ModernAvatar.vue'
@@ -256,11 +256,11 @@ void dialogRef
                         >
                           <span
                             v-if="entry.chip"
-                            class="mb-1 shrink-0 rounded px-1 py-0.5 text-[10px] bg-brand-a10 text-brand border border-brand-a20"
+                            class="mb-1 shrink-0 rounded px-1 py-0.5 text-2xs bg-brand-a10 text-brand border border-brand-a20"
                           >已保存</span>
                           <span
                             v-else
-                            class="mb-1 shrink-0 rounded px-1 py-0.5 text-[10px] text-[var(--color-text-muted)] border border-[var(--color-border-subtle)]"
+                            class="mb-1 shrink-0 rounded px-1 py-0.5 text-2xs text-[var(--color-text-muted)] border border-[var(--color-border-subtle)]"
                           >草稿</span>
                           <span class="whitespace-pre-wrap break-words">{{ displayExtraEntryLabel(entry) }}</span>
                         </button>
@@ -412,7 +412,7 @@ void dialogRef
                   <Globe class="h-3 w-3" />
                   网络搜索
                 </button>
-                <span class="text-[10px] text-[var(--color-text-muted)]">工作区不写长期记忆</span>
+                <span class="text-2xs text-[var(--color-text-muted)]">工作区不写长期记忆</span>
               </div>
               <div v-if="assistant.workspaceAssistantDraftAttachments.value.length" class="mb-3 flex flex-wrap gap-2">
                 <template v-for="attachment in assistant.workspaceAssistantDraftAttachments.value" :key="attachment.id">
@@ -436,7 +436,7 @@ void dialogRef
                     class="group relative flex max-w-[220px] items-start gap-2 rounded-xl border border-[var(--color-border)] bg-surface-muted px-3 py-2 text-left"
                     @click="assistant.removeDraftAttachment('workspace', attachment.id)"
                   >
-                    <span class="rounded bg-surface-overlay px-1.5 py-0.5 text-[10px] font-semibold uppercase text-[var(--color-text-secondary)]">{{ getAssistantAttachmentExt(attachment) }}</span>
+                    <span class="rounded bg-surface-overlay px-1.5 py-0.5 text-2xs font-semibold uppercase text-[var(--color-text-secondary)]">{{ getAssistantAttachmentExt(attachment) }}</span>
                     <span class="truncate text-xs text-[var(--color-text)]">{{ getAssistantAttachmentLabel(attachment) }}</span>
                     <X class="ml-auto mt-0.5 h-3 w-3 shrink-0 text-[var(--color-text-muted)] transition-colors group-hover:text-[var(--color-text)]" />
                   </button>

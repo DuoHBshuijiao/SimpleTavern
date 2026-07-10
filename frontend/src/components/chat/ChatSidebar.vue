@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 /**
  * ChatSidebar - 侧边栏组件
  *
@@ -505,7 +505,7 @@ function confirmDelete() {
         <div class="flex-1 overflow-y-auto p-2 custom-scrollbar">
           <!-- 群聊列表 -->
           <div v-if="groupList.length > 0" class="mb-3">
-            <div class="text-[10px] text-[var(--color-purple)] uppercase tracking-wider px-2 mb-1 flex items-center gap-1">
+            <div class="text-2xs text-[var(--color-purple)] uppercase tracking-wider px-2 mb-1 flex items-center gap-1">
               <Users class="w-3 h-3" /> 群聊
             </div>
             <div 
@@ -529,7 +529,7 @@ function confirmDelete() {
                       class="ring-1 ring-[var(--color-surface-overlay)] bg-[var(--color-surface-overlay)]"
                     />
                   </template>
-                  <div v-if="getChatAvatars(c).length > 3" class="w-5 h-5 rounded-full bg-surface-hover flex items-center justify-center text-[8px] ring-1 ring-[var(--color-surface-overlay)]">
+                  <div v-if="getChatAvatars(c).length > 3" class="w-5 h-5 rounded-full bg-surface-hover flex items-center justify-center text-2xs ring-1 ring-[var(--color-surface-overlay)]">
                     +{{ getChatAvatars(c).length - 3 }}
                   </div>
                 </div>
@@ -557,7 +557,7 @@ function confirmDelete() {
                   />
                   <span class="truncate">{{ c.title }}</span>
                 </div>
-                <span class="text-[10px] text-[var(--color-text-muted)] shrink-0">({{ c.memberIds.length }}人)</span>
+                <span class="text-2xs text-[var(--color-text-muted)] shrink-0">({{ c.memberIds.length }}人)</span>
               </div>
               
               <div
@@ -588,7 +588,7 @@ function confirmDelete() {
 
           <!-- 单聊列表 -->
           <div v-if="chatList.filter(c => !c.isGroup).length > 0">
-            <div v-if="groupList.length > 0" class="text-[10px] text-[var(--color-text-muted)] uppercase tracking-wider px-2 mb-1">
+            <div v-if="groupList.length > 0" class="text-2xs text-[var(--color-text-muted)] uppercase tracking-wider px-2 mb-1">
               单聊
             </div>
             <div 

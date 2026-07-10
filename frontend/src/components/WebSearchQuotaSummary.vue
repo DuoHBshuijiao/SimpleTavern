@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 /**
  * 将 GET /api/web-search/status 的结果渲染为可读用量/余额（不展示原始 JSON）。
  * 仅展示当前选中的提供方，避免切换厂商时混显两边的余额。
@@ -33,8 +33,8 @@ function usagePct(used: number, limit: number): number {
 }
 
 function barToneClass(pct: number): string {
-  if (pct > 90) return 'bg-red-500'
-  if (pct > 70) return 'bg-amber-500'
+  if (pct > 90) return 'bg-[var(--color-error)]'
+  if (pct > 70) return 'bg-[var(--color-warning)]'
   return 'bg-brand'
 }
 
@@ -154,7 +154,7 @@ const emptyHintForCurrentProvider = computed(() => {
                 :style="{ width: usagePct(tavilyParsed.keyM.usage, tavilyParsed.keyM.limit) + '%' }"
               ></div>
             </div>
-            <p v-if="tavilyParsed.keyM.breakdown" class="text-[11px] leading-snug text-[var(--color-text-muted)]">
+            <p v-if="tavilyParsed.keyM.breakdown" class="text-2xs leading-snug text-[var(--color-text-muted)]">
               {{ tavilyParsed.keyM.breakdown }}
             </p>
           </div>

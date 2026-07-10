@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ChevronDown, X } from 'lucide-vue-next'
 import type { ApiPresetVoice } from '../types/models'
@@ -187,9 +187,9 @@ watch(dropdownOpen, (open) => {
         >
           <div class="min-w-0 flex-1">
             <div class="truncate text-xs font-medium text-[var(--color-text-secondary)]">{{ voice.name }}</div>
-            <div class="truncate text-[10px] text-[var(--color-text-muted)]">{{ voice.voiceId }}</div>
+            <div class="truncate text-2xs text-[var(--color-text-muted)]">{{ voice.voiceId }}</div>
           </div>
-          <span class="shrink-0 rounded-full bg-surface-muted px-2 py-0.5 text-[10px] text-[var(--color-text-muted)]">{{ voice.voiceType }}</span>
+          <span class="shrink-0 rounded-full bg-surface-muted px-2 py-0.5 text-2xs text-[var(--color-text-muted)]">{{ voice.voiceType }}</span>
         </button>
         <div v-if="filteredVoices.length === 0" class="px-3 py-3 text-xs text-[var(--color-text-muted)]">
           暂无已获取音色

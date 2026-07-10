@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { ref } from 'vue'
 import ModernSelect from '../ModernSelect.vue'
 import ThemedCheckbox from '../ThemedCheckbox.vue'
@@ -203,7 +203,7 @@ function triggerStImport() {
         <div class="flex items-center justify-between gap-3">
           <span class="text-xs text-[var(--color-text-secondary)]">活动预设</span>
           <div class="flex shrink-0 items-center gap-1.5">
-            <span class="whitespace-nowrap text-[11px] text-[var(--color-text-muted)]">渲染性能</span>
+            <span class="whitespace-nowrap text-2xs text-[var(--color-text-muted)]">渲染性能</span>
             <ModernSelect
               v-model="webgpuTargetFps"
               :options="webgpuTargetFpsOptions"
@@ -212,7 +212,7 @@ function triggerStImport() {
             />
           </div>
         </div>
-        <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-snug text-[var(--color-text-muted)]">
+        <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-2xs leading-snug text-[var(--color-text-muted)]">
           <span>适配器：{{ webgpuAvailability === 'available' ? '可用' : webgpuAvailability === 'unavailable' ? '不可用' : '检测中' }}</span>
           <span v-if="webgpuHasRuntimeOverride">· 运行态覆盖</span>
           <span v-if="webgpuPresetSourceDirty">· 未保存</span>
@@ -243,7 +243,7 @@ function triggerStImport() {
               <div class="flex flex-wrap items-center gap-1.5" @click.stop>
                 <button
                   type="button"
-                  class="min-h-8 shrink-0 rounded-md border border-[var(--color-border-subtle)] px-2 py-1 text-[11px] text-[var(--color-text-secondary)] transition-colors hover:bg-surface-hover/40 hover:text-[var(--color-text)]"
+                  class="min-h-8 shrink-0 rounded-md border border-[var(--color-border-subtle)] px-2 py-1 text-2xs text-[var(--color-text-secondary)] transition-colors hover:bg-surface-hover/40 hover:text-[var(--color-text)]"
                   :class="item.id === activeWebgpuPresetId ? 'border-[var(--color-border-subtle)]/80' : ''"
                   @click="emit('open-webgpu-editor', item.id)"
                 >
@@ -252,14 +252,14 @@ function triggerStImport() {
                 <template v-if="item.id === activeWebgpuPresetId">
                   <button
                     type="button"
-                    class="min-h-8 shrink-0 rounded-md border border-[var(--color-border-subtle)] px-2 py-1 text-[11px] transition-colors hover:bg-surface-hover/30"
+                    class="min-h-8 shrink-0 rounded-md border border-[var(--color-border-subtle)] px-2 py-1 text-2xs transition-colors hover:bg-surface-hover/30"
                     @click="emit('run-webgpu-preset')"
                   >
                     运行
                   </button>
                   <button
                     type="button"
-                    class="min-h-8 shrink-0 rounded-md border border-red-500/40 px-2 py-1 text-[11px] text-red-300 transition-colors hover:bg-red-500/10 disabled:opacity-50"
+                    class="min-h-8 shrink-0 rounded-md border border-[color-mix(in_srgb,var(--color-error)_40%,transparent)] px-2 py-1 text-2xs text-[var(--color-error-text)] transition-colors hover:bg-[var(--color-danger-hover)] disabled:opacity-50"
                     :disabled="webgpuPresetDeleteBusy"
                     @click="emit('delete-webgpu-preset')"
                   >

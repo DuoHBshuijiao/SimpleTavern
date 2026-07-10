@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="space-y-3">
     <div class="flex items-center justify-between">
       <label class="label">
@@ -24,22 +24,22 @@
         <input v-model="table.name" class="input flex-1 text-sm min-w-[120px]" placeholder="表格名称" @input="emitUpdate" />
         <button type="button" class="btn btn-xs btn-secondary" @click="addColumn(ti)">+列</button>
         <button type="button" class="btn btn-xs btn-secondary" @click="addRow(ti)">+行</button>
-        <button type="button" class="btn btn-xs btn-secondary text-red-400" @click="removeTable(ti)">删除</button>
+        <button type="button" class="btn btn-xs btn-danger" @click="removeTable(ti)">删除</button>
       </div>
 
       <div v-if="table.columns.length" class="flex flex-wrap gap-1">
         <span
           v-for="(_col, ci) in table.columns"
           :key="ci"
-          class="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--color-brand-a15)] text-[var(--color-brand)]"
+          class="inline-flex items-center gap-1 text-2xs px-1.5 py-0.5 rounded-full bg-[var(--color-brand-a15)] text-[var(--color-brand)]"
         >
           <input
-            class="bg-transparent border-none outline-none text-[10px] w-[60px] text-[var(--color-brand)]"
+            class="bg-transparent border-none outline-none text-2xs w-[60px] text-[var(--color-brand)]"
             placeholder="列名"
             :value="table.columns[ci]"
             @input="onColumnNameInput(ti, ci, $event)"
           />
-          <button type="button" class="hover:text-red-400 shrink-0 leading-none" @click="removeColumn(ti, ci)">&times;</button>
+          <button type="button" class="shrink-0 leading-none text-[var(--color-text-muted)] hover:text-[var(--color-error-text)] transition-colors" @click="removeColumn(ti, ci)">&times;</button>
         </span>
       </div>
 
@@ -75,7 +75,7 @@
                 />
               </td>
               <td class="p-1 border-b border-[var(--color-border-subtle)]">
-                <button type="button" class="text-[var(--color-text-muted)] hover:text-red-400 text-xs leading-none" @click="removeRow(ti, ri)">&times;</button>
+                <button type="button" class="text-[var(--color-text-muted)] hover:text-[var(--color-error-text)] text-xs leading-none transition-colors" @click="removeRow(ti, ri)">&times;</button>
               </td>
             </tr>
           </tbody>

@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 /**
  * HTTP 日志详情区：顶栏（宽屏单行：模式按钮与 method/url 同排；stackDetailHeader 时两行）+ 正文 + 底栏
  */
@@ -78,7 +78,7 @@ const contentMaxHeightClassDefault = 'max-h-[72vh]'
       </div>
       <div
         v-if="detail"
-        class="flex min-w-0 flex-wrap gap-x-2 gap-y-0.5 text-[11px] text-[var(--color-text-muted)]"
+        class="flex min-w-0 flex-wrap gap-x-2 gap-y-0.5 text-2xs text-[var(--color-text-muted)]"
         :class="stackDetailHeader ? 'items-baseline' : 'min-w-[120px] flex-1 items-center'"
       >
         <span class="shrink-0 font-mono">{{ detail.method }}</span>
@@ -113,7 +113,7 @@ const contentMaxHeightClassDefault = 'max-h-[72vh]'
     </div>
 
     <div
-      class="shrink-0 border-t border-[var(--color-border-subtle)] bg-[var(--color-surface-muted)]/20 px-3 py-1.5 text-center text-[10px] text-[var(--color-text-muted)]"
+      class="shrink-0 border-t border-[var(--color-border-subtle)] bg-[var(--color-surface-muted)]/20 px-3 py-1.5 text-center text-2xs text-[var(--color-text-muted)]"
     >
       仅保留最近 30 分钟，每 30s 自动清理一次；API Key 与文件内容已脱敏。
     </div>

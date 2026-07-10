@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 /**
  * HttpLogViewerModal - HTTP 请求查看弹窗
  *
@@ -237,7 +237,7 @@ function statusClass(item: HttpLogListItem): string {
 }
 
 function sourceBadgeClass(src: string): string {
-  const base = 'inline-flex items-center rounded px-1 py-0.5 text-[10px] font-semibold'
+  const base = 'inline-flex items-center rounded px-1 py-0.5 text-2xs font-semibold'
   switch (src) {
     case 'llm':
       return `${base} bg-[var(--color-success-bg)] text-[var(--color-success-text)]`
@@ -354,7 +354,7 @@ function detailEmbedId(itemId: string) {
                 <Clock class="h-3 w-3" />
                 最近 {{ listRetentionMinutes }} 分钟
               </span>
-              <span class="text-[10px] text-[var(--color-text-muted)]">{{ items.length }} 条</span>
+              <span class="text-2xs text-[var(--color-text-muted)]">{{ items.length }} 条</span>
             </div>
             <div v-if="listError" class="px-3 py-2 text-xs text-rose-300">{{ listError }}</div>
             <div v-else-if="items.length === 0 && !listLoading" class="flex flex-1 items-center justify-center px-3 text-center text-xs text-[var(--color-text-muted)]">
@@ -373,17 +373,17 @@ function detailEmbedId(itemId: string) {
                 >
                   <div class="flex items-center gap-1.5">
                     <span :class="sourceBadgeClass(it.source)">{{ sourceLabel(it.source) }}</span>
-                    <span class="font-mono text-[10px] text-[var(--color-text-muted)]">{{ it.method }}</span>
-                    <span :class="['ml-auto font-mono text-[10px]', statusClass(it)]">
+                    <span class="font-mono text-2xs text-[var(--color-text-muted)]">{{ it.method }}</span>
+                    <span :class="['ml-auto font-mono text-2xs', statusClass(it)]">
                       <template v-if="it.error">ERR</template>
                       <template v-else-if="it.responseStatus != null">{{ it.responseStatus }}</template>
                       <template v-else>—</template>
                     </span>
                   </div>
-                  <div class="truncate font-mono text-[10px] text-[var(--color-text-secondary)]">
+                  <div class="truncate font-mono text-2xs text-[var(--color-text-secondary)]">
                     {{ truncateUrl(it.url, 60) }}
                   </div>
-                  <div class="flex items-center gap-1.5 text-[10px] text-[var(--color-text-muted)]">
+                  <div class="flex items-center gap-1.5 text-2xs text-[var(--color-text-muted)]">
                     <span>{{ formatTime(it.ts) }}</span>
                     <Radio v-if="it.streaming" class="h-2.5 w-2.5" />
                     <span v-if="it.streaming">stream</span>
@@ -408,17 +408,17 @@ function detailEmbedId(itemId: string) {
                     >
                       <div class="flex items-center gap-1.5">
                         <span :class="sourceBadgeClass(it.source)">{{ sourceLabel(it.source) }}</span>
-                        <span class="font-mono text-[10px] text-[var(--color-text-muted)]">{{ it.method }}</span>
-                        <span :class="['ml-auto font-mono text-[10px]', statusClass(it)]">
+                        <span class="font-mono text-2xs text-[var(--color-text-muted)]">{{ it.method }}</span>
+                        <span :class="['ml-auto font-mono text-2xs', statusClass(it)]">
                           <template v-if="it.error">ERR</template>
                           <template v-else-if="it.responseStatus != null">{{ it.responseStatus }}</template>
                           <template v-else>—</template>
                         </span>
                       </div>
-                      <div class="truncate font-mono text-[10px] text-[var(--color-text-secondary)]">
+                      <div class="truncate font-mono text-2xs text-[var(--color-text-secondary)]">
                         {{ truncateUrl(it.url, 60) }}
                       </div>
-                      <div class="flex items-center gap-1.5 text-[10px] text-[var(--color-text-muted)]">
+                      <div class="flex items-center gap-1.5 text-2xs text-[var(--color-text-muted)]">
                         <span>{{ formatTime(it.ts) }}</span>
                         <Radio v-if="it.streaming" class="h-2.5 w-2.5" />
                         <span v-if="it.streaming">stream</span>

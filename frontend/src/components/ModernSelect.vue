@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 /**
  * ModernSelect - 现代化选择器组件
  *
@@ -467,7 +467,7 @@ onUnmounted(() => {
         <template v-for="(item, idx) in filteredOptions">
            <!-- Group Header -->
            <div v-if="'options' in item" :key="`group-${idx}`" class="px-2 py-1">
-              <div class="text-[10px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider px-1 mb-1">{{ item.label }}</div>
+              <div class="text-2xs font-bold text-[var(--color-text-muted)] uppercase tracking-wider px-1 mb-1">{{ item.label }}</div>
               <div 
                 v-for="opt in item.options" 
                 :key="opt.value"

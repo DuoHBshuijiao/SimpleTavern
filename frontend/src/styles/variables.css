@@ -580,6 +580,7 @@
   --font-mono: 'JetBrains Mono', 'Fira Code', Consolas, Monaco, 'Courier New', monospace;
   
   /* ========== 字号 ========== */
+  --text-2xs: 0.625rem; /* 10px：dense chip / badge / SYSTEM 标签 */
   --text-xs: 0.75rem;
   --text-sm: 0.875rem;
   --text-base: 1rem;
@@ -606,7 +607,7 @@
    * 遮罩：var(--color-overlay)、var(--color-overlay-heavy)
    * 主色/品牌：var(--color-primary)、var(--color-brand-a10)～var(--color-brand-a50)
    * 圆角：var(--radius-sm|md|lg|xl|2xl)；间距：var(--spacing-xs|sm|md|lg|xl|2xl)；阴影：var(--shadow-light|heavy|brand|…)
-   * 字号/字体：var(--text-xs|sm|…)、var(--font-sans)
+   * 字号/字体：var(--text-2xs|xs|sm|…)、var(--font-sans)
    * 层级：继承 .modal（var(--z-modal)）；弹内下拉须满足 var(--z-dropdown)
    * Tailwind arbitrary：text-[var(--color-text-muted)] 等，不得写死颜色字面量。
    */

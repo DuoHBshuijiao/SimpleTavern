@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import ModernSelect from '../ModernSelect.vue'
 import WebSearchQuotaSummary from '../WebSearchQuotaSummary.vue'
 import SettingsDrawerGlobalAccordion from './SettingsDrawerGlobalAccordion.vue'
@@ -104,7 +104,7 @@ const open = defineModel<boolean>('open', { required: true })
           <span>用量 / 余额</span>
           <span
             v-if="remoteStatusFetching"
-            class="text-[11px] font-normal text-[var(--color-text-muted)]"
+            class="text-2xs font-normal text-[var(--color-text-muted)]"
           >
             刷新中…
           </span>

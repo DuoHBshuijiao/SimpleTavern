@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 /**
  * MessageList - 消息列表组件
  *
@@ -1573,7 +1573,7 @@ onBeforeUnmount(() => {
       >
         <!-- 头像 -->
         <div class="flex-shrink-0 mt-1">
-          <div v-if="m.role === 'system'" class="w-10 h-10 rounded-full bg-yellow-500/20 flex items-center justify-center text-yellow-500">
+          <div v-if="m.role === 'system'" class="w-10 h-10 rounded-full bg-[var(--color-warning-bg)] flex items-center justify-center text-[var(--color-warning-text)]">
             <Settings class="w-6 h-6" />
           </div>
           <button
@@ -1608,7 +1608,7 @@ onBeforeUnmount(() => {
             <span class="text-xs font-bold" :class="m.role === 'user' ? 'text-brand-fg-soft' : 'text-[var(--color-text-muted)]'">
               {{ getMessageLabel(m) }}
             </span>
-            <span v-if="m.role === 'system'" class="text-[10px] bg-yellow-500/10 text-yellow-500 px-1.5 py-0.5 rounded">SYSTEM</span>
+            <span v-if="m.role === 'system'" class="text-2xs bg-[var(--color-warning-bg)] text-[var(--color-warning-text)] px-1.5 py-0.5 rounded">SYSTEM</span>
             <div
               v-if="getOutgoingFork(m)"
               :ref="(el) => setForkListAnchor(m.id, el)"
@@ -1616,7 +1616,7 @@ onBeforeUnmount(() => {
             >
               <button
                 type="button"
-                class="text-[10px] text-brand hover:underline"
+                class="text-2xs text-brand hover:underline"
                 :aria-label="`已有 ${getOutgoingFork(m)?.count ?? 0} 个分叉，点击查看`"
                 @click.stop="toggleForkList(m.id)"
               >

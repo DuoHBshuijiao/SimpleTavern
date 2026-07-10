@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 /**
  * 世界书整书编辑：书名、条目 CRUD、排序、PUT 保存。
  */
@@ -371,7 +371,7 @@ async function save() {
                       <div class="text-xs text-[var(--color-text-muted)] mt-0.5 truncate">
                         {{ (e.regex || '').trim() ? '已填正则' : '无正则' }}
                       </div>
-                      <div class="text-[10px] text-[var(--color-text-muted)] mt-0.5">{{ entryTokenHint(e.id) }}</div>
+                      <div class="text-2xs text-[var(--color-text-muted)] mt-0.5">{{ entryTokenHint(e.id) }}</div>
                     </div>
                     <div class="flex flex-wrap items-center gap-1 shrink-0">
                       <button

@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 /**
  * ChatPage - 聊天页面主组件
  *
@@ -4546,7 +4546,7 @@ const editingPersonaAvatarUrl = computed(() => {
                   <template v-if="activeChat.isGroup">
                     <div class="flex min-w-0 items-center gap-2">
                       <h2 class="truncate text-lg font-bold text-[var(--color-purple-text)]">{{ activeChat.title }}</h2>
-                      <span class="shrink-0 rounded-full border border-[var(--color-border-subtle)] bg-surface-muted/70 px-2 py-0.5 text-[11px] text-[var(--color-text-muted)]">
+                      <span class="shrink-0 rounded-full border border-[var(--color-border-subtle)] bg-surface-muted/70 px-2 py-0.5 text-2xs text-[var(--color-text-muted)]">
                         {{ activeChat.memberIds.length }} 个角色
                       </span>
                     </div>
@@ -4654,7 +4654,7 @@ const editingPersonaAvatarUrl = computed(() => {
                         </span>
                         <div class="leading-tight">
                           <div class="text-xs text-[var(--color-text-secondary)]">会话搜索</div>
-                          <div class="text-[11px] text-[var(--color-text-muted)]">
+                          <div class="text-2xs text-[var(--color-text-muted)]">
                             {{ chatSearchHitsForNav.length ? (chatSearchCursor < 0 ? `—/${chatSearchHitsForNav.length}` : `${chatSearchCursor + 1}/${chatSearchHitsForNav.length}`) : (chatSearchLoading ? '搜索中...' : '输入后定位消息') }}
                           </div>
                         </div>
@@ -4709,7 +4709,7 @@ const editingPersonaAvatarUrl = computed(() => {
             <Transition name="chat-header-groupstrip">
             <div v-if="activeChat.isGroup && groupMembers.length > 0" key="hdr-group-strip" class="px-6 pb-2 pointer-events-auto">
               <div class="flex items-center gap-3 overflow-x-auto rounded-xl border border-[var(--color-border-subtle)] bg-surface-overlay/55 px-3 py-2">
-                <div class="shrink-0 text-[11px] tracking-[0.08em] text-[var(--color-text-muted)]">
+                <div class="shrink-0 text-2xs tracking-[0.08em] text-[var(--color-text-muted)]">
                   成员
                 </div>
                 <div 
@@ -4719,7 +4719,7 @@ const editingPersonaAvatarUrl = computed(() => {
                   :class="group.canInterject.value ? 'cursor-pointer hover:bg-[var(--color-purple-bg)]' : ''"
                   @click="group.canInterject.value && triggerInterject(member.id)"
                 >
-                  <span class="text-[10px] text-[var(--color-text-muted)]">{{ idx + 1 }}</span>
+                  <span class="text-2xs text-[var(--color-text-muted)]">{{ idx + 1 }}</span>
                   <ModernAvatar 
                     :src="member.avatar ? `/api/avatars/${member.avatar}` : null" 
                     :name="member.name" 
@@ -4730,7 +4730,7 @@ const editingPersonaAvatarUrl = computed(() => {
                   <span class="max-w-[72px] truncate text-xs text-[var(--color-text-secondary)]">{{ member.name }}</span>
                   <span 
                     v-if="group.getMemberSettings(member.id).probability < 1" 
-                    class="rounded-full border border-[var(--color-warning)]/20 bg-[var(--color-warning-bg)] px-1.5 py-0.5 text-[10px] leading-none text-[var(--color-warning-text)]"
+                    class="rounded-full border border-[var(--color-warning)]/20 bg-[var(--color-warning-bg)] px-1.5 py-0.5 text-2xs leading-none text-[var(--color-warning-text)]"
                   >
                     {{ Math.round(group.getMemberSettings(member.id).probability * 100) }}%
                   </span>
@@ -4738,7 +4738,7 @@ const editingPersonaAvatarUrl = computed(() => {
                 <div v-if="!group.effectivePureAiMode.value" class="flex items-center gap-1.5 shrink-0 rounded-full border border-brand-a20 bg-brand-a10 px-2.5 py-1">
                   <ModernAvatar :src="userAvatarUrl" :name="userName" :size="20" aspect="1" rounded="rounded" />
                   <span class="max-w-[72px] truncate text-xs text-brand">{{ userName }}</span>
-                  <span class="text-[10px] text-brand-a60">你</span>
+                  <span class="text-2xs text-brand-a60">你</span>
                 </div>
               </div>
             </div>
@@ -5317,7 +5317,7 @@ const editingPersonaAvatarUrl = computed(() => {
 .chat-header-search-expand {
   display: grid;
   grid-template-rows: 0fr;
-  transition: grid-template-rows var(--chat-search-expand-ms, 320ms) cubic-bezier(0.4, 0, 0.2, 1);
+  transition: grid-template-rows var(--motion-duration-expand) cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .chat-header-search-expand--open {
@@ -5333,8 +5333,8 @@ const editingPersonaAvatarUrl = computed(() => {
   opacity: 0;
   transform: translateY(6px);
   transition:
-    opacity var(--chat-search-content-ms, 280ms) cubic-bezier(0.4, 0, 0.2, 1),
-    transform var(--chat-search-content-ms, 280ms) cubic-bezier(0.25, 1, 0.5, 1);
+    opacity var(--motion-duration-expand) cubic-bezier(0.4, 0, 0.2, 1),
+    transform var(--motion-duration-expand) cubic-bezier(0.25, 1, 0.5, 1);
   pointer-events: none;
 }
 
@@ -5382,7 +5382,7 @@ const editingPersonaAvatarUrl = computed(() => {
 .chat-search-chips-expand {
   display: grid;
   grid-template-rows: 0fr;
-  transition: grid-template-rows var(--chat-search-chips-ms, 280ms) cubic-bezier(0.4, 0, 0.2, 1);
+  transition: grid-template-rows var(--chat-search-chips-ms, var(--motion-duration-expand)) cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .chat-search-chips-expand--open {
@@ -5395,8 +5395,8 @@ const editingPersonaAvatarUrl = computed(() => {
   transform: translateY(8px);
   opacity: 0;
   transition:
-    transform var(--chat-search-chips-ms, 280ms) cubic-bezier(0.25, 1, 0.5, 1),
-    opacity var(--chat-search-chips-ms, 280ms) cubic-bezier(0.4, 0, 0.2, 1);
+    transform var(--chat-search-chips-ms, var(--motion-duration-expand)) cubic-bezier(0.25, 1, 0.5, 1),
+    opacity var(--chat-search-chips-ms, var(--motion-duration-expand)) cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .chat-search-chips-expand--open .chat-search-chips-expand-inner {

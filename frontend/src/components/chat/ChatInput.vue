@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 /**
  * ChatInput - 聊天输入组件
  *
@@ -961,6 +961,7 @@ defineExpose({
 .chat-input-shell {
   --chat-input-sink-shift: 1.75rem;
   margin-top: 0;
+  /* impeccable-disable-next-line layout-transition: sink 布局补偿须与 morph-wrap transform 同频 */
   transition: margin-top var(--chat-input-trans-dur, 320ms) var(--chat-input-trans-ease, ease);
 }
 
@@ -1052,7 +1053,7 @@ defineExpose({
   background-color: var(--color-chrome-widget);
   background-image: none;
   color: var(--color-text-secondary);
-  font-size: 0.6875rem;
+  font-size: var(--text-2xs);
   line-height: 1;
   cursor: pointer;
   overflow: hidden;

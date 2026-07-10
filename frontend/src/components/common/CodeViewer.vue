@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 /**
  * CodeViewer - 通用只读代码查看器
  *
@@ -461,7 +461,7 @@ function lineNumberText(n: number): string {
       <!-- 行号 + 折叠指示列：与内容列共享 paddingTop/Bottom 像素、font 堆栈、每行显式 height+lineHeight -->
       <div
         v-if="showLineNumbers"
-        class="sticky left-0 z-[2] flex shrink-0 select-none flex-col bg-transparent font-mono text-[11px] text-[var(--color-text-muted)]"
+        class="sticky left-0 z-[2] flex shrink-0 select-none flex-col bg-transparent font-mono text-2xs text-[var(--color-text-muted)]"
         :style="{ width: '3.5rem', ...verticalPadStyle }"
       >
         <div
@@ -491,7 +491,7 @@ function lineNumberText(n: number): string {
       <div class="min-h-0 min-w-0 flex-1 overflow-x-auto">
         <div
           ref="contentRootRef"
-          class="box-border w-full px-3 font-mono text-[11px] text-[var(--color-text-primary)]"
+          class="box-border w-full px-3 font-mono text-2xs text-[var(--color-text-primary)]"
           :style="verticalPadStyle"
         >
           <div

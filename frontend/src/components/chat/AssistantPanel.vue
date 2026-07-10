@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 /**
  * AssistantPanel - 聊天助手面板组件
  *
@@ -317,19 +317,19 @@ watch(
             聊天助手
             <span
               v-if="allowWriteMemory"
-              class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold normal-case tracking-normal bg-brand/20 text-brand-foreground border border-brand/40"
+              class="inline-flex items-center rounded px-1.5 py-0.5 text-2xs font-semibold normal-case tracking-normal bg-brand/20 text-brand-foreground border border-brand/40"
             >
               记忆
             </span>
             <span
               v-if="allowDestructiveTools"
-              class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold normal-case tracking-normal bg-[var(--color-warning-bg)] text-[var(--color-warning-text)] border border-[color-mix(in_srgb,var(--color-warning)_40%,transparent)]"
+              class="inline-flex items-center rounded px-1.5 py-0.5 text-2xs font-semibold normal-case tracking-normal bg-[var(--color-warning-bg)] text-[var(--color-warning-text)] border border-[color-mix(in_srgb,var(--color-warning)_40%,transparent)]"
             >
               破坏
             </span>
             <span
               v-if="allowWebSearch"
-              class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold normal-case tracking-normal bg-brand/20 text-brand-foreground border border-brand/40"
+              class="inline-flex items-center rounded px-1.5 py-0.5 text-2xs font-semibold normal-case tracking-normal bg-brand/20 text-brand-foreground border border-brand/40"
             >
               搜索
             </span>
@@ -452,7 +452,7 @@ watch(
             class="group surface-muted relative flex max-w-[220px] items-start gap-2 px-3 py-2 text-left"
             @click="emit('remove-attachment', attachment.id)"
           >
-            <span class="rounded bg-[var(--color-surface-inset)] px-1.5 py-0.5 text-[10px] font-semibold uppercase text-secondary">{{ getAttachmentExt(attachment) }}</span>
+            <span class="rounded bg-[var(--color-surface-inset)] px-1.5 py-0.5 text-2xs font-semibold uppercase text-secondary">{{ getAttachmentExt(attachment) }}</span>
             <span class="truncate text-xs text-primary">{{ getAttachmentLabel(attachment) }}</span>
             <X class="ml-auto mt-0.5 h-3 w-3 shrink-0 text-muted transition-colors group-hover:text-primary" />
           </button>

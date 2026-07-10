@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { inject } from 'vue'
 import { SETTINGS_DRAWER_CHAT_KEY } from '../../composables/settingsDrawerChatKey'
 import ModernSelect from '../ModernSelect.vue'
@@ -85,7 +85,7 @@ const chat = inject(SETTINGS_DRAWER_CHAT_KEY)!
       >
         <div class="min-w-0 flex-1">
           <div class="text-xs text-[var(--color-text)] truncate">{{ book.name || book.id }}</div>
-          <div class="text-[10px] text-[var(--color-text-muted)] leading-tight mt-0.5">
+          <div class="text-2xs text-[var(--color-text-muted)] leading-tight mt-0.5">
             {{ chat.worldbookTokenHint(book.id) }}
           </div>
         </div>
@@ -103,7 +103,7 @@ const chat = inject(SETTINGS_DRAWER_CHAT_KEY)!
   </div>
   <div class="space-y-1 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay p-2">
     <div class="text-xs text-[var(--color-text-muted)]">会话世界书顺序</div>
-    <p class="text-[10px] text-[var(--color-text-muted)] mb-1 leading-snug">
+    <p class="text-2xs text-[var(--color-text-muted)] mb-1 leading-snug">
       拖动条目或用上移/下移调整顺序（预算淘汰时靠后的书先被丢弃）。扫描深度与插入深度在「编辑」中设置（按会话）。
     </p>
     <div
@@ -122,7 +122,7 @@ const chat = inject(SETTINGS_DRAWER_CHAT_KEY)!
         </span>
         <div class="flex min-w-0 flex-1 flex-col gap-0.5">
           <span class="truncate text-xs text-[var(--color-text)]">{{ Number(idx) + 1 }}. {{ chat.worldBookName(att.worldBookId) }}</span>
-          <div class="text-[10px] text-[var(--color-text-muted)] leading-tight">
+          <div class="text-2xs text-[var(--color-text-muted)] leading-tight">
             扫描：{{ chat.scanDepthDisplay(att.scanDepth) }}　深度：{{ att.insertDepth ?? 5 }}
           </div>
         </div>

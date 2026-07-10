@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 /**
  * GroupSettingsModal - 群聊设置弹窗组件
  *
@@ -354,7 +354,7 @@ void dialogRef
                 </div>
 
                 <!-- 序号 -->
-                <div class="surface-inset w-6 h-6 rounded-full flex items-center justify-center text-[10px] text-muted font-bold">
+                <div class="surface-inset w-6 h-6 rounded-full flex items-center justify-center text-2xs text-muted font-bold">
                   {{ idx + 1 }}
                 </div>
 
@@ -370,7 +370,7 @@ void dialogRef
                 <!-- 名称 -->
                 <div class="flex-1 min-w-0">
                   <div class="font-medium text-sm text-primary truncate">{{ getCharacter(id)?.name || '未知角色' }}</div>
-                  <div v-if="chat.memberSettings?.[id]?.probability !== undefined && chat.memberSettings[id].probability < 1" class="text-[10px] text-warning">
+                  <div v-if="chat.memberSettings?.[id]?.probability !== undefined && chat.memberSettings[id].probability < 1" class="text-2xs text-warning">
                     参与概率: {{ Math.round(Number(chat.memberSettings?.[id]?.probability) * 100) }}%
                   </div>
                 </div>

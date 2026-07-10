@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 /**
  * 会话世界书顺序中单本书的扫描深度 / 插入深度编辑（不写回世界书条目）。
  */
@@ -96,7 +96,7 @@ function save() {
                 class="input w-full"
                 :placeholder="scanPlaceholder()"
               />
-              <p class="text-[10px] text-[var(--color-text-muted)]">留空表示与会话全局默认一致；≥1 时对最近 N 条消息做正则匹配。</p>
+              <p class="text-2xs text-[var(--color-text-muted)]">留空表示与会话全局默认一致；≥1 时对最近 N 条消息做正则匹配。</p>
             </div>
             <div class="space-y-1.5">
               <label class="text-xs font-medium text-[var(--color-text-secondary)]">插入深度</label>

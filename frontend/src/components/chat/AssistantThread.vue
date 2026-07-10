@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { usePreferHoverChrome } from '../../composables/usePreferHoverChrome'
 import { renderChatMarkdown } from '../../utils/markdownIt'
@@ -425,22 +425,22 @@ onMounted(() => {
       >
         <div class="flex items-start justify-between gap-3 mb-2">
           <div class="min-w-0">
-            <div class="text-[10px] uppercase tracking-wider text-warning">工具步骤</div>
+            <div class="text-2xs uppercase tracking-wider text-warning">工具步骤</div>
             <div class="text-sm text-primary break-words">{{ getToolStepTitle(message) }}</div>
           </div>
-          <span class="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold" :class="getToolStatusClass(message)">
+          <span class="shrink-0 rounded-full px-2 py-0.5 text-2xs font-semibold" :class="getToolStatusClass(message)">
             {{ getToolStatusLabel(message) }}
           </span>
         </div>
         <div v-if="getToolMessage(message)" class="text-xs text-secondary whitespace-pre-wrap break-words">
           {{ getToolMessage(message) }}
         </div>
-        <div v-if="getToolArgsDigest(message)" class="mt-2 text-[10px] text-muted break-all">
+        <div v-if="getToolArgsDigest(message)" class="mt-2 text-2xs text-muted break-all">
           argsDigest: {{ getToolArgsDigest(message) }}
         </div>
         <details class="surface-inset mt-2 overflow-hidden">
-          <summary class="cursor-pointer px-3 py-2 text-[11px] text-secondary select-none">查看结果 JSON</summary>
-          <pre class="max-w-full overflow-x-auto px-3 pb-3 text-[11px] leading-relaxed text-secondary whitespace-pre-wrap break-all break-words">{{ getToolDetailContent(message) }}</pre>
+          <summary class="cursor-pointer px-3 py-2 text-2xs text-secondary select-none">查看结果 JSON</summary>
+          <pre class="max-w-full overflow-x-auto px-3 pb-3 text-2xs leading-relaxed text-secondary whitespace-pre-wrap break-all break-words">{{ getToolDetailContent(message) }}</pre>
         </details>
       </div>
     </template>
@@ -485,7 +485,7 @@ onMounted(() => {
                 class="group surface-inset relative flex max-w-[220px] items-start gap-2 px-3 py-2 text-left"
                 @click="toggleTextAttachment(attachment)"
               >
-                <span class="absolute right-2 top-1.5 rounded bg-[var(--color-surface-muted)] px-1.5 py-0.5 text-[10px] font-semibold uppercase text-secondary">{{ getAttachmentExt(attachment) }}</span>
+                <span class="absolute right-2 top-1.5 rounded bg-[var(--color-surface-muted)] px-1.5 py-0.5 text-2xs font-semibold uppercase text-secondary">{{ getAttachmentExt(attachment) }}</span>
                 <span class="truncate pr-10 text-xs text-primary">{{ getAttachmentLabel(attachment) }}</span>
               </button>
             </div>
@@ -531,7 +531,7 @@ onMounted(() => {
                   :key="attachment.id"
                   class="group surface-inset relative flex max-w-[220px] items-start gap-2 px-3 py-2 text-left"
                 >
-                  <span class="absolute right-2 top-1.5 rounded bg-[var(--color-surface-muted)] px-1.5 py-0.5 text-[10px] font-semibold uppercase text-secondary">{{ getAttachmentExt(attachment) }}</span>
+                  <span class="absolute right-2 top-1.5 rounded bg-[var(--color-surface-muted)] px-1.5 py-0.5 text-2xs font-semibold uppercase text-secondary">{{ getAttachmentExt(attachment) }}</span>
                   <span class="truncate pr-10 text-xs text-primary">{{ getAttachmentLabel(attachment) }}</span>
                 </div>
               </div>

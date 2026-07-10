@@ -16,20 +16,24 @@
 | VI | warning token | ✅ | `AssistantPanel`「破坏」徽章、`CharacterEditorModal` 破坏性工具 → `--color-warning-*` |
 | VII | detect 复扫 | ✅ | 审计域 88 findings，**全部**为 `design-system-font-size`（`text-[10px]`） |
 | VIII | 残留 transition-all | ✅ | ChatSidebar/ChatInput/ModernSelect/ReasoningBubble/AvatarCropper/WorldBook/ModernAvatar |
+| IX | caption-xs / text-2xs | ✅ | DESIGN + `--text-2xs`；`text-[10px|11px|8px]` / `0.6875rem` → `text-2xs` |
 
-## Detect 结论（批次 VII）
+## Detect 结论
+
+**批次 VII（迁移前）**：88 × `design-system-font-size`（`text-[10px]`）
+
+**批次 IX（迁移后）**：审计域 **0 findings**（exit 0）。ChatInput sink `margin-top` transition 已 inline disable。
 
 ```text
-npx impeccable detect --json \
+npx impeccable detect --quiet \
   frontend/src/components/modals \
   frontend/src/components/chat \
   frontend/src/components/settings-drawer \
   frontend/src/components/AvatarCropper.vue \
   frontend/src/components/WebSearchQuotaSummary.vue
-→ 88 × design-system-font-size (text-[10px] off DESIGN.md ramp)
 ```
 
-**处理决策**：不在本轮批量改 10px chip/badge。产品为 dense cockpit，`text-[10px]` 用于 SYSTEM/工具徽章等；若要消 advisory，应先在 `DESIGN.md` 增加 `caption-xs: 0.625rem` 再迁移，属后续设计系统扩展。
+**保留例外**：`CodeViewer` 语法高亮色；编排动画时长。
 
 ## 已知保留
 
@@ -40,7 +44,7 @@ npx impeccable detect --json \
 | ChatPage 搜索 `--chat-search-*-ms` | 与搜索状态机绑定 |
 | `CodeViewer` amber/emerald/sky | 语法高亮，非 UI status |
 | 残留 `transition-all` | ✅ 批次 VIII 已收束（仅保留 utilities.css 工具类定义） |
-| `text-[10px]` ×88 | 见上；待 DESIGN caption 阶 |
+| `text-[10px]` ×88 | ✅ 批次 IX：`--text-2xs` / `text-2xs`；11px/8px/0.6875rem 一并收束 |
 
 ## 批次 VIII（残留 transition-all）
 
@@ -53,6 +57,14 @@ npx impeccable detect --json \
 | `AvatarCropper` 上传区 | `transition-[background-color,border-color]` |
 | `SettingsDrawerChatWorldBookSection` | `transition-[border-color,opacity,background-color]` |
 | `ModernAvatar` | `transition-[box-shadow,border-color]` |
+
+## 批次 IX（caption-xs）
+
+- `DESIGN.md`：新增 Caption XS（0.625rem）
+- `variables.css`：`--text-2xs: 0.625rem`（@theme → `text-2xs`）
+- 全前端 `text-[10px]` / `text-[11px]` / `text-[8px]` / `font-size: 0.6875rem` → `text-2xs` / `var(--text-2xs)`
+- ChatInput sink `margin-top` transition：inline impeccable-disable（布局补偿有意例外）
+- `HttpRecordPreview` error 色：`text-rose-300` → `--color-error-text`
 
 ## verify
 

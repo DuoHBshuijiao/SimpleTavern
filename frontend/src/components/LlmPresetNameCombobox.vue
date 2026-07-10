@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ChevronDown, X } from 'lucide-vue-next'
 import { LLM_PROVIDER_PRESETS, type LlmProviderPreset } from '../constants/llmProviderPresets'
@@ -183,7 +183,7 @@ watch(dropdownOpen, (open) => {
           <div class="w-full truncate text-xs font-medium text-[var(--color-text-secondary)]">
             {{ preset.label }}
           </div>
-          <div class="w-full truncate text-[10px] text-[var(--color-text-muted)]">
+          <div class="w-full truncate text-2xs text-[var(--color-text-muted)]">
             <template v-if="preset.requiresManualEdit">需替换占位符 · </template>{{ preset.baseUrl }}
           </div>
         </button>

@@ -1,7 +1,7 @@
-<template>
+﻿<template>
   <Teleport to="body">
     <aside
-      class="drawer-surface fixed right-4 top-4 bottom-4 border border-[var(--color-border)] rounded-2xl transition-all duration-300 overflow-hidden flex flex-col z-floating pointer-events-auto"
+      class="drawer-surface fixed right-4 top-4 bottom-4 border border-[var(--color-border)] rounded-2xl transition-[transform,opacity,width] duration-300 overflow-hidden flex flex-col z-floating pointer-events-auto"
       :class="isOpen
         ? 'translate-x-0 w-[min(360px,calc(100vw-2rem))] opacity-100'
         : 'translate-x-[calc(100%+20px)] w-[min(360px,calc(100vw-2rem))] opacity-0 pointer-events-none'"
@@ -69,11 +69,11 @@
           :key="entry.id"
           class="flex items-start gap-3 py-2 border-b border-[var(--color-border-subtle)] last:border-b-0"
         >
-          <span class="text-[11px] text-[var(--color-text-muted)] w-[52px] shrink-0 font-mono leading-5 pt-px">{{
+          <span class="text-2xs text-[var(--color-text-muted)] w-[52px] shrink-0 font-mono leading-5 pt-px">{{
             formatTime(entry.timestamp)
           }}</span>
           <span
-            class="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full font-medium leading-4 mt-px"
+            class="shrink-0 text-2xs px-1.5 py-0.5 rounded-full font-medium leading-4 mt-px"
             :class="badgeClass(entry.eventType)"
           >{{ badgeLabel(entry.eventType) }}</span>
           <span class="text-xs text-[var(--color-text-secondary)] leading-5 min-w-0 break-words">{{ entry.summary }}</span>
@@ -87,7 +87,7 @@
           :options="modelOptions"
           placement="top"
           placeholder="留空则使用默认模型名称与候选回退"
-          class="!text-[11px] !min-w-0 w-full"
+          class="!text-2xs !min-w-0 w-full"
           dropdown-width="360"
           searchable
           allow-create
@@ -95,7 +95,7 @@
         />
         <p
           v-if="resolvedMvuModel && !(mvuModel || '').trim()"
-          class="text-[10px] leading-snug text-[var(--color-text-muted)]"
+          class="text-2xs leading-snug text-[var(--color-text-muted)]"
         >
           当前生效（回退）：<span class="font-mono text-[var(--color-text-secondary)]">{{ resolvedMvuModel }}</span>
         </p>

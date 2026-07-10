@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { Check, X } from 'lucide-vue-next'
 import type { ApiPresetVoice } from '../../types/models'
 
@@ -77,10 +77,10 @@ const emit = defineEmits<{
                 >
                   {{ v.name }}
                 </div>
-                <div class="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-[var(--color-text-muted)]">
+                <div class="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-2xs text-[var(--color-text-muted)]">
                   <span class="truncate font-mono">{{ v.voiceId }}</span>
                   <span
-                    class="shrink-0 rounded-full bg-surface-muted px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)]"
+                    class="shrink-0 rounded-full bg-surface-muted px-1.5 py-0.5 text-2xs text-[var(--color-text-muted)]"
                   >{{ v.voiceType }}</span>
                 </div>
               </div>

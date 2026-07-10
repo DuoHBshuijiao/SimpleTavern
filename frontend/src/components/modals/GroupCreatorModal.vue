@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 /**
  * GroupCreatorModal - 群聊创建弹窗组件
  *
@@ -489,7 +489,7 @@ void dialogRef
                     <div class="font-medium text-sm truncate" :class="selectedMemberIds.includes(c.id) ? 'text-brand-light' : 'text-secondary'">{{ c.name }}</div>
                     <div class="text-xs text-muted truncate">{{ c.description || '暂无简介' }}</div>
                     <div v-if="selectedMemberIds.includes(c.id)" class="mt-2 space-y-1" @click.stop>
-                      <div class="text-[10px] text-muted">system prompt 插入：</div>
+                      <div class="text-2xs text-muted">system prompt 插入：</div>
                       <div class="flex flex-wrap gap-3 text-xs text-secondary">
                         <label class="flex items-center gap-1 cursor-pointer">
                           <ThemedCheckbox

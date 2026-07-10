@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { inject } from 'vue'
 import { SETTINGS_DRAWER_CHAT_KEY } from '../../composables/settingsDrawerChatKey'
 import ThemedCheckbox from '../ThemedCheckbox.vue'
@@ -56,16 +56,16 @@ const chat = inject(SETTINGS_DRAWER_CHAT_KEY)!
           <div class="min-w-0 flex-1 cursor-grab active:cursor-grabbing">
             <div class="text-xs font-medium text-[var(--color-text)] break-all">
               {{ rule.name || rule.pattern.slice(0, 50) }}
-              <span v-if="rule._origin === 'character'" class="inline-block text-[10px] px-1 py-px rounded-full bg-[var(--color-brand-a15)] text-[var(--color-brand)] align-middle ml-1">角色自带</span>
+              <span v-if="rule._origin === 'character'" class="inline-block text-2xs px-1 py-px rounded-full bg-[var(--color-brand-a15)] text-[var(--color-brand)] align-middle ml-1">角色自带</span>
             </div>
-            <div class="mt-1 text-[11px] text-[var(--color-text-muted)] break-all">{{ rule.pattern }}</div>
-            <div class="mt-1 text-[11px] text-[var(--color-text-muted)]">
+            <div class="mt-1 text-2xs text-[var(--color-text-muted)] break-all">{{ rule.pattern }}</div>
+            <div class="mt-1 text-2xs text-[var(--color-text-muted)]">
               {{ chat.regexActionLabel(rule.action) }} / {{ chat.regexMatchModeLabel(rule.matchMode) }} / 深度 {{ rule.scanDepthOverride ?? chat.chatDraft.contentRegexScanDepthDefault ?? 50 }}
             </div>
-            <div v-if="rule.action === 'extract' || rule.action === 'extract_and_replace'" class="mt-1 text-[11px] text-[var(--color-text-muted)]">
+            <div v-if="rule.action === 'extract' || rule.action === 'extract_and_replace'" class="mt-1 text-2xs text-[var(--color-text-muted)]">
               提取来源：{{ chat.regexExtractSourceLabel(rule.extractSource) }}
             </div>
-            <div v-if="rule.action === 'replace' || rule.action === 'extract_and_replace'" class="mt-1 text-[11px] text-[var(--color-text-muted)] break-all">
+            <div v-if="rule.action === 'replace' || rule.action === 'extract_and_replace'" class="mt-1 text-2xs text-[var(--color-text-muted)] break-all">
               {{ (rule.replacement || '').slice(0, 80) }}
             </div>
           </div>

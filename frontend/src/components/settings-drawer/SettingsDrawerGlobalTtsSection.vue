@@ -72,8 +72,8 @@ function onToggleTts() {
       <div class="space-y-1">
         <div class="h-2 w-full overflow-hidden rounded-full bg-[var(--color-track)]">
           <div
-            class="h-full rounded-full transition-[width] duration-500 ease-out"
-            :class="cachePercent > 90 ? 'bg-red-500' : cachePercent > 70 ? 'bg-amber-500' : 'bg-brand'"
+            class="h-full rounded-full transition-[width] duration-[var(--motion-duration-expand)] ease-out"
+            :class="cachePercent > 90 ? 'bg-[var(--color-error)]' : cachePercent > 70 ? 'bg-[var(--color-warning)]' : 'bg-brand'"
             :style="{ width: (cacheStats ? cachePercent : 0) + '%' }"
           />
         </div>

@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { X } from 'lucide-vue-next'
 import WgslMonospaceEditor from '../WgslMonospaceEditor.vue'
@@ -190,7 +190,7 @@ watch(
               <div class="font-medium text-[var(--color-text-secondary)]">
                 {{ diagnosticTitle(d, i) }}
               </div>
-              <pre class="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-[var(--color-error-text)]">{{ d.raw }}</pre>
+              <pre class="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap font-mono text-2xs leading-relaxed text-[var(--color-error-text)]">{{ d.raw }}</pre>
             </li>
           </ul>
           <p
