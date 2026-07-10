@@ -4,10 +4,20 @@
 
 from __future__ import annotations
 
+import json
 import threading
 from typing import Any
 
-from app.schemas import Chat, ForkLineageResponse, ForkOrigin, ForkOutgoingGroup, ForkSiblingSummary
+from app.errors import AppError
+from app.schemas import (
+    Chat,
+    ForkLineageResponse,
+    ForkLineageWarning,
+    ForkOrigin,
+    ForkOutgoingGroup,
+    ForkSiblingSummary,
+)
+from app.services.cleanup_log import log_cleanup_failure
 from app.storage import (
     CHAT_RECORD_FILENAME,
     ForkChatSummary,
@@ -22,6 +32,39 @@ from app.storage import (
 
 _INDEX_VERSION = 1
 _index_lock = threading.RLock()
+_pending_warnings: list[ForkLineageWarning] = []
+_index_dirty = False
+
+
+class ForkIndexLoadError(RuntimeError):
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def _record_warning(
+    code: str,
+    message: str,
+    suggested_action: str,
+) -> None:
+    with _index_lock:
+        if any(item.code == code for item in _pending_warnings):
+            return
+        _pending_warnings.append(
+            ForkLineageWarning(
+                code=code,
+                message=message,
+                suggestedAction=suggested_action,
+            )
+        )
+        del _pending_warnings[:-20]
+
+
+def _consume_warnings() -> list[ForkLineageWarning]:
+    with _index_lock:
+        warnings = list(_pending_warnings)
+        _pending_warnings.clear()
+        return warnings
 
 
 def _fork_index_path() -> Path:
@@ -36,6 +79,7 @@ def _empty_index() -> dict[str, Any]:
         "byParent": {},
         "byChild": {},
         "titles": {},
+        "warnings": [],
     }
 
 
@@ -45,17 +89,59 @@ def _load_index_unlocked() -> dict[str, Any]:
         return _empty_index()
     try:
         raw = read_json(path)
-    except Exception:
-        return _empty_index()
+    except Exception as exc:
+        code = "fork_index_corrupt" if isinstance(exc, (json.JSONDecodeError, UnicodeDecodeError)) else "fork_index_read_failed"
+        raise ForkIndexLoadError(code, f"{type(exc).__name__}: {exc}") from exc
     if not isinstance(raw, dict):
-        return _empty_index()
+        raise ForkIndexLoadError("fork_index_corrupt", "fork index root must be an object")
     raw.setdefault("version", _INDEX_VERSION)
     raw.setdefault("rebuilt", False)
     raw.setdefault("forkCharacterIds", [])
     raw.setdefault("byParent", {})
     raw.setdefault("byChild", {})
     raw.setdefault("titles", {})
+    raw.setdefault("warnings", [])
+    if not isinstance(raw["forkCharacterIds"], list):
+        raise ForkIndexLoadError("fork_index_corrupt", "forkCharacterIds must be an array")
+    for key in ("byParent", "byChild", "titles"):
+        if not isinstance(raw[key], dict):
+            raise ForkIndexLoadError("fork_index_corrupt", f"{key} must be an object")
+    if not isinstance(raw["warnings"], list):
+        raise ForkIndexLoadError("fork_index_corrupt", "warnings must be an array")
+    try:
+        raw["warnings"] = [
+            ForkLineageWarning.model_validate(item).model_dump(mode="json")
+            for item in raw["warnings"]
+        ]
+    except Exception as exc:
+        raise ForkIndexLoadError("fork_index_corrupt", f"invalid warning entry: {exc}") from exc
     return raw
+
+
+def _load_or_rebuild_index_unlocked() -> dict[str, Any]:
+    global _index_dirty
+    if _index_dirty:
+        rebuild_fork_index()
+        return _load_index_unlocked()
+    try:
+        data = _load_index_unlocked()
+    except ForkIndexLoadError as exc:
+        log_cleanup_failure(
+            source="fork_index.load",
+            exc=exc,
+            path=_fork_index_path(),
+        )
+        _record_warning(
+            exc.code,
+            "分叉索引损坏，已从会话文件重建" if exc.code == "fork_index_corrupt" else "分叉索引读取失败，已尝试重建",
+            "如该提示重复出现，请运行数据完整性巡检并检查 data/fork_index.json",
+        )
+        rebuild_fork_index()
+        return _load_index_unlocked()
+    if _index_needs_rebuild(data):
+        rebuild_fork_index()
+        return _load_index_unlocked()
+    return data
 
 
 def _index_needs_rebuild(data: dict[str, Any]) -> bool:
@@ -80,70 +166,98 @@ def _sibling_from_entry(entry: dict[str, Any]) -> ForkSiblingSummary:
 
 def sync_chat_fork_index(chat: Chat) -> None:
     """save_chat / delete 后同步单条会话的分叉索引。"""
-    with _index_lock:
-        data = _load_index_unlocked()
-        chat_id = chat.id
-        titles: dict[str, str] = data["titles"]
-        titles[chat_id] = (chat.title or "").strip() or "新对话"
+    global _index_dirty
+    try:
+        with _index_lock:
+            data = _load_or_rebuild_index_unlocked()
+            chat_id = chat.id
+            titles: dict[str, str] = data["titles"]
+            titles[chat_id] = (chat.title or "").strip() or "新对话"
 
-        by_child: dict[str, Any] = data["byChild"]
-        old_child = by_child.pop(chat_id, None)
-        if old_child:
-            _remove_from_by_parent(
-                data["byParent"],
-                str(old_child.get("parentChatId") or ""),
-                str(old_child.get("messageId") or ""),
-                chat_id,
-            )
+            by_child: dict[str, Any] = data["byChild"]
+            old_child = by_child.pop(chat_id, None)
+            if old_child:
+                _remove_from_by_parent(
+                    data["byParent"],
+                    str(old_child.get("parentChatId") or ""),
+                    str(old_child.get("messageId") or ""),
+                    chat_id,
+                )
 
-        parent_id = (chat.forkedFromChatId or "").strip() or None
-        msg_id = (chat.forkedFromMessageId or "").strip() or None
-        if parent_id and msg_id:
-            idx = chat.forkedFromMessageIndex
-            by_child[chat_id] = {
-                "chatId": chat_id,
-                "parentChatId": parent_id,
-                "messageId": msg_id,
-                "messageIndex": idx,
-                "title": titles[chat_id],
-                "createdAt": chat.createdAt or "",
-            }
-            entry = {
-                "chatId": chat_id,
-                "title": titles[chat_id],
-                "createdAt": chat.createdAt or "",
-                "anchorMessageIndex": idx,
-            }
-            _upsert_by_parent(data["byParent"], parent_id, msg_id, entry)
-            fork_character_ids = set(data.get("forkCharacterIds") or [])
-            fork_character_ids.add(chat.characterId)
-            data["forkCharacterIds"] = sorted(fork_character_ids)
+            parent_id = (chat.forkedFromChatId or "").strip() or None
+            msg_id = (chat.forkedFromMessageId or "").strip() or None
+            if parent_id and msg_id:
+                idx = chat.forkedFromMessageIndex
+                by_child[chat_id] = {
+                    "chatId": chat_id,
+                    "parentChatId": parent_id,
+                    "messageId": msg_id,
+                    "messageIndex": idx,
+                    "title": titles[chat_id],
+                    "createdAt": chat.createdAt or "",
+                }
+                entry = {
+                    "chatId": chat_id,
+                    "title": titles[chat_id],
+                    "createdAt": chat.createdAt or "",
+                    "anchorMessageIndex": idx,
+                }
+                _upsert_by_parent(data["byParent"], parent_id, msg_id, entry)
+                fork_character_ids = set(data.get("forkCharacterIds") or [])
+                fork_character_ids.add(chat.characterId)
+                data["forkCharacterIds"] = sorted(fork_character_ids)
 
-        _save_index_unlocked(data)
+            _save_index_unlocked(data)
+    except Exception as exc:
+        _index_dirty = True
+        _record_warning(
+            "fork_index_sync_failed",
+            "会话已保存，但分叉索引同步失败",
+            "重新打开分叉信息以触发重建；如持续失败请检查 data 目录权限",
+        )
+        log_cleanup_failure(
+            source="fork_index.sync",
+            exc=exc,
+            path=_fork_index_path(),
+        )
 
 
 def remove_chat_fork_index(chat_id: str) -> None:
-    with _index_lock:
-        data = _load_index_unlocked()
-        data["titles"].pop(chat_id, None)
-        old_child = data["byChild"].pop(chat_id, None)
-        if old_child:
-            _remove_from_by_parent(
-                data["byParent"],
-                str(old_child.get("parentChatId") or ""),
-                str(old_child.get("messageId") or ""),
-                chat_id,
-            )
-        for parent_id, by_msg in list(data.get("byParent", {}).items()):
-            for msg_id, entries in list(by_msg.items()):
-                filtered = [e for e in entries if str(e.get("chatId")) != chat_id]
-                if filtered:
-                    by_msg[msg_id] = filtered
-                else:
-                    del by_msg[msg_id]
-            if not by_msg:
-                del data["byParent"][parent_id]
-        _save_index_unlocked(data)
+    global _index_dirty
+    try:
+        with _index_lock:
+            data = _load_or_rebuild_index_unlocked()
+            data["titles"].pop(chat_id, None)
+            old_child = data["byChild"].pop(chat_id, None)
+            if old_child:
+                _remove_from_by_parent(
+                    data["byParent"],
+                    str(old_child.get("parentChatId") or ""),
+                    str(old_child.get("messageId") or ""),
+                    chat_id,
+                )
+            for parent_id, by_msg in list(data.get("byParent", {}).items()):
+                for msg_id, entries in list(by_msg.items()):
+                    filtered = [e for e in entries if str(e.get("chatId")) != chat_id]
+                    if filtered:
+                        by_msg[msg_id] = filtered
+                    else:
+                        del by_msg[msg_id]
+                if not by_msg:
+                    del data["byParent"][parent_id]
+            _save_index_unlocked(data)
+    except Exception as exc:
+        _index_dirty = True
+        _record_warning(
+            "fork_index_sync_failed",
+            "会话已删除，但分叉索引清理失败",
+            "重新打开分叉信息以触发重建；如持续失败请检查 data 目录权限",
+        )
+        log_cleanup_failure(
+            source="fork_index.remove",
+            exc=exc,
+            path=_fork_index_path(),
+        )
 
 
 def _upsert_by_parent(
@@ -197,6 +311,18 @@ def _resolve_anchor_index(
             parent = load_chat(parent_chat_id)
         except FileNotFoundError:
             cache[parent_chat_id] = None
+        except AppError as exc:
+            _record_warning(
+                "fork_meta_unreadable",
+                "部分分叉锚点因源会话损坏而无法恢复",
+                "运行数据完整性巡检并修复对应会话后重新加载",
+            )
+            log_cleanup_failure(
+                source="fork_index.resolve_anchor",
+                exc=exc,
+                path=parent_chat_id,
+            )
+            cache[parent_chat_id] = None
         else:
             cache[parent_chat_id] = {m.id: i + 1 for i, m in enumerate(parent.messages)}
     index_by_message = cache.get(parent_chat_id)
@@ -212,6 +338,7 @@ def rebuild_fork_index(character_ids: set[str] | None = None) -> None:
     若未指定 character_ids，先用尾部 fork 元数据找出真正存在 fork 子会话的角色；
     第二遍只索引这些角色，避免把“索引修复”扩散到所有角色的完整元数据处理。
     """
+    global _index_dirty
     with _index_lock:
         data = _empty_index()
         titles: dict[str, str] = data["titles"]
@@ -221,6 +348,7 @@ def rebuild_fork_index(character_ids: set[str] | None = None) -> None:
         base = _chats_dir()
         summaries_by_character: dict[str, list[ForkChatSummary]] = {}
         fork_character_ids: set[str] = set(character_ids or set())
+        incomplete = False
         if base.exists():
             for character_dir in base.iterdir():
                 if not character_dir.is_dir():
@@ -234,6 +362,12 @@ def rebuild_fork_index(character_ids: set[str] | None = None) -> None:
                         continue
                     summary = read_chat_fork_meta(record_path)
                     if summary is None:
+                        incomplete = True
+                        _record_warning(
+                            "fork_meta_unreadable",
+                            "部分会话的分叉元数据无法读取，索引结果可能不完整",
+                            "运行数据完整性巡检并修复对应会话后重新加载",
+                        )
                         continue
                     summaries_by_character.setdefault(cid, []).append(summary)
                     if summary.forkedFromChatId and summary.forkedFromMessageId:
@@ -272,7 +406,16 @@ def rebuild_fork_index(character_ids: set[str] | None = None) -> None:
                         },
                     )
 
+        if incomplete:
+            data["warnings"] = [
+                ForkLineageWarning(
+                    code="fork_meta_unreadable",
+                    message="部分会话的分叉元数据无法读取，索引结果可能不完整",
+                    suggestedAction="运行数据完整性巡检并修复对应会话后重新加载",
+                ).model_dump(mode="json")
+            ]
         _save_index_unlocked(data)
+        _index_dirty = False
 
 
 def _resolve_parent_title(parent_chat_id: str, index: dict[str, Any]) -> str:
@@ -300,12 +443,19 @@ def _coerce_positive_int(value: Any) -> int | None:
 
 def build_fork_lineage(chat_id: str) -> ForkLineageResponse:
     """由索引构建 ForkLineageResponse；不加载 chat.json 的 messages。"""
-    with _index_lock:
-        data = _load_index_unlocked()
-    if _index_needs_rebuild(data):
-        rebuild_fork_index()
-    with _index_lock:
-        data = _load_index_unlocked()
+    try:
+        with _index_lock:
+            data = _load_or_rebuild_index_unlocked()
+    except Exception as exc:
+        raise AppError(
+            code="fork_index_rebuild_failed",
+            message="分叉索引无法读取或重建",
+            detail=f"{type(exc).__name__}: {exc}",
+            source="fork_index.lineage",
+            status_code=503,
+            retryable=True,
+            suggested_action="检查 data 目录读写权限后重试，或从备份恢复损坏的会话文件",
+        ) from exc
 
     origin: ForkOrigin | None = None
     siblings: list[ForkSiblingSummary] = []
@@ -359,8 +509,15 @@ def build_fork_lineage(chat_id: str) -> ForkLineageResponse:
     outgoing_forks.sort(key=lambda g: g.messageIndex)
     siblings.sort(key=lambda c: c.createdAt, reverse=True)
 
+    warnings = _consume_warnings()
+    for raw_warning in data.get("warnings") or []:
+        warning = ForkLineageWarning.model_validate(raw_warning)
+        if not any(item.code == warning.code for item in warnings):
+            warnings.append(warning)
     return ForkLineageResponse(
         origin=origin,
         siblings=siblings,
         outgoingForks=outgoing_forks,
+        partialSuccess=bool(warnings),
+        warnings=warnings,
     )

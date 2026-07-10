@@ -12,7 +12,7 @@
 | Domain | Inventory | Migration |
 |---|---|---|
 | LLM / generate | complete for P0/P1 scan | batch 1 complete |
-| storage / chats / fork | initial high-risk scan complete | pending |
+| storage / chats / fork | complete for F-011~F-016 | batch 2 complete |
 | assistant / tools | initial high-risk scan complete | pending |
 | MVU / KG / regex | initial high-risk scan complete | pending |
 | search | initial high-risk scan complete | pending |
@@ -34,12 +34,12 @@
 | F-008 | generate | `backend/app/services/generate_web_search_runtime.py` | tool argument parsing | 非法 JSON 退化为 `{}` 并继续调用 | fatal | `tool_call_invalid` | terminal generation error | `test_generate_web_search_runtime.py` | done |
 | F-009 | generate | `backend/app/routes/generate.py` | `match_worldbook_entries` | 坏 regex 被跳过 | partial | `worldbook_regex_invalid` | warnings/error stack | pending | open |
 | F-010 | regex | generate save paths | assistant persistence | 未调用正文正则管线；与工作区契约不一致 | verify-first | pending decision | pending decision | fact regression | verified-gap |
-| F-011 | storage | `backend/app/storage.py` | `list_characters` | 损坏 JSON `continue`，角色从列表消失 | partial | `character_corrupt` | `corruptEntries[]` | pending | open |
-| F-012 | storage | `backend/app/storage.py` | `list_worldbooks` | 损坏 JSON `continue`，世界书从列表消失 | partial | `worldbook_corrupt` | `corruptEntries[]` | pending | open |
-| F-013 | storage | `backend/app/storage.py` | `_load_chat_from_path` | 读取异常返回 `None` | partial | `chat_corrupt` | integrity issue | pending | open |
-| F-014 | storage | `backend/app/storage.py` | `load_update_ignore` | 损坏配置重置为空对象 | partial | `update_ignore_reset` | warning/health | pending | open |
-| F-015 | fork | `backend/app/fork_index.py` | `_load_index_unlocked` | 损坏索引静默重置为空 | partial | `fork_index_corrupt` | rebuild warning | pending | open |
-| F-016 | storage | `backend/app/storage.py` | delete/clear cleanup | 清理失败 `pass` / `continue` | cleanup-only | `cleanup_failed` | structured log | pending | open |
+| F-011 | storage | `backend/app/storage.py` | `list_characters` | 损坏 JSON `continue`，角色从列表消失 | partial | `invalid_json` / `schema_mismatch` | integrity issue（列表仍保持数组） | `test_storage_integrity_contract.py` | done |
+| F-012 | storage | `backend/app/storage.py` | `list_worldbooks` | 损坏 JSON `continue`，世界书从列表消失 | partial | `invalid_json` / `schema_mismatch` | integrity issue（列表仍保持数组） | `test_storage_integrity_contract.py` | done |
+| F-013 | storage | `backend/app/storage.py` | `_load_chat_from_path` | 读取异常返回 `None` | partial | `data_corrupted` | REST envelope + integrity issue | `test_storage_integrity_contract.py` / `test_data_integrity_expanded.py` | done |
+| F-014 | storage | `backend/app/storage.py` | `load_update_ignore` | 损坏配置重置为空对象 | fatal | `update_ignore_corrupt` | REST envelope；保留原文件 | `test_storage_integrity_contract.py` | done |
+| F-015 | fork | `backend/app/fork_index.py` | `_load_index_unlocked` | 损坏索引静默重置为空 | partial | `fork_index_corrupt` / `fork_index_rebuild_failed` | lineage warnings + error stack | `test_fork_index.py` / `useForkLineage.test.ts` | done |
+| F-016 | storage | `backend/app/storage.py` | delete/clear cleanup | 清理失败 `pass` / `continue` | cleanup-only | `cleanup_failed` | structured log + requestId | `test_storage_integrity_contract.py` | done |
 | F-017 | assistant | `backend/app/routes/assistant.py` | `_normalize_assistant_chat_for_save` | 校验失败仍保存原对象 | fatal | `assistant_message_invalid` | REST error | pending | open |
 | F-018 | assistant | `backend/app/services/assistant_agent.py` | tool argument parsing | 非法 JSON 退化为 `{}` | fatal | `tool_call_invalid` | ToolResult + error stack | pending | open |
 | F-019 | assistant | `backend/app/services/assistant_agent.py` | stream/nonstream errors | 仅传 `str(exc)` | fatal | mapped AppError | REST/SSE envelope | pending | open |
@@ -67,6 +67,12 @@
 | M-002 | `/llm/test-models` 不再返回 200 + `[]` | done |
 | M-003 | `/generate/stream` 使用 meta + terminal error + success-only done | done |
 | M-004 | 主生成网络搜索未配置时在写入用户消息前 fast-fail | done |
+
+## Batch 2 Performance Baseline
+
+- `rebuild_fork_index()`：1000 个会话、99 个 fork，Windows 本机冷重建 `410.05 ms`。
+- 回归门槛：同 fixture `< 5000 ms`；测试同时断言锚点已存在时不调用完整 `load_chat()`。
+- fixture/test：`backend/tests/test_fork_index.py::test_rebuild_1000_chat_lightweight_baseline`。
 
 ## Explicit non-errors
 

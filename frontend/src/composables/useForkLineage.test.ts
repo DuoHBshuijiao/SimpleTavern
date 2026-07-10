@@ -83,4 +83,45 @@ describe('useForkLineage', () => {
     expect(api.forkLineageLoading.value).toBe(false)
     app.unmount()
   })
+
+  it('索引自愈 warning 交给调用方展示', async () => {
+    const onWarning = vi.fn()
+    const value = lineage('m1', 1)
+    value.partialSuccess = true
+    value.warnings = [{
+      code: 'fork_index_corrupt',
+      message: '分叉索引已重建',
+      suggestedAction: '检查数据目录',
+    }]
+    const { api, app } = withSetup({
+      getActiveChat: () => chat('c1', 'src'),
+      fetchForkLineage: async () => value,
+      onWarning,
+    })
+
+    await api.refreshForkLineage('c1')
+
+    expect(api.forkLineage.value).toEqual(value)
+    expect(onWarning).toHaveBeenCalledWith(value.warnings[0])
+    app.unmount()
+  })
+
+  it('加载失败交给调用方错误面且清空旧结果', async () => {
+    const error = new Error('fork index unavailable')
+    const onError = vi.fn()
+    const { api, app } = withSetup({
+      getActiveChat: () => chat('c1', 'src'),
+      fetchForkLineage: async () => {
+        throw error
+      },
+      onError,
+    })
+    api.forkLineage.value = lineage('stale', 1)
+
+    await api.refreshForkLineage('c1')
+
+    expect(api.forkLineage.value).toBeNull()
+    expect(onError).toHaveBeenCalledWith(error)
+    app.unmount()
+  })
 })

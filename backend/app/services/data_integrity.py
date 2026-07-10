@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -11,7 +12,7 @@ from typing import Any, Literal
 
 from pydantic import ValidationError
 
-from app.schemas import AssistantChat
+from app.schemas import AssistantChat, Chat, CharacterCard, WorldBook
 from app.storage import (
     ASSISTANT_CHAT_FILENAME,
     CHAT_MEMORY_FILENAME,
@@ -37,6 +38,7 @@ IntegrityIssueCode = Literal[
     "invalid_json",
     "schema_mismatch",
     "orphan_reference",
+    "read_error",
 ]
 IntegrityTargetKind = Literal[
     "chat_record",
@@ -65,6 +67,7 @@ _ISSUE_MESSAGES: dict[IntegrityIssueCode, str] = {
     "invalid_json": "JSON 解析失败",
     "schema_mismatch": "JSON 结构不符合预期",
     "orphan_reference": "引用的角色不存在（孤儿会话）",
+    "read_error": "文件读取失败",
 }
 
 _REPAIR_ACTIONS: dict[IntegrityTargetKind, RepairAction] = {
@@ -83,7 +86,7 @@ _REPAIR_ACTIONS: dict[IntegrityTargetKind, RepairAction] = {
 
 def _effective_repair_action(kind: IntegrityTargetKind, code: IntegrityIssueCode) -> RepairAction:
     """孤儿引用所在文件本身可能完好，绝不能按 chat_record 的 delete 自动删除，统一降级为人工处理。"""
-    if code == "orphan_reference":
+    if code in {"orphan_reference", "read_error"}:
         return "none"
     return _REPAIR_ACTIONS[kind]
 
@@ -119,6 +122,7 @@ class RecordedIssue:
     snapshot: FileSnapshot
     issue: ScanIssue
     discovered_at: str
+    runtime: bool = False
 
 
 def _now_iso() -> str:
@@ -158,7 +162,7 @@ class DataIntegrityService:
     def __init__(self) -> None:
         self._repo_root = get_repo_root().resolve()
         self._issues: dict[str, RecordedIssue] = {}
-        self._lock = asyncio.Lock()
+        self._lock = threading.RLock()
         self._started = False
 
     def _relative_path(self, path: Path) -> str:
@@ -324,18 +328,35 @@ class DataIntegrityService:
             return f"{label}缺少非空 id 字段"
         return None
 
-    def _validate_schema(self, target: ScanTarget, raw: Any) -> str | None:
+    def _validate_schema(
+        self,
+        target: ScanTarget,
+        raw: Any,
+        *,
+        full_validation: bool = False,
+    ) -> str | None:
         try:
             if target.kind in {"chat_record", "legacy_chat"}:
+                if full_validation:
+                    Chat.model_validate(raw)
+                    return None
                 return self._validate_chat_record_schema(raw)
             if target.kind == "chat_memory":
                 return self._validate_chat_memory_schema(raw)
             if target.kind in {"settings", "assistant_settings"}:
                 return self._validate_object_schema(raw, "设置文件")
             if target.kind == "character_card":
-                return self._validate_identified_schema(raw, "角色卡")
+                identified_error = self._validate_identified_schema(raw, "角色卡")
+                if identified_error is not None:
+                    return identified_error
+                CharacterCard.model_validate(raw)
+                return None
             if target.kind == "world_book":
-                return self._validate_identified_schema(raw, "世界书")
+                identified_error = self._validate_identified_schema(raw, "世界书")
+                if identified_error is not None:
+                    return identified_error
+                WorldBook.model_validate(raw)
+                return None
             AssistantChat.model_validate(raw)
             return None
         except ValidationError as exc:
@@ -386,7 +407,11 @@ class DataIntegrityService:
         return None
 
     async def _scan_target(
-        self, target: ScanTarget, valid_character_ids: set[str] | None = None
+        self,
+        target: ScanTarget,
+        valid_character_ids: set[str] | None = None,
+        *,
+        full_validation: bool = False,
     ) -> tuple[FileSnapshot, ScanIssue] | None:
         stable = await self._read_stable_bytes(target.path)
         if stable is None:
@@ -425,7 +450,11 @@ class DataIntegrityService:
                 ),
             )
 
-        schema_error = self._validate_schema(target, raw)
+        schema_error = self._validate_schema(
+            target,
+            raw,
+            full_validation=full_validation,
+        )
         if schema_error is not None:
             return (
                 stable.snapshot,
@@ -442,22 +471,85 @@ class DataIntegrityService:
 
         return None
 
+    def record_runtime_failure(
+        self,
+        path: Path,
+        kind: IntegrityTargetKind,
+        exc: BaseException,
+    ) -> None:
+        """同步记录用户操作中发现的损坏项，供现有完整性面板立即展示。"""
+        if isinstance(exc, FileNotFoundError):
+            self.clear_runtime_issue(path)
+            return
+        resolved = path.resolve()
+        try:
+            stat = resolved.stat()
+            snapshot = FileSnapshot(size=stat.st_size, mtime_ns=stat.st_mtime_ns)
+        except OSError:
+            snapshot = FileSnapshot(size=0, mtime_ns=0)
+
+        if isinstance(exc, json.JSONDecodeError):
+            code: IntegrityIssueCode = "invalid_json"
+            detail = f"line={exc.lineno}, column={exc.colno}"
+        elif isinstance(exc, UnicodeDecodeError):
+            code = "invalid_utf8"
+            detail = f"start={exc.start}, end={exc.end}"
+        elif isinstance(exc, ValidationError):
+            code = "schema_mismatch"
+            detail = f"{exc.error_count()} validation error(s)"
+        elif isinstance(exc, ValueError):
+            code = "schema_mismatch"
+            detail = str(exc)
+        else:
+            code = "read_error"
+            detail = f"{type(exc).__name__}: {exc}"
+
+        target = ScanTarget(path=resolved, kind=kind)
+        key = self._relative_path(resolved)
+        with self._lock:
+            self._issues[key] = RecordedIssue(
+                target=target,
+                snapshot=snapshot,
+                issue=ScanIssue(
+                    code=code,
+                    message=_ISSUE_MESSAGES[code],
+                    detail=_normalize_detail(detail),
+                ),
+                discovered_at=_now_iso(),
+                runtime=True,
+            )
+
+    def clear_runtime_issue(self, path: Path) -> None:
+        key = self._relative_path(path)
+        with self._lock:
+            current = self._issues.get(key)
+            if current is not None and current.runtime:
+                self._issues.pop(key, None)
+
     async def _upsert_issue(self, target: ScanTarget, result: tuple[FileSnapshot, ScanIssue] | None) -> None:
         key = self._relative_path(target.path)
-        async with self._lock:
+        with self._lock:
             if result is None:
                 self._issues.pop(key, None)
                 return
             snapshot, issue = result
+            previous = self._issues.get(key)
             self._issues[key] = RecordedIssue(
                 target=target,
                 snapshot=snapshot,
                 issue=issue,
                 discovered_at=_now_iso(),
+                runtime=bool(previous and previous.runtime),
             )
 
+    def _has_runtime_issue(self, path: Path) -> bool:
+        key = self._relative_path(path)
+        with self._lock:
+            current = self._issues.get(key)
+            return bool(current and current.runtime)
+
     async def run_startup_scan(self) -> None:
-        async with self._lock:
+        with self._lock:
             if self._started:
                 return
             self._started = True
@@ -467,14 +559,18 @@ class DataIntegrityService:
         targets = await asyncio.to_thread(self._enumerate_targets)
         valid_character_ids = await asyncio.to_thread(self._collect_character_ids)
         for index, target in enumerate(targets):
-            result = await self._scan_target(target, valid_character_ids)
+            result = await self._scan_target(
+                target,
+                valid_character_ids,
+                full_validation=self._has_runtime_issue(target.path),
+            )
             await self._upsert_issue(target, result)
             if index < len(targets) - 1:
                 await asyncio.sleep(SCAN_INTERVAL_SEC)
 
     async def _refresh_cached_issues(self) -> None:
         """Re-scan paths currently in the in-memory cache so polling reflects manual fixes."""
-        async with self._lock:
+        with self._lock:
             cached = list(self._issues.values())
 
         if not cached:
@@ -497,12 +593,16 @@ class DataIntegrityService:
                 if refreshed_target.kind in {"chat_record", "legacy_chat"}
                 else None
             )
-            result = await self._scan_target(refreshed_target, char_ids)
+            result = await self._scan_target(
+                refreshed_target,
+                char_ids,
+                full_validation=recorded.runtime,
+            )
             await self._upsert_issue(refreshed_target, result)
 
     async def list_issues(self) -> dict[str, Any]:
         await self._refresh_cached_issues()
-        async with self._lock:
+        with self._lock:
             items = sorted(self._issues.values(), key=lambda item: self._relative_path(item.target.path))
 
         issues = [
@@ -551,6 +651,7 @@ class DataIntegrityService:
             await asyncio.to_thread(self._collect_character_ids)
             if recorded.target.kind in {"chat_record", "legacy_chat"}
             else None,
+            full_validation=recorded.runtime,
         )
         if current_issue is None:
             return {"path": rel_path, "status": "skipped", "reason": "文件已恢复正常"}
@@ -564,7 +665,7 @@ class DataIntegrityService:
 
     async def repair_issues(self, requested_paths: list[str] | None = None) -> dict[str, Any]:
         normalized_requested = {path.strip() for path in (requested_paths or []) if isinstance(path, str) and path.strip()}
-        async with self._lock:
+        with self._lock:
             current = dict(self._issues)
 
         if normalized_requested:
@@ -585,7 +686,11 @@ class DataIntegrityService:
                     if refreshed_target.kind in {"chat_record", "legacy_chat"}
                     else None
                 )
-                refreshed_issue = await self._scan_target(refreshed_target, char_ids)
+                refreshed_issue = await self._scan_target(
+                    refreshed_target,
+                    char_ids,
+                    full_validation=recorded.runtime,
+                )
                 await self._upsert_issue(refreshed_target, refreshed_issue)
                 if refreshed_issue is not None:
                     skipped.append({
@@ -611,7 +716,10 @@ class DataIntegrityService:
 
             refreshed_target = self._build_target(recorded.target.path)
             if refreshed_target is not None:
-                refreshed_issue = await self._scan_target(refreshed_target)
+                refreshed_issue = await self._scan_target(
+                    refreshed_target,
+                    full_validation=recorded.runtime,
+                )
                 await self._upsert_issue(refreshed_target, refreshed_issue)
             else:
                 await self._upsert_issue(recorded.target, None)

@@ -1,11 +1,15 @@
 import { computed, onBeforeUnmount, ref } from 'vue'
-import type { Chat, ForkLineageResponse, ForkSiblingSummary } from '../types/models'
+import type { Chat, ForkLineageResponse, ForkLineageWarning, ForkSiblingSummary } from '../types/models'
 
 export interface UseForkLineageOptions {
   /** 当前会话 getter */
   getActiveChat: () => Chat | null | undefined
   /** 拉取分叉血缘（通常为 chatsStore.fetchForkLineage） */
   fetchForkLineage: (chatId: string, signal: AbortSignal) => Promise<ForkLineageResponse>
+  /** 索引自愈或部分结果提示 */
+  onWarning?: (warning: ForkLineageWarning) => void
+  /** 分叉索引无法加载时交给全局错误面展示 */
+  onError?: (error: unknown) => void
 }
 
 /**
@@ -14,7 +18,7 @@ export interface UseForkLineageOptions {
  * 普通会话不主动拉 lineage；仅对带 `forkedFromChatId` 的会话在加载后防抖请求，并带 30s 缓存。
  */
 export function useForkLineage(options: UseForkLineageOptions) {
-  const { getActiveChat, fetchForkLineage } = options
+  const { getActiveChat, fetchForkLineage, onWarning, onError } = options
 
   const forkLineage = ref<ForkLineageResponse | null>(null)
   const forkLineageLoading = ref(false)
@@ -43,9 +47,13 @@ export function useForkLineage(options: UseForkLineageOptions) {
         expiresAt: Date.now() + FORK_LINEAGE_CACHE_TTL_MS,
       })
       forkLineage.value = lineage
+      for (const warning of lineage.warnings ?? []) {
+        onWarning?.(warning)
+      }
     } catch (e: unknown) {
       if (e instanceof DOMException && e.name === 'AbortError') return
       forkLineage.value = null
+      onError?.(e)
     } finally {
       if (forkLineageAbort === ac) {
         forkLineageLoading.value = false

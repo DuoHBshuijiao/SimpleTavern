@@ -3843,6 +3843,22 @@ const {
 } = useForkLineage({
   getActiveChat: () => activeChat.value,
   fetchForkLineage: (chatId, signal) => chats.fetchForkLineage(chatId, signal),
+  onWarning: (warning) => {
+    errorStack.pushError({
+      message: warning.message,
+      source: 'main',
+      title: '分叉索引提示',
+      code: warning.code,
+      suggestedAction: warning.suggestedAction ?? undefined,
+    })
+  },
+  onError: (error) => {
+    errorStack.pushError({
+      message: error,
+      source: 'main',
+      title: '分叉索引错误',
+    })
+  },
 })
 
 watch(

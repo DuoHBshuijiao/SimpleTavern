@@ -8,8 +8,10 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = BACKEND_ROOT.parent
 MIGRATED_FILES = (
     BACKEND_ROOT / "app" / "llm" / "openai_compat.py",
+    BACKEND_ROOT / "app" / "fork_index.py",
     BACKEND_ROOT / "app" / "routes" / "generate.py",
     BACKEND_ROOT / "app" / "services" / "generate_web_search_runtime.py",
+    BACKEND_ROOT / "app" / "storage.py",
 )
 
 
@@ -63,6 +65,16 @@ def test_generate_routes_do_not_reintroduce_bare_sse_or_legacy_json_errors() -> 
 
     assert 'yield _sse("error"' not in source
     assert 'JSONResponse({"ok": False, "error": str(e)}' not in source
+
+
+def test_storage_cleanup_and_fork_index_do_not_reintroduce_silent_fallbacks() -> None:
+    storage_source = (BACKEND_ROOT / "app" / "storage.py").read_text(encoding="utf-8")
+    fork_source = (BACKEND_ROOT / "app" / "fork_index.py").read_text(encoding="utf-8")
+
+    assert "ignore_errors=True" not in storage_source
+    assert "except OSError:\n            pass" not in storage_source
+    assert "except Exception:\n                    continue" not in storage_source
+    assert "except Exception:\n        return _empty_index()" not in fork_source
 
 
 def test_content_regex_persistence_gap_is_explicitly_tracked() -> None:

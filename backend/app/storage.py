@@ -36,6 +36,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
@@ -50,6 +51,7 @@ import portalocker
 from datetime import datetime
 
 from app.attachment_policy import normalize_mime_type
+from app.errors import AppError
 from app.schemas import (
     AssistantAttachment,
     AssistantChat,
@@ -66,6 +68,10 @@ from app.schemas import (
     WorldBook,
     _now_iso,
 )
+from app.services.cleanup_log import log_cleanup_failure
+
+
+logger = logging.getLogger(__name__)
 
 
 def _repo_root() -> Path:
@@ -230,16 +236,33 @@ def update_ignore_path() -> Path:
 
 
 def load_update_ignore() -> dict[str, Any]:
-    """读取更新忽略配置；损坏时自愈为 {}。"""
+    """读取更新忽略配置；损坏时明确报错，不覆盖原文件。"""
     path = update_ignore_path()
     if not path.exists():
         return {}
     try:
         raw = read_json(path)
-    except Exception:
-        write_json(path, {})
+    except FileNotFoundError:
         return {}
-    return raw if isinstance(raw, dict) else {}
+    except Exception as exc:
+        raise AppError(
+            code="update_ignore_corrupt",
+            message="更新忽略配置已损坏",
+            detail=f"{path.name}: {type(exc).__name__}",
+            source="storage.update_ignore",
+            status_code=500,
+            suggested_action="备份后删除 data/update_ignore.json，再重新设置忽略版本",
+        ) from exc
+    if not isinstance(raw, dict):
+        raise AppError(
+            code="update_ignore_corrupt",
+            message="更新忽略配置结构无效",
+            detail=f"{path.name}: expected object",
+            source="storage.update_ignore",
+            status_code=500,
+            suggested_action="备份后删除 data/update_ignore.json，再重新设置忽略版本",
+        )
+    return raw
 
 
 def save_update_ignore(ignored_release_tag: str | None) -> dict[str, str]:
@@ -682,6 +705,65 @@ def character_path(character_id: str) -> Path:
     return _characters_dir() / f"{character_id}.json"
 
 
+def _report_runtime_integrity_failure(
+    path: Path,
+    *,
+    kind: str,
+    exc: BaseException,
+) -> None:
+    try:
+        from app.services.data_integrity import data_integrity_service
+
+        data_integrity_service.record_runtime_failure(path, kind, exc)  # type: ignore[arg-type]
+    except Exception as report_exc:
+        logger.warning(
+            "integrity_issue_report_failed kind=%s path=%s error=%s",
+            kind,
+            path,
+            report_exc,
+            exc_info=True,
+        )
+
+
+def _clear_runtime_integrity_issue(path: Path) -> None:
+    try:
+        from app.services.data_integrity import data_integrity_service
+
+        data_integrity_service.clear_runtime_issue(path)
+    except Exception as report_exc:
+        logger.warning(
+            "integrity_issue_clear_failed path=%s error=%s",
+            path,
+            report_exc,
+            exc_info=True,
+        )
+
+
+def _require_persisted_id(raw: Any, *, label: str) -> None:
+    if not isinstance(raw, dict):
+        raise ValueError(f"{label}必须是 JSON 对象")
+    identifier = raw.get("id")
+    if not isinstance(identifier, str) or not identifier.strip():
+        raise ValueError(f"{label}缺少非空 id 字段")
+
+
+def _data_corrupted_error(
+    *,
+    path: Path,
+    source: str,
+    label: str,
+    exc: BaseException,
+) -> AppError:
+    return AppError(
+        code="data_corrupted",
+        message=f"{label}文件已损坏或结构无效",
+        detail=f"{path.name}: {type(exc).__name__}",
+        source=source,
+        status_code=500,
+        suggested_action="打开数据完整性巡检查看文件位置，并在备份后人工修复",
+    )
+
+
 def list_characters() -> list[CharacterCard]:
     """
     列出所有角色卡片
@@ -694,9 +776,15 @@ def list_characters() -> list[CharacterCard]:
     out: list[CharacterCard] = []
     for p in list_json_files(_characters_dir()):
         try:
-            out.append(CharacterCard.model_validate(read_json(p)))
-        except Exception:
+            raw = read_json(p)
+            _require_persisted_id(raw, label="角色卡")
+            out.append(CharacterCard.model_validate(raw))
+        except FileNotFoundError:
             continue
+        except Exception as exc:
+            _report_runtime_integrity_failure(p, kind="character_card", exc=exc)
+            continue
+        _clear_runtime_integrity_issue(p)
     out.sort(key=lambda c: c.updatedAt, reverse=True)
     return out
 
@@ -714,7 +802,23 @@ def load_character(character_id: str) -> CharacterCard:
     Raises:
         FileNotFoundError: 角色不存在时抛出
     """
-    return CharacterCard.model_validate(read_json(character_path(character_id)))
+    path = character_path(character_id)
+    try:
+        raw = read_json(path)
+        _require_persisted_id(raw, label="角色卡")
+        card = CharacterCard.model_validate(raw)
+    except FileNotFoundError:
+        raise
+    except Exception as exc:
+        _report_runtime_integrity_failure(path, kind="character_card", exc=exc)
+        raise _data_corrupted_error(
+            path=path,
+            source="storage.character",
+            label="角色卡",
+            exc=exc,
+        ) from exc
+    _clear_runtime_integrity_issue(path)
+    return card
 
 
 def save_character(card: CharacterCard) -> CharacterCard:
@@ -741,9 +845,15 @@ def list_worldbooks() -> list[WorldBook]:
     out: list[WorldBook] = []
     for p in list_json_files(_worldbooks_dir()):
         try:
-            out.append(WorldBook.model_validate(read_json(p)))
-        except Exception:
+            raw = read_json(p)
+            _require_persisted_id(raw, label="世界书")
+            out.append(WorldBook.model_validate(raw))
+        except FileNotFoundError:
             continue
+        except Exception as exc:
+            _report_runtime_integrity_failure(p, kind="world_book", exc=exc)
+            continue
+        _clear_runtime_integrity_issue(p)
     out.sort(key=lambda w: w.updatedAt, reverse=True)
     return out
 
@@ -752,7 +862,23 @@ def load_worldbook(worldbook_id: str) -> WorldBook:
     """
     加载指定世界书
     """
-    return WorldBook.model_validate(read_json(worldbook_path(worldbook_id)))
+    path = worldbook_path(worldbook_id)
+    try:
+        raw = read_json(path)
+        _require_persisted_id(raw, label="世界书")
+        book = WorldBook.model_validate(raw)
+    except FileNotFoundError:
+        raise
+    except Exception as exc:
+        _report_runtime_integrity_failure(path, kind="world_book", exc=exc)
+        raise _data_corrupted_error(
+            path=path,
+            source="storage.worldbook",
+            label="世界书",
+            exc=exc,
+        ) from exc
+    _clear_runtime_integrity_issue(path)
+    return book
 
 
 def save_worldbook(book: WorldBook) -> WorldBook:
@@ -986,18 +1112,45 @@ def prune_assistant_chat_attachments(chat_id: str, messages: list[ChatMessage]) 
         base.rmdir()
 
 
+def _rmtree_best_effort(target: Path, *, source: str) -> None:
+    def onerror(_func, failed_path: str, exc_info) -> None:
+        exc = exc_info[1]
+        if not isinstance(exc, BaseException):
+            exc = OSError("unknown cleanup failure")
+        log_cleanup_failure(
+            source=source,
+            exc=exc,
+            path=failed_path,
+        )
+
+    try:
+        shutil.rmtree(target, onerror=onerror)
+    except OSError as exc:
+        log_cleanup_failure(
+            source=source,
+            exc=exc,
+            path=target,
+        )
+
+
 def clear_assistant_chat_attachments(chat_id: str | None = None) -> None:
     """删除聊天助手 ingest 目录；chat_id 为空时清空整棵 assistant_chat 子树。"""
     target = _assistant_chat_ingest_root() if not chat_id else assistant_chat_ingest_dir(chat_id)
     if target.exists():
-        shutil.rmtree(target, ignore_errors=True)
+        _rmtree_best_effort(
+            target,
+            source="storage.clear_assistant_chat_attachments",
+        )
 
 
 def clear_workspace_session_attachments(session_id: str) -> None:
     """删除指定 workspace_session 附件目录。"""
     target = workspace_session_ingest_dir(session_id)
     if target.exists():
-        shutil.rmtree(target, ignore_errors=True)
+        _rmtree_best_effort(
+            target,
+            source="storage.clear_workspace_session_attachments",
+        )
 
 
 def chat_image_path(character_id: str, chat_id: str, image_filename: str) -> Path:
@@ -1051,8 +1204,12 @@ def delete_message_images(chat: Chat, message: ChatMessage) -> None:
     for image in getattr(message, "images", []) or []:
         try:
             delete_chat_image(chat, image)
-        except Exception:
-            continue
+        except Exception as exc:
+            log_cleanup_failure(
+                source="storage.delete_message_images",
+                exc=exc,
+                path=chat_image_path(chat.characterId, chat.id, image.filename),
+            )
 
 
 def legacy_chat_path(character_id: str, chat_id: str) -> Path:
@@ -1135,7 +1292,16 @@ def _sanitize_chat_greeting_variants(chat: Chat) -> None:
             m.content = cleaned[0]
 
 
-def _load_chat_from_path(path: Path, character_id: str) -> Chat | None:
+def _chat_integrity_kind(path: Path) -> str:
+    return "chat_record" if path.name == CHAT_RECORD_FILENAME else "legacy_chat"
+
+
+def _load_chat_from_path(
+    path: Path,
+    character_id: str,
+    *,
+    strict: bool = False,
+) -> Chat | None:
     """
     从指定路径加载聊天对象
     
@@ -1149,9 +1315,26 @@ def _load_chat_from_path(path: Path, character_id: str) -> Chat | None:
         Chat | None: 聊天对象，加载失败返回None
     """
     try:
-        chat = Chat.model_validate(read_json(path))
-    except Exception:
+        raw = read_json(path)
+        _require_persisted_id(raw, label="聊天记录")
+        chat = Chat.model_validate(raw)
+    except FileNotFoundError:
         return None
+    except Exception as exc:
+        _report_runtime_integrity_failure(
+            path,
+            kind=_chat_integrity_kind(path),
+            exc=exc,
+        )
+        if strict:
+            raise _data_corrupted_error(
+                path=path,
+                source="storage.chat",
+                label="聊天记录",
+                exc=exc,
+            ) from exc
+        return None
+    _clear_runtime_integrity_issue(path)
     if chat.characterId != character_id:
         chat.characterId = character_id
     _attach_chat_memory(chat)
@@ -1248,8 +1431,9 @@ def load_chat(chat_id: str) -> Chat:
     if found is None:
         raise FileNotFoundError(chat_id)
     p, character_id = found
-    chat = _load_chat_from_path(p, character_id)
+    chat = _load_chat_from_path(p, character_id, strict=True)
     if chat is None:
+        # 文件在路径定位后被并发删除，属于真正的 not-found，而不是损坏。
         raise FileNotFoundError(chat_id)
     return chat
 
@@ -1471,10 +1655,10 @@ def delete_chat(chat_id: str) -> None:
     remove_chat_fork_index(chat_id)
     chat_dir_path = chat_folder(character_id, chat_id)
     if chat_dir_path.exists():
-        try:
-            shutil.rmtree(chat_dir_path)
-        except OSError:
-            pass
+        _rmtree_best_effort(
+            chat_dir_path,
+            source="storage.delete_chat.directory",
+        )
 
 
 def delete_chats_by_character(character_id: str) -> None:
@@ -1498,15 +1682,33 @@ def delete_chats_by_character(character_id: str) -> None:
                             p.unlink(missing_ok=True)
                     elif p.is_dir():
                         p.rmdir()
-                except Exception:
-                    continue
+                except Exception as exc:
+                    log_cleanup_failure(
+                        source="storage.delete_chats_by_character.entry",
+                        exc=exc,
+                        path=p,
+                    )
         elif entry.is_file() and entry.suffix.lower() == ".json":
             with _lock_for(entry):
                 entry.unlink(missing_ok=True)
     try:
         char_chat_dir.rmdir()
-    except OSError:
-        pass
+    except OSError as exc:
+        log_cleanup_failure(
+            source="storage.delete_chats_by_character.directory",
+            exc=exc,
+            path=char_chat_dir,
+        )
+    try:
+        from app.fork_index import rebuild_fork_index
+
+        rebuild_fork_index()
+    except Exception as exc:
+        log_cleanup_failure(
+            source="storage.delete_chats_by_character.fork_index",
+            exc=exc,
+            path=char_chat_dir,
+        )
 
 
 def list_group_chats() -> list[Chat]:
@@ -1606,10 +1808,16 @@ def read_chat_fork_meta(path: Path) -> ForkChatSummary | None:
             if size > 2048:
                 f.seek(max(0, size - 2048))
             tail = f.read().decode("utf-8", errors="ignore")
-    except OSError:
+    except OSError as exc:
+        _report_runtime_integrity_failure(
+            path,
+            kind=_chat_integrity_kind(path),
+            exc=exc,
+        )
         return None
 
-    chat_id = _match_json_string(_RE_CHAT_ID.search(head)) or path.parent.name
+    fallback_chat_id = path.parent.name if path.name == CHAT_RECORD_FILENAME else path.stem
+    chat_id = _match_json_string(_RE_CHAT_ID.search(head)) or fallback_chat_id
     if not chat_id:
         return None
     title = (_match_json_string(_RE_CHAT_TITLE.search(head)) or "").strip() or "新对话"
@@ -1675,7 +1883,12 @@ def read_chat_list_meta(path: Path) -> ChatListMeta | None:
             if size > tail_size:
                 f.seek(size - tail_size)
             tail = f.read().decode("utf-8", errors="ignore")
-    except OSError:
+    except OSError as exc:
+        _report_runtime_integrity_failure(
+            path,
+            kind=_chat_integrity_kind(path),
+            exc=exc,
+        )
         return None
 
     combined = head + tail
@@ -2310,5 +2523,9 @@ def clear_ai_workspace() -> None:
                 p.unlink(missing_ok=True)
             elif p.is_dir():
                 p.rmdir()
-        except Exception:
-            continue
+        except Exception as exc:
+            log_cleanup_failure(
+                source="storage.clear_ai_workspace",
+                exc=exc,
+                path=p,
+            )

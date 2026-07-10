@@ -757,8 +757,16 @@ export interface ForkOutgoingGroup {
   chats: ForkSiblingSummary[]
 }
 
+export interface ForkLineageWarning {
+  code: string
+  message: string
+  suggestedAction?: string | null
+}
+
 export interface ForkLineageResponse {
   origin: ForkOrigin | null
   siblings: ForkSiblingSummary[]
   outgoingForks: ForkOutgoingGroup[]
+  partialSuccess?: boolean
+  warnings?: ForkLineageWarning[]
 }

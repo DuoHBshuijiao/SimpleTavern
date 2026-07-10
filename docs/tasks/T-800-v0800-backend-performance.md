@@ -41,10 +41,11 @@ v0.800 从“后端性能版”升级为“**后端可信执行层**”：
 ## 当前实施进度（2026-07-10）
 
 - T-801 已完成：统一错误 envelope、requestId、REST/SSE handler、上游错误映射、前端 typed error 与错误栈。
-- T-802 首批已完成：八领域 fallback 清单、模型列表/Chat Completions 协议 fast-fail、draft/group/interject 与搜索工具参数迁移。
-- 当前门禁：后端 150 tests、前端 121 tests、前端 build 全通过。
+- T-802 前两批已完成：LLM/generate fast-fail，以及 Storage/chat/fork 损坏数据可见化、索引自愈、cleanup-only 日志。
+- 当前门禁：后端 168 tests、前端 123 tests、前端 build 全通过。
+- fork index 性能基线：1000 会话、99 fork 冷重建 `410.05 ms`，回归门槛 `< 5000 ms`。
 - 已确认正文正则未在 generate 落库前调用，登记为 F-010 契约缺口，待唯一语义决策。
-- 下一批：Storage/chat list/fork 损坏项与 cleanup-only 可观测性。
+- 下一批：Assistant/tools 脏消息、工具参数与 REST/SSE 错误收口。
 
 ## 统一错误契约
 

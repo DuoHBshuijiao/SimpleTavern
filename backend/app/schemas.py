@@ -1203,11 +1203,19 @@ class ForkOutgoingGroup(BaseModel):
     chats: list[ForkSiblingSummary] = Field(default_factory=list)
 
 
+class ForkLineageWarning(BaseModel):
+    code: str
+    message: str
+    suggestedAction: str | None = None
+
+
 class ForkLineageResponse(BaseModel):
     """分叉溯源：来源、兄弟分叉、本会话拉出的子分叉。"""
     origin: ForkOrigin | None = None
     siblings: list[ForkSiblingSummary] = Field(default_factory=list)
     outgoingForks: list[ForkOutgoingGroup] = Field(default_factory=list)
+    partialSuccess: bool = False
+    warnings: list[ForkLineageWarning] = Field(default_factory=list)
 
 
 class CreateChatRequest(BaseModel):

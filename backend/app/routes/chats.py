@@ -52,6 +52,7 @@ from app.group_mvu import (
     apply_character_mvu_snapshot_to_group_chat,
     character_has_mvu_profile_data,
 )
+from app.services.cleanup_log import log_cleanup_failure
 from app.schemas import (
     AppendMessageRequest,
     Chat,
@@ -717,8 +718,11 @@ def promote_to_group(source_chat_id: str, req: PromoteToGroupRequest) -> Chat:
     except Exception:
         try:
             delete_chat(new_chat.id)
-        except Exception:
-            pass
+        except Exception as cleanup_exc:
+            log_cleanup_failure(
+                source="chats.promote_to_group.rollback",
+                exc=cleanup_exc,
+            )
         raise
 
     return new_chat
@@ -800,8 +804,11 @@ def branch_chat(source_chat_id: str) -> Chat:
     except Exception:
         try:
             delete_chat(new_chat.id)
-        except Exception:
-            pass
+        except Exception as cleanup_exc:
+            log_cleanup_failure(
+                source="chats.branch.rollback",
+                exc=cleanup_exc,
+            )
         raise
 
     return new_chat
@@ -904,8 +911,11 @@ def _fork_chat(source: Chat, fork_at_message_id: str, new_chat_name: str | None)
     except Exception:
         try:
             delete_chat(new_chat.id)
-        except Exception:
-            pass
+        except Exception as cleanup_exc:
+            log_cleanup_failure(
+                source="chats.fork.rollback",
+                exc=cleanup_exc,
+            )
         raise
 
     return new_chat

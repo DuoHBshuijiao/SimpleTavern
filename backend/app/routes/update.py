@@ -19,6 +19,7 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from app.errors import AppError
 from app.services.http_log import log_outbound_sync
 from app.storage import get_repo_root, get_update_dir, load_update_ignore, save_update_ignore
 from app.version import APP_VERSION
@@ -147,6 +148,8 @@ def startup_check_update() -> dict:
             "ignoredReleaseTag": ignored_tag,
             "shouldNotify": should_notify,
         }
+    except AppError:
+        raise
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"启动更新检查失败: {e}")
 

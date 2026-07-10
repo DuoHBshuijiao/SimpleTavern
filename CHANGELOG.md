@@ -2,6 +2,14 @@
 
 ## v0.800（进行中）
 
+### 静默 Fallback 迁移第二批（T-802）
+
+- 损坏角色/世界书在保持列表数组兼容的同时进入数据完整性巡检；直接加载损坏角色、世界书、会话改为 `data_corrupted`，不再伪装未找到。
+- runtime chat issue 保持完整校验直到文件真正修复；瞬时读取错误只允许人工处理，不触发自动删除。
+- 损坏 fork index 可从会话元数据重建并返回用户 warning；重建失败可重试，索引同步失败不覆盖已保存会话。
+- cleanup-only 失败统一结构化日志与 requestId，目录清理保持逐项尽力执行；损坏 update-ignore 不再被覆写为空对象。
+- 1000 会话、99 fork 冷重建基线为 410.05 ms；后端 168、前端 123 项测试与前端构建通过。
+
 ### 静默 Fallback 迁移首批（T-802）
 
 - 建立全 backend 八领域 fallback/catch 首轮 P0/P1 清单，区分 fatal、partial、retryable、explicit-fallback、cleanup-only 与 verify-first。

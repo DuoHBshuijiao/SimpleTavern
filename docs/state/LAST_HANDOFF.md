@@ -1,31 +1,34 @@
 # Last Handoff
 
-- last_task: `T-802-batch-1-llm-generate`
+- last_task: `T-802-batch-2-storage-chat-fork`
 - status: completed（T-802 overall in-progress）
-- summary: 建立全 backend fallback 首轮 P0/P1 清单，并完成 LLM/model-list/generate 首批静默失败迁移。
+- summary: 完成 Storage/chat/fork 损坏数据可见化、fork 索引自愈与 cleanup-only 可观测性。
 - code_changes:
-  - 新增 `docs/audits/v0800-backend-fallback-inventory.md`，覆盖八个 backend 领域高风险项。
-  - `/llm/models`、`/llm/test-models` 空列表统一 `model_list_empty`，不回退本地候选、不返回 200 + `[]`。
-  - OpenAI-compatible 空响应、非法 SSE、空流、无结束标记分别 fast-fail。
-  - 搜索工具非法参数/未知工具统一 `tool_call_invalid`，不再退 `{}` 调用。
-  - draft/group/interject 统一 requestId、SSE meta/terminal error/success-only done 和非流 ErrorEnvelope。
-  - group/interject 搜索未配置在生成前 fast-fail。
-  - 新增已迁域静态 silent-fallback 守卫。
+  - 角色/世界书列表保持数组契约；损坏项实时写入既有 data-integrity issue，避免破坏前端 stores。
+  - 损坏角色、世界书、会话直接加载统一 `data_corrupted`；真实缺失仍为 not-found。
+  - runtime chat issue 保持完整校验直到磁盘文件修复；读取错误禁止自动删除。
+  - `update_ignore.json` 损坏统一 `update_ignore_corrupt`，不再覆写原文件。
+  - fork index 损坏从 chat 元数据重建并返回 warnings；失败为 retryable error；sync 失败标 dirty 并在下次 lineage 重建。
+  - cleanup-only 统一 `cleanup_failed` 结构化日志与 requestId，目录仍逐项尽力清理。
+  - 前端 fork warning/error 接入现有错误栈。
 - review_fixes:
-  - 补 `/llm/test-models` 上游空列表 fast-fail。
-  - 补工具运行时“坏参数不得调用 search”测试。
-  - 补 group/interject 非流 envelope、空流、reasoning/tool-only 与无 `[DONE]` 正常结束测试。
-  - 保持 OpenAI Chat Completions 严格字段：tool arguments 为 JSON string、tool index 为 integer、SSE 只接受 data/comment。
+  - 修复 runtime chat issue 首次轮询后降级为轻量校验导致的误清。
+  - `read_error` 改为人工处理，防止瞬时 I/O 错误触发删除建议。
+  - 恢复 `rmtree` 逐项尽力清理，不因首个失败扩大残留。
+  - fork sync 失败增加 dirty 标记；不可读 meta warning 持久保留。
+  - 启动更新检查不再把 `update_ignore_corrupt` 包成泛 502。
 - known_gap:
   - generate 落库前未调用 `apply_content_regex_pipeline`，与工作区文档契约不一致；已登记 F-010，本批未改变持久化语义。
+  - F-009 世界书坏 regex 仍待用户可见 warning。
 - verification:
-  - T-802 focused contracts → 38 passed。
-  - `cd backend && python -m pytest tests/ -q` → 150 passed。
-  - `cd frontend && npm run test` → 121 passed。
+  - T-802 batch-2 focused contracts → 30 passed。
+  - fork index 1000 chats / 99 forks cold rebuild → `410.05 ms`（门槛 `< 5000 ms`）。
+  - `cd backend && python -m pytest tests/ -q` → 168 passed。
+  - `cd frontend && npm run test` → 123 passed。
   - `cd frontend && npm run build` → passed。
 - version_note: `backend/app/version.py` 仍为 `v0.700`；待 v0.800 发布门禁完成后再改。
 - next_read:
   1. `docs/tasks/T-802-v0800-backend-fallback-audit.md`
   2. `docs/audits/v0800-backend-fallback-inventory.md`
   3. `docs/tasks/T-800-v0800-backend-performance.md`
-- next_implementation: T-802 第二批迁移 Storage/chat list/fork 损坏项；先决定 F-010 正文正则唯一契约，再进入相关修复。不要同时开始 T-804 协议内核或计量大改。
+- next_implementation: T-802 第三批迁移 Assistant/tools（F-017~F-020）；F-010 正文正则需先确认唯一产品语义。不要同时开始 T-804 协议内核或计量大改。

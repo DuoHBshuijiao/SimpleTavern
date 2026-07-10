@@ -6,6 +6,9 @@ import asyncio
 import json
 from pathlib import Path
 
+from pydantic import ValidationError
+
+from app.schemas import Chat, WorldBook
 from app.services import data_integrity as di
 from app.services.data_integrity import (
     DataIntegrityService,
@@ -39,6 +42,7 @@ def test_effective_repair_action_protects_high_value_data():
     assert _effective_repair_action("assistant_settings", "empty") == "none"
     assert _effective_repair_action("character_card", "schema_mismatch") == "none"
     assert _effective_repair_action("world_book", "empty") == "none"
+    assert _effective_repair_action("chat_record", "read_error") == "none"
     # 孤儿引用所在的 chat 文件本身完好，绝不能按 chat_record 的 delete 自动删除
     assert _effective_repair_action("chat_record", "orphan_reference") == "none"
     assert _effective_repair_action("legacy_chat", "orphan_reference") == "none"
@@ -57,7 +61,8 @@ def test_validate_schema_for_new_kinds():
     assert svc._validate_schema(char_t, "str") is not None
 
     wb_t = ScanTarget(path=Path("w.json"), kind="world_book")
-    assert svc._validate_schema(wb_t, {"id": "w1"}) is None
+    assert svc._validate_schema(wb_t, {"id": "w1", "name": "Book"}) is None
+    assert svc._validate_schema(wb_t, {"id": "w1"}) is not None
     assert svc._validate_schema(wb_t, {}) is not None
 
 
@@ -215,3 +220,64 @@ def test_repair_manual_kind_clears_cache_when_fixed(monkeypatch, tmp_path):
     assert report["hasIssues"] is False
     assert report["remainingIssues"] == []
     assert report["skipped"] == []
+
+
+def test_runtime_schema_issue_remains_visible_until_file_is_fixed(monkeypatch, tmp_path):
+    _data, _chars, wbs, _chats = _patch_paths(monkeypatch, tmp_path)
+    broken = wbs / "broken.json"
+    broken.write_text(json.dumps({"id": "broken"}), encoding="utf-8")
+    svc = DataIntegrityService()
+
+    try:
+        WorldBook.model_validate({"id": "broken"})
+    except ValidationError as exc:
+        svc.record_runtime_failure(broken, "world_book", exc)
+    else:
+        raise AssertionError("expected ValidationError")
+
+    before = asyncio.run(svc.list_issues())
+    assert before["hasIssues"] is True
+    assert before["issues"][0]["code"] == "schema_mismatch"
+    assert before["issues"][0]["repairAction"] == "none"
+
+    broken.write_text(
+        json.dumps({"id": "broken", "name": "Fixed"}),
+        encoding="utf-8",
+    )
+    after = asyncio.run(svc.list_issues())
+    assert after["hasIssues"] is False
+
+
+def test_runtime_chat_issue_survives_repeated_refresh_until_fixed(monkeypatch, tmp_path):
+    _data, chars, _wbs, chats = _patch_paths(monkeypatch, tmp_path)
+    (chars / "hero.json").write_text(
+        json.dumps({"id": "hero", "name": "Hero"}),
+        encoding="utf-8",
+    )
+    broken = chats / "hero" / "chat-1" / "chat.json"
+    broken.parent.mkdir(parents=True)
+    raw = {
+        "id": "chat-1",
+        "characterId": "hero",
+        "messages": [{"role": "invalid", "content": "hello"}],
+    }
+    broken.write_text(json.dumps(raw), encoding="utf-8")
+    svc = DataIntegrityService()
+
+    try:
+        Chat.model_validate(raw)
+    except ValidationError as exc:
+        svc.record_runtime_failure(broken, "chat_record", exc)
+    else:
+        raise AssertionError("expected ValidationError")
+
+    first = asyncio.run(svc.list_issues())
+    second = asyncio.run(svc.list_issues())
+    assert first["hasIssues"] is True
+    assert second["hasIssues"] is True
+    assert second["issues"][0]["code"] == "schema_mismatch"
+
+    raw["messages"] = []
+    broken.write_text(json.dumps(raw), encoding="utf-8")
+    fixed = asyncio.run(svc.list_issues())
+    assert fixed["hasIssues"] is False

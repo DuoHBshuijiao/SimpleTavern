@@ -96,9 +96,9 @@
 ### 当前进度
 
 - T-801 已完成：统一 REST/SSE 错误 envelope、requestId、上游错误映射、前端 typed error/错误栈。
-- T-802 首批已完成：八领域 fallback 清单、LLM/model-list 协议 fast-fail、draft/group/interject 错误契约、搜索工具参数校验。
-- 当前门禁：后端 150 tests、前端 121 tests、前端 build 通过。
-- T-802 下一批为 Storage/chat list/fork 损坏项与 cleanup-only 可观测性。
+- T-802 前两批已完成：LLM/generate fast-fail，以及 Storage/chat/fork 损坏数据、索引自愈、cleanup-only 可观测性。
+- 当前门禁：后端 168 tests、前端 123 tests、前端 build 通过；1000 会话 fork 索引冷重建 410.05 ms。
+- T-802 下一批为 Assistant/tools 脏消息、工具参数与错误契约。
 
 ### 成本统计 UI
 

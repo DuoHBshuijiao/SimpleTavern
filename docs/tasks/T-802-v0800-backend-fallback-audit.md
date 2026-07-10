@@ -1,6 +1,6 @@
 # T-802 v0.800 全后端静默 Fallback 审计与迁移
 
-- status: in-progress（首批 LLM/model-list/generate 已完成）
+- status: in-progress（前两批 LLM/generate 与 Storage/chat/fork 已完成）
 - area: `backend/app/**`
 - priority: P0
 - theme: 每个 catch/fallback 都有业务语义、用户可见结果与测试
@@ -157,11 +157,23 @@
 - Grok 4.5 只读复查无阻塞问题；坚持 OpenAI Chat Completions 的 string arguments、integer tool index 与 data/comment 帧契约，不增加隐式兼容。
 - 门禁：后端 `150 passed`、前端 `121 passed`、前端 build 通过。
 
+### 第二批已完成
+
+- 角色/世界书列表保持 `list[...]` 兼容契约；坏项实时侧写到既有 data-integrity issue，完整校验与实际加载规则对齐。
+- 直接加载损坏角色、世界书、会话时统一 `data_corrupted`，不再把“文件存在但损坏”伪装成 404。
+- runtime chat issue 连续轮询仍保持完整 Pydantic 校验，文件真正修复后才从巡检面清除；`read_error` 不允许自动删除。
+- `update_ignore.json` 损坏改为 `update_ignore_corrupt`，原文件不再被静默覆写为空对象，启动更新检查保留该 AppError。
+- fork index 损坏会从 chat 元数据重建并返回 warning；重建失败为 retryable `fork_index_rebuild_failed`；sync 失败不覆盖已保存会话，并在下次 lineage 强制重建。
+- 删除/回滚/附件清理失败统一 `cleanup_failed` 结构化日志，关联 requestId，且目录删除保持逐项尽力清理。
+- 性能基线：1000 会话、99 fork 冷重建 `410.05 ms`，门槛 `< 5000 ms`，锚点齐全时禁止完整 `load_chat()`。
+- Grok 4.5 两轮只读复查无阻塞/高优先级遗留。
+- 门禁：后端 `168 passed`、前端 `123 passed`、前端 build 通过。
+
 ### 下一批
 
-1. Storage/chat list/fork 损坏项可见化与 cleanup-only 日志。
+1. Assistant/tools 脏消息、工具参数与 REST/SSE 错误迁移（F-017~F-020）。
 2. 明确正文正则“落库原文 + 前端显示”或“落库前处理”的唯一契约，再修 F-010。
-3. Assistant/tools 脏消息与工具参数迁移。
+3. MVU/KG/regex scanner health、重试与 dropped counter（F-021~F-026）。
 
 ### 1. 建立机器可读清单
 
