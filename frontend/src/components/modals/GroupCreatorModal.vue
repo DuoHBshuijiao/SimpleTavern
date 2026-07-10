@@ -465,7 +465,7 @@ void dialogRef
                 <div 
                   v-for="c in characters"
                   :key="c.id"
-                  class="flex items-start gap-3 p-3 rounded-xl cursor-pointer transition-all border-2"
+                  class="flex items-start gap-3 p-3 rounded-xl cursor-pointer transition-[border-color,background-color,box-shadow,color] border-2"
                   :class="selectedMemberIds.includes(c.id) ? 'surface-selected' : 'surface-muted interactive-surface border-transparent'"
                   @click="toggleMemberSelection(c.id)"
                 >

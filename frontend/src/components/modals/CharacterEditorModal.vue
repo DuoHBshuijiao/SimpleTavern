@@ -310,7 +310,7 @@ void dialogRef
                   <div
                     v-for="(wbId, idx) in (character.attachedWorldBookIds || [])"
                     :key="`${wbId}-${idx}`"
-                    class="flex items-center justify-between gap-2 rounded-lg border border-[var(--color-border-subtle)] bg-surface-muted px-2 py-1.5 transition-all"
+                    class="flex items-center justify-between gap-2 rounded-lg border border-[var(--color-border-subtle)] bg-surface-muted px-2 py-1.5 transition-[border-color,background-color,box-shadow]"
                     :class="characterEditorWbDraggingIdx === idx ? 'opacity-50 border-brand-a50' : ''"
                     draggable="true"
                     @dragstart="handleCharacterEditorWbDragStart(idx)"
@@ -395,7 +395,7 @@ void dialogRef
                   type="button"
                   class="text-xs px-2.5 py-1 rounded-lg border transition-colors"
                   :class="assistant.allowDestructiveToolsEnabled.value
-                    ? 'bg-amber-500/15 border-amber-500/50 text-amber-200'
+                    ? 'bg-[var(--color-warning-bg)] border-[color-mix(in_srgb,var(--color-warning)_50%,transparent)] text-[var(--color-warning-text)]'
                     : 'border-[var(--color-border-subtle)] text-[var(--color-text-muted)]'"
                   @click="assistant.toggleAllowDestructiveTools"
                 >

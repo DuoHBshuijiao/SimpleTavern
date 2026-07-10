@@ -218,7 +218,7 @@ function save() {
               <div class="flex-1">
                 <div class="h-2 bg-[var(--color-surface-muted)] rounded-full overflow-hidden">
                   <div 
-                    class="h-full bg-[var(--color-success)] transition-all"
+                    class="h-full bg-[var(--color-success)] transition-[width] duration-[var(--motion-duration-expand)] ease-out"
                     :style="{ width: `${(settings.probability ?? 1) * 100}%` }"
                   ></div>
                 </div>

@@ -296,7 +296,7 @@ watch(
   <!-- Teleport 到 body，避免主聊天区（含 z-50 助手按钮等）的层叠上下文遮挡侧栏下半部分 -->
   <Teleport to="body">
   <aside
-    class="drawer-surface fixed right-4 top-4 bottom-4 border border-[var(--color-border)] rounded-2xl transition-all duration-300 overflow-hidden flex flex-col z-floating pointer-events-auto"
+    class="drawer-surface fixed right-4 top-4 bottom-4 border border-[var(--color-border)] rounded-2xl transition-[transform,opacity,width] duration-300 overflow-hidden flex flex-col z-floating pointer-events-auto"
     :class="isOpen ? 'translate-x-0 w-[min(360px,calc(100vw-2rem))] opacity-100' : 'translate-x-[calc(100%+20px)] w-[min(360px,calc(100vw-2rem))] opacity-0 pointer-events-none'"
     style="contain: content; will-change: transform, opacity;"
   >
@@ -323,7 +323,7 @@ watch(
             </span>
             <span
               v-if="allowDestructiveTools"
-              class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold normal-case tracking-normal bg-amber-500/20 text-amber-100 border border-amber-500/40"
+              class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold normal-case tracking-normal bg-[var(--color-warning-bg)] text-[var(--color-warning-text)] border border-[color-mix(in_srgb,var(--color-warning)_40%,transparent)]"
             >
               破坏
             </span>
@@ -364,7 +364,7 @@ watch(
       >
         <div v-if="messages.length === 0" class="text-xs text-muted text-center py-12 flex flex-col items-center gap-3">
         <div class="surface-muted w-12 h-12 rounded-full flex items-center justify-center text-xl">
-            <Sparkles class="w-6 h-6 text-yellow-400" />
+            <Sparkles class="w-6 h-6 text-[var(--color-warning)]" />
         </div>
         开始和助手对话以获得帮助
       </div>
