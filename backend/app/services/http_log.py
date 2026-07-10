@@ -33,6 +33,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, AsyncIterator, Iterable, Literal
 
+from app.errors import redact_sensitive_text
+from app.request_context import get_request_id
+
 logger = logging.getLogger(__name__)
 
 
@@ -47,6 +50,8 @@ _SENSITIVE_HEADER_KEYS = (
     "anthropic-api-key",
     "x-goog-api-key",
     "proxy-authorization",
+    "cookie",
+    "set-cookie",
 )
 _SENSITIVE_BODY_KEYS = (
     "apikey",
@@ -255,7 +260,11 @@ async def _write_record(record: dict[str, Any]) -> None:
         try:
             payload = json.dumps(
                 {
-                    **{k: v for k, v in record.items() if k in ("id", "ts", "source", "method", "url", "responseStatus")},
+                    **{
+                        k: v
+                        for k, v in record.items()
+                        if k in ("id", "requestId", "ts", "source", "method", "url", "responseStatus")
+                    },
                     "_serializeError": True,
                 },
                 ensure_ascii=False,
@@ -266,6 +275,7 @@ async def _write_record(record: dict[str, Any]) -> None:
         payload = json.dumps(
             {
                 "id": record.get("id"),
+                "requestId": record.get("requestId"),
                 "ts": record.get("ts"),
                 "source": record.get("source"),
                 "method": record.get("method"),
@@ -322,6 +332,7 @@ def _record_meta(record: dict[str, Any]) -> dict[str, Any]:
     """列表接口的精简元数据（不含大 body）。"""
     return {
         "id": record.get("id"),
+        "requestId": record.get("requestId"),
         "ts": record.get("ts"),
         "source": record.get("source"),
         "method": record.get("method"),
@@ -417,6 +428,7 @@ async def log_outbound(
     request_body: Any = None,
     streaming: bool = False,
     extra: dict[str, Any] | None = None,
+    request_id: str | None = None,
 ) -> AsyncIterator["_RecordHandle"]:
     """
     包裹一次出站请求，无论成功/失败都在退出时落盘。
@@ -431,6 +443,7 @@ async def log_outbound(
             # 异常会被 handle.set_error 捕获
     """
     record_id = uuid.uuid4().hex
+    correlated_request_id = request_id or get_request_id()
     started_at = time.time()
     handle = _RecordHandle(record_id=record_id)
     try:
@@ -444,6 +457,7 @@ async def log_outbound(
         ts_iso = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).astimezone().isoformat()
         record: dict[str, Any] = {
             "id": record_id,
+            "requestId": correlated_request_id,
             "ts": ts_iso,
             "tsMs": ts_ms,
             "durationMs": duration_ms,
@@ -507,9 +521,11 @@ def log_outbound_sync(
     request_body: Any = None,
     streaming: bool = False,
     extra: dict[str, Any] | None = None,
+    request_id: str | None = None,
 ):
     """同步版本的 log_outbound，用于 update 路由等非 async 调用方。"""
     record_id = uuid.uuid4().hex
+    correlated_request_id = request_id or get_request_id()
     started_at = time.time()
     handle = _RecordHandle(record_id=record_id)
     err: BaseException | None = None
@@ -526,6 +542,7 @@ def log_outbound_sync(
             ts_iso = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).astimezone().isoformat()
             record: dict[str, Any] = {
                 "id": record_id,
+                "requestId": correlated_request_id,
                 "ts": ts_iso,
                 "tsMs": ts_ms,
                 "durationMs": duration_ms,
@@ -556,6 +573,7 @@ def _write_record_sync(record: dict[str, Any]) -> None:
         payload = json.dumps(
             {
                 "id": record.get("id"),
+                "requestId": record.get("requestId"),
                 "ts": record.get("ts"),
                 "source": record.get("source"),
                 "method": record.get("method"),
@@ -618,4 +636,4 @@ class _RecordHandle:
             self.stream_chunks.append(text)
 
     def set_error(self, err: str | None) -> None:
-        self.error = err
+        self.error = redact_sensitive_text(err) if err else None

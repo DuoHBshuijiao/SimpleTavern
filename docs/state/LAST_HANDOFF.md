@@ -1,19 +1,31 @@
 # Last Handoff
 
-- last_task: `v0.800-planning-kickoff`
-- status: completed（规划文档）；v0.800 implementation not started
-- summary: 正式宣布进入 v0.800；范围升级为全 backend fast-fail/无静默 fallback、性能与健壮性、原生 OpenAI Responses/Anthropic/Gemini、多套工具/消息/流、Anthropic 缓存、消息 usage/cost/latency 元数据、usage ledger、会话/全局/按模型统计、搜索供应商扩展。
-- code_changes: none（仅文档）
-- version_note: `backend/app/version.py` 仍为 `v0.700`，不得在无实现/无门禁时提前改版本常量。
-- baseline_evidence:
-  - LLM 当前以 `backend/app/llm/openai_compat.py` 为单一主干。
-  - `list_models_openai_compat` 与 `/llm/models` 存在失败→空列表→候选/默认模型静默回退，是 T-801/T-802 首个示范点。
-  - ChatMessage 尚无 generation usage/cost 元数据；HTTP log 只有 durationMs。
-  - 搜索当前为 Tavily/博查。
-  - 成本统计 UI 目标为 `SettingsDrawerGlobalAppSection.vue`，成本计算器按钮上方。
+- last_task: `T-802-batch-1-llm-generate`
+- status: completed（T-802 overall in-progress）
+- summary: 建立全 backend fallback 首轮 P0/P1 清单，并完成 LLM/model-list/generate 首批静默失败迁移。
+- code_changes:
+  - 新增 `docs/audits/v0800-backend-fallback-inventory.md`，覆盖八个 backend 领域高风险项。
+  - `/llm/models`、`/llm/test-models` 空列表统一 `model_list_empty`，不回退本地候选、不返回 200 + `[]`。
+  - OpenAI-compatible 空响应、非法 SSE、空流、无结束标记分别 fast-fail。
+  - 搜索工具非法参数/未知工具统一 `tool_call_invalid`，不再退 `{}` 调用。
+  - draft/group/interject 统一 requestId、SSE meta/terminal error/success-only done 和非流 ErrorEnvelope。
+  - group/interject 搜索未配置在生成前 fast-fail。
+  - 新增已迁域静态 silent-fallback 守卫。
+- review_fixes:
+  - 补 `/llm/test-models` 上游空列表 fast-fail。
+  - 补工具运行时“坏参数不得调用 search”测试。
+  - 补 group/interject 非流 envelope、空流、reasoning/tool-only 与无 `[DONE]` 正常结束测试。
+  - 保持 OpenAI Chat Completions 严格字段：tool arguments 为 JSON string、tool index 为 integer、SSE 只接受 data/comment。
+- known_gap:
+  - generate 落库前未调用 `apply_content_regex_pipeline`，与工作区文档契约不一致；已登记 F-010，本批未改变持久化语义。
+- verification:
+  - T-802 focused contracts → 38 passed。
+  - `cd backend && python -m pytest tests/ -q` → 150 passed。
+  - `cd frontend && npm run test` → 121 passed。
+  - `cd frontend && npm run build` → passed。
+- version_note: `backend/app/version.py` 仍为 `v0.700`；待 v0.800 发布门禁完成后再改。
 - next_read:
-  1. `docs/tasks/T-801-v0800-fast-fail-foundation.md`
-  2. `docs/superpowers/specs/2026-07-10-v0800-backend-trust-layer-design.md`
+  1. `docs/tasks/T-802-v0800-backend-fallback-audit.md`
+  2. `docs/audits/v0800-backend-fallback-inventory.md`
   3. `docs/tasks/T-800-v0800-backend-performance.md`
-- first_implementation: 只做 T-801 错误基座与最小示范迁移；不要同时开始协议/计量大改。
-- verify_when_implementing: backend pytest；frontend test/build；新增 REST/SSE error contract tests。
+- next_implementation: T-802 第二批迁移 Storage/chat list/fork 损坏项；先决定 F-010 正文正则唯一契约，再进入相关修复。不要同时开始 T-804 协议内核或计量大改。

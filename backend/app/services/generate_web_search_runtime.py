@@ -10,6 +10,7 @@ from copy import deepcopy
 from typing import Any, AsyncIterator
 from uuid import uuid4
 
+from app.errors import AppError
 from app.llm.openai_compat import chat_completions_message, stream_chat_completions
 from app.schemas import Settings
 from app.services.web_search import OPENAI_WEB_SEARCH_TOOLS, run_web_search, web_search_is_configured
@@ -30,6 +31,82 @@ def normalize_tool_calls_ids(tool_calls: list[dict[str, Any]] | None) -> list[di
         tc_copy["id"] = tid
         out.append(tc_copy)
     return out
+
+
+def _parse_web_search_query(tool_call: dict[str, Any]) -> str:
+    function = tool_call.get("function")
+    if not isinstance(function, dict):
+        raise AppError(
+            code="tool_call_invalid",
+            message="模型返回了无效工具调用",
+            detail="tool call function is missing or invalid",
+            source="generate.web_search.tool",
+            status_code=502,
+            provider="openai_compatible",
+            protocol="openai_compatible_chat",
+            suggested_action="检查模型是否支持 OpenAI-compatible 工具调用",
+        )
+    name = function.get("name")
+    if name != "web_search":
+        raise AppError(
+            code="tool_call_invalid",
+            message="模型调用了未注册的工具",
+            detail=f"unknown tool: {name!r}",
+            source="generate.web_search.tool",
+            status_code=502,
+            provider="openai_compatible",
+            protocol="openai_compatible_chat",
+            suggested_action="检查模型工具调用配置",
+        )
+    raw_arguments = function.get("arguments")
+    if not isinstance(raw_arguments, str):
+        raise AppError(
+            code="tool_call_invalid",
+            message="模型返回了无效工具参数",
+            detail="web_search arguments must be a JSON string",
+            source="generate.web_search.tool",
+            status_code=502,
+            provider="openai_compatible",
+            protocol="openai_compatible_chat",
+            suggested_action="重试请求，或更换支持工具调用的模型",
+        )
+    try:
+        arguments = json.loads(raw_arguments)
+    except json.JSONDecodeError as exc:
+        raise AppError(
+            code="tool_call_invalid",
+            message="模型返回了无法解析的工具参数",
+            detail=f"web_search arguments JSON is invalid: {exc}",
+            source="generate.web_search.tool",
+            status_code=502,
+            provider="openai_compatible",
+            protocol="openai_compatible_chat",
+            suggested_action="重试请求，或更换支持工具调用的模型",
+        ) from exc
+    if not isinstance(arguments, dict):
+        raise AppError(
+            code="tool_call_invalid",
+            message="模型返回了无效工具参数",
+            detail="web_search arguments must decode to an object",
+            source="generate.web_search.tool",
+            status_code=502,
+            provider="openai_compatible",
+            protocol="openai_compatible_chat",
+            suggested_action="重试请求，或更换支持工具调用的模型",
+        )
+    query = arguments.get("query")
+    if not isinstance(query, str) or not query.strip():
+        raise AppError(
+            code="tool_call_invalid",
+            message="模型未提供有效的搜索关键词",
+            detail="web_search query is missing or empty",
+            source="generate.web_search.tool",
+            status_code=502,
+            provider="openai_compatible",
+            protocol="openai_compatible_chat",
+            suggested_action="重试请求，或更换支持工具调用的模型",
+        )
+    return query.strip()
 
 
 async def iter_web_search_stream_events(
@@ -105,21 +182,8 @@ async def iter_web_search_stream_events(
                     asst["reasoning_content"] = rc_round
                 msgs.append(asst)
                 for tc in norm:
-                    fn = tc.get("function") or {}
-                    name = str(fn.get("name") or "")
-                    raw_args = str(fn.get("arguments") or "{}")
-                    try:
-                        args = json.loads(raw_args)
-                    except Exception:
-                        args = {}
-                    q = str(args.get("query") or "").strip()
-                    if name == "web_search":
-                        body = await run_web_search(settings, q)
-                    else:
-                        body = json.dumps(
-                            {"ok": False, "error": f"未知工具: {name}"},
-                            ensure_ascii=False,
-                        )
+                    query = _parse_web_search_query(tc)
+                    body = await run_web_search(settings, query)
                     msgs.append({"role": "tool", "tool_call_id": tc["id"], "content": body})
                 tool_rounds_used += 1
                 continue
@@ -195,21 +259,8 @@ async def nonstream_web_search_rounds(
                     asst["reasoning_content"] = rc
                 msgs.append(asst)
                 for tc in norm:
-                    fn = tc.get("function") or {}
-                    name = str(fn.get("name") or "")
-                    raw_args = str(fn.get("arguments") or "{}")
-                    try:
-                        args = json.loads(raw_args)
-                    except Exception:
-                        args = {}
-                    q = str(args.get("query") or "").strip()
-                    if name == "web_search":
-                        body = await run_web_search(settings, q)
-                    else:
-                        body = json.dumps(
-                            {"ok": False, "error": f"未知工具: {name}"},
-                            ensure_ascii=False,
-                        )
+                    query = _parse_web_search_query(tc)
+                    body = await run_web_search(settings, query)
                     msgs.append({"role": "tool", "tool_call_id": tc["id"], "content": body})
                 tool_rounds_used += 1
                 continue

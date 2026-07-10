@@ -14,8 +14,8 @@
 ## v0.800 任务（当前版本）
 
 - [ ] **T-800** 后端可信执行层总卡（规划已建立）
-- [ ] **T-801 P0** Fast-Fail 错误基座：统一 REST/SSE envelope、requestId、前端错误栈
-- [ ] **T-802 P0** 全 backend 静默 fallback/catch 审计与迁移
+- [x] **T-801 P0** Fast-Fail 错误基座：统一 REST/SSE envelope、requestId、前端错误栈
+- [ ] **T-802 P0** 全 backend 静默 fallback/catch 审计与迁移（首批 LLM/model-list/generate 已完成）
 - [ ] **T-803 P0** 性能基线、profiling、共享 HTTP client、索引/锁/原子写
 - [ ] **T-804 P0** LLM 协议内核与 OpenAI-compatible 迁移
 - [ ] **T-805 P0** OpenAI Responses / Anthropic Messages / Gemini 原生协议

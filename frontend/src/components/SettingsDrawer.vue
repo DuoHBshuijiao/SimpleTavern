@@ -59,7 +59,7 @@ import {
   type WorldBook,
   type WorldBookAttachment,
 } from '../types/models'
-import { apiDelete, apiGet, apiPost, apiPostFormData, apiPut } from '../api/http'
+import { ApiError, apiDelete, apiGet, apiPost, apiPostFormData, apiPut } from '../api/http'
 import { downloadUpdate, getManualUpdateCheck, runUpdate } from '../api/update'
 import { useAppFont } from '../composables/useAppFont'
 import { useViewportNarrowPortrait } from '../composables/useViewportNarrowPortrait'
@@ -2883,7 +2883,11 @@ async function openModelSelector(preset: ApiPreset) {
         modelSelectorQuery.value = ''
         showModelSelector.value = true
     } catch (e) {
-        await notifyMessage('获取模型失败: ' + String(e))
+        const message = e instanceof Error ? e.message : String(e)
+        const details = [`获取模型失败：${message}`]
+        if (e instanceof ApiError && e.suggestedAction) details.push(`建议操作：${e.suggestedAction}`)
+        if (e instanceof ApiError && e.requestId) details.push(`requestId：${e.requestId}`)
+        await notifyMessage(details.join('\n'))
     } finally {
         presetModelsLoading.value = false
     }

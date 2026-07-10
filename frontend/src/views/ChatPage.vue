@@ -204,7 +204,12 @@ const janitorPendingId = ref<string | null>(null)
 const janitorPendingReloadNonce = ref(0)
 const settingsTab = ref<SettingsDrawerTab>('global')
 const isGenerating = ref(false)
-const streamError = ref<string | null>(null)
+const streamError = ref<unknown | null>(null)
+const streamErrorMessage = computed(() => {
+  const value = streamError.value
+  if (value == null) return null
+  return value instanceof Error ? value.message : String(value)
+})
 const sidebarCollapsed = ref(false)
 const { isNarrowPortrait } = useViewportNarrowPortrait()
 /** 主内容区与 FAB 宿主 ref（须在 composable 前声明） */
@@ -1444,7 +1449,7 @@ async function handleOpenDraftHelper(mode: 'write' | 'enhance') {
       // 润色失败时恢复原草稿，避免用户内容意外丢失
       draftMessage.value = draftHelper.value.sourceDraft
     }
-    streamError.value = e?.message ?? String(e)
+    streamError.value = e
   }
 }
 
@@ -1453,7 +1458,7 @@ async function handleDraftHelperRewrite() {
   try {
     await runDraftHelper(draftHelper.value.mode, draftHelper.value.sourceDraft)
   } catch (e: any) {
-    streamError.value = e?.message ?? String(e)
+    streamError.value = e
   }
 }
 
@@ -2517,7 +2522,7 @@ async function sendUserMessage() {
       await afterChatReload(chatId)
       bumpSidebarForActiveChat()
     } catch (e: any) {
-      streamError.value = e?.message ?? String(e)
+      streamError.value = e
     }
     return
   }
@@ -2627,7 +2632,6 @@ async function sendUserMessage() {
 
       if (useStream) {
         stream.registerStreamMessage(localAssistantId)
-        let sseError: string | null = null
         try {
           await postAndConsumeSse(
             '/api/generate/stream',
@@ -2667,15 +2671,10 @@ async function sendUserMessage() {
               } else if (evt.event === 'error') {
                 chatReasoningStreamActive.value = false
                 clearReasoningPhaseTiming()
-                const data = evt.data as { message?: string } | undefined
-                sseError = String(data?.message ?? 'unknown error')
               }
             },
             aborter.value?.signal,
           )
-          if (sseError) {
-            throw new Error(sseError)
-          }
         } finally {
           stream.flushForMessage(localAssistantId)
           stopRequested.value = false
@@ -2728,7 +2727,6 @@ async function sendUserMessage() {
             chats.addLocalMessage({ version: 1, id: localAssistantId, role: 'assistant', content: '', ts: new Date().toISOString() })
             if (useStream) {
               stream.registerStreamMessage(localAssistantId)
-              let retryErr: string | null = null
               try {
                 await postAndConsumeSse('/api/generate/stream', {
                   chatId,
@@ -2741,11 +2739,8 @@ async function sendUserMessage() {
                   if (evt.event === 'delta') {
                     const data = evt.data as { text?: string } | undefined
                     if (typeof data?.text === 'string') stream.appendDeltaBuffered(localAssistantId, data.text)
-                  } else if (evt.event === 'error') {
-                    retryErr = String((evt.data as { message?: string } | undefined)?.message ?? 'unknown error')
                   }
                 }, aborter.value?.signal)
-                if (retryErr) throw new Error(retryErr)
               } finally {
                 stream.flushForMessage(localAssistantId)
               }
@@ -2773,7 +2768,7 @@ async function sendUserMessage() {
           }
         })
       } else {
-        streamError.value = errMsg
+        streamError.value = e
       }
     }
   } finally {
@@ -2819,7 +2814,7 @@ async function continueGroupChat() {
     group.showInterject()
   } catch (e: any) {
     if (!isAbortError(e)) {
-      streamError.value = e?.message ?? String(e)
+      streamError.value = e
     }
   } finally {
     const skippedReload = stopStreamingHold.value
@@ -2877,7 +2872,7 @@ async function startNextRound() {
 
     group.showInterject()
   } catch (e: any) {
-    streamError.value = e?.message ?? String(e)
+    streamError.value = e
   } finally {
     isGenerating.value = false
     group.currentSpeakerIndex.value = -1
@@ -2969,9 +2964,6 @@ async function triggerInterject(characterId: string) {
             } else if (evt.event === 'error') {
               chatReasoningStreamActive.value = false
               clearReasoningPhaseTiming()
-              const data = evt.data as { message?: string } | undefined
-              generationHadError = true
-              streamError.value = String(data?.message ?? 'unknown error')
             }
           },
           aborter.value?.signal,
@@ -3013,7 +3005,7 @@ async function triggerInterject(characterId: string) {
   } catch (e: any) {
     if (!isAbortError(e)) {
       generationHadError = true
-      streamError.value = e?.message ?? String(e)
+      streamError.value = e
     }
   } finally {
     group.isInterjecting.value = false
@@ -3608,9 +3600,6 @@ async function handleRewriteMessage(m: ChatMessage) {
               } else if (evt.event === 'error') {
                 chatReasoningStreamActive.value = false
                 clearReasoningPhaseTiming()
-                const data = evt.data as { message?: string } | undefined
-                generationHadError = true
-                streamError.value = String(data?.message ?? 'unknown error')
               }
             },
             aborter.value?.signal,
@@ -3692,9 +3681,6 @@ async function handleRewriteMessage(m: ChatMessage) {
               } else if (evt.event === 'error') {
                 chatReasoningStreamActive.value = false
                 clearReasoningPhaseTiming()
-                const data = evt.data as { message?: string } | undefined
-                generationHadError = true
-                streamError.value = String(data?.message ?? 'unknown error')
               }
             },
             aborter.value?.signal,
@@ -3739,7 +3725,7 @@ async function handleRewriteMessage(m: ChatMessage) {
   } catch (e: any) {
     if (!isAbortError(e)) {
       generationHadError = true
-      streamError.value = e?.message ?? String(e)
+      streamError.value = e
     }
   } finally {
     isGenerating.value = false
@@ -4371,9 +4357,6 @@ async function handleSaveAndSend() {
               } else if (evt.event === 'error') {
                 chatReasoningStreamActive.value = false
                 clearReasoningPhaseTiming()
-                const data = evt.data as { message?: string } | undefined
-                generationHadError = true
-                streamError.value = String(data?.message ?? 'unknown error')
               }
             },
             aborter.value?.signal,
@@ -4410,7 +4393,7 @@ async function handleSaveAndSend() {
   } catch (e: any) {
     if (!isAbortError(e)) {
       generationHadError = true
-      streamError.value = e?.message ?? String(e)
+      streamError.value = e
     }
   } finally {
     isGenerating.value = false
@@ -4508,7 +4491,7 @@ const editingPersonaAvatarUrl = computed(() => {
     <!-- 右侧主区域 + 助手面板（侧栏折叠时保留与展开时 ml-4 一致的左侧留白；竖屏 overlay 时不再 pl-4 以免与 translate 重叠） -->
     <div class="flex-1 flex min-w-0 relative min-h-0 flex-col">
       <div
-        class="flex-1 flex min-w-0 min-h-0 transition-[padding,transform] duration-300 ease-in-out overflow-x-hidden"
+        class="flex-1 flex min-w-0 min-h-0 transition-[padding,transform] duration-300 ease-in-out overflow-hidden"
         :class="{ 'pl-4': sidebarCollapsed && !isNarrowPortrait }"
         :style="
           isNarrowPortrait && !sidebarCollapsed ? { transform: 'translateX(21rem)' } : {}
@@ -4829,7 +4812,7 @@ const editingPersonaAvatarUrl = computed(() => {
             :on-assistant-fab-drag-end="() => runChatFabSeparation('assistant')"
             :on-assistant-fab-snap-end="() => runChatFabSeparation('assistant')"
             :is-generating="isGenerating"
-            :stream-error="streamError"
+            :stream-error="streamErrorMessage"
             :draft-images="draftImages"
             :draft-helper-status="draftHelper.status"
             :is-group="activeChat.isGroup"

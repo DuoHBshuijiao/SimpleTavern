@@ -22,6 +22,150 @@
  *    - 位置：API层，提供HTTP请求的基础封装
  */
 
+export interface AppErrorEnvelope {
+  code: string
+  message: string
+  detail?: string | null
+  source?: string
+  retryable?: boolean
+  requestId?: string
+  provider?: string | null
+  protocol?: string | null
+  upstreamStatus?: number | null
+  suggestedAction?: string | null
+  terminal?: boolean
+}
+
+export class ApiError extends Error {
+  readonly code: string
+  readonly detail?: string | null
+  readonly source?: string
+  readonly retryable: boolean
+  readonly requestId?: string
+  readonly provider?: string | null
+  readonly protocol?: string | null
+  readonly upstreamStatus?: number | null
+  readonly suggestedAction?: string | null
+  readonly status?: number
+  readonly terminal: boolean
+  readonly rawBody?: string
+
+  constructor(envelope: AppErrorEnvelope, options: { status?: number; rawBody?: string } = {}) {
+    super(envelope.message)
+    this.name = 'ApiError'
+    this.code = envelope.code
+    this.detail = envelope.detail
+    this.source = envelope.source
+    this.retryable = envelope.retryable ?? false
+    this.requestId = envelope.requestId
+    this.provider = envelope.provider
+    this.protocol = envelope.protocol
+    this.upstreamStatus = envelope.upstreamStatus
+    this.suggestedAction = envelope.suggestedAction
+    this.status = options.status
+    this.terminal = envelope.terminal ?? false
+    this.rawBody = options.rawBody
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function parseJsonText(value: string): unknown {
+  const trimmed = value.trim()
+  if (!trimmed) return value
+  try {
+    return JSON.parse(trimmed)
+  } catch {
+    return value
+  }
+}
+
+function detailToMessage(detail: unknown): string | undefined {
+  if (typeof detail === 'string' && detail.trim()) return detail.trim()
+  if (Array.isArray(detail) && detail.length > 0) return '请求参数无效'
+  if (isRecord(detail) && typeof detail.message === 'string' && detail.message.trim()) {
+    return detail.message.trim()
+  }
+  return undefined
+}
+
+export function parseApiError(
+  payload: unknown,
+  options: {
+    status?: number
+    requestId?: string
+    fallbackMessage?: string
+    rawBody?: string
+    terminal?: boolean
+  } = {},
+): ApiError {
+  const parsed = typeof payload === 'string' ? parseJsonText(payload) : payload
+  const root = isRecord(parsed) ? parsed : null
+  const nestedError = root && isRecord(root.error) ? root.error : null
+  const detailObject = root && isRecord(root.detail) ? root.detail : null
+  const envelope = nestedError ?? detailObject ?? root
+
+  const message =
+    (envelope && typeof envelope.message === 'string' && envelope.message.trim()
+      ? envelope.message.trim()
+      : undefined) ??
+    (root ? detailToMessage(root.detail) : undefined) ??
+    (typeof parsed === 'string' && parsed.trim() ? parsed.trim() : undefined) ??
+    options.fallbackMessage ??
+    '请求失败'
+
+  const detail =
+    envelope && typeof envelope.detail === 'string'
+      ? envelope.detail
+      : root && typeof root.detail === 'string' && root.detail !== message
+        ? root.detail
+        : undefined
+  const code =
+    envelope && typeof envelope.code === 'string' && envelope.code.trim()
+      ? envelope.code.trim()
+      : options.status === 422
+        ? 'request_validation_failed'
+        : 'request_failed'
+
+  return new ApiError(
+    {
+      code,
+      message,
+      detail,
+      source: envelope && typeof envelope.source === 'string' ? envelope.source : undefined,
+      retryable: envelope?.retryable === true,
+      requestId:
+        envelope && typeof envelope.requestId === 'string'
+          ? envelope.requestId
+          : options.requestId,
+      provider: envelope && typeof envelope.provider === 'string' ? envelope.provider : undefined,
+      protocol: envelope && typeof envelope.protocol === 'string' ? envelope.protocol : undefined,
+      upstreamStatus:
+        envelope && typeof envelope.upstreamStatus === 'number' ? envelope.upstreamStatus : undefined,
+      suggestedAction:
+        envelope && typeof envelope.suggestedAction === 'string' ? envelope.suggestedAction : undefined,
+      terminal: envelope?.terminal === true || options.terminal === true,
+    },
+    { status: options.status, rawBody: options.rawBody },
+  )
+}
+
+export async function responseToApiError(response: Response): Promise<ApiError> {
+  const rawBody = await response.text()
+  return parseApiError(rawBody, {
+    status: response.status,
+    requestId: response.headers.get('x-request-id') ?? undefined,
+    fallbackMessage: response.statusText || `HTTP ${response.status}`,
+    rawBody,
+  })
+}
+
+async function assertOk(response: Response): Promise<void> {
+  if (!response.ok) throw await responseToApiError(response)
+}
+
 /**
  * 发送GET请求
  *
@@ -34,7 +178,7 @@
  */
 export async function apiGet<T>(path: string, signal?: AbortSignal): Promise<T> {
   const r = await fetch(path, { method: 'GET', signal })
-  if (!r.ok) throw new Error(await r.text())
+  await assertOk(r)
   return (await r.json()) as T
 }
 
@@ -56,7 +200,7 @@ export async function apiPut<T>(path: string, body: unknown, signal?: AbortSigna
     body: JSON.stringify(body),
     signal,
   })
-  if (!r.ok) throw new Error(await r.text())
+  await assertOk(r)
   return (await r.json()) as T
 }
 
@@ -78,7 +222,7 @@ export async function apiPost<T>(path: string, body: unknown, signal?: AbortSign
     body: JSON.stringify(body),
     signal,
   })
-  if (!r.ok) throw new Error(await r.text())
+  await assertOk(r)
   return (await r.json()) as T
 }
 
@@ -91,7 +235,7 @@ export async function apiPostFormData<T>(path: string, body: FormData, signal?: 
     body,
     signal,
   })
-  if (!r.ok) throw new Error(await r.text())
+  await assertOk(r)
   return (await r.json()) as T
 }
 
@@ -106,7 +250,7 @@ export async function apiPostFormData<T>(path: string, body: FormData, signal?: 
  */
 export async function apiDelete(path: string): Promise<void> {
   const r = await fetch(path, { method: 'DELETE' })
-  if (!r.ok) throw new Error(await r.text())
+  await assertOk(r)
 }
 
 

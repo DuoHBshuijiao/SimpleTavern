@@ -1,6 +1,25 @@
 # Changelog
 
-## v0.800（规划中，尚未实现）
+## v0.800（进行中）
+
+### 静默 Fallback 迁移首批（T-802）
+
+- 建立全 backend 八领域 fallback/catch 首轮 P0/P1 清单，区分 fatal、partial、retryable、explicit-fallback、cleanup-only 与 verify-first。
+- 模型列表空结果不再回退本地候选或返回 200 + `[]`；OpenAI-compatible 空响应、非法 SSE、空流与断流改为结构化错误。
+- 网络搜索工具坏参数/未知工具不再退 `{}` 执行；group/interject 搜索未配置在生成前 fast-fail。
+- draft-help/group/interject 对齐 requestId、SSE meta/terminal error/success-only done 与非流 ErrorEnvelope。
+- 新增已迁域静态 silent-fallback 守卫与协议/路由运行时回归测试；后端 150、前端 121 项测试与前端构建通过。
+- 确认 generate 落库前未调用正文正则管线，已登记为待决契约缺口，未在本批改变持久化语义。
+
+### Fast-Fail 错误基座（T-801）
+
+- 新增统一 `AppError` / `ErrorEnvelope`、全局 REST 异常处理和贯穿普通/异常/流式响应的 requestId。
+- 统一 SSE `meta`、terminal `error`、success-only `done`；前端收到 error 后终止消费，不再处理后续 done。
+- 增加上游鉴权、配额、超时、网络和非法响应映射；未处理异常不向 UI 泄露堆栈。
+- `/llm/test-models` 失败不再以 200 + 空数组伪装成功；单聊生成和网络搜索未配置路径完成首批迁移。
+- 前端新增 typed `ApiError`，兼容旧 FastAPI detail/裸文本错误；错误栈展示建议操作和 requestId。
+- 出站 HTTP 日志关联 requestId，并补 Authorization、API Key 与 cookie 脱敏。
+- 新增 REST/SSE/requestId/redaction/模型列表 fast-fail 及前端解析/展示测试；后端 129、前端 121 项测试与前端构建通过。
 
 ### 版本启动
 

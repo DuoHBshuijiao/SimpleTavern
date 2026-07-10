@@ -28,10 +28,11 @@ import time
 from datetime import datetime
 from typing import Any, AsyncIterator
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.content_regex_scanner import ensure_content_regex_scanner_started
+from app.errors import AppError, app_error_response, as_app_error
 from app.llm.openai_compat import chat_completions, chat_completions_message, stream_chat_completions
 from app.llm.preset_resolve import LlmPresetResolveError, resolve_llm_preset_credentials
 from app.placeholders import replace_placeholders_in_text
@@ -58,6 +59,8 @@ from app.services.generate_web_search_runtime import iter_web_search_stream_even
 from app.services.mvu_daemon import ensure_mvu_worker, signal_generate_done, _resolve_mvu_runtime_config
 from app.services.web_search import web_search_is_configured
 from app.services.user_message_content import build_user_message_content
+from app.request_context import REQUEST_ID_HEADER, get_request_id, new_request_id
+from app.sse import sse_done, sse_event, sse_meta, sse_terminal_error
 from app.storage import load_character, load_chat, load_chat_image_bytes, load_settings, save_chat, save_settings
 from app.storage import list_worldbooks
 from app.tokenizer_service import (
@@ -78,6 +81,20 @@ def _resolve_generation_credentials(settings: Any, *, model: str, preset_id: str
     except LlmPresetResolveError as exc:
         raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message}) from exc
     return credentials.base_url, credentials.api_key
+
+
+def _ensure_web_search_ready(settings: Any, *, requested: bool) -> bool:
+    if not requested:
+        return False
+    if web_search_is_configured(settings):
+        return True
+    raise AppError(
+        code="web_search_not_configured",
+        message="网络搜索已启用，但当前提供方未配置 API Key",
+        source="web_search.config",
+        status_code=400,
+        suggested_action="在全局设置中配置网络搜索提供方和 API Key，或关闭本轮网络搜索",
+    )
 
 
 def _omit_message_ids_from_request(req: Any) -> set[str]:
@@ -250,7 +267,7 @@ def _sse(event: str, data_obj: dict) -> str:
     Returns:
         str: SSE格式的字符串
     """
-    return f"event: {event}\ndata: {json.dumps(data_obj, ensure_ascii=False)}\n\n"
+    return sse_event(event, data_obj)
 
 
 def _resolve_user_name_for_message(msg: ChatMessage, fallback_user_name: str) -> str:
@@ -891,7 +908,7 @@ def _build_draft_help_prompt(
 
 
 @router.post("/generate/stream")
-async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
+async def generate_stream(req: GenerateStreamRequest, request: Request) -> StreamingResponse:
     """
     单聊流式生成
     
@@ -909,6 +926,8 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
     Raises:
         HTTPException: 聊天或角色不存在时抛出404错误
     """
+    request_id = getattr(request.state, "request_id", None) or get_request_id() or new_request_id()
+
     try:
         chat = load_chat(req.chatId)
     except FileNotFoundError:
@@ -917,6 +936,10 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
     ensure_mvu_worker(chat.id)
 
     settings = load_settings()
+    web_search_enabled = _ensure_web_search_ready(
+        settings,
+        requested=bool(getattr(req, "webSearchEnabled", False)),
+    )
     try:
         character = load_character(chat.characterId)
     except FileNotFoundError:
@@ -1187,11 +1210,17 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
         temperature = None
 
     async def event_iter() -> AsyncIterator[str]:
+        yield sse_meta(
+            request_id=request_id,
+            provider="openai_compatible",
+            protocol="openai_compatible_chat",
+            resolved_model=model,
+        )
         try:
             assistant_content = ""
             reasoning_text: str | None = None
             duration_sec: float | None = None
-            ws_on = bool(getattr(req, "webSearchEnabled", False)) and web_search_is_configured(settings)
+            ws_on = web_search_enabled
             if ws_on:
                 async for ev in iter_web_search_stream_events(
                     messages=messages,
@@ -1238,7 +1267,7 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
                         reasoning_end = now
                         full_reasoning.append(chunk.text)
                         yield _sse("reasoning", {"text": chunk.text})
-                    else:
+                    elif chunk.kind == "content":
                         full_text.append(chunk.text)
                         yield _sse("delta", {"text": chunk.text})
 
@@ -1273,17 +1302,25 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
                     done_payload["reasoningContent"] = reasoning_text
                 if duration_sec is not None and reasoning_text:
                     done_payload["reasoningDurationSec"] = duration_sec
-                yield _sse("done", done_payload)
+                yield sse_done(done_payload)
             else:
-                yield _sse("done", {"ok": True, "chatId": chat.id})
+                yield sse_done({"ok": True, "chatId": chat.id})
             signal_generate_done(chat.id)
         except Exception as e:
-            yield _sse("error", {"message": str(e)})
+            yield sse_terminal_error(
+                e,
+                request_id=request_id,
+                source="generate.stream",
+                default_code="generation_failed",
+                default_message="生成消息失败",
+                provider="openai_compatible",
+                protocol="openai_compatible_chat",
+            )
 
     if not settings.streamEnabled:
         try:
             req_start = time.monotonic()
-            ws_on = bool(getattr(req, "webSearchEnabled", False)) and web_search_is_configured(settings)
+            ws_on = web_search_enabled
             if ws_on:
                 assistant_content, reasoning_content, req_duration = await nonstream_web_search_rounds(
                     messages=messages,
@@ -1357,7 +1394,16 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
             signal_generate_done(chat.id)
             return JSONResponse(payload)
         except Exception as e:
-            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+            error = as_app_error(
+                e,
+                source="generate.nonstream",
+                default_code="generation_failed",
+                default_message="生成消息失败",
+                default_status_code=500,
+                provider="openai_compatible",
+                protocol="openai_compatible_chat",
+            )
+            return app_error_response(error, request_id)
 
     return StreamingResponse(
         event_iter(),
@@ -1366,13 +1412,15 @@ async def generate_stream(req: GenerateStreamRequest) -> StreamingResponse:
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
+            REQUEST_ID_HEADER: request_id,
         },
     )
 
 
 @router.post("/generate/draft-help")
-async def generate_draft_help(req: DraftHelpRequest) -> StreamingResponse:
+async def generate_draft_help(req: DraftHelpRequest, request: Request) -> StreamingResponse:
     """写作辅助：根据当前会话上下文生成或润色用户草稿。"""
+    request_id = getattr(request.state, "request_id", None) or get_request_id() or new_request_id()
     try:
         chat = load_chat(req.chatId)
     except FileNotFoundError:
@@ -1441,6 +1489,12 @@ async def generate_draft_help(req: DraftHelpRequest) -> StreamingResponse:
 
     async def event_iter() -> AsyncIterator[str]:
         full_text: list[str] = []
+        yield sse_meta(
+            request_id=request_id,
+            provider="openai_compatible",
+            protocol="openai_compatible_chat",
+            resolved_model=model,
+        )
         try:
             async for chunk in stream_chat_completions(
                 base_url=base_url,
@@ -1457,9 +1511,17 @@ async def generate_draft_help(req: DraftHelpRequest) -> StreamingResponse:
                 elif chunk.kind == "content":
                     full_text.append(chunk.text)
                     yield _sse("delta", {"text": chunk.text})
-            yield _sse("done", {"ok": True, "content": "".join(full_text)})
+            yield sse_done({"ok": True, "content": "".join(full_text)})
         except Exception as e:
-            yield _sse("error", {"message": str(e)})
+            yield sse_terminal_error(
+                e,
+                request_id=request_id,
+                source="generate.draft_help",
+                default_code="generation_failed",
+                default_message="写作辅助生成失败",
+                provider="openai_compatible",
+                protocol="openai_compatible_chat",
+            )
 
     if not settings.streamEnabled:
         try:
@@ -1480,7 +1542,16 @@ async def generate_draft_help(req: DraftHelpRequest) -> StreamingResponse:
                 "stream": False,
             })
         except Exception as e:
-            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+            error = as_app_error(
+                e,
+                source="generate.draft_help",
+                default_code="generation_failed",
+                default_message="写作辅助生成失败",
+                default_status_code=500,
+                provider="openai_compatible",
+                protocol="openai_compatible_chat",
+            )
+            return app_error_response(error, request_id)
 
     return StreamingResponse(
         event_iter(),
@@ -1489,12 +1560,13 @@ async def generate_draft_help(req: DraftHelpRequest) -> StreamingResponse:
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
+            REQUEST_ID_HEADER: request_id,
         },
     )
 
 
 @router.post("/generate/group")
-async def generate_group_response(req: GroupGenerateRequest) -> StreamingResponse:
+async def generate_group_response(req: GroupGenerateRequest, request: Request) -> StreamingResponse:
     """
     群聊生成
     
@@ -1511,6 +1583,7 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
     Raises:
         HTTPException: 聊天不存在、非群聊、角色不是成员或角色不存在时抛出相应错误
     """
+    request_id = getattr(request.state, "request_id", None) or get_request_id() or new_request_id()
     try:
         chat = load_chat(req.chatId)
     except FileNotFoundError:
@@ -1525,6 +1598,10 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
     ensure_mvu_worker(chat.id)
 
     settings = load_settings()
+    web_search_enabled = _ensure_web_search_ready(
+        settings,
+        requested=bool(getattr(req, "webSearchEnabled", False)),
+    )
     pure_ai_mode = _resolve_pure_ai_mode(settings, chat, req.runtimeOverrides)
     try:
         character = load_character(req.characterId)
@@ -1784,11 +1861,17 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
         temperature = None
 
     async def event_iter():
+        yield sse_meta(
+            request_id=request_id,
+            provider="openai_compatible",
+            protocol="openai_compatible_chat",
+            resolved_model=model,
+        )
         try:
             assistant_content = ""
             reasoning_text: str | None = None
             duration_sec: float | None = None
-            ws_on = bool(getattr(req, "webSearchEnabled", False)) and web_search_is_configured(settings)
+            ws_on = web_search_enabled
             if ws_on:
                 async for ev in iter_web_search_stream_events(
                     messages=messages,
@@ -1835,7 +1918,7 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
                         reasoning_end = now
                         full_reasoning.append(chunk.text)
                         yield _sse("reasoning", {"text": chunk.text})
-                    else:
+                    elif chunk.kind == "content":
                         full_text.append(chunk.text)
                         yield _sse("delta", {"text": chunk.text})
 
@@ -1867,17 +1950,25 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
                     done_payload["reasoningContent"] = reasoning_text
                 if duration_sec is not None and reasoning_text:
                     done_payload["reasoningDurationSec"] = duration_sec
-                yield _sse("done", done_payload)
+                yield sse_done(done_payload)
             else:
-                yield _sse("done", {"ok": True, "chatId": chat.id, "characterId": req.characterId})
+                yield sse_done({"ok": True, "chatId": chat.id, "characterId": req.characterId})
             signal_generate_done(chat.id)
         except Exception as e:
-            yield _sse("error", {"message": str(e)})
+            yield sse_terminal_error(
+                e,
+                request_id=request_id,
+                source="generate.group",
+                default_code="generation_failed",
+                default_message="群聊生成失败",
+                provider="openai_compatible",
+                protocol="openai_compatible_chat",
+            )
 
     if not settings.streamEnabled:
         try:
             req_start = time.monotonic()
-            ws_on = bool(getattr(req, "webSearchEnabled", False)) and web_search_is_configured(settings)
+            ws_on = web_search_enabled
             if ws_on:
                 assistant_content, reasoning_content, req_duration = await nonstream_web_search_rounds(
                     messages=messages,
@@ -1948,7 +2039,16 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
             signal_generate_done(chat.id)
             return JSONResponse(payload)
         except Exception as e:
-            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+            error = as_app_error(
+                e,
+                source="generate.group",
+                default_code="generation_failed",
+                default_message="群聊生成失败",
+                default_status_code=500,
+                provider="openai_compatible",
+                protocol="openai_compatible_chat",
+            )
+            return app_error_response(error, request_id)
 
     return StreamingResponse(
         event_iter(),
@@ -1957,12 +2057,13 @@ async def generate_group_response(req: GroupGenerateRequest) -> StreamingRespons
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
+            REQUEST_ID_HEADER: request_id,
         },
     )
 
 
 @router.post("/generate/interject")
-async def generate_single_interject(req: SingleInterjectRequest) -> StreamingResponse:
+async def generate_single_interject(req: SingleInterjectRequest, request: Request) -> StreamingResponse:
     """
     群聊单次插话
     
@@ -1978,6 +2079,7 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
     Raises:
         HTTPException: 聊天不存在、非群聊、角色不是成员或角色不存在时抛出相应错误
     """
+    request_id = getattr(request.state, "request_id", None) or get_request_id() or new_request_id()
     try:
         chat = load_chat(req.chatId)
     except FileNotFoundError:
@@ -1992,6 +2094,10 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
     ensure_mvu_worker(chat.id)
 
     settings = load_settings()
+    web_search_enabled = _ensure_web_search_ready(
+        settings,
+        requested=bool(getattr(req, "webSearchEnabled", False)),
+    )
     pure_ai_mode = _resolve_pure_ai_mode(settings, chat, None)
     try:
         character = load_character(req.characterId)
@@ -2243,11 +2349,17 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
         temperature = None
 
     async def event_iter():
+        yield sse_meta(
+            request_id=request_id,
+            provider="openai_compatible",
+            protocol="openai_compatible_chat",
+            resolved_model=model,
+        )
         try:
             assistant_content = ""
             reasoning_text: str | None = None
             duration_sec: float | None = None
-            ws_on = bool(getattr(req, "webSearchEnabled", False)) and web_search_is_configured(settings)
+            ws_on = web_search_enabled
             if ws_on:
                 async for ev in iter_web_search_stream_events(
                     messages=messages,
@@ -2294,7 +2406,7 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
                         reasoning_end = now
                         full_reasoning.append(chunk.text)
                         yield _sse("reasoning", {"text": chunk.text})
-                    else:
+                    elif chunk.kind == "content":
                         full_text.append(chunk.text)
                         yield _sse("delta", {"text": chunk.text})
 
@@ -2326,17 +2438,30 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
                     done_payload["reasoningContent"] = reasoning_text
                 if duration_sec is not None and reasoning_text:
                     done_payload["reasoningDurationSec"] = duration_sec
-                yield _sse("done", done_payload)
+                yield sse_done(done_payload)
             else:
-                yield _sse("done", {"ok": True, "chatId": chat.id, "characterId": req.characterId, "isInterject": True})
+                yield sse_done({
+                    "ok": True,
+                    "chatId": chat.id,
+                    "characterId": req.characterId,
+                    "isInterject": True,
+                })
             signal_generate_done(chat.id)
         except Exception as e:
-            yield _sse("error", {"message": str(e)})
+            yield sse_terminal_error(
+                e,
+                request_id=request_id,
+                source="generate.interject",
+                default_code="generation_failed",
+                default_message="群聊插话生成失败",
+                provider="openai_compatible",
+                protocol="openai_compatible_chat",
+            )
 
     if not settings.streamEnabled:
         try:
             req_start = time.monotonic()
-            ws_on = bool(getattr(req, "webSearchEnabled", False)) and web_search_is_configured(settings)
+            ws_on = web_search_enabled
             if ws_on:
                 assistant_content, reasoning_content, req_duration = await nonstream_web_search_rounds(
                     messages=messages,
@@ -2408,7 +2533,16 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
             signal_generate_done(chat.id)
             return JSONResponse(payload)
         except Exception as e:
-            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+            error = as_app_error(
+                e,
+                source="generate.interject",
+                default_code="generation_failed",
+                default_message="群聊插话生成失败",
+                default_status_code=500,
+                provider="openai_compatible",
+                protocol="openai_compatible_chat",
+            )
+            return app_error_response(error, request_id)
 
     return StreamingResponse(
         event_iter(),
@@ -2417,5 +2551,6 @@ async def generate_single_interject(req: SingleInterjectRequest) -> StreamingRes
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
+            REQUEST_ID_HEADER: request_id,
         },
     )

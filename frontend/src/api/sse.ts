@@ -26,6 +26,8 @@
  *    - 位置：API层，提供SSE流式传输的基础封装
  */
 
+import { parseApiError, responseToApiError } from './http'
+
 /**
  * SSE事件类型
  *
@@ -103,7 +105,7 @@ export async function postAndConsumeSse(
   body: unknown,
   onEvent: (evt: SseEvent) => void,
   signal?: AbortSignal,
-) {
+): Promise<void> {
   const r = await fetch(path, {
     method: 'POST',
     headers: {
@@ -114,7 +116,7 @@ export async function postAndConsumeSse(
     body: JSON.stringify(body),
     signal,
   })
-  if (!r.ok) throw new Error(await r.text())
+  if (!r.ok) throw await responseToApiError(r)
   if (!r.body) return
 
   const reader = r.body.getReader()
@@ -135,6 +137,19 @@ export async function postAndConsumeSse(
       const evt = parseEventBlock(chunk)
       if (evt) {
         onEvent(evt)
+        if (evt.event === 'error') {
+          const terminalError = parseApiError(evt.data, {
+            requestId: r.headers.get('x-request-id') ?? undefined,
+            fallbackMessage: '流式请求失败',
+            terminal: true,
+          })
+          try {
+            await reader.cancel()
+          } catch {
+            // 终止错误已确定；取消 reader 的附带失败不覆盖主错误。
+          }
+          throw terminalError
+        }
         processedEventsSinceYield += 1
         // 让出主线程给渲染：避免某些代理/缓冲导致一次性读到大量 SSE 时 UI “憋到最后才更新”
         if (processedEventsSinceYield >= 20) {

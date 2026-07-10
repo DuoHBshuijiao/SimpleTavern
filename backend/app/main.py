@@ -33,6 +33,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.errors import install_error_handlers
+from app.request_context import REQUEST_ID_HEADER, RequestIdMiddleware
 from app.routes.avatars import router as avatars_router
 from app.routes.characters import router as characters_router
 from app.routes.chats import router as chats_router
@@ -111,7 +113,10 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=[REQUEST_ID_HEADER],
 )
+app.add_middleware(RequestIdMiddleware)
+install_error_handlers(app)
 
 
 @app.get("/api/health")
@@ -147,3 +152,15 @@ app.include_router(update_router, prefix="/api")
 app.include_router(mvu_router, prefix="/api")
 app.include_router(worldbooks_router, prefix="/api")
 app.include_router(tts_router, prefix="/api")
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(
+        "app.main:app",
+        host="127.0.0.1",
+        port=9091,
+        reload=True,
+        timeout_graceful_shutdown=3,
+    )

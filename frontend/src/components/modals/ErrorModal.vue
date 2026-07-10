@@ -19,7 +19,10 @@ const copied = ref(false)
 
 async function copyMessage() {
   try {
-    await navigator.clipboard.writeText(props.item.message)
+    const lines = [props.item.message]
+    if (props.item.suggestedAction) lines.push(`建议操作：${props.item.suggestedAction}`)
+    if (props.item.requestId) lines.push(`requestId：${props.item.requestId}`)
+    await navigator.clipboard.writeText(lines.join('\n'))
     copied.value = true
     setTimeout(() => {
       copied.value = false
@@ -46,6 +49,12 @@ async function copyMessage() {
       </div>
       <div class="px-3 py-2">
         <pre class="text-xs leading-5 text-[var(--color-error-text)] whitespace-pre-wrap break-words max-h-44 overflow-auto">{{ item.message }}</pre>
+        <p v-if="item.suggestedAction" class="mt-2 text-xs leading-5 text-[var(--color-text-secondary)]">
+          建议操作：{{ item.suggestedAction }}
+        </p>
+        <p v-if="item.requestId" class="mt-1 text-2xs text-[var(--color-text-muted)]">
+          requestId：<code class="font-mono">{{ item.requestId }}</code>
+        </p>
       </div>
       <div class="px-3 pb-3 flex justify-end">
         <button class="btn btn-xs btn-secondary" @click="copyMessage">

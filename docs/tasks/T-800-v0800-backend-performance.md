@@ -1,6 +1,6 @@
 # T-800 v0.800 后端 Fast-Fail、性能、原生协议与计量总卡
 
-- status: in-progress（规划阶段；尚未开始代码迁移）
+- status: in-progress（实施阶段；T-801 已完成）
 - area: backend 全域 + 必要前端配套
 - theme: **无静默失败、可定位错误、全链路性能与健壮性、原生多厂商协议、精确用量与成本**
 - version_note: 文档宣布进入 v0.800；`backend/app/version.py` 仍保持 `v0.700`，直到首批实现与发布门禁完成
@@ -37,6 +37,14 @@ v0.800 从“后端性能版”升级为“**后端可信执行层**”：
 - HTTP 出站日志已有 `durationMs`，但不是消息级计费账本，也没有统一 usage 归一化。
 - 网络搜索已有 Tavily / 博查；部分失败以 JSON 字符串作为工具结果返回，尚未进入统一错误契约。
 - 统计 UI 目标位置：`SettingsDrawerGlobalAppSection.vue` 的“应用与更新”accordion 内、成本计算器按钮上方。
+
+## 当前实施进度（2026-07-10）
+
+- T-801 已完成：统一错误 envelope、requestId、REST/SSE handler、上游错误映射、前端 typed error 与错误栈。
+- T-802 首批已完成：八领域 fallback 清单、模型列表/Chat Completions 协议 fast-fail、draft/group/interject 与搜索工具参数迁移。
+- 当前门禁：后端 150 tests、前端 121 tests、前端 build 全通过。
+- 已确认正文正则未在 generate 落库前调用，登记为 F-010 契约缺口，待唯一语义决策。
+- 下一批：Storage/chat list/fork 损坏项与 cleanup-only 可观测性。
 
 ## 统一错误契约
 
@@ -120,6 +128,7 @@ REST 与 SSE 共用字段：
 ## 首批 read_first
 
 - `docs/tasks/T-801-v0800-fast-fail-foundation.md`
+- `docs/tasks/T-802-v0800-backend-fallback-audit.md`
 - `docs/superpowers/specs/2026-07-10-v0800-backend-trust-layer-design.md`
 - `backend/app/llm/openai_compat.py`
 - `backend/app/routes/llm.py`

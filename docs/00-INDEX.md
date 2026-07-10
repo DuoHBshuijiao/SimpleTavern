@@ -6,10 +6,12 @@
 
 1. 先读 `docs/state/CURRENT.md`，确认当前任务（现为 v0.800）。
 2. 读 `docs/tasks/T-800-v0800-backend-performance.md`，了解全版本依赖与边界。
-3. 当前首批读 `docs/tasks/T-801-v0800-fast-fail-foundation.md`。
-4. 架构契约读 `docs/superpowers/specs/2026-07-10-v0800-backend-trust-layer-design.md`。
-5. 按任务内 `read_first` 阅读源码与契约文件。
-6. 完成后更新当前任务、`docs/state/LAST_HANDOFF.md` 和必要的发布文档。
+3. `docs/tasks/T-801-v0800-fast-fail-foundation.md` 已完成，用于理解错误契约。
+4. 当前任务读 `docs/tasks/T-802-v0800-backend-fallback-audit.md`。
+5. T-802 迁移状态读 `docs/audits/v0800-backend-fallback-inventory.md`。
+6. 架构契约读 `docs/superpowers/specs/2026-07-10-v0800-backend-trust-layer-design.md`。
+7. 按任务内 `read_first` 阅读源码与契约文件。
+8. 完成后更新当前任务、`docs/state/LAST_HANDOFF.md` 和必要的发布文档。
 
 ## 文档职责
 

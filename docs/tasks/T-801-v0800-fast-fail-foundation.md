@@ -1,6 +1,6 @@
 # T-801 v0.800 Fast-Fail 错误基座
 
-- status: ready
+- status: completed（2026-07-10）
 - area: backend + frontend error transport
 - priority: P0（v0.800 第一批，阻塞其他任务）
 - theme: 统一错误类型、REST/SSE 契约、requestId、用户可感知提示
@@ -69,6 +69,20 @@
 - 错误栈能看到可读 message、建议操作、requestId。
 - 日志含 requestId 且敏感字段已脱敏。
 - 现有成功路径行为不变。
+
+## 完成记录
+
+- 新增统一 `AppError` / `ErrorEnvelope`、全局异常处理、纯 ASGI requestId middleware 与共享 SSE helper。
+- REST 兼容 AppError、请求校验、HTTPException 和未处理异常；未处理异常不向 UI 泄露堆栈。
+- SSE 支持 `meta`、terminal `error` 与 success-only `done`；前端 error 事件会终止消费并忽略后续 done。
+- 上游 401/403、429、timeout/network、非法响应映射为稳定 code。
+- HTTP 日志关联 requestId，并补 Authorization/API Key/cookie 脱敏。
+- 最小示范迁移：
+  - `/llm/test-models` 失败不再返回 200 + `[]`。
+  - `/generate/stream` 发出 requestId meta 与 terminal error。
+  - 网络搜索开启但未配置时，在写入用户消息前 fast-fail。
+- 前端 `api/http.ts` / `api/sse.ts` 抛出 typed `ApiError`，兼容旧 `detail`/裸文本错误；错误栈展示建议操作和 requestId。
+- 验证：后端 `129 passed`；前端 `121 passed`；`npm run build` 通过。
 
 ## 测试
 

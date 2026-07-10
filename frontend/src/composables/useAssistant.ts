@@ -1059,8 +1059,6 @@ export function useAssistant(options: UseAssistantOptions) {
                 assistantReasoningElapsedSec.value = null
               }
               reasoningPhaseStartedAtMs = null
-              const data = evt.data as { message?: string } | undefined
-              state.streamError.value = String(data?.message ?? 'unknown error')
             }
           },
           assistantAborters[scope]?.signal,

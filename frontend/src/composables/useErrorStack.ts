@@ -3,6 +3,7 @@
  * 与 useNotify 分工：非阻塞业务提示、确认框走全局 AppNotificationHost，本栈保留自动消失与复制。
  */
 import { ref } from 'vue'
+import { ApiError } from '../api/http'
 
 export interface ErrorStackItem {
   id: string
@@ -11,6 +12,9 @@ export interface ErrorStackItem {
   title: string
   createdAt: number
   timeoutMs: number
+  code?: string
+  suggestedAction?: string
+  requestId?: string
 }
 
 interface InternalErrorStackItem extends ErrorStackItem {
@@ -19,10 +23,45 @@ interface InternalErrorStackItem extends ErrorStackItem {
   startedAt: number
 }
 
-function normalizeErrorMessage(raw: unknown): string {
-  if (raw == null) return 'unknown error'
-  const s = String(raw).trim()
-  return s || 'unknown error'
+export interface ErrorStackPushPayload {
+  message: unknown
+  source: 'main' | 'assistant'
+  title?: string
+  code?: string
+  suggestedAction?: string
+  requestId?: string
+}
+
+function normalizeError(raw: unknown): {
+  message: string
+  code?: string
+  suggestedAction?: string
+  requestId?: string
+} {
+  if (raw instanceof ApiError) {
+    return {
+      message: raw.message || 'unknown error',
+      code: raw.code,
+      suggestedAction: raw.suggestedAction ?? undefined,
+      requestId: raw.requestId,
+    }
+  }
+  if (raw instanceof Error) {
+    return { message: raw.message.trim() || 'unknown error' }
+  }
+  if (typeof raw === 'object' && raw !== null) {
+    const value = raw as Record<string, unknown>
+    const message = typeof value.message === 'string' ? value.message.trim() : ''
+    return {
+      message: message || 'unknown error',
+      code: typeof value.code === 'string' ? value.code : undefined,
+      suggestedAction: typeof value.suggestedAction === 'string' ? value.suggestedAction : undefined,
+      requestId: typeof value.requestId === 'string' ? value.requestId : undefined,
+    }
+  }
+  if (raw == null) return { message: 'unknown error' }
+  const message = String(raw).trim()
+  return { message: message || 'unknown error' }
 }
 
 export function useErrorStack(defaultTimeoutMs = 6000) {
@@ -55,14 +94,18 @@ export function useErrorStack(defaultTimeoutMs = 6000) {
     startTimer(item)
   }
 
-  const pushError = (payload: { message: unknown; source: 'main' | 'assistant'; title?: string }) => {
+  const pushError = (payload: ErrorStackPushPayload) => {
+    const normalized = normalizeError(payload.message)
     const item: InternalErrorStackItem = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      message: normalizeErrorMessage(payload.message),
+      message: normalized.message,
       source: payload.source,
       title: payload.title ?? (payload.source === 'assistant' ? '助手错误' : '聊天错误'),
       createdAt: Date.now(),
       timeoutMs: defaultTimeoutMs,
+      code: payload.code ?? normalized.code,
+      suggestedAction: payload.suggestedAction ?? normalized.suggestedAction,
+      requestId: payload.requestId ?? normalized.requestId,
       timer: null,
       remainingMs: defaultTimeoutMs,
       startedAt: Date.now(),

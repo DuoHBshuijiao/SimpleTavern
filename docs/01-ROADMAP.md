@@ -93,6 +93,13 @@
 - `docs/tasks/T-801-v0800-fast-fail-foundation.md`
 - `docs/superpowers/specs/2026-07-10-v0800-backend-trust-layer-design.md`
 
+### 当前进度
+
+- T-801 已完成：统一 REST/SSE 错误 envelope、requestId、上游错误映射、前端 typed error/错误栈。
+- T-802 首批已完成：八领域 fallback 清单、LLM/model-list 协议 fast-fail、draft/group/interject 错误契约、搜索工具参数校验。
+- 当前门禁：后端 150 tests、前端 121 tests、前端 build 通过。
+- T-802 下一批为 Storage/chat list/fork 损坏项与 cleanup-only 可观测性。
+
 ### 成本统计 UI
 
 统计组件位于 SettingsDrawer → Global → “应用与更新”accordion 内，放在“成本计算器”按钮上方：
