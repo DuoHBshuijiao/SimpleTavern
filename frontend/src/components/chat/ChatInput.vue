@@ -725,7 +725,7 @@ defineExpose({
           <div class="flex items-center gap-0 shrink-0">
           <div ref="draftHelperMenuAnchorRef" class="relative">
             <button
-              class="chat-action-button chat-action-button--secondary shadow-lg transition-all active:scale-95"
+              class="chat-action-button chat-action-button--secondary shadow-lg transition-[transform,box-shadow] active:scale-95"
               :disabled="isGenerating && !showContinueButton"
               aria-label="写作辅助"
               @click="toggleDraftHelperMenu"
@@ -761,7 +761,7 @@ defineExpose({
           <template v-if="!isNarrowPortrait">
           <button
             type="button"
-            class="chat-action-button shadow-lg transition-all active:scale-95"
+            class="chat-action-button shadow-lg transition-[transform,box-shadow] active:scale-95"
             :class="
               webSearchEnabled
                 ? 'bg-brand-a20 text-brand ring-2 ring-[var(--color-brand-a40)] border border-[var(--color-brand-a30)]'
@@ -774,7 +774,7 @@ defineExpose({
             <Globe class="w-4 h-4" />
           </button>
           <button
-            class="chat-action-button chat-action-button--secondary shadow-lg transition-all active:scale-95"
+            class="chat-action-button chat-action-button--secondary shadow-lg transition-[transform,box-shadow] active:scale-95"
             :disabled="isGenerating && !showContinueButton"
             aria-label="选择图片"
             @click="openImagePicker"
@@ -786,7 +786,7 @@ defineExpose({
           <div ref="composerOverflowMenuAnchorRef" class="relative">
             <button
               type="button"
-              class="chat-action-button chat-action-button--secondary shadow-lg transition-all active:scale-95"
+              class="chat-action-button chat-action-button--secondary shadow-lg transition-[transform,box-shadow] active:scale-95"
               :disabled="isGenerating && !showContinueButton"
               aria-label="更多输入选项"
               @click="toggleComposerOverflowMenu"
@@ -850,7 +850,7 @@ defineExpose({
           />
           </div>
           <button 
-            class="chat-action-button shadow-lg transition-all active:scale-95"
+            class="chat-action-button shadow-lg transition-[transform,box-shadow] active:scale-95"
             :class="[primaryActionClass, primaryActionDisabled ? 'opacity-50 cursor-not-allowed' : 'hover:shadow-brand hover:-translate-y-0.5']"
             :disabled="primaryActionDisabled"
             @click="emit('primary-action')"

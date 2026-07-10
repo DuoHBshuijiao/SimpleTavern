@@ -31,6 +31,8 @@
 import { ref, onUnmounted, watch, nextTick } from 'vue'
 import Cropper from 'cropperjs'
 import 'cropperjs/dist/cropper.css'
+import { useDialogBehavior } from '../composables/useDialogBehavior'
+import { dialogAria } from '../utils/uiPrimitives'
 
 const props = defineProps<{
   show: boolean
@@ -43,6 +45,16 @@ const emit = defineEmits<{
   (e: 'update:show', v: boolean): void
   (e: 'save', payload: { imageData: string; focusX?: number; focusY?: number }): void
 }>()
+
+const titleId = 'avatar-cropper-title'
+const dialogAttrs = dialogAria(titleId)
+
+function close() {
+  emit('update:show', false)
+}
+
+const { dialogRef } = useDialogBehavior(() => props.show, close)
+void dialogRef
 
 const imageRef = ref<HTMLImageElement | null>(null)
 const imageSrc = ref<string | null>(null)
@@ -177,7 +189,7 @@ function handleSave() {
   if (props.preserveOriginal) {
     if (!imageSrc.value) return
     emit('save', { imageData: imageSrc.value, focusX, focusY })
-    emit('update:show', false)
+    close()
     return
   }
 
@@ -189,7 +201,7 @@ function handleSave() {
   })
   const imageData = canvas.toDataURL('image/png')
   emit('save', { imageData, focusX, focusY })
-  emit('update:show', false)
+  close()
 }
 
 /**
@@ -198,7 +210,7 @@ function handleSave() {
  * 关闭弹窗，不保存裁剪结果。
  */
 function handleCancel() {
-  emit('update:show', false)
+  close()
 }
 
 /**
@@ -224,9 +236,14 @@ onUnmounted(() => {
   <Transition name="modal">
     <div v-if="show" class="modal">
       <div class="modal-backdrop" @click="handleCancel"></div>
-      <div class="modal-content modal-surface chat-modal-width-500-90" role="dialog" aria-modal="true" aria-labelledby="avatar-cropper-title">
+      <div
+        ref="dialogRef"
+        v-bind="dialogAttrs"
+        tabindex="-1"
+        class="modal-content modal-surface chat-modal-width-500-90"
+      >
         <div class="modal-header">
-          <h3 id="avatar-cropper-title" class="modal-title">设置头像</h3>
+          <h3 :id="titleId" class="modal-title">设置头像</h3>
           <button type="button" class="modal-close" aria-label="关闭头像设置弹窗" @click="handleCancel">×</button>
         </div>
         <div
@@ -249,7 +266,7 @@ onUnmounted(() => {
 
             <div 
               v-if="!imageSrc" 
-              class="upload-area border-2 border-dashed border-[var(--color-border)] bg-[var(--color-surface-muted)] hover:bg-[var(--color-surface-hover)] hover:border-[var(--color-border-strong)] transition-all rounded-xl p-10 text-center cursor-pointer" 
+              class="upload-area border-2 border-dashed border-[var(--color-border)] bg-[var(--color-surface-muted)] hover:bg-[var(--color-surface-hover)] hover:border-[var(--color-border-strong)] transition-[background-color,border-color] rounded-xl p-10 text-center cursor-pointer" 
               @click="triggerFileInput"
             >
               <div class="upload-content pointer-events-none">

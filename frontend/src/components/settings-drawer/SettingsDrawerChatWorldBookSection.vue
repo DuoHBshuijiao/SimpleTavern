@@ -109,7 +109,7 @@ const chat = inject(SETTINGS_DRAWER_CHAT_KEY)!
     <div
       v-for="(att, idx) in (chat.chatDraft.worldBookAttachments || [])"
       :key="`${att.worldBookId}-${idx}`"
-      class="flex items-center justify-between gap-2 rounded-md border border-[var(--color-border-subtle)] bg-surface-muted px-2 py-1 transition-all"
+      class="flex items-center justify-between gap-2 rounded-md border border-[var(--color-border-subtle)] bg-surface-muted px-2 py-1 transition-[border-color,opacity,background-color]"
       :class="chat.worldBookOrderDraggingIdx === idx ? 'opacity-50 border-brand-a50' : ''"
       draggable="true"
       @dragstart="chat.handleWorldBookOrderDragStart(idx)"

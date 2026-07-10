@@ -421,7 +421,7 @@ onUnmounted(() => {
     <!-- Trigger -->
     <div
       ref="triggerRef"
-      class="flex items-center justify-between w-full bg-surface-muted border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm text-[var(--color-text)] transition-all cursor-pointer shadow-sm"
+      class="flex items-center justify-between w-full bg-surface-muted border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm text-[var(--color-text)] transition-[background-color,border-color,box-shadow] cursor-pointer shadow-sm"
       :class="[
         disabled ? 'opacity-50 cursor-not-allowed' : 'hover:bg-surface-hover hover:border-brand-a30',
         isOpen ? '!border-brand-a50 ring-1 ring-brand-a20' : ''

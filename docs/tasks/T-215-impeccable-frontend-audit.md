@@ -15,6 +15,7 @@
 | V | 弹层族抽查 | ✅ | KG/GroupCreator a11y 已齐；`GroupCreator`/`CharacterEditor`/`MemberSettings` 属性级 transition |
 | VI | warning token | ✅ | `AssistantPanel`「破坏」徽章、`CharacterEditorModal` 破坏性工具 → `--color-warning-*` |
 | VII | detect 复扫 | ✅ | 审计域 88 findings，**全部**为 `design-system-font-size`（`text-[10px]`） |
+| VIII | 残留 transition-all | ✅ | ChatSidebar/ChatInput/ModernSelect/ReasoningBubble/AvatarCropper/WorldBook/ModernAvatar |
 
 ## Detect 结论（批次 VII）
 
@@ -38,8 +39,20 @@ npx impeccable detect --json \
 | `StateVariablesBar` gradient | DESIGN 唯一允许背景渐变 |
 | ChatPage 搜索 `--chat-search-*-ms` | 与搜索状态机绑定 |
 | `CodeViewer` amber/emerald/sky | 语法高亮，非 UI status |
-| 残留 `transition-all` | ChatSidebar 列表项、ChatInput 操作钮、ModernSelect、ReasoningBubble、AvatarCropper 上传区、WorldBook 行 — 低风险，可后续属性级收束 |
+| 残留 `transition-all` | ✅ 批次 VIII 已收束（仅保留 utilities.css 工具类定义） |
 | `text-[10px]` ×88 | 见上；待 DESIGN caption 阶 |
+
+## 批次 VIII（残留 transition-all）
+
+| 文件 | 处理 |
+|------|------|
+| `ChatSidebar` | 去掉冗余 `transition-all`（已有 `interactive-surface`） |
+| `ChatInput` 操作钮 | `transition-[transform,box-shadow]` |
+| `ModernSelect` | `transition-[background-color,border-color,box-shadow]` |
+| `ReasoningBubble` 折叠钮 | 位置/尺寸/旋转属性级 |
+| `AvatarCropper` 上传区 | `transition-[background-color,border-color]` |
+| `SettingsDrawerChatWorldBookSection` | `transition-[border-color,opacity,background-color]` |
+| `ModernAvatar` | `transition-[box-shadow,border-color]` |
 
 ## verify
 

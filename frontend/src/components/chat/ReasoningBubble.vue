@@ -434,7 +434,7 @@ onBeforeUnmount(() => {
 
     <button
       type="button"
-      class="reasoning-toggle-icon absolute z-[11] flex items-center justify-center rounded transition-all duration-200"
+      class="reasoning-toggle-icon absolute z-[11] flex items-center justify-center rounded transition-[top,right,bottom,width,height,transform,background-color] duration-200"
       :class="toggleIconPositionClass"
       :aria-label="isExpanded ? '收起思考' : '展开思考'"
       @click="toggleExpanded"

@@ -141,7 +141,7 @@ const bgColor = computed(() => {
 
 <template>
   <div
-    class="relative overflow-hidden shrink-0 flex items-start justify-center select-none transition-all duration-300 shadow-sm"
+    class="relative overflow-hidden shrink-0 flex items-start justify-center select-none transition-[box-shadow,border-color] duration-300 shadow-sm"
     :class="[
       rounded,
       bgColor,

@@ -389,7 +389,7 @@ function confirmDelete() {
             <div 
               v-for="p in personas"
               :key="p.id"
-              class="group surface-muted interactive-surface flex items-center gap-3 p-2 transition-all duration-200"
+              class="group surface-muted interactive-surface flex items-center gap-3 p-2"
               :class="selectedPersonaId === p.id ? 'bg-brand-a10 border-l-brand' : 'border-l-transparent hover:bg-surface-muted'"
               style="border: 1px solid var(--color-border);"
               @click="emit('select-persona', p.id)"
@@ -439,7 +439,7 @@ function confirmDelete() {
             v-for="c in characters"
             :key="c.id"
             :data-character-id="c.id"
-            class="group surface-muted interactive-surface relative flex items-start gap-3 p-3 transition-all duration-200"
+            class="group surface-muted interactive-surface relative flex items-start gap-3 p-3"
             :class="selectedCharacterId === c.id ? 'surface-selected' : ''"
             style="border: 1px solid var(--color-border);"
             @click="emit('update:selectedCharacterId', c.id)"
@@ -695,7 +695,7 @@ function confirmDelete() {
 
   <!-- 侧边栏开关 -->
   <div 
-    class="fixed top-1/2 -translate-y-1/2 z-floating cursor-pointer p-2 bg-brand-a30 hover:bg-brand-a50 rounded-r-lg transition-all duration-300 border border-l-0 border-brand-a40 shadow-heavy"
+    class="fixed top-1/2 -translate-y-1/2 z-floating cursor-pointer p-2 bg-brand-a30 hover:bg-brand-a50 rounded-r-lg transition-[left,background-color] duration-300 border border-l-0 border-brand-a40 shadow-heavy"
     :class="collapsed ? 'left-0' : 'left-[21rem]'"
     role="button"
     tabindex="0"
