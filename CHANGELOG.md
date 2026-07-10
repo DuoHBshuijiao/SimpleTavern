@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.800（规划中，尚未实现）
+
+### 版本启动
+
+- 正式进入 v0.800 规划阶段；本轮仅更新文档，应用版本常量仍为 `v0.700`。
+- 版本主题升级为“后端可信执行层”：全 backend fast-fail、取消静默 fallback、统一用户可感知错误、性能与健壮性增强。
+- 原生 OpenAI Responses、Anthropic Messages、Gemini 协议从 v0.900+ 调整到 v0.800，并纳入多套工具调用、消息维护与流式事件适配。
+- 规划 Anthropic prompt caching 显式开关；不支持/失败时不静默重发无缓存请求。
+- 规划消息 generation metadata 与 append-only usage ledger，记录云端 token、缓存读取/写入、TTFT、总耗时与 cost。
+- 规划 SettingsDrawer “应用与更新”中的会话/全局/按模型 usage/cost 统计，位于成本计算器按钮上方。
+- 规划扩展独立搜索 API 与 OpenAI/Anthropic/Gemini 原生联网能力；失败不得自动切换供应商。
+- 新增 T-800 总卡、T-801 Fast-Fail 首批任务卡与后端可信执行层设计文档。
+
 ## v0.700
 
 ### 组件化与测试基座
@@ -45,7 +58,7 @@
 
 ### UI/动画（T-213）
 
-- ChatInput sink 改为 morph-wrap 单轨 `transform`（去 margin transition）；SettingsDrawer 动效收束至 motion token。
+- ChatInput sink 使用 morph-wrap `transform` + 外壳等量负 margin 布局补偿，二者同频过渡；SettingsDrawer 动效收束至 motion token。
 
 ### 可观测性收尾（T-214）
 

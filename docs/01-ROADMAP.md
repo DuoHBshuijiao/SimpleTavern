@@ -35,14 +35,14 @@
 
 **v0.800** 专注**后端性能改进**（索引、扫描、生成路径优化等），不再承担前端拆分与 UI 主责。
 
-### v0.700 已完成（约 45%）
+### v0.700 已完成（100% 前端范围）
 
 - 前端组件测试基座（`@vue/test-utils` + `happy-dom`）。
 - ChatPage composable 第一批：`useChatSearch`、`useImageStickyBinding`、`useForkLineage` + 单测。
 - 数据完整性扫描扩展 + 导入 warning 修复。
 - UI/UX 首批：ChatPage 顶栏 + ChatSidebar 选中态 + 图片回退弹层 + 搜索 a11y + 完整性巡检文案。
 
-### 进行中 / 待完成
+### 已完成批次
 
 | 批次 | 任务卡 | 内容 |
 |------|--------|------|
@@ -50,30 +50,71 @@
 | 组件化 | T-210 | ✅ ChatPage composable 第二批 |
 | 拆分 | T-211 | ✅ SettingsDrawer Tab 拆分 |
 | 组件化 | T-212 | ✅ ChatPage 弹层/composable（SSE 主体 → v0.800） |
-| UI/动画 | T-213 | ✅ ChatInput sink transform-only + motion audit |
+| UI/动画 | T-213 | ✅ ChatInput sink + motion audit |
 | 可观测性 | T-214 | ✅ 前端收尾（orphan 扩展/导出 API → v0.800） |
+| 设计审计 | T-215 | ✅ Impeccable 语义 token/a11y/motion/caption-xs 收口 |
 
 ### v0.700 边界（已关闭）
 
-- 不新增原生 Responses / Anthropic / Gemini 协议栈（**v0.900+**）。
+- 不新增原生 Responses / Anthropic / Gemini 协议栈（已改排至 **v0.800**）。
 - **不在 v0.700**：ChatPage SSE 主体 composable、后端性能、世界书 orphan 扩展、导出跳过 API warnings。
 - Playwright E2E 可推迟至 v0.900+；组件测试基座已扩展。
 
 ## v0.800 定位
 
-**后端性能 + 生成流 composable + 可观测性后端扩展**（见 `docs/tasks/T-800-v0800-backend-performance.md`）：
+`v0.800` 是“**后端可信执行层**”版本，正式进入进行中状态。核心不是单点性能调优，而是把所有后端组件升级为可定位、可计量、可验证的执行系统。
 
-- chatId 索引、扫描/加载路径优化、生成与 MVU 热路径 profiling
-- `useChatGeneration`（T-212#8 遗留 SSE 编排）
-- 数据完整性 worldbook orphan、导出 warnings API
-- 前端仅做上述 API 的配套 UI
+### 核心原则
 
-**v0.900+**：原生 Responses / Anthropic / Gemini 多厂商对话协议层。
+1. **Fast-Fail 全覆盖**：取消静默吞错、空结果伪成功与隐式供应商/模型 fallback。
+2. **用户可感知错误**：REST、SSE、后台任务、工具调用统一结构化错误与 requestId，进入前端错误栈。
+3. **性能 + 健壮性**：所有 backend 组件纳入基准、profiling、故障注入与回归门禁。
+4. **原生多厂商协议**：OpenAI Responses、Anthropic Messages、Gemini 原生协议；保留 OpenAI-compatible。
+5. **精确用量与成本**：消息元数据记录云端 usage、缓存、TTFT、总耗时、cost；本地账本支持会话/全局/按模型汇总。
+
+### 主要交付
+
+| 领域 | 交付 |
+|------|------|
+| 错误基座 | 统一错误 envelope、requestId、SSE terminal error、前端 typed error |
+| 全后端迁移 | 审计并移除静默 fallback；所有 catch 有明确语义 |
+| 性能 | HTTP client/连接池、chatId 与 usage 索引、生成/MVU/TTS/storage 热路径 |
+| 原生协议 | OpenAI Responses、Anthropic Messages、Gemini；多套工具/消息/流事件适配 |
+| Anthropic 缓存 | API 预设中显式启用 prompt caching，不支持时 fast-fail |
+| 计量 | message generation metadata + append-only usage ledger |
+| 成本统计 | 会话/全局切换、总/平均 token、缓存命中、总成本、按模型汇总 |
+| 搜索 | Tavily/博查增强；独立搜索 API 与模型原生联网能力扩展 |
+| 前端 SSE | `useChatGeneration` 消费统一 meta/usage/done/error |
+| 数据完整性 | worldbook orphan、导出跳过 warning、索引修复 |
+
+详细设计：
+
+- `docs/tasks/T-800-v0800-backend-performance.md`
+- `docs/tasks/T-801-v0800-fast-fail-foundation.md`
+- `docs/superpowers/specs/2026-07-10-v0800-backend-trust-layer-design.md`
+
+### 成本统计 UI
+
+统计组件位于 SettingsDrawer → Global → “应用与更新”accordion 内，放在“成本计算器”按钮上方：
+
+- 当前会话 / 全局切换。
+- 总输入、总输出、平均输入、平均输出。
+- 缓存读取输入、缓存写入输入、缓存命中率。
+- 总金额与 cloud/local-estimated/unknown 来源区分。
+- 按 provider/protocol/model 汇总 token、成本、请求数、TTFT 与总耗时。
+
+### v0.800 边界
+
+- 仍采用 JSON/JSONL + 文件锁，不引入传统数据库。
+- 不做自动换模型、自动换供应商或隐藏协议降级。
+- 模型价格匹配不允许宽泛别名直接产生确定成本；模糊项需用户确认。
+- Playwright 全量 E2E 仍留 v0.900+。
 
 ## v0.900+ / v1.000
 
-- 协议层抽象（Responses / Anthropic / Gemini）。
-- Playwright E2E、后端全局索引迁移（若未在 v0.800 完成）。
+- Playwright E2E。
+- 插件化 provider SDK、跨设备统计同步等后续能力。
+- v0.800 未完成项不得仅因版本切换自动顺延，需在发布评审中明确。
 
 ## v1.000 发布定义
 

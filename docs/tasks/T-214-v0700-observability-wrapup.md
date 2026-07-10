@@ -25,10 +25,10 @@
 | 导出跳过项 warning | ZIP 导出缺失世界书 / globalActive 跳过需 API 返回 warnings |
 | 后端性能 | chatId 索引、扫描路径、生成/MVU 热路径 |
 
-## 推迟到 v0.900+
+## 后续排期调整
 
-- 原生 Responses / Anthropic Messages / Gemini 多厂商对话协议层
-- Playwright E2E
+- 原生 Responses / Anthropic Messages / Gemini 多厂商对话协议层：T-214 完成时原定 v0.900+，现已调整为 **v0.800 T-805/T-806**。
+- Playwright E2E：仍为 v0.900+。
 
 ## verify
 
