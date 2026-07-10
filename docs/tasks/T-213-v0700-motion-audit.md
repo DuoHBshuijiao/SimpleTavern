@@ -6,12 +6,14 @@
 
 ## 已完成
 
-### ChatInput sink（去 margin transition）
+### ChatInput sink
 
-- 下沉改为 **仅 `transform` 作用于 `.chat-input-morph-wrap`**（卡片 + 底部提示同相）
-- 移除 `.chat-input-shell` 负 `margin-top` 及 margin transition
-- `transition` 始终挂在 morph-wrap，侧栏展开/收起时不再出现 margin 瞬变 + transform 缓动不同步
-- `prefers-reduced-motion` 下 morph-wrap 禁用 transform
+- 下沉：`.chat-input-morph-wrap` 用 `translateY`（卡片 + 底部提示同相）
+- **布局补偿**：`.chat-input-shell--sink` 等量负 `margin-top`（抵消 transform 不占流的空隙）
+- `margin-top` 的 transition 挂在**壳基类**上，避免去掉 `--sink` 后 margin 瞬变、transform 仍缓动
+- `prefers-reduced-motion` 下禁用 margin/transform
+
+> Bugbot（`887737b`）：仅 transform、无负 margin 时 steady 态会多出 `--chat-input-sink-shift` 空隙；已恢复布局补偿。
 
 ### Motion token（`variables.css`）
 

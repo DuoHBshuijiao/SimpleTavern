@@ -559,7 +559,7 @@ const textareaPlaceholderAttr = computed(() =>
   showPlaceholderReveal.value ? '' : inputPlaceholder.value
 )
 
-  /** 顶栏 morph 变量挂在输入壳上，子树继承；下沉仅 transform morph-wrap（无 margin transition） */
+  /** 顶栏 morph 变量挂在输入壳上，子树继承；下沉 = morph-wrap translateY + 壳等量负 margin（布局补偿） */
 const shellInlineStyle = computed(() => ({
   color: 'var(--color-text)',
   backgroundColor: 'unset',
@@ -952,12 +952,20 @@ defineExpose({
 }
 
 /*
- * 下沉：卡片 + 底部提示作为 morph-wrap 整体 translateY，transition 始终挂在 wrap 上，
- * 侧栏展开/收起时不会丢失过渡属性（避免 margin + transform 双轨不同步的截断感）。
+ * 下沉：morph-wrap 用 translateY 下移（卡片 + 底部提示同相）；外壳用等量负 margin-top
+ * 上移布局，抵消 transform 不占流的空隙，避免与消息列表之间多出 sink-shift。
+ * margin 的 transition 必须挂在壳基类上：仅写在 --sink 上时，侧栏展开去掉类后
+ * 元素失去 transition，margin 会瞬间归零而 transform 仍在过渡，造成底部「截断」感。
  * --chat-input-sink-shift：略大于原 1.125rem，以盖住底部提示行（mt-2 + text-xs）并略有余量。
  */
 .chat-input-shell {
   --chat-input-sink-shift: 1.75rem;
+  margin-top: 0;
+  transition: margin-top var(--chat-input-trans-dur, 320ms) var(--chat-input-trans-ease, ease);
+}
+
+.chat-input-shell--sink {
+  margin-top: calc(-1 * var(--chat-input-sink-shift));
 }
 
 .chat-input-morph-wrap {
@@ -993,6 +1001,12 @@ defineExpose({
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .chat-input-shell {
+    transition: none !important;
+  }
+  .chat-input-shell--sink {
+    margin-top: 0 !important;
+  }
   .chat-input-morph-wrap {
     transition: none !important;
     transform: none !important;
