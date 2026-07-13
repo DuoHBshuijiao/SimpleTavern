@@ -79,13 +79,17 @@ export function useChatHeaderLayout(options: UseChatHeaderLayoutOptions) {
     const insetTop = '0.75rem'
     const radiusOpen = 'var(--radius-2xl)'
 
+    // 须高于 chat-input-shell 的 z-40：Agent 顶栏控件挂在该壳内，本地 z-[9] 无法跨层叠上下文压过壳；
+    // 否则「更多」菜单会被 Agent / 输入壳盖住。
+    const headerZ = 50
+
     if (phase === 'full') {
       return {
         position: 'fixed',
         left: '0',
         right: '0',
         top: '0',
-        zIndex: 10,
+        zIndex: headerZ,
         borderRadius: '0',
         transition: `left ${HEADER_SQUEEZE_MS}ms ${HEADER_SQUEEZE_EASE}, right ${HEADER_SQUEEZE_MS}ms ${HEADER_SQUEEZE_EASE}, border-radius ${HEADER_SQUEEZE_MS}ms ${HEADER_SQUEEZE_EASE}`,
       }
@@ -97,7 +101,7 @@ export function useChatHeaderLayout(options: UseChatHeaderLayoutOptions) {
         left: insetLeft,
         right: insetRight,
         top: '0',
-        zIndex: 10,
+        zIndex: headerZ,
         borderRadius: radiusOpen,
         transition: `top ${HEADER_LIFT_MS}ms ${HEADER_LIFT_EASE}`,
       }
@@ -109,7 +113,7 @@ export function useChatHeaderLayout(options: UseChatHeaderLayoutOptions) {
       left: insetLeft,
       right: insetRight,
       top: insetTop,
-      zIndex: 10,
+      zIndex: headerZ,
       borderRadius: radiusOpen,
       transition,
     }

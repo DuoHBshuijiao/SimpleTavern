@@ -39,7 +39,7 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                             v-for="(presetItem, idx) in presets.globalDraft!.apiPresets"
                             :key="presetItem.id"
                             draggable="true"
-                            class="group relative flex min-h-10 cursor-grab items-center rounded-lg py-1.5 pl-2 pr-1 text-sm transition-colors active:cursor-grabbing"
+                            class="group relative flex min-h-10 cursor-pointer items-center rounded-lg py-1.5 pl-2 pr-1 text-sm transition-colors"
                             :class="[
                               presets.editingPresetId === presetItem.id ? 'bg-brand-a10 text-brand' : 'text-[var(--color-text-secondary)] hover:bg-surface-muted',
                               presets.apiPresetOrderDraggingIdx === idx ? 'opacity-50 ring-1 ring-brand-a50' : '',
