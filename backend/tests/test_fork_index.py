@@ -17,7 +17,7 @@ def _patch_paths(monkeypatch, tmp_path: Path) -> tuple[Path, Path]:
     index_path = data / "fork_index.json"
     monkeypatch.setattr(fi, "_fork_index_path", lambda: index_path)
     monkeypatch.setattr(fi, "_chats_dir", lambda: chats)
-    fi._pending_warnings.clear()
+    fi._deferred_warnings.clear()
     fi._index_dirty = False
     return chats, index_path
 
@@ -61,11 +61,13 @@ def test_corrupt_index_rebuilds_and_returns_visible_warning(
     index_path.write_text("{broken", encoding="utf-8")
 
     lineage = fi.build_fork_lineage(child.id)
+    repeated = fi.build_fork_lineage(child.id)
 
     assert lineage.origin is not None
     assert lineage.origin.chatId == parent.id
     assert lineage.partialSuccess is True
     assert [warning.code for warning in lineage.warnings] == ["fork_index_corrupt"]
+    assert [warning.code for warning in repeated.warnings] == ["fork_index_corrupt"]
     rebuilt = json.loads(index_path.read_text(encoding="utf-8"))
     assert rebuilt["rebuilt"] is True
     assert child.id in rebuilt["byChild"]
@@ -148,10 +150,12 @@ def test_sync_failure_marks_index_dirty_and_next_lineage_rebuilds(
     assert fi._index_dirty is True
 
     lineage = fi.build_fork_lineage(child.id)
+    repeated = fi.build_fork_lineage(child.id)
 
     assert fi._index_dirty is False
     assert lineage.origin is not None
     assert any(warning.code == "fork_index_sync_failed" for warning in lineage.warnings)
+    assert any(warning.code == "fork_index_sync_failed" for warning in repeated.warnings)
 
 
 def test_unreadable_fork_meta_warning_remains_sticky(

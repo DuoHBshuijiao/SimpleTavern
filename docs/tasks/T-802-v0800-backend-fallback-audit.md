@@ -164,10 +164,12 @@
 - runtime chat issue 连续轮询仍保持完整 Pydantic 校验，文件真正修复后才从巡检面清除；`read_error` 不允许自动删除。
 - `update_ignore.json` 损坏改为 `update_ignore_corrupt`，原文件不再被静默覆写为空对象，启动更新检查保留该 AppError。
 - fork index 损坏会从 chat 元数据重建并返回 warning；重建失败为 retryable `fork_index_rebuild_failed`；sync 失败不覆盖已保存会话，并在下次 lineage 强制重建。
+- 瞬时并发写/读失败使用 `ScanUnavailable` 保留已有 integrity issue；只有稳定确认文件恢复或消失时才清除。
+- fork corrupt/sync warning 在成功重建时写入索引 `warnings[]`，不再被首次 lineage 请求一次性消费。
 - 删除/回滚/附件清理失败统一 `cleanup_failed` 结构化日志，关联 requestId，且目录删除保持逐项尽力清理。
 - 性能基线：1000 会话、99 fork 冷重建 `410.05 ms`，门槛 `< 5000 ms`，锚点齐全时禁止完整 `load_chat()`。
 - Grok 4.5 两轮只读复查无阻塞/高优先级遗留。
-- 门禁：后端 `168 passed`、前端 `123 passed`、前端 build 通过。
+- 门禁：后端 `169 passed`、前端 `123 passed`、前端 build 通过。
 
 ### 下一批
 

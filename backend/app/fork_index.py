@@ -32,7 +32,7 @@ from app.storage import (
 
 _INDEX_VERSION = 1
 _index_lock = threading.RLock()
-_pending_warnings: list[ForkLineageWarning] = []
+_deferred_warnings: list[ForkLineageWarning] = []
 _index_dirty = False
 
 
@@ -48,23 +48,16 @@ def _record_warning(
     suggested_action: str,
 ) -> None:
     with _index_lock:
-        if any(item.code == code for item in _pending_warnings):
+        if any(item.code == code for item in _deferred_warnings):
             return
-        _pending_warnings.append(
+        _deferred_warnings.append(
             ForkLineageWarning(
                 code=code,
                 message=message,
                 suggestedAction=suggested_action,
             )
         )
-        del _pending_warnings[:-20]
-
-
-def _consume_warnings() -> list[ForkLineageWarning]:
-    with _index_lock:
-        warnings = list(_pending_warnings)
-        _pending_warnings.clear()
-        return warnings
+        del _deferred_warnings[:-20]
 
 
 def _fork_index_path() -> Path:
@@ -212,8 +205,8 @@ def sync_chat_fork_index(chat: Chat) -> None:
         _index_dirty = True
         _record_warning(
             "fork_index_sync_failed",
-            "会话已保存，但分叉索引同步失败",
-            "重新打开分叉信息以触发重建；如持续失败请检查 data 目录权限",
+            "分叉索引同步失败，后续血缘查询将强制重建",
+            "如该提示在重建后仍持续出现，请检查 data 目录权限",
         )
         log_cleanup_failure(
             source="fork_index.sync",
@@ -250,8 +243,8 @@ def remove_chat_fork_index(chat_id: str) -> None:
         _index_dirty = True
         _record_warning(
             "fork_index_sync_failed",
-            "会话已删除，但分叉索引清理失败",
-            "重新打开分叉信息以触发重建；如持续失败请检查 data 目录权限",
+            "分叉索引清理失败，后续血缘查询将强制重建",
+            "如该提示在重建后仍持续出现，请检查 data 目录权限",
         )
         log_cleanup_failure(
             source="fork_index.remove",
@@ -406,15 +399,21 @@ def rebuild_fork_index(character_ids: set[str] | None = None) -> None:
                         },
                     )
 
-        if incomplete:
-            data["warnings"] = [
-                ForkLineageWarning(
-                    code="fork_meta_unreadable",
-                    message="部分会话的分叉元数据无法读取，索引结果可能不完整",
-                    suggestedAction="运行数据完整性巡检并修复对应会话后重新加载",
-                ).model_dump(mode="json")
-            ]
+        if incomplete and not any(
+            warning.code == "fork_meta_unreadable"
+            for warning in _deferred_warnings
+        ):
+            _record_warning(
+                "fork_meta_unreadable",
+                "部分会话的分叉元数据无法读取，索引结果可能不完整",
+                "运行数据完整性巡检并修复对应会话后重新加载",
+            )
+        data["warnings"] = [
+            warning.model_dump(mode="json")
+            for warning in _deferred_warnings
+        ]
         _save_index_unlocked(data)
+        _deferred_warnings.clear()
         _index_dirty = False
 
 
@@ -509,11 +508,10 @@ def build_fork_lineage(chat_id: str) -> ForkLineageResponse:
     outgoing_forks.sort(key=lambda g: g.messageIndex)
     siblings.sort(key=lambda c: c.createdAt, reverse=True)
 
-    warnings = _consume_warnings()
-    for raw_warning in data.get("warnings") or []:
-        warning = ForkLineageWarning.model_validate(raw_warning)
-        if not any(item.code == warning.code for item in warnings):
-            warnings.append(warning)
+    warnings = [
+        ForkLineageWarning.model_validate(raw_warning)
+        for raw_warning in data.get("warnings") or []
+    ]
     return ForkLineageResponse(
         origin=origin,
         siblings=siblings,

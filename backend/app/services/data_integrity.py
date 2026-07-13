@@ -117,6 +117,15 @@ class ScanIssue:
 
 
 @dataclass(frozen=True)
+class ScanUnavailable:
+    """目标仍存在，但本轮因并发写或瞬时 I/O 无法稳定读取。"""
+
+
+SCAN_UNAVAILABLE = ScanUnavailable()
+ScanResult = tuple[FileSnapshot, ScanIssue] | ScanUnavailable | None
+
+
+@dataclass(frozen=True)
 class RecordedIssue:
     target: ScanTarget
     snapshot: FileSnapshot
@@ -412,10 +421,16 @@ class DataIntegrityService:
         valid_character_ids: set[str] | None = None,
         *,
         full_validation: bool = False,
-    ) -> tuple[FileSnapshot, ScanIssue] | None:
+    ) -> ScanResult:
         stable = await self._read_stable_bytes(target.path)
         if stable is None:
-            return None
+            try:
+                target.path.stat()
+            except FileNotFoundError:
+                return None
+            except OSError:
+                return SCAN_UNAVAILABLE
+            return SCAN_UNAVAILABLE
 
         data = stable.data
         if not data:
@@ -526,9 +541,11 @@ class DataIntegrityService:
             if current is not None and current.runtime:
                 self._issues.pop(key, None)
 
-    async def _upsert_issue(self, target: ScanTarget, result: tuple[FileSnapshot, ScanIssue] | None) -> None:
+    async def _upsert_issue(self, target: ScanTarget, result: ScanResult) -> None:
         key = self._relative_path(target.path)
         with self._lock:
+            if isinstance(result, ScanUnavailable):
+                return
             if result is None:
                 self._issues.pop(key, None)
                 return
@@ -585,9 +602,6 @@ class DataIntegrityService:
 
         for recorded in cached:
             refreshed_target = self._build_target(recorded.target.path) or recorded.target
-            if not refreshed_target.path.exists():
-                await self._upsert_issue(refreshed_target, None)
-                continue
             char_ids = (
                 valid_character_ids
                 if refreshed_target.kind in {"chat_record", "legacy_chat"}
@@ -653,6 +667,8 @@ class DataIntegrityService:
             else None,
             full_validation=recorded.runtime,
         )
+        if isinstance(current_issue, ScanUnavailable):
+            return {"path": rel_path, "status": "skipped", "reason": "文件暂时无法稳定读取"}
         if current_issue is None:
             return {"path": rel_path, "status": "skipped", "reason": "文件已恢复正常"}
 
@@ -692,7 +708,13 @@ class DataIntegrityService:
                     full_validation=recorded.runtime,
                 )
                 await self._upsert_issue(refreshed_target, refreshed_issue)
-                if refreshed_issue is not None:
+                if isinstance(refreshed_issue, ScanUnavailable):
+                    skipped.append({
+                        "path": self._relative_path(recorded.target.path),
+                        "status": "skipped",
+                        "reason": "文件暂时无法稳定读取",
+                    })
+                elif refreshed_issue is not None:
                     skipped.append({
                         "path": self._relative_path(recorded.target.path),
                         "status": "skipped",

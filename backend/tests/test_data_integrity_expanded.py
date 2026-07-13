@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 from pydantic import ValidationError
 
@@ -281,3 +282,34 @@ def test_runtime_chat_issue_survives_repeated_refresh_until_fixed(monkeypatch, t
     broken.write_text(json.dumps(raw), encoding="utf-8")
     fixed = asyncio.run(svc.list_issues())
     assert fixed["hasIssues"] is False
+
+
+def test_refresh_keeps_cached_issue_when_file_is_temporarily_unreadable(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    _data, _chars, wbs, _chats = _patch_paths(monkeypatch, tmp_path)
+    broken = wbs / "broken.json"
+    broken.write_text("{broken", encoding="utf-8")
+    svc = DataIntegrityService()
+    try:
+        json.loads("{broken")
+    except json.JSONDecodeError as exc:
+        svc.record_runtime_failure(broken, "world_book", exc)
+    else:
+        raise AssertionError("expected JSONDecodeError")
+
+    monkeypatch.setattr(
+        svc,
+        "_read_stable_bytes",
+        AsyncMock(return_value=None),
+    )
+    first = asyncio.run(svc.list_issues())
+    second = asyncio.run(svc.list_issues())
+    assert first["hasIssues"] is True
+    assert second["hasIssues"] is True
+    assert second["issues"][0]["code"] == "invalid_json"
+
+    broken.unlink()
+    missing = asyncio.run(svc.list_issues())
+    assert missing["hasIssues"] is False
