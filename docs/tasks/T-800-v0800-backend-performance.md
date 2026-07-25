@@ -44,7 +44,7 @@ v0.800 从“后端性能版”升级为“**后端可信执行层**”：
 - T-802 前两批已完成：LLM/generate fast-fail，以及 Storage/chat/fork 损坏数据可见化、索引自愈、cleanup-only 日志。
 - 当前门禁：后端 169 tests、前端 123 tests、前端 build 全通过。
 - fork index 性能基线：1000 会话、99 fork 冷重建 `410.05 ms`，回归门槛 `< 5000 ms`。
-- 已确认正文正则未在 generate 落库前调用，登记为 F-010 契约缺口，待唯一语义决策。
+- F-010 已确认语义 A：正文正则存原文 + 前端显示时处理；generate 不落库前改写（非缺口）。
 - 下一批：Assistant/tools 脏消息、工具参数与 REST/SSE 错误收口。
 
 ## 统一错误契约

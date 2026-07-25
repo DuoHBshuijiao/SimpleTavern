@@ -20,7 +20,7 @@
   - 瞬时不可稳定读取改为独立扫描状态，不再误清尚未修复的 integrity issue。
   - fork corrupt/sync warning 在成功重建时写入索引，后续 lineage API 持续可见。
 - known_gap:
-  - generate 落库前未调用 `apply_content_regex_pipeline`，与工作区文档契约不一致；已登记 F-010，本批未改变持久化语义。
+  - F-010 已确认语义 A（存原文 + 前端 display-time）；generate 不调用 `apply_content_regex_pipeline` 为正确契约，非缺口。
   - F-009 世界书坏 regex 仍待用户可见 warning。
 - verification:
   - Bugbot 修复 focused contracts → 24 passed。
@@ -33,4 +33,4 @@
   1. `docs/tasks/T-802-v0800-backend-fallback-audit.md`
   2. `docs/audits/v0800-backend-fallback-inventory.md`
   3. `docs/tasks/T-800-v0800-backend-performance.md`
-- next_implementation: T-802 第三批迁移 Assistant/tools（F-017~F-020）；F-010 正文正则需先确认唯一产品语义。不要同时开始 T-804 协议内核或计量大改。
+- next_implementation: T-802 第三批迁移 Assistant/tools（F-017~F-020）。F-010 已关闭（语义 A）。不要同时开始 T-804 协议内核或计量大改。

@@ -33,7 +33,7 @@
 | F-007 | generate | `backend/app/routes/generate.py` | group/interject web search preflight | 开启但未配置时静默关闭工具 | fatal | `web_search_not_configured` | REST error before generation | `test_generate_error_contracts.py` | done |
 | F-008 | generate | `backend/app/services/generate_web_search_runtime.py` | tool argument parsing | 非法 JSON 退化为 `{}` 并继续调用 | fatal | `tool_call_invalid` | terminal generation error | `test_generate_web_search_runtime.py` | done |
 | F-009 | generate | `backend/app/routes/generate.py` | `match_worldbook_entries` | 坏 regex 被跳过 | partial | `worldbook_regex_invalid` | warnings/error stack | pending | open |
-| F-010 | regex | generate save paths | assistant persistence | 未调用正文正则管线；与工作区契约不一致 | verify-first | pending decision | pending decision | fact regression | verified-gap |
+| F-010 | regex | generate save paths | assistant persistence | generate 不调用正文正则管线（已确认正确） | explicit-non-error | n/a（存原文） | 前端 display-time 处理 | fact regression | decided-A |
 | F-011 | storage | `backend/app/storage.py` | `list_characters` | 损坏 JSON `continue`，角色从列表消失 | partial | `invalid_json` / `schema_mismatch` | integrity issue（列表仍保持数组） | `test_storage_integrity_contract.py` | done |
 | F-012 | storage | `backend/app/storage.py` | `list_worldbooks` | 损坏 JSON `continue`，世界书从列表消失 | partial | `invalid_json` / `schema_mismatch` | integrity issue（列表仍保持数组） | `test_storage_integrity_contract.py` | done |
 | F-013 | storage | `backend/app/storage.py` | `_load_chat_from_path` | 读取异常返回 `None` | partial | `data_corrupted` | REST envelope + integrity issue | `test_storage_integrity_contract.py` / `test_data_integrity_expanded.py` | done |
@@ -79,6 +79,7 @@
 - 生命周期 `CancelledError`、取消任务后的 `pass`：cleanup-only。
 - 已保留主异常的 rollback 清理失败：cleanup-only，后续只补结构化日志。
 - 正文正则单规则错误进入 `errors[]` 并继续：partial，不应改为全批 fatal。
+- **F-010 产品契约（2026-07-25 确认语义 A）**：消息 content **永远存原文**；`generate` 落库路径**不得**调用 `apply_content_regex_pipeline`。前端 `contentRegex.ts` 在渲染时即时处理显示文本；后端管线仅供 scanner/MVU 提取等非显示路径。不得改为「落库前改写」。
 - 导入逐项失败且已进入 warnings：partial，后续统一结构，不机械改 fatal。
 - `character.name or "角色"`、`user_name or "用户"`：展示默认值。
 - SSE 空行、`data: [DONE]` 和明确 `:` comment/keepalive：协议允许。

@@ -36,7 +36,7 @@
 - Fork：损坏索引自动重建并返回 warning；失败可重试，索引副作用不覆盖已保存会话。
 - Cleanup/update：cleanup-only 失败记录 requestId；损坏 update-ignore 不再覆写原文件。
 - 守卫：已迁域 broad except/裸 SSE/旧 JSON 错误静态回归测试。
-- 已知契约缺口：正文正则目前未在 generate 落库前调用，F-010 待产品语义确认。
+- F-010 已确认语义 A：正文正则存原文 + 前端显示时处理；generate 不落库前改写。
 - 性能基线：1000 会话 fork 索引冷重建 `410.05 ms`。
 - 门禁：后端 169 tests、前端 123 tests、前端 build 全通过。
 

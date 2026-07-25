@@ -18,7 +18,7 @@
 - 网络搜索工具坏参数/未知工具不再退 `{}` 执行；group/interject 搜索未配置在生成前 fast-fail。
 - draft-help/group/interject 对齐 requestId、SSE meta/terminal error/success-only done 与非流 ErrorEnvelope。
 - 新增已迁域静态 silent-fallback 守卫与协议/路由运行时回归测试；后端 150、前端 121 项测试与前端构建通过。
-- 确认 generate 落库前未调用正文正则管线，已登记为待决契约缺口，未在本批改变持久化语义。
+- 确认 generate 不调用正文正则管线；产品语义定为 A（存原文 + 前端显示时处理），F-010 关闭。
 
 ### Fast-Fail 错误基座（T-801）
 

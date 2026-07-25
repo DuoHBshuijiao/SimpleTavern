@@ -151,7 +151,7 @@ npm run build
 - **智能聊天助手**：内置可调用工具的 Agent 流程，支持长记忆摘要、角色卡生成等。
 - **群聊独有定制**：每个群成员可以拥有独立的模型、系统提示和温度设置。
 - **MVU 状态变量与知识图谱**：支持由后台 Agent 或正文正则提取结果维护状态表，并可在会话中查看、编辑和注入知识图谱。
-- **正文正则后处理**：会话可配置 remove / replace / extract / extract_and_replace 规则，用于清理显示文本、提取状态变量线索，并与 MVU 队列联动。
+- **正文正则后处理**：会话可配置 remove / replace / extract / extract_and_replace 规则。磁盘始终存原文；前端渲染时即时处理显示文本；后端管线用于 scanner/MVU 提取，不在 generate 落库前改写。
 - **会话分叉与数据完整性检查**：支持从历史消息创建分支会话，并提供数据完整性扫描与修复接口，降低 JSON 文件长期使用后的维护成本。
 - **语音 TTS：云端 + 本机（可选）**：在应用内即可接入**云端 TTS**；需要**本机托管**时，在设置里填写你自行部署的网关地址。本机语音**不在**本仓库里一键装好——需**单独**运行与 SimpleTavern 对接的 **FastAPI 网关**，与主程序分进程部署即可。
   - 自部署网关（进阶，按需打开）：[GLM TTS FastAPI 网关](https://github.com/DuoHBshuijiao/GLM-TTS-FastAPI_Gateway) · [Qwen3 TTS 流式 FastAPI 网关](https://github.com/DuoHBshuijiao/Qwen3-TTS-streaming-FastAPI_Gateway) · [OmniVoice FastAPI 网关](https://github.com/DuoHBshuijiao/OmniVoice-FastAPI_Gateway)

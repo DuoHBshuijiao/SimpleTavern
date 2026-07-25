@@ -77,7 +77,8 @@ def test_storage_cleanup_and_fork_index_do_not_reintroduce_silent_fallbacks() ->
     assert "except Exception:\n        return _empty_index()" not in fork_source
 
 
-def test_content_regex_persistence_gap_is_explicitly_tracked() -> None:
+def test_content_regex_display_time_contract_is_locked() -> None:
+    """F-010 semantic A: persist raw content; generate must not rewrite via pipeline."""
     generate_source = (BACKEND_ROOT / "app" / "routes" / "generate.py").read_text(encoding="utf-8")
     scanner_source = (BACKEND_ROOT / "app" / "content_regex_scanner.py").read_text(encoding="utf-8")
     inventory = (
@@ -87,4 +88,5 @@ def test_content_regex_persistence_gap_is_explicitly_tracked() -> None:
     assert "apply_content_regex_pipeline" not in generate_source
     assert "apply_content_regex_pipeline" in scanner_source
     assert "F-010" in inventory
-    assert "verified-gap" in inventory
+    assert "decided-A" in inventory
+    assert "verified-gap" not in inventory.split("F-010", 1)[1].split("\n", 1)[0]

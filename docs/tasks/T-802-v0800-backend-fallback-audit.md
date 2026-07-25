@@ -50,15 +50,12 @@
 - 上游断流、无 finish、空 response、工具参数损坏均有稳定 code。
 - 世界书规则错误进入用户可见 warning/error。
 
-### 正文正则契约核验（功能风险）
+### 正文正则契约（F-010，已确认语义 A）
 
-审计发现：
-
-- `content_regex.py` 存在 `apply_content_regex_pipeline`。
-- `content_regex_scanner.py` 使用该管线。
-- 需核验 `generate.py` 最终 assistant 输出是否确实在“落库前”执行正文正则；当前静态扫描未找到明确调用，与既有文档描述可能不一致。
-
-此项先写回归测试确认事实，再决定修复；不得在未验证时宣称已应用。
+- 消息 content **永远存原文**；`generate` 落库路径**不得**调用 `apply_content_regex_pipeline`。
+- 前端 `contentRegex.ts` 在渲染时即时处理显示文本。
+- 后端 `apply_content_regex_pipeline` 仅供 `content_regex_scanner` / MVU 提取等非显示路径。
+- 静态守卫锁定上述契约；不得改为「落库前改写」。
 
 ### Assistant / Tools
 
@@ -153,7 +150,7 @@
 - draft-help/group/interject 统一 requestId、SSE meta/terminal error/success-only done 与非流 ErrorEnvelope。
 - group/interject 开启网络搜索但未配置时，生成前 `web_search_not_configured` fast-fail。
 - 静态守卫覆盖已迁文件的 broad-except silent return、裸 SSE error 与旧 `{ok,error}` 回归。
-- 正文正则事实核验：generate 落库前未调用 `apply_content_regex_pipeline`；已登记 F-010，未在本批擅自改变存储/前端显示语义。
+- 正文正则事实核验：generate 未调用 `apply_content_regex_pipeline`；后确认为语义 A（存原文 + 前端显示），非缺口。
 - Grok 4.5 只读复查无阻塞问题；坚持 OpenAI Chat Completions 的 string arguments、integer tool index 与 data/comment 帧契约，不增加隐式兼容。
 - 门禁：后端 `150 passed`、前端 `121 passed`、前端 build 通过。
 
@@ -174,7 +171,7 @@
 ### 下一批
 
 1. Assistant/tools 脏消息、工具参数与 REST/SSE 错误迁移（F-017~F-020）。
-2. 明确正文正则“落库原文 + 前端显示”或“落库前处理”的唯一契约，再修 F-010。
+2. F-010 已关闭（语义 A：存原文 + 前端显示）。
 3. MVU/KG/regex scanner health、重试与 dropped counter（F-021~F-026）。
 
 ### 1. 建立机器可读清单
@@ -230,7 +227,7 @@
 - 用户操作失败可在 UI 看到明确 message/suggestedAction/requestId。
 - 批处理 partial success 有逐项 warning，不因单项失败吞掉全批，也不把 partial 标为完整成功。
 - 搜索、TTS、导入等显式 fallback 有开关与记录。
-- 正文正则落库前管线有事实性回归测试。
+- 正文正则语义 A 有事实性回归测试：generate 不调用管线；scanner 保留调用。
 - 性能热点有基线记录。
 
 ## verify
