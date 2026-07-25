@@ -66,6 +66,13 @@ def resolve_chat_mvu_runtime_enablement(chat: Chat) -> MvuRuntimeEnablement:
     ov = chat.overrides
     explicit = getattr(ov, "groupMvuEnabled", None)
     if explicit is True:
+        try:
+            load_character(chat.characterId)
+        except Exception as exc:
+            return MvuRuntimeEnablement(
+                enabled=False,
+                character_error=_character_unreadable_error(chat.characterId, exc),
+            )
         return MvuRuntimeEnablement(enabled=True)
     if explicit is False:
         return MvuRuntimeEnablement(enabled=False)

@@ -27,6 +27,75 @@ from app.services.knowledge_graph import KnowledgeGraphError, _require_mvu_enabl
 from app.services.mvu_agent import MvuAgentEvent
 
 
+def test_resolve_group_mvu_enabled_requires_readable_character() -> None:
+    chat = Chat(
+        id="g1",
+        characterId="anchor-char",
+        title="group",
+        messages=[],
+        isGroup=True,
+        overrides=ChatOverrides(groupMvuEnabled=True),
+    )
+    with patch("app.storage.load_character", side_effect=AppError(
+        code="data_corrupted",
+        message="角色卡文件已损坏或结构无效",
+        source="storage.character",
+        status_code=500,
+    )):
+        result = resolve_chat_mvu_runtime_enablement(chat)
+    assert result.enabled is False
+    assert result.character_error is not None
+    assert result.character_error.code == "mvu_character_unreadable"
+
+
+def test_ensure_mvu_worker_maps_corrupted_character_to_enable_error() -> None:
+    chat = Chat(
+        id="g2",
+        characterId="anchor-char",
+        title="group",
+        messages=[],
+        isGroup=True,
+        overrides=ChatOverrides(groupMvuEnabled=True),
+    )
+    mvu_daemon._health.pop(chat.id, None)
+    with patch("app.services.mvu_daemon.load_chat", return_value=chat):
+        with patch(
+            "app.services.mvu_daemon.resolve_chat_mvu_runtime_enablement",
+            return_value=MvuRuntimeEnablement(enabled=True),
+        ):
+            with patch(
+                "app.services.mvu_daemon.load_character",
+                side_effect=AppError(
+                    code="data_corrupted",
+                    message="角色卡文件已损坏或结构无效",
+                    source="storage.character",
+                    status_code=500,
+                ),
+            ):
+                ok = mvu_daemon.ensure_mvu_worker(chat.id)
+    assert ok is False
+    health = mvu_daemon.get_mvu_worker_health(chat.id)
+    assert health["enableError"] is not None
+    assert health["enableError"]["code"] == "mvu_character_unreadable"
+
+
+def test_match_worldbook_budget_pass_does_not_collect_warnings() -> None:
+    """预算阶段不传 warnings_out；最终注入只收集一次。"""
+    entry = WorldBookEntry.model_construct(
+        id="e1",
+        regex="[unterminated",
+        content="x",
+        enabled=True,
+        orderIndex=0,
+    )
+    book = WorldBook.model_construct(id="wb1", name="book", entries=[entry])
+    warnings: list[dict] = []
+    match_worldbook_entries(book, [{"role": "user", "content": "hi"}], 5)
+    match_worldbook_entries(book, [{"role": "user", "content": "hi"}], 5, warnings_out=warnings)
+    assert len(warnings) == 1
+    assert warnings[0]["code"] == "worldbook_regex_invalid"
+
+
 def test_resolve_chat_mvu_runtime_enablement_character_unreadable() -> None:
     chat = Chat(id="c1", characterId="missing-char", title="t", messages=[])
     with patch("app.storage.load_character", side_effect=FileNotFoundError("gone")):

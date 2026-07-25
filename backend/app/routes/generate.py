@@ -1164,9 +1164,7 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
     worldbook_regex_warnings: list[dict[str, Any]] = []
     for book in selected_books:
         eff_scan, ins_dep = _runtime_scan_insert_for_book(book.id, chat, settings)
-        entries = match_worldbook_entries(
-            book, base_conversation, eff_scan, warnings_out=worldbook_regex_warnings
-        )
+        entries = match_worldbook_entries(book, base_conversation, eff_scan)
         injections = build_worldbook_injections(book, entries, len(base_conversation), ins_dep)
         token_count = count_tokens_for_messages([item["message"] for item in injections]) if injections else 0
         if token_count is None:
@@ -1832,9 +1830,7 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
     worldbook_regex_warnings: list[dict[str, Any]] = []
     for book in selected_books:
         eff_scan, ins_dep = _runtime_scan_insert_for_book(book.id, chat, settings)
-        entries = match_worldbook_entries(
-            book, base_conversation, eff_scan, warnings_out=worldbook_regex_warnings
-        )
+        entries = match_worldbook_entries(book, base_conversation, eff_scan)
         injections = build_worldbook_injections(book, entries, len(base_conversation), ins_dep)
         token_count = count_tokens_for_messages([item["message"] for item in injections]) if injections else 0
         if token_count is None:
@@ -2326,9 +2322,7 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
     worldbook_regex_warnings: list[dict[str, Any]] = []
     for book in selected_books:
         eff_scan, ins_dep = _runtime_scan_insert_for_book(book.id, chat, settings)
-        entries = match_worldbook_entries(
-            book, base_conversation, eff_scan, warnings_out=worldbook_regex_warnings
-        )
+        entries = match_worldbook_entries(book, base_conversation, eff_scan)
         injections = build_worldbook_injections(book, entries, len(base_conversation), ins_dep)
         token_count = count_tokens_for_messages([item["message"] for item in injections]) if injections else 0
         if token_count is None:

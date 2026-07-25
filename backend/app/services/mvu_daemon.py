@@ -19,8 +19,8 @@ from typing import Literal
 logger = logging.getLogger(__name__)
 
 from app.content_regex_queue import dequeue_by_message_id, get_content_regex_queue_dropped, get_content_regex_queue_size
-from app.errors import AppError, as_app_error
-from app.group_mvu import resolve_chat_mvu_runtime_enablement
+from app.errors import as_app_error
+from app.group_mvu import _character_unreadable_error, resolve_chat_mvu_runtime_enablement
 from app.llm.preset_resolve import LlmPresetResolveError, resolve_llm_preset_credentials
 from app.mvu_model_resolve import resolve_mvu_model_from_settings
 from app.mvu_system_prompt import load_mvu_system_prompt
@@ -165,17 +165,9 @@ def ensure_mvu_worker(chat_id: str) -> bool:
     health.enabled = True
     try:
         load_character(chat.characterId)
-    except FileNotFoundError as exc:
-        health.set_enable_error(
-            AppError(
-                code="mvu_character_unreadable",
-                message="无法读取会话绑定角色，MVU worker 未启动",
-                detail=f"characterId={chat.characterId}: FileNotFoundError",
-                source="mvu.daemon.ensure",
-                status_code=500,
-                suggested_action="检查角色文件是否存在后重试",
-            )
-        )
+    except Exception as exc:
+        # 缺失与损坏（AppError data_corrupted）均写入 enableError，勿让 health 路由 500。
+        health.set_enable_error(_character_unreadable_error(chat.characterId, exc))
         return False
 
     _get_or_create(chat_id)
