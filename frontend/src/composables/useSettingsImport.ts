@@ -46,6 +46,8 @@ export interface SillyTavernPreviewResult {
   pendingId: string
   expiresAt: string
   preview: SillyTavernImportPreview
+  warnings?: ImportWarningItem[]
+  partialSuccess?: boolean
 }
 
 export interface SillyTavernConfirmResult extends SettingsImportResult {

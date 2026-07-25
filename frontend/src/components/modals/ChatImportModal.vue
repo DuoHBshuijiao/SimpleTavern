@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { apiGet } from '../../api/http'
-import { useSettingsImport, type ImportWarningItem } from '../../composables/useSettingsImport'
+import { useSettingsImport, type ImportWarningItem, coerceImportWarningText } from '../../composables/useSettingsImport'
 import { notifyMessage } from '../../composables/useNotify'
 import type { CharacterCard, Chat, MvuMode, UserPersona } from '../../types/models'
 import ModernSelect from '../ModernSelect.vue'
@@ -112,6 +112,7 @@ const stConfirming = ref(false)
 const stPendingId = ref('')
 const stExpiresAt = ref('')
 const stPreview = ref<Awaited<ReturnType<typeof previewSillyTavernImport>>['preview'] | null>(null)
+const stPreviewWarnings = ref<ImportWarningItem[]>([])
 const stEnableMvuCompatibility = ref(false)
 const stMvuMode = ref<MvuMode>('regex')
 
@@ -198,6 +199,7 @@ function resetStPreview() {
   stPendingId.value = ''
   stExpiresAt.value = ''
   stPreview.value = null
+  stPreviewWarnings.value = []
   stEnableMvuCompatibility.value = false
   stMvuMode.value = 'regex'
 }
@@ -214,6 +216,7 @@ async function loadStPreviewFromFile(file: File): Promise<void> {
     stPendingId.value = result.pendingId
     stExpiresAt.value = result.expiresAt
     stPreview.value = result.preview
+    stPreviewWarnings.value = result.warnings || []
     stMvuMode.value = result.preview.mvu.suggestedMode || 'regex'
     stEnableMvuCompatibility.value = Boolean(
       result.preview.mvu.hasTavernHelper
@@ -477,6 +480,17 @@ async function confirmJanitorImport() {
                   <div>世界书条目：<span class="text-[var(--color-text)]">{{ stPreview.worldBookEntryCount }}</span></div>
                   <div>tavern_helper：<span class="text-[var(--color-text)]">{{ stPreview.mvu.hasTavernHelper ? '已检测到' : '未检测到' }}</span></div>
                   <div>regex_scripts：<span class="text-[var(--color-text)]">{{ stPreview.mvu.regexScriptCount }}</span></div>
+                </div>
+                <div
+                  v-if="stPreviewWarnings.length"
+                  class="mt-2 rounded-md border border-[var(--color-border-subtle)] bg-[var(--color-surface-muted)] p-2 text-[var(--color-text)]"
+                >
+                  <div class="text-[var(--color-text-secondary)]">导入警告</div>
+                  <ul class="mt-1 list-disc space-y-1 pl-4">
+                    <li v-for="(warning, idx) in stPreviewWarnings" :key="idx">
+                      {{ coerceImportWarningText(warning) }}
+                    </li>
+                  </ul>
                 </div>
                 <p v-if="stPreview.worldBookEntryCount" class="mt-2 text-[var(--color-text-muted)]">
                   ST 世界书将作为 SimpleTavern 世界书完整保留；MVU 兼容只生成指令或正文正则，不删除原条目。

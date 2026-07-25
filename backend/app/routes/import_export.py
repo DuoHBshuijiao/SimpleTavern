@@ -2260,14 +2260,33 @@ def confirm_janitor_import(req: JanitorConfirmRequest) -> dict[str, Any]:
     }
 
 
-def _parse_sillytavern_upload(payload: bytes, filename: str, content_type: str | None) -> tuple[dict[str, Any], bytes | None]:
+def _pending_png_warnings(stored: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_warnings = stored.get("pngWarnings")
+    if not isinstance(raw_warnings, list):
+        return []
+    return [w for w in raw_warnings if isinstance(w, dict)]
+
+
+def _merge_import_warnings(*groups: list[Any]) -> list[Any]:
+    merged: list[Any] = []
+    for group in groups:
+        for item in group:
+            merged.append(item)
+    return merged
+
+
+def _parse_sillytavern_upload(
+    payload: bytes,
+    filename: str,
+    content_type: str | None,
+) -> tuple[dict[str, Any], bytes | None, list[dict[str, Any]]]:
     if not payload:
         raise HTTPException(status_code=400, detail="empty file")
     lower_name = filename.lower()
     if payload[:8] == PNG_SIGNATURE:
         try:
-            st_raw, _png_warnings = _extract_st_json_from_png(payload)
-            return st_raw, payload
+            st_raw, png_warnings = _extract_st_json_from_png(payload)
+            return st_raw, payload, png_warnings
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"invalid SillyTavern png: {e}") from e
     if lower_name.endswith(".json") or (content_type and "json" in content_type.lower()):
@@ -2277,7 +2296,7 @@ def _parse_sillytavern_upload(payload: bytes, filename: str, content_type: str |
             raise HTTPException(status_code=400, detail=f"invalid json: {e}") from e
         if not _looks_like_st_card(raw):
             raise HTTPException(status_code=400, detail="json is not a SillyTavern character card")
-        return raw, None
+        return raw, None, []
     raise HTTPException(status_code=400, detail="unsupported SillyTavern file format")
 
 
@@ -2285,7 +2304,7 @@ def _parse_sillytavern_upload(payload: bytes, filename: str, content_type: str |
 async def preview_sillytavern_import(file: UploadFile = File(...)) -> dict[str, Any]:
     _cleanup_expired_sillytavern_pending()
     payload = await file.read()
-    raw, png_payload = _parse_sillytavern_upload(payload, file.filename or "", file.content_type)
+    raw, png_payload, png_warnings = _parse_sillytavern_upload(payload, file.filename or "", file.content_type)
     preview = _build_sillytavern_preview(raw)
     pending_id = uuid4().hex
     expires_at = datetime.now().astimezone() + timedelta(seconds=SILLYTAVERN_IMPORT_PENDING_TTL_SECONDS)
@@ -2295,6 +2314,7 @@ async def preview_sillytavern_import(file: UploadFile = File(...)) -> dict[str, 
         {
             "raw": raw,
             "pngPayload": png_payload,
+            "pngWarnings": png_warnings,
             "filename": file.filename or "",
             "preview": preview,
         },
@@ -2304,6 +2324,8 @@ async def preview_sillytavern_import(file: UploadFile = File(...)) -> dict[str, 
         "pendingId": pending_id,
         "expiresAt": expires_at.isoformat(),
         "preview": preview,
+        "warnings": png_warnings,
+        "partialSuccess": bool(png_warnings),
     }
 
 
@@ -2328,8 +2350,15 @@ async def confirm_sillytavern_import(req: SillyTavernConfirmRequest) -> dict[str
         enable_mvu_compatibility=req.enableMvuCompatibility,
         mvu_mode=req.mvuMode,
     )
+    png_warnings = _pending_png_warnings(stored)
+    warnings = _merge_import_warnings(png_warnings, list(result.get("warnings") or []))
     _sillytavern_pending_store.pop(req.pendingId, None)
-    return {"ok": True, **result}
+    return {
+        "ok": True,
+        **result,
+        "warnings": warnings,
+        "partialSuccess": bool(warnings),
+    }
 
 
 @router.post("/import/sillytavern/materialize")
@@ -2350,11 +2379,14 @@ async def materialize_sillytavern_pending(req: SillyTavernMaterializeRequest) ->
         enable_mvu_compatibility=req.enableMvuCompatibility,
         mvu_mode=req.mvuMode,
     )
+    png_warnings = _pending_png_warnings(stored)
+    merged_warnings = _merge_import_warnings(png_warnings, list(warnings))
     _sillytavern_pending_store.pop(req.pendingId, None)
     out: dict[str, Any] = {
         "ok": True,
         "character": card.model_dump(mode="json"),
-        "warnings": warnings,
+        "warnings": merged_warnings,
+        "partialSuccess": bool(merged_warnings),
         "mvuCompat": mvu_compat,
         "mvu": {
             "enabled": bool(req.enableMvuCompatibility),
