@@ -2,6 +2,7 @@
 主聊天网络搜索：Tavily Search、博查 Bocha Web Search。
 
 仅调用各厂商官方 REST，不做通用 HTML 抓取。
+成功返回 {ok:true, code, result}；失败返回 {ok:false, code, message, ...}，不再把错误伪装成检索正文。
 """
 
 from __future__ import annotations
@@ -48,6 +49,26 @@ def web_search_is_configured(settings: Settings) -> bool:
         b = ws.bocha
         return bool(b and (b.apiKey or "").strip())
     return False
+
+
+def _search_ok(result: str, *, provider: str | None = None) -> dict[str, Any]:
+    out: dict[str, Any] = {"ok": True, "code": "OK", "result": result}
+    if provider:
+        out["provider"] = provider
+    return out
+
+
+def _search_err(code: str, message: str, **extra: Any) -> dict[str, Any]:
+    out: dict[str, Any] = {"ok": False, "code": code, "message": message}
+    out.update(extra)
+    return out
+
+
+def format_web_search_tool_content(payload: dict[str, Any]) -> str:
+    """供 generate tool message：成功用 markdown，失败用结构化 JSON。"""
+    if payload.get("ok"):
+        return str(payload.get("result") or "")
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def _format_tavily_markdown(data: dict[str, Any]) -> str:
@@ -108,13 +129,13 @@ def _tavily_request(ws: WebSearchSettings, query: str) -> tuple[str, dict[str, s
     return "https://api.tavily.com/search", headers, body
 
 
-async def _tavily_search(ws: WebSearchSettings, query: str) -> str:
+async def _tavily_search(ws: WebSearchSettings, query: str) -> dict[str, Any]:
     url, headers, body = _tavily_request(ws, query)
     async with httpx.AsyncClient(timeout=90.0) as client:
         r = await client.post(url, json=body, headers=headers)
         r.raise_for_status()
         data = r.json()
-    return _format_tavily_markdown(data if isinstance(data, dict) else {})
+    return _search_ok(_format_tavily_markdown(data if isinstance(data, dict) else {}), provider="tavily")
 
 
 def _bocha_request(ws: WebSearchSettings, query: str) -> tuple[str, dict[str, str], dict[str, Any]]:
@@ -136,28 +157,42 @@ def _bocha_request(ws: WebSearchSettings, query: str) -> tuple[str, dict[str, st
     return url, headers, body
 
 
-def _parse_bocha_response(status_code: int, text: str, data: Any) -> str:
+def _parse_bocha_response(status_code: int, text: str, data: Any) -> dict[str, Any]:
     if not isinstance(data, dict):
-        return json.dumps({"ok": False, "error": "invalid response"}, ensure_ascii=False)
+        return _search_err(
+            "web_search_invalid_response",
+            "博查返回了无效响应",
+            provider="bocha",
+            detail="response is not an object",
+            status=status_code,
+        )
 
     code = data.get("code")
     if status_code == 403 or code == 403 or code == "403":
         msg = data.get("message") or data.get("msg") or "403"
-        return json.dumps(
-            {"ok": False, "error": "余额不足或无权访问（403）", "detail": msg},
-            ensure_ascii=False,
+        return _search_err(
+            "web_search_quota",
+            "余额不足或无权访问（403）",
+            provider="bocha",
+            detail=str(msg),
+            status=403,
         )
     if code != 200 and code != "200":
         msg = data.get("msg") or data.get("message") or str(data)
-        return json.dumps({"ok": False, "error": msg}, ensure_ascii=False)
+        return _search_err(
+            "web_search_provider_error",
+            str(msg),
+            provider="bocha",
+            status=status_code,
+        )
 
     inner = data.get("data")
     if not isinstance(inner, dict):
         inner = {}
-    return _format_bocha_markdown(inner)
+    return _search_ok(_format_bocha_markdown(inner), provider="bocha")
 
 
-async def _bocha_search(ws: WebSearchSettings, query: str) -> str:
+async def _bocha_search(ws: WebSearchSettings, query: str) -> dict[str, Any]:
     url, headers, body = _bocha_request(ws, query)
     async with httpx.AsyncClient(timeout=90.0) as client:
         r = await client.post(url, json=body, headers=headers)
@@ -165,54 +200,77 @@ async def _bocha_search(ws: WebSearchSettings, query: str) -> str:
         try:
             data = r.json()
         except json.JSONDecodeError:
-            return json.dumps(
-                {"ok": False, "error": f"HTTP {r.status_code}", "body": text[:2000]},
-                ensure_ascii=False,
+            return _search_err(
+                "web_search_invalid_response",
+                f"HTTP {r.status_code}：响应不是合法 JSON",
+                provider="bocha",
+                detail=text[:2000],
+                status=r.status_code,
             )
     return _parse_bocha_response(r.status_code, text, data)
 
 
-async def run_web_search(settings: Settings, query: str) -> str:
+def _map_http_status_error(exc: httpx.HTTPStatusError, *, provider: str | None) -> dict[str, Any]:
+    try:
+        detail = (exc.response.text or "")[:2000]
+    except Exception:
+        detail = ""
+    status = exc.response.status_code
+    code = "web_search_quota" if status == 403 else "web_search_http_error"
+    return _search_err(
+        code,
+        f"HTTP {status}",
+        provider=provider,
+        detail=detail,
+        status=status,
+    )
+
+
+async def run_web_search(settings: Settings, query: str) -> dict[str, Any]:
     q = (query or "").strip()
     if not q:
-        return json.dumps({"ok": False, "error": "空查询"}, ensure_ascii=False)
+        return _search_err("web_search_empty_query", "空查询")
     ws = settings.webSearch
     if ws is None or not web_search_is_configured(settings):
-        return json.dumps({"ok": False, "error": "未配置网络搜索或缺少 API Key"}, ensure_ascii=False)
+        return _search_err("web_search_not_configured", "未配置网络搜索或缺少 API Key")
+    provider = ws.provider
     try:
-        if ws.provider == "tavily":
+        if provider == "tavily":
             return await _tavily_search(ws, q)
-        if ws.provider == "bocha":
+        if provider == "bocha":
             return await _bocha_search(ws, q)
     except httpx.HTTPStatusError as e:
-        detail = ""
-        try:
-            detail = (e.response.text or "")[:2000]
-        except Exception:
-            pass
-        return json.dumps({"ok": False, "error": f"HTTP {e.response.status_code}", "detail": detail}, ensure_ascii=False)
+        return _map_http_status_error(e, provider=provider)
     except Exception as e:
-        return json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False)
-    return json.dumps({"ok": False, "error": "未知提供方"}, ensure_ascii=False)
+        return _search_err(
+            "web_search_provider_error",
+            str(e) or "网络搜索失败",
+            provider=provider,
+        )
+    return _search_err("web_search_unknown_provider", "未知提供方", provider=provider)
 
 
-def run_web_search_sync(settings: Settings, query: str) -> str:
+def run_web_search_sync(settings: Settings, query: str) -> dict[str, Any]:
     """同步版本，供现有同步 assistant tool executor 调用。"""
     q = (query or "").strip()
     if not q:
-        return json.dumps({"ok": False, "error": "空查询"}, ensure_ascii=False)
+        return _search_err("web_search_empty_query", "空查询")
     ws = settings.webSearch
     if ws is None or not web_search_is_configured(settings):
-        return json.dumps({"ok": False, "error": "未配置网络搜索或缺少 API Key"}, ensure_ascii=False)
+        return _search_err("web_search_not_configured", "未配置网络搜索或缺少 API Key")
+    provider = ws.provider
     try:
-        if ws.provider == "tavily":
+        if provider == "tavily":
             url, headers, body = _tavily_request(ws, q)
             with httpx.Client(timeout=90.0) as client:
                 r = client.post(url, json=body, headers=headers)
                 r.raise_for_status()
                 data = r.json()
-            return _format_tavily_markdown(data if isinstance(data, dict) else {})
-        if ws.provider == "bocha":
+            return _search_ok(
+                _format_tavily_markdown(data if isinstance(data, dict) else {}),
+                provider="tavily",
+            )
+        if provider == "bocha":
             url, headers, body = _bocha_request(ws, q)
             with httpx.Client(timeout=90.0) as client:
                 r = client.post(url, json=body, headers=headers)
@@ -220,21 +278,23 @@ def run_web_search_sync(settings: Settings, query: str) -> str:
                 try:
                     data = r.json()
                 except json.JSONDecodeError:
-                    return json.dumps(
-                        {"ok": False, "error": f"HTTP {r.status_code}", "body": text[:2000]},
-                        ensure_ascii=False,
+                    return _search_err(
+                        "web_search_invalid_response",
+                        f"HTTP {r.status_code}：响应不是合法 JSON",
+                        provider="bocha",
+                        detail=text[:2000],
+                        status=r.status_code,
                     )
             return _parse_bocha_response(r.status_code, text, data)
     except httpx.HTTPStatusError as e:
-        detail = ""
-        try:
-            detail = (e.response.text or "")[:2000]
-        except Exception:
-            pass
-        return json.dumps({"ok": False, "error": f"HTTP {e.response.status_code}", "detail": detail}, ensure_ascii=False)
+        return _map_http_status_error(e, provider=provider)
     except Exception as e:
-        return json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False)
-    return json.dumps({"ok": False, "error": "未知提供方"}, ensure_ascii=False)
+        return _search_err(
+            "web_search_provider_error",
+            str(e) or "网络搜索失败",
+            provider=provider,
+        )
+    return _search_err("web_search_unknown_provider", "未知提供方", provider=provider)
 
 
 async def fetch_tavily_usage(api_key: str) -> dict[str, Any]:

@@ -30,6 +30,14 @@ describe('formatImportResultMessage', () => {
     expect(msg).not.toContain('L4')
   })
 
+  it('兼容结构化 warning 对象（code/message）', () => {
+    const msg = formatImportResultMessage({
+      imported: ['character'],
+      warnings: [{ code: 'export_attachment_missing', message: '缺少世界书 wb-1' }],
+    })
+    expect(msg).toContain('警告：缺少世界书 wb-1')
+  })
+
   it('无导入项显示“无”', () => {
     expect(formatImportResultMessage({})).toContain('导入完成：无')
   })

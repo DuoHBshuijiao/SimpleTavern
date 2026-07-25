@@ -46,8 +46,39 @@ def test_parse_chat_text_v2_surfaces_transcript_warnings(monkeypatch):
 
     chat, warnings = ie._parse_chat_text(_v2_text())
 
-    # 未知 role 的行应被跳过并产生 warning（此前 TXT 路径会静默丢弃）
-    assert any("badrole" in w for w in warnings)
+    # 未知 role 的行应被跳过并产生结构化 warning
+    assert any("badrole" in ie._warning_text(w) for w in warnings)
+    assert any(isinstance(w, dict) and w.get("code") == "import_row_skipped" for w in warnings)
     # 仅保留合法的 user + assistant 两条
     assert len(chat.messages) == 2
     assert [m.role for m in chat.messages] == ["user", "assistant"]
+
+
+def test_export_character_manifest_records_missing_worldbook(monkeypatch, tmp_path):
+    from fastapi.testclient import TestClient
+    from fastapi import FastAPI
+    from app.schemas import CharacterCard
+
+    card = CharacterCard(id="c1", name="Hero", attachedWorldBookIds=["missing-wb"])
+    monkeypatch.setattr(ie, "load_character", lambda _cid: card)
+
+    def _missing(_wid):
+        raise FileNotFoundError("gone")
+
+    monkeypatch.setattr(ie, "load_worldbook", _missing)
+
+    app = FastAPI()
+    app.include_router(ie.router, prefix="/api")
+    with TestClient(app) as client:
+        resp = client.get("/api/characters/c1/export", params={"include_world_books": True})
+    assert resp.status_code == 200
+    import io
+    import zipfile
+    import json
+
+    with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+        manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
+    assert manifest["partialSuccess"] is True
+    assert any(w["code"] == "export_attachment_missing" for w in manifest["warnings"])
+    assert manifest["exportedWorldBookIds"] == []
+

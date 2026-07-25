@@ -1,12 +1,14 @@
 import { useCharactersStore, useChatsStore, useSettingsStore } from '../stores'
 import type { MvuMode } from '../types/models'
 
+export type ImportWarningItem = string | { code?: string; message?: string }
+
 export interface SillyTavernMvuCompatResult {
   mode: MvuMode
   applied: boolean
   summary?: string
   rules?: number
-  warnings?: string[]
+  warnings?: ImportWarningItem[]
   worldbookMarks?: Array<Record<string, unknown>>
   confidence?: number
 }
@@ -14,7 +16,8 @@ export interface SillyTavernMvuCompatResult {
 export interface SettingsImportResult {
   ok?: boolean
   imported?: string[]
-  warnings?: string[]
+  partialSuccess?: boolean
+  warnings?: ImportWarningItem[]
   mvuCompat?: SillyTavernMvuCompatResult
 }
 
@@ -70,9 +73,14 @@ export interface SillyTavernMaterializeResult {
   ok: boolean
   character: Record<string, unknown>
   worldbook?: Record<string, unknown> | null
-  warnings?: string[]
+  warnings?: ImportWarningItem[]
   mvuCompat?: SillyTavernMvuCompatResult
   mvu?: SillyTavernConfirmResult['mvu']
+}
+
+export function coerceImportWarningText(item: ImportWarningItem): string {
+  if (typeof item === 'string') return item
+  return String(item.message || item.code || '')
 }
 
 export function normalizeImportNoticeText(text: string): string {
@@ -88,11 +96,11 @@ export function formatImportResultMessage(result: SettingsImportResult): string 
     ? `\nMVU 兼容：${compat.mode} / ${compat.applied ? '已应用' : '未应用'}${mvuSummaryText ? `，${mvuSummaryText}` : ''}`
     : ''
   const warnings = result.warnings?.length
-    ? `\n警告：${result.warnings.map(normalizeImportNoticeText).join('; ')}`
+    ? `\n警告：${result.warnings.map((w) => normalizeImportNoticeText(coerceImportWarningText(w))).join('; ')}`
     : ''
   // 顶层 warnings 与 MVU 兼容 warnings 同时存在时都要展示，避免互斥丢失任一来源。
   const mvuWarnings = compat?.warnings?.length
-    ? `\nMVU 警告：${compat.warnings.map(normalizeImportNoticeText).join('; ')}`
+    ? `\nMVU 警告：${compat.warnings.map((w) => normalizeImportNoticeText(coerceImportWarningText(w))).join('; ')}`
     : ''
   return `导入完成：${imported}${mvuSummary}${warnings}${mvuWarnings}`
 }

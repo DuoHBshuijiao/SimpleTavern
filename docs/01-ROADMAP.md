@@ -96,9 +96,9 @@
 ### 当前进度
 
 - T-801 已完成：统一 REST/SSE 错误 envelope、requestId、上游错误映射、前端 typed error/错误栈。
-- T-802 前四批已完成：LLM/generate、Storage/chat/fork、Assistant/tools、MVU/KG/regex health（含 F-009）。
-- 当前门禁：后端 185 tests；1000 会话 fork 索引冷重建 410.05 ms。
-- T-802 下一批为 Search / import-export / TTS / infra（F-027~F-034）。
+- T-802 前五批已完成：LLM/generate、Storage/chat/fork、Assistant/tools、MVU/KG/regex health（含 F-009）、Search/Import-Export。
+- 当前门禁：后端 191 tests；1000 会话 fork 索引冷重建 410.05 ms。
+- T-802 下一批为 TTS / infra（F-030~F-034）。
 
 ### 成本统计 UI
 

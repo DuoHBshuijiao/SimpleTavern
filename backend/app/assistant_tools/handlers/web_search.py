@@ -17,11 +17,20 @@ def handle_web_search(ctx: AssistantToolContext, args: dict[str, object]) -> dic
     query = str(args.get("query") or "").strip()
     if not query:
         return R.err(R.VALIDATION_ERROR, "query is required", tool="web_search")
+    payload = run_web_search_sync(settings, query)
+    if not payload.get("ok"):
+        return R.err(
+            str(payload.get("code") or "web_search_provider_error"),
+            str(payload.get("message") or "网络搜索失败"),
+            tool="web_search",
+            details={k: v for k, v in payload.items() if k not in {"ok", "code", "message"}},
+        )
     return R.ok(
         {
-            "provider": settings.webSearch.provider if settings.webSearch else None,
+            "provider": payload.get("provider")
+            or (settings.webSearch.provider if settings.webSearch else None),
             "query": query,
-            "result": run_web_search_sync(settings, query),
+            "result": payload.get("result") or "",
         },
         tool="web_search",
     )

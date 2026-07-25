@@ -2,6 +2,13 @@
 
 ## v0.800（进行中）
 
+### 静默 Fallback 迁移第五批（T-802）
+
+- 网络搜索 provider 失败改为结构化 `{ok, code, message}`；助手工具返回 `ToolResult.err`，不再把错误塞进成功工具结果字符串。
+- 角色导出 ZIP 写入 `manifest.json`（`warnings` / `partialSuccess` / `exportedWorldBookIds`），缺失世界书记为 `export_attachment_missing`。
+- 导入 warning 统一为 `{code, message, ...}`；前端兼容旧字符串与新结构。
+- 静默 fallback 守卫扩展到 web_search / import_export；后端 191 项测试通过。
+
 ### 静默 Fallback 迁移第四批（T-802）
 
 - MVU worker / 正文正则 scanner 增加 health（failureCount、lastError、paused、nextRetryAt），并暴露 `/api/mvu/{chatId}/health` 与 `/api/content-regex/health`。

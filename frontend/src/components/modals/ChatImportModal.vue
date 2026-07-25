@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { apiGet } from '../../api/http'
-import { useSettingsImport } from '../../composables/useSettingsImport'
+import { useSettingsImport, type ImportWarningItem } from '../../composables/useSettingsImport'
 import { notifyMessage } from '../../composables/useNotify'
 import type { CharacterCard, Chat, MvuMode, UserPersona } from '../../types/models'
 import ModernSelect from '../ModernSelect.vue'
@@ -68,7 +68,7 @@ interface JanitorPendingPreview {
 interface JanitorConfirmResult {
   chat: Chat
   imported: string[]
-  warnings: string[]
+  warnings: ImportWarningItem[]
 }
 
 const props = defineProps<{

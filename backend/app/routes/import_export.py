@@ -42,7 +42,7 @@ from urllib.request import Request as UrllibRequest, urlopen
 
 from fastapi import APIRouter, Body, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from app.chat_transcript import (
     build_jsonl_header_dict,
@@ -1092,6 +1092,19 @@ def _chat_export_participants(chat: Chat) -> str:
     return "、".join(names) or "群聊"
 
 
+def _import_warning(code: str, message: str, **fields: Any) -> dict[str, Any]:
+    """统一导入 warning 结构；message 保持可读，便于旧前端与测试检索。"""
+    payload: dict[str, Any] = {"code": code, "message": message}
+    payload.update(fields)
+    return payload
+
+
+def _warning_text(item: str | dict[str, Any]) -> str:
+    if isinstance(item, dict):
+        return str(item.get("message") or item.get("code") or "")
+    return str(item)
+
+
 def _build_chat_from_transcript_rows(
     *,
     chat_id: str | None,
@@ -1100,7 +1113,7 @@ def _build_chat_from_transcript_rows(
     participants: list[str],
     rows: list[tuple[str, str, str]],
     settings: Settings,
-) -> tuple[Chat, list[str]]:
+) -> tuple[Chat, list[dict[str, Any]]]:
     """
     由「会话头参与者名 + (role, name, content) 行」构建 Chat，与 JSONL 导入同源。
     """
@@ -1130,11 +1143,18 @@ def _build_chat_from_transcript_rows(
         if p.name:
             name_to_persona[p.name] = p
 
-    warnings: list[str] = []
+    warnings: list[dict[str, Any]] = []
     messages: list[ChatMessage] = []
     for i, (role, name, content) in enumerate(rows, start=1):
         if role not in ("user", "assistant", "system"):
-            warnings.append(f"row {i}: skipped (unknown role {role!r})")
+            warnings.append(
+                _import_warning(
+                    "import_row_skipped",
+                    f"row {i}: skipped (unknown role {role!r})",
+                    row=i,
+                    role=role,
+                )
+            )
             continue
         msg_kwargs: dict[str, Any] = {"role": role, "content": content}
         if role == "assistant":
@@ -1151,7 +1171,14 @@ def _build_chat_from_transcript_rows(
         try:
             messages.append(ChatMessage.model_validate(msg_kwargs))
         except Exception as exc:
-            warnings.append(f"row {i}: skipped ({exc})")
+            warnings.append(
+                _import_warning(
+                    "import_row_invalid",
+                    f"row {i}: skipped ({exc})",
+                    row=i,
+                    detail=str(exc),
+                )
+            )
             continue
 
     resolved_id = chat_id or uuid4().hex
@@ -1232,15 +1259,27 @@ def _import_from_jsonl(text: str) -> dict[str, Any]:
     is_group: bool = bool(header.get("isGroup", False))
     settings = load_settings()
     rows: list[tuple[str, str, str]] = []
-    warnings: list[str] = []
+    warnings: list[dict[str, Any]] = []
     for i, ln in enumerate(raw_lines[1:], start=2):
         try:
             obj = json.loads(ln)
         except Exception:
-            warnings.append(f"line {i}: skipped (invalid json)")
+            warnings.append(
+                _import_warning(
+                    "import_row_skipped",
+                    f"line {i}: skipped (invalid json)",
+                    row=i,
+                )
+            )
             continue
         if not isinstance(obj, dict):
-            warnings.append(f"line {i}: skipped (not an object)")
+            warnings.append(
+                _import_warning(
+                    "import_row_skipped",
+                    f"line {i}: skipped (not an object)",
+                    row=i,
+                )
+            )
             continue
         role = str(obj.get("role", ""))
         name: str = obj.get("name") or ""
@@ -1257,7 +1296,11 @@ def _import_from_jsonl(text: str) -> dict[str, Any]:
     )
     warnings.extend(map_warnings)
     save_chat(chat)
-    return {"imported": ["chat"], "warnings": warnings}
+    return {
+        "imported": ["chat"],
+        "partialSuccess": bool(warnings),
+        "warnings": warnings,
+    }
 
 
 @router.get("/chats/{chat_id}/export")
@@ -1348,17 +1391,36 @@ def export_character(
 
     buffer = io.BytesIO()
     attached_ids = list(dict.fromkeys(getattr(card, "attachedWorldBookIds", []) or []))
+    export_warnings: list[dict[str, Any]] = []
+    exported_worldbook_ids: list[str] = []
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(f"characters/{card.id}.json", json.dumps(card.model_dump(mode="json"), ensure_ascii=False, indent=2))
         for worldbook_id in attached_ids:
             try:
                 book = load_worldbook(worldbook_id)
             except FileNotFoundError:
+                export_warnings.append(
+                    {
+                        "code": "export_attachment_missing",
+                        "message": f"世界书不存在，已跳过：{worldbook_id}",
+                        "worldBookId": worldbook_id,
+                        "reason": "not_found",
+                    }
+                )
                 continue
             # 角色便携包只包含会话激活世界书，不包含仅全局激活书
             if bool(getattr(book, "globalActive", False)):
+                export_warnings.append(
+                    {
+                        "code": "export_attachment_skipped",
+                        "message": f"全局激活世界书未纳入角色便携包：{worldbook_id}",
+                        "worldBookId": worldbook_id,
+                        "reason": "global_active",
+                    }
+                )
                 continue
             zf.writestr(f"worldbooks/{book.id}.json", json.dumps(book.model_dump(mode="json"), ensure_ascii=False, indent=2))
+            exported_worldbook_ids.append(book.id)
         zf.writestr(
             "manifest.json",
             json.dumps(
@@ -1367,6 +1429,9 @@ def export_character(
                     "version": 1,
                     "characterId": card.id,
                     "exportedAt": datetime.now().astimezone().isoformat(),
+                    "exportedWorldBookIds": exported_worldbook_ids,
+                    "partialSuccess": bool(export_warnings),
+                    "warnings": export_warnings,
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -1417,7 +1482,8 @@ def backup_settings(scope: str = Query("basic")) -> Response:
             for p in characters_dir().glob("*.json"):
                 try:
                     card = CharacterCard.model_validate(json.loads(p.read_text(encoding="utf-8")))
-                except Exception:
+                except (OSError, UnicodeError, json.JSONDecodeError, ValidationError, TypeError, ValueError):
+                    # 损坏角色卡跳过其头像附件；主 JSON 仍已写入 ZIP（partial）
                     continue
                 if card.avatar:
                     avatar_file = avatar_path(card.avatar)
@@ -1480,7 +1546,7 @@ def _parse_character_text(content: str) -> CharacterCard:
     return card
 
 
-def _parse_chat_text(content: str) -> tuple[Chat, list[str]]:
+def _parse_chat_text(content: str) -> tuple[Chat, list[dict[str, Any]]]:
     """
     解析 SimpleTavern Chat Export 文本。
 
@@ -1629,17 +1695,29 @@ def _decode_st_blob_to_json(raw_text: str) -> dict[str, Any]:
     return parsed
 
 
-def _extract_st_json_from_png(payload: bytes) -> dict[str, Any]:
+def _extract_st_json_from_png(payload: bytes) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """
     从 PNG 中提取 SillyTavern 卡片 JSON（ccv3 优先，其次 chara）。
+    返回 (payload, warnings)；坏 candidate 记入 warnings。
     """
     text_map = _extract_png_text_map(payload)
     values_ccv3 = text_map.get("ccv3", [])
     values_chara = text_map.get("chara", [])
-    for candidate in values_ccv3 + values_chara:
+    warnings: list[dict[str, Any]] = []
+    for index, candidate in enumerate(values_ccv3 + values_chara):
+        source = "ccv3" if index < len(values_ccv3) else "chara"
         try:
-            return _decode_st_blob_to_json(candidate)
-        except Exception:
+            return _decode_st_blob_to_json(candidate), warnings
+        except Exception as exc:
+            warnings.append(
+                _import_warning(
+                    "import_png_candidate_skipped",
+                    f"png {source} candidate {index}: skipped ({exc})",
+                    source=source,
+                    candidateIndex=index,
+                    detail=str(exc),
+                )
+            )
             continue
     raise ValueError("png does not contain valid ccv3/chara data")
 
@@ -2188,7 +2266,8 @@ def _parse_sillytavern_upload(payload: bytes, filename: str, content_type: str |
     lower_name = filename.lower()
     if payload[:8] == PNG_SIGNATURE:
         try:
-            return _extract_st_json_from_png(payload), payload
+            st_raw, _png_warnings = _extract_st_json_from_png(payload)
+            return st_raw, payload
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"invalid SillyTavern png: {e}") from e
     if lower_name.endswith(".json") or (content_type and "json" in content_type.lower()):
@@ -2405,10 +2484,17 @@ async def import_data(file: UploadFile = File(...)) -> dict:
             result = _import_from_zip(payload)
             return {"ok": True, **result}
         if payload[:8] == PNG_SIGNATURE:
-            st_raw = _extract_st_json_from_png(payload)
+            st_raw, png_warnings = _extract_st_json_from_png(payload)
             avatar_filename = f"{uuid4().hex}.png"
             save_avatar(avatar_filename, payload)
-            return {"ok": True, **(await _import_sillytavern_card(st_raw, avatar_filename=avatar_filename))}
+            result = await _import_sillytavern_card(st_raw, avatar_filename=avatar_filename)
+            warnings = list(result.get("warnings") or []) + png_warnings
+            return {
+                "ok": True,
+                **result,
+                "warnings": warnings,
+                "partialSuccess": bool(warnings),
+            }
         if filename.endswith(".jsonl") or (file.content_type and "jsonl" in file.content_type):
             result = _import_from_jsonl(payload.decode("utf-8"))
             return {"ok": True, **result}
@@ -2420,7 +2506,12 @@ async def import_data(file: UploadFile = File(...)) -> dict:
         if "SimpleTavern Chat Export" in text or "[Message]" in text:
             chat, warnings = _parse_chat_text(text)
             save_chat(chat)
-            return {"ok": True, "imported": ["chat"], "warnings": warnings}
+            return {
+                "ok": True,
+                "imported": ["chat"],
+                "partialSuccess": bool(warnings),
+                "warnings": warnings,
+            }
         if "角色名称" in text or "【简介】" in text:
             card = _parse_character_text(text)
             save_character(card)

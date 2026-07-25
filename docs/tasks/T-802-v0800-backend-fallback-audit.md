@@ -187,11 +187,18 @@
 - F-009：世界书坏 regex → `worldbook_regex_invalid` 进入 generate SSE meta.warnings。
 - 门禁：后端 `185 passed`。
 
+### 第五批已完成
+
+- F-027：网络搜索 provider 失败返回结构化 `{ok,code,message}`；助手工具 `ToolResult.err`；generate 工具 content 走 `format_web_search_tool_content`。
+- F-028：角色导出 ZIP `manifest.json` 写入 `warnings` / `partialSuccess` / `exportedWorldBookIds`（含 `export_attachment_missing`）。
+- F-029：导入 warning 统一 `_import_warning`；前端兼容 string 与 `{code,message}`。
+- 静默 fallback 守卫纳入 `web_search.py` / `import_export.py` / web_search handler。
+- 门禁：后端 `191 passed`。
+
 ### 下一批
 
-1. Search provider 失败契约（F-027）。
-2. Import/export/avatar warnings 统一（F-028~F-029）。
-3. TTS / infra（F-030~F-034）。
+1. TTS endpoint fallback / voice list / process health（F-030~F-032）。
+2. HTTP log 写失败与 tokenizer unavailable（F-033~F-034）。
 
 ### 1. 建立机器可读清单
 

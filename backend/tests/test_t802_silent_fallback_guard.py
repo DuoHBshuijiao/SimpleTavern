@@ -11,14 +11,17 @@ MIGRATED_FILES = (
     BACKEND_ROOT / "app" / "fork_index.py",
     BACKEND_ROOT / "app" / "routes" / "generate.py",
     BACKEND_ROOT / "app" / "routes" / "assistant.py",
+    BACKEND_ROOT / "app" / "routes" / "import_export.py",
     BACKEND_ROOT / "app" / "services" / "assistant_agent.py",
     BACKEND_ROOT / "app" / "services" / "generate_web_search_runtime.py",
+    BACKEND_ROOT / "app" / "services" / "web_search.py",
     BACKEND_ROOT / "app" / "services" / "mvu_daemon.py",
     BACKEND_ROOT / "app" / "services" / "mvu_agent.py",
     BACKEND_ROOT / "app" / "group_mvu.py",
     BACKEND_ROOT / "app" / "content_regex_scanner.py",
     BACKEND_ROOT / "app" / "content_regex_queue.py",
     BACKEND_ROOT / "app" / "assistant_tools" / "executor.py",
+    BACKEND_ROOT / "app" / "assistant_tools" / "handlers" / "web_search.py",
     BACKEND_ROOT / "app" / "storage.py",
 )
 

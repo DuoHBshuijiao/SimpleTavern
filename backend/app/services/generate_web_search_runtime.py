@@ -13,7 +13,12 @@ from uuid import uuid4
 from app.errors import AppError
 from app.llm.openai_compat import chat_completions_message, stream_chat_completions
 from app.schemas import Settings
-from app.services.web_search import OPENAI_WEB_SEARCH_TOOLS, run_web_search, web_search_is_configured
+from app.services.web_search import (
+    OPENAI_WEB_SEARCH_TOOLS,
+    format_web_search_tool_content,
+    run_web_search,
+    web_search_is_configured,
+)
 
 WEB_SEARCH_MAX_TOOL_ROUNDS = 8
 
@@ -184,7 +189,13 @@ async def iter_web_search_stream_events(
                 for tc in norm:
                     query = _parse_web_search_query(tc)
                     body = await run_web_search(settings, query)
-                    msgs.append({"role": "tool", "tool_call_id": tc["id"], "content": body})
+                    msgs.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc["id"],
+                            "content": format_web_search_tool_content(body),
+                        }
+                    )
                 tool_rounds_used += 1
                 continue
 
@@ -261,7 +272,13 @@ async def nonstream_web_search_rounds(
                 for tc in norm:
                     query = _parse_web_search_query(tc)
                     body = await run_web_search(settings, query)
-                    msgs.append({"role": "tool", "tool_call_id": tc["id"], "content": body})
+                    msgs.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc["id"],
+                            "content": format_web_search_tool_content(body),
+                        }
+                    )
                 tool_rounds_used += 1
                 continue
 

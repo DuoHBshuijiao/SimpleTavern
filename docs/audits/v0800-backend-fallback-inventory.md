@@ -15,8 +15,8 @@
 | storage / chats / fork | complete for F-011~F-016 | batch 2 complete |
 | assistant / tools | complete for F-017~F-020 | batch 3 complete |
 | MVU / KG / regex | complete for F-021~F-026 | batch 4 complete |
-| search | initial high-risk scan complete | pending |
-| import / export / avatar | initial high-risk scan complete | pending |
+| search | initial high-risk scan complete | batch 5 complete (F-027) |
+| import / export / avatar | initial high-risk scan complete | batch 5 complete (F-028~F-029) |
 | TTS | initial high-risk scan complete | pending |
 | infra / background | initial high-risk scan complete | pending |
 
@@ -50,9 +50,9 @@
 | F-024 | mvu | `backend/app/services/mvu_agent.py` | tool argument parsing | 非法 JSON 退化为 `{}` | fatal | `tool_call_invalid` | worker error state | `test_t802_mvu_regex_health.py` | done |
 | F-025 | regex | `backend/app/content_regex_scanner.py` | scanner loop | 失败仅日志/退避，无 health | retryable | `content_regex_scanner_failed` | health/lastError | `test_t802_mvu_regex_health.py` | done |
 | F-026 | regex | `backend/app/content_regex_queue.py` | enqueue | 队列超限静默丢最旧项 | partial | `content_regex_queue_dropped` | dropped counter | `test_t802_mvu_regex_health.py` | done |
-| F-027 | search | `backend/app/services/web_search.py` | async/sync search | provider 失败变 JSON 字符串工具结果 | partial | provider-specific search error | ToolResult + error stack | pending | open |
-| F-028 | import/export | `backend/app/routes/import_export.py` | character export | 缺失 worldbook 被跳过 | partial | `export_attachment_missing` | warnings/manifest | pending | open |
-| F-029 | import/export | import row/candidate loops | item failure | 已有 warning，但结构不统一 | partial | domain-specific warning | `partialSuccess/warnings[]` | pending | open |
+| F-027 | search | `backend/app/services/web_search.py` | async/sync search | provider 失败变 JSON 字符串工具结果 | partial | provider-specific search error | ToolResult + error stack | `test_web_search.py` | done |
+| F-028 | import/export | `backend/app/routes/import_export.py` | character export | 缺失 worldbook 被跳过 | partial | `export_attachment_missing` | warnings/manifest | `test_import_export_warnings.py` | done |
+| F-029 | import/export | import row/candidate loops | item failure | 已有 warning，但结构不统一 | partial | domain-specific warning | `partialSuccess/warnings[]` | `test_import_export_warnings.py` / `useSettingsImport.test.ts` | done |
 | F-030 | TTS | GLM local synthesize | endpoint selection | JSON 失败自动改 multipart | explicit-fallback | `tts_endpoint_fallback` | from/to/reason | pending | open |
 | F-031 | TTS | SiliconFlow voice list | remote list | 失败后仅返回内置预设 | partial | `tts_voice_list_partial` | partial warning | pending | open |
 | F-032 | TTS | local process health/cleanup | process errors | 异常退化为 False/pass | cleanup-only | process health codes | health API | pending | open |
