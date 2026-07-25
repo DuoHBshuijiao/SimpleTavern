@@ -39,11 +39,14 @@ import json
 from typing import Any, AsyncIterator
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.assistant import load_agent_system_prompt
+from app.errors import AppError, app_error_response
+from app.request_context import REQUEST_ID_HEADER, get_request_id, new_request_id
+from app.sse import sse_done, sse_meta, sse_terminal_error
 from app.attachment_policy import (
     ASSISTANT_IMAGE_ATTACHMENT_MAX_BYTES,
     ASSISTANT_TEXT_ATTACHMENT_MAX_BYTES,
@@ -75,8 +78,8 @@ from app.storage import (
     clear_assistant_chat_attachments,
     clear_workspace_session_attachments,
     load_assistant_attachment_bytes,
-    ai_workspace_dir,
     save_workspace_character_card,
+    workspace_character_card_path,
     clear_assistant_chat,
     clear_assistant_chat_for_chat,
     clear_assistant_workspace_chat,
@@ -300,13 +303,22 @@ def _compact_tool_result_contents_for_llm(messages: list[dict[str, Any]]) -> Non
 
 
 def _normalize_assistant_chat_for_save(chat: AssistantChat) -> None:
-    """保存前校验/规范化助手消息，避免非法组合写入磁盘。"""
+    """保存前校验/规范化助手消息；非法组合 fast-fail，禁止脏对象落盘。"""
     normalized: list[ChatMessage] = []
-    for m in chat.messages:
+    for index, m in enumerate(chat.messages):
         try:
             normalized.append(ChatMessage.model_validate(m.model_dump(mode="json")))
-        except Exception:
-            normalized.append(m)
+        except Exception as exc:
+            msg_id = getattr(m, "id", None)
+            role = getattr(m, "role", None)
+            raise AppError(
+                code="assistant_message_invalid",
+                message="助手消息结构无效，已阻止写入磁盘",
+                detail=f"index={index} id={msg_id!s} role={role!s}: {type(exc).__name__}: {exc}",
+                source="assistant.chat.save",
+                status_code=400,
+                suggested_action="检查助手会话中的 tool/assistant 消息字段后重试",
+            ) from exc
     chat.messages = normalized
 
 
@@ -495,25 +507,37 @@ def _find_assistant_attachment(
     return None
 
 
-@router.get("/assistant/workspace/character-card")
-def get_workspace_character_card() -> dict[str, Any]:
+@router.get("/assistant/workspace/character-card", response_model=CharacterCard)
+def get_workspace_character_card() -> CharacterCard:
     """
-    获取工作空间角色卡片
-    
-    读取ai_workspace/character_card.json文件的内容。
-    
-    Returns:
-        dict[str, Any]: 包含ok、error和card字段的响应
+    获取工作空间角色卡草稿。
+
+    缺失返回 data_not_found；损坏返回 data_corrupted；成功直接返回 CharacterCard。
     """
-    card_path = ai_workspace_dir() / "character_card.json"
+    card_path = workspace_character_card_path()
     if not card_path.exists():
-        return {"ok": False, "error": "not found", "card": None}
+        raise AppError(
+            code="data_not_found",
+            message="工作区角色卡草稿不存在",
+            detail=card_path.name,
+            source="assistant.workspace.character_card",
+            status_code=404,
+            suggested_action="创建新角色或先保存草稿后再读取",
+        )
     try:
         raw = json.loads(card_path.read_text(encoding="utf-8"))
-        card = CharacterCard.model_validate(raw)
-        return {"ok": True, "card": card.model_dump(mode="json")}
+        return CharacterCard.model_validate(raw)
+    except AppError:
+        raise
     except Exception as exc:
-        return {"ok": False, "error": str(exc), "card": None}
+        raise AppError(
+            code="data_corrupted",
+            message="工作区角色卡草稿已损坏或结构无效",
+            detail=f"{card_path.name}: {type(exc).__name__}",
+            source="assistant.workspace.character_card",
+            status_code=500,
+            suggested_action="删除或修复 data/ai_workspace/character_card.json 后重试",
+        ) from exc
 
 
 @router.put("/assistant/workspace/character-card", response_model=CharacterCard)
@@ -791,8 +815,8 @@ def delete_assistant_message(
     return chat
 
 
-@router.post("/assistant/stream")
-async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
+@router.post("/assistant/stream", response_model=None)
+async def stream_assistant(req: AssistantStreamRequest, request: Request):
     """
     流式 AI 助手对话。
 
@@ -802,10 +826,12 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
 
     Args:
         req: 流式请求对象
+        request: FastAPI 请求（用于 requestId）
 
     Returns:
-        StreamingResponse: SSE 流式响应
+        StreamingResponse | JSONResponse: SSE 流式响应或非流 JSON / 错误 envelope
     """
+    request_id = getattr(request.state, "request_id", None) or get_request_id() or new_request_id()
     settings = load_settings()
     assistant_settings = load_assistant_settings()
     scope = req.scope
@@ -878,16 +904,10 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
 
     # 非流式：与全局设置 streamEnabled 一致，返回 JSON
     if not getattr(settings, "streamEnabled", True):
-        result = await agent.run_nonstream()
-        if not result.ok:
-            return JSONResponse(
-                {
-                    "ok": False,
-                    "error": result.error or "unknown error",
-                    "code": result.error_code,
-                },
-                status_code=500,
-            )
+        try:
+            result = await agent.run_nonstream()
+        except AppError as exc:
+            return app_error_response(exc, request_id)
         return JSONResponse(
             {
                 "ok": True,
@@ -899,21 +919,42 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
                 "card": result.card,
                 "worldbookUpdated": result.worldbook_updated,
                 "chatOverridesUpdated": result.chat_overrides_updated,
-            }
+            },
+            headers={REQUEST_ID_HEADER: request_id},
         )
 
     async def event_iter() -> AsyncIterator[str]:
         """
         流式事件迭代器
-        
+
         使用 stream_chat_completions 逐块推送 reasoning 与 content，实现打字机效果。
-        支持多轮工具调用，最多8轮。如果检测到character_card.json，会发送card事件。
-        
-        Yields:
-            str: SSE格式的事件字符串
+        支持多轮工具调用；错误事件携带统一 ErrorEnvelope。
         """
-        async for event in agent.iter_events():
-            yield _sse(event.kind, event.data)
+        yield sse_meta(
+            request_id=request_id,
+            provider="openai_compatible",
+            protocol="openai_compatible_chat",
+            resolved_model=model,
+        )
+        try:
+            async for event in agent.iter_events():
+                if event.kind == "error":
+                    yield _sse("error", event.data)
+                    return
+                if event.kind == "done":
+                    yield sse_done(event.data)
+                    return
+                yield _sse(event.kind, event.data)
+        except Exception as exc:
+            yield sse_terminal_error(
+                exc,
+                request_id=request_id,
+                source="assistant.stream",
+                default_code="assistant_failed",
+                default_message="助手流式执行失败",
+                provider="openai_compatible",
+                protocol="openai_compatible_chat",
+            )
 
     return StreamingResponse(
         event_iter(),
@@ -922,5 +963,6 @@ async def stream_assistant(req: AssistantStreamRequest) -> StreamingResponse:
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
+            REQUEST_ID_HEADER: request_id,
         },
     )

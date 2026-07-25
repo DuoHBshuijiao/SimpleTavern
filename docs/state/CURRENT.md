@@ -1,7 +1,7 @@
 # 当前任务
 
 - current: `v0.800 / T-802`
-- status: in-progress（T-801 已完成，T-802 前两批已完成）
+- status: in-progress（T-801 已完成，T-802 前三批已完成）
 - next_read: `docs/tasks/T-802-v0800-backend-fallback-audit.md`
 - goal: 建立后端可信执行层——全 backend fast-fail、取消静默 fallback、用户可感知错误、性能与健壮性、原生多厂商协议、精确 usage/cost
 
@@ -22,7 +22,7 @@
 ## v0.800 第一阶段
 
 1. T-801：统一错误基座（REST/SSE/requestId/前端错误栈）。✅
-2. T-802：全 backend 静默 fallback 审计与迁移。← 前两批完成，下一批 Assistant/tools
+2. T-802：全 backend 静默 fallback 审计与迁移。← 前三批完成，下一批 MVU/KG/regex
 3. T-803：性能基线、profiling、共享 HTTP client、索引与 I/O。
 4. T-804：LLM 协议内核；随后接原生 OpenAI Responses / Anthropic / Gemini。
 
@@ -37,8 +37,9 @@
 - Cleanup/update：cleanup-only 失败记录 requestId；损坏 update-ignore 不再覆写原文件。
 - 守卫：已迁域 broad except/裸 SSE/旧 JSON 错误静态回归测试。
 - F-010 已确认语义 A：正文正则存原文 + 前端显示时处理；generate 不落库前改写。
+- T-802 第三批：Assistant/tools（F-017~F-020）脏消息禁写、工具参数 fast-fail、Agent ErrorEnvelope、workspace 角色卡 REST。
 - 性能基线：1000 会话 fork 索引冷重建 `410.05 ms`。
-- 门禁：后端 169 tests、前端 123 tests、前端 build 全通过。
+- 门禁：后端 178 tests；前端基线仍记 123（本轮未重跑，node_modules 缺失）。
 
 ## v0.800 核心交付
 

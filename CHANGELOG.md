@@ -2,6 +2,14 @@
 
 ## v0.800（进行中）
 
+### 静默 Fallback 迁移第三批（T-802）
+
+- 助手消息保存前严格校验，非法 tool/assistant 组合抛 `assistant_message_invalid`，禁止脏对象落盘。
+- 助手工具参数非法 JSON/非对象改为 `tool_call_invalid` ToolResult，不再退 `{}` 执行；executor 同步拒绝非 dict。
+- 助手非流失败改为 AppError envelope；流式错误携带 terminal ErrorEnvelope，并补齐 SSE meta/requestId。
+- 工作区角色卡草稿缺失/损坏分别返回 `data_not_found`/`data_corrupted`；成功直接返回 CharacterCard。
+- 新增 assistant 错误契约测试与静默 fallback 守卫扩展；后端 178 项测试通过。
+
 ### 静默 Fallback 迁移第二批（T-802）
 
 - 损坏角色/世界书在保持列表数组兼容的同时进入数据完整性巡检；直接加载损坏角色、世界书、会话改为 `data_corrupted`，不再伪装未找到。

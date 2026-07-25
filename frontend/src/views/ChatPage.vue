@@ -4061,9 +4061,9 @@ async function openCreateCharacter() {
   void assistant.loadState('workspace')
   
   try {
-    const res = await apiGet<{ ok: boolean; card: any }>('/api/assistant/workspace/character-card')
-    if (res.ok && res.card) {
-      actions.applyAssistantCard(res.card)
+    const card = await apiGet<CharacterCard>('/api/assistant/workspace/character-card')
+    if (card) {
+      actions.applyAssistantCard(card)
     }
   } catch (e) {
     console.log('No existing character card in workspace:', e)

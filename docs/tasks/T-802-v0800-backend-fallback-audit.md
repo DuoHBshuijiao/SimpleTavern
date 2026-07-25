@@ -1,6 +1,6 @@
 # T-802 v0.800 全后端静默 Fallback 审计与迁移
 
-- status: in-progress（前两批 LLM/generate 与 Storage/chat/fork 已完成）
+- status: in-progress（前三批 LLM/generate、Storage/chat/fork、Assistant/tools 已完成）
 - area: `backend/app/**`
 - priority: P0
 - theme: 每个 catch/fallback 都有业务语义、用户可见结果与测试
@@ -168,11 +168,20 @@
 - Grok 4.5 两轮只读复查无阻塞/高优先级遗留。
 - 门禁：后端 `169 passed`、前端 `123 passed`、前端 build 通过。
 
+### 第三批已完成
+
+- F-017：`_normalize_assistant_chat_for_save` 校验失败抛 `assistant_message_invalid`，禁止脏消息落盘。
+- F-018：工具参数非法 JSON/非对象写入 `tool_call_invalid` ToolResult，不再退 `{}` 执行；executor 同步拒绝非 dict。
+- F-019：agent 非流抛 AppError；流式错误事件携带 ErrorEnvelope + terminal；route 对齐 meta/done/`app_error_response`。
+- F-020：workspace character-card 缺失/损坏分别 `data_not_found`/`data_corrupted`；成功直接返回 CharacterCard；前端按 2xx 卡片体适配。
+- 新增 `test_assistant_error_contracts.py`；静默 fallback 守卫纳入 assistant/agent/executor。
+- 门禁：后端 `178 passed`；本机前端 `node_modules` 缺失未跑（文档基线仍记前端 123）。
+
 ### 下一批
 
-1. Assistant/tools 脏消息、工具参数与 REST/SSE 错误迁移（F-017~F-020）。
-2. F-010 已关闭（语义 A：存原文 + 前端显示）。
-3. MVU/KG/regex scanner health、重试与 dropped counter（F-021~F-026）。
+1. MVU/KG/regex scanner health、重试与 dropped counter（F-021~F-026）。
+2. F-009 世界书坏 regex 用户可见 warning。
+3. Search / import-export / TTS / infra（F-027~F-034）。
 
 ### 1. 建立机器可读清单
 

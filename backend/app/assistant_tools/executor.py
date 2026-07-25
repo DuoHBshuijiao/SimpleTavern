@@ -47,13 +47,15 @@ def _try_parse_character_card_from_workspace(path_str: str, content: str | None)
     raw: Any
     try:
         raw = json.loads(content) if content is not None else None
-    except Exception:
-        raw = None
+    except Exception as exc:
+        logger.debug("workspace character_card.json JSON parse failed: %s", exc)
+        return None
     if raw is None:
         return None
     try:
         card = CharacterCard.model_validate(raw)
-    except Exception:
+    except Exception as exc:
+        logger.debug("workspace character_card.json schema invalid: %s", exc)
         return None
     return card.model_dump(mode="json")
 
@@ -126,14 +128,21 @@ def execute_tool(
     t0 = time.perf_counter()
     ad = args_digest(args if isinstance(args, dict) else {})
 
+    if not isinstance(args, dict):
+        res = R.err(
+            R.VALIDATION_ERROR,
+            "tool arguments must be an object",
+            tool=name,
+            details={"kind": "tool_call_invalid"},
+        )
+        _log_tool_end(name, t0, res, ad)
+        return _empty_outcome(res)
+
     entry = tool_entry(name)
     if entry is None:
         res = R.err(R.UNKNOWN_TOOL, f"unknown tool: {name}", tool=name)
         _log_tool_end(name, t0, res, ad)
         return _empty_outcome(res)
-
-    if not isinstance(args, dict):
-        args = {}
 
     if not entry.skip_jsonschema:
         verr = _validate_json_schema(entry.parameters, args, entry.name)

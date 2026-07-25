@@ -12,6 +12,7 @@ from app.assistant_tools.context import AssistantToolContext
 from app.assistant_tools.digest import args_digest as _tool_args_digest
 from app.assistant_tools.executor import build_openai_tools_list, execute_tool
 from app.assistant_tools import result as tool_result
+from app.errors import AppError, as_app_error
 from app.llm.openai_compat import chat_completions_message, stream_chat_completions
 from app.schemas import AssistantChat, ChatMessage
 
@@ -101,12 +102,15 @@ def tool_record_payload(
     }
 
 
-def _loop_limit_result(limit: int) -> dict[str, Any]:
-    return tool_result.err(
-        tool_result.LIMIT_EXCEEDED,
-        f"tool call loop limit exceeded: maxToolTurns={limit}",
-        tool="assistant_agent",
-        details={"maxToolTurns": limit},
+def _loop_limit_error(limit: int) -> AppError:
+    return AppError(
+        code="assistant_tool_loop_limit",
+        message=f"助手工具调用轮次已达上限（maxToolTurns={limit}）",
+        detail=f"maxToolTurns={limit}",
+        source="assistant.agent",
+        status_code=429,
+        retryable=False,
+        suggested_action="减少工具调用轮次，或提高 maxToolTurns 后重试",
     )
 
 
@@ -117,6 +121,66 @@ def _per_turn_limit_result(tool_name: str, limit: int) -> dict[str, Any]:
         tool=tool_name,
         details={"maxToolsPerTurn": limit},
     )
+
+
+def _tool_call_args_invalid_result(
+    tool_name: str,
+    *,
+    message: str,
+    detail: str,
+    raw_preview: str | None = None,
+) -> dict[str, Any]:
+    details: dict[str, Any] = {"kind": "tool_call_invalid", "detail": detail}
+    if raw_preview is not None:
+        details["rawPreview"] = raw_preview[:200]
+    return tool_result.err(
+        "tool_call_invalid",
+        message,
+        tool=tool_name,
+        details=details,
+    )
+
+
+def _parse_tool_call_arguments(
+    tool_call: dict[str, Any],
+    tool_name: str,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """返回 (args, error_result)；非法 JSON/非对象时不执行工具。"""
+    raw_args = (tool_call.get("function") or {}).get("arguments")
+    if raw_args is None or raw_args == "":
+        return {}, None
+    if isinstance(raw_args, dict):
+        return raw_args, None
+    if not isinstance(raw_args, str):
+        return None, _tool_call_args_invalid_result(
+            tool_name,
+            message="模型返回了无效工具参数",
+            detail="tool arguments must be a JSON string or object",
+            raw_preview=repr(raw_args),
+        )
+    try:
+        args = json.loads(raw_args)
+    except json.JSONDecodeError as exc:
+        return None, _tool_call_args_invalid_result(
+            tool_name,
+            message="模型返回了无法解析的工具参数",
+            detail=f"arguments JSON is invalid: {exc}",
+            raw_preview=raw_args,
+        )
+    if not isinstance(args, dict):
+        return None, _tool_call_args_invalid_result(
+            tool_name,
+            message="模型返回了无效工具参数",
+            detail="tool arguments must decode to an object",
+            raw_preview=raw_args[:200],
+        )
+    return args, None
+
+
+def _error_event_payload(error: AppError) -> dict[str, Any]:
+    payload = error.to_dict()
+    payload["terminal"] = True
+    return payload
 
 
 class AssistantAgentService:
@@ -216,16 +280,18 @@ class AssistantAgentService:
                     if item.chat_overrides_updated:
                         co_updates.append(item.chat_overrides_updated)
 
-            loop_limit = _loop_limit_result(self._ctx.max_tool_turns)
-            return AssistantAgentRunResult(
-                ok=False,
-                error=str(loop_limit.get("message") or "tool call loop limit exceeded"),
-                error_code=str(loop_limit.get("code") or tool_result.LIMIT_EXCEEDED),
-                tool_traces=tool_traces,
-                tool_records=list(tool_traces),
-            )
+            raise _loop_limit_error(self._ctx.max_tool_turns)
+        except AppError:
+            raise
         except Exception as exc:
-            return AssistantAgentRunResult(ok=False, error=str(exc))
+            raise as_app_error(
+                exc,
+                source="assistant.agent",
+                default_code="assistant_failed",
+                default_message="助手执行失败",
+                provider="openai_compatible",
+                protocol="openai_compatible_chat",
+            ) from exc
 
     async def iter_events(self) -> AsyncIterator[AssistantAgentEvent]:
         current_messages = list(self._ctx.messages)
@@ -262,81 +328,84 @@ class AssistantAgentService:
                         yield AssistantAgentEvent("delta", {"text": chunk.text})
                     elif chunk.kind == "finish":
                         tool_calls_from_stream = chunk.tool_calls
-            except Exception as exc:
-                yield AssistantAgentEvent("error", {"message": str(exc)})
-                return
 
-            reasoning_duration_sec: float | None = None
-            if reasoning_phase_started is not None:
-                end_mono = reasoning_phase_end if reasoning_phase_end is not None else time.monotonic()
-                reasoning_duration_sec = round(end_mono - reasoning_phase_started, 3)
+                reasoning_duration_sec: float | None = None
+                if reasoning_phase_started is not None:
+                    end_mono = reasoning_phase_end if reasoning_phase_end is not None else time.monotonic()
+                    reasoning_duration_sec = round(end_mono - reasoning_phase_started, 3)
 
-            if final_reasoning_content:
-                llm_assistant_msg["reasoning_content"] = final_reasoning_content
-            llm_assistant_msg["content"] = final_content
-            if tool_calls_from_stream:
-                normalized_stream = normalize_tool_calls_ids(tool_calls_from_stream)
-                llm_assistant_msg["tool_calls"] = normalized_stream
-            current_messages.append(llm_assistant_msg)
+                if final_reasoning_content:
+                    llm_assistant_msg["reasoning_content"] = final_reasoning_content
+                llm_assistant_msg["content"] = final_content
+                if tool_calls_from_stream:
+                    normalized_stream = normalize_tool_calls_ids(tool_calls_from_stream)
+                    llm_assistant_msg["tool_calls"] = normalized_stream
+                current_messages.append(llm_assistant_msg)
 
-            frc_strip = final_reasoning_content.strip()
-            if frc_strip:
+                frc_strip = final_reasoning_content.strip()
+                if frc_strip:
+                    self._append_message(
+                        ChatMessage(
+                            role="reasoning",
+                            content=frc_strip,
+                            reasoningDurationSec=reasoning_duration_sec,
+                        )
+                    )
+
+                if not tool_calls_from_stream:
+                    assistant_msg = ChatMessage(
+                        role="assistant",
+                        content=final_content,
+                        reasoningContent=None,
+                    )
+                    self._append_message(assistant_msg)
+                    yield AssistantAgentEvent("done", {"ok": True, "messageId": assistant_msg.id})
+                    return
+
                 self._append_message(
                     ChatMessage(
-                        role="reasoning",
-                        content=frc_strip,
-                        reasoningDurationSec=reasoning_duration_sec,
+                        role="assistant",
+                        content=final_content or "",
+                        tool_calls=list(normalized_stream),
+                        reasoningContent=None,
                     )
                 )
 
-            if not tool_calls_from_stream:
-                assistant_msg = ChatMessage(
-                    role="assistant",
-                    content=final_content,
-                    reasoningContent=None,
+                executed, tool_idx = self._execute_tool_calls(
+                    normalized_stream,
+                    current_messages,
+                    start_index=tool_idx,
                 )
-                self._append_message(assistant_msg)
-                yield AssistantAgentEvent("done", {"ok": True, "messageId": assistant_msg.id})
+                for item in executed:
+                    yield AssistantAgentEvent("tool_record", item.trace)
+                    yield AssistantAgentEvent("tool_trace", item.trace)
+                    if item.card:
+                        yield AssistantAgentEvent("card", {"card": item.card})
+                    if item.chat_memory_updated:
+                        yield AssistantAgentEvent(
+                            "chat_memory_updated",
+                            {"chat": item.chat_memory_updated},
+                        )
+                    if item.worldbook_updated:
+                        yield AssistantAgentEvent("worldbook_updated", item.worldbook_updated)
+                    if item.chat_overrides_updated:
+                        yield AssistantAgentEvent("chat_overrides_updated", item.chat_overrides_updated)
+            except AppError as exc:
+                yield AssistantAgentEvent("error", _error_event_payload(exc))
+                return
+            except Exception as exc:
+                error = as_app_error(
+                    exc,
+                    source="assistant.agent.stream",
+                    default_code="assistant_failed",
+                    default_message="助手流式执行失败",
+                    provider="openai_compatible",
+                    protocol="openai_compatible_chat",
+                )
+                yield AssistantAgentEvent("error", _error_event_payload(error))
                 return
 
-            self._append_message(
-                ChatMessage(
-                    role="assistant",
-                    content=final_content or "",
-                    tool_calls=list(normalized_stream),
-                    reasoningContent=None,
-                )
-            )
-
-            executed, tool_idx = self._execute_tool_calls(
-                normalized_stream,
-                current_messages,
-                start_index=tool_idx,
-            )
-            for item in executed:
-                yield AssistantAgentEvent("tool_record", item.trace)
-                yield AssistantAgentEvent("tool_trace", item.trace)
-                if item.card:
-                    yield AssistantAgentEvent("card", {"card": item.card})
-                if item.chat_memory_updated:
-                    yield AssistantAgentEvent(
-                        "chat_memory_updated",
-                        {"chat": item.chat_memory_updated},
-                    )
-                if item.worldbook_updated:
-                    yield AssistantAgentEvent("worldbook_updated", item.worldbook_updated)
-                if item.chat_overrides_updated:
-                    yield AssistantAgentEvent("chat_overrides_updated", item.chat_overrides_updated)
-
-        loop_limit = _loop_limit_result(self._ctx.max_tool_turns)
-        yield AssistantAgentEvent(
-            "error",
-            {
-                "message": loop_limit.get("message") or "tool call loop limit exceeded",
-                "code": loop_limit.get("code") or tool_result.LIMIT_EXCEEDED,
-                "details": loop_limit.get("details") or {},
-            },
-        )
+        yield AssistantAgentEvent("error", _error_event_payload(_loop_limit_error(self._ctx.max_tool_turns)))
 
     def _append_message(self, message: ChatMessage) -> None:
         chat = self._ctx.load_chat()
@@ -355,13 +424,18 @@ class AssistantAgentService:
         max_tools_per_turn = self._ctx.max_tools_per_turn
         for turn_index, tool_call in enumerate(tool_calls):
             fn = (tool_call.get("function") or {}).get("name")
-            raw_args = (tool_call.get("function") or {}).get("arguments") or "{}"
-            try:
-                args = json.loads(raw_args)
-            except Exception:
-                args = {}
             tool_name = str(fn)
-            if max_tools_per_turn is not None and turn_index >= max_tools_per_turn:
+            args, args_error = _parse_tool_call_arguments(tool_call, tool_name)
+            if args_error is not None:
+                outcome = _ExecutedToolOutcome(
+                    result=args_error,
+                    card=None,
+                    chat_memory_updated=None,
+                    worldbook_updated=None,
+                    chat_overrides_updated=None,
+                )
+                args = {}
+            elif max_tools_per_turn is not None and turn_index >= max_tools_per_turn:
                 result = _per_turn_limit_result(tool_name, max_tools_per_turn)
                 outcome = _ExecutedToolOutcome(
                     result=result,
@@ -371,6 +445,7 @@ class AssistantAgentService:
                     chat_overrides_updated=None,
                 )
             else:
+                assert args is not None
                 exec_outcome = execute_tool(tool_name, args, self._ctx.tool_ctx)
                 outcome = _ExecutedToolOutcome(
                     result=exec_outcome.result,

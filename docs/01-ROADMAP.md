@@ -96,9 +96,9 @@
 ### 当前进度
 
 - T-801 已完成：统一 REST/SSE 错误 envelope、requestId、上游错误映射、前端 typed error/错误栈。
-- T-802 前两批已完成：LLM/generate fast-fail，以及 Storage/chat/fork 损坏数据、索引自愈、cleanup-only 可观测性。
-- 当前门禁：后端 169 tests、前端 123 tests、前端 build 通过；1000 会话 fork 索引冷重建 410.05 ms。
-- T-802 下一批为 Assistant/tools 脏消息、工具参数与错误契约。
+- T-802 前三批已完成：LLM/generate、Storage/chat/fork、Assistant/tools（F-017~F-020）。
+- 当前门禁：后端 178 tests；1000 会话 fork 索引冷重建 410.05 ms。
+- T-802 下一批为 MVU/KG/regex scanner health 与 dropped counter（F-021~F-026）。
 
 ### 成本统计 UI
 

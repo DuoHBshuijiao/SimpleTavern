@@ -13,7 +13,7 @@
 |---|---|---|
 | LLM / generate | complete for P0/P1 scan | batch 1 complete |
 | storage / chats / fork | complete for F-011~F-016 | batch 2 complete |
-| assistant / tools | initial high-risk scan complete | pending |
+| assistant / tools | complete for F-017~F-020 | batch 3 complete |
 | MVU / KG / regex | initial high-risk scan complete | pending |
 | search | initial high-risk scan complete | pending |
 | import / export / avatar | initial high-risk scan complete | pending |
@@ -40,10 +40,10 @@
 | F-014 | storage | `backend/app/storage.py` | `load_update_ignore` | 损坏配置重置为空对象 | fatal | `update_ignore_corrupt` | REST envelope；保留原文件 | `test_storage_integrity_contract.py` | done |
 | F-015 | fork | `backend/app/fork_index.py` | `_load_index_unlocked` | 损坏索引静默重置为空 | partial | `fork_index_corrupt` / `fork_index_rebuild_failed` | lineage warnings + error stack | `test_fork_index.py` / `useForkLineage.test.ts` | done |
 | F-016 | storage | `backend/app/storage.py` | delete/clear cleanup | 清理失败 `pass` / `continue` | cleanup-only | `cleanup_failed` | structured log + requestId | `test_storage_integrity_contract.py` | done |
-| F-017 | assistant | `backend/app/routes/assistant.py` | `_normalize_assistant_chat_for_save` | 校验失败仍保存原对象 | fatal | `assistant_message_invalid` | REST error | pending | open |
-| F-018 | assistant | `backend/app/services/assistant_agent.py` | tool argument parsing | 非法 JSON 退化为 `{}` | fatal | `tool_call_invalid` | ToolResult + error stack | pending | open |
-| F-019 | assistant | `backend/app/services/assistant_agent.py` | stream/nonstream errors | 仅传 `str(exc)` | fatal | mapped AppError | REST/SSE envelope | pending | open |
-| F-020 | assistant | assistant workspace card route | workspace failure | HTTP 200 + `{ok:false}` | fatal | `data_not_found` / `data_corrupted` | REST error | pending | open |
+| F-017 | assistant | `backend/app/routes/assistant.py` | `_normalize_assistant_chat_for_save` | 校验失败仍保存原对象 | fatal | `assistant_message_invalid` | REST error | `test_assistant_error_contracts.py` | done |
+| F-018 | assistant | `backend/app/services/assistant_agent.py` | tool argument parsing | 非法 JSON 退化为 `{}` | fatal | `tool_call_invalid` | ToolResult + error stack | `test_assistant_error_contracts.py` | done |
+| F-019 | assistant | `backend/app/services/assistant_agent.py` | stream/nonstream errors | 仅传 `str(exc)` | fatal | mapped AppError | REST/SSE envelope | `test_assistant_error_contracts.py` | done |
+| F-020 | assistant | assistant workspace card route | workspace failure | HTTP 200 + `{ok:false}` | fatal | `data_not_found` / `data_corrupted` | REST error | `test_assistant_error_contracts.py` | done |
 | F-021 | mvu | `backend/app/services/mvu_daemon.py` | worker loop | 失败日志后无限继续，无 health | retryable | `mvu_worker_failed` | health/lastError | pending | open |
 | F-022 | mvu | `backend/app/services/mvu_daemon.py` | `_broadcast` | QueueFull 静默丢事件 | partial | `mvu_sse_dropped` | dropped counter | pending | open |
 | F-023 | mvu | `backend/app/group_mvu.py` | runtime enable check | 角色读取失败被视为功能关闭 | fatal | `mvu_character_unreadable` | explicit error state | pending | open |

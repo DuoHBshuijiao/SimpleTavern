@@ -10,7 +10,10 @@ MIGRATED_FILES = (
     BACKEND_ROOT / "app" / "llm" / "openai_compat.py",
     BACKEND_ROOT / "app" / "fork_index.py",
     BACKEND_ROOT / "app" / "routes" / "generate.py",
+    BACKEND_ROOT / "app" / "routes" / "assistant.py",
+    BACKEND_ROOT / "app" / "services" / "assistant_agent.py",
     BACKEND_ROOT / "app" / "services" / "generate_web_search_runtime.py",
+    BACKEND_ROOT / "app" / "assistant_tools" / "executor.py",
     BACKEND_ROOT / "app" / "storage.py",
 )
 
@@ -65,6 +68,17 @@ def test_generate_routes_do_not_reintroduce_bare_sse_or_legacy_json_errors() -> 
 
     assert 'yield _sse("error"' not in source
     assert 'JSONResponse({"ok": False, "error": str(e)}' not in source
+
+
+def test_assistant_routes_do_not_reintroduce_legacy_ok_false_errors() -> None:
+    source = (BACKEND_ROOT / "app" / "routes" / "assistant.py").read_text(encoding="utf-8")
+    agent_source = (BACKEND_ROOT / "app" / "services" / "assistant_agent.py").read_text(encoding="utf-8")
+
+    assert 'return {"ok": False, "error": "not found"' not in source
+    assert '"ok": False,\n                    "error": result.error' not in source
+    assert "except Exception:\n                args = {}" not in agent_source
+    assert 'AssistantAgentEvent("error", {"message": str(exc)})' not in agent_source
+    assert "except Exception:\n            normalized.append(m)" not in source
 
 
 def test_storage_cleanup_and_fork_index_do_not_reintroduce_silent_fallbacks() -> None:
