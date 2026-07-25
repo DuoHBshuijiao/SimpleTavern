@@ -1,4 +1,5 @@
 from app import content_regex_scanner as scanner
+from app.group_mvu import MvuRuntimeEnablement
 from app.schemas import CharacterCard, Chat, ChatContentRegexRule, ChatMessage, ChatOverrides, Settings
 
 
@@ -30,7 +31,11 @@ def test_scanner_does_not_enqueue_or_signal_directive_mvu(monkeypatch) -> None:
 
     monkeypatch.setattr(scanner, "load_settings", lambda: settings)
     monkeypatch.setattr(scanner, "_chat_iter", lambda: iter([chat]))
-    monkeypatch.setattr(scanner, "is_chat_mvu_runtime_enabled", lambda _chat: True)
+    monkeypatch.setattr(
+        scanner,
+        "resolve_chat_mvu_runtime_enablement",
+        lambda _chat: MvuRuntimeEnablement(enabled=True),
+    )
     monkeypatch.setattr(scanner, "load_character", lambda _character_id: character)
     monkeypatch.setattr(scanner, "enqueue_content_regex_items", lambda chat_id, items: enqueued.append((chat_id, items)))
     monkeypatch.setattr(

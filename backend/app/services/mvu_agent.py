@@ -19,9 +19,11 @@ from app.assistant_tools.context import AssistantToolContext
 from app.assistant_tools.executor import execute_tool
 from app.assistant_tools.registry import registered_tools
 from app.assistant_tools import result as tool_result
+from app.errors import as_app_error
 from app.llm.openai_compat import chat_completions_message
 from app.kg_inject import mvu_tool_names
 from app.schemas import AssistantSettings, MvuWorkLogEntry, StateVariables
+from app.services.assistant_agent import _parse_tool_call_arguments
 
 
 def _now_iso() -> str:
@@ -216,14 +218,14 @@ class MvuAgentService:
 
                 for tc in tool_calls:
                     fn_name = str((tc.get("function") or {}).get("name") or "")
-                    raw_args = str((tc.get("function") or {}).get("arguments") or "{}")
-                    try:
-                        args = json.loads(raw_args)
-                    except json.JSONDecodeError:
+                    args, args_error = _parse_tool_call_arguments(tc, fn_name)
+                    if args_error is not None:
+                        result = args_error
                         args = {}
-
-                    outcome = execute_tool(fn_name, args, tool_ctx)
-                    result = outcome.result
+                    else:
+                        assert args is not None
+                        outcome = execute_tool(fn_name, args, tool_ctx)
+                        result = outcome.result
 
                     tool_msg: dict[str, Any] = {
                         "role": "tool",
@@ -242,6 +244,7 @@ class MvuAgentService:
                         "tool": fn_name,
                         "args": args,
                         "ok": ok,
+                        "code": code,
                     })
 
             await _alog("error", f"达到工具调用轮次上限 max_tool_turns={self._ctx.max_tool_turns}")
@@ -255,8 +258,14 @@ class MvuAgentService:
             return events, log_entries
 
         except Exception as exc:
-            await _alog("error", f"异常: {exc}")
-            err_evt = MvuAgentEvent("error", {"message": str(exc)})
+            error = as_app_error(
+                exc,
+                source="mvu.agent",
+                default_code="mvu_worker_failed",
+                default_message="MVU Agent 执行失败",
+            )
+            await _alog("error", f"异常: {error.message}", {"code": error.code})
+            err_evt = MvuAgentEvent("error", error.to_dict())
             events.append(err_evt)
             if on_event:
                 await on_event(err_evt)

@@ -13,12 +13,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from datetime import datetime
 from typing import Literal
 
 logger = logging.getLogger(__name__)
 
-from app.content_regex_queue import dequeue_by_message_id, get_content_regex_queue_size
-from app.group_mvu import is_chat_mvu_runtime_enabled
+from app.content_regex_queue import dequeue_by_message_id, get_content_regex_queue_dropped, get_content_regex_queue_size
+from app.errors import AppError, as_app_error
+from app.group_mvu import resolve_chat_mvu_runtime_enablement
 from app.llm.preset_resolve import LlmPresetResolveError, resolve_llm_preset_credentials
 from app.mvu_model_resolve import resolve_mvu_model_from_settings
 from app.mvu_system_prompt import load_mvu_system_prompt
@@ -39,8 +41,10 @@ from app.storage import (
     save_chat,
     save_mvu_logs,
 )
+from app.worker_health import WorkerHealth
 
 _COOLDOWN_SECS = 1.0
+_FAILURE_PAUSE_AFTER = 5
 
 # per-chat 原语
 _events: dict[str, asyncio.Event] = {}
@@ -48,10 +52,32 @@ _locks: dict[str, asyncio.Lock] = {}
 _tasks: dict[str, asyncio.Task] = {}
 _last_run: dict[str, float] = {}
 _context_window_counts: dict[str, int] = {}
+_health: dict[str, WorkerHealth] = {}
+_sse_dropped: dict[str, int] = {}
 
 # SSE 订阅者（per chat_id 的 asyncio.Queue 列表）
 _subscribers: dict[str, list[asyncio.Queue]] = {}
 _QUEUE_MAX = 200
+
+
+def _chat_health(chat_id: str) -> WorkerHealth:
+    health = _health.get(chat_id)
+    if health is None:
+        health = WorkerHealth()
+        _health[chat_id] = health
+    return health
+
+
+def get_mvu_worker_health(chat_id: str) -> dict:
+    """返回会话级 MVU worker health（含 SSE/queue dropped）。"""
+    health = _chat_health(chat_id)
+    health.extras = {
+        "sseDropped": int(_sse_dropped.get(chat_id, 0)),
+        "queueSize": get_content_regex_queue_size(chat_id),
+        "queueDropped": get_content_regex_queue_dropped(chat_id),
+        "codeHint": "mvu_sse_dropped" if _sse_dropped.get(chat_id) else None,
+    }
+    return health.to_dict()
 
 
 def subscribe(chat_id: str) -> asyncio.Queue:
@@ -72,13 +98,19 @@ def unsubscribe(chat_id: str, q: asyncio.Queue) -> None:
 
 
 async def _broadcast(chat_id: str, event: MvuAgentEvent) -> None:
-    """将事件推送到所有 SSE 订阅者。"""
+    """将事件推送到所有 SSE 订阅者；QueueFull 计数后丢弃。"""
     subs = _subscribers.get(chat_id, [])
     for q in subs:
         try:
             q.put_nowait(event)
         except asyncio.QueueFull:
-            pass
+            _sse_dropped[chat_id] = _sse_dropped.get(chat_id, 0) + 1
+            logger.warning(
+                "chat %s: MVU SSE queue full, dropped event kind=%s (total dropped=%s)",
+                chat_id,
+                event.kind,
+                _sse_dropped[chat_id],
+            )
 
 
 def _get_or_create(chat_id: str) -> tuple[asyncio.Event, asyncio.Lock]:
@@ -86,6 +118,7 @@ def _get_or_create(chat_id: str) -> tuple[asyncio.Event, asyncio.Lock]:
         _events[chat_id] = asyncio.Event()
         _locks[chat_id] = asyncio.Lock()
         _last_run[chat_id] = 0.0
+        _health.setdefault(chat_id, WorkerHealth())
     return _events[chat_id], _locks[chat_id]
 
 
@@ -115,15 +148,34 @@ def _next_context_window_count(chat_id: str) -> int:
 
 def ensure_mvu_worker(chat_id: str) -> bool:
     """确保 chat_id 的 MVU worker loop 已启动。返回 True 表示已在运行或成功启动。"""
+    health = _chat_health(chat_id)
     try:
         chat = load_chat(chat_id)
     except FileNotFoundError:
         return False
-    if not is_chat_mvu_runtime_enabled(chat):
+    enablement = resolve_chat_mvu_runtime_enablement(chat)
+    if enablement.character_error is not None:
+        health.set_enable_error(enablement.character_error)
         return False
+    health.enable_error = None
+    if not enablement.enabled:
+        health.enabled = False
+        health.status = "disabled"
+        return False
+    health.enabled = True
     try:
         load_character(chat.characterId)
-    except FileNotFoundError:
+    except FileNotFoundError as exc:
+        health.set_enable_error(
+            AppError(
+                code="mvu_character_unreadable",
+                message="无法读取会话绑定角色，MVU worker 未启动",
+                detail=f"characterId={chat.characterId}: FileNotFoundError",
+                source="mvu.daemon.ensure",
+                status_code=500,
+                suggested_action="检查角色文件是否存在后重试",
+            )
+        )
         return False
 
     _get_or_create(chat_id)
@@ -138,6 +190,7 @@ def ensure_mvu_worker(chat_id: str) -> bool:
 
 async def _mvu_loop(chat_id: str) -> None:
     event, lock = _events[chat_id], _locks[chat_id]
+    health = _chat_health(chat_id)
 
     while True:
         triggered_by_signal = False
@@ -152,6 +205,20 @@ async def _mvu_loop(chat_id: str) -> None:
             now = time.monotonic()
             if now - _last_run.get(chat_id, 0) < _COOLDOWN_SECS:
                 continue
+
+            if health.paused:
+                if health.next_retry_at:
+                    try:
+                        retry_ts = datetime.fromisoformat(health.next_retry_at).timestamp()
+                    except ValueError:
+                        retry_ts = 0.0
+                    if time.time() < retry_ts:
+                        continue
+                    # half-open: allow one more attempt after backoff
+                    health.paused = False
+                    health.status = "degraded"
+                else:
+                    continue
 
             try:
                 chat = load_chat(chat_id)
@@ -169,10 +236,34 @@ async def _mvu_loop(chat_id: str) -> None:
 
             try:
                 await _run_once(chat_id)
-            except Exception:
+            except Exception as exc:
                 logger.exception("chat %s: MVU worker run failed", chat_id)
+                error = as_app_error(
+                    exc,
+                    source="mvu.daemon.worker",
+                    default_code="mvu_worker_failed",
+                    default_message="MVU worker 执行失败",
+                )
+                health.record_failure(
+                    error,
+                    pause_after=_FAILURE_PAUSE_AFTER,
+                    retry_after_seconds=min(60.0, _COOLDOWN_SECS * max(5, health.failure_count * 2)),
+                )
+                await _broadcast(
+                    chat_id,
+                    MvuAgentEvent(
+                        "error",
+                        {
+                            **error.to_dict(),
+                            "failureCount": health.failure_count,
+                            "paused": health.paused,
+                            "nextRetryAt": health.next_retry_at,
+                        },
+                    ),
+                )
                 continue
 
+            health.record_success()
             _last_run[chat_id] = time.monotonic()
 
 

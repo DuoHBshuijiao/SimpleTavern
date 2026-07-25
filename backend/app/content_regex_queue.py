@@ -5,18 +5,27 @@ from threading import Lock
 
 _QUEUE_MAX_PER_CHAT = 500
 _queues: dict[str, deque[dict[str, str]]] = {}
+_dropped_counts: dict[str, int] = {}
 _lock = Lock()
 
 
-def enqueue_content_regex_items(chat_id: str, items: list[dict[str, str]]) -> None:
+def enqueue_content_regex_items(chat_id: str, items: list[dict[str, str]]) -> dict[str, int]:
+    """入队提取项；超限丢弃最旧项并计数。返回 {enqueued, dropped}。"""
     if not chat_id or not items:
-        return
+        return {"enqueued": 0, "dropped": 0}
+    dropped = 0
+    enqueued = 0
     with _lock:
         q = _queues.setdefault(chat_id, deque())
         for item in items:
             q.append(dict(item))
+            enqueued += 1
             while len(q) > _QUEUE_MAX_PER_CHAT:
                 q.popleft()
+                dropped += 1
+        if dropped:
+            _dropped_counts[chat_id] = _dropped_counts.get(chat_id, 0) + dropped
+    return {"enqueued": enqueued, "dropped": dropped}
 
 
 def pop_content_regex_item(chat_id: str) -> dict[str, str] | None:
@@ -103,3 +112,19 @@ def get_content_regex_queue_size(chat_id: str) -> int:
         q = _queues.get(chat_id)
         return len(q) if q else 0
 
+
+def get_content_regex_queue_dropped(chat_id: str | None = None) -> int:
+    """返回某会话或全局累计因超限丢弃的条目数。"""
+    with _lock:
+        if chat_id is None:
+            return sum(_dropped_counts.values())
+        return int(_dropped_counts.get(chat_id, 0))
+
+
+def reset_content_regex_queue_dropped(chat_id: str | None = None) -> None:
+    """测试辅助：重置丢弃计数。"""
+    with _lock:
+        if chat_id is None:
+            _dropped_counts.clear()
+        else:
+            _dropped_counts.pop(chat_id, None)

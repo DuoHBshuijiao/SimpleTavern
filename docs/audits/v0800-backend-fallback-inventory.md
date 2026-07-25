@@ -11,10 +11,10 @@
 
 | Domain | Inventory | Migration |
 |---|---|---|
-| LLM / generate | complete for P0/P1 scan | batch 1 complete |
+| LLM / generate | complete for P0/P1 scan | batch 1 complete (+ F-009) |
 | storage / chats / fork | complete for F-011~F-016 | batch 2 complete |
 | assistant / tools | complete for F-017~F-020 | batch 3 complete |
-| MVU / KG / regex | initial high-risk scan complete | pending |
+| MVU / KG / regex | complete for F-021~F-026 | batch 4 complete |
 | search | initial high-risk scan complete | pending |
 | import / export / avatar | initial high-risk scan complete | pending |
 | TTS | initial high-risk scan complete | pending |
@@ -32,7 +32,7 @@
 | F-006 | generate | `backend/app/routes/generate.py` | draft/group/interject nonstream | 500 返回旧 `{ok,error}` | fatal | `generation_failed` | REST envelope | `test_generate_error_contracts.py` | done |
 | F-007 | generate | `backend/app/routes/generate.py` | group/interject web search preflight | 开启但未配置时静默关闭工具 | fatal | `web_search_not_configured` | REST error before generation | `test_generate_error_contracts.py` | done |
 | F-008 | generate | `backend/app/services/generate_web_search_runtime.py` | tool argument parsing | 非法 JSON 退化为 `{}` 并继续调用 | fatal | `tool_call_invalid` | terminal generation error | `test_generate_web_search_runtime.py` | done |
-| F-009 | generate | `backend/app/routes/generate.py` | `match_worldbook_entries` | 坏 regex 被跳过 | partial | `worldbook_regex_invalid` | warnings/error stack | pending | open |
+| F-009 | generate | `backend/app/routes/generate.py` | `match_worldbook_entries` | 坏 regex 被跳过 | partial | `worldbook_regex_invalid` | warnings/error stack | `test_t802_mvu_regex_health.py` | done |
 | F-010 | regex | generate save paths | assistant persistence | generate 不调用正文正则管线（已确认正确） | explicit-non-error | n/a（存原文） | 前端 display-time 处理 | fact regression | decided-A |
 | F-011 | storage | `backend/app/storage.py` | `list_characters` | 损坏 JSON `continue`，角色从列表消失 | partial | `invalid_json` / `schema_mismatch` | integrity issue（列表仍保持数组） | `test_storage_integrity_contract.py` | done |
 | F-012 | storage | `backend/app/storage.py` | `list_worldbooks` | 损坏 JSON `continue`，世界书从列表消失 | partial | `invalid_json` / `schema_mismatch` | integrity issue（列表仍保持数组） | `test_storage_integrity_contract.py` | done |
@@ -44,12 +44,12 @@
 | F-018 | assistant | `backend/app/services/assistant_agent.py` | tool argument parsing | 非法 JSON 退化为 `{}` | fatal | `tool_call_invalid` | ToolResult + error stack | `test_assistant_error_contracts.py` | done |
 | F-019 | assistant | `backend/app/services/assistant_agent.py` | stream/nonstream errors | 仅传 `str(exc)` | fatal | mapped AppError | REST/SSE envelope | `test_assistant_error_contracts.py` | done |
 | F-020 | assistant | assistant workspace card route | workspace failure | HTTP 200 + `{ok:false}` | fatal | `data_not_found` / `data_corrupted` | REST error | `test_assistant_error_contracts.py` | done |
-| F-021 | mvu | `backend/app/services/mvu_daemon.py` | worker loop | 失败日志后无限继续，无 health | retryable | `mvu_worker_failed` | health/lastError | pending | open |
-| F-022 | mvu | `backend/app/services/mvu_daemon.py` | `_broadcast` | QueueFull 静默丢事件 | partial | `mvu_sse_dropped` | dropped counter | pending | open |
-| F-023 | mvu | `backend/app/group_mvu.py` | runtime enable check | 角色读取失败被视为功能关闭 | fatal | `mvu_character_unreadable` | explicit error state | pending | open |
-| F-024 | mvu | `backend/app/services/mvu_agent.py` | tool argument parsing | 非法 JSON 退化为 `{}` | fatal | `tool_call_invalid` | worker error state | pending | open |
-| F-025 | regex | `backend/app/content_regex_scanner.py` | scanner loop | 失败仅日志/退避，无 health | retryable | `content_regex_scanner_failed` | health/lastError | pending | open |
-| F-026 | regex | `backend/app/content_regex_queue.py` | enqueue | 队列超限静默丢最旧项 | partial | `content_regex_queue_dropped` | dropped counter | pending | open |
+| F-021 | mvu | `backend/app/services/mvu_daemon.py` | worker loop | 失败日志后无限继续，无 health | retryable | `mvu_worker_failed` | health/lastError | `test_t802_mvu_regex_health.py` | done |
+| F-022 | mvu | `backend/app/services/mvu_daemon.py` | `_broadcast` | QueueFull 静默丢事件 | partial | `mvu_sse_dropped` | dropped counter | `test_t802_mvu_regex_health.py` | done |
+| F-023 | mvu | `backend/app/group_mvu.py` | runtime enable check | 角色读取失败被视为功能关闭 | fatal | `mvu_character_unreadable` | explicit error state | `test_t802_mvu_regex_health.py` | done |
+| F-024 | mvu | `backend/app/services/mvu_agent.py` | tool argument parsing | 非法 JSON 退化为 `{}` | fatal | `tool_call_invalid` | worker error state | `test_t802_mvu_regex_health.py` | done |
+| F-025 | regex | `backend/app/content_regex_scanner.py` | scanner loop | 失败仅日志/退避，无 health | retryable | `content_regex_scanner_failed` | health/lastError | `test_t802_mvu_regex_health.py` | done |
+| F-026 | regex | `backend/app/content_regex_queue.py` | enqueue | 队列超限静默丢最旧项 | partial | `content_regex_queue_dropped` | dropped counter | `test_t802_mvu_regex_health.py` | done |
 | F-027 | search | `backend/app/services/web_search.py` | async/sync search | provider 失败变 JSON 字符串工具结果 | partial | provider-specific search error | ToolResult + error stack | pending | open |
 | F-028 | import/export | `backend/app/routes/import_export.py` | character export | 缺失 worldbook 被跳过 | partial | `export_attachment_missing` | warnings/manifest | pending | open |
 | F-029 | import/export | import row/candidate loops | item failure | 已有 warning，但结构不统一 | partial | domain-specific warning | `partialSuccess/warnings[]` | pending | open |

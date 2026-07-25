@@ -5,11 +5,13 @@ import json
 import logging
 import threading
 import time
+from datetime import datetime
 from typing import Any
 
 from app.content_regex import apply_content_regex_pipeline
-from app.content_regex_queue import enqueue_content_regex_items
-from app.group_mvu import is_chat_mvu_runtime_enabled
+from app.content_regex_queue import enqueue_content_regex_items, get_content_regex_queue_dropped
+from app.errors import AppError, as_app_error
+from app.group_mvu import resolve_chat_mvu_runtime_enablement
 from app.storage import (
     list_characters,
     list_chats,
@@ -17,14 +19,26 @@ from app.storage import (
     load_character,
     load_settings,
 )
+from app.worker_health import WorkerHealth
 
 logger = logging.getLogger(__name__)
 
 _SCAN_INTERVAL_SECONDS = 5.0
 _SCAN_DEPTH_HARD_LIMIT = 50
+_FAILURE_PAUSE_AFTER = 5
 _scanner_started = False
 _scanner_lock = threading.Lock()
 _processed_signatures: dict[tuple[str, str], str] = {}
+_scanner_health = WorkerHealth()
+
+
+def get_content_regex_scanner_health() -> dict:
+    """返回正文正则 scanner 全局 health。"""
+    _scanner_health.extras = {
+        "queueDroppedTotal": get_content_regex_queue_dropped(),
+        "scannerStarted": _scanner_started,
+    }
+    return _scanner_health.to_dict()
 
 
 def _resolve_effective_rules(chat: Any, settings: Any) -> list[Any]:
@@ -134,7 +148,8 @@ def _scan_once() -> None:
         rules_sig = _rules_signature(rules)
 
         # 检查会话是否启用 MVU（单聊看角色卡；群聊看显式开关与兼容逻辑）
-        mvu_enabled = is_chat_mvu_runtime_enabled(chat)
+        enablement = resolve_chat_mvu_runtime_enablement(chat)
+        mvu_enabled = enablement.enabled and enablement.character_error is None
         mvu_mode = _resolve_chat_mvu_scan_mode(chat) if mvu_enabled else "regex"
 
         # 定位 MVU 已消费标记所在的消息索引（-1 表示无标记）
@@ -193,15 +208,38 @@ def _scan_once() -> None:
 
 
 def _scanner_loop() -> None:
-    failure_count = 0
     while True:
+        sleep_seconds = _SCAN_INTERVAL_SECONDS
+        if _scanner_health.paused and _scanner_health.next_retry_at:
+            try:
+                retry_ts = datetime.fromisoformat(_scanner_health.next_retry_at).timestamp()
+            except ValueError:
+                retry_ts = 0.0
+            remaining = retry_ts - time.time()
+            if remaining > 0:
+                time.sleep(min(60.0, remaining))
+                continue
+            _scanner_health.paused = False
+            _scanner_health.status = "degraded"
         try:
             _scan_once()
-            failure_count = 0
-        except Exception:
-            failure_count += 1
+            _scanner_health.record_success()
+        except Exception as exc:
             logger.exception("content regex scanner failed")
-        time.sleep(min(60.0, _SCAN_INTERVAL_SECONDS * max(1, failure_count)))
+            error = as_app_error(
+                exc,
+                source="content_regex.scanner",
+                default_code="content_regex_scanner_failed",
+                default_message="正文正则扫描失败",
+            )
+            backoff = min(60.0, _SCAN_INTERVAL_SECONDS * max(1, _scanner_health.failure_count + 1))
+            _scanner_health.record_failure(
+                error,
+                pause_after=_FAILURE_PAUSE_AFTER,
+                retry_after_seconds=backoff,
+            )
+            sleep_seconds = backoff
+        time.sleep(sleep_seconds)
 
 
 def ensure_content_regex_scanner_started() -> None:

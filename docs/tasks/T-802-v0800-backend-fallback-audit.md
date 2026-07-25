@@ -1,6 +1,6 @@
 # T-802 v0.800 全后端静默 Fallback 审计与迁移
 
-- status: in-progress（前三批 LLM/generate、Storage/chat/fork、Assistant/tools 已完成）
+- status: in-progress（前四批已完成：LLM/generate、Storage、Assistant/tools、MVU/regex；含 F-009）
 - area: `backend/app/**`
 - priority: P0
 - theme: 每个 catch/fallback 都有业务语义、用户可见结果与测试
@@ -177,11 +177,21 @@
 - 新增 `test_assistant_error_contracts.py`；静默 fallback 守卫纳入 assistant/agent/executor。
 - 门禁：后端 `178 passed`；本机前端 `node_modules` 缺失未跑（文档基线仍记前端 123）。
 
+### 第四批已完成
+
+- 新增共享 `WorkerHealth`；MVU worker / content-regex scanner 暴露 failureCount、lastError、paused、nextRetryAt。
+- F-021/F-022：MVU loop 失败可观测；SSE QueueFull 计入 `sseDropped`。
+- F-023：角色不可读与「未启用」分离为 `mvu_character_unreadable`；KG 门控透传。
+- F-024：MVU 工具非法 JSON 不再退 `{}`。
+- F-025/F-026：scanner health + 队列 dropped；`GET /api/mvu/{chatId}/health`、`GET /api/content-regex/health`。
+- F-009：世界书坏 regex → `worldbook_regex_invalid` 进入 generate SSE meta.warnings。
+- 门禁：后端 `185 passed`。
+
 ### 下一批
 
-1. MVU/KG/regex scanner health、重试与 dropped counter（F-021~F-026）。
-2. F-009 世界书坏 regex 用户可见 warning。
-3. Search / import-export / TTS / infra（F-027~F-034）。
+1. Search provider 失败契约（F-027）。
+2. Import/export/avatar warnings 统一（F-028~F-029）。
+3. TTS / infra（F-030~F-034）。
 
 ### 1. 建立机器可读清单
 

@@ -23,7 +23,8 @@ from app.schemas import (
 )
 from app.services import knowledge_graph as kg_svc
 from app.services.knowledge_graph import KnowledgeGraphError, kg_error_to_http
-from app.services.mvu_daemon import ensure_mvu_worker, subscribe, unsubscribe
+from app.services.mvu_daemon import ensure_mvu_worker, get_mvu_worker_health, subscribe, unsubscribe
+from app.content_regex_scanner import get_content_regex_scanner_health
 from app.storage import load_chat, load_knowledge_graph, load_mvu_logs, save_chat_state_variables
 
 router = APIRouter(tags=["mvu"])
@@ -105,6 +106,20 @@ async def stream_mvu_work_log(chat_id: str) -> StreamingResponse:
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.get("/mvu/{chat_id}/health")
+def get_mvu_health(chat_id: str):
+    """会话级 MVU worker health（含 SSE/queue dropped）。"""
+    _load_chat_or_404(chat_id)
+    ensure_mvu_worker(chat_id)
+    return {"ok": True, "health": get_mvu_worker_health(chat_id)}
+
+
+@router.get("/content-regex/health")
+def get_content_regex_health():
+    """全局正文正则 scanner health。"""
+    return {"ok": True, "health": get_content_regex_scanner_health()}
 
 
 @router.get("/mvu/{chat_id}/state")

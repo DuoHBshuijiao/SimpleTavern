@@ -2,6 +2,14 @@
 
 ## v0.800（进行中）
 
+### 静默 Fallback 迁移第四批（T-802）
+
+- MVU worker / 正文正则 scanner 增加 health（failureCount、lastError、paused、nextRetryAt），并暴露 `/api/mvu/{chatId}/health` 与 `/api/content-regex/health`。
+- MVU SSE QueueFull 与正文正则队列超限分别计数 `sseDropped` / `queueDropped`，不再静默丢弃。
+- 角色不可读与 MVU 未开启分离为 `mvu_character_unreadable`；KG 门控透传结构化 code。
+- MVU 工具非法 JSON 改为 `tool_call_invalid` ToolResult；世界书坏 regex 进入 generate SSE meta.warnings。
+- 后端 185 项测试通过。
+
 ### 静默 Fallback 迁移第三批（T-802）
 
 - 助手消息保存前严格校验，非法 tool/assistant 组合抛 `assistant_message_invalid`，禁止脏对象落盘。

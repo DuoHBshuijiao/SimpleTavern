@@ -17,6 +17,7 @@ def sse_meta(
     provider: str | None = None,
     protocol: str | None = None,
     resolved_model: str | None = None,
+    warnings: list[dict[str, Any]] | None = None,
 ) -> str:
     payload: dict[str, Any] = {"requestId": request_id}
     if provider:
@@ -25,6 +26,8 @@ def sse_meta(
         payload["protocol"] = protocol
     if resolved_model:
         payload["resolvedModel"] = resolved_model
+    if warnings:
+        payload["warnings"] = list(warnings)
     return sse_event("meta", payload)
 
 

@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from fastapi import HTTPException
 
-from app.group_mvu import is_chat_mvu_runtime_enabled
+from app.group_mvu import resolve_chat_mvu_runtime_enablement
 from app.schemas import (
     KgEntity,
     KgEntityType,
@@ -22,9 +22,10 @@ from app.storage import delete_knowledge_graph, load_chat, load_knowledge_graph,
 class KnowledgeGraphError(Exception):
     """业务错误，可映射为 HTTP 状态码。"""
 
-    def __init__(self, message: str, status_code: int = 400):
+    def __init__(self, message: str, status_code: int = 400, *, code: str | None = None):
         super().__init__(message)
         self.status_code = status_code
+        self.code = code or "knowledge_graph_error"
 
 
 def _now_iso() -> str:
@@ -66,9 +67,21 @@ def _require_mvu_enabled(chat_id: str):
     try:
         chat = load_chat(chat_id)
     except FileNotFoundError:
-        raise KnowledgeGraphError("chat not found", 404)
-    if not is_chat_mvu_runtime_enabled(chat):
-        raise KnowledgeGraphError("MVU runtime not enabled for this chat", 403)
+        raise KnowledgeGraphError("chat not found", 404, code="chat_not_found")
+    enablement = resolve_chat_mvu_runtime_enablement(chat)
+    if enablement.character_error is not None:
+        err = enablement.character_error
+        raise KnowledgeGraphError(
+            err.message,
+            err.status_code,
+            code=err.code,
+        )
+    if not enablement.enabled:
+        raise KnowledgeGraphError(
+            "MVU runtime not enabled for this chat",
+            403,
+            code="mvu_runtime_disabled",
+        )
     return chat
 
 
@@ -366,4 +379,10 @@ def clear_graph(chat_id: str) -> None:
 
 
 def kg_error_to_http(exc: KnowledgeGraphError) -> HTTPException:
-    return HTTPException(status_code=exc.status_code, detail=str(exc))
+    return HTTPException(
+        status_code=exc.status_code,
+        detail={
+            "code": exc.code,
+            "message": str(exc),
+        },
+    )

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from app.errors import AppError
 from app.schemas import CharacterCard, Chat, ChatOverrides, StateVariables, StatusTableDef
 
 _EXTRACT_ACTIONS = frozenset({"extract", "extract_and_replace"})
@@ -12,6 +14,14 @@ _EXTRACT_ACTIONS = frozenset({"extract", "extract_and_replace"})
 
 def _now_iso() -> str:
     return datetime.now().astimezone().isoformat()
+
+
+@dataclass(frozen=True)
+class MvuRuntimeEnablement:
+    """MVU 运行时启用判定：区分「未开启」与「角色不可读」。"""
+
+    enabled: bool
+    character_error: AppError | None = None
 
 
 def character_has_mvu_profile_data(card: CharacterCard | Any) -> bool:
@@ -28,27 +38,50 @@ def character_has_mvu_profile_data(card: CharacterCard | Any) -> bool:
     return False
 
 
-def is_chat_mvu_runtime_enabled(chat: Chat) -> bool:
-    """单聊：沿用角色卡 mvuEnabled。群聊：显式 groupMvuEnabled；未设置时回退旧行为（首位成员的 mvuEnabled）。"""
+def _character_unreadable_error(character_id: str, exc: BaseException) -> AppError:
+    return AppError(
+        code="mvu_character_unreadable",
+        message="无法读取会话绑定角色，MVU 运行时不可用",
+        detail=f"characterId={character_id}: {type(exc).__name__}: {exc}",
+        source="mvu.runtime.enable",
+        status_code=500,
+        suggested_action="检查角色文件是否存在或已损坏，修复后重试",
+    )
+
+
+def resolve_chat_mvu_runtime_enablement(chat: Chat) -> MvuRuntimeEnablement:
+    """单聊：沿用角色卡 mvuEnabled。群聊：显式 groupMvuEnabled；未设置时回退首位成员 mvuEnabled。"""
     from app.storage import load_character
 
     if not getattr(chat, "isGroup", False):
         try:
             c = load_character(chat.characterId)
-        except Exception:
-            return False
-        return bool(getattr(c, "mvuEnabled", False))
+        except Exception as exc:
+            return MvuRuntimeEnablement(
+                enabled=False,
+                character_error=_character_unreadable_error(chat.characterId, exc),
+            )
+        return MvuRuntimeEnablement(enabled=bool(getattr(c, "mvuEnabled", False)))
+
     ov = chat.overrides
     explicit = getattr(ov, "groupMvuEnabled", None)
     if explicit is True:
-        return True
+        return MvuRuntimeEnablement(enabled=True)
     if explicit is False:
-        return False
+        return MvuRuntimeEnablement(enabled=False)
     try:
         c = load_character(chat.characterId)
-    except Exception:
-        return False
-    return bool(getattr(c, "mvuEnabled", False))
+    except Exception as exc:
+        return MvuRuntimeEnablement(
+            enabled=False,
+            character_error=_character_unreadable_error(chat.characterId, exc),
+        )
+    return MvuRuntimeEnablement(enabled=bool(getattr(c, "mvuEnabled", False)))
+
+
+def is_chat_mvu_runtime_enabled(chat: Chat) -> bool:
+    """兼容布尔门控。角色不可读时返回 False；需要区分错误时请用 resolve_chat_mvu_runtime_enablement。"""
+    return resolve_chat_mvu_runtime_enablement(chat).enabled
 
 
 def maybe_migrate_legacy_group_mvu_on_save(chat: Chat) -> None:
@@ -64,7 +97,9 @@ def maybe_migrate_legacy_group_mvu_on_save(chat: Chat) -> None:
         return
     try:
         c = load_character(chat.characterId)
-    except Exception:
+    except Exception as exc:
+        # 迁移是 best-effort；角色不可读时跳过，不改写会话。
+        _ = exc
         return
     if not bool(getattr(c, "mvuEnabled", False)):
         return

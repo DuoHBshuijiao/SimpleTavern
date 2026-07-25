@@ -685,7 +685,13 @@ def _runtime_scan_insert_for_book(book_id: str, chat: Any, settings: Any) -> tup
     return m.get(book_id, (default_scan, 5))
 
 
-def match_worldbook_entries(book, conversation: list[dict], effective_scan: int) -> list[Any]:
+def match_worldbook_entries(
+    book,
+    conversation: list[dict],
+    effective_scan: int,
+    *,
+    warnings_out: list[dict[str, Any]] | None = None,
+) -> list[Any]:
     entries = sorted(list(getattr(book, "entries", []) or []), key=lambda e: int(getattr(e, "orderIndex", 0)))
     matched: list[Any] = []
     for entry in entries:
@@ -705,7 +711,17 @@ def match_worldbook_entries(book, conversation: list[dict], effective_scan: int)
         try:
             if compile_user_regex(pattern, re.MULTILINE).search(scan_text):
                 matched.append(entry)
-        except re.error:
+        except re.error as exc:
+            warning = {
+                "code": "worldbook_regex_invalid",
+                "message": "世界书条目正则无效，已跳过该条目",
+                "worldBookId": getattr(book, "id", None),
+                "entryId": getattr(entry, "id", None),
+                "pattern": pattern[:200],
+                "detail": str(exc),
+            }
+            if warnings_out is not None:
+                warnings_out.append(warning)
             continue
     return matched
 
@@ -1145,9 +1161,12 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
     worldbook_meta: dict[str, dict[str, Any]] = {}
     worldbook_token_known = True
     worldbook_tokens_total = 0
+    worldbook_regex_warnings: list[dict[str, Any]] = []
     for book in selected_books:
         eff_scan, ins_dep = _runtime_scan_insert_for_book(book.id, chat, settings)
-        entries = match_worldbook_entries(book, base_conversation, eff_scan)
+        entries = match_worldbook_entries(
+            book, base_conversation, eff_scan, warnings_out=worldbook_regex_warnings
+        )
         injections = build_worldbook_injections(book, entries, len(base_conversation), ins_dep)
         token_count = count_tokens_for_messages([item["message"] for item in injections]) if injections else 0
         if token_count is None:
@@ -1177,7 +1196,9 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
         if book.id not in selected_book_ids:
             continue
         eff_scan, ins_dep = _runtime_scan_insert_for_book(book.id, chat, settings)
-        entries = match_worldbook_entries(book, conversation, eff_scan)
+        entries = match_worldbook_entries(
+            book, conversation, eff_scan, warnings_out=worldbook_regex_warnings
+        )
         final_injections.extend(build_worldbook_injections(book, entries, len(conversation), ins_dep))
     conversation = insert_injections_into_conversation(conversation, final_injections)
 
@@ -1215,6 +1236,7 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
             provider="openai_compatible",
             protocol="openai_compatible_chat",
             resolved_model=model,
+            warnings=worldbook_regex_warnings or None,
         )
         try:
             assistant_content = ""
@@ -1807,9 +1829,12 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
     worldbook_meta: dict[str, dict[str, Any]] = {}
     worldbook_token_known = True
     worldbook_tokens_total = 0
+    worldbook_regex_warnings: list[dict[str, Any]] = []
     for book in selected_books:
         eff_scan, ins_dep = _runtime_scan_insert_for_book(book.id, chat, settings)
-        entries = match_worldbook_entries(book, base_conversation, eff_scan)
+        entries = match_worldbook_entries(
+            book, base_conversation, eff_scan, warnings_out=worldbook_regex_warnings
+        )
         injections = build_worldbook_injections(book, entries, len(base_conversation), ins_dep)
         token_count = count_tokens_for_messages([item["message"] for item in injections]) if injections else 0
         if token_count is None:
@@ -1839,7 +1864,9 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
         if book.id not in selected_book_ids:
             continue
         eff_scan, ins_dep = _runtime_scan_insert_for_book(book.id, chat, settings)
-        entries = match_worldbook_entries(book, conversation, eff_scan)
+        entries = match_worldbook_entries(
+            book, conversation, eff_scan, warnings_out=worldbook_regex_warnings
+        )
         final_injections.extend(build_worldbook_injections(book, entries, len(conversation), ins_dep))
     conversation = insert_injections_into_conversation(conversation, final_injections)
 
@@ -1866,6 +1893,7 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
             provider="openai_compatible",
             protocol="openai_compatible_chat",
             resolved_model=model,
+            warnings=worldbook_regex_warnings or None,
         )
         try:
             assistant_content = ""
@@ -2295,9 +2323,12 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
     worldbook_meta: dict[str, dict[str, Any]] = {}
     worldbook_token_known = True
     worldbook_tokens_total = 0
+    worldbook_regex_warnings: list[dict[str, Any]] = []
     for book in selected_books:
         eff_scan, ins_dep = _runtime_scan_insert_for_book(book.id, chat, settings)
-        entries = match_worldbook_entries(book, base_conversation, eff_scan)
+        entries = match_worldbook_entries(
+            book, base_conversation, eff_scan, warnings_out=worldbook_regex_warnings
+        )
         injections = build_worldbook_injections(book, entries, len(base_conversation), ins_dep)
         token_count = count_tokens_for_messages([item["message"] for item in injections]) if injections else 0
         if token_count is None:
@@ -2327,7 +2358,9 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
         if book.id not in selected_book_ids:
             continue
         eff_scan, ins_dep = _runtime_scan_insert_for_book(book.id, chat, settings)
-        entries = match_worldbook_entries(book, conversation, eff_scan)
+        entries = match_worldbook_entries(
+            book, conversation, eff_scan, warnings_out=worldbook_regex_warnings
+        )
         final_injections.extend(build_worldbook_injections(book, entries, len(conversation), ins_dep))
     conversation = insert_injections_into_conversation(conversation, final_injections)
 
@@ -2354,6 +2387,7 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
             provider="openai_compatible",
             protocol="openai_compatible_chat",
             resolved_model=model,
+            warnings=worldbook_regex_warnings or None,
         )
         try:
             assistant_content = ""

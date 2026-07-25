@@ -13,6 +13,11 @@ MIGRATED_FILES = (
     BACKEND_ROOT / "app" / "routes" / "assistant.py",
     BACKEND_ROOT / "app" / "services" / "assistant_agent.py",
     BACKEND_ROOT / "app" / "services" / "generate_web_search_runtime.py",
+    BACKEND_ROOT / "app" / "services" / "mvu_daemon.py",
+    BACKEND_ROOT / "app" / "services" / "mvu_agent.py",
+    BACKEND_ROOT / "app" / "group_mvu.py",
+    BACKEND_ROOT / "app" / "content_regex_scanner.py",
+    BACKEND_ROOT / "app" / "content_regex_queue.py",
     BACKEND_ROOT / "app" / "assistant_tools" / "executor.py",
     BACKEND_ROOT / "app" / "storage.py",
 )
@@ -73,12 +78,16 @@ def test_generate_routes_do_not_reintroduce_bare_sse_or_legacy_json_errors() -> 
 def test_assistant_routes_do_not_reintroduce_legacy_ok_false_errors() -> None:
     source = (BACKEND_ROOT / "app" / "routes" / "assistant.py").read_text(encoding="utf-8")
     agent_source = (BACKEND_ROOT / "app" / "services" / "assistant_agent.py").read_text(encoding="utf-8")
+    mvu_agent_source = (BACKEND_ROOT / "app" / "services" / "mvu_agent.py").read_text(encoding="utf-8")
+    mvu_daemon_source = (BACKEND_ROOT / "app" / "services" / "mvu_daemon.py").read_text(encoding="utf-8")
 
     assert 'return {"ok": False, "error": "not found"' not in source
     assert '"ok": False,\n                    "error": result.error' not in source
     assert "except Exception:\n                args = {}" not in agent_source
     assert 'AssistantAgentEvent("error", {"message": str(exc)})' not in agent_source
     assert "except Exception:\n            normalized.append(m)" not in source
+    assert "except json.JSONDecodeError:\n                        args = {}" not in mvu_agent_source
+    assert "except asyncio.QueueFull:\n            pass" not in mvu_daemon_source
 
 
 def test_storage_cleanup_and_fork_index_do_not_reintroduce_silent_fallbacks() -> None:
