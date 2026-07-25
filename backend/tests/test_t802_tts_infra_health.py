@@ -67,6 +67,64 @@ def test_glm_local_process_health_records_start_failure(tmp_path) -> None:
     asyncio.run(_run())
 
 
+def test_health_poll_timeout_does_not_double_count_failures() -> None:
+    import asyncio
+
+    async def _run() -> None:
+        glm_local_tts_process._failure_count = 0
+        glm_local_tts_process._last_error = None
+        glm_local_tts_process._last_code = None
+        ok = await glm_local_tts_process._health_poll(
+            "http://127.0.0.1:1",
+            retries=1,
+            interval=0,
+        )
+        assert ok is False
+        # poll 本身不记账；由调用方 start() 统一记录一次
+        assert glm_local_tts_process.get_health()["failureCount"] == 0
+
+    asyncio.run(_run())
+
+
+def test_glm_local_health_reachable_clears_stale_top_level_error(monkeypatch) -> None:
+    import asyncio
+    from app.routes import tts as tts_routes
+    from app.schemas import Settings, ApiPreset
+    from app.services.tts_platform import GlmLocalTtsPlatform
+
+    glm_local_tts_process._failure_count = 3
+    glm_local_tts_process._last_code = "tts_local_process_start_failed"
+    glm_local_tts_process._last_error = {
+        "code": "tts_local_process_start_failed",
+        "message": "stale",
+    }
+
+    preset = ApiPreset(
+        id="p1",
+        name="glm",
+        presetKind="tts",
+        ttsProvider="glm_local",
+        ttsGlmLocalPort=8088,
+    )
+    settings = Settings(ttsEnabled=True, apiPresets=[preset], activeApiPresetId="p1")
+    monkeypatch.setattr(tts_routes, "_require_tts_enabled", lambda: settings)
+    monkeypatch.setattr(tts_routes, "_resolve_tts_preset", lambda _s, _pid=None: preset)
+
+    platform = GlmLocalTtsPlatform(base_url="http://127.0.0.1:8088")
+    platform.health_check_detail = AsyncMock(  # type: ignore[method-assign]
+        return_value={"ok": True, "code": None, "lastError": None},
+    )
+    platform.close = AsyncMock()  # type: ignore[method-assign]
+    monkeypatch.setattr(tts_routes, "_get_platform", lambda *_a, **_k: platform)
+
+    body = asyncio.run(tts_routes.glm_local_health(tts_routes.GlmLocalActionReq()))
+    assert body["ok"] is True
+    assert body["health"]["reachable"] is True
+    assert body["health"]["code"] is None
+    assert body["health"]["lastError"] is None
+    assert body["health"]["process"]["failureCount"] == 0
+
+
 def test_http_log_write_failure_increments_counter(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(http_log_service, "get_http_log_dir", lambda: tmp_path)
     before = http_log_service.get_health()["writeFailedCount"]

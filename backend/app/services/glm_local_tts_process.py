@@ -71,6 +71,14 @@ def get_health() -> dict[str, Any]:
     }
 
 
+def note_reachable(*, port: int | None = None) -> None:
+    """外部探测确认服务可达时清除历史失败态，避免误报。"""
+    global _managed_port
+    if port is not None:
+        _managed_port = port
+    _record_success()
+
+
 def is_running() -> bool:
     return _process is not None and _process.poll() is None
 
@@ -88,7 +96,6 @@ async def _health_poll(base_url: str, *, retries: int = 40, interval: float = 3.
             except httpx.HTTPError as exc:
                 last_detail = str(exc) or type(exc).__name__
             await asyncio.sleep(interval)
-    _record_failure("tts_local_health_unreachable", f"health poll timed out: {last_detail}")
     return False
 
 
@@ -120,6 +127,8 @@ async def start(repo_path: str, port: int = 8088) -> bool:
         ok = await _health_poll(base_url)
         if ok:
             _record_success()
+        else:
+            _record_failure("tts_local_health_unreachable", "health poll timed out while process already running")
         return ok
 
     repo = Path(repo_path)
@@ -170,6 +179,7 @@ async def start(repo_path: str, port: int = 8088) -> bool:
         logger.error(
             "[GLM-TTS] 若已弹出独立控制台窗口，请在该窗口中查看 run_api_gpu / 下游进程的报错输出。"
         )
+        # 仅由 start() 记一次失败，避免与 _health_poll 重复累加
         _record_failure("tts_local_process_start_failed", "health check timed out after start")
     return ok
 

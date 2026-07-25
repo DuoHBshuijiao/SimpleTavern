@@ -772,10 +772,25 @@ async def glm_local_health(req: GlmLocalActionReq):
     try:
         detail = await platform.health_check_detail()
         process_health = glm_local_tts_process.get_health()
+        reachable = bool(detail.get("ok"))
+        # 服务已可达时以探测结果为准，不把历史 process 失败态合并到顶层 code/lastError
+        if reachable:
+            matched = _resolve_tts_preset(settings, req.preset_id)
+            glm_local_tts_process.note_reachable(port=matched.ttsGlmLocalPort or 8088)
+            process_health = glm_local_tts_process.get_health()
+            return {
+                "ok": True,
+                "health": {
+                    "reachable": True,
+                    "code": None,
+                    "lastError": None,
+                    "process": process_health,
+                },
+            }
         return {
-            "ok": bool(detail.get("ok")),
+            "ok": False,
             "health": {
-                "reachable": bool(detail.get("ok")),
+                "reachable": False,
                 "code": detail.get("code") or process_health.get("code"),
                 "lastError": detail.get("lastError") or process_health.get("lastError"),
                 "process": process_health,
