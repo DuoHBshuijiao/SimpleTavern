@@ -111,6 +111,15 @@ class SynthesisResult:
     audio_bytes: bytes
     format: str  # mp3, wav, flac, pcm
     sample_rate: int
+    warnings: tuple[dict[str, Any], ...] = ()
+
+
+@dataclass(frozen=True)
+class VoiceListResult:
+    """音色列表（可附带 partial warning）。"""
+    voices: list[VoiceInfo]
+    warnings: tuple[dict[str, Any], ...] = ()
+    partial_success: bool = False
 
 
 @dataclass
@@ -165,6 +174,11 @@ class TtsPlatform(abc.ABC):
     @abc.abstractmethod
     async def list_voices(self, voice_type: str = "all") -> list[VoiceInfo]:
         """查询可用音色列表。"""
+
+    async def list_voices_detailed(self, voice_type: str = "all") -> VoiceListResult:
+        """查询音色列表并附带 partial warning（默认无 warning）。"""
+        voices = await self.list_voices(voice_type)
+        return VoiceListResult(voices=voices)
 
     @abc.abstractmethod
     async def upload_file(
@@ -800,7 +814,8 @@ class GlmLocalTtsPlatform(TtsPlatform):
                 "GLM-TTS（本地）需要参考音频路径，请在预设音色中配置有效的「参考音频」本地路径。"
             )
 
-        # 优先 JSON 接口（同机）
+        # 优先 JSON 接口（同机）；失败后显式回退 multipart（F-030）
+        fallback_warning: dict[str, Any] | None = None
         if prompt_audio_path:
             try:
                 return await self._synthesize_json(
@@ -809,11 +824,25 @@ class GlmLocalTtsPlatform(TtsPlatform):
                 )
             except Exception as exc:
                 logger.warning("[TTS][glm_local] json endpoint failed, falling back to multipart: %s", exc)
+                fallback_warning = {
+                    "code": "tts_endpoint_fallback",
+                    "message": "GLM local JSON synthesize failed; fell back to multipart",
+                    "from": "/api/v1/tts/json",
+                    "to": "/api/v1/tts",
+                    "reason": str(exc)[:500],
+                }
 
-        # 回退 multipart
-        return await self._synthesize_multipart(
+        result = await self._synthesize_multipart(
             text, prompt_text, prompt_audio_path,
             sample_rate=sample_rate, seed=seed, use_cache=use_cache,
+        )
+        if fallback_warning is None:
+            return result
+        return SynthesisResult(
+            audio_bytes=result.audio_bytes,
+            format=result.format,
+            sample_rate=result.sample_rate,
+            warnings=(fallback_warning,),
         )
 
     async def _synthesize_json(
@@ -935,11 +964,26 @@ class GlmLocalTtsPlatform(TtsPlatform):
 
     async def health_check(self) -> bool:
         """调用 GET /health 判断本地服务是否就绪。"""
+        detail = await self.health_check_detail()
+        return bool(detail.get("ok"))
+
+    async def health_check_detail(self) -> dict[str, Any]:
+        """结构化健康检查（含 code / lastError）。"""
         try:
             resp = await self._client.get("/health", timeout=5)
-            return resp.status_code == 200
-        except Exception:
-            return False
+            if resp.status_code == 200:
+                return {"ok": True, "code": None, "lastError": None}
+            return {
+                "ok": False,
+                "code": "tts_local_health_unreachable",
+                "lastError": {"status": resp.status_code, "body": (resp.text or "")[:300]},
+            }
+        except Exception as exc:
+            return {
+                "ok": False,
+                "code": "tts_local_health_unreachable",
+                "lastError": {"message": str(exc)[:500]},
+            }
 
     # -- 清显存 -------------------------------------------------------------
 
@@ -1409,9 +1453,13 @@ class OpenAiSpeechCompatTtsPlatform(TtsPlatform):
                     yield chunk
 
     async def list_voices(self, voice_type: str = "all") -> list[VoiceInfo]:
+        result = await self.list_voices_detailed(voice_type)
+        return list(result.voices)
+
+    async def list_voices_detailed(self, voice_type: str = "all") -> VoiceListResult:
         del voice_type
         if self._variant == "openrouter":
-            return []
+            return VoiceListResult(voices=[])
         voices: list[VoiceInfo] = [
             VoiceInfo(voice_id=vid, name=name, voice_type="system") for vid, name in _COSYVOICE2_PRESET_VOICES
         ]
@@ -1421,7 +1469,12 @@ class OpenAiSpeechCompatTtsPlatform(TtsPlatform):
                 headers={"Authorization": f"Bearer {self._api_key}"},
             )
             if resp.status_code != 200:
-                return voices
+                warning = {
+                    "code": "tts_voice_list_partial",
+                    "message": "SiliconFlow voice list unavailable; returning built-in presets only",
+                    "upstreamStatus": resp.status_code,
+                }
+                return VoiceListResult(voices=voices, warnings=(warning,), partial_success=True)
             data = resp.json()
             for item in data.get("results") or []:
                 if not isinstance(item, dict):
@@ -1431,9 +1484,15 @@ class OpenAiSpeechCompatTtsPlatform(TtsPlatform):
                     continue
                 name = str(item.get("customName") or uri).strip()
                 voices.append(VoiceInfo(voice_id=uri, name=name, voice_type="private"))
-        except Exception:
+            return VoiceListResult(voices=voices)
+        except Exception as exc:
             logger.warning("[TTS] SiliconFlow voice list failed", exc_info=True)
-        return voices
+            warning = {
+                "code": "tts_voice_list_partial",
+                "message": "SiliconFlow voice list failed; returning built-in presets only",
+                "reason": str(exc)[:500],
+            }
+            return VoiceListResult(voices=voices, warnings=(warning,), partial_success=True)
 
     async def upload_file(
         self,

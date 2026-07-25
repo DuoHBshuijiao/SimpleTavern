@@ -15,7 +15,9 @@ import os
 import signal
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import httpx
 
@@ -25,6 +27,48 @@ logger = logging.getLogger(__name__)
 
 _process: subprocess.Popen | None = None
 _managed_port: int | None = None
+_failure_count = 0
+_last_error: dict[str, Any] | None = None
+_last_success_at: str | None = None
+_last_code: str | None = None
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).astimezone().isoformat()
+
+
+def _record_success() -> None:
+    global _failure_count, _last_error, _last_success_at, _last_code
+    _failure_count = 0
+    _last_error = None
+    _last_code = None
+    _last_success_at = _now_iso()
+
+
+def _record_failure(code: str, message: str, **extra: Any) -> None:
+    global _failure_count, _last_error, _last_code
+    _failure_count += 1
+    _last_code = code
+    _last_error = {"code": code, "message": message, **extra}
+
+
+def get_health() -> dict[str, Any]:
+    running = is_running()
+    status = "ok"
+    if _last_error is not None:
+        status = "error"
+    elif not running and _managed_port is not None:
+        status = "stopped"
+    return {
+        "status": status,
+        "running": running,
+        "managedPort": _managed_port,
+        "pid": _process.pid if _process is not None and running else None,
+        "failureCount": _failure_count,
+        "lastError": _last_error,
+        "lastSuccessAt": _last_success_at,
+        "code": _last_code,
+    }
 
 
 def is_running() -> bool:
@@ -33,15 +77,18 @@ def is_running() -> bool:
 
 async def _health_poll(base_url: str, *, retries: int = 40, interval: float = 3.0) -> bool:
     """轮询 /health 等待服务就绪。"""
+    last_detail = "unreachable"
     async with httpx.AsyncClient(timeout=5) as client:
         for _ in range(retries):
             try:
                 resp = await client.get(f"{base_url}/health")
                 if resp.status_code == 200:
                     return True
-            except Exception:
-                pass
+                last_detail = f"HTTP {resp.status_code}"
+            except httpx.HTTPError as exc:
+                last_detail = str(exc) or type(exc).__name__
             await asyncio.sleep(interval)
+    _record_failure("tts_local_health_unreachable", f"health poll timed out: {last_detail}")
     return False
 
 
@@ -62,22 +109,29 @@ async def start(repo_path: str, port: int = 8088) -> bool:
             resp = await client.get(f"{base_url}/health")
             if resp.status_code == 200:
                 logger.info("[GLM-TTS] 端口 %d 已就绪，跳过启动", port)
+                _managed_port = port
+                _record_success()
                 return True
-    except Exception:
+    except httpx.HTTPError:
         pass
 
     if is_running():
         logger.info("[GLM-TTS] 子进程已在运行 (pid=%s)", _process.pid if _process else None)
-        return await _health_poll(base_url)
+        ok = await _health_poll(base_url)
+        if ok:
+            _record_success()
+        return ok
 
     repo = Path(repo_path)
     script = repo / "run_api_gpu.ps1"
     if not script.is_file():
         logger.error("[GLM-TTS] 启动脚本不存在: %s", script)
+        _record_failure("tts_local_process_start_failed", f"startup script missing: {script}")
         return False
 
     if sys.platform != "win32":
         logger.warning("[GLM-TTS] 进程托管目前仅支持 Windows")
+        _record_failure("tts_local_process_start_failed", "managed start is Windows-only")
         return False
 
     env = os.environ.copy()
@@ -93,22 +147,30 @@ async def start(repo_path: str, port: int = 8088) -> bool:
     ]
 
     logger.info("[GLM-TTS] 启动: %s (port=%d)", " ".join(cmd), port)
-    _process = subprocess.Popen(
-        cmd,
-        cwd=str(repo),
-        env=env,
-        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NEW_CONSOLE,
-    )
+    try:
+        _process = subprocess.Popen(
+            cmd,
+            cwd=str(repo),
+            env=env,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NEW_CONSOLE,
+        )
+    except OSError as exc:
+        logger.exception("[GLM-TTS] 启动子进程失败")
+        _record_failure("tts_local_process_start_failed", str(exc))
+        _process = None
+        return False
     _managed_port = port
 
     ok = await _health_poll(base_url)
     if ok:
         logger.info("[GLM-TTS] 服务已就绪 (pid=%d, port=%d)", _process.pid, port)
+        _record_success()
     else:
         logger.error("[GLM-TTS] 健康检查超时，服务可能未正常启动")
         logger.error(
             "[GLM-TTS] 若已弹出独立控制台窗口，请在该窗口中查看 run_api_gpu / 下游进程的报错输出。"
         )
+        _record_failure("tts_local_process_start_failed", "health check timed out after start")
     return ok
 
 
@@ -136,8 +198,9 @@ def stop() -> None:
         logger.warning("[GLM-TTS] 子进程未响应，强制 kill")
         _process.kill()
         _process.wait(timeout=5)
-    except Exception:
+    except Exception as exc:
         logger.exception("[GLM-TTS] 终止子进程时出错")
+        _record_failure("tts_local_process_stop_failed", str(exc))
     finally:
         _process = None
         _managed_port = None

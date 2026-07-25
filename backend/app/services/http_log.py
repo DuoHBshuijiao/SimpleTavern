@@ -38,6 +38,30 @@ from app.request_context import get_request_id
 
 logger = logging.getLogger(__name__)
 
+_write_failed_count = 0
+_last_write_error: dict[str, Any] | None = None
+_last_write_failed_at: str | None = None
+
+
+def _record_write_failure(reason: str, *, detail: str | None = None) -> None:
+    global _write_failed_count, _last_write_error, _last_write_failed_at
+    _write_failed_count += 1
+    _last_write_failed_at = datetime.now(timezone.utc).astimezone().isoformat()
+    _last_write_error = {
+        "code": "http_log_write_failed",
+        "message": reason,
+        "detail": (detail or "")[:500] or None,
+    }
+
+
+def get_health() -> dict[str, Any]:
+    return {
+        "status": "ok" if _write_failed_count == 0 else "degraded",
+        "writeFailedCount": _write_failed_count,
+        "lastWriteError": _last_write_error,
+        "lastWriteFailedAt": _last_write_failed_at,
+    }
+
 
 # 保留窗口：与 sweeper 保持一致
 RETENTION_MINUTES = 30
@@ -269,7 +293,8 @@ async def _write_record(record: dict[str, Any]) -> None:
                 },
                 ensure_ascii=False,
             )
-        except Exception:
+        except Exception as exc:
+            _record_write_failure("serialize failed", detail=str(exc))
             return
     if len(payload.encode("utf-8")) > _MAX_RECORD_BYTES:
         payload = json.dumps(
@@ -295,8 +320,9 @@ async def _write_record(record: dict[str, Any]) -> None:
             path.parent.mkdir(parents=True, exist_ok=True)
             with open(path, "a", encoding="utf-8") as f:
                 f.write(payload + "\n")
-        except Exception:
+        except Exception as exc:
             logger.exception("[http_log] failed to write record")
+            _record_write_failure("disk write failed", detail=str(exc))
 
 
 # ---------------------------------------------------------------------------
@@ -358,7 +384,7 @@ def list_recent(since_minutes: int = RETENTION_MINUTES, limit: int = 500) -> lis
                         continue
                     try:
                         rec = json.loads(line)
-                    except Exception:
+                    except json.JSONDecodeError:
                         continue
                     ts_ms = int(rec.get("tsMs") or 0)
                     if ts_ms and ts_ms < cutoff_ms:
@@ -385,7 +411,7 @@ def load_detail(record_id: str) -> dict[str, Any] | None:
                         continue
                     try:
                         rec = json.loads(line)
-                    except Exception:
+                    except json.JSONDecodeError:
                         continue
                     if rec.get("id") == record_id:
                         return rec
@@ -567,7 +593,8 @@ def log_outbound_sync(
 def _write_record_sync(record: dict[str, Any]) -> None:
     try:
         payload = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
-    except Exception:
+    except Exception as exc:
+        _record_write_failure("serialize failed", detail=str(exc))
         return
     if len(payload.encode("utf-8")) > _MAX_RECORD_BYTES:
         payload = json.dumps(
@@ -588,8 +615,9 @@ def _write_record_sync(record: dict[str, Any]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "a", encoding="utf-8") as f:
             f.write(payload + "\n")
-    except Exception:
+    except Exception as exc:
         logger.exception("[http_log] sync write failed")
+        _record_write_failure("disk write failed", detail=str(exc))
 
 
 class _RecordHandle:

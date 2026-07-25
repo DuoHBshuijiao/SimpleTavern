@@ -15,11 +15,18 @@ from fastapi import APIRouter, HTTPException, Query
 from app.services.http_log import (
     RETENTION_MINUTES,
     clear_all,
+    get_health,
     list_recent,
     load_detail,
 )
 
 router = APIRouter(tags=["http-log"])
+
+
+@router.get("/http-log/health")
+def get_http_log_health() -> dict:
+    """出站 HTTP 日志写盘健康（写失败计数）。"""
+    return get_health()
 
 
 @router.get("/http-log")

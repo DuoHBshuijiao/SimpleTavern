@@ -18,34 +18,49 @@ _BACKEND_DIR = _APP_DIR.parent
 _TOKENIZER_DIR = _BACKEND_DIR / "tokenizer" / "deepseek_v3_tokenizer"
 
 _tokenizer_instance = None
+_tokenizer_unavailable_reason: str | None = None
 _ASSISTANT_TOOL_HISTORY_SUMMARY_PREFIX = "[assistant_tool_history_summary]"
 _ASSISTANT_TOOL_SUMMARY_ENTRY_LIMIT = 8
 _ASSISTANT_TOOL_SUMMARY_MIN_BUDGET = 16
 _ASSISTANT_TOOL_SUMMARY_MAX_BUDGET = 96
 
 
+def get_tokenizer_health() -> dict[str, Any]:
+    available = _get_tokenizer() is not None
+    return {
+        "status": "ok" if available else "unavailable",
+        "available": available,
+        "code": None if available else "tokenizer_unavailable",
+        "reason": None if available else _tokenizer_unavailable_reason,
+    }
+
+
 def _get_tokenizer():
-    """懒加载 tokenizer，失败时返回 None。"""
-    global _tokenizer_instance
+    """懒加载 tokenizer，失败时返回 None（F-034：不可用 ≠ 0 token）。"""
+    global _tokenizer_instance, _tokenizer_unavailable_reason
     if _tokenizer_instance is not None:
         return _tokenizer_instance
     try:
         from tokenizers import Tokenizer
         if not _TOKENIZER_DIR.exists():
+            _tokenizer_unavailable_reason = f"tokenizer dir missing: {_TOKENIZER_DIR}"
             return None
         tokenizer_json = _TOKENIZER_DIR / "tokenizer.json"
         if not tokenizer_json.exists():
+            _tokenizer_unavailable_reason = f"tokenizer.json missing: {tokenizer_json}"
             return None
         _tokenizer_instance = Tokenizer.from_file(str(tokenizer_json))
+        _tokenizer_unavailable_reason = None
         return _tokenizer_instance
-    except Exception:
+    except Exception as exc:
+        _tokenizer_unavailable_reason = str(exc)[:500]
         return None
 
 
 def warmup_tokenizer() -> None:
     """
     在应用启动时预加载 tokenizer，避免首次请求时触发 transformers/PyTorch 检查带来的延迟。
-    仅尝试加载，失败时静默忽略（后续请求仍会走懒加载逻辑）。
+    仅尝试加载；失败时记录 unavailable reason，不抛出。
     """
     _get_tokenizer()
 
@@ -71,7 +86,9 @@ def count_tokens(text: str | None) -> int | None:
         if ids is None:
             return None
         return len(ids)
-    except Exception:
+    except Exception as exc:
+        global _tokenizer_unavailable_reason
+        _tokenizer_unavailable_reason = str(exc)[:500]
         return None
 
 
@@ -119,7 +136,7 @@ def _tool_result_brief(content: str | None) -> dict[str, Any]:
         return {}
     try:
         raw = json.loads(content)
-    except Exception:
+    except (json.JSONDecodeError, TypeError, ValueError):
         return {}
     return raw if isinstance(raw, dict) else {}
 
@@ -226,7 +243,7 @@ def trim_dict_messages_to_token_budget(
         return list(messages), warnings
     total = count_tokens_for_messages(messages)
     if total is None:
-        warnings.append("token_count_unavailable")
+        warnings.append("tokenizer_unavailable")
         return list(messages), warnings
     if total <= max_tokens:
         return list(messages), warnings
@@ -234,7 +251,7 @@ def trim_dict_messages_to_token_budget(
     while len(kept) > 1:
         t = count_tokens_for_messages(kept)
         if t is None:
-            warnings.append("token_count_unavailable")
+            warnings.append("tokenizer_unavailable")
             return list(messages), warnings
         if t <= max_tokens:
             return kept, warnings

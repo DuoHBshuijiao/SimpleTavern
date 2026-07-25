@@ -652,6 +652,8 @@ async def synthesize(request: Request, req: SynthesizeReq):
                 "format": result.format,
                 "sampleRate": result.sample_rate,
                 "sizeBytes": len(result.audio_bytes),
+                "warnings": list(getattr(result, "warnings", ()) or ()),
+                "partialSuccess": bool(getattr(result, "warnings", ()) or ()),
             }
     except HTTPException:
         raise
@@ -706,8 +708,15 @@ async def list_voices(req: VoicesReq):
     settings = _require_tts_enabled()
     platform = _get_platform(settings)
     try:
-        voices = await platform.list_voices(req.voice_type)
-        return {"voices": [{"voiceId": v.voice_id, "name": v.name, "voiceType": v.voice_type} for v in voices]}
+        detailed = await platform.list_voices_detailed(req.voice_type)
+        return {
+            "voices": [
+                {"voiceId": v.voice_id, "name": v.name, "voiceType": v.voice_type}
+                for v in detailed.voices
+            ],
+            "warnings": list(detailed.warnings),
+            "partialSuccess": bool(detailed.partial_success),
+        }
     except Exception as e:
         logger.exception("[TTS] list_voices error")
         raise HTTPException(status_code=502, detail=str(e))
@@ -733,8 +742,15 @@ async def test_voices(req: TestVoicesReq):
         }
     platform = _get_inline_platform(req.baseUrl, req.apiKey, req.provider)
     try:
-        voices = await platform.list_voices(req.voice_type)
-        return {"voices": [{"voiceId": v.voice_id, "name": v.name, "voiceType": v.voice_type} for v in voices]}
+        detailed = await platform.list_voices_detailed(req.voice_type)
+        return {
+            "voices": [
+                {"voiceId": v.voice_id, "name": v.name, "voiceType": v.voice_type}
+                for v in detailed.voices
+            ],
+            "warnings": list(detailed.warnings),
+            "partialSuccess": bool(detailed.partial_success),
+        }
     except Exception as e:
         logger.exception("[TTS] test_voices error")
         raise HTTPException(status_code=502, detail=str(e))
@@ -754,8 +770,17 @@ async def glm_local_health(req: GlmLocalActionReq):
     if not isinstance(platform, GlmLocalTtsPlatform):
         raise HTTPException(status_code=400, detail="当前预设不是 GLM-TTS（本地）提供商")
     try:
-        ok = await platform.health_check()
-        return {"ok": ok}
+        detail = await platform.health_check_detail()
+        process_health = glm_local_tts_process.get_health()
+        return {
+            "ok": bool(detail.get("ok")),
+            "health": {
+                "reachable": bool(detail.get("ok")),
+                "code": detail.get("code") or process_health.get("code"),
+                "lastError": detail.get("lastError") or process_health.get("lastError"),
+                "process": process_health,
+            },
+        }
     finally:
         await platform.close()
 
@@ -793,7 +818,8 @@ async def glm_local_start(req: GlmLocalStartReq):
         raise HTTPException(status_code=400, detail="未配置 GLM-TTS 仓库路径")
     port = matched.ttsGlmLocalPort or 8088
     ok = await glm_local_tts_process.start(repo_path, port)
-    return {"ok": ok}
+    health = glm_local_tts_process.get_health()
+    return {"ok": ok, "health": health}
 
 
 class Qwen3LocalActionReq(BaseModel):

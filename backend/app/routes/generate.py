@@ -472,6 +472,28 @@ def _trim_main_chat_conversation(conversation: list[dict], budget: int | None) -
     return trim_messages_to_context(conversation, budget, None)
 
 
+def _resolve_system_tokens_for_budget(
+    system_prompt: str,
+    *,
+    warnings_out: list[dict[str, Any]],
+) -> tuple[int, bool]:
+    """
+    返回 (system_tokens, tokenizer_ok)。
+
+    F-034：tokenizer 不可用时不得把 system 当作 0 token 去裁剪预算。
+    """
+    counted = count_tokens(system_prompt)
+    if counted is None:
+        warnings_out.append(
+            {
+                "code": "tokenizer_unavailable",
+                "message": "tokenizer unavailable; skipped token-budget trim that depends on system tokens",
+            }
+        )
+        return 0, False
+    return int(counted), True
+
+
 def _main_chat_message_to_conversation_entries(
     *,
     chat: Any,
@@ -1149,9 +1171,15 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
         getattr(chat.overrides, "contextStartMessageId", None),
         getattr(chat.overrides, "contextStartKeepBeforeMessages", None),
     )
-    system_tokens = count_tokens(system_prompt) or 0
-    pretrim_budget = max(int(context_size) - system_tokens, 0) if context_size and context_size >= 1 else None
-    base_conversation = _trim_main_chat_conversation(conversation, pretrim_budget) if pretrim_budget is not None else list(conversation)
+    worldbook_regex_warnings: list[dict[str, Any]] = []
+    system_tokens, tokenizer_ok = _resolve_system_tokens_for_budget(
+        system_prompt, warnings_out=worldbook_regex_warnings
+    )
+    if tokenizer_ok and context_size and context_size >= 1:
+        pretrim_budget = max(int(context_size) - system_tokens, 0)
+        base_conversation = _trim_main_chat_conversation(conversation, pretrim_budget)
+    else:
+        base_conversation = list(conversation)
 
     worldbook_order = list(getattr(chat.overrides, "worldBookIds", []) or [])
     wb_global_excl = set(getattr(chat.overrides, "worldBookGlobalExclusions", []) or [])
@@ -1161,7 +1189,6 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
     worldbook_meta: dict[str, dict[str, Any]] = {}
     worldbook_token_known = True
     worldbook_tokens_total = 0
-    worldbook_regex_warnings: list[dict[str, Any]] = []
     for book in selected_books:
         eff_scan, ins_dep = _runtime_scan_insert_for_book(book.id, chat, settings)
         entries = match_worldbook_entries(book, base_conversation, eff_scan)
@@ -1173,14 +1200,14 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
         worldbook_meta[book.id] = {"entries": entries, "injections": injections, "tokens": token_count}
         worldbook_tokens_total += token_count
 
-    if context_size and context_size >= 1 and worldbook_token_known:
+    if tokenizer_ok and context_size and context_size >= 1 and worldbook_token_known:
         budget = int(context_size)
         while selected_books and (system_tokens + worldbook_tokens_total) > budget:
             removed = selected_books.pop()
             selected_book_ids.discard(removed.id)
             worldbook_tokens_total -= int(worldbook_meta.get(removed.id, {}).get("tokens", 0))
 
-    if context_size and context_size >= 1:
+    if tokenizer_ok and context_size and context_size >= 1:
         history_budget = int(context_size) - system_tokens
         if worldbook_token_known:
             history_budget -= max(worldbook_tokens_total, 0)
@@ -1815,9 +1842,15 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
         getattr(chat.overrides, "contextStartMessageId", None),
         getattr(chat.overrides, "contextStartKeepBeforeMessages", None),
     )
-    system_tokens = count_tokens(system_prompt) or 0
-    pretrim_budget = max(int(context_size) - system_tokens, 0) if context_size and context_size >= 1 else None
-    base_conversation = _trim_main_chat_conversation(conversation, pretrim_budget) if pretrim_budget is not None else list(conversation)
+    worldbook_regex_warnings: list[dict[str, Any]] = []
+    system_tokens, tokenizer_ok = _resolve_system_tokens_for_budget(
+        system_prompt, warnings_out=worldbook_regex_warnings
+    )
+    if tokenizer_ok and context_size and context_size >= 1:
+        pretrim_budget = max(int(context_size) - system_tokens, 0)
+        base_conversation = _trim_main_chat_conversation(conversation, pretrim_budget)
+    else:
+        base_conversation = list(conversation)
 
     worldbook_order = list(getattr(chat.overrides, "worldBookIds", []) or [])
     wb_global_excl = set(getattr(chat.overrides, "worldBookGlobalExclusions", []) or [])
@@ -1827,7 +1860,6 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
     worldbook_meta: dict[str, dict[str, Any]] = {}
     worldbook_token_known = True
     worldbook_tokens_total = 0
-    worldbook_regex_warnings: list[dict[str, Any]] = []
     for book in selected_books:
         eff_scan, ins_dep = _runtime_scan_insert_for_book(book.id, chat, settings)
         entries = match_worldbook_entries(book, base_conversation, eff_scan)
@@ -1839,14 +1871,14 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
         worldbook_meta[book.id] = {"entries": entries, "injections": injections, "tokens": token_count}
         worldbook_tokens_total += token_count
 
-    if context_size and context_size >= 1 and worldbook_token_known:
+    if tokenizer_ok and context_size and context_size >= 1 and worldbook_token_known:
         budget = int(context_size)
         while selected_books and (system_tokens + worldbook_tokens_total) > budget:
             removed = selected_books.pop()
             selected_book_ids.discard(removed.id)
             worldbook_tokens_total -= int(worldbook_meta.get(removed.id, {}).get("tokens", 0))
 
-    if context_size and context_size >= 1:
+    if tokenizer_ok and context_size and context_size >= 1:
         history_budget = int(context_size) - system_tokens
         if worldbook_token_known:
             history_budget -= max(worldbook_tokens_total, 0)
@@ -2307,9 +2339,15 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
         getattr(chat.overrides, "contextStartMessageId", None),
         getattr(chat.overrides, "contextStartKeepBeforeMessages", None),
     )
-    system_tokens = count_tokens(system_prompt) or 0
-    pretrim_budget = max(int(context_size) - system_tokens, 0) if context_size and context_size >= 1 else None
-    base_conversation = _trim_main_chat_conversation(conversation, pretrim_budget) if pretrim_budget is not None else list(conversation)
+    worldbook_regex_warnings: list[dict[str, Any]] = []
+    system_tokens, tokenizer_ok = _resolve_system_tokens_for_budget(
+        system_prompt, warnings_out=worldbook_regex_warnings
+    )
+    if tokenizer_ok and context_size and context_size >= 1:
+        pretrim_budget = max(int(context_size) - system_tokens, 0)
+        base_conversation = _trim_main_chat_conversation(conversation, pretrim_budget)
+    else:
+        base_conversation = list(conversation)
 
     worldbook_order = list(getattr(chat.overrides, "worldBookIds", []) or [])
     wb_global_excl = set(getattr(chat.overrides, "worldBookGlobalExclusions", []) or [])
@@ -2319,7 +2357,6 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
     worldbook_meta: dict[str, dict[str, Any]] = {}
     worldbook_token_known = True
     worldbook_tokens_total = 0
-    worldbook_regex_warnings: list[dict[str, Any]] = []
     for book in selected_books:
         eff_scan, ins_dep = _runtime_scan_insert_for_book(book.id, chat, settings)
         entries = match_worldbook_entries(book, base_conversation, eff_scan)
@@ -2331,14 +2368,14 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
         worldbook_meta[book.id] = {"entries": entries, "injections": injections, "tokens": token_count}
         worldbook_tokens_total += token_count
 
-    if context_size and context_size >= 1 and worldbook_token_known:
+    if tokenizer_ok and context_size and context_size >= 1 and worldbook_token_known:
         budget = int(context_size)
         while selected_books and (system_tokens + worldbook_tokens_total) > budget:
             removed = selected_books.pop()
             selected_book_ids.discard(removed.id)
             worldbook_tokens_total -= int(worldbook_meta.get(removed.id, {}).get("tokens", 0))
 
-    if context_size and context_size >= 1:
+    if tokenizer_ok and context_size and context_size >= 1:
         history_budget = int(context_size) - system_tokens
         if worldbook_token_known:
             history_budget -= max(worldbook_tokens_total, 0)

@@ -17,8 +17,8 @@
 | MVU / KG / regex | complete for F-021~F-026 | batch 4 complete |
 | search | initial high-risk scan complete | batch 5 complete (F-027) |
 | import / export / avatar | initial high-risk scan complete | batch 5 complete (F-028~F-029) |
-| TTS | initial high-risk scan complete | pending |
-| infra / background | initial high-risk scan complete | pending |
+| TTS | initial high-risk scan complete | batch 6 complete (F-030~F-032) |
+| infra / background | initial high-risk scan complete | batch 6 complete (F-033~F-034) |
 
 ## Inventory
 
@@ -53,11 +53,11 @@
 | F-027 | search | `backend/app/services/web_search.py` | async/sync search | provider 失败变 JSON 字符串工具结果 | partial | provider-specific search error | ToolResult + error stack | `test_web_search.py` | done |
 | F-028 | import/export | `backend/app/routes/import_export.py` | character export | 缺失 worldbook 被跳过 | partial | `export_attachment_missing` | warnings/manifest | `test_import_export_warnings.py` | done |
 | F-029 | import/export | import row/candidate loops | item failure | 已有 warning，但结构不统一 | partial | domain-specific warning | `partialSuccess/warnings[]` | `test_import_export_warnings.py` / `useSettingsImport.test.ts` | done |
-| F-030 | TTS | GLM local synthesize | endpoint selection | JSON 失败自动改 multipart | explicit-fallback | `tts_endpoint_fallback` | from/to/reason | pending | open |
-| F-031 | TTS | SiliconFlow voice list | remote list | 失败后仅返回内置预设 | partial | `tts_voice_list_partial` | partial warning | pending | open |
-| F-032 | TTS | local process health/cleanup | process errors | 异常退化为 False/pass | cleanup-only | process health codes | health API | pending | open |
-| F-033 | infra | `backend/app/services/http_log.py` | record write | 序列化/写盘失败可能丢记录 | cleanup-only | `http_log_write_failed` | health counter | pending | open |
-| F-034 | infra | `backend/app/tokenizer_service.py` | tokenizer load | 不可用返回 None | explicit-fallback | `tokenizer_unavailable` | unavailable, not zero | pending | open |
+| F-030 | TTS | `backend/app/services/tts_platform.py` | GLM local synthesize | JSON 失败自动改 multipart | explicit-fallback | `tts_endpoint_fallback` | from/to/reason | `test_t802_tts_infra_health.py` | done |
+| F-031 | TTS | SiliconFlow voice list | remote list | 失败后仅返回内置预设 | partial | `tts_voice_list_partial` | partial warning | `test_t802_tts_infra_health.py` | done |
+| F-032 | TTS | local process health/cleanup | process errors | 异常退化为 False/pass | cleanup-only | process health codes | health API | `test_t802_tts_infra_health.py` | done |
+| F-033 | infra | `backend/app/services/http_log.py` | record write | 序列化/写盘失败可能丢记录 | cleanup-only | `http_log_write_failed` | health counter | `test_t802_tts_infra_health.py` | done |
+| F-034 | infra | `backend/app/tokenizer_service.py` | tokenizer load | 不可用返回 None | explicit-fallback | `tokenizer_unavailable` | unavailable, not zero | `test_t802_tts_infra_health.py` | done |
 
 ## Already migrated by T-801
 

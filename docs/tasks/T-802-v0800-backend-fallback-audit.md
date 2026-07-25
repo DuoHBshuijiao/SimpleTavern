@@ -195,10 +195,19 @@
 - 静默 fallback 守卫纳入 `web_search.py` / `import_export.py` / web_search handler。
 - 门禁：后端 `191 passed`。
 
+### 第六批已完成
+
+- F-030：GLM 本地 JSON→multipart 显式 fallback，带 `tts_endpoint_fallback`（from/to/reason）。
+- F-031：SiliconFlow 音色列表失败返回预设 + `tts_voice_list_partial` / `partialSuccess`。
+- F-032：GLM 本地进程 health（failureCount/lastError/code）；health/start 路由结构化返回。
+- F-033：http_log 写失败计数 + `GET /api/http-log/health`。
+- F-034：tokenizer unavailable；generate 不再 `or 0` 伪装 system token；`GET /api/tokenizer/health`。
+- 门禁：后端 `198 passed`。
+
 ### 下一批
 
-1. TTS endpoint fallback / voice list / process health（F-030~F-032）。
-2. HTTP log 写失败与 tokenizer unavailable（F-033~F-034）。
+1. T-803：性能基线、profiling、共享 HTTP client、索引与 I/O。
+2. 前端消费各类 health / dropped / partial warning UI（可选跟进）。
 
 ### 1. 建立机器可读清单
 

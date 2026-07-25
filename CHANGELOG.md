@@ -2,6 +2,15 @@
 
 ## v0.800（进行中）
 
+### 静默 Fallback 迁移第六批（T-802）
+
+- GLM 本地 TTS：JSON 合成失败回退 multipart 时写入 `tts_endpoint_fallback`（from/to/reason），响应附带 warnings。
+- SiliconFlow 音色列表远程失败时保留内置预设，并返回 `tts_voice_list_partial` / `partialSuccess`。
+- GLM 本地进程托管暴露 failureCount/lastError/code；health/start API 返回结构化 health。
+- 出站 HTTP 日志写失败计数，并新增 `/api/http-log/health`。
+- Tokenizer 不可用保持 null/unavailable，不再被 generate 用 `or 0` 伪装；新增 `/api/tokenizer/health`。
+- 后端 198 项测试通过；T-802 清单 F-001~F-034 主项迁移完成。
+
 ### 静默 Fallback 迁移第五批（T-802）
 
 - 网络搜索 provider 失败改为结构化 `{ok, code, message}`；助手工具返回 `ToolResult.err`，不再把错误塞进成功工具结果字符串。

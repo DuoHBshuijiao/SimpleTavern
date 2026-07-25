@@ -9,13 +9,19 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from app.storage import load_chat
-from app.tokenizer_service import count_tokens, count_tokens_for_messages
+from app.tokenizer_service import count_tokens, count_tokens_for_messages, get_tokenizer_health
 
 router = APIRouter(tags=["tokenizer"])
 
 
 class CountTextRequest(BaseModel):
     text: str | None = None
+
+
+@router.get("/tokenizer/health")
+def tokenizer_health() -> dict:
+    """Tokenizer 可用性（unavailable 不等于 0 token）。"""
+    return get_tokenizer_health()
 
 
 @router.post("/tokenizer/count")
