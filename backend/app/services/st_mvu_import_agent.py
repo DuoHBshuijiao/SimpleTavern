@@ -10,7 +10,9 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.llm.openai_compat import chat_completions_message
+from app.llm.preset_resolve import LlmPresetResolveError, resolve_llm_preset_credentials
+from app.llm.runtime import chat_completions_message
+from app.llm.types import OPENAI_COMPATIBLE_CHAT_PROTOCOL
 from app.schemas import (
     StatusTableDef,
     build_reasoning_request_config,
@@ -29,6 +31,7 @@ class StMvuImportAgentRunContext:
     temperature: float | None = None
     max_tool_turns: int = 6
     extra_body: dict[str, Any] | None = None
+    protocol: str = OPENAI_COMPATIBLE_CHAT_PROTOCOL
 
 
 @dataclass
@@ -40,7 +43,6 @@ class _ImportDraft:
     summary: str = ""
     confidence: float = 0.0
     finished: bool = False
-
 
 def _tools() -> list[dict[str, Any]]:
     return [
@@ -119,35 +121,10 @@ def _default_run_context() -> StMvuImportAgentRunContext:
             "MVU 导入 Agent 模型未配置，请在全局设置中指定 MVU 模型或默认模型。",
         )
 
-    base_url = (settings.llm.baseUrl or "").strip()
-    api_key = settings.llm.apiKey or ""
-
-    llm_presets = [
-        p for p in (settings.apiPresets or [])
-        if (getattr(p, "presetKind", None) or "") != "tts"
-    ]
-
-    preset_for_model = None
-    if llm_presets:
-        preset_for_model = next(
-            (p for p in llm_presets if p.models and model in p.models),
-            None,
-        )
-    if preset_for_model and (preset_for_model.baseUrl or "").strip():
-        base_url = preset_for_model.baseUrl.strip()
-        api_key = preset_for_model.apiKey or ""
-
-    if not base_url and llm_presets:
-        fb = next((p for p in llm_presets if (p.baseUrl or "").strip()), None)
-        if fb:
-            base_url = fb.baseUrl.strip()
-            api_key = fb.apiKey or ""
-
-    if not base_url:
-        raise RuntimeError(
-            "MVU 导入 API 基础地址未配置：请在全局设置填写「默认 API 基础地址」，"
-            "或确保至少有一个非 TTS 的 API 预设填写了 Base URL。"
-        )
+    try:
+        credentials = resolve_llm_preset_credentials(settings, model=model)
+    except LlmPresetResolveError as exc:
+        raise RuntimeError(exc.message) from exc
 
     reasoning_cfg = build_reasoning_request_config(settings)
     thinking_enabled = reasoning_cfg["thinking_enabled"]
@@ -157,11 +134,12 @@ def _default_run_context() -> StMvuImportAgentRunContext:
         temperature = settings.generationDefaults.temperature
 
     return StMvuImportAgentRunContext(
-        base_url=base_url,
-        api_key=api_key,
+        base_url=credentials.base_url,
+        api_key=credentials.api_key,
         model=model,
         temperature=temperature,
         extra_body=extra_body,
+        protocol=credentials.protocol,
     )
 
 
@@ -257,6 +235,7 @@ async def run_st_mvu_import_agent(
             temperature=ctx.temperature,
             tools=_tools(),
             extra_body=ctx.extra_body,
+            protocol=ctx.protocol,
         )
         assistant_msg: dict[str, Any] = {
             "role": resp.role or "assistant",

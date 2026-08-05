@@ -94,6 +94,7 @@ class StMvuImportAgentTest(unittest.IsolatedAsyncioTestCase):
                     api_key="test",
                     model="fake-model",
                     max_tool_turns=1,
+                    protocol="openai_compatible_chat",
                 ),
             )
 
@@ -101,6 +102,7 @@ class StMvuImportAgentTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["initialStateTables"][0]["name"], "角色状态")
         self.assertIn("复杂 UI 脚本", result["warnings"][0])
         prompt_context = calls[0]["messages"][1]["content"]
+        self.assertEqual(calls[0]["protocol"], "openai_compatible_chat")
         self.assertIn("<button onclick=", prompt_context)
         self.assertIn("生命值、位置、心情都需要在状态栏维护", prompt_context)
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from app.errors import AppError
 from app.llm.protocol import ProviderAdapter
-from app.llm.types import OPENAI_COMPATIBLE_CHAT_PROTOCOL, ProtocolId
+from app.llm.types import OPENAI_COMPATIBLE_CHAT_PROTOCOL, ProtocolId, provider_id_for_protocol
 
 _REGISTRY: dict[str, ProviderAdapter] | None = None
 
@@ -52,6 +52,7 @@ def get_adapter(protocol: str | ProtocolId) -> ProviderAdapter:
             source="llm.registry",
             status_code=400,
             suggested_action=f"请使用已支持的协议（当前：{OPENAI_COMPATIBLE_CHAT_PROTOCOL}）",
+            provider=provider_id_for_protocol(key),
             protocol=key,
         )
     return adapter

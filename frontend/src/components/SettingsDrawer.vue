@@ -103,7 +103,7 @@ import {
 } from '../utils/wgslCompilation'
 import { notifyConfirm, notifyMessage } from '../composables/useNotify'
 import type { LlmProviderPreset } from '../constants/llmProviderPresets'
-import { DEFAULT_LLM_PROTOCOL, LLM_PROTOCOL_OPTIONS, normalizeLlmProtocol } from '../constants/llmProtocols'
+import { DEFAULT_LLM_PROTOCOL, LLM_PROTOCOL_OPTIONS, llmProtocolSelectOptions, normalizeLlmProtocol } from '../constants/llmProtocols'
 import { useDialogBehavior } from '../composables/useDialogBehavior'
 import { dialogAria } from '../utils/uiPrimitives'
 
@@ -2975,6 +2975,7 @@ provide(
     ttsDesignDraft,
     TTS_PROVIDER_OPTIONS,
     LLM_PROTOCOL_OPTIONS,
+    llmProtocolSelectOptions,
     editingPreset,
     editingPresetTtsProvider,
     editingPresetIsGlmLocal,

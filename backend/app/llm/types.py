@@ -48,7 +48,7 @@ def normalize_protocol_id(raw: str | None, *, default: ProtocolId = OPENAI_COMPA
 
 def provider_id_for_protocol(protocol: str | None) -> str:
     key = normalize_protocol_id(protocol)
-    return _PROTOCOL_PROVIDERS.get(key, OPENAI_COMPATIBLE_PROVIDER)
+    return _PROTOCOL_PROVIDERS.get(key, "unknown")
 
 
 def is_known_protocol_id(protocol: str | None) -> bool:

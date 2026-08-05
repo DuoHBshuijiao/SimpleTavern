@@ -26,7 +26,13 @@
 - generate / assistant / mvu / web_search / `llm` 路由接线；SSE meta 使用解析出的 protocol/provider
 - 前端：预设与全局「LLM 协议」下拉；`test-models` 传 protocol
 - 未注册协议（Anthropic/Gemini/Responses）选择后 fast-fail，不静默回退
-- 门禁：`cd backend && python -m pytest tests/ -q` → **231 passed**
+- 门禁：`cd backend && python -m pytest tests/ -q` → **232 passed**
+
+### 5A 审查修复
+
+- 前端未知协议不再静默改写为 compat；下拉可展示未知项
+- `st_mvu_import_agent`、TTS `/preprocess` 改走 `resolve` + `runtime` + `protocol`
+- `provider_id_for_protocol` 对未知协议返回 `unknown`
 
 ## T-806 边界
 

@@ -36,6 +36,14 @@ def test_registry_unknown_protocol_fast_fails() -> None:
     err = exc_info.value
     assert err.code == "provider_capability_unsupported"
     assert err.protocol == "anthropic_messages"
+    assert err.provider == "anthropic"
+
+
+def test_provider_id_for_unknown_protocol_is_unknown() -> None:
+    from app.llm.types import provider_id_for_protocol
+
+    assert provider_id_for_protocol("custom_provider") == "unknown"
+    assert provider_id_for_protocol("openai_compatible_chat") == OPENAI_COMPATIBLE_PROVIDER
 
 
 def test_registry_empty_protocol_is_config_missing() -> None:

@@ -7,7 +7,8 @@
 - `ApiPreset` / 全局 LLM 增加 `protocol`；`preset_resolve` 与 `llm/runtime` 经 registry 调用。
 - generate / assistant / mvu / web_search / test-models 传递协议；SSE meta 反映实际协议。
 - 设置页协议下拉；未实现协议（Anthropic/Gemini/Responses）明确 fast-fail。
-- 后端 231 项测试通过。
+- 审查修复：前端未知协议不再静默改写；ST MVU 导入与 TTS 文本后处理改走 runtime；未知协议 provider 标为 `unknown`。
+- 后端 232 项测试通过。
 
 ### LLM 协议内核（T-804）
 
