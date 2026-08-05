@@ -196,4 +196,8 @@ def test_health_endpoints_exist(monkeypatch) -> None:
         regex = client.get("/api/content-regex/health")
         assert regex.status_code == 200
         assert "health" in regex.json()
-        assert "status" in get_content_regex_scanner_health()
+        health = get_content_regex_scanner_health()
+        assert "status" in health
+        assert "lastScanDurationMs" in health
+        assert "chatsSkippedUnchanged" in health
+        assert "lockAcquireCount" in health

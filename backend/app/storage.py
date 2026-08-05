@@ -37,18 +37,19 @@ from __future__ import annotations
 
 import json
 import logging
+import mimetypes
 import os
 import re
 import shutil
-import mimetypes
+import threading
+import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
 from uuid import uuid4
 
 import portalocker
-
-from datetime import datetime
 
 from app.attachment_policy import normalize_mime_type
 from app.errors import AppError
@@ -389,6 +390,54 @@ class LockedFile:
             self.lock_handle.close()
 
 
+_lock_stats_lock = threading.Lock()
+_lock_stats: dict[str, float | int] = {
+    "acquireCount": 0,
+    "waitMsTotal": 0.0,
+    "waitMsMax": 0.0,
+    "lastWaitMs": 0.0,
+    "sharedAcquireCount": 0,
+    "exclusiveAcquireCount": 0,
+}
+
+
+def reset_lock_observability() -> None:
+    """重置锁等待观测计数（测试/基线用）。"""
+    with _lock_stats_lock:
+        _lock_stats["acquireCount"] = 0
+        _lock_stats["waitMsTotal"] = 0.0
+        _lock_stats["waitMsMax"] = 0.0
+        _lock_stats["lastWaitMs"] = 0.0
+        _lock_stats["sharedAcquireCount"] = 0
+        _lock_stats["exclusiveAcquireCount"] = 0
+
+
+def get_lock_observability() -> dict[str, Any]:
+    """返回 portalocker 等待观测快照。"""
+    with _lock_stats_lock:
+        return {
+            "acquireCount": int(_lock_stats["acquireCount"]),
+            "waitMsTotal": round(float(_lock_stats["waitMsTotal"]), 3),
+            "waitMsMax": round(float(_lock_stats["waitMsMax"]), 3),
+            "lastWaitMs": round(float(_lock_stats["lastWaitMs"]), 3),
+            "sharedAcquireCount": int(_lock_stats["sharedAcquireCount"]),
+            "exclusiveAcquireCount": int(_lock_stats["exclusiveAcquireCount"]),
+        }
+
+
+def _record_lock_wait(wait_ms: float, *, shared: bool) -> None:
+    with _lock_stats_lock:
+        _lock_stats["acquireCount"] = int(_lock_stats["acquireCount"]) + 1
+        _lock_stats["waitMsTotal"] = float(_lock_stats["waitMsTotal"]) + wait_ms
+        _lock_stats["lastWaitMs"] = wait_ms
+        if wait_ms > float(_lock_stats["waitMsMax"]):
+            _lock_stats["waitMsMax"] = wait_ms
+        if shared:
+            _lock_stats["sharedAcquireCount"] = int(_lock_stats["sharedAcquireCount"]) + 1
+        else:
+            _lock_stats["exclusiveAcquireCount"] = int(_lock_stats["exclusiveAcquireCount"]) + 1
+
+
 def _lock_for(target: Path) -> LockedFile:
     """
     为目标文件创建文件锁
@@ -404,16 +453,21 @@ def _lock_for(target: Path) -> LockedFile:
     lock_path = Path(str(target) + ".lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     fh = open(lock_path, "a+b")
+    started = time.perf_counter()
     portalocker.lock(fh, portalocker.LOCK_EX)
+    _record_lock_wait((time.perf_counter() - started) * 1000.0, shared=False)
     return LockedFile(lock_path=lock_path, lock_handle=fh)
 
 
-def read_json(path: Path) -> dict[str, Any]:
+def read_json(path: Path, *, shared: bool = False) -> dict[str, Any]:
     """
     读取JSON文件（带文件锁保护）
+
+    shared=True 时使用共享读锁，供后台扫描等纯读路径；默认仍为独占锁以保持既有语义。
     
     Args:
         path: JSON文件路径
+        shared: 是否使用共享读锁
     
     Returns:
         dict[str, Any]: 解析后的JSON数据
@@ -423,6 +477,9 @@ def read_json(path: Path) -> dict[str, Any]:
     """
     if not path.exists():
         raise FileNotFoundError(str(path))
+    if shared:
+        raw = read_bytes_under_lock(path, shared=True)
+        return json.loads(raw.decode("utf-8"))
     with _lock_for(path):
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
@@ -440,7 +497,9 @@ def read_bytes_under_lock(path: Path, *, shared: bool = True) -> bytes:
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     mode = portalocker.LOCK_SH if shared else portalocker.LOCK_EX
     with open(lock_path, "a+b") as fh:
+        started = time.perf_counter()
         portalocker.lock(fh, mode)
+        _record_lock_wait((time.perf_counter() - started) * 1000.0, shared=shared)
         try:
             with open(path, "rb") as f:
                 return f.read()
@@ -1301,6 +1360,8 @@ def _load_chat_from_path(
     character_id: str,
     *,
     strict: bool = False,
+    shared: bool = False,
+    attach_memory: bool = True,
 ) -> Chat | None:
     """
     从指定路径加载聊天对象
@@ -1310,12 +1371,15 @@ def _load_chat_from_path(
     Args:
         path: 聊天文件路径
         character_id: 期望的角色ID
+        strict: 损坏时是否抛错
+        shared: 是否使用共享读锁（后台扫描）
+        attach_memory: 是否附加长期记忆（扫描路径可关闭以省 I/O）
     
     Returns:
         Chat | None: 聊天对象，加载失败返回None
     """
     try:
-        raw = read_json(path)
+        raw = read_json(path, shared=shared)
         _require_persisted_id(raw, label="聊天记录")
         chat = Chat.model_validate(raw)
     except FileNotFoundError:
@@ -1337,9 +1401,44 @@ def _load_chat_from_path(
     _clear_runtime_integrity_issue(path)
     if chat.characterId != character_id:
         chat.characterId = character_id
-    _attach_chat_memory(chat)
+    if attach_memory:
+        _attach_chat_memory(chat)
+    else:
+        chat.overrides.longTermMemory = None
     _sanitize_chat_greeting_variants(chat)
     return chat
+
+
+def iter_chat_record_paths() -> Iterable[tuple[str, str, Path]]:
+    """
+    轻量枚举全库会话文件路径，不读取 chat.json 正文。
+
+    Yields:
+        (character_id, chat_id, record_path)
+    """
+    base = _chats_dir()
+    if not base.exists():
+        return
+    for character_dir in base.iterdir():
+        if not character_dir.is_dir():
+            continue
+        character_id = character_dir.name
+        seen_ids: set[str] = set()
+        for entry in character_dir.iterdir():
+            if not entry.is_dir():
+                continue
+            record_path = entry / CHAT_RECORD_FILENAME
+            if record_path.is_file():
+                seen_ids.add(entry.name)
+                yield character_id, entry.name, record_path
+        for p in list_json_files(character_dir):
+            if p.name == CHAT_MEMORY_FILENAME:
+                continue
+            if p.stem in seen_ids:
+                continue
+            if (character_dir / p.stem / CHAT_RECORD_FILENAME).exists():
+                continue
+            yield character_id, p.stem, p
 
 
 def list_chats(character_id: str) -> list[Chat]:

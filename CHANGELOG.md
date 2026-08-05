@@ -2,6 +2,13 @@
 
 ## v0.800（进行中）
 
+### 性能基础设施 3C（T-803）
+
+- 正文正则后台扫描改为单次路径枚举，去掉群聊/角色目录双载。
+- 按文件 mtime/size 与规则签名跳过未变更会话；扫描读使用共享锁且不附加长期记忆。
+- portalocker 等待时长可观测；`/api/content-regex/health` 暴露扫描耗时与跳过统计。
+- 基线：100 会话冷扫约 130 ms、暖扫约 17 ms；后端 214 项测试通过。
+
 ### 性能基础设施 3B（T-803）
 
 - 新增 `chat_path_index`（chatId→characterId/format），`load_chat` 热路径不再全角色目录扫描。

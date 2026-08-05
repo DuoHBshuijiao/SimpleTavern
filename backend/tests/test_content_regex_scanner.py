@@ -29,8 +29,6 @@ def test_scanner_does_not_enqueue_or_signal_directive_mvu(monkeypatch) -> None:
     enqueued: list[tuple[str, list[dict[str, str]]]] = []
     signaled: list[str] = []
 
-    monkeypatch.setattr(scanner, "load_settings", lambda: settings)
-    monkeypatch.setattr(scanner, "_chat_iter", lambda: iter([chat]))
     monkeypatch.setattr(
         scanner,
         "resolve_chat_mvu_runtime_enablement",
@@ -43,8 +41,10 @@ def test_scanner_does_not_enqueue_or_signal_directive_mvu(monkeypatch) -> None:
         lambda chat_id: signaled.append(chat_id),
     )
 
-    scanner._processed_signatures.clear()
-    scanner._scan_once()
+    scanner.reset_scanner_scan_state_for_tests()
+    scanned, applied = scanner._process_chat(chat, settings, {})
 
+    assert scanned >= 1
+    assert applied >= 1
     assert enqueued == []
     assert signaled == []

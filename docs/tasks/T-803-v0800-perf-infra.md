@@ -1,6 +1,6 @@
 # T-803 v0.800 性能基线与基础设施
 
-- status: in-progress（3A/3B 已完成；下一棒 3C）
+- status: in-progress（3A/3B/3C 已完成；下一棒 3D）
 - area: backend HTTP / I/O / 索引
 - priority: P0
 - theme: 先测量再优化；共享连接池、索引与锁；每项有基线与回归门槛
@@ -49,7 +49,10 @@
 | `_find_chat_path_by_id` | O(角色数) exists 扫描 | 索引命中为主路径 | 3B done |
 | chat_path 冷重建 1000（50×20） | — | 103.11 ms；门槛 `< 1000 ms` | 3B done |
 | chat_path 暖查找 ×1000 | — | 105.55 ms；门槛 `< 500 ms` | 3B done |
-| content-regex scanner | 周期全库（待测） | 增量/退避可配置 | 3C |
+| content-regex scanner | 每 5s 全库双载 | 去双载 + mtime 跳过；暖路径 ≪ 冷路径 | 3C done |
+| scanner 冷扫 100 chats | — | 130.21 ms；门槛 `< 5000 ms` | 3C done |
+| scanner 暖扫 100（mtime 跳过） | — | 16.54 ms；门槛 `< max(100, 冷×25%)` | 3C done |
+| portalocker 等待 | 不可见 | health 含 waitMs / acquireCount | 3C done |
 | generate worldbook/trim | 未 profiling | 有火焰图或分段计时 | 3D |
 
 ## 3A 实现要点
@@ -95,3 +98,12 @@ python -m pytest tests/ -q
 - `save_chat` upsert、`delete_chat` / `delete_chats_by_character` 失效；lifespan 预热。
 - 基线（本机）：重建 1000 会话 `103.11 ms`；暖查找 ×1000 `105.55 ms`。
 - 测试：`test_chat_path_index.py`；门禁后端 209 passed。
+
+### 3C（已完成）
+
+- `_chat_iter` / 扫描主路径去掉 `list_group_chats`+`list_chats` 双载；改为 `iter_chat_record_paths` 单次枚举。
+- mtime/size + 全局规则签名 + 角色卡 mtime 缓存：未变更会话跳过 `read_json`/validate。
+- 扫描读路径：`read_json(shared=True)` + 不附加 longTermMemory；消息签名仅在 apply/enqueue 成功后写入。
+- 锁观测：`get_lock_observability()`；`/api/content-regex/health` 增加 `lastScanDurationMs`、`chatsLoaded`、`chatsSkippedUnchanged`、`lockWaitMs*`。
+- 基线（本机）：冷扫 100 会话 `130.21 ms`；暖扫 `16.54 ms`。
+- 测试：`test_content_regex_scanner_baseline.py`；门禁后端 214 passed。
