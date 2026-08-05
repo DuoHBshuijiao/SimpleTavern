@@ -42,15 +42,14 @@ v0.800 从“后端性能版”升级为“**后端可信执行层**”：
 
 - T-801 已完成：统一错误 envelope、requestId、REST/SSE handler、上游错误映射、前端 typed error 与错误栈。
 - T-802 已完成：F-001~F-034 六批静默 fallback 迁移。
-- T-803-3A 已完成：共享 HTTP client；openai_compat + web_search 复用连接池。
-- T-803-3B 已完成：chatId→path 索引；load_chat 热路径索引命中。
-- T-803-3C 已完成：scanner 去双载 + mtime 跳过；portalocker 等待可观测。
-- 当前门禁：后端 214 tests。
+- T-803 已完成（3A–3D）：共享 HTTP client、chat/worldbook 索引、scanner 增量、generate prep profiling。
+- 当前门禁：后端 220 tests。
 - fork index 性能基线：1000 会话、99 fork 冷重建 `410.05 ms`，回归门槛 `< 5000 ms`。
 - chat_path 基线：重建 `103.11 ms`（`< 1000`）；暖查找×1000 `105.55 ms`（`< 500`）。
 - scanner 基线：100 会话冷扫 `130.21 ms`；暖扫 `16.54 ms`。
+- generate prep 基线：20 书/2 激活 prepTotal `5.13 ms`（`< 2000`）；只加载激活世界书。
 - F-010 已确认语义 A：正文正则存原文 + 前端显示时处理；generate 不落库前改写（非缺口）。
-- 下一批：T-803-3D 生成热路径 profiling。
+- 下一批：T-804 LLM 协议内核。
 
 ## 统一错误契约
 

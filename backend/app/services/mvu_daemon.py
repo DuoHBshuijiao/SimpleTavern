@@ -14,7 +14,7 @@ import asyncio
 import logging
 import time
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
 
@@ -146,13 +146,22 @@ def _next_context_window_count(chat_id: str) -> int:
     return current
 
 
-def ensure_mvu_worker(chat_id: str) -> bool:
-    """确保 chat_id 的 MVU worker loop 已启动。返回 True 表示已在运行或成功启动。"""
+def ensure_mvu_worker(
+    chat_id: str,
+    *,
+    chat: Any | None = None,
+    character: Any | None = None,
+) -> bool:
+    """确保 chat_id 的 MVU worker loop 已启动。返回 True 表示已在运行或成功启动。
+
+    可选传入已加载的 chat/character，避免 generate 热路径重复读盘（T-803-3D）。
+    """
     health = _chat_health(chat_id)
-    try:
-        chat = load_chat(chat_id)
-    except FileNotFoundError:
-        return False
+    if chat is None:
+        try:
+            chat = load_chat(chat_id)
+        except FileNotFoundError:
+            return False
     enablement = resolve_chat_mvu_runtime_enablement(chat)
     if enablement.character_error is not None:
         health.set_enable_error(enablement.character_error)
@@ -163,12 +172,22 @@ def ensure_mvu_worker(chat_id: str) -> bool:
         health.status = "disabled"
         return False
     health.enabled = True
-    try:
-        load_character(chat.characterId)
-    except Exception as exc:
-        # 缺失与损坏（AppError data_corrupted）均写入 enableError，勿让 health 路由 500。
-        health.set_enable_error(_character_unreadable_error(chat.characterId, exc))
-        return False
+    if character is None:
+        try:
+            load_character(chat.characterId)
+        except Exception as exc:
+            # 缺失与损坏（AppError data_corrupted）均写入 enableError，勿让 health 路由 500。
+            health.set_enable_error(_character_unreadable_error(chat.characterId, exc))
+            return False
+    else:
+        # 调用方已成功加载角色卡，跳过二次 I/O；仍校验 characterId 一致。
+        loaded_id = str(getattr(character, "id", "") or "")
+        if loaded_id and loaded_id != str(getattr(chat, "characterId", "") or ""):
+            try:
+                load_character(chat.characterId)
+            except Exception as exc:
+                health.set_enable_error(_character_unreadable_error(chat.characterId, exc))
+                return False
 
     _get_or_create(chat_id)
 

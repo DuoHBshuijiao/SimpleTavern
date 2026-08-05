@@ -1,19 +1,19 @@
 # Last Handoff
 
-- last_task: `T-803-3C-scanner-locks`
-- status: completed（T-803 overall in-progress）
-- summary: 正文正则扫描去双载 + mtime 增量跳过；portalocker 等待可观测；health 暴露扫描统计。
+- last_task: `T-803-3D-generate-prep`
+- status: completed（T-803 overall completed）
+- summary: generate 世界书/trim 分段 profiling；激活索引按需加载；MVU 复用已加载对象；match 窗口未变时复用。
 - code_changes:
-  - `content_regex_scanner.py`：路径枚举、mtime 缓存、共享读、成功后签名、扫描串行锁。
-  - `storage.py`：`iter_chat_record_paths`、`read_json(shared=)`、锁 wait 统计、`_load_chat_from_path` 可选 shared/attach_memory。
-  - 基线：冷 130.21 ms / 暖 16.54 ms（100 chats）。
+  - `prepare_conversation_with_worldbooks` + prep profile。
+  - `worldbook_index.py`；`ensure_mvu_worker(chat=, character=)`。
+  - 基线：prepTotal 5.13 ms（20 书/2 激活）。
 - known_gap:
-  - T-803 3D 未开始（generate 世界书/trim profiling）。
-  - TTS 共享 client、前端 health UI 仍待后续。
+  - TTS 共享 client、前端 health UI 仍可另开。
+  - `resolve_chat_mvu_runtime_enablement` 仍可能再读一次角色卡（次要）。
 - verification:
-  - `cd backend && python -m pytest tests/ -q` → 214 passed。
+  - `cd backend && python -m pytest tests/ -q` → 220 passed。
 - version_note: `backend/app/version.py` 仍为 `v0.700`。
 - next_read:
-  1. `docs/tasks/T-803-v0800-perf-infra.md`
-  2. `backend/app/routes/generate.py`（或世界书/trim 相关）
-- next_implementation: T-803-3D 生成热路径 profiling。不要同时开始 T-804。
+  1. `docs/tasks/T-804-v0800-llm-protocol-kernel.md`（若存在）或 `docs/01-ROADMAP.md` T-804
+  2. `docs/superpowers/specs/2026-07-10-v0800-backend-trust-layer-design.md`
+- next_implementation: T-804 LLM 协议内核。不要并行启动 usage ledger（T-807）除非用户要求。

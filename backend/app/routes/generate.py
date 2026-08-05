@@ -61,8 +61,7 @@ from app.services.web_search import web_search_is_configured
 from app.services.user_message_content import build_user_message_content
 from app.request_context import REQUEST_ID_HEADER, get_request_id, new_request_id
 from app.sse import sse_done, sse_event, sse_meta, sse_terminal_error
-from app.storage import load_character, load_chat, load_chat_image_bytes, load_settings, save_chat, save_settings
-from app.storage import list_worldbooks
+from app.storage import load_character, load_chat, load_chat_image_bytes, load_settings, load_worldbook, save_chat, save_settings
 from app.tokenizer_service import (
     count_tokens,
     count_tokens_for_messages,
@@ -73,6 +72,13 @@ from app.tokenizer_service import (
 
 router = APIRouter(tags=["generate"])
 ensure_content_regex_scanner_started()
+
+_last_generate_prep_profile: dict[str, Any] | None = None
+
+
+def get_last_generate_prep_profile() -> dict[str, Any] | None:
+    """返回最近一次世界书/trim prep 的分段计时与计数（测试/基线用）。"""
+    return dict(_last_generate_prep_profile) if _last_generate_prep_profile is not None else None
 
 
 def _resolve_generation_credentials(settings: Any, *, model: str, preset_id: str | None) -> tuple[str, str]:
@@ -658,16 +664,18 @@ def collect_active_worldbooks(
     ordered_ids: list[str] | None = None,
     global_exclusions: set[str] | None = None,
 ):
+    """按激活索引加载会话相关世界书正文（不再全库 list_worldbooks）。"""
+    from app.worldbook_index import list_active_worldbook_ids
+
     global_exclusions = global_exclusions or set()
-    all_books = list_worldbooks()
+    active_ids = list_active_worldbook_ids(chat_id, global_exclusions)
     active: list[Any] = []
-    for b in all_books:
-        if bool(getattr(b, "globalActive", False)):
-            if b.id in global_exclusions:
-                continue
-            active.append(b)
-        elif chat_id in (getattr(b, "sessionChatIds", []) or []):
-            active.append(b)
+    for wid in active_ids:
+        try:
+            active.append(load_worldbook(wid))
+        except FileNotFoundError:
+            # 索引可能陈旧：跳过缺失文件，不吞其它结构化错误
+            continue
     if not ordered_ids:
         return active
     by_id = {b.id: b for b in active}
@@ -701,10 +709,41 @@ def _book_worldbook_runtime_settings(chat: Any, settings: Any) -> dict[str, tupl
     return m
 
 
-def _runtime_scan_insert_for_book(book_id: str, chat: Any, settings: Any) -> tuple[int, int]:
-    m = _book_worldbook_runtime_settings(chat, settings)
+def _runtime_scan_insert_for_book(
+    book_id: str,
+    chat: Any,
+    settings: Any,
+    *,
+    runtime_map: dict[str, tuple[int, int]] | None = None,
+) -> tuple[int, int]:
+    m = runtime_map if runtime_map is not None else _book_worldbook_runtime_settings(chat, settings)
     default_scan = _resolve_effective_scan_depth(None, settings)
     return m.get(book_id, (default_scan, 5))
+
+
+def _worldbook_regex_warning(book: Any, entry: Any, pattern: str, exc: Exception) -> dict[str, Any]:
+    return {
+        "code": "worldbook_regex_invalid",
+        "message": "世界书条目正则无效，已跳过该条目",
+        "worldBookId": getattr(book, "id", None),
+        "entryId": getattr(entry, "id", None),
+        "pattern": pattern[:200],
+        "detail": str(exc),
+    }
+
+
+def collect_worldbook_regex_warnings(book: Any, warnings_out: list[dict[str, Any]]) -> None:
+    """仅校验条目正则是否可编译（复用 match 结果时仍需收集一次 warning）。"""
+    for entry in list(getattr(book, "entries", []) or []):
+        if not bool(getattr(entry, "enabled", True)):
+            continue
+        pattern = (getattr(entry, "regex", "") or "").strip()
+        if not pattern:
+            continue
+        try:
+            compile_user_regex(pattern, re.MULTILINE)
+        except re.error as exc:
+            warnings_out.append(_worldbook_regex_warning(book, entry, pattern, exc))
 
 
 def match_worldbook_entries(
@@ -734,18 +773,27 @@ def match_worldbook_entries(
             if compile_user_regex(pattern, re.MULTILINE).search(scan_text):
                 matched.append(entry)
         except re.error as exc:
-            warning = {
-                "code": "worldbook_regex_invalid",
-                "message": "世界书条目正则无效，已跳过该条目",
-                "worldBookId": getattr(book, "id", None),
-                "entryId": getattr(entry, "id", None),
-                "pattern": pattern[:200],
-                "detail": str(exc),
-            }
             if warnings_out is not None:
-                warnings_out.append(warning)
+                warnings_out.append(_worldbook_regex_warning(book, entry, pattern, exc))
             continue
     return matched
+
+
+def _scan_scope_equivalent(base: list[dict], trimmed: list[dict], effective_scan: int) -> bool:
+    """二次 trim 后，若 match 扫描窗口未变则可复用 pass1 的 entries。"""
+    if int(effective_scan) <= 0:
+        return True
+    n = int(effective_scan)
+    base_tail = base[-n:] if n > 0 else []
+    trim_tail = trimmed[-n:] if n > 0 else []
+    if len(base_tail) != len(trim_tail):
+        return False
+    for a, b in zip(base_tail, trim_tail):
+        if _extract_text_content(a.get("content")) != _extract_text_content(b.get("content")):
+            return False
+        if a.get("role") != b.get("role"):
+            return False
+    return True
 
 
 def build_worldbook_injections(book, entries: list[Any], conversation_len: int, insert_depth: int) -> list[dict[str, Any]]:
@@ -775,6 +823,125 @@ def insert_injections_into_conversation(conversation: list[dict], injections: li
         idx = max(0, min(idx, len(output)))
         output.insert(idx, dict(injection["message"]))
     return output
+
+
+def prepare_conversation_with_worldbooks(
+    *,
+    conversation: list[dict],
+    chat: Any,
+    settings: Any,
+    system_prompt: str,
+    context_size: int | None,
+) -> tuple[list[dict], list[dict[str, Any]], dict[str, Any]]:
+    """
+    单聊/群聊/插话共用的 trim + 世界书预算/注入 prep。
+
+    返回 (conversation, warnings, profile)。
+    """
+    global _last_generate_prep_profile
+    profile: dict[str, Any] = {
+        "segmentsMs": {},
+        "counters": {
+            "worldbooksConsidered": 0,
+            "worldbooksLoaded": 0,
+            "matchPass1": 0,
+            "matchPass2": 0,
+            "matchReused": 0,
+        },
+    }
+    prep_started = time.perf_counter()
+    warnings: list[dict[str, Any]] = []
+
+    t0 = time.perf_counter()
+    system_tokens, tokenizer_ok = _resolve_system_tokens_for_budget(system_prompt, warnings_out=warnings)
+    profile["segmentsMs"]["systemTokens"] = round((time.perf_counter() - t0) * 1000, 3)
+
+    t0 = time.perf_counter()
+    if tokenizer_ok and context_size and context_size >= 1:
+        pretrim_budget = max(int(context_size) - system_tokens, 0)
+        base_conversation = _trim_main_chat_conversation(conversation, pretrim_budget)
+    else:
+        base_conversation = list(conversation)
+    profile["segmentsMs"]["pretrim"] = round((time.perf_counter() - t0) * 1000, 3)
+
+    t0 = time.perf_counter()
+    worldbook_order = list(getattr(chat.overrides, "worldBookIds", []) or [])
+    wb_global_excl = set(getattr(chat.overrides, "worldBookGlobalExclusions", []) or [])
+    active_books = collect_active_worldbooks(chat.id, worldbook_order, wb_global_excl)
+    profile["segmentsMs"]["worldbookLoad"] = round((time.perf_counter() - t0) * 1000, 3)
+    profile["counters"]["worldbooksLoaded"] = len(active_books)
+    profile["counters"]["worldbooksConsidered"] = len(active_books)
+
+    selected_books = list(active_books)
+    selected_book_ids = {book.id for book in selected_books}
+    worldbook_meta: dict[str, dict[str, Any]] = {}
+    worldbook_token_known = True
+    worldbook_tokens_total = 0
+    runtime_map = _book_worldbook_runtime_settings(chat, settings)
+
+    t0 = time.perf_counter()
+    for book in selected_books:
+        eff_scan, ins_dep = _runtime_scan_insert_for_book(book.id, chat, settings, runtime_map=runtime_map)
+        entries = match_worldbook_entries(book, base_conversation, eff_scan)
+        profile["counters"]["matchPass1"] += 1
+        injections = build_worldbook_injections(book, entries, len(base_conversation), ins_dep)
+        token_count = count_tokens_for_messages([item["message"] for item in injections]) if injections else 0
+        if token_count is None:
+            worldbook_token_known = False
+            token_count = 0
+        worldbook_meta[book.id] = {
+            "entries": entries,
+            "injections": injections,
+            "tokens": token_count,
+            "eff_scan": eff_scan,
+            "ins_dep": ins_dep,
+        }
+        worldbook_tokens_total += token_count
+    profile["segmentsMs"]["worldbookMatch1"] = round((time.perf_counter() - t0) * 1000, 3)
+
+    t0 = time.perf_counter()
+    if tokenizer_ok and context_size and context_size >= 1 and worldbook_token_known:
+        budget = int(context_size)
+        while selected_books and (system_tokens + worldbook_tokens_total) > budget:
+            removed = selected_books.pop()
+            selected_book_ids.discard(removed.id)
+            worldbook_tokens_total -= int(worldbook_meta.get(removed.id, {}).get("tokens", 0))
+    profile["segmentsMs"]["worldbookBudget"] = round((time.perf_counter() - t0) * 1000, 3)
+
+    t0 = time.perf_counter()
+    if tokenizer_ok and context_size and context_size >= 1:
+        history_budget = int(context_size) - system_tokens
+        if worldbook_token_known:
+            history_budget -= max(worldbook_tokens_total, 0)
+        history_budget = max(history_budget, 0)
+        conversation = _trim_main_chat_conversation(base_conversation, history_budget)
+    else:
+        conversation = list(base_conversation)
+    profile["segmentsMs"]["historyTrim"] = round((time.perf_counter() - t0) * 1000, 3)
+
+    t0 = time.perf_counter()
+    final_injections: list[dict[str, Any]] = []
+    for book in active_books:
+        if book.id not in selected_book_ids:
+            continue
+        meta = worldbook_meta.get(book.id) or {}
+        eff_scan = int(meta.get("eff_scan") or _runtime_scan_insert_for_book(book.id, chat, settings, runtime_map=runtime_map)[0])
+        ins_dep = int(meta.get("ins_dep") or 5)
+        if _scan_scope_equivalent(base_conversation, conversation, eff_scan):
+            entries = list(meta.get("entries") or [])
+            collect_worldbook_regex_warnings(book, warnings)
+            profile["counters"]["matchReused"] += 1
+        else:
+            entries = match_worldbook_entries(
+                book, conversation, eff_scan, warnings_out=warnings
+            )
+            profile["counters"]["matchPass2"] += 1
+        final_injections.extend(build_worldbook_injections(book, entries, len(conversation), ins_dep))
+    conversation = insert_injections_into_conversation(conversation, final_injections)
+    profile["segmentsMs"]["worldbookMatch2"] = round((time.perf_counter() - t0) * 1000, 3)
+    profile["segmentsMs"]["prepTotal"] = round((time.perf_counter() - prep_started) * 1000, 3)
+    _last_generate_prep_profile = profile
+    return conversation, warnings, profile
 
 
 def _resolve_char_name_for_draft_help(chat) -> str:
@@ -971,8 +1138,6 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="chat not found")
 
-    ensure_mvu_worker(chat.id)
-
     settings = load_settings()
     web_search_enabled = _ensure_web_search_ready(
         settings,
@@ -982,6 +1147,8 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
         character = load_character(chat.characterId)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="character not found for chat")
+
+    ensure_mvu_worker(chat.id, chat=chat, character=character)
 
     pure_ai_mode = _resolve_pure_ai_mode(settings, chat, req.runtimeOverrides)
 
@@ -1171,61 +1338,13 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
         getattr(chat.overrides, "contextStartMessageId", None),
         getattr(chat.overrides, "contextStartKeepBeforeMessages", None),
     )
-    worldbook_regex_warnings: list[dict[str, Any]] = []
-    system_tokens, tokenizer_ok = _resolve_system_tokens_for_budget(
-        system_prompt, warnings_out=worldbook_regex_warnings
+    conversation, worldbook_regex_warnings, _prep_profile = prepare_conversation_with_worldbooks(
+        conversation=conversation,
+        chat=chat,
+        settings=settings,
+        system_prompt=system_prompt,
+        context_size=context_size,
     )
-    if tokenizer_ok and context_size and context_size >= 1:
-        pretrim_budget = max(int(context_size) - system_tokens, 0)
-        base_conversation = _trim_main_chat_conversation(conversation, pretrim_budget)
-    else:
-        base_conversation = list(conversation)
-
-    worldbook_order = list(getattr(chat.overrides, "worldBookIds", []) or [])
-    wb_global_excl = set(getattr(chat.overrides, "worldBookGlobalExclusions", []) or [])
-    active_books = collect_active_worldbooks(chat.id, worldbook_order, wb_global_excl)
-    selected_books = list(active_books)
-    selected_book_ids = {book.id for book in selected_books}
-    worldbook_meta: dict[str, dict[str, Any]] = {}
-    worldbook_token_known = True
-    worldbook_tokens_total = 0
-    for book in selected_books:
-        eff_scan, ins_dep = _runtime_scan_insert_for_book(book.id, chat, settings)
-        entries = match_worldbook_entries(book, base_conversation, eff_scan)
-        injections = build_worldbook_injections(book, entries, len(base_conversation), ins_dep)
-        token_count = count_tokens_for_messages([item["message"] for item in injections]) if injections else 0
-        if token_count is None:
-            worldbook_token_known = False
-            token_count = 0
-        worldbook_meta[book.id] = {"entries": entries, "injections": injections, "tokens": token_count}
-        worldbook_tokens_total += token_count
-
-    if tokenizer_ok and context_size and context_size >= 1 and worldbook_token_known:
-        budget = int(context_size)
-        while selected_books and (system_tokens + worldbook_tokens_total) > budget:
-            removed = selected_books.pop()
-            selected_book_ids.discard(removed.id)
-            worldbook_tokens_total -= int(worldbook_meta.get(removed.id, {}).get("tokens", 0))
-
-    if tokenizer_ok and context_size and context_size >= 1:
-        history_budget = int(context_size) - system_tokens
-        if worldbook_token_known:
-            history_budget -= max(worldbook_tokens_total, 0)
-        history_budget = max(history_budget, 0)
-        conversation = _trim_main_chat_conversation(base_conversation, history_budget)
-    else:
-        conversation = list(base_conversation)
-
-    final_injections: list[dict[str, Any]] = []
-    for book in active_books:
-        if book.id not in selected_book_ids:
-            continue
-        eff_scan, ins_dep = _runtime_scan_insert_for_book(book.id, chat, settings)
-        entries = match_worldbook_entries(
-            book, conversation, eff_scan, warnings_out=worldbook_regex_warnings
-        )
-        final_injections.extend(build_worldbook_injections(book, entries, len(conversation), ins_dep))
-    conversation = insert_injections_into_conversation(conversation, final_injections)
 
     messages: list[dict] = []
     if system_prompt:
@@ -1642,8 +1761,6 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
     if req.characterId not in chat.memberIds:
         raise HTTPException(status_code=400, detail="character is not a member of this group")
 
-    ensure_mvu_worker(chat.id)
-
     settings = load_settings()
     web_search_enabled = _ensure_web_search_ready(
         settings,
@@ -1654,6 +1771,8 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
         character = load_character(req.characterId)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="character not found")
+
+    ensure_mvu_worker(chat.id, chat=chat, character=character)
 
     runtime = req.runtimeOverrides
     selected_persona = _resolve_selected_persona(settings, chat, pure_ai_mode)
@@ -1842,61 +1961,13 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
         getattr(chat.overrides, "contextStartMessageId", None),
         getattr(chat.overrides, "contextStartKeepBeforeMessages", None),
     )
-    worldbook_regex_warnings: list[dict[str, Any]] = []
-    system_tokens, tokenizer_ok = _resolve_system_tokens_for_budget(
-        system_prompt, warnings_out=worldbook_regex_warnings
+    conversation, worldbook_regex_warnings, _prep_profile = prepare_conversation_with_worldbooks(
+        conversation=conversation,
+        chat=chat,
+        settings=settings,
+        system_prompt=system_prompt,
+        context_size=context_size,
     )
-    if tokenizer_ok and context_size and context_size >= 1:
-        pretrim_budget = max(int(context_size) - system_tokens, 0)
-        base_conversation = _trim_main_chat_conversation(conversation, pretrim_budget)
-    else:
-        base_conversation = list(conversation)
-
-    worldbook_order = list(getattr(chat.overrides, "worldBookIds", []) or [])
-    wb_global_excl = set(getattr(chat.overrides, "worldBookGlobalExclusions", []) or [])
-    active_books = collect_active_worldbooks(chat.id, worldbook_order, wb_global_excl)
-    selected_books = list(active_books)
-    selected_book_ids = {book.id for book in selected_books}
-    worldbook_meta: dict[str, dict[str, Any]] = {}
-    worldbook_token_known = True
-    worldbook_tokens_total = 0
-    for book in selected_books:
-        eff_scan, ins_dep = _runtime_scan_insert_for_book(book.id, chat, settings)
-        entries = match_worldbook_entries(book, base_conversation, eff_scan)
-        injections = build_worldbook_injections(book, entries, len(base_conversation), ins_dep)
-        token_count = count_tokens_for_messages([item["message"] for item in injections]) if injections else 0
-        if token_count is None:
-            worldbook_token_known = False
-            token_count = 0
-        worldbook_meta[book.id] = {"entries": entries, "injections": injections, "tokens": token_count}
-        worldbook_tokens_total += token_count
-
-    if tokenizer_ok and context_size and context_size >= 1 and worldbook_token_known:
-        budget = int(context_size)
-        while selected_books and (system_tokens + worldbook_tokens_total) > budget:
-            removed = selected_books.pop()
-            selected_book_ids.discard(removed.id)
-            worldbook_tokens_total -= int(worldbook_meta.get(removed.id, {}).get("tokens", 0))
-
-    if tokenizer_ok and context_size and context_size >= 1:
-        history_budget = int(context_size) - system_tokens
-        if worldbook_token_known:
-            history_budget -= max(worldbook_tokens_total, 0)
-        history_budget = max(history_budget, 0)
-        conversation = _trim_main_chat_conversation(base_conversation, history_budget)
-    else:
-        conversation = list(base_conversation)
-
-    final_injections: list[dict[str, Any]] = []
-    for book in active_books:
-        if book.id not in selected_book_ids:
-            continue
-        eff_scan, ins_dep = _runtime_scan_insert_for_book(book.id, chat, settings)
-        entries = match_worldbook_entries(
-            book, conversation, eff_scan, warnings_out=worldbook_regex_warnings
-        )
-        final_injections.extend(build_worldbook_injections(book, entries, len(conversation), ins_dep))
-    conversation = insert_injections_into_conversation(conversation, final_injections)
 
     messages: list[dict] = _build_group_api_messages(
         system_prompt=system_prompt,
@@ -2147,8 +2218,6 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
     if req.characterId not in chat.memberIds:
         raise HTTPException(status_code=400, detail="character is not a member of this group")
 
-    ensure_mvu_worker(chat.id)
-
     settings = load_settings()
     web_search_enabled = _ensure_web_search_ready(
         settings,
@@ -2159,6 +2228,8 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
         character = load_character(req.characterId)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="character not found")
+
+    ensure_mvu_worker(chat.id, chat=chat, character=character)
 
     selected_persona = _resolve_selected_persona(settings, chat, pure_ai_mode)
     runtime_user_name = selected_persona.name.strip() if selected_persona and selected_persona.name else "用户"
@@ -2339,61 +2410,13 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
         getattr(chat.overrides, "contextStartMessageId", None),
         getattr(chat.overrides, "contextStartKeepBeforeMessages", None),
     )
-    worldbook_regex_warnings: list[dict[str, Any]] = []
-    system_tokens, tokenizer_ok = _resolve_system_tokens_for_budget(
-        system_prompt, warnings_out=worldbook_regex_warnings
+    conversation, worldbook_regex_warnings, _prep_profile = prepare_conversation_with_worldbooks(
+        conversation=conversation,
+        chat=chat,
+        settings=settings,
+        system_prompt=system_prompt,
+        context_size=context_size,
     )
-    if tokenizer_ok and context_size and context_size >= 1:
-        pretrim_budget = max(int(context_size) - system_tokens, 0)
-        base_conversation = _trim_main_chat_conversation(conversation, pretrim_budget)
-    else:
-        base_conversation = list(conversation)
-
-    worldbook_order = list(getattr(chat.overrides, "worldBookIds", []) or [])
-    wb_global_excl = set(getattr(chat.overrides, "worldBookGlobalExclusions", []) or [])
-    active_books = collect_active_worldbooks(chat.id, worldbook_order, wb_global_excl)
-    selected_books = list(active_books)
-    selected_book_ids = {book.id for book in selected_books}
-    worldbook_meta: dict[str, dict[str, Any]] = {}
-    worldbook_token_known = True
-    worldbook_tokens_total = 0
-    for book in selected_books:
-        eff_scan, ins_dep = _runtime_scan_insert_for_book(book.id, chat, settings)
-        entries = match_worldbook_entries(book, base_conversation, eff_scan)
-        injections = build_worldbook_injections(book, entries, len(base_conversation), ins_dep)
-        token_count = count_tokens_for_messages([item["message"] for item in injections]) if injections else 0
-        if token_count is None:
-            worldbook_token_known = False
-            token_count = 0
-        worldbook_meta[book.id] = {"entries": entries, "injections": injections, "tokens": token_count}
-        worldbook_tokens_total += token_count
-
-    if tokenizer_ok and context_size and context_size >= 1 and worldbook_token_known:
-        budget = int(context_size)
-        while selected_books and (system_tokens + worldbook_tokens_total) > budget:
-            removed = selected_books.pop()
-            selected_book_ids.discard(removed.id)
-            worldbook_tokens_total -= int(worldbook_meta.get(removed.id, {}).get("tokens", 0))
-
-    if tokenizer_ok and context_size and context_size >= 1:
-        history_budget = int(context_size) - system_tokens
-        if worldbook_token_known:
-            history_budget -= max(worldbook_tokens_total, 0)
-        history_budget = max(history_budget, 0)
-        conversation = _trim_main_chat_conversation(base_conversation, history_budget)
-    else:
-        conversation = list(base_conversation)
-
-    final_injections: list[dict[str, Any]] = []
-    for book in active_books:
-        if book.id not in selected_book_ids:
-            continue
-        eff_scan, ins_dep = _runtime_scan_insert_for_book(book.id, chat, settings)
-        entries = match_worldbook_entries(
-            book, conversation, eff_scan, warnings_out=worldbook_regex_warnings
-        )
-        final_injections.extend(build_worldbook_injections(book, entries, len(conversation), ins_dep))
-    conversation = insert_injections_into_conversation(conversation, final_injections)
 
     messages: list[dict] = _build_group_api_messages(
         system_prompt=system_prompt,

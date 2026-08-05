@@ -1,6 +1,6 @@
 # T-803 v0.800 性能基线与基础设施
 
-- status: in-progress（3A/3B/3C 已完成；下一棒 3D）
+- status: completed（3A–3D 均已完成）
 - area: backend HTTP / I/O / 索引
 - priority: P0
 - theme: 先测量再优化；共享连接池、索引与锁；每项有基线与回归门槛
@@ -53,7 +53,8 @@
 | scanner 冷扫 100 chats | — | 130.21 ms；门槛 `< 5000 ms` | 3C done |
 | scanner 暖扫 100（mtime 跳过） | — | 16.54 ms；门槛 `< max(100, 冷×25%)` | 3C done |
 | portalocker 等待 | 不可见 | health 含 waitMs / acquireCount | 3C done |
-| generate worldbook/trim | 未 profiling | 有火焰图或分段计时 | 3D |
+| generate worldbook/trim | 未 profiling；全库 list_worldbooks；match 双遍 | 分段计时 + 激活索引 + match 复用 | 3D done |
+| generate prep（20 书/2 激活） | — | prepTotal ≈ 5.13 ms；只 load 2 本；门槛 `< 2000 ms` | 3D done |
 
 ## 3A 实现要点
 
@@ -107,3 +108,12 @@ python -m pytest tests/ -q
 - 锁观测：`get_lock_observability()`；`/api/content-regex/health` 增加 `lastScanDurationMs`、`chatsLoaded`、`chatsSkippedUnchanged`、`lockWaitMs*`。
 - 基线（本机）：冷扫 100 会话 `130.21 ms`；暖扫 `16.54 ms`。
 - 测试：`test_content_regex_scanner_baseline.py`；门禁后端 214 passed。
+
+### 3D（已完成）
+
+- 抽取 `prepare_conversation_with_worldbooks`：单聊/群聊/插话共用；分段计时写入 `get_last_generate_prep_profile()`。
+- 新增 `worldbook_index`（激活元数据）；`collect_active_worldbooks` 只 `load_worldbook` 激活项；save/delete/lifespan 维护。
+- `ensure_mvu_worker(chat=, character=)` 复用已加载对象，避免 generate 热路径二次读盘。
+- 二次 trim 后扫描窗口未变时复用 pass1 match（仍单独收集 regex warnings）。
+- 基线（本机）：20 书/2 激活 prepTotal `5.13 ms`；`worldbooksLoaded=2`；`matchReused=2`。
+- 测试：`test_generate_prep_baseline.py`；门禁后端 220 passed。

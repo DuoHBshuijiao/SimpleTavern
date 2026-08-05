@@ -81,6 +81,13 @@ async def _warm_chat_path_index() -> None:
     await asyncio.to_thread(warm_chat_path_index)
 
 
+async def _warm_worldbook_index() -> None:
+    """启动后预热世界书激活索引，避免首个 generate 全库读盘。"""
+    from app.worldbook_index import warm_worldbook_index
+
+    await asyncio.to_thread(warm_worldbook_index)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -92,6 +99,7 @@ async def lifespan(app: FastAPI):
     await startup_http_clients()
     fork_index_task = asyncio.create_task(_warm_fork_index())
     chat_path_index_task = asyncio.create_task(_warm_chat_path_index())
+    worldbook_index_task = asyncio.create_task(_warm_worldbook_index())
     integrity_scan_task = asyncio.create_task(data_integrity_service.run_startup_scan())
     await tts_cache_patrol.start()
     await http_log_sweeper.start()
@@ -106,6 +114,7 @@ async def lifespan(app: FastAPI):
         await shutdown_http_clients()
         fork_index_task.cancel()
         chat_path_index_task.cancel()
+        worldbook_index_task.cancel()
         integrity_scan_task.cancel()
         try:
             await fork_index_task
@@ -113,6 +122,10 @@ async def lifespan(app: FastAPI):
             pass
         try:
             await chat_path_index_task
+        except asyncio.CancelledError:
+            pass
+        try:
+            await worldbook_index_task
         except asyncio.CancelledError:
             pass
         try:

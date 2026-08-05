@@ -958,6 +958,16 @@ def save_worldbook(book: WorldBook) -> WorldBook:
             e.pop("insertDepth", None)
             e.pop("scanDepth", None)
     write_json(worldbook_path(book.id), data)
+    try:
+        from app.worldbook_index import upsert_worldbook_activation
+
+        upsert_worldbook_activation(
+            book.id,
+            global_active=bool(book.globalActive),
+            session_chat_ids=list(book.sessionChatIds or []),
+        )
+    except Exception as exc:
+        logger.warning("worldbook_index upsert failed for %s: %s", book.id, exc)
     return book
 
 
@@ -970,6 +980,12 @@ def delete_worldbook(worldbook_id: str) -> None:
         with _lock_for(p):
             p.unlink(missing_ok=True)
     _lock_file_path(p).unlink(missing_ok=True)
+    try:
+        from app.worldbook_index import remove_worldbook_activation
+
+        remove_worldbook_activation(worldbook_id)
+    except Exception as exc:
+        logger.warning("worldbook_index remove failed for %s: %s", worldbook_id, exc)
 
 
 def delete_character(character_id: str, delete_related_chats: bool = True) -> None:
