@@ -1,4 +1,4 @@
-"""T-805-5B: Anthropic Messages adapter (no tools / cache off)."""
+"""T-805-5B / T-806-6A / T-806-6B: Anthropic Messages adapter (tools + cache)."""
 
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ from unittest.mock import patch
 import httpx
 import pytest
 
-from app.errors import AppError
 from app.llm.providers.anthropic_messages import (
     AnthropicMessagesAdapter,
     _build_payload,
@@ -56,30 +55,78 @@ def test_convert_messages_extracts_system_and_merges_roles() -> None:
     ]
 
 
-def test_tools_in_config_fast_fail() -> None:
-    adapter = AnthropicMessagesAdapter()
-    with pytest.raises(AppError) as exc:
-        adapter.build_request(
-            base_url="https://api.anthropic.com",
-            api_key="k",
-            messages=[{"role": "user", "content": "hi"}],
-            config=GenerationConfig(
-                model="claude-sonnet-4-5",
-                tools=[{"type": "function", "function": {"name": "web_search"}}],
-            ),
-        )
-    assert exc.value.code == "provider_capability_unsupported"
+def test_build_payload_includes_converted_tools_and_choice() -> None:
+    payload = _build_payload(
+        model="claude-sonnet-4-5",
+        messages=[{"role": "user", "content": "hi"}],
+        stream=False,
+        temperature=None,
+        top_p=None,
+        max_tokens=128,
+        extra_body={"tool_choice": "required"},
+        tools=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "web_search",
+                    "description": "Search the web",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"q": {"type": "string"}},
+                        "required": ["q"],
+                    },
+                },
+            }
+        ],
+        tool_choice=None,
+    )
+    assert payload["tools"] == [
+        {
+            "name": "web_search",
+            "description": "Search the web",
+            "input_schema": {
+                "type": "object",
+                "properties": {"q": {"type": "string"}},
+                "required": ["q"],
+            },
+        }
+    ]
+    assert payload["tool_choice"] == {"type": "any"}
 
 
-def test_tool_role_in_messages_fast_fail() -> None:
-    with pytest.raises(AppError) as exc:
-        _convert_messages(
-            [
-                {"role": "user", "content": "hi"},
-                {"role": "tool", "tool_call_id": "x", "content": "result"},
-            ]
-        )
-    assert exc.value.code == "provider_capability_unsupported"
+def test_convert_messages_tool_use_and_tool_result() -> None:
+    system, msgs = _convert_messages(
+        [
+            {"role": "user", "content": "search something"},
+            {
+                "role": "assistant",
+                "content": "ok",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "web_search", "arguments": '{"q":"hi"}'},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": "result-a"},
+            {"role": "tool", "tool_call_id": "call_2", "content": "result-b"},
+        ]
+    )
+    assert system is None
+    assert msgs[0] == {"role": "user", "content": "search something"}
+    assert msgs[1]["role"] == "assistant"
+    assert msgs[1]["content"] == [
+        {"type": "text", "text": "ok"},
+        {"type": "tool_use", "id": "call_1", "name": "web_search", "input": {"q": "hi"}},
+    ]
+    assert msgs[2] == {
+        "role": "user",
+        "content": [
+            {"type": "tool_result", "tool_use_id": "call_1", "content": "result-a"},
+            {"type": "tool_result", "tool_use_id": "call_2", "content": "result-b"},
+        ],
+    }
 
 
 def test_build_payload_defaults_max_tokens_and_strips_top_level_cache() -> None:
@@ -248,6 +295,58 @@ def test_complete_nonstream_text() -> None:
     assert result.tool_calls is None
 
 
+def test_complete_nonstream_returns_tool_calls() -> None:
+    adapter = AnthropicMessagesAdapter()
+    response = _FakeResponse(
+        payload={
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "toolu_1",
+                    "name": "web_search",
+                    "input": {"q": "weather"},
+                }
+            ],
+            "stop_reason": "tool_use",
+            "usage": {"input_tokens": 10, "output_tokens": 4},
+        }
+    )
+
+    async def run() -> Any:
+        with patch("app.llm.providers.anthropic_messages.get_async_http_client", return_value=_FakeClient(response)):
+            return await adapter.complete(
+                base_url="https://api.anthropic.com",
+                api_key="k",
+                messages=[{"role": "user", "content": "hi"}],
+                config=GenerationConfig(
+                    model="claude-sonnet-4-5",
+                    max_tokens=32,
+                    tools=[
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": "web_search",
+                                "parameters": {"type": "object", "properties": {}},
+                            },
+                        }
+                    ],
+                    tool_choice="auto",
+                ),
+                as_message=True,
+            )
+
+    result = asyncio.run(run())
+    assert result.content == ""
+    assert result.tool_calls == [
+        {
+            "id": "toolu_1",
+            "type": "function",
+            "function": {"name": "web_search", "arguments": '{"q": "weather"}'},
+        }
+    ]
+
+
 class _FakeStreamResponse:
     def __init__(self, lines: list[str], *, status_code: int = 200):
         self.status_code = status_code
@@ -322,25 +421,61 @@ def test_stream_yields_content_reasoning_and_finish() -> None:
     assert "".join(c.text for c in chunks if c.kind == "reasoning") == "hmm"
 
 
-def test_stream_tool_use_fast_fails() -> None:
+def test_stream_finish_includes_tool_calls() -> None:
     adapter = AnthropicMessagesAdapter()
     lines = [
         "event: content_block_start",
-        'data: {"type":"content_block_start","content_block":{"type":"tool_use","id":"t1","name":"web_search"}}',
+        'data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"t1","name":"web_search","input":{}}}',
+        "",
+        "event: content_block_delta",
+        'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"q\\":"}}',
+        "",
+        "event: content_block_delta",
+        'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\\"hi\\"}"}}',
+        "",
+        "event: content_block_stop",
+        'data: {"type":"content_block_stop","index":0}',
+        "",
+        "event: message_delta",
+        'data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":3}}',
+        "",
+        "event: message_stop",
+        'data: {"type":"message_stop"}',
         "",
     ]
     response = _FakeStreamResponse(lines)
 
-    async def run() -> None:
+    async def run() -> list[Any]:
+        out = []
         with patch("app.llm.providers.anthropic_messages.get_async_http_client", return_value=_FakeStreamClient(response)):
-            async for _ in adapter.stream(
+            async for chunk in adapter.stream(
                 base_url="https://api.anthropic.com",
                 api_key="k",
                 messages=[{"role": "user", "content": "hi"}],
-                config=GenerationConfig(model="claude-sonnet-4-5", max_tokens=32, stream=True),
+                config=GenerationConfig(
+                    model="claude-sonnet-4-5",
+                    max_tokens=32,
+                    stream=True,
+                    tools=[
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": "web_search",
+                                "parameters": {"type": "object", "properties": {}},
+                            },
+                        }
+                    ],
+                ),
             ):
-                pass
+                out.append(chunk)
+        return out
 
-    with pytest.raises(AppError) as exc:
-        asyncio.run(run())
-    assert exc.value.code == "provider_capability_unsupported"
+    chunks = asyncio.run(run())
+    assert chunks[-1].kind == "finish"
+    assert chunks[-1].tool_calls == [
+        {
+            "id": "t1",
+            "type": "function",
+            "function": {"name": "web_search", "arguments": '{"q":"hi"}'},
+        }
+    ]

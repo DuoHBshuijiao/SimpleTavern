@@ -1,4 +1,4 @@
-"""T-805-5C: Gemini generateContent adapter (no tools; not OpenAI-compat shim)."""
+"""T-805-5C / T-806-6B: Gemini generateContent adapter (tools round-trip)."""
 
 from __future__ import annotations
 
@@ -71,16 +71,113 @@ def test_convert_messages_maps_roles_and_system() -> None:
     assert contents[2]["role"] == "user"
 
 
-def test_tools_fast_fail() -> None:
+def test_tools_and_tool_choice_mapped() -> None:
+    """Former test_tools_fast_fail — tools are mapped, not rejected."""
     adapter = GeminiGenerateContentAdapter()
+    wire = adapter.build_request(
+        base_url="https://generativelanguage.googleapis.com",
+        api_key="k",
+        messages=[{"role": "user", "content": "hi"}],
+        config=GenerationConfig(
+            model="gemini-2.5-flash",
+            tools=[
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "web_search",
+                        "description": "search the web",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"query": {"type": "string"}},
+                            "required": ["query"],
+                        },
+                    },
+                }
+            ],
+            tool_choice="auto",
+        ),
+    )
+    body = wire.json_body or {}
+    assert body["tools"] == [
+        {
+            "functionDeclarations": [
+                {
+                    "name": "web_search",
+                    "description": "search the web",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"query": {"type": "string"}},
+                        "required": ["query"],
+                    },
+                }
+            ]
+        }
+    ]
+    assert body["toolConfig"] == {"functionCallingConfig": {"mode": "AUTO"}}
+
+
+def test_tool_choice_required_and_named() -> None:
+    payload = _build_payload(
+        messages=[{"role": "user", "content": "hi"}],
+        temperature=None,
+        top_p=None,
+        max_tokens=None,
+        extra_body=None,
+        tools=[{"type": "function", "function": {"name": "a"}}],
+        tool_choice="required",
+    )
+    assert payload["toolConfig"]["functionCallingConfig"]["mode"] == "ANY"
+
+    payload2 = _build_payload(
+        messages=[{"role": "user", "content": "hi"}],
+        temperature=None,
+        top_p=None,
+        max_tokens=None,
+        extra_body={"tool_choice": {"type": "function", "function": {"name": "web_search"}}},
+        tools=[{"type": "function", "function": {"name": "web_search"}}],
+    )
+    assert payload2["toolConfig"] == {
+        "functionCallingConfig": {"mode": "ANY", "allowedFunctionNames": ["web_search"]}
+    }
+
+
+def test_convert_messages_tool_round_trip() -> None:
+    system, contents = _convert_messages(
+        [
+            {"role": "user", "content": "weather?"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "get_weather", "arguments": '{"city":"SF"}'},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": '{"temp":72}'},
+        ]
+    )
+    assert system is None
+    assert contents[0]["role"] == "user"
+    assert contents[1]["role"] == "model"
+    assert contents[1]["parts"] == [{"functionCall": {"name": "get_weather", "args": {"city": "SF"}}}]
+    assert contents[2]["role"] == "user"
+    assert contents[2]["parts"] == [
+        {"functionResponse": {"name": "get_weather", "response": {"temp": 72}}}
+    ]
+
+
+def test_tool_message_without_resolvable_name_fast_fails() -> None:
     with pytest.raises(AppError) as exc:
-        adapter.build_request(
-            base_url="https://generativelanguage.googleapis.com",
-            api_key="k",
-            messages=[{"role": "user", "content": "hi"}],
-            config=GenerationConfig(model="gemini-2.5-flash", tools=[{"type": "function"}]),
+        _convert_messages(
+            [
+                {"role": "user", "content": "hi"},
+                {"role": "tool", "tool_call_id": "missing", "content": "{}"},
+            ]
         )
-    assert exc.value.code == "provider_capability_unsupported"
+    assert exc.value.code == "tool_call_invalid"
 
 
 def test_build_payload_thinking_and_defaults() -> None:
@@ -174,6 +271,49 @@ def test_complete_nonstream() -> None:
     assert result.reasoning_content == "think"
 
 
+def test_complete_as_message_tool_calls() -> None:
+    adapter = GeminiGenerateContentAdapter()
+    response = _FakeResponse(
+        payload={
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {"functionCall": {"name": "web_search", "args": {"query": "news"}}},
+                        ]
+                    }
+                }
+            ]
+        }
+    )
+
+    async def run() -> Any:
+        with patch(
+            "app.llm.providers.gemini_generate_content.get_async_http_client",
+            return_value=_FakeClient(response),
+        ):
+            return await adapter.complete(
+                base_url="https://generativelanguage.googleapis.com",
+                api_key="k",
+                messages=[{"role": "user", "content": "hi"}],
+                config=GenerationConfig(
+                    model="gemini-2.5-flash",
+                    tools=[{"type": "function", "function": {"name": "web_search"}}],
+                ),
+                as_message=True,
+            )
+
+    result = asyncio.run(run())
+    assert result.content is None
+    assert result.tool_calls == [
+        {
+            "id": "call_web_search_0",
+            "type": "function",
+            "function": {"name": "web_search", "arguments": '{"query": "news"}'},
+        }
+    ]
+
+
 class _FakeStreamResponse:
     def __init__(self, lines: list[str], *, status_code: int = 200):
         self.status_code = status_code
@@ -236,28 +376,38 @@ def test_stream_yields_content_and_finish() -> None:
     chunks = asyncio.run(run())
     assert "".join(c.text for c in chunks if c.kind == "content") == "hi!"
     assert chunks[-1].kind == "finish"
+    assert chunks[-1].tool_calls is None
 
 
-def test_stream_function_call_fast_fails() -> None:
+def test_stream_finish_with_tool_calls() -> None:
+    """Former test_stream_function_call_fast_fails — functionCall → finish.tool_calls."""
     adapter = GeminiGenerateContentAdapter()
     lines = [
-        'data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"web_search","args":{}}}]}}]}',
+        'data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"web_search","args":{"query":"x"}}}]}}]}',
         "",
     ]
 
-    async def run() -> None:
+    async def run() -> list[Any]:
+        out = []
         with patch(
             "app.llm.providers.gemini_generate_content.get_async_http_client",
             return_value=_FakeStreamClient(_FakeStreamResponse(lines)),
         ):
-            async for _ in adapter.stream(
+            async for chunk in adapter.stream(
                 base_url="https://generativelanguage.googleapis.com",
                 api_key="k",
                 messages=[{"role": "user", "content": "hi"}],
                 config=GenerationConfig(model="gemini-2.5-flash", stream=True),
             ):
-                pass
+                out.append(chunk)
+        return out
 
-    with pytest.raises(AppError) as exc:
-        asyncio.run(run())
-    assert exc.value.code == "provider_capability_unsupported"
+    chunks = asyncio.run(run())
+    assert chunks[-1].kind == "finish"
+    assert chunks[-1].tool_calls == [
+        {
+            "id": "call_web_search_0",
+            "type": "function",
+            "function": {"name": "web_search", "arguments": '{"query": "x"}'},
+        }
+    ]

@@ -2,6 +2,13 @@
 
 ## v0.800（进行中）
 
+### 多协议工具 round-trip（T-806-6B）
+
+- Anthropic Messages：OpenAI 形 tools ↔ `tool_use`/`tool_result`；流式 finish 携带 tool_calls。
+- Gemini generateContent：`functionDeclarations` / `functionCall` / `functionResponse` 往返。
+- OpenAI Responses：function tools（`function_call` / `function_call_output`）；内建 web_search 仍 fast-fail（归 6C）。
+- 前端协议下拉去掉「无工具」标注；后端 280 项测试通过。
+
 ### Anthropic Prompt Cache（T-806-6A）
 
 - 预设/全局增加 `anthropicPromptCache`：`off`（默认）| `5m` | `1h`；布尔旧值 true→`5m`、false→`off`。

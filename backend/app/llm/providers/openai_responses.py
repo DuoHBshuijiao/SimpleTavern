@@ -1,10 +1,11 @@
 """
-OpenAI Responses API provider adapter (T-805-5D).
+OpenAI Responses API provider adapter (T-805-5D / T-806-6B).
 
-Scope for 5D:
+Supports:
 - non-stream + stream text paths via /v1/responses typed SSE
 - reasoning_summary → StreamChunk(kind='reasoning')
-- tools / built-in web_search / function_call → provider_capability_unsupported (T-806)
+- function tools round-trip (Chat tools/messages ↔ Responses tools/items)
+- built-in web_search / hosted tools → provider_capability_unsupported (T-806-6C)
 """
 
 from __future__ import annotations
@@ -40,6 +41,33 @@ _RESPONSES_SUFFIX = "/responses"
 _APP_REFERER = "https://github.com/DuoHBshuijiao/SimpleTavern"
 _APP_TITLE = "SimpleTavern"
 
+# Hosted / built-in Responses tool types (not app-defined function tools).
+_BUILTIN_TOOL_TYPES = frozenset(
+    {
+        "web_search",
+        "web_search_preview",
+        "file_search",
+        "computer_use_preview",
+        "computer",
+        "code_interpreter",
+        "image_generation",
+        "mcp",
+        "custom",
+    }
+)
+
+_BUILTIN_OUTPUT_ITEM_TYPES = frozenset(
+    {
+        "web_search_call",
+        "file_search_call",
+        "computer_call",
+        "custom_tool_call",
+        "code_interpreter_call",
+        "image_generation_call",
+        "mcp_call",
+    }
+)
+
 
 def _protocol_error(
     *,
@@ -65,14 +93,14 @@ def _protocol_error(
 def _tools_unsupported(*, detail: str) -> AppError:
     return AppError(
         code="provider_capability_unsupported",
-        message="当前 OpenAI Responses 适配器尚未支持工具调用",
+        message="当前 OpenAI Responses 适配器尚未支持该工具能力",
         detail=detail,
         source="llm.openai_responses",
         status_code=400,
         retryable=False,
         provider=_PROVIDER,
         protocol=_PROTOCOL,
-        suggested_action="请改用 OpenAI Compatible Chat，或等待 T-806 工具/内建 web_search 支持",
+        suggested_action="请改用 function tools，或等待 T-806-6C 内建 web_search 支持",
     )
 
 
@@ -192,31 +220,118 @@ def _content_to_text(content: Any) -> str:
     return str(content)
 
 
-def _reject_tools_in_messages(messages: list[dict[str, Any]]) -> None:
-    for idx, msg in enumerate(messages):
-        if not isinstance(msg, dict):
+def _arguments_to_str(arguments: Any) -> str:
+    if isinstance(arguments, str):
+        return arguments
+    if arguments is None:
+        return "{}"
+    try:
+        return json.dumps(arguments, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return str(arguments)
+
+
+def _convert_tools(tools: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
+    """OpenAI Chat Completions tools → Responses function tools."""
+    if not tools:
+        return None
+    out: list[dict[str, Any]] = []
+    for idx, tool in enumerate(tools):
+        if not isinstance(tool, dict):
+            raise _protocol_error(
+                code="provider_request_invalid",
+                message="tools 项必须是对象",
+                detail=f"tools[{idx}] is {type(tool).__name__}",
+                status_code=400,
+            )
+        typ = tool.get("type")
+        if isinstance(typ, str) and typ in _BUILTIN_TOOL_TYPES:
+            raise _tools_unsupported(detail=f"built-in tool type={typ!r} (T-806-6C)")
+        if typ and typ != "function":
+            raise _tools_unsupported(detail=f"unsupported tool type={typ!r}")
+
+        # Chat nested: {type:function, function:{name,description,parameters}}
+        nested = tool.get("function")
+        if isinstance(nested, dict):
+            name = nested.get("name")
+            if not isinstance(name, str) or not name.strip():
+                raise _protocol_error(
+                    code="provider_request_invalid",
+                    message="function tool 缺少 name",
+                    detail=f"tools[{idx}].function.name missing",
+                    status_code=400,
+                )
+            item: dict[str, Any] = {
+                "type": "function",
+                "name": name.strip(),
+                "description": nested.get("description") if isinstance(nested.get("description"), str) else "",
+                "parameters": nested.get("parameters")
+                if isinstance(nested.get("parameters"), dict)
+                else {"type": "object", "properties": {}},
+            }
+            strict = nested.get("strict") if "strict" in nested else tool.get("strict")
+            if isinstance(strict, bool):
+                item["strict"] = strict
+            out.append(item)
             continue
-        role = msg.get("role")
-        if role == "tool":
-            raise _tools_unsupported(detail=f"messages[{idx}].role=tool")
-        if msg.get("tool_calls"):
-            raise _tools_unsupported(detail=f"messages[{idx}].tool_calls present")
-        if msg.get("tool_call_id"):
-            raise _tools_unsupported(detail=f"messages[{idx}].tool_call_id present")
+
+        # Already Responses-shaped: {type:function, name, parameters, ...}
+        name = tool.get("name")
+        if isinstance(name, str) and name.strip():
+            item = {
+                "type": "function",
+                "name": name.strip(),
+                "description": tool.get("description") if isinstance(tool.get("description"), str) else "",
+                "parameters": tool.get("parameters")
+                if isinstance(tool.get("parameters"), dict)
+                else {"type": "object", "properties": {}},
+            }
+            if isinstance(tool.get("strict"), bool):
+                item["strict"] = tool["strict"]
+            out.append(item)
+            continue
+
+        raise _protocol_error(
+            code="provider_request_invalid",
+            message="无法识别的 function tool 定义",
+            detail=f"tools[{idx}] missing function.name",
+            status_code=400,
+        )
+    return out or None
 
 
-def _reject_tools_in_config(config: GenerationConfig) -> None:
-    if config.tools:
-        raise _tools_unsupported(detail="GenerationConfig.tools is set")
-    if config.tool_choice is not None:
-        raise _tools_unsupported(detail="GenerationConfig.tool_choice is set")
-    extra = config.extra_body or {}
-    if extra.get("tools") is not None or extra.get("tool_choice") is not None:
-        raise _tools_unsupported(detail="extra_body contains tools/tool_choice")
+def _convert_tool_choice(tool_choice: Any) -> Any:
+    """Map Chat tool_choice to Responses tool_choice when needed."""
+    if tool_choice is None:
+        return None
+    if isinstance(tool_choice, str):
+        return tool_choice
+    if not isinstance(tool_choice, dict):
+        return tool_choice
+    typ = tool_choice.get("type")
+    if typ == "function":
+        if isinstance(tool_choice.get("name"), str) and tool_choice["name"].strip():
+            return {"type": "function", "name": tool_choice["name"].strip()}
+        nested = tool_choice.get("function")
+        if isinstance(nested, dict) and isinstance(nested.get("name"), str) and nested["name"].strip():
+            return {"type": "function", "name": nested["name"].strip()}
+    return tool_choice
+
+
+def _function_call_to_chat_tool_call(item: dict[str, Any]) -> dict[str, Any]:
+    call_id = item.get("call_id") or item.get("id") or ""
+    name = item.get("name") if isinstance(item.get("name"), str) else ""
+    return {
+        "id": call_id if isinstance(call_id, str) else str(call_id),
+        "type": "function",
+        "function": {
+            "name": name,
+            "arguments": _arguments_to_str(item.get("arguments")),
+        },
+    }
 
 
 def _convert_input(messages: list[dict[str, Any]]) -> tuple[str | None, list[dict[str, Any]]]:
-    _reject_tools_in_messages(messages)
     instructions_parts: list[str] = []
     items: list[dict[str, Any]] = []
 
@@ -225,21 +340,70 @@ def _convert_input(messages: list[dict[str, Any]]) -> tuple[str | None, list[dic
             continue
         role = (msg.get("role") or "").strip()
         content = msg.get("content")
+
         if role == "system":
             text = _content_to_text(content).strip()
             if text:
                 instructions_parts.append(text)
             continue
-        if role not in {"user", "assistant", "developer"}:
+
+        if role == "tool":
+            call_id = msg.get("tool_call_id")
+            if not isinstance(call_id, str) or not call_id.strip():
+                raise _protocol_error(
+                    code="provider_request_invalid",
+                    message="tool 消息缺少 tool_call_id",
+                    detail="role=tool requires tool_call_id",
+                    status_code=400,
+                )
+            items.append(
+                {
+                    "type": "function_call_output",
+                    "call_id": call_id.strip(),
+                    "output": _content_to_text(content),
+                }
+            )
+            continue
+
+        if role == "assistant":
+            tool_calls = msg.get("tool_calls")
+            text = _content_to_text(content)
+            if isinstance(tool_calls, list) and tool_calls:
+                if text.strip():
+                    items.append({"role": "assistant", "content": text})
+                for tc in tool_calls:
+                    if not isinstance(tc, dict):
+                        continue
+                    fn = tc.get("function") if isinstance(tc.get("function"), dict) else {}
+                    call_id = tc.get("id")
+                    name = fn.get("name") if isinstance(fn.get("name"), str) else ""
+                    if not isinstance(call_id, str) or not call_id.strip():
+                        raise _protocol_error(
+                            code="provider_request_invalid",
+                            message="assistant.tool_calls 缺少 id",
+                            detail="tool_calls[].id is required for Responses function_call",
+                            status_code=400,
+                        )
+                    items.append(
+                        {
+                            "type": "function_call",
+                            "call_id": call_id.strip(),
+                            "name": name,
+                            "arguments": _arguments_to_str(fn.get("arguments")),
+                        }
+                    )
+                continue
+            items.append({"role": "assistant", "content": text})
+            continue
+
+        if role not in {"user", "developer"}:
             raise _protocol_error(
                 code="provider_request_invalid",
                 message="消息角色不被 OpenAI Responses 支持",
                 detail=f"unsupported role={role!r}",
                 status_code=400,
             )
-        text = _content_to_text(content)
-        # Simple role/content form accepted by Responses API.
-        items.append({"role": role if role != "developer" else "developer", "content": text})
+        items.append({"role": role, "content": _content_to_text(content)})
 
     instructions = "\n\n".join(instructions_parts) if instructions_parts else None
     return instructions, items
@@ -283,6 +447,25 @@ def _sanitize_extra_body(extra_body: dict[str, Any] | None) -> dict[str, Any]:
     return out
 
 
+def _resolve_tools_and_choice(
+    *,
+    tools: list[dict[str, Any]] | None,
+    tool_choice: Any,
+    extra_body: dict[str, Any] | None,
+) -> tuple[list[dict[str, Any]] | None, Any]:
+    extra = extra_body or {}
+    resolved_tools = tools if tools is not None else extra.get("tools")
+    if resolved_tools is not None and not isinstance(resolved_tools, list):
+        raise _protocol_error(
+            code="provider_request_invalid",
+            message="tools 必须是数组",
+            detail=f"got {type(resolved_tools).__name__}",
+            status_code=400,
+        )
+    resolved_choice = tool_choice if tool_choice is not None else extra.get("tool_choice")
+    return _convert_tools(resolved_tools), _convert_tool_choice(resolved_choice)
+
+
 def _build_payload(
     *,
     model: str,
@@ -292,6 +475,8 @@ def _build_payload(
     top_p: float | None,
     max_tokens: int | None,
     extra_body: dict[str, Any] | None,
+    tools: list[dict[str, Any]] | None = None,
+    tool_choice: Any = None,
 ) -> dict[str, Any]:
     instructions, input_items = _convert_input(messages)
     if not input_items:
@@ -320,6 +505,16 @@ def _build_payload(
     if top_p is not None:
         payload["top_p"] = top_p
 
+    converted_tools, converted_choice = _resolve_tools_and_choice(
+        tools=tools,
+        tool_choice=tool_choice,
+        extra_body=extra_body,
+    )
+    if converted_tools is not None:
+        payload["tools"] = converted_tools
+    if converted_choice is not None:
+        payload["tool_choice"] = converted_choice
+
     extra = _sanitize_extra_body(extra_body)
     # If reasoning effort is set, Responses often expects temperature omitted/1.
     if "reasoning" in extra and temperature is not None:
@@ -346,19 +541,22 @@ def _decode_json_object(response: httpx.Response, *, context: str) -> dict[str, 
     return data
 
 
-def _extract_text_and_reasoning(data: dict[str, Any]) -> tuple[str, str | None]:
-    # Prefer convenience field when present.
+def _extract_output(data: dict[str, Any]) -> tuple[str, str | None, list[dict[str, Any]] | None]:
     convenience = data.get("output_text")
     texts: list[str] = []
     reasonings: list[str] = []
+    tool_calls: list[dict[str, Any]] = []
     output = data.get("output")
     if isinstance(output, list):
         for item in output:
             if not isinstance(item, dict):
                 continue
             typ = item.get("type")
-            if typ in {"function_call", "custom_tool_call", "web_search_call", "file_search_call", "computer_call"}:
+            if typ in _BUILTIN_OUTPUT_ITEM_TYPES:
                 raise _tools_unsupported(detail=f"response output item type={typ}")
+            if typ == "function_call":
+                tool_calls.append(_function_call_to_chat_tool_call(item))
+                continue
             if typ == "reasoning":
                 summary = item.get("summary")
                 if isinstance(summary, list):
@@ -379,7 +577,7 @@ def _extract_text_and_reasoning(data: dict[str, Any]) -> tuple[str, str | None]:
     if not text and isinstance(convenience, str):
         text = convenience
     reasoning = "".join(reasonings).strip() or None
-    return text, reasoning
+    return text, reasoning, (tool_calls or None)
 
 
 def _iter_text_chunks(text: str) -> list[str]:
@@ -482,7 +680,6 @@ async def complete_responses(
     config: GenerationConfig,
     as_message: bool = False,
 ) -> ChatCompletionResult | ChatCompletionMessage:
-    _reject_tools_in_config(config)
     url = _responses_url(base_url)
     headers = {
         "Accept": "application/json",
@@ -497,6 +694,8 @@ async def complete_responses(
         top_p=config.top_p,
         max_tokens=config.max_tokens,
         extra_body=config.extra_body,
+        tools=config.tools,
+        tool_choice=config.tool_choice,
     )
     try:
         async with log_outbound(
@@ -513,20 +712,20 @@ async def complete_responses(
             _raise_http_error(r)
             data = _decode_json_object(r, context="openai responses")
             _log.set_response(body=data)
-            text, reasoning = _extract_text_and_reasoning(data)
+            text, reasoning, tool_calls = _extract_output(data)
             _ = decode_usage(data.get("usage") if isinstance(data.get("usage"), dict) else None)
             if as_message:
                 return ChatCompletionMessage(
                     role="assistant",
                     content=text,
                     reasoning_content=reasoning,
-                    tool_calls=None,
+                    tool_calls=tool_calls,
                 )
-            if not text.strip() and not reasoning:
+            if not text.strip() and not reasoning and not tool_calls:
                 raise _protocol_error(
                     code="provider_response_invalid",
                     message="上游服务未返回有效文本",
-                    detail="openai responses: empty output_text and reasoning summary",
+                    detail="openai responses: empty output_text, reasoning summary, and tool_calls",
                 )
             return ChatCompletionResult(text=text)
     except AppError:
@@ -543,11 +742,8 @@ async def complete_responses(
         ) from exc
 
 
-_TOOLISH_EVENT_TYPES = frozenset(
+_BUILTIN_STREAM_EVENT_TYPES = frozenset(
     {
-        "response.function_call_arguments.delta",
-        "response.function_call_arguments.done",
-        "response.output_item.added",
         "response.web_search_call.in_progress",
         "response.web_search_call.searching",
         "response.web_search_call.completed",
@@ -567,7 +763,6 @@ async def stream_responses(
     messages: list[dict[str, Any]],
     config: GenerationConfig,
 ) -> AsyncIterator[StreamChunk]:
-    _reject_tools_in_config(config)
     url = _responses_url(base_url)
     headers = {
         "Accept": "text/event-stream",
@@ -582,6 +777,8 @@ async def stream_responses(
         top_p=config.top_p,
         max_tokens=config.max_tokens,
         extra_body=config.extra_body,
+        tools=config.tools,
+        tool_choice=config.tool_choice,
     )
 
     saw_output = False
@@ -599,6 +796,9 @@ async def stream_responses(
         ) as _log:
             aggregated_content: list[str] = []
             aggregated_reasoning: list[str] = []
+            # item_id (fc_*) → Chat-shaped tool_call; preserve insertion order
+            tool_calls_by_item: dict[str, dict[str, Any]] = {}
+            tool_call_order: list[str] = []
             client = get_async_http_client()
             async with client.stream("POST", url, headers=headers, json=payload, timeout=None) as r:
                 _log.set_response(status=r.status_code, headers=dict(r.headers))
@@ -641,7 +841,23 @@ async def stream_responses(
                         )
 
                     etype = event_name or str(data.get("type") or "")
-                    if etype in {"response.created", "response.in_progress", "response.output_text.done"}:
+                    if etype in {
+                        "response.created",
+                        "response.in_progress",
+                        "response.output_text.done",
+                        "response.output_item.done",
+                    }:
+                        # output_item.done may carry final function_call; sync if present.
+                        if etype == "response.output_item.done":
+                            item = data.get("item")
+                            if isinstance(item, dict) and item.get("type") == "function_call":
+                                item_id = item.get("id")
+                                key = item_id if isinstance(item_id, str) and item_id else f"idx-{data.get('output_index')}"
+                                chat_tc = _function_call_to_chat_tool_call(item)
+                                if key not in tool_calls_by_item:
+                                    tool_call_order.append(key)
+                                tool_calls_by_item[key] = chat_tc
+                                saw_output = True
                         continue
                     if etype == "error" or data.get("type") == "error":
                         err = data.get("error") if isinstance(data.get("error"), dict) else data
@@ -654,22 +870,43 @@ async def stream_responses(
                             detail=msg or data_str[:500],
                             retryable=True,
                         )
-                    if etype in _TOOLISH_EVENT_TYPES:
-                        # output_item.added may be message/reasoning — only fail on toolish items.
-                        if etype == "response.output_item.added":
-                            item = data.get("item")
-                            if isinstance(item, dict):
-                                item_type = item.get("type")
-                                if item_type in {
-                                    "function_call",
-                                    "web_search_call",
-                                    "file_search_call",
-                                    "computer_call",
-                                    "custom_tool_call",
-                                }:
-                                    raise _tools_unsupported(detail=f"stream output_item type={item_type}")
-                            continue
+                    if etype in _BUILTIN_STREAM_EVENT_TYPES:
                         raise _tools_unsupported(detail=f"stream event type={etype}")
+                    if etype == "response.output_item.added":
+                        item = data.get("item")
+                        if isinstance(item, dict):
+                            item_type = item.get("type")
+                            if item_type in _BUILTIN_OUTPUT_ITEM_TYPES:
+                                raise _tools_unsupported(detail=f"stream output_item type={item_type}")
+                            if item_type == "function_call":
+                                item_id = item.get("id")
+                                key = (
+                                    item_id
+                                    if isinstance(item_id, str) and item_id
+                                    else f"idx-{data.get('output_index')}"
+                                )
+                                chat_tc = _function_call_to_chat_tool_call(item)
+                                if key not in tool_calls_by_item:
+                                    tool_call_order.append(key)
+                                tool_calls_by_item[key] = chat_tc
+                                saw_output = True
+                        continue
+                    if etype == "response.function_call_arguments.delta":
+                        item_id = data.get("item_id")
+                        delta = data.get("delta")
+                        key = item_id if isinstance(item_id, str) and item_id else None
+                        if key and key in tool_calls_by_item and isinstance(delta, str) and delta:
+                            tool_calls_by_item[key]["function"]["arguments"] += delta
+                            saw_output = True
+                        continue
+                    if etype == "response.function_call_arguments.done":
+                        item_id = data.get("item_id")
+                        arguments = data.get("arguments")
+                        key = item_id if isinstance(item_id, str) and item_id else None
+                        if key and key in tool_calls_by_item and isinstance(arguments, str):
+                            tool_calls_by_item[key]["function"]["arguments"] = arguments
+                            saw_output = True
+                        continue
                     if etype == "response.output_text.delta":
                         delta = data.get("delta")
                         if isinstance(delta, str) and delta:
@@ -695,23 +932,27 @@ async def stream_responses(
                             terminal_usage = data["usage"]
                         continue
 
-            _ = decode_usage(terminal_usage)
-            _log.set_response(
-                body={
-                    "_aggregated": True,
-                    "content": "".join(aggregated_content),
-                    "reasoning_content": "".join(aggregated_reasoning) or None,
-                    "usage": terminal_usage,
-                    "completed": completed,
-                }
+            sorted_tool_calls = (
+                [tool_calls_by_item[k] for k in tool_call_order] if tool_call_order else None
             )
+            _ = decode_usage(terminal_usage)
+            body: dict[str, Any] = {
+                "_aggregated": True,
+                "content": "".join(aggregated_content),
+                "reasoning_content": "".join(aggregated_reasoning) or None,
+                "usage": terminal_usage,
+                "completed": completed,
+            }
+            if sorted_tool_calls:
+                body["tool_calls"] = sorted_tool_calls
+            _log.set_response(body=body)
             if not saw_output:
                 raise _protocol_error(
                     code="provider_response_invalid",
                     message="上游流未返回任何文本",
-                    detail="openai responses stream produced no output_text/reasoning deltas",
+                    detail="openai responses stream produced no output_text/reasoning/function_call",
                 )
-            yield StreamChunk(kind="finish", tool_calls=None)
+            yield StreamChunk(kind="finish", tool_calls=sorted_tool_calls)
     except AppError:
         raise
     except Exception as exc:
@@ -727,7 +968,7 @@ async def stream_responses(
 
 
 class OpenAIResponsesAdapter:
-    """ProviderAdapter for OpenAI Responses (no tools in 5D)."""
+    """ProviderAdapter for OpenAI Responses (function tools in T-806-6B)."""
 
     provider = _PROVIDER
     protocol = _PROTOCOL
@@ -765,7 +1006,6 @@ class OpenAIResponsesAdapter:
         if not isinstance(config, GenerationConfig):
             raise TypeError("config must be GenerationConfig")
         self.validate_config(base_url=base_url, api_key=api_key)
-        _reject_tools_in_config(config)
         url = _responses_url(base_url)
         headers = {
             "Accept": "application/json",
@@ -780,6 +1020,8 @@ class OpenAIResponsesAdapter:
             top_p=config.top_p,
             max_tokens=config.max_tokens,
             extra_body=config.extra_body,
+            tools=config.tools,
+            tool_choice=config.tool_choice,
         )
         return WireRequest(method="POST", url=url, headers=headers, json_body=payload)
 

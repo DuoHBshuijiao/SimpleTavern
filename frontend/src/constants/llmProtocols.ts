@@ -17,9 +17,9 @@ export const DEFAULT_LLM_PROTOCOL: LlmProtocolId = 'openai_compatible_chat'
 
 export const LLM_PROTOCOL_OPTIONS: Array<{ label: string; value: LlmProtocolId }> = [
   { label: 'OpenAI Compatible Chat（默认）', value: 'openai_compatible_chat' },
-  { label: 'Anthropic Messages（无工具）', value: 'anthropic_messages' },
-  { label: 'Gemini generateContent（无工具）', value: 'gemini_generate_content' },
-  { label: 'OpenAI Responses（无工具）', value: 'openai_responses' },
+  { label: 'Anthropic Messages', value: 'anthropic_messages' },
+  { label: 'Gemini generateContent', value: 'gemini_generate_content' },
+  { label: 'OpenAI Responses', value: 'openai_responses' },
 ]
 
 /** 仅空/非法类型回落到默认；未知非空协议原样保留。 */

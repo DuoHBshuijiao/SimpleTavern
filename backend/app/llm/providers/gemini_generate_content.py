@@ -1,8 +1,8 @@
 """
-Gemini generateContent / streamGenerateContent provider adapter (T-805-5C).
+Gemini generateContent / streamGenerateContent provider adapter (T-805-5C / T-806-6B).
 
 Native Google Generative Language API only — NOT the OpenAI-compatible
-`…/v1beta/openai` shim. Tools / functionCall deferred to T-806.
+`…/v1beta/openai` shim. Tools round-trip aligns with OpenAI Chat function tools.
 """
 
 from __future__ import annotations
@@ -64,17 +64,17 @@ def _protocol_error(
     )
 
 
-def _tools_unsupported(*, detail: str) -> AppError:
+def _tool_call_invalid(*, detail: str) -> AppError:
     return AppError(
-        code="provider_capability_unsupported",
-        message="当前 Gemini generateContent 适配器尚未支持工具调用",
+        code="tool_call_invalid",
+        message="工具调用无效",
         detail=detail,
         source="llm.gemini_generate_content",
         status_code=400,
         retryable=False,
         provider=_PROVIDER,
         protocol=_PROTOCOL,
-        suggested_action="请改用 OpenAI Compatible Chat，或等待 T-806 工具支持",
+        suggested_action="检查 tools / tool_calls / role=tool 消息是否符合 OpenAI function tools 契约",
     )
 
 
@@ -237,43 +237,202 @@ def _to_gemini_parts(content: Any) -> list[dict[str, Any]]:
                     detail="image_url content parts are not supported in T-805-5C",
                     status_code=400,
                 )
-            elif "functionCall" in item or "function_call" in item or typ == "function_call":
-                raise _tools_unsupported(detail="functionCall part in messages")
+            elif isinstance(item.get("functionCall"), dict):
+                parts.append({"functionCall": item["functionCall"]})
+            elif isinstance(item.get("function_call"), dict):
+                parts.append({"functionCall": item["function_call"]})
         return parts or [{"text": ""}]
     return [{"text": str(content)}]
 
 
-def _reject_tools_in_messages(messages: list[dict[str, Any]]) -> None:
-    for idx, msg in enumerate(messages):
-        if not isinstance(msg, dict):
+def _nonempty_text_parts(content: Any) -> list[dict[str, Any]]:
+    if content is None or content == "":
+        return []
+    return [p for p in _to_gemini_parts(content) if not ("text" in p and p.get("text") == "")]
+
+
+def _parse_tool_args_object(arguments: Any, *, detail: str) -> dict[str, Any]:
+    """OpenAI arguments (JSON string) → Gemini functionCall.args object."""
+    if arguments is None:
+        return {}
+    if isinstance(arguments, dict):
+        return arguments
+    if isinstance(arguments, str):
+        raw = arguments.strip()
+        if not raw:
+            return {}
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise _tool_call_invalid(detail=f"{detail}: arguments is not valid JSON ({exc})") from exc
+        if isinstance(parsed, dict):
+            return parsed
+        raise _tool_call_invalid(detail=f"{detail}: arguments JSON must be an object")
+    raise _tool_call_invalid(detail=f"{detail}: arguments must be a JSON string or object")
+
+
+def _args_to_openai_json_string(args: Any) -> str:
+    """Gemini functionCall.args → OpenAI arguments JSON string."""
+    if args is None:
+        return "{}"
+    if isinstance(args, str):
+        return args
+    return json.dumps(args, ensure_ascii=False)
+
+
+def _tool_response_object(content: Any) -> dict[str, Any]:
+    if content is None:
+        return {}
+    if isinstance(content, dict):
+        return content
+    if isinstance(content, str):
+        raw = content.strip()
+        if not raw:
+            return {}
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return {"result": content}
+        if isinstance(parsed, dict):
+            return parsed
+        return {"result": parsed}
+    text = _content_to_text(content)
+    if not text:
+        return {}
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return {"result": text}
+    if isinstance(parsed, dict):
+        return parsed
+    return {"result": parsed}
+
+
+def _map_openai_tools_to_gemini(tools: list[Any]) -> list[dict[str, Any]]:
+    """OpenAI function tools → Gemini `tools: [{functionDeclarations: [...]}]`."""
+    if not tools:
+        raise _tool_call_invalid(detail="tools is empty")
+    declarations: list[dict[str, Any]] = []
+    for idx, tool in enumerate(tools):
+        if not isinstance(tool, dict):
+            raise _tool_call_invalid(detail=f"tools[{idx}] is not an object")
+        fn = tool.get("function") if isinstance(tool.get("function"), dict) else None
+        if tool.get("type") == "function" or fn is not None:
+            if fn is None:
+                raise _tool_call_invalid(detail=f"tools[{idx}].function is missing")
+            name = fn.get("name")
+            if not isinstance(name, str) or not name.strip():
+                raise _tool_call_invalid(detail=f"tools[{idx}].function.name is missing")
+            decl: dict[str, Any] = {"name": name.strip()}
+            desc = fn.get("description")
+            if isinstance(desc, str) and desc:
+                decl["description"] = desc
+            if "parameters" in fn and fn["parameters"] is not None:
+                decl["parameters"] = fn["parameters"]
+            declarations.append(decl)
             continue
-        role = msg.get("role")
-        if role == "tool":
-            raise _tools_unsupported(detail=f"messages[{idx}].role=tool")
-        if msg.get("tool_calls"):
-            raise _tools_unsupported(detail=f"messages[{idx}].tool_calls present")
-        if msg.get("tool_call_id"):
-            raise _tools_unsupported(detail=f"messages[{idx}].tool_call_id present")
+        raise _tool_call_invalid(
+            detail=f"tools[{idx}] is not an OpenAI function tool (got keys={sorted(tool.keys())})"
+        )
+    if not declarations:
+        raise _tool_call_invalid(detail="tools produced no functionDeclarations")
+    return [{"functionDeclarations": declarations}]
 
 
-def _reject_tools_in_config(config: GenerationConfig) -> None:
-    if config.tools:
-        raise _tools_unsupported(detail="GenerationConfig.tools is set")
-    if config.tool_choice is not None:
-        raise _tools_unsupported(detail="GenerationConfig.tool_choice is set")
-    extra = config.extra_body or {}
-    if extra.get("tools") or extra.get("tool_choice") is not None:
-        raise _tools_unsupported(detail="extra_body contains tools/tool_choice")
-    if extra.get("tools") or extra.get("functionDeclarations") or extra.get("toolConfig"):
-        raise _tools_unsupported(detail="extra_body contains Gemini tool fields")
+def _map_tool_choice_to_gemini(tool_choice: Any) -> dict[str, Any]:
+    """OpenAI tool_choice → Gemini toolConfig.functionCallingConfig."""
+    if isinstance(tool_choice, str):
+        mode = tool_choice.strip().lower()
+        if mode == "auto":
+            return {"functionCallingConfig": {"mode": "AUTO"}}
+        if mode == "none":
+            return {"functionCallingConfig": {"mode": "NONE"}}
+        if mode == "required":
+            return {"functionCallingConfig": {"mode": "ANY"}}
+        raise _tool_call_invalid(detail=f"unsupported tool_choice={tool_choice!r}")
+    if isinstance(tool_choice, dict):
+        name: str | None = None
+        fn = tool_choice.get("function")
+        if isinstance(fn, dict) and isinstance(fn.get("name"), str):
+            name = fn["name"].strip() or None
+        if name is None and isinstance(tool_choice.get("name"), str):
+            name = tool_choice["name"].strip() or None
+        if name:
+            return {
+                "functionCallingConfig": {
+                    "mode": "ANY",
+                    "allowedFunctionNames": [name],
+                }
+            }
+        raise _tool_call_invalid(detail=f"unsupported tool_choice object: {tool_choice!r}")
+    raise _tool_call_invalid(detail=f"unsupported tool_choice type: {type(tool_choice).__name__}")
+
+
+def _assistant_tool_call_parts(
+    tool_calls: Any,
+    *,
+    id_to_name: dict[str, str],
+    msg_index: int,
+) -> list[dict[str, Any]]:
+    if not isinstance(tool_calls, list):
+        raise _tool_call_invalid(detail=f"messages[{msg_index}].tool_calls must be an array")
+    parts: list[dict[str, Any]] = []
+    for tc_idx, tc in enumerate(tool_calls):
+        if not isinstance(tc, dict):
+            raise _tool_call_invalid(detail=f"messages[{msg_index}].tool_calls[{tc_idx}] is not an object")
+        fn = tc.get("function")
+        if not isinstance(fn, dict):
+            raise _tool_call_invalid(
+                detail=f"messages[{msg_index}].tool_calls[{tc_idx}].function is missing"
+            )
+        name = fn.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise _tool_call_invalid(
+                detail=f"messages[{msg_index}].tool_calls[{tc_idx}].function.name is missing"
+            )
+        name = name.strip()
+        tc_id = tc.get("id")
+        if isinstance(tc_id, str) and tc_id:
+            id_to_name[tc_id] = name
+        args = _parse_tool_args_object(
+            fn.get("arguments"),
+            detail=f"messages[{msg_index}].tool_calls[{tc_idx}].function.arguments",
+        )
+        parts.append({"functionCall": {"name": name, "args": args}})
+    return parts
+
+
+def _resolve_tool_message_name(
+    msg: dict[str, Any],
+    *,
+    id_to_name: dict[str, str],
+    msg_index: int,
+) -> str:
+    name = msg.get("name")
+    if isinstance(name, str) and name.strip():
+        return name.strip()
+    tc_id = msg.get("tool_call_id")
+    if isinstance(tc_id, str) and tc_id:
+        resolved = id_to_name.get(tc_id)
+        if resolved:
+            return resolved
+        raise _tool_call_invalid(
+            detail=(
+                f"messages[{msg_index}].role=tool: cannot resolve name for "
+                f"tool_call_id={tc_id!r} from prior assistant.tool_calls"
+            )
+        )
+    raise _tool_call_invalid(
+        detail=f"messages[{msg_index}].role=tool: missing name and tool_call_id"
+    )
 
 
 def _convert_messages(messages: list[dict[str, Any]]) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
-    _reject_tools_in_messages(messages)
     system_parts: list[str] = []
     contents: list[dict[str, Any]] = []
+    id_to_name: dict[str, str] = {}
 
-    for msg in messages:
+    for idx, msg in enumerate(messages):
         if not isinstance(msg, dict):
             continue
         role = (msg.get("role") or "").strip()
@@ -283,12 +442,31 @@ def _convert_messages(messages: list[dict[str, Any]]) -> tuple[dict[str, Any] | 
             if text:
                 system_parts.append(text)
             continue
-        if role == "assistant":
+
+        if role == "tool":
+            gem_role = "user"
+            tool_name = _resolve_tool_message_name(msg, id_to_name=id_to_name, msg_index=idx)
+            parts = [
+                {
+                    "functionResponse": {
+                        "name": tool_name,
+                        "response": _tool_response_object(content),
+                    }
+                }
+            ]
+        elif role in {"assistant", "model"}:
             gem_role = "model"
+            parts = _nonempty_text_parts(content)
+            tool_calls = msg.get("tool_calls")
+            if tool_calls:
+                parts.extend(
+                    _assistant_tool_call_parts(tool_calls, id_to_name=id_to_name, msg_index=idx)
+                )
+            if not parts:
+                parts = [{"text": ""}]
         elif role == "user":
             gem_role = "user"
-        elif role == "model":
-            gem_role = "model"
+            parts = _to_gemini_parts(content)
         else:
             raise _protocol_error(
                 code="provider_request_invalid",
@@ -296,7 +474,7 @@ def _convert_messages(messages: list[dict[str, Any]]) -> tuple[dict[str, Any] | 
                 detail=f"unsupported role={role!r}",
                 status_code=400,
             )
-        parts = _to_gemini_parts(content)
+
         if contents and contents[-1]["role"] == gem_role:
             # Merge consecutive same-role turns.
             contents[-1]["parts"].extend(parts)
@@ -324,6 +502,22 @@ def _thinking_budget_from_extra(extra_body: dict[str, Any] | None) -> int | None
     return None
 
 
+def _resolve_tools_and_choice(
+    *,
+    tools: list[dict[str, Any]] | None,
+    tool_choice: Any | None,
+    extra_body: dict[str, Any] | None,
+) -> tuple[list[Any] | None, Any | None]:
+    resolved_tools = tools
+    resolved_choice = tool_choice
+    extra = extra_body or {}
+    if resolved_tools is None and extra.get("tools") is not None:
+        resolved_tools = extra.get("tools")  # type: ignore[assignment]
+    if resolved_choice is None and extra.get("tool_choice") is not None:
+        resolved_choice = extra.get("tool_choice")
+    return resolved_tools, resolved_choice
+
+
 def _build_payload(
     *,
     messages: list[dict[str, Any]],
@@ -331,6 +525,8 @@ def _build_payload(
     top_p: float | None,
     max_tokens: int | None,
     extra_body: dict[str, Any] | None,
+    tools: list[dict[str, Any]] | None = None,
+    tool_choice: Any | None = None,
 ) -> dict[str, Any]:
     system_instruction, contents = _convert_messages(messages)
     if not contents:
@@ -359,6 +555,18 @@ def _build_payload(
     }
     if system_instruction is not None:
         payload["systemInstruction"] = system_instruction
+
+    resolved_tools, resolved_choice = _resolve_tools_and_choice(
+        tools=tools,
+        tool_choice=tool_choice,
+        extra_body=extra_body,
+    )
+    if resolved_tools is not None:
+        if not isinstance(resolved_tools, list):
+            raise _tool_call_invalid(detail="tools must be an array")
+        payload["tools"] = _map_openai_tools_to_gemini(resolved_tools)
+    if resolved_choice is not None:
+        payload["toolConfig"] = _map_tool_choice_to_gemini(resolved_choice)
 
     if extra_body:
         for key, value in extra_body.items():
@@ -405,27 +613,51 @@ def _decode_json_object(response: httpx.Response, *, context: str) -> dict[str, 
     return data
 
 
-def _extract_text_and_thoughts(data: dict[str, Any]) -> tuple[str, str | None]:
+def _function_call_to_openai_tool_call(fc: dict[str, Any], *, index: int) -> dict[str, Any]:
+    name = fc.get("name")
+    if not isinstance(name, str):
+        name = ""
+    args = fc.get("args") if "args" in fc else fc.get("arguments")
+    call_id = fc.get("id")
+    if not isinstance(call_id, str) or not call_id:
+        call_id = f"call_{name}_{index}"
+    return {
+        "id": call_id,
+        "type": "function",
+        "function": {
+            "name": name,
+            "arguments": _args_to_openai_json_string(args),
+        },
+    }
+
+
+def _extract_text_thoughts_and_tool_calls(
+    data: dict[str, Any],
+) -> tuple[str, str | None, list[dict[str, Any]] | None]:
     candidates = data.get("candidates")
     if not isinstance(candidates, list) or not candidates:
-        return "", None
+        return "", None, None
     first = candidates[0]
     if not isinstance(first, dict):
-        return "", None
-    # Reject tool calls in native response.
+        return "", None, None
     content = first.get("content")
     if not isinstance(content, dict):
-        return "", None
+        return "", None, None
     parts = content.get("parts")
     if not isinstance(parts, list):
-        return "", None
+        return "", None, None
     texts: list[str] = []
     thoughts: list[str] = []
+    tool_calls: list[dict[str, Any]] = []
     for part in parts:
         if not isinstance(part, dict):
             continue
-        if "functionCall" in part or "function_call" in part:
-            raise _tools_unsupported(detail="response contains functionCall")
+        fc = part.get("functionCall")
+        if fc is None:
+            fc = part.get("function_call")
+        if isinstance(fc, dict):
+            tool_calls.append(_function_call_to_openai_tool_call(fc, index=len(tool_calls)))
+            continue
         text = part.get("text")
         if not isinstance(text, str) or not text:
             continue
@@ -434,7 +666,7 @@ def _extract_text_and_thoughts(data: dict[str, Any]) -> tuple[str, str | None]:
         else:
             texts.append(text)
     reasoning = "".join(thoughts).strip() or None
-    return "".join(texts), reasoning
+    return "".join(texts), reasoning, tool_calls or None
 
 
 def _iter_text_chunks(text: str) -> list[str]:
@@ -535,6 +767,22 @@ async def list_models_gemini(*, base_url: str, api_key: str) -> list[str]:
         ) from exc
 
 
+def _payload_from_config(
+    *,
+    messages: list[dict[str, Any]],
+    config: GenerationConfig,
+) -> dict[str, Any]:
+    return _build_payload(
+        messages=messages,
+        temperature=config.temperature,
+        top_p=config.top_p,
+        max_tokens=config.max_tokens,
+        extra_body=config.extra_body,
+        tools=config.tools,
+        tool_choice=config.tool_choice,
+    )
+
+
 async def complete_gemini(
     *,
     base_url: str,
@@ -543,20 +791,13 @@ async def complete_gemini(
     config: GenerationConfig,
     as_message: bool = False,
 ) -> ChatCompletionResult | ChatCompletionMessage:
-    _reject_tools_in_config(config)
     url = _model_action_url(base_url, model=config.model, stream=False)
     headers = {
         "Accept": "application/json",
         "Content-Type": "application/json",
         **_auth_headers(api_key),
     }
-    payload = _build_payload(
-        messages=messages,
-        temperature=config.temperature,
-        top_p=config.top_p,
-        max_tokens=config.max_tokens,
-        extra_body=config.extra_body,
-    )
+    payload = _payload_from_config(messages=messages, config=config)
     try:
         async with log_outbound(
             source="llm",
@@ -572,14 +813,20 @@ async def complete_gemini(
             _raise_http_error(r)
             data = _decode_json_object(r, context="gemini generateContent")
             _log.set_response(body=data)
-            text, reasoning = _extract_text_and_thoughts(data)
+            text, reasoning, tool_calls = _extract_text_thoughts_and_tool_calls(data)
             _ = decode_usage(data.get("usageMetadata") if isinstance(data.get("usageMetadata"), dict) else None)
             if as_message:
+                if not text and not reasoning and not tool_calls:
+                    raise _protocol_error(
+                        code="provider_response_invalid",
+                        message="上游服务返回了空消息",
+                        detail="gemini generateContent: content, reasoning and tool_calls are empty",
+                    )
                 return ChatCompletionMessage(
                     role="assistant",
-                    content=text,
+                    content=text or None,
                     reasoning_content=reasoning,
-                    tool_calls=None,
+                    tool_calls=tool_calls,
                 )
             if not text.strip() and not reasoning:
                 raise _protocol_error(
@@ -609,20 +856,13 @@ async def stream_gemini(
     messages: list[dict[str, Any]],
     config: GenerationConfig,
 ) -> AsyncIterator[StreamChunk]:
-    _reject_tools_in_config(config)
     url = _model_action_url(base_url, model=config.model, stream=True)
     headers = {
         "Accept": "text/event-stream",
         "Content-Type": "application/json",
         **_auth_headers(api_key),
     }
-    payload = _build_payload(
-        messages=messages,
-        temperature=config.temperature,
-        top_p=config.top_p,
-        max_tokens=config.max_tokens,
-        extra_body=config.extra_body,
-    )
+    payload = _payload_from_config(messages=messages, config=config)
 
     saw_output = False
     terminal_usage: dict[str, Any] | None = None
@@ -638,6 +878,7 @@ async def stream_gemini(
         ) as _log:
             aggregated_content: list[str] = []
             aggregated_reasoning: list[str] = []
+            aggregated_tool_calls: list[dict[str, Any]] = []
             client = get_async_http_client()
             async with client.stream("POST", url, headers=headers, json=payload, timeout=None) as r:
                 _log.set_response(status=r.status_code, headers=dict(r.headers))
@@ -686,7 +927,7 @@ async def stream_gemini(
                     usage = data.get("usageMetadata")
                     if isinstance(usage, dict):
                         terminal_usage = usage
-                    text, reasoning = _extract_text_and_thoughts(data)
+                    text, reasoning, tool_calls = _extract_text_thoughts_and_tool_calls(data)
                     if reasoning:
                         saw_output = True
                         aggregated_reasoning.append(reasoning)
@@ -697,13 +938,18 @@ async def stream_gemini(
                         aggregated_content.append(text)
                         for piece in _iter_text_chunks(text):
                             yield StreamChunk(kind="content", text=piece)
+                    if tool_calls:
+                        saw_output = True
+                        aggregated_tool_calls.extend(tool_calls)
 
             _ = decode_usage(terminal_usage)
+            finish_tool_calls = aggregated_tool_calls or None
             _log.set_response(
                 body={
                     "_aggregated": True,
                     "content": "".join(aggregated_content),
                     "reasoning_content": "".join(aggregated_reasoning) or None,
+                    "tool_calls": finish_tool_calls,
                     "usageMetadata": terminal_usage,
                 }
             )
@@ -711,9 +957,9 @@ async def stream_gemini(
                 raise _protocol_error(
                     code="provider_response_invalid",
                     message="上游流未返回任何文本",
-                    detail="gemini stream produced no text/thought parts",
+                    detail="gemini stream produced no text/thought/tool_call parts",
                 )
-            yield StreamChunk(kind="finish", tool_calls=None)
+            yield StreamChunk(kind="finish", tool_calls=finish_tool_calls)
     except AppError:
         raise
     except Exception as exc:
@@ -729,7 +975,7 @@ async def stream_gemini(
 
 
 class GeminiGenerateContentAdapter:
-    """ProviderAdapter for Gemini generateContent (no tools in 5C)."""
+    """ProviderAdapter for Gemini generateContent (OpenAI-aligned tools in T-806-6B)."""
 
     provider = _PROVIDER
     protocol = _PROTOCOL
@@ -768,20 +1014,13 @@ class GeminiGenerateContentAdapter:
         if not isinstance(config, GenerationConfig):
             raise TypeError("config must be GenerationConfig")
         self.validate_config(base_url=base_url, api_key=api_key)
-        _reject_tools_in_config(config)
         url = _model_action_url(base_url, model=config.model, stream=bool(config.stream))
         headers = {
             "Accept": "application/json" if not config.stream else "text/event-stream",
             "Content-Type": "application/json",
             **_auth_headers(api_key),
         }
-        payload = _build_payload(
-            messages=messages,
-            temperature=config.temperature,
-            top_p=config.top_p,
-            max_tokens=config.max_tokens,
-            extra_body=config.extra_body,
-        )
+        payload = _payload_from_config(messages=messages, config=config)
         return WireRequest(method="POST", url=url, headers=headers, json_body=payload)
 
     async def list_models(self, *, base_url: str, api_key: str) -> list[str]:

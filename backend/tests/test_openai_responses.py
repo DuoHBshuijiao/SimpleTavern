@@ -1,4 +1,4 @@
-"""T-805-5D: OpenAI Responses adapter (no tools; typed SSE)."""
+"""T-805-5D / T-806-6B: OpenAI Responses adapter (function tools round-trip)."""
 
 from __future__ import annotations
 
@@ -15,11 +15,25 @@ from app.llm.providers.openai_responses import (
     OpenAIResponsesAdapter,
     _build_payload,
     _convert_input,
+    _convert_tools,
     _responses_url,
     decode_usage,
 )
 from app.llm.registry import get_adapter, registered_protocols, reset_adapter_registry_for_tests
 from app.llm.types import OPENAI_RESPONSES_PROTOCOL, GenerationConfig
+
+_SAMPLE_CHAT_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "get_weather",
+        "description": "Get weather",
+        "parameters": {
+            "type": "object",
+            "properties": {"location": {"type": "string"}},
+            "required": ["location"],
+        },
+    },
+}
 
 
 @pytest.fixture(autouse=True)
@@ -56,7 +70,100 @@ def test_convert_input_extracts_instructions() -> None:
     ]
 
 
-def test_tools_fast_fail() -> None:
+def test_convert_input_tool_round_trip() -> None:
+    instructions, items = _convert_input(
+        [
+            {"role": "user", "content": "weather?"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "get_weather", "arguments": '{"location":"Paris"}'},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": '{"temp":20}'},
+        ]
+    )
+    assert instructions is None
+    assert items[0] == {"role": "user", "content": "weather?"}
+    assert items[1] == {
+        "type": "function_call",
+        "call_id": "call_1",
+        "name": "get_weather",
+        "arguments": '{"location":"Paris"}',
+    }
+    assert items[2] == {
+        "type": "function_call_output",
+        "call_id": "call_1",
+        "output": '{"temp":20}',
+    }
+
+
+def test_convert_tools_chat_to_responses() -> None:
+    converted = _convert_tools([_SAMPLE_CHAT_TOOL])
+    assert converted == [
+        {
+            "type": "function",
+            "name": "get_weather",
+            "description": "Get weather",
+            "parameters": {
+                "type": "object",
+                "properties": {"location": {"type": "string"}},
+                "required": ["location"],
+            },
+        }
+    ]
+
+
+def test_function_tools_build_request() -> None:
+    adapter = OpenAIResponsesAdapter()
+    req = adapter.build_request(
+        base_url="https://api.openai.com",
+        api_key="k",
+        messages=[
+            {"role": "user", "content": "hi"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_abc",
+                        "type": "function",
+                        "function": {"name": "get_weather", "arguments": "{}"},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_abc", "content": "ok"},
+        ],
+        config=GenerationConfig(
+            model="gpt-4.1",
+            tools=[_SAMPLE_CHAT_TOOL],
+            tool_choice="auto",
+        ),
+    )
+    body = req.json_body or {}
+    assert body["tools"] == [
+        {
+            "type": "function",
+            "name": "get_weather",
+            "description": "Get weather",
+            "parameters": {
+                "type": "object",
+                "properties": {"location": {"type": "string"}},
+                "required": ["location"],
+            },
+        }
+    ]
+    assert body["tool_choice"] == "auto"
+    assert body["input"][-2]["type"] == "function_call"
+    assert body["input"][-1]["type"] == "function_call_output"
+
+
+def test_builtin_web_search_tool_rejected() -> None:
     adapter = OpenAIResponsesAdapter()
     with pytest.raises(AppError) as exc:
         adapter.build_request(
@@ -66,6 +173,7 @@ def test_tools_fast_fail() -> None:
             config=GenerationConfig(model="gpt-4.1", tools=[{"type": "web_search"}]),
         )
     assert exc.value.code == "provider_capability_unsupported"
+    assert "web_search" in (exc.value.detail or "")
 
 
 def test_build_payload_defaults_and_reasoning() -> None:
@@ -159,6 +267,45 @@ def test_complete_nonstream() -> None:
     result = asyncio.run(run())
     assert result.content == "hello"
     assert result.reasoning_content == "think"
+    assert result.tool_calls is None
+
+
+def test_complete_function_call_as_message() -> None:
+    adapter = OpenAIResponsesAdapter()
+    response = _FakeResponse(
+        payload={
+            "output": [
+                {
+                    "type": "function_call",
+                    "id": "fc_1",
+                    "call_id": "call_1",
+                    "name": "get_weather",
+                    "arguments": '{"location":"Paris"}',
+                }
+            ],
+            "usage": {"input_tokens": 1, "output_tokens": 2, "total_tokens": 3},
+        }
+    )
+
+    async def run() -> Any:
+        with patch("app.llm.providers.openai_responses.get_async_http_client", return_value=_FakeClient(response)):
+            return await adapter.complete(
+                base_url="https://api.openai.com",
+                api_key="k",
+                messages=[{"role": "user", "content": "weather?"}],
+                config=GenerationConfig(model="gpt-4.1", tools=[_SAMPLE_CHAT_TOOL]),
+                as_message=True,
+            )
+
+    result = asyncio.run(run())
+    assert result.content == ""
+    assert result.tool_calls == [
+        {
+            "id": "call_1",
+            "type": "function",
+            "function": {"name": "get_weather", "arguments": '{"location":"Paris"}'},
+        }
+    ]
 
 
 class _FakeStreamResponse:
@@ -229,13 +376,86 @@ def test_stream_typed_sse() -> None:
     assert "".join(c.text for c in chunks if c.kind == "reasoning") == "hmm"
     assert "".join(c.text for c in chunks if c.kind == "content") == "hi"
     assert chunks[-1].kind == "finish"
+    assert chunks[-1].tool_calls is None
 
 
-def test_stream_function_call_fast_fails() -> None:
+def test_stream_function_call_finish() -> None:
+    adapter = OpenAIResponsesAdapter()
+
+    def _sse(event: str, payload: dict[str, Any]) -> list[str]:
+        return [f"event: {event}", f"data: {json.dumps(payload, ensure_ascii=False)}", ""]
+
+    lines = [
+        *_sse(
+            "response.output_item.added",
+            {
+                "type": "response.output_item.added",
+                "output_index": 0,
+                "item": {
+                    "type": "function_call",
+                    "id": "fc_1",
+                    "call_id": "call_1",
+                    "name": "get_weather",
+                    "arguments": "",
+                },
+            },
+        ),
+        *_sse(
+            "response.function_call_arguments.delta",
+            {"type": "response.function_call_arguments.delta", "item_id": "fc_1", "delta": '{"location":'},
+        ),
+        *_sse(
+            "response.function_call_arguments.delta",
+            {"type": "response.function_call_arguments.delta", "item_id": "fc_1", "delta": '"Paris"}'},
+        ),
+        *_sse(
+            "response.function_call_arguments.done",
+            {
+                "type": "response.function_call_arguments.done",
+                "item_id": "fc_1",
+                "arguments": '{"location":"Paris"}',
+            },
+        ),
+        *_sse(
+            "response.completed",
+            {
+                "type": "response.completed",
+                "response": {"usage": {"input_tokens": 1, "output_tokens": 2, "total_tokens": 3}},
+            },
+        ),
+    ]
+
+    async def run() -> list[Any]:
+        out = []
+        with patch(
+            "app.llm.providers.openai_responses.get_async_http_client",
+            return_value=_FakeStreamClient(_FakeStreamResponse(lines)),
+        ):
+            async for chunk in adapter.stream(
+                base_url="https://api.openai.com",
+                api_key="k",
+                messages=[{"role": "user", "content": "weather?"}],
+                config=GenerationConfig(model="gpt-4.1", stream=True, tools=[_SAMPLE_CHAT_TOOL]),
+            ):
+                out.append(chunk)
+        return out
+
+    chunks = asyncio.run(run())
+    assert chunks[-1].kind == "finish"
+    assert chunks[-1].tool_calls == [
+        {
+            "id": "call_1",
+            "type": "function",
+            "function": {"name": "get_weather", "arguments": '{"location":"Paris"}'},
+        }
+    ]
+
+
+def test_stream_builtin_web_search_fast_fails() -> None:
     adapter = OpenAIResponsesAdapter()
     lines = [
         "event: response.output_item.added",
-        'data: {"type":"response.output_item.added","item":{"type":"function_call","name":"web_search"}}',
+        'data: {"type":"response.output_item.added","item":{"type":"web_search_call","id":"ws_1"}}',
         "",
     ]
 

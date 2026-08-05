@@ -1,9 +1,9 @@
 """
-Anthropic Messages API provider adapter (T-805-5B).
+Anthropic Messages API provider adapter (T-805-5B / T-806-6A / T-806-6B).
 
-Scope for 5B / 6A:
+Scope:
 - non-stream + stream text (and thinking→reasoning) paths
-- tools / tool_result / tool_use → provider_capability_unsupported (T-806-6B)
+- tools round-trip: OpenAI-shaped tools ↔ Anthropic tool_use/tool_result (T-806-6B)
 - prompt cache: anthropic_prompt_cache off|5m|1h on system block only (T-806-6A)
 """
 
@@ -66,20 +66,6 @@ def _protocol_error(
         provider=_PROVIDER,
         protocol=_PROTOCOL,
         suggested_action="检查 Anthropic API 预设（Base URL / API Key / 模型）与协议是否匹配",
-    )
-
-
-def _tools_unsupported(*, detail: str) -> AppError:
-    return AppError(
-        code="provider_capability_unsupported",
-        message="当前 Anthropic Messages 适配器尚未支持工具调用",
-        detail=detail,
-        source="llm.anthropic_messages",
-        status_code=400,
-        retryable=False,
-        provider=_PROVIDER,
-        protocol=_PROTOCOL,
-        suggested_action="请改用 OpenAI Compatible Chat，或等待 T-806 工具支持后再启用工具/网络搜索",
     )
 
 
@@ -222,59 +208,224 @@ def _to_anthropic_content(content: Any) -> str | list[dict[str, Any]]:
     return str(content)
 
 
-def _reject_tools_in_messages(messages: list[dict[str, Any]]) -> None:
-    for idx, msg in enumerate(messages):
-        if not isinstance(msg, dict):
+def _as_content_blocks(content: str | list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if isinstance(content, list):
+        return list(content)
+    if isinstance(content, str) and content:
+        return [{"type": "text", "text": content}]
+    return []
+
+
+def _merge_same_role_content(
+    prev: str | list[dict[str, Any]],
+    new: str | list[dict[str, Any]],
+) -> str | list[dict[str, Any]]:
+    if isinstance(prev, str) and isinstance(new, str):
+        return prev + "\n" + new
+    return _as_content_blocks(prev) + _as_content_blocks(new)
+
+
+def _parse_tool_arguments(raw: Any) -> dict[str, Any]:
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        s = raw.strip()
+        if not s:
+            return {}
+        try:
+            parsed = json.loads(s)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+def _arguments_to_json_string(inp: Any) -> str:
+    if isinstance(inp, str):
+        return inp if inp.strip() else "{}"
+    if isinstance(inp, dict):
+        return json.dumps(inp, ensure_ascii=False)
+    return "{}"
+
+
+def _convert_tools_openai_to_anthropic(tools: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
+    """OpenAI tools → Anthropic tools (name / description / input_schema)."""
+    if not tools:
+        return None
+    out: list[dict[str, Any]] = []
+    for tool in tools:
+        if not isinstance(tool, dict):
             continue
-        role = msg.get("role")
-        if role == "tool":
-            raise _tools_unsupported(detail=f"messages[{idx}].role=tool")
-        if msg.get("tool_calls"):
-            raise _tools_unsupported(detail=f"messages[{idx}].tool_calls present")
-        if msg.get("tool_call_id"):
-            raise _tools_unsupported(detail=f"messages[{idx}].tool_call_id present")
+        if isinstance(tool.get("name"), str) and isinstance(tool.get("input_schema"), dict):
+            entry: dict[str, Any] = {
+                "name": tool["name"].strip(),
+                "input_schema": tool["input_schema"],
+            }
+            desc = tool.get("description")
+            if isinstance(desc, str) and desc:
+                entry["description"] = desc
+            if entry["name"]:
+                out.append(entry)
+            continue
+        fn = tool.get("function") if isinstance(tool.get("function"), dict) else None
+        if fn is None and tool.get("type") != "function":
+            # Allow bare {name, description, parameters} shapes.
+            fn = tool if isinstance(tool.get("name"), str) else None
+        if not isinstance(fn, dict):
+            continue
+        name = fn.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        params = fn.get("parameters")
+        if not isinstance(params, dict):
+            params = {"type": "object", "properties": {}}
+        entry = {
+            "name": name.strip(),
+            "input_schema": params,
+        }
+        desc = fn.get("description")
+        if isinstance(desc, str) and desc:
+            entry["description"] = desc
+        out.append(entry)
+    return out or None
 
 
-def _reject_tools_in_config(config: GenerationConfig) -> None:
-    if config.tools:
-        raise _tools_unsupported(detail="GenerationConfig.tools is set")
-    if config.tool_choice is not None:
-        raise _tools_unsupported(detail="GenerationConfig.tool_choice is set")
-    extra = config.extra_body or {}
-    if extra.get("tools") or extra.get("tool_choice") is not None:
-        raise _tools_unsupported(detail="extra_body contains tools/tool_choice")
+def _convert_tool_choice(tool_choice: Any) -> dict[str, Any] | None:
+    """Map OpenAI tool_choice → Anthropic tool_choice."""
+    if tool_choice is None:
+        return None
+    if isinstance(tool_choice, str):
+        low = tool_choice.strip().lower()
+        if low == "auto":
+            return {"type": "auto"}
+        if low == "none":
+            return {"type": "none"}
+        if low in {"required", "any"}:
+            return {"type": "any"}
+        return None
+    if isinstance(tool_choice, dict):
+        typ = tool_choice.get("type")
+        if typ == "function":
+            fn = tool_choice.get("function") if isinstance(tool_choice.get("function"), dict) else {}
+            name = fn.get("name") if isinstance(fn.get("name"), str) else tool_choice.get("name")
+            if isinstance(name, str) and name.strip():
+                return {"type": "tool", "name": name.strip()}
+            return None
+        if typ == "tool":
+            name = tool_choice.get("name")
+            if isinstance(name, str) and name.strip():
+                return {"type": "tool", "name": name.strip()}
+            return None
+        if typ in {"auto", "none", "any"}:
+            return {"type": typ}
+    return None
+
+
+def _assistant_tool_use_blocks(msg: dict[str, Any]) -> list[dict[str, Any]]:
+    tool_calls = msg.get("tool_calls")
+    if not isinstance(tool_calls, list):
+        return []
+    blocks: list[dict[str, Any]] = []
+    for tc in tool_calls:
+        if not isinstance(tc, dict):
+            continue
+        fn = tc.get("function") if isinstance(tc.get("function"), dict) else {}
+        name = fn.get("name") if isinstance(fn.get("name"), str) else ""
+        if not name.strip():
+            continue
+        blocks.append(
+            {
+                "type": "tool_use",
+                "id": str(tc.get("id") or ""),
+                "name": name.strip(),
+                "input": _parse_tool_arguments(fn.get("arguments")),
+            }
+        )
+    return blocks
 
 
 def _convert_messages(messages: list[dict[str, Any]]) -> tuple[str | None, list[dict[str, Any]]]:
-    _reject_tools_in_messages(messages)
     system_parts: list[str] = []
     converted: list[dict[str, Any]] = []
+    i = 0
+    n = len(messages)
 
-    for msg in messages:
+    while i < n:
+        msg = messages[i]
         if not isinstance(msg, dict):
+            i += 1
             continue
         role = (msg.get("role") or "").strip()
         content = msg.get("content")
+
         if role == "system":
             text = _content_to_text(content).strip()
             if text:
                 system_parts.append(text)
+            i += 1
             continue
-        if role not in {"user", "assistant"}:
-            raise _protocol_error(
-                code="provider_request_invalid",
-                message="消息角色不被 Anthropic Messages 支持",
-                detail=f"unsupported role={role!r}",
-                status_code=400,
-            )
-        anth_content = _to_anthropic_content(content)
-        if converted and converted[-1]["role"] == role:
-            # Merge consecutive same-role turns (Anthropic prefers alternation).
-            prev = converted[-1]["content"]
-            merged_text = _content_to_text(prev) + "\n" + _content_to_text(anth_content)
-            converted[-1] = {"role": role, "content": merged_text}
-        else:
-            converted.append({"role": role, "content": anth_content})
+
+        if role == "tool":
+            # Consecutive role=tool → single user message with tool_result blocks.
+            tool_results: list[dict[str, Any]] = []
+            while i < n:
+                m = messages[i]
+                if not isinstance(m, dict) or (m.get("role") or "").strip() != "tool":
+                    break
+                tool_call_id = m.get("tool_call_id")
+                tool_results.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": str(tool_call_id or ""),
+                        "content": _content_to_text(m.get("content")),
+                    }
+                )
+                i += 1
+            if converted and converted[-1]["role"] == "user":
+                converted[-1] = {
+                    "role": "user",
+                    "content": _merge_same_role_content(converted[-1]["content"], tool_results),
+                }
+            else:
+                converted.append({"role": "user", "content": tool_results})
+            continue
+
+        if role == "assistant":
+            tool_blocks = _assistant_tool_use_blocks(msg)
+            text_content = _to_anthropic_content(content)
+            if tool_blocks:
+                blocks = _as_content_blocks(text_content) + tool_blocks
+                anth_content: str | list[dict[str, Any]] = blocks
+            else:
+                anth_content = text_content
+            if converted and converted[-1]["role"] == "assistant":
+                converted[-1] = {
+                    "role": "assistant",
+                    "content": _merge_same_role_content(converted[-1]["content"], anth_content),
+                }
+            else:
+                converted.append({"role": "assistant", "content": anth_content})
+            i += 1
+            continue
+
+        if role == "user":
+            anth_content = _to_anthropic_content(content)
+            if converted and converted[-1]["role"] == "user":
+                converted[-1] = {
+                    "role": "user",
+                    "content": _merge_same_role_content(converted[-1]["content"], anth_content),
+                }
+            else:
+                converted.append({"role": "user", "content": anth_content})
+            i += 1
+            continue
+
+        raise _protocol_error(
+            code="provider_request_invalid",
+            message="消息角色不被 Anthropic Messages 支持",
+            detail=f"unsupported role={role!r}",
+            status_code=400,
+        )
 
     if converted and converted[0]["role"] == "assistant":
         converted.insert(0, {"role": "user", "content": "."})
@@ -311,6 +462,7 @@ def _sanitize_extra_body(extra_body: dict[str, Any] | None) -> tuple[dict[str, A
 
     # Pass through Anthropic-native keys if callers set them explicitly.
     # cache_control / anthropic_prompt_cache are handled separately on system.
+    # tools / tool_choice are handled in _build_payload.
     for key, value in extra_body.items():
         if key in {
             "thinking",
@@ -343,6 +495,25 @@ def _system_with_cache(system: str | None, cache: str) -> str | list[dict[str, A
     return [{"type": "text", "text": system, "cache_control": control}]
 
 
+def _resolve_tools_and_choice(
+    *,
+    tools: list[dict[str, Any]] | None,
+    tool_choice: Any | None,
+    extra_body: dict[str, Any] | None,
+) -> tuple[list[dict[str, Any]] | None, dict[str, Any] | None]:
+    resolved_tools = tools
+    resolved_choice = tool_choice
+    if extra_body:
+        if resolved_tools is None and extra_body.get("tools") is not None:
+            raw = extra_body.get("tools")
+            resolved_tools = raw if isinstance(raw, list) else None
+        if resolved_choice is None and extra_body.get("tool_choice") is not None:
+            resolved_choice = extra_body.get("tool_choice")
+    anth_tools = _convert_tools_openai_to_anthropic(resolved_tools)
+    anth_choice = _convert_tool_choice(resolved_choice)
+    return anth_tools, anth_choice
+
+
 def _build_payload(
     *,
     model: str,
@@ -352,6 +523,8 @@ def _build_payload(
     top_p: float | None,
     max_tokens: int | None,
     extra_body: dict[str, Any] | None,
+    tools: list[dict[str, Any]] | None = None,
+    tool_choice: Any | None = None,
 ) -> dict[str, Any]:
     system, anth_messages = _convert_messages(messages)
     if not anth_messages:
@@ -379,6 +552,17 @@ def _build_payload(
         payload["temperature"] = temperature
     if top_p is not None and not thinking_enabled:
         payload["top_p"] = top_p
+
+    anth_tools, anth_choice = _resolve_tools_and_choice(
+        tools=tools,
+        tool_choice=tool_choice,
+        extra_body=extra_body,
+    )
+    if anth_tools is not None:
+        payload["tools"] = anth_tools
+    if anth_choice is not None:
+        payload["tool_choice"] = anth_choice
+
     payload.update(extra)
     # Top-level cache_control is not used for 6A (system-block only).
     payload.pop("cache_control", None)
@@ -404,11 +588,14 @@ def _decode_json_object(response: httpx.Response, *, context: str) -> dict[str, 
     return data
 
 
-def _extract_text_and_thinking(content_blocks: Any) -> tuple[str, str | None]:
+def _extract_text_thinking_and_tools(
+    content_blocks: Any,
+) -> tuple[str, str | None, list[dict[str, Any]] | None]:
     texts: list[str] = []
     thinking: list[str] = []
+    tool_calls: list[dict[str, Any]] = []
     if not isinstance(content_blocks, list):
-        return "", None
+        return "", None, None
     for block in content_blocks:
         if not isinstance(block, dict):
             continue
@@ -418,10 +605,20 @@ def _extract_text_and_thinking(content_blocks: Any) -> tuple[str, str | None]:
         elif typ == "thinking" and isinstance(block.get("thinking"), str):
             thinking.append(block["thinking"])
         elif typ == "tool_use":
-            raise _tools_unsupported(detail="assistant response contains tool_use block")
+            name = block.get("name") if isinstance(block.get("name"), str) else ""
+            tool_calls.append(
+                {
+                    "id": str(block.get("id") or ""),
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "arguments": _arguments_to_json_string(block.get("input")),
+                    },
+                }
+            )
     text = "".join(texts)
     reasoning = "".join(thinking).strip() or None
-    return text, reasoning
+    return text, reasoning, tool_calls or None
 
 
 def _iter_text_chunks(text: str) -> list[str]:
@@ -522,7 +719,6 @@ async def complete_anthropic(
     config: GenerationConfig,
     as_message: bool = False,
 ) -> ChatCompletionResult | ChatCompletionMessage:
-    _reject_tools_in_config(config)
     url = _messages_url(base_url)
     headers = {
         "Accept": "application/json",
@@ -537,6 +733,8 @@ async def complete_anthropic(
         top_p=config.top_p,
         max_tokens=config.max_tokens,
         extra_body=config.extra_body,
+        tools=config.tools,
+        tool_choice=config.tool_choice,
     )
     try:
         async with log_outbound(
@@ -553,7 +751,7 @@ async def complete_anthropic(
             _raise_http_error(r)
             data = _decode_json_object(r, context="anthropic messages")
             _log.set_response(body=data)
-            text, reasoning = _extract_text_and_thinking(data.get("content"))
+            text, reasoning, tool_calls = _extract_text_thinking_and_tools(data.get("content"))
             # Terminal usage for future T-807.
             _ = decode_usage(data.get("usage") if isinstance(data.get("usage"), dict) else None)
             if as_message:
@@ -561,13 +759,13 @@ async def complete_anthropic(
                     role="assistant",
                     content=text,
                     reasoning_content=reasoning,
-                    tool_calls=None,
+                    tool_calls=tool_calls,
                 )
-            if not text.strip() and not reasoning:
+            if not text.strip() and not reasoning and not tool_calls:
                 raise _protocol_error(
                     code="provider_response_invalid",
                     message="上游服务未返回有效文本",
-                    detail="anthropic messages: empty text and thinking",
+                    detail="anthropic messages: empty text, thinking and tool_calls",
                 )
             return ChatCompletionResult(text=text)
     except AppError:
@@ -591,7 +789,6 @@ async def stream_anthropic(
     messages: list[dict[str, Any]],
     config: GenerationConfig,
 ) -> AsyncIterator[StreamChunk]:
-    _reject_tools_in_config(config)
     url = _messages_url(base_url)
     headers = {
         "Accept": "text/event-stream",
@@ -606,10 +803,14 @@ async def stream_anthropic(
         top_p=config.top_p,
         max_tokens=config.max_tokens,
         extra_body=config.extra_body,
+        tools=config.tools,
+        tool_choice=config.tool_choice,
     )
 
     saw_output = False
     terminal_usage: dict[str, Any] | None = None
+    # index → {id, name, arguments_acc}
+    pending_tools: dict[int, dict[str, str]] = {}
 
     try:
         async with log_outbound(
@@ -680,7 +881,14 @@ async def stream_anthropic(
                     if etype == "content_block_start":
                         block = data.get("content_block")
                         if isinstance(block, dict) and block.get("type") == "tool_use":
-                            raise _tools_unsupported(detail="stream content_block_start tool_use")
+                            idx_raw = data.get("index")
+                            idx = idx_raw if isinstance(idx_raw, int) else len(pending_tools)
+                            pending_tools[idx] = {
+                                "id": str(block.get("id") or ""),
+                                "name": str(block.get("name") or ""),
+                                "arguments_acc": "",
+                            }
+                            saw_output = True
                         continue
                     if etype == "content_block_delta":
                         delta = data.get("delta")
@@ -702,7 +910,12 @@ async def stream_anthropic(
                                 for piece in _iter_text_chunks(thinking):
                                     yield StreamChunk(kind="reasoning", text=piece)
                         elif dtype == "input_json_delta":
-                            raise _tools_unsupported(detail="stream input_json_delta")
+                            idx_raw = data.get("index")
+                            idx = idx_raw if isinstance(idx_raw, int) else None
+                            partial = delta.get("partial_json")
+                            if idx is not None and idx in pending_tools and isinstance(partial, str):
+                                pending_tools[idx]["arguments_acc"] += partial
+                                saw_output = True
                         continue
                     if etype == "message_delta":
                         usage = data.get("usage")
@@ -710,22 +923,40 @@ async def stream_anthropic(
                             terminal_usage = usage
                         continue
 
+            sorted_tool_calls: list[dict[str, Any]] | None = None
+            if pending_tools:
+                sorted_tool_calls = []
+                for idx in sorted(pending_tools.keys()):
+                    t = pending_tools[idx]
+                    args = t["arguments_acc"] if t["arguments_acc"].strip() else "{}"
+                    sorted_tool_calls.append(
+                        {
+                            "id": t["id"],
+                            "type": "function",
+                            "function": {
+                                "name": t["name"],
+                                "arguments": args,
+                            },
+                        }
+                    )
+
             _ = decode_usage(terminal_usage)
-            _log.set_response(
-                body={
-                    "_aggregated": True,
-                    "content": "".join(aggregated_content),
-                    "reasoning_content": "".join(aggregated_reasoning) or None,
-                    "usage": terminal_usage,
-                }
-            )
+            body: dict[str, Any] = {
+                "_aggregated": True,
+                "content": "".join(aggregated_content),
+                "reasoning_content": "".join(aggregated_reasoning) or None,
+                "usage": terminal_usage,
+            }
+            if sorted_tool_calls:
+                body["tool_calls"] = sorted_tool_calls
+            _log.set_response(body=body)
             if not saw_output:
                 raise _protocol_error(
                     code="provider_response_invalid",
                     message="上游流未返回任何文本",
-                    detail="anthropic stream produced no content/thinking deltas",
+                    detail="anthropic stream produced no content/thinking/tool deltas",
                 )
-            yield StreamChunk(kind="finish", tool_calls=None)
+            yield StreamChunk(kind="finish", tool_calls=sorted_tool_calls)
     except AppError:
         raise
     except Exception as exc:
@@ -741,7 +972,7 @@ async def stream_anthropic(
 
 
 class AnthropicMessagesAdapter:
-    """ProviderAdapter for Anthropic Messages (no tools / cache off in 5B)."""
+    """ProviderAdapter for Anthropic Messages (tools + prompt cache)."""
 
     provider = _PROVIDER
     protocol = _PROTOCOL
@@ -779,7 +1010,6 @@ class AnthropicMessagesAdapter:
         if not isinstance(config, GenerationConfig):
             raise TypeError("config must be GenerationConfig")
         self.validate_config(base_url=base_url, api_key=api_key)
-        _reject_tools_in_config(config)
         url = _messages_url(base_url)
         headers = {
             "Accept": "application/json",
@@ -794,6 +1024,8 @@ class AnthropicMessagesAdapter:
             top_p=config.top_p,
             max_tokens=config.max_tokens,
             extra_body=config.extra_body,
+            tools=config.tools,
+            tool_choice=config.tool_choice,
         )
         return WireRequest(method="POST", url=url, headers=headers, json_body=payload)
 
