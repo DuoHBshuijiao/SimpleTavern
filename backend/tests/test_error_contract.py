@@ -332,7 +332,7 @@ def test_generate_stream_upstream_failure_emits_meta_then_error_without_done() -
             patch("app.routes.generate.collect_active_worldbooks", return_value=[]),
             patch(
                 "app.routes.generate._resolve_generation_credentials",
-                return_value=("https://provider.example/v1", "test-key", "openai_compatible_chat"),
+                return_value=("https://provider.example/v1", "test-key", "openai_compatible_chat", "off"),
             ),
             patch("app.routes.generate.stream_chat_completions", fail_stream),
         ):

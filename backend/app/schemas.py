@@ -196,6 +196,23 @@ class SettingsLLM(BaseModel):
         default="openai_compatible_chat",
         description="LLM 协议；缺省 openai_compatible_chat（T-805）",
     )
+    anthropicPromptCache: str = Field(
+        default="off",
+        description="Anthropic prompt cache TTL：off|5m|1h；仅 anthropic_messages 生效（T-806）",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_anthropic_prompt_cache(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        incoming = dict(data)
+        from app.llm.types import normalize_anthropic_prompt_cache
+
+        incoming["anthropicPromptCache"] = normalize_anthropic_prompt_cache(
+            incoming.get("anthropicPromptCache")
+        )
+        return incoming
 
 
 class ApiPreset(BaseModel):
@@ -222,6 +239,10 @@ class ApiPreset(BaseModel):
     protocol: str = Field(
         default="openai_compatible_chat",
         description="LLM 协议；旧数据缺省映射为 openai_compatible_chat",
+    )
+    anthropicPromptCache: str = Field(
+        default="off",
+        description="Anthropic prompt cache TTL：off|5m|1h；仅 anthropic_messages 生效（T-806）",
     )
     presetKind: str | None = Field(default=None, description="预设用途；'tts' 表示 TTS 服务预设")
     ttsProvider: TtsProvider | None = Field(default=None, description="TTS 服务提供商；仅当 presetKind='tts' 时有意义")
@@ -271,6 +292,11 @@ class ApiPreset(BaseModel):
         incoming = dict(data)
         if not str(incoming.get("protocol") or "").strip():
             incoming["protocol"] = "openai_compatible_chat"
+        from app.llm.types import normalize_anthropic_prompt_cache
+
+        incoming["anthropicPromptCache"] = normalize_anthropic_prompt_cache(
+            incoming.get("anthropicPromptCache")
+        )
         preset_kind = incoming.get("presetKind")
         provider = incoming.get("ttsProvider")
         if preset_kind == "minimax":

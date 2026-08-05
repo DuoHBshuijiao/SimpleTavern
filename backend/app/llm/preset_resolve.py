@@ -10,7 +10,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.llm.types import OPENAI_COMPATIBLE_CHAT_PROTOCOL, normalize_protocol_id
+from app.llm.types import (
+    ANTHROPIC_PROMPT_CACHE_OFF,
+    OPENAI_COMPATIBLE_CHAT_PROTOCOL,
+    normalize_anthropic_prompt_cache,
+    normalize_protocol_id,
+)
 from app.schemas import ApiPreset, Settings
 
 
@@ -21,6 +26,7 @@ class LlmPresetCredentials:
     preset_id: str | None
     source: str
     protocol: str = OPENAI_COMPATIBLE_CHAT_PROTOCOL
+    anthropic_prompt_cache: str = ANTHROPIC_PROMPT_CACHE_OFF
 
 
 class LlmPresetResolveError(ValueError):
@@ -57,6 +63,9 @@ def _credential_from_preset(preset: ApiPreset, *, source: str) -> LlmPresetCrede
         preset_id=preset.id,
         source=source,
         protocol=normalize_protocol_id(getattr(preset, "protocol", None)),
+        anthropic_prompt_cache=normalize_anthropic_prompt_cache(
+            getattr(preset, "anthropicPromptCache", None)
+        ),
     )
 
 
@@ -71,6 +80,9 @@ def _credential_from_global(settings: Settings) -> LlmPresetCredentials | None:
         preset_id=None,
         source="global",
         protocol=normalize_protocol_id(getattr(settings.llm, "protocol", None)),
+        anthropic_prompt_cache=normalize_anthropic_prompt_cache(
+            getattr(settings.llm, "anthropicPromptCache", None)
+        ),
     )
 
 

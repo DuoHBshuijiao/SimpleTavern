@@ -116,3 +116,47 @@ def test_global_protocol_is_resolved() -> None:
     assert credentials.source == "global"
     assert credentials.protocol == "openai_responses"
 
+
+def test_anthropic_prompt_cache_from_preset() -> None:
+    settings = _settings(
+        presets=[
+            ApiPreset(
+                id="anth",
+                name="Anthropic",
+                baseUrl="https://api.anthropic.com",
+                apiKey="k",
+                models=["claude"],
+                protocol="anthropic_messages",
+                anthropicPromptCache="1h",
+            )
+        ],
+    )
+    credentials = resolve_llm_preset_credentials(settings, model="claude")
+    assert credentials.anthropic_prompt_cache == "1h"
+
+
+def test_anthropic_prompt_cache_bool_legacy_migrates() -> None:
+    preset = ApiPreset.model_validate(
+        {
+            "id": "anth",
+            "name": "Anthropic",
+            "baseUrl": "https://api.anthropic.com",
+            "apiKey": "k",
+            "models": ["claude"],
+            "protocol": "anthropic_messages",
+            "anthropicPromptCache": True,
+        }
+    )
+    assert preset.anthropicPromptCache == "5m"
+    settings = _settings(presets=[preset])
+    credentials = resolve_llm_preset_credentials(settings, model="claude")
+    assert credentials.anthropic_prompt_cache == "5m"
+
+
+def test_anthropic_prompt_cache_defaults_off() -> None:
+    settings = _settings(
+        presets=[ApiPreset(id="llm", name="LLM", baseUrl="https://llm.example", apiKey="k", models=["m"])],
+    )
+    credentials = resolve_llm_preset_credentials(settings, model="m")
+    assert credentials.anthropic_prompt_cache == "off"
+

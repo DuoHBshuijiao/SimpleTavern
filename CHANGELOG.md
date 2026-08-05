@@ -2,6 +2,13 @@
 
 ## v0.800（进行中）
 
+### Anthropic Prompt Cache（T-806-6A）
+
+- 预设/全局增加 `anthropicPromptCache`：`off`（默认）| `5m` | `1h`；布尔旧值 true→`5m`、false→`off`。
+- 仅 `anthropic_messages` 时设置页展示；adapter 在稳定 system 块注入 `cache_control`（不静默去掉缓存重试）。
+- generate / assistant / mvu / TTS 文本后处理经 `attach_protocol_extra_body` 传递。
+- 后端 270 项测试通过。
+
 ### OpenAI Responses（T-805-5D）
 
 - 新增原生 `openai_responses` 适配器：`/v1/responses`、typed SSE、`store=false`。

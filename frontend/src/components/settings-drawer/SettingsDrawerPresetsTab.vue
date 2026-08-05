@@ -133,7 +133,24 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                               @update:model-value="(v) => { if (presets.editingPreset) presets.editingPreset.protocol = String(v) }"
                             />
                             <p class="text-xs text-[var(--color-text-muted)]">
-                              默认 OpenAI Compatible Chat；其他协议在后续版本落地，选中未实现或未知协议会明确失败（不静默回退）。
+                              默认 OpenAI Compatible Chat；未知/未实现协议会明确失败（不静默回退）。
+                            </p>
+                        </div>
+
+                        <div
+                          v-if="!presets.isTtsPreset(presets.editingPreset) && (presets.editingPreset!.protocol || 'openai_compatible_chat') === 'anthropic_messages'"
+                          class="space-y-1.5"
+                        >
+                            <label class="block text-xs font-medium text-[var(--color-text-secondary)]">Anthropic Prompt Cache</label>
+                            <ModernSelect
+                              :model-value="presets.editingPreset!.anthropicPromptCache || 'off'"
+                              :options="presets.ANTHROPIC_PROMPT_CACHE_OPTIONS"
+                              class="w-full"
+                              placeholder="缓存 TTL…"
+                              @update:model-value="(v) => { if (presets.editingPreset) presets.editingPreset.anthropicPromptCache = String(v) }"
+                            />
+                            <p class="text-xs text-[var(--color-text-muted)]">
+                              仅缓存稳定 system 块；默认关闭。上游错误不会静默去掉缓存重试。
                             </p>
                         </div>
 

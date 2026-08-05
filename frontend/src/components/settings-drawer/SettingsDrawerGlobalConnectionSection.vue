@@ -3,6 +3,7 @@ import { Eye, EyeOff } from 'lucide-vue-next'
 import ModernSelect from '../ModernSelect.vue'
 import SettingsDrawerGlobalAccordion from './SettingsDrawerGlobalAccordion.vue'
 import { llmProtocolSelectOptions } from '../../constants/llmProtocols'
+import { ANTHROPIC_PROMPT_CACHE_OPTIONS } from '../../constants/anthropicPromptCache'
 import { REASONING_EFFORT_OPTIONS, type Settings } from '../../types/models'
 
 defineProps<{
@@ -112,6 +113,23 @@ const emit = defineEmits<{
       />
       <p class="text-xs text-[var(--color-text-muted)]">
         仅在使用全局凭证（未匹配到 API 预设）时生效；未知/未实现协议会明确失败。
+      </p>
+    </div>
+
+    <div
+      v-if="(draft.llm.protocol || 'openai_compatible_chat') === 'anthropic_messages'"
+      class="space-y-1.5"
+    >
+      <label class="block text-sm font-medium text-[var(--color-text-secondary)]">Anthropic Prompt Cache</label>
+      <ModernSelect
+        :model-value="draft.llm.anthropicPromptCache || 'off'"
+        :options="ANTHROPIC_PROMPT_CACHE_OPTIONS"
+        placeholder="缓存 TTL…"
+        class="w-full"
+        @update:model-value="(v) => { draft.llm.anthropicPromptCache = String(v) }"
+      />
+      <p class="text-xs text-[var(--color-text-muted)]">
+        仅缓存稳定 system 块；默认关闭。上游缓存配置错误会直接报错，不会静默去掉缓存重试。
       </p>
     </div>
 

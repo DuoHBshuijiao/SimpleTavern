@@ -104,6 +104,11 @@ import {
 import { notifyConfirm, notifyMessage } from '../composables/useNotify'
 import type { LlmProviderPreset } from '../constants/llmProviderPresets'
 import { DEFAULT_LLM_PROTOCOL, LLM_PROTOCOL_OPTIONS, llmProtocolSelectOptions, normalizeLlmProtocol } from '../constants/llmProtocols'
+import {
+  ANTHROPIC_PROMPT_CACHE_OPTIONS,
+  DEFAULT_ANTHROPIC_PROMPT_CACHE,
+  normalizeAnthropicPromptCache,
+} from '../constants/anthropicPromptCache'
 import { useDialogBehavior } from '../composables/useDialogBehavior'
 import { dialogAria } from '../utils/uiPrimitives'
 
@@ -1154,6 +1159,9 @@ function normalizePresetDraft(preset: ApiPreset): ApiPreset {
   return {
     ...preset,
     protocol: isTts ? (preset.protocol ?? null) : normalizeLlmProtocol(preset.protocol),
+    anthropicPromptCache: isTts
+      ? (preset.anthropicPromptCache ?? null)
+      : normalizeAnthropicPromptCache(preset.anthropicPromptCache),
     presetKind: isTts ? 'tts' : (preset.presetKind ?? null),
     ttsProvider: isTts ? resolveTtsProvider(preset) : null,
     voiceCatalog: normalizeVoiceCatalog(preset.voiceCatalog),
@@ -1859,9 +1867,11 @@ watch(
         modelCandidates: [],
         usedModels: [],
         protocol: DEFAULT_LLM_PROTOCOL,
+        anthropicPromptCache: DEFAULT_ANTHROPIC_PROMPT_CACHE,
       }
     } else {
       s.llm.protocol = normalizeLlmProtocol(s.llm.protocol)
+      s.llm.anthropicPromptCache = normalizeAnthropicPromptCache(s.llm.anthropicPromptCache)
     }
     if (!(s as Settings).draftHelpDefaults) (s as Settings).draftHelpDefaults = ensureDraftHelpDefaults()
     if (s.selectedFont === undefined) (s as Settings).selectedFont = null
@@ -2477,6 +2487,7 @@ function createPreset() {
     apiKey: '',
     models: [],
     protocol: DEFAULT_LLM_PROTOCOL,
+    anthropicPromptCache: DEFAULT_ANTHROPIC_PROMPT_CACHE,
     presetKind: null,
     ttsProvider: null,
     voiceCatalog: [],
@@ -2976,6 +2987,7 @@ provide(
     TTS_PROVIDER_OPTIONS,
     LLM_PROTOCOL_OPTIONS,
     llmProtocolSelectOptions,
+    ANTHROPIC_PROMPT_CACHE_OPTIONS,
     editingPreset,
     editingPresetTtsProvider,
     editingPresetIsGlmLocal,

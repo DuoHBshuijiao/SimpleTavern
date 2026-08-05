@@ -297,6 +297,8 @@ export interface ApiPreset {
   models: string[]
   /** LLM 协议；缺省 openai_compatible_chat；TTS 预设可忽略 */
   protocol?: string | null
+  /** Anthropic prompt cache：off|5m|1h；仅 anthropic_messages 生效 */
+  anthropicPromptCache?: string | null
   presetKind?: string | null
   ttsProvider?: TtsProvider | null
   voiceCatalog?: ApiPresetVoice[]
@@ -404,6 +406,8 @@ export interface Settings {
     usedModels: string[]
     /** 全局 LLM 协议；缺省 openai_compatible_chat */
     protocol?: string | null
+    /** Anthropic prompt cache：off|5m|1h；仅 anthropic_messages 生效 */
+    anthropicPromptCache?: string | null
   }
   apiPresets: ApiPreset[]
   generationDefaults: GenerationParams

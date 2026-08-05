@@ -59,7 +59,7 @@ from app.services.assistant_agent import (
     AssistantAgentService,
 )
 from app.llm.preset_resolve import LlmPresetResolveError, resolve_llm_preset_credentials
-from app.llm.types import provider_id_for_protocol
+from app.llm.types import attach_protocol_extra_body, provider_id_for_protocol
 from app.services.user_message_content import build_user_message_content
 from app.schemas import (
     AssistantAppendRole,
@@ -108,13 +108,19 @@ from app.tokenizer_service import trim_assistant_openai_messages_to_context
 router = APIRouter(tags=["assistant"])
 
 
-def _resolve_assistant_credentials(settings: Any, *, model: str, preset_id: str | None) -> tuple[str, str, str]:
+def _resolve_assistant_credentials(
+    settings: Any, *, model: str, preset_id: str | None
+) -> tuple[str, str, str, str]:
     try:
         credentials = resolve_llm_preset_credentials(settings, model=model, explicit_preset_id=preset_id)
     except LlmPresetResolveError as exc:
         raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message}) from exc
-    return credentials.base_url, credentials.api_key, credentials.protocol
-
+    return (
+        credentials.base_url,
+        credentials.api_key,
+        credentials.protocol,
+        credentials.anthropic_prompt_cache,
+    )
 
 class AssistantStreamRequest(BaseModel):
     """
@@ -847,7 +853,7 @@ async def stream_assistant(req: AssistantStreamRequest, request: Request):
         temperature = None
 
     preset_id = assistant_settings.presetId
-    base_url, api_key, protocol = _resolve_assistant_credentials(settings, model=model, preset_id=preset_id)
+    base_url, api_key, protocol, anthropic_prompt_cache = _resolve_assistant_credentials(settings, model=model, preset_id=preset_id)
     llm_provider = provider_id_for_protocol(protocol)
 
     existing_messages = chat.messages or []
@@ -888,7 +894,11 @@ async def stream_assistant(req: AssistantStreamRequest, request: Request):
         allow_web_search=allow_web_search,
         assistant_settings=assistant_settings,
     )
-    extra_body = filter_reasoning_extra_body_for_upstream(model, reasoning_cfg["extra_body"])
+    extra_body = attach_protocol_extra_body(
+        filter_reasoning_extra_body_for_upstream(model, reasoning_cfg["extra_body"]),
+        protocol=protocol,
+        anthropic_prompt_cache=anthropic_prompt_cache,
+    )
     agent_ctx = AssistantAgentRunContext(
         base_url=base_url,
         api_key=api_key,

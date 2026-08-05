@@ -1,10 +1,10 @@
 """
 Anthropic Messages API provider adapter (T-805-5B).
 
-Scope for 5B:
+Scope for 5B / 6A:
 - non-stream + stream text (and thinking→reasoning) paths
-- tools / tool_result / tool_use → provider_capability_unsupported (T-806)
-- prompt caching left off (no cache_control); T-806 owns off/5m/1h
+- tools / tool_result / tool_use → provider_capability_unsupported (T-806-6B)
+- prompt cache: anthropic_prompt_cache off|5m|1h on system block only (T-806-6A)
 """
 
 from __future__ import annotations
@@ -27,6 +27,7 @@ from app.llm.types import (
     GenerationConfig,
     Usage,
     WireRequest,
+    normalize_anthropic_prompt_cache,
 )
 from app.services.http_client import get_async_http_client
 from app.services.http_log import log_outbound
@@ -282,15 +283,16 @@ def _convert_messages(messages: list[dict[str, Any]]) -> tuple[str | None, list[
     return system, converted
 
 
-def _sanitize_extra_body(extra_body: dict[str, Any] | None) -> tuple[dict[str, Any], bool]:
+def _sanitize_extra_body(extra_body: dict[str, Any] | None) -> tuple[dict[str, Any], bool, str]:
     """
     Map shared reasoning extra_body into Anthropic thinking; strip OpenAI-only keys.
-    Returns (payload_fragment, thinking_enabled).
+    Returns (payload_fragment, thinking_enabled, anthropic_prompt_cache).
     """
     if not extra_body:
-        return {}, False
+        return {}, False, "off"
     out: dict[str, Any] = {}
     thinking_enabled = False
+    cache = normalize_anthropic_prompt_cache(extra_body.get("anthropic_prompt_cache"))
 
     thinking = extra_body.get("thinking")
     effort = None
@@ -307,15 +309,38 @@ def _sanitize_extra_body(extra_body: dict[str, Any] | None) -> tuple[dict[str, A
         thinking_enabled = False
         # Omit thinking entirely when disabled.
 
-    # Pass through Anthropic-native keys if callers set them explicitly (no cache_control in 5B).
+    # Pass through Anthropic-native keys if callers set them explicitly.
+    # cache_control / anthropic_prompt_cache are handled separately on system.
     for key, value in extra_body.items():
-        if key in {"thinking", "reasoning", "reasoning_effort", "tools", "tool_choice", "cache_control"}:
+        if key in {
+            "thinking",
+            "reasoning",
+            "reasoning_effort",
+            "tools",
+            "tool_choice",
+            "cache_control",
+            "anthropic_prompt_cache",
+        }:
             continue
         if key == "system":
             continue
         out[key] = value
 
-    return out, thinking_enabled
+    return out, thinking_enabled, cache
+
+
+def _system_with_cache(system: str | None, cache: str) -> str | list[dict[str, Any]] | None:
+    """Apply Anthropic prompt cache to the stable system block only (T-806-6A)."""
+    if not system:
+        return None
+    if cache == "off":
+        return system
+    control: dict[str, Any] = {"type": "ephemeral"}
+    if cache == "1h":
+        control["ttl"] = "1h"
+    elif cache == "5m":
+        control["ttl"] = "5m"
+    return [{"type": "text", "text": system, "cache_control": control}]
 
 
 def _build_payload(
@@ -337,15 +362,16 @@ def _build_payload(
             status_code=400,
         )
 
-    extra, thinking_enabled = _sanitize_extra_body(extra_body)
+    extra, thinking_enabled, cache = _sanitize_extra_body(extra_body)
     payload: dict[str, Any] = {
         "model": model,
         "messages": anth_messages,
         "max_tokens": int(max_tokens) if max_tokens and max_tokens > 0 else _DEFAULT_MAX_TOKENS,
         "stream": stream,
     }
-    if system:
-        payload["system"] = system
+    system_payload = _system_with_cache(system, cache)
+    if system_payload is not None:
+        payload["system"] = system_payload
     if thinking_enabled:
         # Anthropic requires temperature=1 (or omit) when thinking is enabled.
         payload["temperature"] = 1
@@ -354,8 +380,9 @@ def _build_payload(
     if top_p is not None and not thinking_enabled:
         payload["top_p"] = top_p
     payload.update(extra)
-    # 5B: never enable prompt caching.
+    # Top-level cache_control is not used for 6A (system-block only).
     payload.pop("cache_control", None)
+    payload.pop("anthropic_prompt_cache", None)
     return payload
 
 

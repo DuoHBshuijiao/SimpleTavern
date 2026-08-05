@@ -20,6 +20,9 @@
 - [x] **T-804 P0** LLM 协议内核与 OpenAI-compatible 迁移
 - [x] **T-805 P0** OpenAI Responses / Anthropic Messages / Gemini 原生协议（5A–5D ✅）
 - [ ] **T-806 P0** 工具 round-trip / 消息维护 / 流事件 + Anthropic cache（off/5m/1h）+ Responses/Gemini 高级能力
+  - [x] 6A Anthropic cache `off|5m|1h`
+  - [ ] 6B 多协议工具 round-trip
+  - [ ] 6C Responses web_search / Gemini CachedContents
 - [ ] **T-807 P0** 消息 generation metadata + append-only usage ledger
 - [ ] **T-808 P1** 本地定价引擎 + 会话/全局/按模型统计 API 与设置页 UI
 - [ ] **T-809 P1** 网络搜索供应商与 provider-native grounding 扩展

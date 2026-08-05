@@ -28,7 +28,7 @@ from app.llm.preset_resolve import (
     resolve_llm_preset_credentials,
 )
 from app.llm.runtime import chat_completions
-from app.llm.types import normalize_protocol_id
+from app.llm.types import attach_protocol_extra_body, normalize_protocol_id
 from app.schemas import Settings, TtsProvider
 from app.services import glm_local_tts_process
 from app.services import omnivoice_local_tts_process
@@ -233,10 +233,16 @@ def _resolve_llm_credentials(
     preset_id: str | None = None,
     base_url: str | None = None,
     api_key: str | None = None,
-) -> tuple[str, str, str]:
-    """Resolve LLM credentials for TTS text preprocess. Returns (base_url, api_key, protocol)."""
+) -> tuple[str, str, str, str]:
+    """Resolve LLM credentials for TTS text preprocess.
+
+    Returns (base_url, api_key, protocol, anthropic_prompt_cache).
+    """
+    from app.llm.types import ANTHROPIC_PROMPT_CACHE_OFF, normalize_anthropic_prompt_cache
+
     if api_key and api_key.strip():
         protocol = normalize_protocol_id(getattr(settings.llm, "protocol", None))
+        cache = normalize_anthropic_prompt_cache(getattr(settings.llm, "anthropicPromptCache", None))
         if preset_id:
             matched = next((p for p in settings.apiPresets if p.id == preset_id), None)
             if matched is None:
@@ -244,7 +250,13 @@ def _resolve_llm_credentials(
             if not is_llm_api_preset(matched):
                 raise HTTPException(status_code=400, detail="后处理模型不能使用 TTS 预设")
             protocol = normalize_protocol_id(getattr(matched, "protocol", None))
-        return ((base_url or settings.llm.baseUrl).strip(), api_key.strip(), protocol)
+            cache = normalize_anthropic_prompt_cache(getattr(matched, "anthropicPromptCache", None))
+        return (
+            (base_url or settings.llm.baseUrl).strip(),
+            api_key.strip(),
+            protocol,
+            cache or ANTHROPIC_PROMPT_CACHE_OFF,
+        )
 
     try:
         credentials = resolve_llm_preset_credentials(
@@ -253,8 +265,12 @@ def _resolve_llm_credentials(
         )
     except LlmPresetResolveError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
-    return credentials.base_url, credentials.api_key, credentials.protocol
-
+    return (
+        credentials.base_url,
+        credentials.api_key,
+        credentials.protocol,
+        credentials.anthropic_prompt_cache,
+    )
 
 def _write_asset_id_to_message(
     chat_id: str | None,
@@ -964,7 +980,7 @@ async def preprocess_text(req: PreprocessReq):
     if not text:
         return {"processedText": ""}
 
-    base_url, api_key, protocol = _resolve_llm_credentials(
+    base_url, api_key, protocol, anthropic_prompt_cache = _resolve_llm_credentials(
         settings,
         preset_id=req.preset_id,
         base_url=req.base_url,
@@ -1005,6 +1021,11 @@ async def preprocess_text(req: PreprocessReq):
                 {"role": "user", "content": user_payload},
             ],
             protocol=protocol,
+            extra_body=attach_protocol_extra_body(
+                None,
+                protocol=protocol,
+                anthropic_prompt_cache=anthropic_prompt_cache,
+            ),
         )
         payload = _parse_preprocess_json_payload(result.text)
         raw_out = payload.get("processed_text")

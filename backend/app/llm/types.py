@@ -18,6 +18,10 @@ OPENAI_RESPONSES_PROTOCOL: ProtocolId = "openai_responses"
 ANTHROPIC_MESSAGES_PROTOCOL: ProtocolId = "anthropic_messages"
 GEMINI_GENERATE_CONTENT_PROTOCOL: ProtocolId = "gemini_generate_content"
 
+AnthropicPromptCache = Literal["off", "5m", "1h"]
+ANTHROPIC_PROMPT_CACHE_OFF: AnthropicPromptCache = "off"
+_ANTHROPIC_PROMPT_CACHE_VALUES: frozenset[str] = frozenset({"off", "5m", "1h"})
+
 _KNOWN_PROTOCOLS: frozenset[str] = frozenset(
     {
         OPENAI_COMPATIBLE_CHAT_PROTOCOL,
@@ -55,6 +59,39 @@ def is_known_protocol_id(protocol: str | None) -> bool:
     return normalize_protocol_id(protocol) in _KNOWN_PROTOCOLS
 
 
+def normalize_anthropic_prompt_cache(raw: Any, *, default: AnthropicPromptCache = ANTHROPIC_PROMPT_CACHE_OFF) -> AnthropicPromptCache:
+    """Normalize Anthropic prompt-cache TTL; bool legacy true→5m, false→off."""
+    if isinstance(raw, bool):
+        return "5m" if raw else "off"
+    key = str(raw or "").strip().lower()
+    if not key:
+        return default
+    if key in {"true", "1", "yes", "on", "enabled"}:
+        return "5m"
+    if key in {"false", "0", "no", "off", "disabled"}:
+        return "off"
+    if key in _ANTHROPIC_PROMPT_CACHE_VALUES:
+        return key  # type: ignore[return-value]
+    return default
+
+
+def attach_protocol_extra_body(
+    extra_body: dict[str, Any] | None,
+    *,
+    protocol: str | None,
+    anthropic_prompt_cache: str | None = None,
+) -> dict[str, Any]:
+    """Merge protocol-specific knobs into extra_body for adapters (T-806)."""
+    out = dict(extra_body or {})
+    proto = normalize_protocol_id(protocol)
+    cache = normalize_anthropic_prompt_cache(anthropic_prompt_cache)
+    if proto == ANTHROPIC_MESSAGES_PROTOCOL and cache != "off":
+        out["anthropic_prompt_cache"] = cache
+    else:
+        out.pop("anthropic_prompt_cache", None)
+    return out
+
+
 @dataclass(frozen=True)
 class GenerationConfig:
     model: str
@@ -65,6 +102,7 @@ class GenerationConfig:
     tools: list[dict[str, Any]] | None = None
     tool_choice: Any | None = None
     stream: bool = False
+    anthropic_prompt_cache: AnthropicPromptCache | None = None
 
 
 @dataclass(frozen=True)

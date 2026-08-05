@@ -12,7 +12,7 @@ from typing import Any
 
 from app.llm.preset_resolve import LlmPresetResolveError, resolve_llm_preset_credentials
 from app.llm.runtime import chat_completions_message
-from app.llm.types import OPENAI_COMPATIBLE_CHAT_PROTOCOL
+from app.llm.types import OPENAI_COMPATIBLE_CHAT_PROTOCOL, attach_protocol_extra_body
 from app.schemas import (
     StatusTableDef,
     build_reasoning_request_config,
@@ -128,7 +128,11 @@ def _default_run_context() -> StMvuImportAgentRunContext:
 
     reasoning_cfg = build_reasoning_request_config(settings)
     thinking_enabled = reasoning_cfg["thinking_enabled"]
-    extra_body = filter_reasoning_extra_body_for_upstream(model, reasoning_cfg["extra_body"])
+    extra_body = attach_protocol_extra_body(
+        filter_reasoning_extra_body_for_upstream(model, reasoning_cfg["extra_body"]),
+        protocol=credentials.protocol,
+        anthropic_prompt_cache=credentials.anthropic_prompt_cache,
+    )
     temperature: float | None = None
     if not thinking_enabled:
         temperature = settings.generationDefaults.temperature

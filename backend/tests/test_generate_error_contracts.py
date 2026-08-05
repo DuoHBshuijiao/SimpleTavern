@@ -72,7 +72,7 @@ def _enter_common_generation_patches(
     stack.enter_context(
         patch(
             "app.routes.generate._resolve_generation_credentials",
-            return_value=("https://provider.example/v1", "test-key", "openai_compatible_chat"),
+            return_value=("https://provider.example/v1", "test-key", "openai_compatible_chat", "off"),
         )
     )
 

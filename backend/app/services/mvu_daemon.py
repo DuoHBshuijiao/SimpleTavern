@@ -22,6 +22,7 @@ from app.content_regex_queue import dequeue_by_message_id, get_content_regex_que
 from app.errors import as_app_error
 from app.group_mvu import _character_unreadable_error, resolve_chat_mvu_runtime_enablement
 from app.llm.preset_resolve import LlmPresetResolveError, resolve_llm_preset_credentials
+from app.llm.types import attach_protocol_extra_body
 from app.mvu_model_resolve import resolve_mvu_model_from_settings
 from app.mvu_system_prompt import load_mvu_system_prompt
 from app.schemas import (
@@ -322,9 +323,14 @@ async def _run_once(chat_id: str) -> None:
     base_url = credentials.base_url
     api_key = credentials.api_key
     protocol = credentials.protocol
+    anthropic_prompt_cache = credentials.anthropic_prompt_cache
 
     reasoning_cfg = build_reasoning_request_config(settings)
-    extra_body = filter_reasoning_extra_body_for_upstream(model, reasoning_cfg["extra_body"])
+    extra_body = attach_protocol_extra_body(
+        filter_reasoning_extra_body_for_upstream(model, reasoning_cfg["extra_body"]),
+        protocol=protocol,
+        anthropic_prompt_cache=anthropic_prompt_cache,
+    )
     tool_temperature: float | None = None
     if not reasoning_cfg["thinking_enabled"]:
         tool_temperature = settings.generationDefaults.temperature

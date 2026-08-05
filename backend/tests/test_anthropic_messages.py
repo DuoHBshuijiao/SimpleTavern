@@ -82,7 +82,7 @@ def test_tool_role_in_messages_fast_fail() -> None:
     assert exc.value.code == "provider_capability_unsupported"
 
 
-def test_build_payload_defaults_max_tokens_and_strips_cache() -> None:
+def test_build_payload_defaults_max_tokens_and_strips_top_level_cache() -> None:
     payload = _build_payload(
         model="claude-sonnet-4-5",
         messages=[{"role": "user", "content": "hi"}],
@@ -96,6 +96,68 @@ def test_build_payload_defaults_max_tokens_and_strips_cache() -> None:
     assert payload["temperature"] == 0.2
     assert "cache_control" not in payload
     assert "reasoning_effort" not in payload
+    assert "system" not in payload
+
+
+def test_build_payload_applies_system_cache_5m() -> None:
+    payload = _build_payload(
+        model="claude-sonnet-4-5",
+        messages=[
+            {"role": "system", "content": "stable-sys"},
+            {"role": "user", "content": "hi"},
+        ],
+        stream=False,
+        temperature=None,
+        top_p=None,
+        max_tokens=128,
+        extra_body={"anthropic_prompt_cache": "5m"},
+    )
+    assert payload["system"] == [
+        {
+            "type": "text",
+            "text": "stable-sys",
+            "cache_control": {"type": "ephemeral", "ttl": "5m"},
+        }
+    ]
+    assert "anthropic_prompt_cache" not in payload
+
+
+def test_build_payload_applies_system_cache_1h() -> None:
+    payload = _build_payload(
+        model="claude-sonnet-4-5",
+        messages=[
+            {"role": "system", "content": "stable-sys"},
+            {"role": "user", "content": "hi"},
+        ],
+        stream=False,
+        temperature=None,
+        top_p=None,
+        max_tokens=128,
+        extra_body={"anthropic_prompt_cache": "1h"},
+    )
+    assert payload["system"] == [
+        {
+            "type": "text",
+            "text": "stable-sys",
+            "cache_control": {"type": "ephemeral", "ttl": "1h"},
+        }
+    ]
+
+
+def test_build_payload_cache_off_keeps_string_system() -> None:
+    payload = _build_payload(
+        model="claude-sonnet-4-5",
+        messages=[
+            {"role": "system", "content": "stable-sys"},
+            {"role": "user", "content": "hi"},
+        ],
+        stream=False,
+        temperature=None,
+        top_p=None,
+        max_tokens=128,
+        extra_body={"anthropic_prompt_cache": "off"},
+    )
+    assert payload["system"] == "stable-sys"
 
 
 def test_build_payload_maps_thinking_enabled() -> None:

@@ -35,7 +35,7 @@ from app.content_regex_scanner import ensure_content_regex_scanner_started
 from app.errors import AppError, app_error_response, as_app_error
 from app.llm.preset_resolve import LlmPresetResolveError, resolve_llm_preset_credentials
 from app.llm.runtime import chat_completions, chat_completions_message, stream_chat_completions
-from app.llm.types import provider_id_for_protocol
+from app.llm.types import attach_protocol_extra_body, provider_id_for_protocol
 from app.placeholders import replace_placeholders_in_text
 from app.prompt_xml import (
     wrap_acting_as,
@@ -82,13 +82,19 @@ def get_last_generate_prep_profile() -> dict[str, Any] | None:
     return dict(_last_generate_prep_profile) if _last_generate_prep_profile is not None else None
 
 
-def _resolve_generation_credentials(settings: Any, *, model: str, preset_id: str | None) -> tuple[str, str, str]:
+def _resolve_generation_credentials(
+    settings: Any, *, model: str, preset_id: str | None
+) -> tuple[str, str, str, str]:
     try:
         credentials = resolve_llm_preset_credentials(settings, model=model, explicit_preset_id=preset_id)
     except LlmPresetResolveError as exc:
         raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message}) from exc
-    return credentials.base_url, credentials.api_key, credentials.protocol
-
+    return (
+        credentials.base_url,
+        credentials.api_key,
+        credentials.protocol,
+        credentials.anthropic_prompt_cache,
+    )
 
 def _ensure_web_search_ready(settings: Any, *, requested: bool) -> bool:
     if not requested:
@@ -1307,7 +1313,7 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
     elif chat.overrides.presetId:
         preset_id = chat.overrides.presetId
     
-    base_url, api_key, protocol = _resolve_generation_credentials(settings, model=model, preset_id=preset_id)
+    base_url, api_key, protocol, anthropic_prompt_cache = _resolve_generation_credentials(settings, model=model, preset_id=preset_id)
     llm_provider = provider_id_for_protocol(protocol)
 
     _apply_placeholder_rewrite_to_history(
@@ -1372,7 +1378,11 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
 
     reasoning_cfg = build_reasoning_request_config(settings)
     thinking_enabled = reasoning_cfg["thinking_enabled"]
-    extra_body = filter_reasoning_extra_body_for_upstream(model, reasoning_cfg["extra_body"])
+    extra_body = attach_protocol_extra_body(
+        filter_reasoning_extra_body_for_upstream(model, reasoning_cfg["extra_body"]),
+        protocol=protocol,
+        anthropic_prompt_cache=anthropic_prompt_cache,
+    )
     if thinking_enabled:
         temperature = None
 
@@ -1652,12 +1662,16 @@ async def generate_draft_help(req: DraftHelpRequest, request: Request) -> Stream
     recent_dialog = _render_draft_help_history_text(recent_dialog_messages) or "（暂无可用对话上下文）"
     messages.append({"role": "user", "content": f"最近对话如下：\n{recent_dialog}"})
     preset_id = chat.overrides.presetId
-    base_url, api_key, protocol = _resolve_generation_credentials(settings, model=model, preset_id=preset_id)
+    base_url, api_key, protocol, anthropic_prompt_cache = _resolve_generation_credentials(settings, model=model, preset_id=preset_id)
     llm_provider = provider_id_for_protocol(protocol)
 
     reasoning_cfg = build_reasoning_request_config(settings)
     thinking_enabled = reasoning_cfg["thinking_enabled"]
-    extra_body = filter_reasoning_extra_body_for_upstream(model, reasoning_cfg["extra_body"])
+    extra_body = attach_protocol_extra_body(
+        filter_reasoning_extra_body_for_upstream(model, reasoning_cfg["extra_body"]),
+        protocol=protocol,
+        anthropic_prompt_cache=anthropic_prompt_cache,
+    )
     if thinking_enabled:
         temperature = None
 
@@ -1936,7 +1950,7 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
     elif chat.overrides.presetId:
         preset_id = chat.overrides.presetId
     
-    base_url, api_key, protocol = _resolve_generation_credentials(settings, model=model, preset_id=preset_id)
+    base_url, api_key, protocol, anthropic_prompt_cache = _resolve_generation_credentials(settings, model=model, preset_id=preset_id)
     llm_provider = provider_id_for_protocol(protocol)
 
     _apply_placeholder_rewrite_to_history(
@@ -1993,7 +2007,11 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
 
     reasoning_cfg = build_reasoning_request_config(settings)
     thinking_enabled = reasoning_cfg["thinking_enabled"]
-    extra_body = filter_reasoning_extra_body_for_upstream(model, reasoning_cfg["extra_body"])
+    extra_body = attach_protocol_extra_body(
+        filter_reasoning_extra_body_for_upstream(model, reasoning_cfg["extra_body"]),
+        protocol=protocol,
+        anthropic_prompt_cache=anthropic_prompt_cache,
+    )
     if thinking_enabled:
         temperature = None
 
@@ -2391,7 +2409,7 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
     elif chat.overrides.presetId:
         preset_id = chat.overrides.presetId
     
-    base_url, api_key, protocol = _resolve_generation_credentials(settings, model=model, preset_id=preset_id)
+    base_url, api_key, protocol, anthropic_prompt_cache = _resolve_generation_credentials(settings, model=model, preset_id=preset_id)
     llm_provider = provider_id_for_protocol(protocol)
 
     _apply_placeholder_rewrite_to_history(
@@ -2448,7 +2466,11 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
 
     reasoning_cfg = build_reasoning_request_config(settings)
     thinking_enabled = reasoning_cfg["thinking_enabled"]
-    extra_body = filter_reasoning_extra_body_for_upstream(model, reasoning_cfg["extra_body"])
+    extra_body = attach_protocol_extra_body(
+        filter_reasoning_extra_body_for_upstream(model, reasoning_cfg["extra_body"]),
+        protocol=protocol,
+        anthropic_prompt_cache=anthropic_prompt_cache,
+    )
     if thinking_enabled:
         temperature = None
 
