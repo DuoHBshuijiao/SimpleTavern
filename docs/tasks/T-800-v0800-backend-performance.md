@@ -38,14 +38,15 @@ v0.800 从“后端性能版”升级为“**后端可信执行层**”：
 - 网络搜索已有 Tavily / 博查；部分失败以 JSON 字符串作为工具结果返回，尚未进入统一错误契约。
 - 统计 UI 目标位置：`SettingsDrawerGlobalAppSection.vue` 的“应用与更新”accordion 内、成本计算器按钮上方。
 
-## 当前实施进度（2026-07-10）
+## 当前实施进度（2026-08-05）
 
 - T-801 已完成：统一错误 envelope、requestId、REST/SSE handler、上游错误映射、前端 typed error 与错误栈。
-- T-802 前两批已完成：LLM/generate fast-fail，以及 Storage/chat/fork 损坏数据可见化、索引自愈、cleanup-only 日志。
-- 当前门禁：后端 169 tests、前端 123 tests、前端 build 全通过。
+- T-802 已完成：F-001~F-034 六批静默 fallback 迁移。
+- T-803-3A 已完成：共享 HTTP client；openai_compat + web_search 复用连接池。
+- 当前门禁：后端 204 tests。
 - fork index 性能基线：1000 会话、99 fork 冷重建 `410.05 ms`，回归门槛 `< 5000 ms`。
 - F-010 已确认语义 A：正文正则存原文 + 前端显示时处理；generate 不落库前改写（非缺口）。
-- 下一批：Assistant/tools 脏消息、工具参数与 REST/SSE 错误收口。
+- 下一批：T-803-3B chatId/fork 索引与 I/O。
 
 ## 统一错误契约
 

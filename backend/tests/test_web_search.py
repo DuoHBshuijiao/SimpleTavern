@@ -93,12 +93,9 @@ def test_run_web_search_sync_maps_http_error() -> None:
     )
     request = httpx.Request("POST", "https://api.tavily.com/search")
     response = httpx.Response(403, request=request, text="quota")
-    with patch("app.services.web_search.httpx.Client") as client_cls:
-        client = MagicMock()
-        client.__enter__.return_value = client
-        client.__exit__.return_value = False
-        client.post.side_effect = httpx.HTTPStatusError("403", request=request, response=response)
-        client_cls.return_value = client
+    client = MagicMock()
+    client.post.side_effect = httpx.HTTPStatusError("403", request=request, response=response)
+    with patch("app.services.web_search.get_sync_http_client", return_value=client):
         payload = run_web_search_sync(settings, "hello")
     assert payload["ok"] is False
     assert payload["code"] == "web_search_quota"

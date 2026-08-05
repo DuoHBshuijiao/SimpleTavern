@@ -1,6 +1,6 @@
 # T-802 v0.800 全后端静默 Fallback 审计与迁移
 
-- status: in-progress（前四批已完成：LLM/generate、Storage、Assistant/tools、MVU/regex；含 F-009）
+- status: completed（六批完成：F-001~F-034；2026-07-25）
 - area: `backend/app/**`
 - priority: P0
 - theme: 每个 catch/fallback 都有业务语义、用户可见结果与测试

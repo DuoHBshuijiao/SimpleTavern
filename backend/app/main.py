@@ -57,6 +57,7 @@ from app.routes.mvu import router as mvu_router
 from app.routes.tts import router as tts_router
 from app.services.data_integrity import data_integrity_service
 from app.services.glm_local_tts_process import stop as stop_glm_local_tts
+from app.services.http_client import shutdown_http_clients, startup_http_clients
 from app.services.http_log_sweeper import http_log_sweeper
 from app.services.omnivoice_local_tts_process import stop as stop_omnivoice_local_tts
 from app.services.qwen3_local_tts_process import stop as stop_qwen3_local_tts
@@ -81,6 +82,7 @@ async def lifespan(app: FastAPI):
     """
     ensure_data_initialized()
     warmup_tokenizer()
+    await startup_http_clients()
     fork_index_task = asyncio.create_task(_warm_fork_index())
     integrity_scan_task = asyncio.create_task(data_integrity_service.run_startup_scan())
     await tts_cache_patrol.start()
@@ -93,6 +95,7 @@ async def lifespan(app: FastAPI):
         stop_glm_local_tts()
         stop_omnivoice_local_tts()
         stop_qwen3_local_tts()
+        await shutdown_http_clients()
         fork_index_task.cancel()
         integrity_scan_task.cancel()
         try:

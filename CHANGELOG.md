@@ -2,6 +2,12 @@
 
 ## v0.800（进行中）
 
+### 性能基础设施 3A（T-803）
+
+- 新增进程级共享 HTTP client（连接池 + 默认超时），应用 lifespan 负责启动/关闭。
+- OpenAI-compatible LLM 与网络搜索出站请求改为复用共享 client，保留请求级 timeout。
+- 后端 204 项测试通过。
+
 ### 静默 Fallback 迁移第六批（T-802）
 
 - GLM 本地 TTS：JSON 合成失败回退 multipart 时写入 `tts_endpoint_fallback`（from/to/reason），响应附带 warnings。

@@ -97,8 +97,8 @@
 
 - T-801 已完成：统一 REST/SSE 错误 envelope、requestId、上游错误映射、前端 typed error/错误栈。
 - T-802 六批已完成：LLM/generate、Storage/chat/fork、Assistant/tools、MVU/KG/regex health、Search/Import-Export、TTS/infra（F-001~F-034）。
-- 当前门禁：后端 198 tests；1000 会话 fork 索引冷重建 410.05 ms。
-- 下一阶段为 T-803 性能基线 / 共享 HTTP client / 索引与 I/O。
+- T-803 进行中：3A 共享 HTTP client 已完成（openai_compat + web_search）；下一棒 3B 索引/I/O。
+- 当前门禁：后端 204 tests；1000 会话 fork 索引冷重建 410.05 ms。
 
 ### 成本统计 UI
 

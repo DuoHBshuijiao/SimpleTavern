@@ -12,6 +12,8 @@ from typing import Any
 
 import httpx
 
+from app.services.http_client import get_async_http_client, get_sync_http_client
+
 from app.schemas import Settings, WebSearchSettings
 
 OPENAI_WEB_SEARCH_TOOLS: list[dict[str, Any]] = [
@@ -131,10 +133,10 @@ def _tavily_request(ws: WebSearchSettings, query: str) -> tuple[str, dict[str, s
 
 async def _tavily_search(ws: WebSearchSettings, query: str) -> dict[str, Any]:
     url, headers, body = _tavily_request(ws, query)
-    async with httpx.AsyncClient(timeout=90.0) as client:
-        r = await client.post(url, json=body, headers=headers)
-        r.raise_for_status()
-        data = r.json()
+    client = get_async_http_client()
+    r = await client.post(url, json=body, headers=headers, timeout=90.0)
+    r.raise_for_status()
+    data = r.json()
     return _search_ok(_format_tavily_markdown(data if isinstance(data, dict) else {}), provider="tavily")
 
 
@@ -194,19 +196,19 @@ def _parse_bocha_response(status_code: int, text: str, data: Any) -> dict[str, A
 
 async def _bocha_search(ws: WebSearchSettings, query: str) -> dict[str, Any]:
     url, headers, body = _bocha_request(ws, query)
-    async with httpx.AsyncClient(timeout=90.0) as client:
-        r = await client.post(url, json=body, headers=headers)
-        text = r.text
-        try:
-            data = r.json()
-        except json.JSONDecodeError:
-            return _search_err(
-                "web_search_invalid_response",
-                f"HTTP {r.status_code}：响应不是合法 JSON",
-                provider="bocha",
-                detail=text[:2000],
-                status=r.status_code,
-            )
+    client = get_async_http_client()
+    r = await client.post(url, json=body, headers=headers, timeout=90.0)
+    text = r.text
+    try:
+        data = r.json()
+    except json.JSONDecodeError:
+        return _search_err(
+            "web_search_invalid_response",
+            f"HTTP {r.status_code}：响应不是合法 JSON",
+            provider="bocha",
+            detail=text[:2000],
+            status=r.status_code,
+        )
     return _parse_bocha_response(r.status_code, text, data)
 
 
@@ -260,31 +262,30 @@ def run_web_search_sync(settings: Settings, query: str) -> dict[str, Any]:
         return _search_err("web_search_not_configured", "未配置网络搜索或缺少 API Key")
     provider = ws.provider
     try:
+        client = get_sync_http_client()
         if provider == "tavily":
             url, headers, body = _tavily_request(ws, q)
-            with httpx.Client(timeout=90.0) as client:
-                r = client.post(url, json=body, headers=headers)
-                r.raise_for_status()
-                data = r.json()
+            r = client.post(url, json=body, headers=headers, timeout=90.0)
+            r.raise_for_status()
+            data = r.json()
             return _search_ok(
                 _format_tavily_markdown(data if isinstance(data, dict) else {}),
                 provider="tavily",
             )
         if provider == "bocha":
             url, headers, body = _bocha_request(ws, q)
-            with httpx.Client(timeout=90.0) as client:
-                r = client.post(url, json=body, headers=headers)
-                text = r.text
-                try:
-                    data = r.json()
-                except json.JSONDecodeError:
-                    return _search_err(
-                        "web_search_invalid_response",
-                        f"HTTP {r.status_code}：响应不是合法 JSON",
-                        provider="bocha",
-                        detail=text[:2000],
-                        status=r.status_code,
-                    )
+            r = client.post(url, json=body, headers=headers, timeout=90.0)
+            text = r.text
+            try:
+                data = r.json()
+            except json.JSONDecodeError:
+                return _search_err(
+                    "web_search_invalid_response",
+                    f"HTTP {r.status_code}：响应不是合法 JSON",
+                    provider="bocha",
+                    detail=text[:2000],
+                    status=r.status_code,
+                )
             return _parse_bocha_response(r.status_code, text, data)
     except httpx.HTTPStatusError as e:
         return _map_http_status_error(e, provider=provider)
@@ -303,22 +304,22 @@ async def fetch_tavily_usage(api_key: str) -> dict[str, Any]:
         return {"ok": False, "error": "empty key"}
     url = "https://api.tavily.com/usage"
     headers = {"Authorization": f"Bearer {key}", "Accept": "application/json"}
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        r = await client.get(url, headers=headers)
-        try:
-            data = r.json()
-        except json.JSONDecodeError:
-            data = {"raw": (r.text or "")[:2000]}
-        if r.status_code >= 400:
-            msg = f"HTTP {r.status_code}"
-            if isinstance(data, dict):
-                detail = data.get("detail")
-                if isinstance(detail, dict):
-                    err = detail.get("error")
-                    if isinstance(err, str) and err.strip():
-                        msg = err.strip()
-            return {"ok": False, "status": r.status_code, "message": msg}
-        return {"ok": True, "data": data if isinstance(data, dict) else {"value": data}}
+    client = get_async_http_client()
+    r = await client.get(url, headers=headers, timeout=20.0)
+    try:
+        data = r.json()
+    except json.JSONDecodeError:
+        data = {"raw": (r.text or "")[:2000]}
+    if r.status_code >= 400:
+        msg = f"HTTP {r.status_code}"
+        if isinstance(data, dict):
+            detail = data.get("detail")
+            if isinstance(detail, dict):
+                err = detail.get("error")
+                if isinstance(err, str) and err.strip():
+                    msg = err.strip()
+        return {"ok": False, "status": r.status_code, "message": msg}
+    return {"ok": True, "data": data if isinstance(data, dict) else {"value": data}}
 
 
 async def fetch_bocha_remaining(api_key: str, base_url: str | None) -> dict[str, Any]:
@@ -328,21 +329,21 @@ async def fetch_bocha_remaining(api_key: str, base_url: str | None) -> dict[str,
     base = (base_url or "https://api.bocha.cn").rstrip("/")
     url = f"{base}/v1/fund/remaining"
     headers = {"Authorization": f"Bearer {key}", "Accept": "application/json"}
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        r = await client.get(url, headers=headers)
-        try:
-            data = r.json()
-        except json.JSONDecodeError:
-            data = {"raw": (r.text or "")[:2000]}
-        if r.status_code >= 400:
-            msg = f"HTTP {r.status_code}"
-            if isinstance(data, dict):
-                m = data.get("msg")
-                if isinstance(m, str) and m.strip():
-                    msg = m.strip()
-            return {"ok": False, "status": r.status_code, "message": msg}
-        inner = data.get("data") if isinstance(data, dict) else {}
-        remaining = None
-        if isinstance(inner, dict):
-            remaining = inner.get("remaining")
-        return {"ok": True, "remaining": remaining}
+    client = get_async_http_client()
+    r = await client.get(url, headers=headers, timeout=20.0)
+    try:
+        data = r.json()
+    except json.JSONDecodeError:
+        data = {"raw": (r.text or "")[:2000]}
+    if r.status_code >= 400:
+        msg = f"HTTP {r.status_code}"
+        if isinstance(data, dict):
+            m = data.get("msg")
+            if isinstance(m, str) and m.strip():
+                msg = m.strip()
+        return {"ok": False, "status": r.status_code, "message": msg}
+    inner = data.get("data") if isinstance(data, dict) else {}
+    remaining = None
+    if isinstance(inner, dict):
+        remaining = inner.get("remaining")
+    return {"ok": True, "remaining": remaining}

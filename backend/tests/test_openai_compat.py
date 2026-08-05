@@ -114,7 +114,7 @@ def test_list_models_maps_401_instead_of_returning_empty_list() -> None:
         async def __aexit__(self, exc_type, exc, tb) -> None:
             return None
 
-        async def get(self, url: str, headers: dict[str, str]) -> httpx.Response:
+        async def get(self, url: str, headers: dict[str, str], **_kwargs) -> httpx.Response:
             request = httpx.Request("GET", url, headers=headers)
             return httpx.Response(
                 401,
@@ -124,7 +124,7 @@ def test_list_models_maps_401_instead_of_returning_empty_list() -> None:
 
     async def run() -> AppError:
         with (
-            patch("app.llm.openai_compat.httpx.AsyncClient", UnauthorizedClient),
+            patch("app.llm.openai_compat.get_async_http_client", return_value=UnauthorizedClient()),
             patch("app.services.http_log._write_record", AsyncMock()),
         ):
             try:
@@ -142,7 +142,7 @@ def test_nonstream_empty_choices_fast_fails() -> None:
     async def run() -> AppError:
         client = _FakeResponseClient(_response({"choices": []}))
         with (
-            patch("app.llm.openai_compat.httpx.AsyncClient", return_value=client),
+            patch("app.llm.openai_compat.get_async_http_client", return_value=client),
             patch("app.services.http_log._write_record", AsyncMock()),
         ):
             try:
@@ -183,7 +183,7 @@ def test_nonstream_message_allows_tool_call_without_text() -> None:
     async def run():
         client = _FakeResponseClient(_response(payload))
         with (
-            patch("app.llm.openai_compat.httpx.AsyncClient", return_value=client),
+            patch("app.llm.openai_compat.get_async_http_client", return_value=client),
             patch("app.services.http_log._write_record", AsyncMock()),
         ):
             return await chat_completions_message(
@@ -203,7 +203,7 @@ def test_stream_invalid_json_fast_fails() -> None:
     async def run() -> AppError:
         client = _FakeStreamClient(_stream_response("data: {invalid-json}\n\n"))
         with (
-            patch("app.llm.openai_compat.httpx.AsyncClient", return_value=client),
+            patch("app.llm.openai_compat.get_async_http_client", return_value=client),
             patch("app.services.http_log._write_record", AsyncMock()),
         ):
             try:
@@ -239,7 +239,7 @@ def test_stream_allows_keepalive_usage_and_normal_completion() -> None:
     async def run():
         client = _FakeStreamClient(_stream_response(raw))
         with (
-            patch("app.llm.openai_compat.httpx.AsyncClient", return_value=client),
+            patch("app.llm.openai_compat.get_async_http_client", return_value=client),
             patch("app.services.http_log._write_record", AsyncMock()),
         ):
             return [
@@ -264,7 +264,7 @@ def test_stream_without_done_or_finish_reason_is_interrupted() -> None:
         client = _FakeStreamClient(_stream_response(raw))
         content: list[str] = []
         with (
-            patch("app.llm.openai_compat.httpx.AsyncClient", return_value=client),
+            patch("app.llm.openai_compat.get_async_http_client", return_value=client),
             patch("app.services.http_log._write_record", AsyncMock()),
         ):
             try:
@@ -299,7 +299,7 @@ def test_stream_empty_completion_fast_fails() -> None:
     async def run() -> AppError:
         client = _FakeStreamClient(_stream_response(raw))
         with (
-            patch("app.llm.openai_compat.httpx.AsyncClient", return_value=client),
+            patch("app.llm.openai_compat.get_async_http_client", return_value=client),
             patch("app.services.http_log._write_record", AsyncMock()),
         ):
             try:
@@ -335,7 +335,7 @@ def test_stream_reasoning_and_tool_call_can_finish_without_done_sentinel() -> No
     async def run():
         client = _FakeStreamClient(_stream_response(raw))
         with (
-            patch("app.llm.openai_compat.httpx.AsyncClient", return_value=client),
+            patch("app.llm.openai_compat.get_async_http_client", return_value=client),
             patch("app.services.http_log._write_record", AsyncMock()),
         ):
             return [

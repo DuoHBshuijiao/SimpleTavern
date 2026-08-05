@@ -39,6 +39,8 @@ from dataclasses import dataclass
 from typing import Any, AsyncIterator, Literal
 from urllib.parse import urlsplit, urlunsplit
 
+from app.services.http_client import get_async_http_client
+
 import httpx
 
 from app.errors import AppError, as_app_error
@@ -295,16 +297,16 @@ async def list_models_openai_compat(base_url: str, api_key: str) -> list[str]:
             request_headers=headers,
             streaming=False,
         ) as outbound_log:
-            async with httpx.AsyncClient(timeout=10) as client:
-                response = await client.get(url, headers=headers)
-                outbound_log.set_response(
-                    status=response.status_code,
-                    headers=dict(response.headers),
-                    text=response.text,
-                )
-                _raise_http_error(response)
-                data = response.json()
-                outbound_log.set_response(body=data)
+            client = get_async_http_client()
+            response = await client.get(url, headers=headers, timeout=10)
+            outbound_log.set_response(
+                status=response.status_code,
+                headers=dict(response.headers),
+                text=response.text,
+            )
+            _raise_http_error(response)
+            data = response.json()
+            outbound_log.set_response(body=data)
         if not isinstance(data, dict) or not isinstance(data.get("data"), list):
             raise AppError(
                 code="provider_response_invalid",
@@ -524,28 +526,28 @@ async def chat_completions(
         request_body=payload,
         streaming=False,
     ) as _log:
-        async with httpx.AsyncClient(timeout=120) as client:
-            r = await client.post(url, headers=headers, json=payload)
-            _log.set_response(status=r.status_code, headers=dict(r.headers), text=r.text)
-            _raise_http_error(r)
-            data = _decode_json_object(r, context="chat completion response")
-            _log.set_response(body=data)
-            choice = _first_choice(data, context="chat completion response")
-            message = choice.get("message")
-            if not isinstance(message, dict):
-                raise _protocol_error(
-                    code="provider_response_invalid",
-                    message="上游服务未返回有效消息",
-                    detail="chat completion response: choices[0].message is missing or invalid",
-                )
-            content = _message_content_to_text(message.get("content"))
-            if not content.strip():
-                raise _protocol_error(
-                    code="provider_response_invalid",
-                    message="上游服务返回了空消息",
-                    detail="chat completion response: assistant content is empty",
-                )
-            return ChatCompletionResult(text=content)
+        client = get_async_http_client()
+        r = await client.post(url, headers=headers, json=payload, timeout=120)
+        _log.set_response(status=r.status_code, headers=dict(r.headers), text=r.text)
+        _raise_http_error(r)
+        data = _decode_json_object(r, context="chat completion response")
+        _log.set_response(body=data)
+        choice = _first_choice(data, context="chat completion response")
+        message = choice.get("message")
+        if not isinstance(message, dict):
+            raise _protocol_error(
+                code="provider_response_invalid",
+                message="上游服务未返回有效消息",
+                detail="chat completion response: choices[0].message is missing or invalid",
+            )
+        content = _message_content_to_text(message.get("content"))
+        if not content.strip():
+            raise _protocol_error(
+                code="provider_response_invalid",
+                message="上游服务返回了空消息",
+                detail="chat completion response: assistant content is empty",
+            )
+        return ChatCompletionResult(text=content)
 
 
 async def chat_completions_message(
@@ -606,48 +608,48 @@ async def chat_completions_message(
         request_body=payload,
         streaming=False,
     ) as _log:
-        async with httpx.AsyncClient(timeout=120) as client:
-            r = await client.post(url, headers=headers, json=payload)
-            _log.set_response(status=r.status_code, headers=dict(r.headers), text=r.text)
-            _raise_http_error(r)
-            data = _decode_json_object(r, context="chat completion message response")
-            _log.set_response(body=data)
-            choice = _first_choice(data, context="chat completion message response")
-            message = choice.get("message")
-            if not isinstance(message, dict):
-                raise _protocol_error(
-                    code="provider_response_invalid",
-                    message="上游服务未返回有效消息",
-                    detail="chat completion message response: choices[0].message is missing or invalid",
-                )
-            # 支持 reasoning_content（OpenAI）与 reasoning（如 Gemini/OpenRouter）两种字段名
-            reasoning_content = message.get("reasoning_content") or message.get("reasoning")
-            if reasoning_content is not None and not isinstance(reasoning_content, str):
-                raise _protocol_error(
-                    code="provider_response_invalid",
-                    message="上游服务返回了无效 reasoning",
-                    detail="chat completion message response: reasoning must be a string",
-                )
-            content = _message_content_to_text(message.get("content")) or None
-            tool_calls = message.get("tool_calls")
-            if tool_calls is not None and not isinstance(tool_calls, list):
-                raise _protocol_error(
-                    code="provider_response_invalid",
-                    message="上游服务返回了无效工具调用",
-                    detail="chat completion message response: tool_calls is not an array",
-                )
-            if content is None and not reasoning_content and not tool_calls:
-                raise _protocol_error(
-                    code="provider_response_invalid",
-                    message="上游服务返回了空消息",
-                    detail="chat completion message response: content, reasoning and tool_calls are empty",
-                )
-            return ChatCompletionMessage(
-                role=message.get("role"),
-                content=content,
-                reasoning_content=reasoning_content,
-                tool_calls=tool_calls,
+        client = get_async_http_client()
+        r = await client.post(url, headers=headers, json=payload, timeout=120)
+        _log.set_response(status=r.status_code, headers=dict(r.headers), text=r.text)
+        _raise_http_error(r)
+        data = _decode_json_object(r, context="chat completion message response")
+        _log.set_response(body=data)
+        choice = _first_choice(data, context="chat completion message response")
+        message = choice.get("message")
+        if not isinstance(message, dict):
+            raise _protocol_error(
+                code="provider_response_invalid",
+                message="上游服务未返回有效消息",
+                detail="chat completion message response: choices[0].message is missing or invalid",
             )
+        # 支持 reasoning_content（OpenAI）与 reasoning（如 Gemini/OpenRouter）两种字段名
+        reasoning_content = message.get("reasoning_content") or message.get("reasoning")
+        if reasoning_content is not None and not isinstance(reasoning_content, str):
+            raise _protocol_error(
+                code="provider_response_invalid",
+                message="上游服务返回了无效 reasoning",
+                detail="chat completion message response: reasoning must be a string",
+            )
+        content = _message_content_to_text(message.get("content")) or None
+        tool_calls = message.get("tool_calls")
+        if tool_calls is not None and not isinstance(tool_calls, list):
+            raise _protocol_error(
+                code="provider_response_invalid",
+                message="上游服务返回了无效工具调用",
+                detail="chat completion message response: tool_calls is not an array",
+            )
+        if content is None and not reasoning_content and not tool_calls:
+            raise _protocol_error(
+                code="provider_response_invalid",
+                message="上游服务返回了空消息",
+                detail="chat completion message response: content, reasoning and tool_calls are empty",
+            )
+        return ChatCompletionMessage(
+            role=message.get("role"),
+            content=content,
+            reasoning_content=reasoning_content,
+            tool_calls=tool_calls,
+        )
 
 
 async def stream_chat_completions(
@@ -705,185 +707,185 @@ async def stream_chat_completions(
     ) as _log:
         aggregated_content: list[str] = []
         aggregated_reasoning: list[str] = []
-        async with httpx.AsyncClient(timeout=None) as client:
-            async with client.stream("POST", url, headers=headers, json=payload) as r:
-                _log.set_response(status=r.status_code, headers=dict(r.headers))
-                await _raise_stream_http_error(r)
-                async for line in r.aiter_lines():
-                    if not line:
-                        continue
-                    if line.startswith(":"):
-                        # SSE comment / keepalive 帧无业务语义，可安全跳过。
-                        continue
-                    if not line.startswith("data:"):
-                        raise _protocol_error(
-                            code="stream_event_invalid",
-                            message="上游流包含未知事件帧",
-                            detail=f"unexpected SSE line: {line[:200]}",
-                        )
-                    data_str = line[len("data:") :].strip()
-                    if data_str == "[DONE]":
-                        saw_done = True
-                        break
-                    if not data_str:
-                        raise _protocol_error(
-                            code="stream_event_invalid",
-                            message="上游流包含空数据帧",
-                            detail="SSE data field is empty",
-                        )
-                    try:
-                        obj = json.loads(data_str)
-                    except json.JSONDecodeError as exc:
-                        raise _protocol_error(
-                            code="stream_event_invalid",
-                            message="上游流包含无法解析的 JSON",
-                            detail=f"invalid SSE JSON: {exc}",
-                        ) from exc
-                    if not isinstance(obj, dict):
-                        raise _protocol_error(
-                            code="stream_event_invalid",
-                            message="上游流事件格式无效",
-                            detail=f"expected object, got {type(obj).__name__}",
-                        )
+        client = get_async_http_client()
+        async with client.stream("POST", url, headers=headers, json=payload, timeout=None) as r:
+            _log.set_response(status=r.status_code, headers=dict(r.headers))
+            await _raise_stream_http_error(r)
+            async for line in r.aiter_lines():
+                if not line:
+                    continue
+                if line.startswith(":"):
+                    # SSE comment / keepalive 帧无业务语义，可安全跳过。
+                    continue
+                if not line.startswith("data:"):
+                    raise _protocol_error(
+                        code="stream_event_invalid",
+                        message="上游流包含未知事件帧",
+                        detail=f"unexpected SSE line: {line[:200]}",
+                    )
+                data_str = line[len("data:") :].strip()
+                if data_str == "[DONE]":
+                    saw_done = True
+                    break
+                if not data_str:
+                    raise _protocol_error(
+                        code="stream_event_invalid",
+                        message="上游流包含空数据帧",
+                        detail="SSE data field is empty",
+                    )
+                try:
+                    obj = json.loads(data_str)
+                except json.JSONDecodeError as exc:
+                    raise _protocol_error(
+                        code="stream_event_invalid",
+                        message="上游流包含无法解析的 JSON",
+                        detail=f"invalid SSE JSON: {exc}",
+                    ) from exc
+                if not isinstance(obj, dict):
+                    raise _protocol_error(
+                        code="stream_event_invalid",
+                        message="上游流事件格式无效",
+                        detail=f"expected object, got {type(obj).__name__}",
+                    )
 
-                    choices = obj.get("choices")
-                    if not choices:
-                        # OpenAI-compatible 服务可在独立帧中只返回 usage。
-                        if obj.get("usage") is not None:
-                            continue
-                        raise _protocol_error(
-                            code="stream_event_invalid",
-                            message="上游流事件缺少 choices",
-                            detail="SSE event contains neither choices nor usage",
-                        )
-                    if not isinstance(choices, list) or not isinstance(choices[0], dict):
-                        raise _protocol_error(
-                            code="stream_event_invalid",
-                            message="上游流事件 choices 格式无效",
-                            detail="choices must be a non-empty array of objects",
-                        )
-                    choice = choices[0]
-                    finish_reason = choice.get("finish_reason")
-                    if isinstance(finish_reason, str) and finish_reason:
-                        saw_finish_reason = True
-                    delta = choice.get("delta")
-                    if delta is None:
-                        delta = {}
-                    if not isinstance(delta, dict):
-                        raise _protocol_error(
-                            code="stream_event_invalid",
-                            message="上游流事件 delta 格式无效",
-                            detail="choices[0].delta must be an object",
-                        )
-                    # 支持 reasoning_content（OpenAI）与 reasoning（如 Gemini/OpenRouter）两种字段名
-                    reasoning_text = delta.get("reasoning_content") or delta.get("reasoning")
-                    if reasoning_text is not None and not isinstance(reasoning_text, str):
-                        raise _protocol_error(
-                            code="stream_event_invalid",
-                            message="上游流 reasoning 格式无效",
-                            detail="reasoning delta must be a string",
-                        )
-                    if isinstance(reasoning_text, str) and reasoning_text:
-                        saw_output = True
-                        aggregated_reasoning.append(reasoning_text)
-                        for i in range(0, len(reasoning_text), STREAM_TEXT_CHUNK_SIZE):
-                            yield StreamChunk(kind="reasoning", text=reasoning_text[i : i + STREAM_TEXT_CHUNK_SIZE])
-                    content_text = delta.get("content")
-                    if content_text is not None and not isinstance(content_text, str):
-                        raise _protocol_error(
-                            code="stream_event_invalid",
-                            message="上游流正文格式无效",
-                            detail="content delta must be a string",
-                        )
-                    if isinstance(content_text, str) and content_text:
-                        saw_output = True
-                        aggregated_content.append(content_text)
-                        _log.append_stream_text(content_text)
-                        for i in range(0, len(content_text), STREAM_TEXT_CHUNK_SIZE):
-                            yield StreamChunk(kind="content", text=content_text[i : i + STREAM_TEXT_CHUNK_SIZE])
-                    # 收集流式 tool_calls（OpenAI 格式：delta.tool_calls 为按 index 的增量）
-                    raw_tool_calls = delta.get("tool_calls")
-                    if raw_tool_calls is None:
+                choices = obj.get("choices")
+                if not choices:
+                    # OpenAI-compatible 服务可在独立帧中只返回 usage。
+                    if obj.get("usage") is not None:
                         continue
-                    if not isinstance(raw_tool_calls, list):
+                    raise _protocol_error(
+                        code="stream_event_invalid",
+                        message="上游流事件缺少 choices",
+                        detail="SSE event contains neither choices nor usage",
+                    )
+                if not isinstance(choices, list) or not isinstance(choices[0], dict):
+                    raise _protocol_error(
+                        code="stream_event_invalid",
+                        message="上游流事件 choices 格式无效",
+                        detail="choices must be a non-empty array of objects",
+                    )
+                choice = choices[0]
+                finish_reason = choice.get("finish_reason")
+                if isinstance(finish_reason, str) and finish_reason:
+                    saw_finish_reason = True
+                delta = choice.get("delta")
+                if delta is None:
+                    delta = {}
+                if not isinstance(delta, dict):
+                    raise _protocol_error(
+                        code="stream_event_invalid",
+                        message="上游流事件 delta 格式无效",
+                        detail="choices[0].delta must be an object",
+                    )
+                # 支持 reasoning_content（OpenAI）与 reasoning（如 Gemini/OpenRouter）两种字段名
+                reasoning_text = delta.get("reasoning_content") or delta.get("reasoning")
+                if reasoning_text is not None and not isinstance(reasoning_text, str):
+                    raise _protocol_error(
+                        code="stream_event_invalid",
+                        message="上游流 reasoning 格式无效",
+                        detail="reasoning delta must be a string",
+                    )
+                if isinstance(reasoning_text, str) and reasoning_text:
+                    saw_output = True
+                    aggregated_reasoning.append(reasoning_text)
+                    for i in range(0, len(reasoning_text), STREAM_TEXT_CHUNK_SIZE):
+                        yield StreamChunk(kind="reasoning", text=reasoning_text[i : i + STREAM_TEXT_CHUNK_SIZE])
+                content_text = delta.get("content")
+                if content_text is not None and not isinstance(content_text, str):
+                    raise _protocol_error(
+                        code="stream_event_invalid",
+                        message="上游流正文格式无效",
+                        detail="content delta must be a string",
+                    )
+                if isinstance(content_text, str) and content_text:
+                    saw_output = True
+                    aggregated_content.append(content_text)
+                    _log.append_stream_text(content_text)
+                    for i in range(0, len(content_text), STREAM_TEXT_CHUNK_SIZE):
+                        yield StreamChunk(kind="content", text=content_text[i : i + STREAM_TEXT_CHUNK_SIZE])
+                # 收集流式 tool_calls（OpenAI 格式：delta.tool_calls 为按 index 的增量）
+                raw_tool_calls = delta.get("tool_calls")
+                if raw_tool_calls is None:
+                    continue
+                if not isinstance(raw_tool_calls, list):
+                    raise _protocol_error(
+                        code="stream_event_invalid",
+                        message="上游流工具调用格式无效",
+                        detail="tool_calls delta must be an array",
+                    )
+                for tc in raw_tool_calls:
+                    if not isinstance(tc, dict):
                         raise _protocol_error(
                             code="stream_event_invalid",
                             message="上游流工具调用格式无效",
-                            detail="tool_calls delta must be an array",
+                            detail="tool call delta must be an object",
                         )
-                    for tc in raw_tool_calls:
-                        if not isinstance(tc, dict):
+                    idx = tc.get("index")
+                    if not isinstance(idx, int) or idx < 0:
+                        raise _protocol_error(
+                            code="stream_event_invalid",
+                            message="上游流工具调用缺少有效索引",
+                            detail="tool call delta index must be a non-negative integer",
+                        )
+                    saw_output = True
+                    if idx not in tool_calls_by_index:
+                        tool_calls_by_index[idx] = {"id": "", "type": "function", "function": {"name": "", "arguments": ""}}
+                    cur = tool_calls_by_index[idx]
+                    if tc.get("id") is not None:
+                        if not isinstance(tc["id"], str):
                             raise _protocol_error(
                                 code="stream_event_invalid",
-                                message="上游流工具调用格式无效",
-                                detail="tool call delta must be an object",
+                                message="上游流工具调用 ID 格式无效",
+                                detail="tool call id delta must be a string",
                             )
-                        idx = tc.get("index")
-                        if not isinstance(idx, int) or idx < 0:
-                            raise _protocol_error(
-                                code="stream_event_invalid",
-                                message="上游流工具调用缺少有效索引",
-                                detail="tool call delta index must be a non-negative integer",
-                            )
-                        saw_output = True
-                        if idx not in tool_calls_by_index:
-                            tool_calls_by_index[idx] = {"id": "", "type": "function", "function": {"name": "", "arguments": ""}}
-                        cur = tool_calls_by_index[idx]
-                        if tc.get("id") is not None:
-                            if not isinstance(tc["id"], str):
+                        cur["id"] = (cur.get("id") or "") + tc["id"]
+                    fn = tc.get("function")
+                    if fn is not None and not isinstance(fn, dict):
+                        raise _protocol_error(
+                            code="stream_event_invalid",
+                            message="上游流工具函数格式无效",
+                            detail="tool call function delta must be an object",
+                        )
+                    if isinstance(fn, dict):
+                        if fn.get("name") is not None:
+                            if not isinstance(fn["name"], str):
                                 raise _protocol_error(
                                     code="stream_event_invalid",
-                                    message="上游流工具调用 ID 格式无效",
-                                    detail="tool call id delta must be a string",
+                                    message="上游流工具函数名称格式无效",
+                                    detail="tool function name delta must be a string",
                                 )
-                            cur["id"] = (cur.get("id") or "") + tc["id"]
-                        fn = tc.get("function")
-                        if fn is not None and not isinstance(fn, dict):
-                            raise _protocol_error(
-                                code="stream_event_invalid",
-                                message="上游流工具函数格式无效",
-                                detail="tool call function delta must be an object",
-                            )
-                        if isinstance(fn, dict):
-                            if fn.get("name") is not None:
-                                if not isinstance(fn["name"], str):
-                                    raise _protocol_error(
-                                        code="stream_event_invalid",
-                                        message="上游流工具函数名称格式无效",
-                                        detail="tool function name delta must be a string",
-                                    )
-                                cur["function"]["name"] = (cur["function"].get("name") or "") + fn["name"]
-                            if fn.get("arguments") is not None:
-                                if not isinstance(fn["arguments"], str):
-                                    raise _protocol_error(
-                                        code="stream_event_invalid",
-                                        message="上游流工具参数格式无效",
-                                        detail="tool function arguments delta must be a string",
-                                    )
-                                cur["function"]["arguments"] = (cur["function"].get("arguments") or "") + fn["arguments"]
-                if not saw_output:
-                    raise _protocol_error(
-                        code="provider_response_invalid",
-                        message="上游流未返回任何有效内容",
-                        detail="stream ended without content, reasoning, or tool calls",
-                    )
-                if not saw_done and not saw_finish_reason:
-                    raise _protocol_error(
-                        code="stream_interrupted",
-                        message="上游流在完成前中断",
-                        detail="stream ended without [DONE] or finish_reason",
-                        retryable=True,
-                    )
-                # 流结束：产出 finish，便于调用方判断是否有 tool_calls 并继续多轮
-                sorted_tool_calls = [tool_calls_by_index[i] for i in sorted(tool_calls_by_index.keys())] if tool_calls_by_index else None
-                # 把聚合的流式正文写入日志，便于后续查看
-                aggregated_body: dict[str, Any] = {
-                    "_aggregated": True,
-                    "content": "".join(aggregated_content),
-                }
-                if aggregated_reasoning:
-                    aggregated_body["reasoning_content"] = "".join(aggregated_reasoning)
-                if sorted_tool_calls:
-                    aggregated_body["tool_calls"] = sorted_tool_calls
-                _log.set_response(body=aggregated_body)
-                yield StreamChunk(kind="finish", tool_calls=sorted_tool_calls)
+                            cur["function"]["name"] = (cur["function"].get("name") or "") + fn["name"]
+                        if fn.get("arguments") is not None:
+                            if not isinstance(fn["arguments"], str):
+                                raise _protocol_error(
+                                    code="stream_event_invalid",
+                                    message="上游流工具参数格式无效",
+                                    detail="tool function arguments delta must be a string",
+                                )
+                            cur["function"]["arguments"] = (cur["function"].get("arguments") or "") + fn["arguments"]
+        if not saw_output:
+            raise _protocol_error(
+                code="provider_response_invalid",
+                message="上游流未返回任何有效内容",
+                detail="stream ended without content, reasoning, or tool calls",
+            )
+        if not saw_done and not saw_finish_reason:
+            raise _protocol_error(
+                code="stream_interrupted",
+                message="上游流在完成前中断",
+                detail="stream ended without [DONE] or finish_reason",
+                retryable=True,
+            )
+        # 流结束：产出 finish，便于调用方判断是否有 tool_calls 并继续多轮
+        sorted_tool_calls = [tool_calls_by_index[i] for i in sorted(tool_calls_by_index.keys())] if tool_calls_by_index else None
+        # 把聚合的流式正文写入日志，便于后续查看
+        aggregated_body: dict[str, Any] = {
+            "_aggregated": True,
+            "content": "".join(aggregated_content),
+        }
+        if aggregated_reasoning:
+            aggregated_body["reasoning_content"] = "".join(aggregated_reasoning)
+        if sorted_tool_calls:
+            aggregated_body["tool_calls"] = sorted_tool_calls
+        _log.set_response(body=aggregated_body)
+        yield StreamChunk(kind="finish", tool_calls=sorted_tool_calls)
