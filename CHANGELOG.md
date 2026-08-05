@@ -2,6 +2,12 @@
 
 ## v0.800（进行中）
 
+### Gemini generateContent（T-805-5C）
+
+- 新增原生 `gemini_generate_content` 适配器：`generateContent` / `streamGenerateContent?alt=sse`。
+- 拒绝 Base URL 含 `/openai`；工具/functionCall 本批不支持；`thought`→reasoning。
+- 后端 253 项测试通过。
+
 ### Anthropic Messages（T-805-5B）
 
 - 新增原生 `anthropic_messages` 适配器：Messages 请求转换、nonstream/stream、thinking→reasoning。

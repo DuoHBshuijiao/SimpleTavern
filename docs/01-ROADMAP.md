@@ -97,7 +97,7 @@
 
 - T-801 已完成：统一 REST/SSE 错误 envelope、requestId、上游错误映射、前端 typed error/错误栈。
 - T-802 六批已完成：LLM/generate、Storage/chat/fork、Assistant/tools、MVU/KG/regex health、Search/Import-Export、TTS/infra（F-001~F-034）。
-- T-804 已完成。T-805-5A/5B 已完成（协议接线 + Anthropic Messages 无工具）；下一棒 T-805-5C Gemini。
+- T-804 已完成。T-805-5A/5B/5C 已完成；下一棒 T-805-5D OpenAI Responses。
 - 当前门禁：后端 209 tests；fork 冷重建 410.05 ms；chat_path 重建 103.11 ms / 暖查找×1000 105.55 ms。
 
 ### 成本统计 UI

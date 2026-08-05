@@ -18,7 +18,7 @@ export const DEFAULT_LLM_PROTOCOL: LlmProtocolId = 'openai_compatible_chat'
 export const LLM_PROTOCOL_OPTIONS: Array<{ label: string; value: LlmProtocolId }> = [
   { label: 'OpenAI Compatible Chat（默认）', value: 'openai_compatible_chat' },
   { label: 'Anthropic Messages（无工具）', value: 'anthropic_messages' },
-  { label: 'Gemini generateContent（即将支持）', value: 'gemini_generate_content' },
+  { label: 'Gemini generateContent（无工具）', value: 'gemini_generate_content' },
   { label: 'OpenAI Responses（即将支持）', value: 'openai_responses' },
 ]
 
