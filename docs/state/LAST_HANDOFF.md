@@ -1,21 +1,21 @@
 # Last Handoff
 
-- last_task: `T-805-5A-protocol-wiring` + bugfix
+- last_task: `T-805-5B-anthropic-messages`
 - status: completed（T-805 整体仍 in-progress）
-- summary: 5A 接线完成；已修复审查发现的协议静默改写/旁路调用问题。
+- summary: 实现 Anthropic Messages 无工具适配器（nonstream+stream）；工具与 prompt caching 明确 fast-fail / 默认 off。
 - code_changes:
-  - 5A：protocol 字段、runtime、调用方接线、设置页下拉
-  - 修复：前端 `normalizeLlmProtocol` 仅空值回落；未知协议保留并在下拉展示
-  - 修复：`st_mvu_import_agent` / TTS preprocess 改走 `resolve` + `runtime` + `protocol`
-  - 修复：未知协议 `provider_id_for_protocol` → `unknown`
+  - 新增 `backend/app/llm/providers/anthropic_messages.py`
+  - registry 注册 `anthropic_messages`
+  - 测试：`tests/test_anthropic_messages.py`
+  - 前端协议下拉文案：Anthropic 标注「无工具」
 - known_gap:
-  - **5B–5D**：Anthropic / Gemini / Responses 适配器尚未实现
-  - 工具与 Anthropic cache 三档属 T-806
+  - **5C/5D**：Gemini / Responses 尚未实现
+  - Anthropic 工具与 cache `off|5m|1h` 属 T-806
   - usage ledger 属 T-807
 - verification:
-  - `cd backend && python -m pytest tests/ -q` → **232 passed**
+  - `cd backend && python -m pytest tests/ -q` → **243 passed**
 - version_note: `backend/app/version.py` 仍为 `v0.700`
 - next_read:
   1. `docs/tasks/T-805-v0800-native-llm-protocols.md`
-  2. Anthropic Messages API（无工具路径；cache 默认 off）
-- next_implementation: **T-805-5B** `providers/anthropic_messages.py`（无工具 nonstream+stream）。
+  2. Gemini `generateContent` 原生协议（勿与 v1beta/openai 混淆）
+- next_implementation: **T-805-5C** `providers/gemini_generate_content.py`（无工具）。

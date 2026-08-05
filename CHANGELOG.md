@@ -2,6 +2,12 @@
 
 ## v0.800（进行中）
 
+### Anthropic Messages（T-805-5B）
+
+- 新增原生 `anthropic_messages` 适配器：Messages 请求转换、nonstream/stream、thinking→reasoning。
+- 工具调用与 cache_control 本批不支持（工具/缓存三档归 T-806）；缺省 max_tokens=4096。
+- 后端 243 项测试通过。
+
 ### 原生 LLM 协议接线（T-805-5A）
 
 - `ApiPreset` / 全局 LLM 增加 `protocol`；`preset_resolve` 与 `llm/runtime` 经 registry 调用。

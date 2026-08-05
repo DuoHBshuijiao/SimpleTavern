@@ -32,11 +32,11 @@ def test_registry_resolves_openai_compatible_chat() -> None:
 
 def test_registry_unknown_protocol_fast_fails() -> None:
     with pytest.raises(AppError) as exc_info:
-        get_adapter("anthropic_messages")
+        get_adapter("not_a_real_protocol")
     err = exc_info.value
     assert err.code == "provider_capability_unsupported"
-    assert err.protocol == "anthropic_messages"
-    assert err.provider == "anthropic"
+    assert err.protocol == "not_a_real_protocol"
+    assert err.provider == "unknown"
 
 
 def test_provider_id_for_unknown_protocol_is_unknown() -> None:
@@ -116,5 +116,5 @@ def test_runtime_unknown_protocol_fast_fails() -> None:
     from app.llm import runtime as llm_runtime
 
     with pytest.raises(AppError) as exc_info:
-        asyncio.run(llm_runtime.list_models(base_url="https://x.example", api_key="k", protocol="anthropic_messages"))
+        asyncio.run(llm_runtime.list_models(base_url="https://x.example", api_key="k", protocol="not_a_real_protocol"))
     assert exc_info.value.code == "provider_capability_unsupported"

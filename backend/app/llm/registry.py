@@ -10,10 +10,15 @@ _REGISTRY: dict[str, ProviderAdapter] | None = None
 
 
 def _build_registry() -> dict[str, ProviderAdapter]:
+    from app.llm.providers.anthropic_messages import AnthropicMessagesAdapter
     from app.llm.providers.openai_compatible_chat import OpenAICompatibleChatAdapter
 
-    adapter = OpenAICompatibleChatAdapter()
-    return {adapter.protocol: adapter}
+    openai_adapter = OpenAICompatibleChatAdapter()
+    anthropic_adapter = AnthropicMessagesAdapter()
+    return {
+        openai_adapter.protocol: openai_adapter,
+        anthropic_adapter.protocol: anthropic_adapter,
+    }
 
 
 def reset_adapter_registry_for_tests() -> None:
@@ -51,7 +56,9 @@ def get_adapter(protocol: str | ProtocolId) -> ProviderAdapter:
             detail=f"protocol={key}; registered={known}",
             source="llm.registry",
             status_code=400,
-            suggested_action=f"请使用已支持的协议（当前：{OPENAI_COMPATIBLE_CHAT_PROTOCOL}）",
+            suggested_action=(
+                f"请使用已支持的协议（当前：{', '.join(registered_protocols()) or OPENAI_COMPATIBLE_CHAT_PROTOCOL}）"
+            ),
             provider=provider_id_for_protocol(key),
             protocol=key,
         )
