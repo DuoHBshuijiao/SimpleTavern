@@ -1388,30 +1388,13 @@ def list_chats(character_id: str) -> list[Chat]:
 
 def _find_chat_path_by_id(chat_id: str) -> tuple[Path, str] | None:
     """
-    通过聊天ID查找聊天文件路径和角色ID
-    
-    无数据库设计，需要扫描所有角色目录以定位chatId。
-    优先查找新格式（文件夹+chat.json），如果不存在则查找旧格式（{chat_id}.json）。
-    
-    Args:
-        chat_id: 聊天会话ID
-    
-    Returns:
-        tuple[Path, str] | None: (聊天文件路径, 角色ID)元组，未找到返回None
+    通过聊天ID查找聊天文件路径和角色ID。
+
+    T-803-3B：优先走 chat_path_index；索引 miss/stale 时回退全角色扫描并回写。
     """
-    base = _chats_dir()
-    if not base.exists():
-        return None
-    for character_dir in base.iterdir():
-        if not character_dir.is_dir():
-            continue
-        record_path = character_dir / chat_id / CHAT_RECORD_FILENAME
-        if record_path.exists():
-            return record_path, character_dir.name
-        legacy_path = character_dir / f"{chat_id}.json"
-        if legacy_path.exists():
-            return legacy_path, character_dir.name
-    return None
+    from app.chat_path_index import lookup_chat_path
+
+    return lookup_chat_path(chat_id)
 
 
 def load_chat(chat_id: str) -> Chat:
@@ -1485,8 +1468,10 @@ def save_chat(chat: Chat) -> Chat:
     if legacy.exists():
         with _lock_for(legacy):
             legacy.unlink(missing_ok=True)
+    from app.chat_path_index import upsert_chat_path
     from app.fork_index import sync_chat_fork_index
 
+    upsert_chat_path(chat.id, chat.characterId, "folder")
     sync_chat_fork_index(chat)
     return chat
 
@@ -1650,8 +1635,10 @@ def delete_chat(chat_id: str) -> None:
         p.unlink(missing_ok=True)
     _lock_file_path(p).unlink(missing_ok=True)
     delete_chat_memory(character_id, chat_id)
+    from app.chat_path_index import remove_chat_path
     from app.fork_index import remove_chat_fork_index
 
+    remove_chat_path(chat_id)
     remove_chat_fork_index(chat_id)
     chat_dir_path = chat_folder(character_id, chat_id)
     if chat_dir_path.exists():
@@ -1696,6 +1683,16 @@ def delete_chats_by_character(character_id: str) -> None:
     except OSError as exc:
         log_cleanup_failure(
             source="storage.delete_chats_by_character.directory",
+            exc=exc,
+            path=char_chat_dir,
+        )
+    try:
+        from app.chat_path_index import remove_chats_for_character
+
+        remove_chats_for_character(character_id)
+    except Exception as exc:
+        log_cleanup_failure(
+            source="storage.delete_chats_by_character.chat_path_index",
             exc=exc,
             path=char_chat_dir,
         )

@@ -2,6 +2,12 @@
 
 ## v0.800（进行中）
 
+### 性能基础设施 3B（T-803）
+
+- 新增 `chat_path_index`（chatId→characterId/format），`load_chat` 热路径不再全角色目录扫描。
+- save/delete 挂钩索引维护；应用启动预热路径索引。
+- 基线：1000 会话重建约 103 ms；暖查找 ×1000 约 106 ms；后端 209 项测试通过。
+
 ### 性能基础设施 3A（T-803）
 
 - 新增进程级共享 HTTP client（连接池 + 默认超时），应用 lifespan 负责启动/关闭。

@@ -1,6 +1,6 @@
 # T-803 v0.800 性能基线与基础设施
 
-- status: in-progress（3A 共享 HTTP client 为首批）
+- status: in-progress（3A/3B 已完成；下一棒 3C）
 - area: backend HTTP / I/O / 索引
 - priority: P0
 - theme: 先测量再优化；共享连接池、索引与锁；每项有基线与回归门槛
@@ -43,10 +43,12 @@
 | 路径 | 当前已知基线 | 目标 / 门槛 | 状态 |
 |------|--------------|-------------|------|
 | fork 冷重建 1000 chats / 99 forks | 410.05 ms | `< 5000 ms` | 已有（T-802） |
-| LLM 出站 AsyncClient | 每次请求新建 | 进程内复用；连接池 limits 可配置 | ← 3A |
-| web_search Async/Sync Client | 每次请求新建 | 进程内复用 | ← 3A |
-| TTS platforms | 实例内已持有 client | 后续评估是否并入共享池 | 待 3A 后 |
-| `_find_chat_path_by_id` | 全目录扫描（待测） | 索引命中为主路径 | 3B |
+| LLM 出站 AsyncClient | 每次请求新建 | 进程内复用；连接池 limits 可配置 | 3A done |
+| web_search Async/Sync Client | 每次请求新建 | 进程内复用 | 3A done |
+| TTS platforms | 实例内已持有 client | 后续评估是否并入共享池 | 待评估 |
+| `_find_chat_path_by_id` | O(角色数) exists 扫描 | 索引命中为主路径 | 3B done |
+| chat_path 冷重建 1000（50×20） | — | 103.11 ms；门槛 `< 1000 ms` | 3B done |
+| chat_path 暖查找 ×1000 | — | 105.55 ms；门槛 `< 500 ms` | 3B done |
 | content-regex scanner | 周期全库（待测） | 增量/退避可配置 | 3C |
 | generate worldbook/trim | 未 profiling | 有火焰图或分段计时 | 3D |
 
@@ -85,3 +87,11 @@ python -m pytest tests/ -q
 - `main.py` lifespan：`startup_http_clients` / `shutdown_http_clients`。
 - 测试：`test_http_client.py`；`test_openai_compat` mock 改为 patch `get_async_http_client`。
 - 门禁：后端 204 passed。
+
+### 3B（已完成）
+
+- 新增 `backend/app/chat_path_index.py`（`data/chat_path_index.json`）：`byId → {characterId, format}`。
+- `_find_chat_path_by_id` 走索引；miss/stale 回退扫描并回写。
+- `save_chat` upsert、`delete_chat` / `delete_chats_by_character` 失效；lifespan 预热。
+- 基线（本机）：重建 1000 会话 `103.11 ms`；暖查找 ×1000 `105.55 ms`。
+- 测试：`test_chat_path_index.py`；门禁后端 209 passed。

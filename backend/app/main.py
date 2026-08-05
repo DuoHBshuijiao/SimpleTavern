@@ -74,6 +74,13 @@ async def _warm_fork_index() -> None:
     await asyncio.to_thread(rebuild_fork_index)
 
 
+async def _warm_chat_path_index() -> None:
+    """启动后预热 chatId→path 索引，避免首个 load_chat 全角色扫描。"""
+    from app.chat_path_index import warm_chat_path_index
+
+    await asyncio.to_thread(warm_chat_path_index)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -84,6 +91,7 @@ async def lifespan(app: FastAPI):
     warmup_tokenizer()
     await startup_http_clients()
     fork_index_task = asyncio.create_task(_warm_fork_index())
+    chat_path_index_task = asyncio.create_task(_warm_chat_path_index())
     integrity_scan_task = asyncio.create_task(data_integrity_service.run_startup_scan())
     await tts_cache_patrol.start()
     await http_log_sweeper.start()
@@ -97,9 +105,14 @@ async def lifespan(app: FastAPI):
         stop_qwen3_local_tts()
         await shutdown_http_clients()
         fork_index_task.cancel()
+        chat_path_index_task.cancel()
         integrity_scan_task.cancel()
         try:
             await fork_index_task
+        except asyncio.CancelledError:
+            pass
+        try:
+            await chat_path_index_task
         except asyncio.CancelledError:
             pass
         try:

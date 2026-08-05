@@ -43,10 +43,12 @@ v0.800 从“后端性能版”升级为“**后端可信执行层**”：
 - T-801 已完成：统一错误 envelope、requestId、REST/SSE handler、上游错误映射、前端 typed error 与错误栈。
 - T-802 已完成：F-001~F-034 六批静默 fallback 迁移。
 - T-803-3A 已完成：共享 HTTP client；openai_compat + web_search 复用连接池。
-- 当前门禁：后端 204 tests。
+- T-803-3B 已完成：chatId→path 索引；load_chat 热路径索引命中。
+- 当前门禁：后端 209 tests。
 - fork index 性能基线：1000 会话、99 fork 冷重建 `410.05 ms`，回归门槛 `< 5000 ms`。
+- chat_path 基线：重建 `103.11 ms`（`< 1000`）；暖查找×1000 `105.55 ms`（`< 500`）。
 - F-010 已确认语义 A：正文正则存原文 + 前端显示时处理；generate 不落库前改写（非缺口）。
-- 下一批：T-803-3B chatId/fork 索引与 I/O。
+- 下一批：T-803-3C 后台扫描与锁。
 
 ## 统一错误契约
 
