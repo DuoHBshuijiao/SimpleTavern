@@ -4,8 +4,8 @@
 
 ## 下一步阅读顺序
 
-1. 先读 `docs/state/CURRENT.md`，确认当前任务（现为 v0.800 / T-804）。
-2. 读 `docs/01-ROADMAP.md` 与 T-804 相关任务卡/设计规格（当前实施目标）。
+1. 先读 `docs/state/CURRENT.md`，确认当前任务（现为 v0.800 / T-805）。
+2. 读 `docs/01-ROADMAP.md` 与 T-805 相关任务卡/设计规格（当前实施目标）。
 3. 读 `docs/tasks/T-800-v0800-backend-performance.md`，了解全版本依赖与边界。
 4. T-801/T-802 已完成：错误契约见 `T-801`；fallback 清单见 `docs/audits/v0800-backend-fallback-inventory.md`。
 5. 架构契约读 `docs/superpowers/specs/2026-07-10-v0800-backend-trust-layer-design.md`。

@@ -2,6 +2,12 @@
 
 ## v0.800（进行中）
 
+### LLM 协议内核（T-804）
+
+- 新增 ProviderAdapter / registry / GenerationConfig·WireRequest·Usage 类型。
+- OpenAI-compatible Chat Completions 迁入 `providers/openai_compatible_chat.py`；`openai_compat` 保持兼容门面。
+- 未知协议 fast-fail（`provider_capability_unsupported`）；后端 226 项测试通过。
+
 ### 性能基础设施 3D（T-803）
 
 - generate 世界书/trim 抽取为共享 prep，并记录分段耗时与计数。

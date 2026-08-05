@@ -17,7 +17,7 @@
 - [x] **T-801 P0** Fast-Fail 错误基座：统一 REST/SSE envelope、requestId、前端错误栈
 - [x] **T-802 P0** 全 backend 静默 fallback/catch 审计与迁移（F-001~F-034 六批完成）
 - [x] **T-803 P0** 性能基线、profiling、共享 HTTP client、索引/锁/原子写（3A–3D 完成）
-- [ ] **T-804 P0** LLM 协议内核与 OpenAI-compatible 迁移
+- [x] **T-804 P0** LLM 协议内核与 OpenAI-compatible 迁移
 - [ ] **T-805 P0** OpenAI Responses / Anthropic Messages / Gemini 原生协议
 - [ ] **T-806 P0** 多套工具调用/消息维护/流事件 + Anthropic 显式缓存开关
 - [ ] **T-807 P0** 消息 generation metadata + append-only usage ledger
