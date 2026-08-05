@@ -13,14 +13,17 @@ def _build_registry() -> dict[str, ProviderAdapter]:
     from app.llm.providers.anthropic_messages import AnthropicMessagesAdapter
     from app.llm.providers.gemini_generate_content import GeminiGenerateContentAdapter
     from app.llm.providers.openai_compatible_chat import OpenAICompatibleChatAdapter
+    from app.llm.providers.openai_responses import OpenAIResponsesAdapter
 
     openai_adapter = OpenAICompatibleChatAdapter()
     anthropic_adapter = AnthropicMessagesAdapter()
     gemini_adapter = GeminiGenerateContentAdapter()
+    responses_adapter = OpenAIResponsesAdapter()
     return {
         openai_adapter.protocol: openai_adapter,
         anthropic_adapter.protocol: anthropic_adapter,
         gemini_adapter.protocol: gemini_adapter,
+        responses_adapter.protocol: responses_adapter,
     }
 
 

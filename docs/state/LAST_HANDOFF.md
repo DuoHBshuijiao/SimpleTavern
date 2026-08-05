@@ -1,21 +1,20 @@
 # Last Handoff
 
-- last_task: `T-805-5C-gemini-generate-content`
-- status: completed（T-805 整体仍 in-progress）
-- summary: 实现 Gemini 原生 generateContent/streamGenerateContent 无工具适配器；明确拒绝 OpenAI 兼容 shim。
+- last_task: `T-805-5D-openai-responses`（T-805 关闭）
+- status: completed
+- summary: 实现 OpenAI Responses 无工具适配器（typed SSE）；T-805 四协议批次全部完成。
 - code_changes:
-  - 新增 `backend/app/llm/providers/gemini_generate_content.py`
-  - registry 注册 `gemini_generate_content`
-  - 测试：`tests/test_gemini_generate_content.py`
-  - 前端协议下拉：Gemini 标注「无工具」
+  - 新增 `backend/app/llm/providers/openai_responses.py`
+  - registry 注册 `openai_responses`
+  - 测试：`tests/test_openai_responses.py`
+  - 前端协议下拉：Responses 标注「无工具」
 - known_gap:
-  - **5D**：OpenAI Responses 尚未实现
-  - 工具 / Gemini CachedContents / Anthropic cache 三档属 T-806
-  - usage ledger 属 T-807
+  - 工具 round-trip、Anthropic cache `off|5m|1h`、Responses 内建 web_search、Gemini CachedContents → **T-806**
+  - usage ledger / generation metadata → **T-807**
 - verification:
-  - `cd backend && python -m pytest tests/ -q` → **253 passed**
+  - `cd backend && python -m pytest tests/ -q` → **262 passed**
 - version_note: `backend/app/version.py` 仍为 `v0.700`
 - next_read:
-  1. `docs/tasks/T-805-v0800-native-llm-protocols.md`
-  2. OpenAI Responses API（Items + typed SSE）
-- next_implementation: **T-805-5D** `providers/openai_responses.py`（无工具）。
+  1. `docs/01-ROADMAP.md`（T-806）
+  2. `docs/superpowers/specs/2026-07-10-v0800-backend-trust-layer-design.md`（工具/缓存）
+- next_implementation: **T-806**（工具与 Anthropic 缓存三档）。不要并行启动 T-807 除非用户要求。

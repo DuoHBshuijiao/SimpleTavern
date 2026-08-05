@@ -2,6 +2,12 @@
 
 ## v0.800（进行中）
 
+### OpenAI Responses（T-805-5D）
+
+- 新增原生 `openai_responses` 适配器：`/v1/responses`、typed SSE、`store=false`。
+- `output_text` / reasoning summary；工具与内建 web_search 本批 fast-fail（归 T-806）。
+- T-805 四协议批次关闭；后端 262 项测试通过。
+
 ### Gemini generateContent（T-805-5C）
 
 - 新增原生 `gemini_generate_content` 适配器：`generateContent` / `streamGenerateContent?alt=sse`。
