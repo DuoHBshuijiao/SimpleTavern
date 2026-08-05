@@ -20,7 +20,8 @@ from app.assistant_tools.executor import execute_tool
 from app.assistant_tools.registry import registered_tools
 from app.assistant_tools import result as tool_result
 from app.errors import as_app_error
-from app.llm.openai_compat import chat_completions_message
+from app.llm.runtime import chat_completions_message
+from app.llm.types import OPENAI_COMPATIBLE_CHAT_PROTOCOL
 from app.kg_inject import mvu_tool_names
 from app.schemas import AssistantSettings, MvuWorkLogEntry, StateVariables
 from app.services.assistant_agent import _parse_tool_call_arguments
@@ -92,6 +93,7 @@ class MvuAgentRunContext:
     temperature: float | None = None
     max_tool_turns: int = 5
     extra_body: dict[str, Any] | None = None
+    protocol: str = OPENAI_COMPATIBLE_CHAT_PROTOCOL
 
 
 class MvuAgentService:
@@ -189,6 +191,7 @@ class MvuAgentService:
                     temperature=self._ctx.temperature,
                     tools=self._tools,
                     extra_body=self._ctx.extra_body if self._ctx.extra_body else None,
+                    protocol=self._ctx.protocol,
                 )
 
                 tool_calls = _normalize_tool_calls_ids(resp.tool_calls)

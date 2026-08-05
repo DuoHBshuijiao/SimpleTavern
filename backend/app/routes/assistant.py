@@ -59,6 +59,7 @@ from app.services.assistant_agent import (
     AssistantAgentService,
 )
 from app.llm.preset_resolve import LlmPresetResolveError, resolve_llm_preset_credentials
+from app.llm.types import provider_id_for_protocol
 from app.services.user_message_content import build_user_message_content
 from app.schemas import (
     AssistantAppendRole,
@@ -107,12 +108,12 @@ from app.tokenizer_service import trim_assistant_openai_messages_to_context
 router = APIRouter(tags=["assistant"])
 
 
-def _resolve_assistant_credentials(settings: Any, *, model: str, preset_id: str | None) -> tuple[str, str]:
+def _resolve_assistant_credentials(settings: Any, *, model: str, preset_id: str | None) -> tuple[str, str, str]:
     try:
         credentials = resolve_llm_preset_credentials(settings, model=model, explicit_preset_id=preset_id)
     except LlmPresetResolveError as exc:
         raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message}) from exc
-    return credentials.base_url, credentials.api_key
+    return credentials.base_url, credentials.api_key, credentials.protocol
 
 
 class AssistantStreamRequest(BaseModel):
@@ -846,7 +847,8 @@ async def stream_assistant(req: AssistantStreamRequest, request: Request):
         temperature = None
 
     preset_id = assistant_settings.presetId
-    base_url, api_key = _resolve_assistant_credentials(settings, model=model, preset_id=preset_id)
+    base_url, api_key, protocol = _resolve_assistant_credentials(settings, model=model, preset_id=preset_id)
+    llm_provider = provider_id_for_protocol(protocol)
 
     existing_messages = chat.messages or []
     
@@ -899,6 +901,7 @@ async def stream_assistant(req: AssistantStreamRequest, request: Request):
         save_chat=lambda assistant_chat: _save_assistant_chat_by_scope(scope, chat_id, assistant_chat),
         max_tool_turns=req.maxToolTurns or assistant_settings.maxToolTurns or 8,
         max_tools_per_turn=req.maxToolsPerTurn or assistant_settings.maxToolsPerTurn,
+        protocol=protocol,
     )
     agent = AssistantAgentService(agent_ctx)
 
@@ -932,8 +935,8 @@ async def stream_assistant(req: AssistantStreamRequest, request: Request):
         """
         yield sse_meta(
             request_id=request_id,
-            provider="openai_compatible",
-            protocol="openai_compatible_chat",
+            provider=llm_provider,
+            protocol=protocol,
             resolved_model=model,
         )
         try:
@@ -952,8 +955,8 @@ async def stream_assistant(req: AssistantStreamRequest, request: Request):
                 source="assistant.stream",
                 default_code="assistant_failed",
                 default_message="助手流式执行失败",
-                provider="openai_compatible",
-                protocol="openai_compatible_chat",
+                provider=llm_provider,
+                protocol=protocol,
             )
 
     return StreamingResponse(

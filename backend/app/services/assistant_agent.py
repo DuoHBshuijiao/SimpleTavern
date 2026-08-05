@@ -13,7 +13,8 @@ from app.assistant_tools.digest import args_digest as _tool_args_digest
 from app.assistant_tools.executor import build_openai_tools_list, execute_tool
 from app.assistant_tools import result as tool_result
 from app.errors import AppError, as_app_error
-from app.llm.openai_compat import chat_completions_message, stream_chat_completions
+from app.llm.runtime import chat_completions_message, stream_chat_completions
+from app.llm.types import OPENAI_COMPATIBLE_CHAT_PROTOCOL, provider_id_for_protocol
 from app.schemas import AssistantChat, ChatMessage
 
 
@@ -65,6 +66,7 @@ class AssistantAgentRunContext:
     save_chat: AssistantChatSaver
     max_tool_turns: int = 8
     max_tools_per_turn: int | None = None
+    protocol: str = OPENAI_COMPATIBLE_CHAT_PROTOCOL
 
     def tools(self) -> list[dict[str, Any]]:
         return build_openai_tools_list(self.tool_ctx)
@@ -207,6 +209,7 @@ class AssistantAgentService:
                     temperature=self._ctx.temperature,
                     tools=self._tools,
                     extra_body=self._ctx.extra_body,
+                    protocol=self._ctx.protocol,
                 )
                 tool_calls_raw = resp.tool_calls
                 tool_calls_for_llm = (
@@ -289,8 +292,8 @@ class AssistantAgentService:
                 source="assistant.agent",
                 default_code="assistant_failed",
                 default_message="助手执行失败",
-                provider="openai_compatible",
-                protocol="openai_compatible_chat",
+                provider=provider_id_for_protocol(self._ctx.protocol),
+                protocol=self._ctx.protocol,
             ) from exc
 
     async def iter_events(self) -> AsyncIterator[AssistantAgentEvent]:
@@ -315,6 +318,7 @@ class AssistantAgentService:
                     temperature=self._ctx.temperature,
                     tools=self._tools,
                     extra_body=self._ctx.extra_body,
+                    protocol=self._ctx.protocol,
                 ):
                     if chunk.kind == "reasoning":
                         if reasoning_phase_started is None:
@@ -399,8 +403,8 @@ class AssistantAgentService:
                     source="assistant.agent.stream",
                     default_code="assistant_failed",
                     default_message="助手流式执行失败",
-                    provider="openai_compatible",
-                    protocol="openai_compatible_chat",
+                    provider=provider_id_for_protocol(self._ctx.protocol),
+                    protocol=self._ctx.protocol,
                 )
                 yield AssistantAgentEvent("error", _error_event_payload(error))
                 return

@@ -165,7 +165,7 @@ def test_llm_test_models_failure_is_not_empty_success() -> None:
     install_error_handlers(app)
     app.include_router(llm_router, prefix="/api")
 
-    async def fail_models(_base_url: str, _api_key: str) -> list[str]:
+    async def fail_models(*, base_url: str, api_key: str, protocol: str | None = None) -> list[str]:
         raise AppError(
             code="provider_auth_failed",
             message="上游服务鉴权失败",
@@ -173,7 +173,7 @@ def test_llm_test_models_failure_is_not_empty_success() -> None:
             status_code=401,
         )
 
-    with patch("app.routes.llm.list_models_openai_compat", side_effect=fail_models):
+    with patch("app.routes.llm.list_models", side_effect=fail_models):
         with TestClient(app, raise_server_exceptions=False) as client:
             response = client.post(
                 "/api/llm/test-models",
@@ -194,12 +194,12 @@ def test_llm_models_empty_result_does_not_fallback_to_local_candidates() -> None
     settings.llm.modelCandidates = ["local-candidate"]
     settings.llm.defaultModel = "local-default"
 
-    async def empty_models(_base_url: str, _api_key: str) -> list[str]:
+    async def empty_models(*, base_url: str, api_key: str, protocol: str | None = None) -> list[str]:
         return []
 
     with (
         patch("app.routes.llm.load_settings", return_value=settings),
-        patch("app.routes.llm.list_models_openai_compat", side_effect=empty_models),
+        patch("app.routes.llm.list_models", side_effect=empty_models),
     ):
         with TestClient(app, raise_server_exceptions=False) as client:
             response = client.get("/api/llm/models")
@@ -216,10 +216,10 @@ def test_llm_test_models_empty_result_is_not_success() -> None:
     install_error_handlers(app)
     app.include_router(llm_router, prefix="/api")
 
-    async def empty_models(_base_url: str, _api_key: str) -> list[str]:
+    async def empty_models(*, base_url: str, api_key: str, protocol: str | None = None) -> list[str]:
         return []
 
-    with patch("app.routes.llm.list_models_openai_compat", side_effect=empty_models):
+    with patch("app.routes.llm.list_models", side_effect=empty_models):
         with TestClient(app, raise_server_exceptions=False) as client:
             response = client.post(
                 "/api/llm/test-models",
@@ -332,7 +332,7 @@ def test_generate_stream_upstream_failure_emits_meta_then_error_without_done() -
             patch("app.routes.generate.collect_active_worldbooks", return_value=[]),
             patch(
                 "app.routes.generate._resolve_generation_credentials",
-                return_value=("https://provider.example/v1", "test-key"),
+                return_value=("https://provider.example/v1", "test-key", "openai_compatible_chat"),
             ),
             patch("app.routes.generate.stream_chat_completions", fail_stream),
         ):

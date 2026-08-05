@@ -23,7 +23,7 @@ def test_web_search_tool_arguments_must_be_valid_json_object() -> None:
     }
 
     try:
-        _parse_web_search_query(tool_call)
+        _parse_web_search_query(tool_call, protocol="openai_compatible_chat")
     except AppError as error:
         assert error.code == "tool_call_invalid"
         assert error.status_code == 502
@@ -41,7 +41,7 @@ def test_web_search_tool_requires_non_empty_query() -> None:
     }
 
     try:
-        _parse_web_search_query(tool_call)
+        _parse_web_search_query(tool_call, protocol="openai_compatible_chat")
     except AppError as error:
         assert error.code == "tool_call_invalid"
         assert "关键词" in error.message
@@ -58,7 +58,7 @@ def test_web_search_tool_returns_normalized_query() -> None:
         },
     }
 
-    assert _parse_web_search_query(tool_call) == "latest news"
+    assert _parse_web_search_query(tool_call, protocol="openai_compatible_chat") == "latest news"
 
 
 def test_stream_runtime_does_not_execute_tool_with_invalid_arguments() -> None:

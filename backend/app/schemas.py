@@ -192,6 +192,10 @@ class SettingsLLM(BaseModel):
     defaultModel: str = ""
     modelCandidates: list[str] = Field(default_factory=list)
     usedModels: list[str] = Field(default_factory=list)
+    protocol: str = Field(
+        default="openai_compatible_chat",
+        description="LLM 协议；缺省 openai_compatible_chat（T-805）",
+    )
 
 
 class ApiPreset(BaseModel):
@@ -206,6 +210,7 @@ class ApiPreset(BaseModel):
         baseUrl: API基础URL
         apiKey: API密钥
         models: 该预设关联的模型列表
+        protocol: LLM 协议标识（TTS 预设可忽略）
     """
     model_config = ConfigDict(extra="allow")
 
@@ -214,6 +219,10 @@ class ApiPreset(BaseModel):
     baseUrl: str = "https://api.openai.com"
     apiKey: str = ""
     models: list[str] = Field(default_factory=list)
+    protocol: str = Field(
+        default="openai_compatible_chat",
+        description="LLM 协议；旧数据缺省映射为 openai_compatible_chat",
+    )
     presetKind: str | None = Field(default=None, description="预设用途；'tts' 表示 TTS 服务预设")
     ttsProvider: TtsProvider | None = Field(default=None, description="TTS 服务提供商；仅当 presetKind='tts' 时有意义")
     voiceCatalog: list["ApiPresetVoice"] = Field(default_factory=list)
@@ -256,10 +265,12 @@ class ApiPreset(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _migrate_legacy_tts_kind(cls, data: Any) -> Any:
-        """兼容旧版 minimax 标识，统一迁移到 tts + ttsProvider。"""
+        """兼容旧版 minimax 标识，统一迁移到 tts + ttsProvider；补写缺省 protocol。"""
         if not isinstance(data, dict):
             return data
         incoming = dict(data)
+        if not str(incoming.get("protocol") or "").strip():
+            incoming["protocol"] = "openai_compatible_chat"
         preset_kind = incoming.get("presetKind")
         provider = incoming.get("ttsProvider")
         if preset_kind == "minimax":

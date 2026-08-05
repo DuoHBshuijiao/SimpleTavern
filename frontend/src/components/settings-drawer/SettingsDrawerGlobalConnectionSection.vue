@@ -2,6 +2,7 @@
 import { Eye, EyeOff } from 'lucide-vue-next'
 import ModernSelect from '../ModernSelect.vue'
 import SettingsDrawerGlobalAccordion from './SettingsDrawerGlobalAccordion.vue'
+import { LLM_PROTOCOL_OPTIONS } from '../../constants/llmProtocols'
 import { REASONING_EFFORT_OPTIONS, type Settings } from '../../types/models'
 
 defineProps<{
@@ -97,6 +98,20 @@ const emit = defineEmits<{
       />
       <p class="text-xs text-[var(--color-text-muted)]">
         支持 Base（如 https://api.openai.com 或 …/v1）或完整 chat/completions 地址；末尾有无 / 均可。
+      </p>
+    </div>
+
+    <div class="space-y-1.5">
+      <label class="block text-sm font-medium text-[var(--color-text-secondary)]">默认 LLM 协议</label>
+      <ModernSelect
+        :model-value="draft.llm.protocol || 'openai_compatible_chat'"
+        :options="[...LLM_PROTOCOL_OPTIONS]"
+        placeholder="选择协议…"
+        class="w-full"
+        @update:model-value="(v) => { draft.llm.protocol = String(v) }"
+      />
+      <p class="text-xs text-[var(--color-text-muted)]">
+        仅在使用全局凭证（未匹配到 API 预设）时生效。
       </p>
     </div>
 

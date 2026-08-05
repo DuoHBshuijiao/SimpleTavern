@@ -1,20 +1,22 @@
 # Last Handoff
 
-- last_task: `T-804-llm-protocol-kernel`
-- status: completed
-- summary: 建立 LLM ProviderAdapter 内核；OpenAI-compatible Chat Completions 迁入适配器；`openai_compat` 保留稳定 ABI。
+- last_task: `T-805-5A-protocol-wiring`
+- status: completed（T-805 整体仍 in-progress）
+- summary: 将调用方接到 `get_adapter`/`runtime`；预设与全局可持久化 `protocol`；设置页可选协议；未实现协议 fast-fail。
 - code_changes:
-  - 新增 `llm/types.py`、`protocol.py`、`registry.py`、`providers/openai_compatible_chat.py`。
-  - `openai_compat.py` 改为再导出门面。
-  - 测试：`test_llm_protocol_kernel.py`；openai_compat mock 路径更新。
+  - `schemas`：`SettingsLLM.protocol` / `ApiPreset.protocol`
+  - `llm/preset_resolve.py`、`llm/runtime.py`、`routes/llm.py`
+  - generate / assistant / mvu / web_search 传 `protocol`；SSE meta 用解析结果
+  - 前端：`llmProtocols.ts`、PresetsTab / GlobalConnection / test-models
+  - 测试：preset_resolve / protocol kernel / error contract 补丁
 - known_gap:
-  - 调用方尚未经 registry 选协议（4C）；原生 Responses/Anthropic/Gemini 属 T-805。
-  - usage ledger / generation metadata 属 T-807。
+  - **5B–5D**：Anthropic / Gemini / Responses 适配器尚未实现（UI 可选但会失败）
+  - 工具与 Anthropic cache 三档属 T-806
+  - usage ledger 属 T-807
 - verification:
-  - `cd backend && python -m pytest tests/ -q` → 226 passed。
-- version_note: `backend/app/version.py` 仍为 `v0.700`。
+  - `cd backend && python -m pytest tests/ -q` → **231 passed**
+- version_note: `backend/app/version.py` 仍为 `v0.700`
 - next_read:
-  1. `docs/tasks/T-804-v0800-llm-protocol-kernel.md`
-  2. `docs/superpowers/specs/2026-07-10-v0800-backend-trust-layer-design.md` §3
-  3. 新建 `docs/tasks/T-805-*.md`（若无）
-- next_implementation: T-805 原生协议（Responses / Anthropic / Gemini）。不要并行启动 T-807 除非用户要求。
+  1. `docs/tasks/T-805-v0800-native-llm-protocols.md`
+  2. Anthropic Messages API（无工具路径；cache 默认 off）
+- next_implementation: **T-805-5B** `providers/anthropic_messages.py`（无工具 nonstream+stream）。不要并行启动 T-806/T-807 除非用户要求。

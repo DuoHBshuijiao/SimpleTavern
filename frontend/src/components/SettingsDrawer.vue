@@ -103,6 +103,7 @@ import {
 } from '../utils/wgslCompilation'
 import { notifyConfirm, notifyMessage } from '../composables/useNotify'
 import type { LlmProviderPreset } from '../constants/llmProviderPresets'
+import { DEFAULT_LLM_PROTOCOL, LLM_PROTOCOL_OPTIONS, normalizeLlmProtocol } from '../constants/llmProtocols'
 import { useDialogBehavior } from '../composables/useDialogBehavior'
 import { dialogAria } from '../utils/uiPrimitives'
 
@@ -1152,6 +1153,7 @@ function normalizePresetDraft(preset: ApiPreset): ApiPreset {
   const isTts = isTtsApiPreset(preset)
   return {
     ...preset,
+    protocol: isTts ? (preset.protocol ?? null) : normalizeLlmProtocol(preset.protocol),
     presetKind: isTts ? 'tts' : (preset.presetKind ?? null),
     ttsProvider: isTts ? resolveTtsProvider(preset) : null,
     voiceCatalog: normalizeVoiceCatalog(preset.voiceCatalog),
@@ -1849,6 +1851,18 @@ watch(
     if (!s.apiPresets) s.apiPresets = []
     if (!(s as Settings).contentRegexRuleLibrary) (s as Settings).contentRegexRuleLibrary = []
     s.apiPresets = s.apiPresets.map((preset) => normalizePresetDraft(preset))
+    if (!s.llm) {
+      s.llm = {
+        baseUrl: 'https://api.openai.com',
+        apiKey: '',
+        defaultModel: '',
+        modelCandidates: [],
+        usedModels: [],
+        protocol: DEFAULT_LLM_PROTOCOL,
+      }
+    } else {
+      s.llm.protocol = normalizeLlmProtocol(s.llm.protocol)
+    }
     if (!(s as Settings).draftHelpDefaults) (s as Settings).draftHelpDefaults = ensureDraftHelpDefaults()
     if (s.selectedFont === undefined) (s as Settings).selectedFont = null
     if ((s as Settings).pageBackgroundImage === undefined) (s as Settings).pageBackgroundImage = null
@@ -2462,6 +2476,7 @@ function createPreset() {
     baseUrl: 'https://api.openai.com',
     apiKey: '',
     models: [],
+    protocol: DEFAULT_LLM_PROTOCOL,
     presetKind: null,
     ttsProvider: null,
     voiceCatalog: [],
@@ -2876,7 +2891,8 @@ async function openModelSelector(preset: ApiPreset) {
     try {
         const models = await apiPost<string[]>('/api/llm/test-models', {
             baseUrl: preset.baseUrl,
-            apiKey: preset.apiKey
+            apiKey: preset.apiKey,
+            protocol: normalizeLlmProtocol(preset.protocol),
         })
         candidateModels.value = models
         selectedCandidateModels.value = new Set(preset.models)
@@ -2958,6 +2974,7 @@ provide(
     ttsDesignPreviewUrl,
     ttsDesignDraft,
     TTS_PROVIDER_OPTIONS,
+    LLM_PROTOCOL_OPTIONS,
     editingPreset,
     editingPresetTtsProvider,
     editingPresetIsGlmLocal,

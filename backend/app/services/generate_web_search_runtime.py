@@ -11,7 +11,8 @@ from typing import Any, AsyncIterator
 from uuid import uuid4
 
 from app.errors import AppError
-from app.llm.openai_compat import chat_completions_message, stream_chat_completions
+from app.llm.runtime import chat_completions_message, stream_chat_completions
+from app.llm.types import OPENAI_COMPATIBLE_CHAT_PROTOCOL, provider_id_for_protocol
 from app.schemas import Settings
 from app.services.web_search import (
     OPENAI_WEB_SEARCH_TOOLS,
@@ -38,7 +39,8 @@ def normalize_tool_calls_ids(tool_calls: list[dict[str, Any]] | None) -> list[di
     return out
 
 
-def _parse_web_search_query(tool_call: dict[str, Any]) -> str:
+def _parse_web_search_query(tool_call: dict[str, Any], *, protocol: str) -> str:
+    provider = provider_id_for_protocol(protocol)
     function = tool_call.get("function")
     if not isinstance(function, dict):
         raise AppError(
@@ -47,8 +49,8 @@ def _parse_web_search_query(tool_call: dict[str, Any]) -> str:
             detail="tool call function is missing or invalid",
             source="generate.web_search.tool",
             status_code=502,
-            provider="openai_compatible",
-            protocol="openai_compatible_chat",
+            provider=provider,
+            protocol=protocol,
             suggested_action="检查模型是否支持 OpenAI-compatible 工具调用",
         )
     name = function.get("name")
@@ -59,8 +61,8 @@ def _parse_web_search_query(tool_call: dict[str, Any]) -> str:
             detail=f"unknown tool: {name!r}",
             source="generate.web_search.tool",
             status_code=502,
-            provider="openai_compatible",
-            protocol="openai_compatible_chat",
+            provider=provider,
+            protocol=protocol,
             suggested_action="检查模型工具调用配置",
         )
     raw_arguments = function.get("arguments")
@@ -71,8 +73,8 @@ def _parse_web_search_query(tool_call: dict[str, Any]) -> str:
             detail="web_search arguments must be a JSON string",
             source="generate.web_search.tool",
             status_code=502,
-            provider="openai_compatible",
-            protocol="openai_compatible_chat",
+            provider=provider,
+            protocol=protocol,
             suggested_action="重试请求，或更换支持工具调用的模型",
         )
     try:
@@ -84,8 +86,8 @@ def _parse_web_search_query(tool_call: dict[str, Any]) -> str:
             detail=f"web_search arguments JSON is invalid: {exc}",
             source="generate.web_search.tool",
             status_code=502,
-            provider="openai_compatible",
-            protocol="openai_compatible_chat",
+            provider=provider,
+            protocol=protocol,
             suggested_action="重试请求，或更换支持工具调用的模型",
         ) from exc
     if not isinstance(arguments, dict):
@@ -95,8 +97,8 @@ def _parse_web_search_query(tool_call: dict[str, Any]) -> str:
             detail="web_search arguments must decode to an object",
             source="generate.web_search.tool",
             status_code=502,
-            provider="openai_compatible",
-            protocol="openai_compatible_chat",
+            provider=provider,
+            protocol=protocol,
             suggested_action="重试请求，或更换支持工具调用的模型",
         )
     query = arguments.get("query")
@@ -107,8 +109,8 @@ def _parse_web_search_query(tool_call: dict[str, Any]) -> str:
             detail="web_search query is missing or empty",
             source="generate.web_search.tool",
             status_code=502,
-            provider="openai_compatible",
-            protocol="openai_compatible_chat",
+            provider=provider,
+            protocol=protocol,
             suggested_action="重试请求，或更换支持工具调用的模型",
         )
     return query.strip()
@@ -126,6 +128,7 @@ async def iter_web_search_stream_events(
     extra_body: dict[str, Any],
     settings: Settings,
     web_search_enabled: bool,
+    protocol: str = OPENAI_COMPATIBLE_CHAT_PROTOCOL,
 ) -> AsyncIterator[dict[str, Any]]:
     """
     Yields:
@@ -161,6 +164,7 @@ async def iter_web_search_stream_events(
             max_tokens=max_tokens,
             tools=tools,
             extra_body=eb,
+            protocol=protocol,
         ):
             if chunk.kind == "reasoning":
                 now = time.monotonic()
@@ -187,7 +191,7 @@ async def iter_web_search_stream_events(
                     asst["reasoning_content"] = rc_round
                 msgs.append(asst)
                 for tc in norm:
-                    query = _parse_web_search_query(tc)
+                    query = _parse_web_search_query(tc, protocol=protocol)
                     body = await run_web_search(settings, query)
                     msgs.append(
                         {
@@ -225,6 +229,7 @@ async def nonstream_web_search_rounds(
     extra_body: dict[str, Any],
     settings: Settings,
     web_search_enabled: bool,
+    protocol: str = OPENAI_COMPATIBLE_CHAT_PROTOCOL,
 ) -> tuple[str, str | None, float | None]:
     """
     非流式多轮。
@@ -253,6 +258,7 @@ async def nonstream_web_search_rounds(
             max_tokens=max_tokens,
             tools=tools,
             extra_body=eb,
+            protocol=protocol,
         )
         rc = resp.reasoning_content
         if isinstance(rc, str) and rc:
@@ -270,7 +276,7 @@ async def nonstream_web_search_rounds(
                     asst["reasoning_content"] = rc
                 msgs.append(asst)
                 for tc in norm:
-                    query = _parse_web_search_query(tc)
+                    query = _parse_web_search_query(tc, protocol=protocol)
                     body = await run_web_search(settings, query)
                     msgs.append(
                         {
@@ -282,7 +288,8 @@ async def nonstream_web_search_rounds(
                 tool_rounds_used += 1
                 continue
 
-        content_final = (resp.content or "").strip()
         reasoning_full = "".join(reasoning_parts).strip() or None
-        dur = round(max(0.0, time.monotonic() - req_start), 1) if reasoning_full else None
-        return content_final, reasoning_full, dur
+        dur: float | None = None
+        if reasoning_full:
+            dur = round(max(0.0, time.monotonic() - req_start), 1)
+        return (resp.content or "").strip(), reasoning_full, dur

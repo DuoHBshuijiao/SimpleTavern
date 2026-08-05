@@ -120,6 +120,23 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                             <p class="text-xs text-[var(--color-text-muted)]">{{ presets.editingPresetBaseUrlHint }}</p>
                         </div>
 
+                        <div
+                          v-if="!presets.isTtsPreset(presets.editingPreset)"
+                          class="space-y-1.5"
+                        >
+                            <label class="block text-xs font-medium text-[var(--color-text-secondary)]">LLM 协议</label>
+                            <ModernSelect
+                              :model-value="presets.editingPreset!.protocol || 'openai_compatible_chat'"
+                              :options="presets.LLM_PROTOCOL_OPTIONS"
+                              class="w-full"
+                              placeholder="选择协议…"
+                              @update:model-value="(v) => { if (presets.editingPreset) presets.editingPreset.protocol = String(v) }"
+                            />
+                            <p class="text-xs text-[var(--color-text-muted)]">
+                              默认 OpenAI Compatible Chat；其他协议在后续版本落地，选中未实现协议会明确失败（不静默回退）。
+                            </p>
+                        </div>
+
                         <div class="space-y-1.5">
                             <label class="block text-xs font-medium text-[var(--color-text-secondary)]">API Key</label>
                              <div class="relative">

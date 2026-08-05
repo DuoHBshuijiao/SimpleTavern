@@ -321,6 +321,7 @@ async def _run_once(chat_id: str) -> None:
         return
     base_url = credentials.base_url
     api_key = credentials.api_key
+    protocol = credentials.protocol
 
     reasoning_cfg = build_reasoning_request_config(settings)
     extra_body = filter_reasoning_extra_body_for_upstream(model, reasoning_cfg["extra_body"])
@@ -385,6 +386,7 @@ async def _run_once(chat_id: str) -> None:
         model=model,
         temperature=tool_temperature,
         extra_body=extra_body,
+        protocol=protocol,
     )
 
     agent = MvuAgentService(run_ctx, include_knowledge_graph=kg_on)

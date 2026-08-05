@@ -2,6 +2,13 @@
 
 ## v0.800（进行中）
 
+### 原生 LLM 协议接线（T-805-5A）
+
+- `ApiPreset` / 全局 LLM 增加 `protocol`；`preset_resolve` 与 `llm/runtime` 经 registry 调用。
+- generate / assistant / mvu / web_search / test-models 传递协议；SSE meta 反映实际协议。
+- 设置页协议下拉；未实现协议（Anthropic/Gemini/Responses）明确 fast-fail。
+- 后端 231 项测试通过。
+
 ### LLM 协议内核（T-804）
 
 - 新增 ProviderAdapter / registry / GenerationConfig·WireRequest·Usage 类型。

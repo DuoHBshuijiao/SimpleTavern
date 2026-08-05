@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.llm.types import OPENAI_COMPATIBLE_CHAT_PROTOCOL, normalize_protocol_id
 from app.schemas import ApiPreset, Settings
 
 
@@ -19,6 +20,7 @@ class LlmPresetCredentials:
     api_key: str
     preset_id: str | None
     source: str
+    protocol: str = OPENAI_COMPATIBLE_CHAT_PROTOCOL
 
 
 class LlmPresetResolveError(ValueError):
@@ -54,6 +56,7 @@ def _credential_from_preset(preset: ApiPreset, *, source: str) -> LlmPresetCrede
         api_key=preset.apiKey.strip(),
         preset_id=preset.id,
         source=source,
+        protocol=normalize_protocol_id(getattr(preset, "protocol", None)),
     )
 
 
@@ -62,7 +65,13 @@ def _credential_from_global(settings: Settings) -> LlmPresetCredentials | None:
     api_key = (settings.llm.apiKey or "").strip()
     if not _has_credentials(base_url, api_key):
         return None
-    return LlmPresetCredentials(base_url=base_url, api_key=api_key, preset_id=None, source="global")
+    return LlmPresetCredentials(
+        base_url=base_url,
+        api_key=api_key,
+        preset_id=None,
+        source="global",
+        protocol=normalize_protocol_id(getattr(settings.llm, "protocol", None)),
+    )
 
 
 def resolve_llm_preset_credentials(

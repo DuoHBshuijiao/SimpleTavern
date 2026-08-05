@@ -33,8 +33,9 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.content_regex_scanner import ensure_content_regex_scanner_started
 from app.errors import AppError, app_error_response, as_app_error
-from app.llm.openai_compat import chat_completions, chat_completions_message, stream_chat_completions
 from app.llm.preset_resolve import LlmPresetResolveError, resolve_llm_preset_credentials
+from app.llm.runtime import chat_completions, chat_completions_message, stream_chat_completions
+from app.llm.types import provider_id_for_protocol
 from app.placeholders import replace_placeholders_in_text
 from app.prompt_xml import (
     wrap_acting_as,
@@ -81,12 +82,12 @@ def get_last_generate_prep_profile() -> dict[str, Any] | None:
     return dict(_last_generate_prep_profile) if _last_generate_prep_profile is not None else None
 
 
-def _resolve_generation_credentials(settings: Any, *, model: str, preset_id: str | None) -> tuple[str, str]:
+def _resolve_generation_credentials(settings: Any, *, model: str, preset_id: str | None) -> tuple[str, str, str]:
     try:
         credentials = resolve_llm_preset_credentials(settings, model=model, explicit_preset_id=preset_id)
     except LlmPresetResolveError as exc:
         raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message}) from exc
-    return credentials.base_url, credentials.api_key
+    return credentials.base_url, credentials.api_key, credentials.protocol
 
 
 def _ensure_web_search_ready(settings: Any, *, requested: bool) -> bool:
@@ -1306,7 +1307,8 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
     elif chat.overrides.presetId:
         preset_id = chat.overrides.presetId
     
-    base_url, api_key = _resolve_generation_credentials(settings, model=model, preset_id=preset_id)
+    base_url, api_key, protocol = _resolve_generation_credentials(settings, model=model, preset_id=preset_id)
+    llm_provider = provider_id_for_protocol(protocol)
 
     _apply_placeholder_rewrite_to_history(
         chat,
@@ -1377,8 +1379,8 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
     async def event_iter() -> AsyncIterator[str]:
         yield sse_meta(
             request_id=request_id,
-            provider="openai_compatible",
-            protocol="openai_compatible_chat",
+            provider=llm_provider,
+            protocol=protocol,
             resolved_model=model,
             warnings=worldbook_regex_warnings or None,
         )
@@ -1397,6 +1399,7 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
                     top_p=top_p,
                     max_tokens=max_tokens,
                     extra_body=extra_body,
+                    protocol=protocol,
                     settings=settings,
                     web_search_enabled=True,
                 ):
@@ -1425,6 +1428,7 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
                     top_p=top_p,
                     max_tokens=max_tokens,
                     extra_body=extra_body,
+                    protocol=protocol,
                 ):
                     if chunk.kind == "reasoning":
                         now = time.monotonic()
@@ -1479,8 +1483,8 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
                 source="generate.stream",
                 default_code="generation_failed",
                 default_message="生成消息失败",
-                provider="openai_compatible",
-                protocol="openai_compatible_chat",
+                provider=llm_provider,
+                protocol=protocol,
             )
 
     if not settings.streamEnabled:
@@ -1497,6 +1501,7 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
                     top_p=top_p,
                     max_tokens=max_tokens,
                     extra_body=extra_body,
+                    protocol=protocol,
                     settings=settings,
                     web_search_enabled=True,
                 )
@@ -1512,6 +1517,7 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
                     top_p=top_p,
                     max_tokens=max_tokens,
                     extra_body=extra_body,
+                    protocol=protocol,
                 )
                 assistant_content = (resp.content or "").strip()
                 reasoning_content = (resp.reasoning_content or None)
@@ -1526,6 +1532,7 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
                     top_p=top_p,
                     max_tokens=max_tokens,
                     extra_body=extra_body,
+                    protocol=protocol,
                 )
                 assistant_content = result.text.strip()
                 reasoning_content = None
@@ -1566,8 +1573,8 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
                 default_code="generation_failed",
                 default_message="生成消息失败",
                 default_status_code=500,
-                provider="openai_compatible",
-                protocol="openai_compatible_chat",
+                provider=llm_provider,
+                protocol=protocol,
             )
             return app_error_response(error, request_id)
 
@@ -1645,7 +1652,8 @@ async def generate_draft_help(req: DraftHelpRequest, request: Request) -> Stream
     recent_dialog = _render_draft_help_history_text(recent_dialog_messages) or "（暂无可用对话上下文）"
     messages.append({"role": "user", "content": f"最近对话如下：\n{recent_dialog}"})
     preset_id = chat.overrides.presetId
-    base_url, api_key = _resolve_generation_credentials(settings, model=model, preset_id=preset_id)
+    base_url, api_key, protocol = _resolve_generation_credentials(settings, model=model, preset_id=preset_id)
+    llm_provider = provider_id_for_protocol(protocol)
 
     reasoning_cfg = build_reasoning_request_config(settings)
     thinking_enabled = reasoning_cfg["thinking_enabled"]
@@ -1657,8 +1665,8 @@ async def generate_draft_help(req: DraftHelpRequest, request: Request) -> Stream
         full_text: list[str] = []
         yield sse_meta(
             request_id=request_id,
-            provider="openai_compatible",
-            protocol="openai_compatible_chat",
+            provider=llm_provider,
+            protocol=protocol,
             resolved_model=model,
         )
         try:
@@ -1671,6 +1679,7 @@ async def generate_draft_help(req: DraftHelpRequest, request: Request) -> Stream
                 top_p=top_p,
                 max_tokens=max_tokens,
                 extra_body=extra_body,
+                protocol=protocol,
             ):
                 if chunk.kind == "reasoning":
                     yield _sse("reasoning", {"text": chunk.text})
@@ -1685,8 +1694,8 @@ async def generate_draft_help(req: DraftHelpRequest, request: Request) -> Stream
                 source="generate.draft_help",
                 default_code="generation_failed",
                 default_message="写作辅助生成失败",
-                provider="openai_compatible",
-                protocol="openai_compatible_chat",
+                provider=llm_provider,
+                protocol=protocol,
             )
 
     if not settings.streamEnabled:
@@ -1700,6 +1709,7 @@ async def generate_draft_help(req: DraftHelpRequest, request: Request) -> Stream
                 top_p=top_p,
                 max_tokens=max_tokens,
                 extra_body=extra_body,
+                protocol=protocol,
             )
             return JSONResponse({
                 "ok": True,
@@ -1714,8 +1724,8 @@ async def generate_draft_help(req: DraftHelpRequest, request: Request) -> Stream
                 default_code="generation_failed",
                 default_message="写作辅助生成失败",
                 default_status_code=500,
-                provider="openai_compatible",
-                protocol="openai_compatible_chat",
+                provider=llm_provider,
+                protocol=protocol,
             )
             return app_error_response(error, request_id)
 
@@ -1926,7 +1936,8 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
     elif chat.overrides.presetId:
         preset_id = chat.overrides.presetId
     
-    base_url, api_key = _resolve_generation_credentials(settings, model=model, preset_id=preset_id)
+    base_url, api_key, protocol = _resolve_generation_credentials(settings, model=model, preset_id=preset_id)
+    llm_provider = provider_id_for_protocol(protocol)
 
     _apply_placeholder_rewrite_to_history(
         chat,
@@ -1989,8 +2000,8 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
     async def event_iter():
         yield sse_meta(
             request_id=request_id,
-            provider="openai_compatible",
-            protocol="openai_compatible_chat",
+            provider=llm_provider,
+            protocol=protocol,
             resolved_model=model,
             warnings=worldbook_regex_warnings or None,
         )
@@ -2009,6 +2020,7 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
                     top_p=top_p,
                     max_tokens=max_tokens,
                     extra_body=extra_body,
+                    protocol=protocol,
                     settings=settings,
                     web_search_enabled=True,
                 ):
@@ -2037,6 +2049,7 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
                     top_p=top_p,
                     max_tokens=max_tokens,
                     extra_body=extra_body,
+                    protocol=protocol,
                 ):
                     if chunk.kind == "reasoning":
                         now = time.monotonic()
@@ -2088,8 +2101,8 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
                 source="generate.group",
                 default_code="generation_failed",
                 default_message="群聊生成失败",
-                provider="openai_compatible",
-                protocol="openai_compatible_chat",
+                provider=llm_provider,
+                protocol=protocol,
             )
 
     if not settings.streamEnabled:
@@ -2106,6 +2119,7 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
                     top_p=top_p,
                     max_tokens=max_tokens,
                     extra_body=extra_body,
+                    protocol=protocol,
                     settings=settings,
                     web_search_enabled=True,
                 )
@@ -2121,6 +2135,7 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
                     top_p=top_p,
                     max_tokens=max_tokens,
                     extra_body=extra_body,
+                    protocol=protocol,
                 )
                 assistant_content = (resp.content or "").strip()
                 reasoning_content = resp.reasoning_content or None
@@ -2135,6 +2150,7 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
                     top_p=top_p,
                     max_tokens=max_tokens,
                     extra_body=extra_body,
+                    protocol=protocol,
                 )
                 assistant_content = result.text.strip()
                 reasoning_content = None
@@ -2172,8 +2188,8 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
                 default_code="generation_failed",
                 default_message="群聊生成失败",
                 default_status_code=500,
-                provider="openai_compatible",
-                protocol="openai_compatible_chat",
+                provider=llm_provider,
+                protocol=protocol,
             )
             return app_error_response(error, request_id)
 
@@ -2375,7 +2391,8 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
     elif chat.overrides.presetId:
         preset_id = chat.overrides.presetId
     
-    base_url, api_key = _resolve_generation_credentials(settings, model=model, preset_id=preset_id)
+    base_url, api_key, protocol = _resolve_generation_credentials(settings, model=model, preset_id=preset_id)
+    llm_provider = provider_id_for_protocol(protocol)
 
     _apply_placeholder_rewrite_to_history(
         chat,
@@ -2438,8 +2455,8 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
     async def event_iter():
         yield sse_meta(
             request_id=request_id,
-            provider="openai_compatible",
-            protocol="openai_compatible_chat",
+            provider=llm_provider,
+            protocol=protocol,
             resolved_model=model,
             warnings=worldbook_regex_warnings or None,
         )
@@ -2458,6 +2475,7 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
                     top_p=top_p,
                     max_tokens=max_tokens,
                     extra_body=extra_body,
+                    protocol=protocol,
                     settings=settings,
                     web_search_enabled=True,
                 ):
@@ -2486,6 +2504,7 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
                     top_p=top_p,
                     max_tokens=max_tokens,
                     extra_body=extra_body,
+                    protocol=protocol,
                 ):
                     if chunk.kind == "reasoning":
                         now = time.monotonic()
@@ -2542,8 +2561,8 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
                 source="generate.interject",
                 default_code="generation_failed",
                 default_message="群聊插话生成失败",
-                provider="openai_compatible",
-                protocol="openai_compatible_chat",
+                provider=llm_provider,
+                protocol=protocol,
             )
 
     if not settings.streamEnabled:
@@ -2560,6 +2579,7 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
                     top_p=top_p,
                     max_tokens=max_tokens,
                     extra_body=extra_body,
+                    protocol=protocol,
                     settings=settings,
                     web_search_enabled=True,
                 )
@@ -2575,6 +2595,7 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
                     top_p=top_p,
                     max_tokens=max_tokens,
                     extra_body=extra_body,
+                    protocol=protocol,
                 )
                 assistant_content = (resp.content or "").strip()
                 reasoning_content = resp.reasoning_content or None
@@ -2589,6 +2610,7 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
                     top_p=top_p,
                     max_tokens=max_tokens,
                     extra_body=extra_body,
+                    protocol=protocol,
                 )
                 assistant_content = result.text.strip()
                 reasoning_content = None
@@ -2627,8 +2649,8 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
                 default_code="generation_failed",
                 default_message="群聊插话生成失败",
                 default_status_code=500,
-                provider="openai_compatible",
-                protocol="openai_compatible_chat",
+                provider=llm_provider,
+                protocol=protocol,
             )
             return app_error_response(error, request_id)
 

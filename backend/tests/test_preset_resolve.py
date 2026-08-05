@@ -75,3 +75,44 @@ def test_no_credentials_fails_fast() -> None:
         resolve_llm_preset_credentials(_settings(presets=[]))
 
     assert exc.value.code == "MISSING_LLM_CREDENTIALS"
+
+
+def test_preset_protocol_is_resolved() -> None:
+    settings = _settings(
+        presets=[
+            ApiPreset(
+                id="anth",
+                name="Anthropic",
+                baseUrl="https://api.anthropic.com",
+                apiKey="k",
+                models=["claude"],
+                protocol="anthropic_messages",
+            )
+        ],
+    )
+    credentials = resolve_llm_preset_credentials(settings, model="claude")
+    assert credentials.protocol == "anthropic_messages"
+
+
+def test_missing_protocol_defaults_to_openai_compatible_chat() -> None:
+    settings = _settings(
+        presets=[ApiPreset(id="llm", name="LLM", baseUrl="https://llm.example", apiKey="k", models=["m"])],
+    )
+    credentials = resolve_llm_preset_credentials(settings, model="m")
+    assert credentials.protocol == "openai_compatible_chat"
+
+
+def test_global_protocol_is_resolved() -> None:
+    settings = Settings(
+        llm=SettingsLLM(
+            baseUrl="https://global.example",
+            apiKey="global-key",
+            defaultModel="g",
+            protocol="openai_responses",
+        ),
+        apiPresets=[],
+    )
+    credentials = resolve_llm_preset_credentials(settings, model="g")
+    assert credentials.source == "global"
+    assert credentials.protocol == "openai_responses"
+

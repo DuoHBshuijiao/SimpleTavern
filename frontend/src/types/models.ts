@@ -295,6 +295,8 @@ export interface ApiPreset {
   baseUrl: string
   apiKey: string
   models: string[]
+  /** LLM 协议；缺省 openai_compatible_chat；TTS 预设可忽略 */
+  protocol?: string | null
   presetKind?: string | null
   ttsProvider?: TtsProvider | null
   voiceCatalog?: ApiPresetVoice[]
@@ -400,6 +402,8 @@ export interface Settings {
     defaultModel: string
     modelCandidates: string[]
     usedModels: string[]
+    /** 全局 LLM 协议；缺省 openai_compatible_chat */
+    protocol?: string | null
   }
   apiPresets: ApiPreset[]
   generationDefaults: GenerationParams

@@ -85,3 +85,28 @@ def test_decode_usage_normalizes_openai_shape() -> None:
     assert usage.reasoning_tokens == 2
     assert decode_usage(None) is None
     assert decode_usage({}) is None
+
+
+def test_runtime_list_models_routes_via_adapter() -> None:
+    import asyncio
+    from unittest.mock import AsyncMock, patch
+
+    from app.llm import runtime as llm_runtime
+
+    adapter = get_adapter(OPENAI_COMPATIBLE_CHAT_PROTOCOL)
+    with patch.object(adapter, "list_models", new=AsyncMock(return_value=["m1", "m2"])) as mocked:
+        models = asyncio.run(
+            llm_runtime.list_models(base_url="https://x.example/v1", api_key="k", protocol=OPENAI_COMPATIBLE_CHAT_PROTOCOL)
+        )
+    assert models == ["m1", "m2"]
+    mocked.assert_awaited_once()
+
+
+def test_runtime_unknown_protocol_fast_fails() -> None:
+    import asyncio
+
+    from app.llm import runtime as llm_runtime
+
+    with pytest.raises(AppError) as exc_info:
+        asyncio.run(llm_runtime.list_models(base_url="https://x.example", api_key="k", protocol="anthropic_messages"))
+    assert exc_info.value.code == "provider_capability_unsupported"
