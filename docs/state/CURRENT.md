@@ -1,30 +1,17 @@
 # 当前任务
 
-- current: `v0.800 / T-806-6C`
-- status: ready（6A/6B 完成；下一批 6C）
-- next_read: `docs/tasks/T-806-v0800-tools-and-cache.md`（6C）
-- goal: 建立后端可信执行层——全 backend fast-fail、取消静默 fallback、用户可感知错误、性能与健壮性、原生多厂商协议、精确 usage/cost
+- current: `v0.810 / T-820~T-824`
+- status: code complete（`version.py` 已为 `v0.810`；真实 Key 缓存探测已搁置；A3 OAuth 滑到 v0.820）
+- next_read: `docs/state/LAST_HANDOFF.md`
+- goal: 以 pi 名录为唯一信源扩充供应商目录；分协议显式缓存策略与教学弹窗；模型自适应协议与参数翻译；聊天栏模型控制面板（会话级思考深度 / Fast）
 
 ## 版本宣告
 
-- T-801–T-805 完成；T-806-6A/6B 完成。`backend/app/version.py` 暂保持 `v0.700`，待 v0.800 发布门禁完成后再改。
-
-## v0.800 第一阶段
-
-1. T-801–T-804：✅
-5. T-805：原生协议（compat / Anthropic / Gemini / Responses 无工具）。✅
-6. T-806：工具 round-trip + Anthropic cache 三档 + Responses/Gemini 高级能力。
-   - **6A** Anthropic cache `off|5m|1h`：✅
-   - **6B** 工具 round-trip：✅
-   - **6C** Responses web_search / Gemini CachedContents：← 下一批
-
-## T-806-6B 摘要
-
-- Anthropic / Gemini / Responses 均支持 OpenAI 形 function tools round-trip（assistant/mvu/web_search 无需改解析形状）。
-- Responses 内建 web_search 仍明确 fast-fail（归 6C）。
+- v0.800 T-801–T-805、T-806-6A/6B 完成；T-806-6C 缩窄为 Responses web_search（Gemini CachedContents 已并入 T-821）。
+- `backend/app/version.py` 已改为 `v0.810`。
 
 ## 必读
 
-- `docs/01-ROADMAP.md`
-- `docs/tasks/T-806-v0800-tools-and-cache.md`
-- `docs/superpowers/specs/2026-07-10-v0800-backend-trust-layer-design.md`
+- `docs/01-ROADMAP.md`（v0.810 段）
+- `docs/02-BACKLOG.md`（v0.810 依赖图；A3 → v0.820）
+- `docs/tasks/T-820-v0810-provider-catalog.md` 等任务卡

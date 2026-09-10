@@ -19,10 +19,10 @@
 - [x] **T-803 P0** 性能基线、profiling、共享 HTTP client、索引/锁/原子写（3A–3D 完成）
 - [x] **T-804 P0** LLM 协议内核与 OpenAI-compatible 迁移
 - [x] **T-805 P0** OpenAI Responses / Anthropic Messages / Gemini 原生协议（5A–5D ✅）
-- [ ] **T-806 P0** 工具 round-trip / 消息维护 / 流事件 + Anthropic cache（off/5m/1h）+ Responses/Gemini 高级能力
+- [ ] **T-806 P0** 工具 round-trip / 消息维护 / 流事件 + Anthropic cache（off/5m/1h）+ Responses 高级能力
   - [x] 6A Anthropic cache `off|5m|1h`
   - [x] 6B 多协议工具 round-trip
-  - [ ] 6C Responses web_search / Gemini CachedContents
+  - [ ] 6C Responses 内建 web_search（Gemini CachedContents 已并入 v0.810 T-821）
 - [ ] **T-807 P0** 消息 generation metadata + append-only usage ledger
 - [ ] **T-808 P1** 本地定价引擎 + 会话/全局/按模型统计 API 与设置页 UI
 - [ ] **T-809 P1** 网络搜索供应商与 provider-native grounding 扩展
@@ -55,6 +55,36 @@ T-813 → T-814 收尾
 - 每个捕获异常点必须选择：向上抛、转换为 AppError、显式 warning、用户配置的 fallback；不得留无说明的 `pass` / `return None` / `[]`。
 - 每项性能优化必须有基线、改后数据与回归门槛。
 - 协议字段实现前查官方文档并保存 fixture，不凭兼容层经验猜字段。
+
+## v0.810 任务（当前版本，插在 T-806-6B 之后）
+
+- [x] **T-820 P0** 供应商目录扩充与特殊鉴权支持（信源：pi providers）
+  - [x] A1 `sync_llm_catalog.py` + `providers/models generated JSON` + overlay + `catalog.py` + `GET /api/llm/catalog`；combobox 分组/搜索/徽标，选择联动 protocol/authStyle/providerParams
+  - [x] A2 AuthStyle/URL 模板泛化：Azure Responses、Vertex Express、Bedrock Anthropic 变体；Cloudflare/Vercel/OpenCode 等目录条目
+  - [ ] A3 GitHub Copilot 设备码 / OpenAI Codex PKCE 登录 → **v0.820**
+- [x] **T-821 P0** 分协议显式缓存策略 + 教学弹窗
+  - [x] B1 `promptCache` 字段与迁移、四协议缓存写法、Usage 归一化、Chat 流式 usage 帧、Gemini cachedContents 404 重建
+  - [x] B2 预设编辑器/全局连接区「缓存策略」区块 + 消息 usage 缓存徽标
+  - [x] B3 `PromptCacheGuideModal` 近全屏教学弹窗
+- [x] **T-822 P0** 模型自适应协议与参数翻译：`resolution.py`、`auto` 协议、effort clamp 含 `max`、`resolve-preview`
+- [x] **T-824 P0** 聊天栏「模型控制面板」：会话级 `reasoningEffort/fastMode`，四协议 `none` 关思考与 Fast 写法
+- [x] **T-823 P1** 文档、验证与发布收口（`version.py` 已为 `v0.810`；真实 key 探测已搁置）
+
+### 依赖
+
+```text
+T-820-A1 目录数据 ─┬─ T-822 后端解析 ─┬─ T-824 模型控制面板
+                   │                   └─ T-821-B1 参数层 ─ B2 缓存 UI ─ B3 教学弹窗
+                   └─ T-820-A2 AuthStyle ─ T-820-A3 OAuth（可滑动）
+T-822 前端预览 依赖 T-822 后端 + T-820-A1 前端
+T-823 贯穿
+```
+
+### v0.820 候选
+
+- 群聊 `GroupMemberSettings` 成员级思考深度 / Fast 模式。
+- Bedrock Converse、Mistral Conversations、Vertex Anthropic `rawPredict`；Bedrock 原生 eventstream 流式解析。
+- T-820-A3 GitHub Copilot 设备码 / OpenAI Codex PKCE（已从 v0.810 顺延）。
 
 ## v0.900+
 

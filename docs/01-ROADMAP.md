@@ -97,8 +97,9 @@
 
 - T-801 已完成：统一 REST/SSE 错误 envelope、requestId、上游错误映射、前端 typed error/错误栈。
 - T-802 六批已完成：LLM/generate、Storage/chat/fork、Assistant/tools、MVU/KG/regex health、Search/Import-Export、TTS/infra（F-001~F-034）。
-- T-804 / T-805 已完成（四协议无工具主路径）。T-806-6A/6B 已完成；下一棒 **T-806-6C**（Responses 内建 web_search / Gemini CachedContents）。
-- 当前门禁：后端 209 tests；fork 冷重建 410.05 ms；chat_path 重建 103.11 ms / 暖查找×1000 105.55 ms。
+- T-804 / T-805 已完成（四协议无工具主路径）。T-806-6A/6B 已完成；**T-806-6C 缩窄为仅 Responses 内建 web_search**，其中「Gemini CachedContents」并入 v0.810 T-821（显式缓存策略）。
+- 当前门禁：后端 280 tests；fork 冷重建 410.05 ms；chat_path 重建 103.11 ms / 暖查找×1000 105.55 ms。
+- v0.800 剩余项（T-806-6C、T-807~T-814）保留在 backlog，不因 v0.810 插入而自动顺延或删除。
 
 ### 成本统计 UI
 
@@ -116,6 +117,34 @@
 - 不做自动换模型、自动换供应商或隐藏协议降级。
 - 模型价格匹配不允许宽泛别名直接产生确定成本；模糊项需用户确认。
 - Playwright 全量 E2E 仍留 v0.900+。
+
+## v0.810 定位
+
+`v0.810` 是插在 v0.800 协议内核之上的「**供应商目录 + 显式缓存 + 模型自适应**」小版本。API 预设功能自上次构建已过去数月：GPT-5.6+ 缓存策略要求显式断点、Anthropic 新增顶层自动 `cache_control`、Gemini 隐式/显式缓存分化、中国厂商多为尽力前缀缓存。本版本让用户用通俗字段把这些差异配置对，并在切换模型时自动选对协议与参数。
+
+### 核心原则
+
+1. **目录唯一信源**：内建供应商目录以 [pi `packages/ai/src/providers`](https://github.com/earendil-works/pi/tree/main/packages/ai/src/providers) 为唯一信源（模型元数据取 models.dev + OpenRouter `/models` 快照）；系统内已有的第三方供应商（如 Zenmux、硅基流动、智谱、百炼等）经核查数据安全受监管、调用记录可追溯，予以保留并映射到新目录。
+2. **显式缓存、按协议写法**：`promptCache` 统一对象替代仅 Anthropic 的三档下拉；OpenAI Responses/Chat、Anthropic、Gemini、百炼各按官方写法发送；中国厂商默认尽力缓存不发多余字段。
+3. **自适应协议不是隐藏降级**：`protocol: auto` 是用户可见、可关闭的模式；实际协议、推理深度夹紧、缓存翻译写入 SSE `meta.protocolResolution` 与预设编辑器预览。用户显式选定协议时永不改写。
+4. **会话级模型控制面板**：聊天栏可一并切换模型、思考深度（含 `none` 真关思考与 `max`）、Fast 模式；不支持的档位灰显并说明原因。
+
+### 主要交付
+
+| 任务 | 交付 |
+|------|------|
+| T-820 供应商目录 | `sync_llm_catalog.py` + generated JSON + overlay；`GET /api/llm/catalog`；预设名称 combobox 分组/搜索/徽标；AuthStyle/URL 模板泛化（Azure/Vertex Express/Bedrock Anthropic）；OAuth 厂商（Copilot/Codex）允许滑至 v0.820 |
+| T-821 显式缓存 | `promptCache` 字段与迁移；参数注册表；四协议缓存写法；Usage 缓存字段归一化；预设编辑器「缓存策略」区块；近全屏教学弹窗 |
+| T-822 模型自适应 | `resolution.py`：auto 协议、家族匹配、effort clamp（含 `max`）、参数/缓存翻译；`POST /api/llm/resolve-preview`；协议下拉「自动」 |
+| T-824 模型控制面板 | `ModelControlPanel.vue`；会话级 `params.reasoningEffort/fastMode`；四协议 `none` 关思考与 Fast 写法 |
+| T-823 文档 | 路线图/backlog/任务卡/state/changelog/README 收口 |
+
+### v0.810 边界
+
+- 不做 Bedrock Converse 原生协议、Mistral Conversations API、Vertex Anthropic `rawPredict`。
+- 群聊成员级思考深度/Fast → v0.820 backlog。
+- 不引入数据库；Gemini cachedContents 索引仍是 JSON 文件。
+- `backend/app/version.py` 已改为 `v0.810`。
 
 ## v0.900+ / v1.000
 

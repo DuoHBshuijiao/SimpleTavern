@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.810
+
+### 供应商目录与鉴权（T-820 A1/A2）
+
+- 以 pi providers 为信源生成 `providers.generated.json` / `models.generated.json`，overlay 补中文标签、协议、缓存策略；`GET /api/llm/catalog`。
+- 预设名称 combobox 按国内 / 国际 / 网关 / OAuth 分组，选择联动 protocol / authStyle / providerParams。
+- AuthStyle：`bearer` / `x-api-key` / `api-key`（Azure 可附 `?api-version=`）/ `x-goog-api-key` / `query_key`。
+- AWS Bedrock Anthropic 变体：invoke URL 含 model、请求体去掉 `model`、写入 `anthropic_version: bedrock-2023-05-31`。原生 eventstream 流式本版 fast-fail。
+- Copilot / Codex OAuth 滑到 v0.820。
+
+### 分协议显式缓存（T-821）
+
+- `promptCache` 对象替代仅 Anthropic 的三档；OpenAI / Anthropic / Gemini / 百炼按官方写法；中国厂商默认尽力缓存。
+- Gemini `cachedContents` 本地索引，404 重建一次；消息气泡显示缓存读/写徽标。
+- 近全屏 `PromptCacheGuideModal` 七步教学。
+
+### 模型自适应协议（T-822）
+
+- 协议下拉「自动（按模型选择原生协议）」；钉住协议永不改写。
+- 思考深度增加 `max`，按模型能力向下夹紧；结果写入 SSE `meta.protocolResolution` 与预设预览。
+
+### 聊天模型控制面板（T-824）
+
+- 聊天栏胶囊：模型 + 思考深度 + Fast；`none` 在四协议路径上真正关闭思考。
+- 全局/预设「回传思考内容」三态；DeepSeek 关闭回传时的 400 错误卡可跳到对应开关。
+
+### 验证
+
+- 后端 313 项、前端 130 项测试通过；`npm run build` 通过。
+- `backend/app/version.py` 已改为 `v0.810`。
+
 ## v0.800（进行中）
 
 ### 多协议工具 round-trip（T-806-6B）
