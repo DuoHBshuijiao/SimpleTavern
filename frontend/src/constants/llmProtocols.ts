@@ -5,6 +5,7 @@
  * 未知非空值原样保留，禁止静默改写成 compat。
  */
 export const LLM_PROTOCOL_IDS = [
+  'auto',
   'openai_compatible_chat',
   'anthropic_messages',
   'gemini_generate_content',
@@ -13,14 +14,26 @@ export const LLM_PROTOCOL_IDS = [
 
 export type LlmProtocolId = (typeof LLM_PROTOCOL_IDS)[number]
 
+/** T-822：auto = 按模型家族 + 供应商声明自动选择原生协议（结果在预览卡 / SSE meta 里可见） */
+export const AUTO_LLM_PROTOCOL: LlmProtocolId = 'auto'
+
 export const DEFAULT_LLM_PROTOCOL: LlmProtocolId = 'openai_compatible_chat'
 
 export const LLM_PROTOCOL_OPTIONS: Array<{ label: string; value: LlmProtocolId }> = [
+  { label: '自动（按模型选择原生协议）', value: 'auto' },
   { label: 'OpenAI Compatible Chat（默认）', value: 'openai_compatible_chat' },
   { label: 'Anthropic Messages', value: 'anthropic_messages' },
   { label: 'Gemini generateContent', value: 'gemini_generate_content' },
   { label: 'OpenAI Responses', value: 'openai_responses' },
 ]
+
+export const LLM_PROTOCOL_SHORT_LABELS: Record<string, string> = {
+  auto: '自动',
+  openai_compatible_chat: 'OpenAI Chat',
+  anthropic_messages: 'Anthropic',
+  gemini_generate_content: 'Gemini',
+  openai_responses: 'Responses',
+}
 
 /** 仅空/非法类型回落到默认；未知非空协议原样保留。 */
 export function normalizeLlmProtocol(raw: unknown): string {
