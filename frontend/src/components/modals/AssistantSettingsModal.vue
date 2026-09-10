@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { X } from 'lucide-vue-next'
 import ThemedCheckbox from '../ThemedCheckbox.vue'
+import ModernSelect from '../ModernSelect.vue'
 import type { AssistantSettings } from '../../composables/useAssistant'
 import { useDialogBehavior } from '../../composables/useDialogBehavior'
 import { dialogAria } from '../../utils/uiPrimitives'
+import { REASONING_EFFORT_OPTIONS } from '../../types/models'
 
 const props = defineProps<{
   show: boolean
@@ -28,6 +30,14 @@ const { dialogRef } = useDialogBehavior(
   () => emit('cancel'),
 )
 void dialogRef
+
+const effortOptions = [
+  { label: '沿用全局', value: '' },
+  ...REASONING_EFFORT_OPTIONS.map((o) => ({ label: o.label, value: o.value })),
+]
+function effortValue(): string {
+  return props.settings.reasoningEffort ?? ''
+}
 </script>
 
 <template>
@@ -52,6 +62,34 @@ void dialogRef
               step="0.1"
               class="input w-full"
             />
+          </div>
+          <div class="form-group">
+            <label class="label">思考深度</label>
+            <ModernSelect
+              :model-value="effortValue()"
+              :options="effortOptions"
+              class="w-full"
+              placeholder="沿用全局…"
+              @update:model-value="(v) => { settings.reasoningEffort = String(v) ? String(v) : null }"
+            />
+            <p class="text-xs text-[var(--color-text-muted)] mt-1">none 会真正关闭思考。留空则沿用全局设置里的默认深度。</p>
+          </div>
+          <div class="form-group">
+            <button
+              type="button"
+              class="flex w-full items-center justify-between gap-3 text-left"
+              role="switch"
+              :aria-checked="!!settings.fastMode"
+              @click="settings.fastMode = settings.fastMode ? null : true"
+            >
+              <span>
+                <span class="block text-sm text-[var(--color-text)]">Fast 模式</span>
+                <span class="block text-xs text-[var(--color-text-muted)] mt-1">约 2× 计费。不支持的模型会在发送时明确报错。</span>
+              </span>
+              <span class="relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors" :class="settings.fastMode ? 'bg-brand' : 'bg-[var(--color-track)]'">
+                <span class="absolute h-4 w-4 rounded-full bg-[var(--color-on-brand)] shadow transition-transform" :class="settings.fastMode ? 'translate-x-4' : 'translate-x-0.5'" />
+              </span>
+            </button>
           </div>
           <div class="form-group">
             <label class="label">上下文长度</label>

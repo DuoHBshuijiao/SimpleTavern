@@ -47,7 +47,7 @@
  *
  * 文件关系：
  *    - 被导入：被views/ChatPage.vue使用
- *    - 导入：导入vue的computed、types/models.ts的类型、components/ModernAvatar.vue、components/ModernSelect.vue
+ *    - 导入：导入vue的computed、types/models.ts的类型、components/ModernAvatar.vue、chat/ModelControlPanel.vue（T-824 模型/思考深度/Fast 面板）
  *    - 依赖：依赖vue
  *    - 位置：组件层，提供聊天输入功能
  */
@@ -66,7 +66,7 @@ import type { CharacterCard, GroupMemberSettings } from '../../types/models'
 import { validateFilesForTarget } from '../../utils/attachmentPolicy'
 import { resolveRichPaste } from '../../utils/richPaste'
 import ModernAvatar from '../ModernAvatar.vue'
-import ModernSelect from '../ModernSelect.vue'
+import ModelControlPanel from './ModelControlPanel.vue'
 import SelectDropdownSurface from '../SelectDropdownSurface.vue'
 import { useMvuStore } from '../../stores/mvu'
 import {
@@ -149,6 +149,12 @@ const props = withDefaults(
   currentModel: string
   currentPresetId?: string | null
   modelOptions: (ModelOption | ModelOptionGroup | string)[]
+  /** T-824：会话级思考深度覆盖（null 沿用全局） */
+  reasoningEffort?: string | null
+  /** 全局思考深度（供面板展示「沿用全局 · x」） */
+  globalReasoningEffort?: string | null
+  /** T-824：会话级 Fast 模式（null 沿用全局） */
+  fastMode?: boolean | null
   
   /** 主聊天网络搜索开关：为 true 时每次发送均在服务端挂载搜索工具，直至用户关闭 */
   webSearchEnabled?: boolean
@@ -164,6 +170,9 @@ const props = withDefaults(
     ttsEnabled: false,
     ttsTopBarControlsVisible: false,
     webSearchEnabled: false,
+    reasoningEffort: null,
+    globalReasoningEffort: 'none',
+    fastMode: null,
   }
 )
 
@@ -175,6 +184,8 @@ const emit = defineEmits<{
   'continue-group': []
   'trigger-interject': [characterId: string]
   'select-model': [option: any]
+  'update:reasoningEffort': [value: string | null]
+  'update:fastMode': [value: boolean | null]
   'toggle-assistant': []
   'select-images': [files: File[]]
   'remove-image': [imageId: string]
@@ -835,18 +846,19 @@ defineExpose({
             class="hidden"
             @change="handleImageInputChange"
           />
-          <div class="min-w-0 max-w-[200px] shrink flex-1">
-          <ModernSelect
-            :model-value="currentModel"
-            :selected-preset-id="currentPresetId ?? null"
-            :options="modelOptions"
+          <div class="min-w-0 max-w-[240px] shrink flex-1">
+          <ModelControlPanel
+            :current-model="currentModel"
+            :current-preset-id="currentPresetId ?? null"
+            :model-options="modelOptions"
+            :reasoning-effort="reasoningEffort"
+            :global-reasoning-effort="globalReasoningEffort"
+            :fast-mode="fastMode"
             placement="top"
-            placeholder="选择模型 (自动关联预设)..."
-            class="!text-xs min-w-[7rem] w-full max-w-[200px]"
-            dropdown-width="410"
-            searchable
-            allow-create
-            @select="emit('select-model', $event)"
+            class="min-w-[7rem] w-full max-w-[240px]"
+            @select-model="emit('select-model', $event)"
+            @update:reasoning-effort="emit('update:reasoningEffort', $event)"
+            @update:fast-mode="emit('update:fastMode', $event)"
           />
           </div>
           <button 

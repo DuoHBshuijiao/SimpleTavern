@@ -18,13 +18,19 @@ const props = withDefaults(
     gapPx?: number
     /** true：宽度随内容；窄竖屏下仍使用与 ModernSelect 一致的左右留白铺满 */
     autoWidth?: boolean
+    /** 固定宽度（px）并以锚点右缘对齐（与 ModernSelect dropdown-width 行为一致）；设置后忽略 autoWidth。窄竖屏仍左右留白铺满 */
+    fixedWidthPx?: number | null
     maxHeightClass?: string
+    /** 窄竖屏时改为底部抽屉（模型控制面板） */
+    preferBottomSheet?: boolean
   }>(),
   {
     placement: 'bottom',
     gapPx: 8,
     autoWidth: true,
+    fixedWidthPx: null,
     maxHeightClass: 'max-h-[320px]',
+    preferBottomSheet: false,
   },
 )
 
@@ -41,6 +47,16 @@ function updateDropdownPosition() {
   const rect = trigger.getBoundingClientRect()
   const g = props.gapPx
   const style: Record<string, string> = { position: 'fixed' }
+  if (props.preferBottomSheet && isNarrowPortrait.value) {
+    style.left = NARROW_SELECT_GUTTER
+    style.right = NARROW_SELECT_GUTTER
+    style.bottom = '0px'
+    style.top = 'auto'
+    style.width = 'auto'
+    style.maxHeight = 'min(80vh, 36rem)'
+    dropdownStyle.value = style
+    return
+  }
   if (props.placement === 'top') {
     style.bottom = `${window.innerHeight - rect.top + g}px`
     style.top = 'auto'
@@ -48,7 +64,19 @@ function updateDropdownPosition() {
     style.top = `${rect.bottom + g}px`
     style.bottom = 'auto'
   }
-  if (props.autoWidth) {
+  if (props.fixedWidthPx && isNarrowPortrait.value) {
+    style.left = NARROW_SELECT_GUTTER
+    style.right = NARROW_SELECT_GUTTER
+    style.width = 'auto'
+  } else if (props.fixedWidthPx) {
+    const edge = 8
+    const w = Math.min(props.fixedWidthPx, Math.max(200, window.innerWidth - edge * 2))
+    let left = rect.right - w
+    if (left < edge) left = edge
+    style.left = `${left}px`
+    style.right = 'auto'
+    style.width = `${w}px`
+  } else if (props.autoWidth) {
     /** 横向始终以锚点为基准；勿在窄屏改用视口 left 留白（那会贴屏幕左缘，与工具栏按钮脱节） */
     const vw = window.innerWidth
     const edge = 8
@@ -131,7 +159,7 @@ watch(open, (isOpen) => {
 })
 
 watch(
-  () => [props.placement, props.autoWidth, props.gapPx] as const,
+  () => [props.placement, props.autoWidth, props.gapPx, props.fixedWidthPx] as const,
   () => {
     if (open.value) scheduleUpdateDropdownPosition()
   },
@@ -170,9 +198,11 @@ onUnmounted(() => {
         ref="dropdownRef"
         class="z-dropdown select-dropdown glass-l6 rounded-xl overflow-hidden flex flex-col"
         :class="[
-          autoWidth ? 'w-max min-w-0' : '',
-          maxHeightClass,
-          placement === 'top' ? 'select-dropdown-pop--top' : 'select-dropdown-pop--bottom',
+          autoWidth && !fixedWidthPx ? 'w-max min-w-0' : '',
+          preferBottomSheet && isNarrowPortrait ? 'max-h-[min(80vh,36rem)] rounded-t-2xl rounded-b-none' : maxHeightClass,
+          preferBottomSheet && isNarrowPortrait
+            ? 'select-dropdown-pop--sheet'
+            : (placement === 'top' ? 'select-dropdown-pop--top' : 'select-dropdown-pop--bottom'),
         ]"
         :style="dropdownStyle"
       >
@@ -229,6 +259,18 @@ onUnmounted(() => {
   opacity: 1;
 }
 
+.select-dropdown-pop-enter-from.select-dropdown-pop--sheet,
+.select-dropdown-pop-leave-to.select-dropdown-pop--sheet {
+  transform: translateY(1rem);
+  opacity: 0;
+}
+
+.select-dropdown-pop-enter-to.select-dropdown-pop--sheet,
+.select-dropdown-pop-leave-from.select-dropdown-pop--sheet {
+  transform: translateY(0);
+  opacity: 1;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .select-dropdown-pop-enter-active,
   .select-dropdown-pop-leave-active {
@@ -238,7 +280,9 @@ onUnmounted(() => {
   .select-dropdown-pop-enter-from.select-dropdown-pop--bottom,
   .select-dropdown-pop-leave-to.select-dropdown-pop--bottom,
   .select-dropdown-pop-enter-from.select-dropdown-pop--top,
-  .select-dropdown-pop-leave-to.select-dropdown-pop--top {
+  .select-dropdown-pop-leave-to.select-dropdown-pop--top,
+  .select-dropdown-pop-enter-from.select-dropdown-pop--sheet,
+  .select-dropdown-pop-leave-to.select-dropdown-pop--sheet {
     transform: none;
   }
 }

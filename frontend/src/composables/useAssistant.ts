@@ -85,6 +85,10 @@ export interface AssistantSettings {
   temperature: number | null
   model: string | null
   presetId: string | null
+  /** T-824：助手思考深度；null 沿用全局 */
+  reasoningEffort?: string | null
+  /** T-824：助手 Fast 模式 */
+  fastMode?: boolean | null
   /** 上下文总长度限制（token），用于裁剪最近消息 */
   context_size: number | null
   /** 助手读取会话消息条数上限（服务端 chat_read_conversation） */
@@ -151,6 +155,8 @@ export function useAssistant(options: UseAssistantOptions) {
     temperature: null,
     model: null,
     presetId: null,
+    reasoningEffort: null,
+    fastMode: null,
     context_size: null,
     tool_read_max_messages: null,
     tool_read_max_tokens: null,
@@ -503,6 +509,8 @@ export function useAssistant(options: UseAssistantOptions) {
       temperature: number | null
       model: string | null
       presetId?: string | null
+      reasoningEffort?: string | null
+      fastMode?: boolean | null
       context_size?: number | null
       tool_read_max_messages?: number | null
       tool_read_max_tokens?: number | null
@@ -513,6 +521,8 @@ export function useAssistant(options: UseAssistantOptions) {
       temperature: res.temperature ?? null,
       model: res.model ?? null,
       presetId: res.presetId ?? null,
+      reasoningEffort: res.reasoningEffort ?? null,
+      fastMode: res.fastMode ?? null,
       context_size: res.context_size ?? null,
       tool_read_max_messages: res.tool_read_max_messages ?? null,
       tool_read_max_tokens: res.tool_read_max_tokens ?? null,
@@ -540,6 +550,8 @@ export function useAssistant(options: UseAssistantOptions) {
       temperature: assistantSettings.value.temperature,
       model: assistantSettings.value.model,
       presetId: assistantSettings.value.presetId,
+      reasoningEffort: assistantSettings.value.reasoningEffort ?? null,
+      fastMode: assistantSettings.value.fastMode ?? null,
       context_size: normalizeContextSize(assistantSettings.value.context_size),
       tool_read_max_messages:
         assistantSettings.value.tool_read_max_messages != null &&
