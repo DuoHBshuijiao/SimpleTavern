@@ -222,16 +222,39 @@ def _auth_headers(api_key: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {api_key}"}
 
 
-def _common_headers(api_key: str) -> dict[str, str]:
+def _common_headers(api_key: str, auth_style: str | None = None) -> dict[str, str]:
     """
     生成通用请求头（认证 + 应用标识）。
     应用标识头用于 OpenRouter 等平台展示来源与标题。
     """
+    from app.llm.types import auth_headers_for_style
+
     return {
         "HTTP-Referer": _APP_REFERER,
         "X-Title": _APP_TITLE,
-        **_auth_headers(api_key),
+        **auth_headers_for_style(api_key, auth_style),
     }
+
+
+def _request_url_and_headers(
+    base_url: str,
+    api_key: str,
+    *,
+    accept: str,
+    extra_headers: dict[str, str] | None = None,
+    auth_style: str | None = None,
+    provider_params: dict[str, str] | None = None,
+) -> tuple[str, dict[str, str]]:
+    from app.llm.types import append_api_version, append_query_key
+
+    url = append_api_version(append_query_key(_chat_completions_url(base_url), api_key, auth_style), provider_params)
+    headers = {
+        "Accept": accept,
+        "Content-Type": "application/json",
+        **_common_headers(api_key, auth_style),
+        **(extra_headers or {}),
+    }
+    return url, headers
 
 
 async def list_models_openai_compat(base_url: str, api_key: str) -> list[str]:
@@ -343,6 +366,8 @@ class StreamChunk:
     kind: Literal["content", "reasoning", "finish"]
     text: str = ""
     tool_calls: list[dict[str, Any]] | None = None
+    # T-821：终态归一化用量（Usage.to_public_dict），仅 kind='finish' 携带
+    usage: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -354,8 +379,10 @@ class ChatCompletionResult:
     
     主要属性：
         text: 完整的响应文本
+        usage: 归一化用量（T-821，可能为 None）
     """
     text: str
+    usage: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -375,6 +402,17 @@ class ChatCompletionMessage:
     content: str | None
     reasoning_content: str | None
     tool_calls: list[dict[str, Any]] | None
+    usage: dict[str, Any] | None = None
+
+
+def usage_public(raw: dict[str, Any] | None, *, decoder: Any = None) -> dict[str, Any] | None:
+    """把上游 usage 解码成前端可读的归一化 dict（None 表示缺失）。"""
+    decode = decoder or decode_usage
+    usage = decode(raw)
+    if usage is None:
+        return None
+    to_public = getattr(usage, "to_public_dict", None)
+    return to_public() if callable(to_public) else None
 
 
 def _message_content_to_text(content: Any) -> str:
@@ -436,6 +474,32 @@ def _build_payload(
         payload["tools"] = tools
     if extra_body:
         payload.update(extra_body)
+    # T-822：extra_body 中显式为 None 的字段表示「删除该字段」（如 OpenAI 推理模型不接受 max_tokens）
+    for key in [k for k, v in payload.items() if v is None]:
+        payload.pop(key, None)
+    if stream:
+        opts = payload.get("stream_options")
+        if not isinstance(opts, dict):
+            payload["stream_options"] = {"include_usage": True}
+        else:
+            opts.setdefault("include_usage", True)
+    return payload
+
+
+def apply_prompt_cache_to_payload(payload: dict[str, Any], prompt_cache: dict[str, Any] | None) -> dict[str, Any]:
+    """T-821：按缓存计划补 prompt_cache_key / prompt_cache_retention（仅 OpenAI 官方 / Azure）与百炼 cache_control 标记。"""
+    if not prompt_cache:
+        return payload
+    from app.llm.prompt_cache import PromptCachePlan, dashscope_mark_messages, openai_chat_cache_fields
+
+    plan = PromptCachePlan.from_dict(prompt_cache)
+    if plan is None or not plan.enabled:
+        return payload
+    fields = openai_chat_cache_fields(plan)
+    for key, value in fields.items():
+        payload.setdefault(key, value)
+    if plan.explicit_markers and isinstance(payload.get("messages"), list):
+        payload["messages"] = dashscope_mark_messages(payload["messages"], plan)
     return payload
 
 
@@ -450,6 +514,10 @@ async def chat_completions(
     max_tokens: int | None = None,
     tools: list[dict[str, Any]] | None = None,
     extra_body: dict[str, Any] | None = None,
+    extra_headers: dict[str, str] | None = None,
+    prompt_cache: dict[str, Any] | None = None,
+    auth_style: str | None = None,
+    provider_params: dict[str, str] | None = None,
 ) -> ChatCompletionResult:
     """
     OpenAI兼容的非流式聊天完成调用
@@ -473,12 +541,14 @@ async def chat_completions(
     Raises:
         httpx.HTTPStatusError: HTTP请求失败时抛出
     """
-    url = _chat_completions_url(base_url)
-    headers = {
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-        **_common_headers(api_key),
-    }
+    url, headers = _request_url_and_headers(
+        base_url,
+        api_key,
+        accept="application/json",
+        extra_headers=extra_headers,
+        auth_style=auth_style,
+        provider_params=provider_params,
+    )
 
     payload = _build_payload(
         model=model,
@@ -490,6 +560,7 @@ async def chat_completions(
         tools=tools,
         extra_body=extra_body,
     )
+    payload = apply_prompt_cache_to_payload(payload, prompt_cache)
 
     async with log_outbound(
         source="llm",
@@ -520,7 +591,7 @@ async def chat_completions(
                 message="上游服务返回了空消息",
                 detail="chat completion response: assistant content is empty",
             )
-        return ChatCompletionResult(text=content)
+        return ChatCompletionResult(text=content, usage=usage_public(_usage_with_tier(data)))
 
 
 async def chat_completions_message(
@@ -534,6 +605,10 @@ async def chat_completions_message(
     max_tokens: int | None = None,
     tools: list[dict[str, Any]] | None = None,
     extra_body: dict[str, Any] | None = None,
+    extra_headers: dict[str, str] | None = None,
+    prompt_cache: dict[str, Any] | None = None,
+    auth_style: str | None = None,
+    provider_params: dict[str, str] | None = None,
 ) -> ChatCompletionMessage:
     """
     OpenAI兼容的非流式聊天完成调用（返回完整消息结构）
@@ -557,12 +632,14 @@ async def chat_completions_message(
     Raises:
         httpx.HTTPStatusError: HTTP请求失败时抛出
     """
-    url = _chat_completions_url(base_url)
-    headers = {
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-        **_common_headers(api_key),
-    }
+    url, headers = _request_url_and_headers(
+        base_url,
+        api_key,
+        accept="application/json",
+        extra_headers=extra_headers,
+        auth_style=auth_style,
+        provider_params=provider_params,
+    )
     payload = _build_payload(
         model=model,
         messages=messages,
@@ -573,6 +650,7 @@ async def chat_completions_message(
         tools=tools,
         extra_body=extra_body,
     )
+    payload = apply_prompt_cache_to_payload(payload, prompt_cache)
     async with log_outbound(
         source="llm",
         method="POST",
@@ -622,7 +700,21 @@ async def chat_completions_message(
             content=content,
             reasoning_content=reasoning_content,
             tool_calls=tool_calls,
+            usage=usage_public(_usage_with_tier(data)),
         )
+
+
+def _usage_with_tier(data: dict[str, Any]) -> dict[str, Any] | None:
+    """Chat Completions 响应顶层 service_tier 并入 usage，便于统一解码。"""
+    usage = data.get("usage")
+    if not isinstance(usage, dict):
+        return None
+    tier = data.get("service_tier")
+    if isinstance(tier, str) and tier and "service_tier" not in usage:
+        merged = dict(usage)
+        merged["service_tier"] = tier
+        return merged
+    return usage
 
 
 async def stream_chat_completions(
@@ -636,6 +728,10 @@ async def stream_chat_completions(
     max_tokens: int | None = None,
     tools: list[dict[str, Any]] | None = None,
     extra_body: dict[str, Any] | None = None,
+    extra_headers: dict[str, str] | None = None,
+    prompt_cache: dict[str, Any] | None = None,
+    auth_style: str | None = None,
+    provider_params: dict[str, str] | None = None,
 ) -> AsyncIterator[StreamChunk]:
     """
     OpenAI兼容的流式聊天完成调用
@@ -646,12 +742,14 @@ async def stream_chat_completions(
     Yields:
         StreamChunk: 流式响应块（content 或 reasoning）
     """
-    url = _chat_completions_url(base_url)
-    headers = {
-        "Accept": "text/event-stream",
-        "Content-Type": "application/json",
-        **_common_headers(api_key),
-    }
+    url, headers = _request_url_and_headers(
+        base_url,
+        api_key,
+        accept="text/event-stream",
+        extra_headers=extra_headers,
+        auth_style=auth_style,
+        provider_params=provider_params,
+    )
 
     payload = _build_payload(
         model=model,
@@ -663,12 +761,14 @@ async def stream_chat_completions(
         tools=tools,
         extra_body=extra_body,
     )
+    payload = apply_prompt_cache_to_payload(payload, prompt_cache)
 
     # 流式响应中 tool_calls 按 index 分片到达，按 index 合并为完整列表
     tool_calls_by_index: dict[int, dict[str, Any]] = {}
     saw_done = False
     saw_finish_reason = False
     saw_output = False
+    terminal_usage: dict[str, Any] | None = None
 
     async with log_outbound(
         source="llm",
@@ -721,6 +821,9 @@ async def stream_chat_completions(
                         detail=f"expected object, got {type(obj).__name__}",
                     )
 
+                if isinstance(obj.get("usage"), dict):
+                    # usage 可能随最后一帧或独立帧到达；记录最后一次（stream_options.include_usage / DeepSeek 默认带）
+                    terminal_usage = _usage_with_tier(obj)
                 choices = obj.get("choices")
                 if not choices:
                     # OpenAI-compatible 服务可在独立帧中只返回 usage。
@@ -860,8 +963,10 @@ async def stream_chat_completions(
             aggregated_body["reasoning_content"] = "".join(aggregated_reasoning)
         if sorted_tool_calls:
             aggregated_body["tool_calls"] = sorted_tool_calls
+        if terminal_usage:
+            aggregated_body["usage"] = terminal_usage
         _log.set_response(body=aggregated_body)
-        yield StreamChunk(kind="finish", tool_calls=sorted_tool_calls)
+        yield StreamChunk(kind="finish", tool_calls=sorted_tool_calls, usage=usage_public(terminal_usage))
 
 
 def decode_usage(raw: dict[str, Any] | None) -> Any:
@@ -885,13 +990,28 @@ def decode_usage(raw: dict[str, Any] | None) -> Any:
     if isinstance(details, dict):
         reasoning = _as_int(details.get("reasoning_tokens"))
 
+    # 缓存读：OpenAI prompt_tokens_details.cached_tokens / DeepSeek prompt_cache_hit_tokens / Anthropic 兼容层 cache_read_input_tokens
+    cache_read = _as_int(raw.get("cache_read_input_tokens"))
+    prompt_details = raw.get("prompt_tokens_details")
+    if cache_read is None and isinstance(prompt_details, dict):
+        cache_read = _as_int(prompt_details.get("cached_tokens"))
+    if cache_read is None:
+        cache_read = _as_int(raw.get("prompt_cache_hit_tokens"))
+    if cache_read is None:
+        cache_read = _as_int(raw.get("cached_tokens"))
+    cache_write = _as_int(raw.get("cache_creation_input_tokens"))
+    if cache_write is None and isinstance(prompt_details, dict):
+        cache_write = _as_int(prompt_details.get("cache_write_tokens") or prompt_details.get("cache_creation_tokens"))
+    service_tier = raw.get("service_tier")
+
     return Usage(
         input_tokens=_as_int(raw.get("prompt_tokens")),
         output_tokens=_as_int(raw.get("completion_tokens")),
         total_tokens=_as_int(raw.get("total_tokens")),
-        cache_read_input_tokens=_as_int(raw.get("cache_read_input_tokens")),
-        cache_write_input_tokens=_as_int(raw.get("cache_creation_input_tokens")),
+        cache_read_input_tokens=cache_read,
+        cache_write_input_tokens=cache_write,
         reasoning_tokens=reasoning,
+        service_tier=str(service_tier) if isinstance(service_tier, str) and service_tier else None,
         raw=dict(raw),
     )
 
@@ -927,12 +1047,14 @@ class OpenAICompatibleChatAdapter:
         if not isinstance(config, GenerationConfig):
             raise TypeError("config must be GenerationConfig")
         self.validate_config(base_url=base_url, api_key=api_key)
-        url = _chat_completions_url(base_url)
-        headers = {
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-            **_common_headers(api_key),
-        }
+        url, headers = _request_url_and_headers(
+            base_url,
+            api_key,
+            accept="application/json",
+            extra_headers=config.extra_headers,
+            auth_style=config.auth_style,
+            provider_params=config.provider_params,
+        )
         payload = _build_payload(
             model=config.model,
             messages=messages,
@@ -943,6 +1065,7 @@ class OpenAICompatibleChatAdapter:
             tools=config.tools,
             extra_body=config.extra_body,
         )
+        payload = apply_prompt_cache_to_payload(payload, config.prompt_cache)
         if config.tool_choice is not None:
             payload["tool_choice"] = config.tool_choice
         return WireRequest(method="POST", url=url, headers=headers, json_body=payload)
@@ -973,6 +1096,10 @@ class OpenAICompatibleChatAdapter:
             max_tokens=config.max_tokens,
             tools=config.tools,
             extra_body=config.extra_body,
+            extra_headers=config.extra_headers,
+            prompt_cache=config.prompt_cache,
+            auth_style=config.auth_style,
+            provider_params=config.provider_params,
         )
         if as_message:
             return await chat_completions_message(**kwargs)
@@ -1000,6 +1127,10 @@ class OpenAICompatibleChatAdapter:
             max_tokens=config.max_tokens,
             tools=config.tools,
             extra_body=config.extra_body,
+            extra_headers=config.extra_headers,
+            prompt_cache=config.prompt_cache,
+            auth_style=config.auth_style,
+            provider_params=config.provider_params,
         ):
             yield chunk
 

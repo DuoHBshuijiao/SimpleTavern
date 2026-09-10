@@ -16,6 +16,7 @@ from app.routes.llm import router as llm_router
 from app.schemas import CharacterCard, Chat, GenerateStreamRequest, Settings
 from app.services.http_log import log_outbound, redact_headers
 from app.sse import sse_meta, sse_terminal_error
+from tests.llm_prepared_stub import prepare_stub
 
 
 class _Payload(BaseModel):
@@ -146,6 +147,7 @@ def test_sse_error_is_terminal_and_meta_contains_request_id() -> None:
         provider="openai_compatible",
         protocol="openai_compatible_chat",
         resolved_model="test-model",
+        protocol_resolution={"cache": {"mode": "explicit", "ttl": "5m"}},
     )
 
     error_payload = json.loads(error_event.split("data: ", 1)[1])
@@ -157,6 +159,8 @@ def test_sse_error_is_terminal_and_meta_contains_request_id() -> None:
     assert "event: done" not in error_event
     assert meta_payload["requestId"] == "req_sse_123"
     assert meta_payload["resolvedModel"] == "test-model"
+    assert meta_payload["cache"]["mode"] == "explicit"
+    assert meta_payload["protocolResolution"]["cache"]["ttl"] == "5m"
 
 
 def test_llm_test_models_failure_is_not_empty_success() -> None:
@@ -330,10 +334,7 @@ def test_generate_stream_upstream_failure_emits_meta_then_error_without_done() -
             patch("app.routes.generate.load_settings", return_value=settings),
             patch("app.routes.generate.ensure_mvu_worker"),
             patch("app.routes.generate.collect_active_worldbooks", return_value=[]),
-            patch(
-                "app.routes.generate._resolve_generation_credentials",
-                return_value=("https://provider.example/v1", "test-key", "openai_compatible_chat", "off"),
-            ),
+            patch("app.routes.generate.prepare_llm_request", prepare_stub),
             patch("app.routes.generate.stream_chat_completions", fail_stream),
         ):
             response = await generate_stream(body, request)

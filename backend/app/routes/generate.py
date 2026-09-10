@@ -33,9 +33,9 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.content_regex_scanner import ensure_content_regex_scanner_started
 from app.errors import AppError, app_error_response, as_app_error
-from app.llm.preset_resolve import LlmPresetResolveError, resolve_llm_preset_credentials
+from app.llm.preset_resolve import LlmPresetResolveError
+from app.llm.resolution import PreparedLlmRequest, prepare_llm_request
 from app.llm.runtime import chat_completions, chat_completions_message, stream_chat_completions
-from app.llm.types import attach_protocol_extra_body, provider_id_for_protocol
 from app.placeholders import replace_placeholders_in_text
 from app.prompt_xml import (
     wrap_acting_as,
@@ -47,8 +47,6 @@ from app.prompt_xml import (
 )
 from app.regex_compat import compile_user_regex
 from app.schemas import (
-    build_reasoning_request_config,
-    filter_reasoning_extra_body_for_upstream,
     ChatMessage,
     DraftHelpConversationMessage,
     DraftHelpRequest,
@@ -82,19 +80,55 @@ def get_last_generate_prep_profile() -> dict[str, Any] | None:
     return dict(_last_generate_prep_profile) if _last_generate_prep_profile is not None else None
 
 
-def _resolve_generation_credentials(
-    settings: Any, *, model: str, preset_id: str | None
-) -> tuple[str, str, str, str]:
+def _prepare_generation(
+    settings: Any,
+    *,
+    model: str,
+    preset_id: str | None,
+    chat: Any = None,
+    runtime: Any = None,
+    temperature: float | None = None,
+    top_p: float | None = None,
+    max_tokens: int | None = None,
+    character_id: str | None = None,
+) -> PreparedLlmRequest:
+    """凭据 + 协议自适应 + 会话级深度 / Fast + 缓存计划（T-822 / T-824 / T-821）。
+
+    会话级覆盖优先级：runtime.params > chat.overrides.params > 全局 settings。
+    """
+
+    def _pick(name: str) -> Any:
+        val = getattr(getattr(runtime, "params", None), name, None) if runtime is not None else None
+        if val is None and chat is not None:
+            val = getattr(getattr(chat.overrides, "params", None), name, None)
+        return val
+
     try:
-        credentials = resolve_llm_preset_credentials(settings, model=model, explicit_preset_id=preset_id)
+        return prepare_llm_request(
+            settings,
+            model=model,
+            preset_id=preset_id,
+            reasoning_override=_pick("reasoningEffort"),
+            fast_mode=bool(_pick("fastMode")),
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=max_tokens,
+            chat_id=getattr(chat, "id", None) if chat is not None else None,
+            character_id=character_id,
+        )
     except LlmPresetResolveError as exc:
         raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message}) from exc
-    return (
-        credentials.base_url,
-        credentials.api_key,
-        credentials.protocol,
-        credentials.anthropic_prompt_cache,
-    )
+    except AppError:
+        raise
+
+
+def _stamp_usage(usage: dict[str, Any] | None, prepared: PreparedLlmRequest) -> dict[str, Any] | None:
+    """把 Fast 是否被请求记进 usage，供前端「Fast 未生效」徽标判断。"""
+    out = dict(usage) if isinstance(usage, dict) else {}
+    if prepared.resolution.fast_mode_requested:
+        out["fastRequested"] = True
+    return out or None
+
 
 def _ensure_web_search_ready(settings: Any, *, requested: bool) -> bool:
     if not requested:
@@ -133,6 +167,7 @@ def _merge_assistant_output_into_message(
     character_id: str | None = None,
     reasoning_content: str | None = None,
     reasoning_duration_sec: float | None = None,
+    usage: dict[str, Any] | None = None,
 ) -> ChatMessage:
     """将助手输出原位追加为指定 assistant 消息的一个变体。"""
     target = next((m for m in chat.messages if m.id == message_id), None)
@@ -170,6 +205,8 @@ def _merge_assistant_output_into_message(
     target.content = content
     target.reasoningContent = (reasoning_content or "").strip() or None
     target.reasoningDurationSec = reasoning_duration_sec if target.reasoningContent else None
+    if usage:
+        target.usage = usage
 
     for msg in chat.messages:
         if msg.id == target.id or msg.role != "assistant":
@@ -192,6 +229,7 @@ def _append_or_merge_assistant_output(
     character_id: str | None = None,
     reasoning_content: str | None = None,
     reasoning_duration_sec: float | None = None,
+    usage: dict[str, Any] | None = None,
 ) -> ChatMessage | None:
     merge_id = (getattr(req, "mergeAssistantIntoMessageId", None) or "").strip()
     if merge_id:
@@ -202,6 +240,7 @@ def _append_or_merge_assistant_output(
             character_id=character_id,
             reasoning_content=reasoning_content,
             reasoning_duration_sec=reasoning_duration_sec,
+            usage=usage,
         )
     if not content:
         return None
@@ -211,6 +250,7 @@ def _append_or_merge_assistant_output(
         characterId=character_id,
         reasoningContent=(reasoning_content or "").strip() or None,
         reasoningDurationSec=reasoning_duration_sec if reasoning_content else None,
+        usage=usage,
     )
     chat.messages.append(assistant_msg)
     return assistant_msg
@@ -1313,8 +1353,19 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
     elif chat.overrides.presetId:
         preset_id = chat.overrides.presetId
     
-    base_url, api_key, protocol, anthropic_prompt_cache = _resolve_generation_credentials(settings, model=model, preset_id=preset_id)
-    llm_provider = provider_id_for_protocol(protocol)
+    prepared = _prepare_generation(
+        settings,
+        model=model,
+        preset_id=preset_id,
+        chat=chat,
+        runtime=runtime,
+        temperature=temperature,
+        top_p=top_p,
+        max_tokens=max_tokens,
+        character_id=getattr(character, 'id', None),
+    )
+    base_url, api_key, protocol = prepared.base_url, prepared.api_key, prepared.protocol
+    llm_provider = prepared.llm_provider
 
     _apply_placeholder_rewrite_to_history(
         chat,
@@ -1376,13 +1427,10 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
     _inject_mvu_state_tables_for_directive(messages, chat, character)
     _inject_knowledge_graph(messages, chat)
 
-    reasoning_cfg = build_reasoning_request_config(settings)
-    thinking_enabled = reasoning_cfg["thinking_enabled"]
-    extra_body = attach_protocol_extra_body(
-        filter_reasoning_extra_body_for_upstream(model, reasoning_cfg["extra_body"]),
-        protocol=protocol,
-        anthropic_prompt_cache=anthropic_prompt_cache,
-    )
+    thinking_enabled = prepared.thinking_enabled
+    extra_body = prepared.extra_body
+    temperature, top_p = prepared.temperature, prepared.top_p
+    messages = prepared.apply_echo_policy(messages)
     if thinking_enabled:
         temperature = None
 
@@ -1392,6 +1440,7 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
             provider=llm_provider,
             protocol=protocol,
             resolved_model=model,
+            protocol_resolution=prepared.resolution.to_public_dict(),
             warnings=worldbook_regex_warnings or None,
         )
         try:
@@ -1399,6 +1448,7 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
             reasoning_text: str | None = None
             duration_sec: float | None = None
             ws_on = web_search_enabled
+            usage_public: dict[str, Any] | None = None
             if ws_on:
                 async for ev in iter_web_search_stream_events(
                     messages=messages,
@@ -1424,6 +1474,8 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
                         reasoning_text = (rt.strip() if isinstance(rt, str) and rt.strip() else None)
                         ds = ev.get("reasoning_duration_sec")
                         duration_sec = ds if isinstance(ds, (int, float)) else None
+                        if isinstance(ev.get("usage"), dict):
+                            usage_public = ev["usage"]
             else:
                 full_text: list[str] = []
                 full_reasoning: list[str] = []
@@ -1450,6 +1502,8 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
                     elif chunk.kind == "content":
                         full_text.append(chunk.text)
                         yield _sse("delta", {"text": chunk.text})
+                    elif chunk.kind == "finish" and chunk.usage:
+                        usage_public = chunk.usage
 
                 streamed = "".join(full_text)
                 assistant_content = streamed.strip()
@@ -1457,6 +1511,7 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
                 duration_sec = None
                 if reasoning_start is not None and reasoning_end is not None:
                     duration_sec = round(max(0.0, reasoning_end - reasoning_start), 1)
+            usage_public = _stamp_usage(usage_public, prepared)
             assistant_msg = None
             if assistant_content or (getattr(req, "mergeAssistantIntoMessageId", None) and reasoning_text):
                 assistant_msg = _append_or_merge_assistant_output(
@@ -1465,6 +1520,7 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
                     content=assistant_content,
                     reasoning_content=reasoning_text,
                     reasoning_duration_sec=duration_sec,
+                    usage=usage_public,
                 )
                 chat.updatedAt = _now_iso()
                 save_chat(chat)
@@ -1482,6 +1538,8 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
                     done_payload["reasoningContent"] = reasoning_text
                 if duration_sec is not None and reasoning_text:
                     done_payload["reasoningDurationSec"] = duration_sec
+                if usage_public:
+                    done_payload["usage"] = usage_public
                 yield sse_done(done_payload)
             else:
                 yield sse_done({"ok": True, "chatId": chat.id})
@@ -1495,12 +1553,14 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
                 default_message="生成消息失败",
                 provider=llm_provider,
                 protocol=protocol,
+                enrich=prepared.enrich_error,
             )
 
     if not settings.streamEnabled:
         try:
             req_start = time.monotonic()
             ws_on = web_search_enabled
+            nonstream_usage: dict[str, Any] | None = None
             if ws_on:
                 assistant_content, reasoning_content, req_duration = await nonstream_web_search_rounds(
                     messages=messages,
@@ -1531,6 +1591,7 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
                 )
                 assistant_content = (resp.content or "").strip()
                 reasoning_content = (resp.reasoning_content or None)
+                nonstream_usage = resp.usage
                 req_duration = round(max(0.0, time.monotonic() - req_start), 1) if reasoning_content else None
             else:
                 result = await chat_completions(
@@ -1547,6 +1608,8 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
                 assistant_content = result.text.strip()
                 reasoning_content = None
                 req_duration = None
+                nonstream_usage = result.usage
+            nonstream_usage = _stamp_usage(nonstream_usage, prepared)
             assistant_msg = None
             if assistant_content or (getattr(req, "mergeAssistantIntoMessageId", None) and reasoning_content):
                 assistant_msg = _append_or_merge_assistant_output(
@@ -1555,6 +1618,7 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
                     content=assistant_content,
                     reasoning_content=(reasoning_content.strip() if isinstance(reasoning_content, str) and reasoning_content.strip() else None),
                     reasoning_duration_sec=req_duration,
+                    usage=nonstream_usage,
                 )
                 chat.updatedAt = _now_iso()
                 save_chat(chat)
@@ -1574,6 +1638,8 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
                 payload["reasoningContent"] = reasoning_content
             if req_duration is not None:
                 payload["reasoningDurationSec"] = req_duration
+            if nonstream_usage:
+                payload["usage"] = nonstream_usage
             signal_generate_done(chat.id)
             return JSONResponse(payload)
         except Exception as e:
@@ -1586,6 +1652,7 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
                 provider=llm_provider,
                 protocol=protocol,
             )
+            error = prepared.enrich_error(error)
             return app_error_response(error, request_id)
 
     return StreamingResponse(
@@ -1662,16 +1729,24 @@ async def generate_draft_help(req: DraftHelpRequest, request: Request) -> Stream
     recent_dialog = _render_draft_help_history_text(recent_dialog_messages) or "（暂无可用对话上下文）"
     messages.append({"role": "user", "content": f"最近对话如下：\n{recent_dialog}"})
     preset_id = chat.overrides.presetId
-    base_url, api_key, protocol, anthropic_prompt_cache = _resolve_generation_credentials(settings, model=model, preset_id=preset_id)
-    llm_provider = provider_id_for_protocol(protocol)
-
-    reasoning_cfg = build_reasoning_request_config(settings)
-    thinking_enabled = reasoning_cfg["thinking_enabled"]
-    extra_body = attach_protocol_extra_body(
-        filter_reasoning_extra_body_for_upstream(model, reasoning_cfg["extra_body"]),
-        protocol=protocol,
-        anthropic_prompt_cache=anthropic_prompt_cache,
+    prepared = _prepare_generation(
+        settings,
+        model=model,
+        preset_id=preset_id,
+        chat=chat,
+        runtime=None,
+        temperature=temperature,
+        top_p=top_p,
+        max_tokens=max_tokens,
+        character_id=None,
     )
+    base_url, api_key, protocol = prepared.base_url, prepared.api_key, prepared.protocol
+    llm_provider = prepared.llm_provider
+
+    thinking_enabled = prepared.thinking_enabled
+    extra_body = prepared.extra_body
+    temperature, top_p = prepared.temperature, prepared.top_p
+    messages = prepared.apply_echo_policy(messages)
     if thinking_enabled:
         temperature = None
 
@@ -1682,8 +1757,10 @@ async def generate_draft_help(req: DraftHelpRequest, request: Request) -> Stream
             provider=llm_provider,
             protocol=protocol,
             resolved_model=model,
+            protocol_resolution=prepared.resolution.to_public_dict(),
         )
         try:
+            usage_public: dict[str, Any] | None = None
             async for chunk in stream_chat_completions(
                 base_url=base_url,
                 api_key=api_key,
@@ -1700,7 +1777,12 @@ async def generate_draft_help(req: DraftHelpRequest, request: Request) -> Stream
                 elif chunk.kind == "content":
                     full_text.append(chunk.text)
                     yield _sse("delta", {"text": chunk.text})
-            yield sse_done({"ok": True, "content": "".join(full_text)})
+                elif chunk.kind == "finish" and chunk.usage:
+                    usage_public = chunk.usage
+            draft_done: dict[str, Any] = {"ok": True, "content": "".join(full_text)}
+            if usage_public:
+                draft_done["usage"] = usage_public
+            yield sse_done(draft_done)
         except Exception as e:
             yield sse_terminal_error(
                 e,
@@ -1710,6 +1792,7 @@ async def generate_draft_help(req: DraftHelpRequest, request: Request) -> Stream
                 default_message="写作辅助生成失败",
                 provider=llm_provider,
                 protocol=protocol,
+                enrich=prepared.enrich_error,
             )
 
     if not settings.streamEnabled:
@@ -1730,6 +1813,7 @@ async def generate_draft_help(req: DraftHelpRequest, request: Request) -> Stream
                 "content": (resp.content or "").strip(),
                 "reasoningContent": resp.reasoning_content or None,
                 "stream": False,
+                **({"usage": resp.usage} if resp.usage else {}),
             })
         except Exception as e:
             error = as_app_error(
@@ -1741,6 +1825,7 @@ async def generate_draft_help(req: DraftHelpRequest, request: Request) -> Stream
                 provider=llm_provider,
                 protocol=protocol,
             )
+            error = prepared.enrich_error(error)
             return app_error_response(error, request_id)
 
     return StreamingResponse(
@@ -1950,8 +2035,19 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
     elif chat.overrides.presetId:
         preset_id = chat.overrides.presetId
     
-    base_url, api_key, protocol, anthropic_prompt_cache = _resolve_generation_credentials(settings, model=model, preset_id=preset_id)
-    llm_provider = provider_id_for_protocol(protocol)
+    prepared = _prepare_generation(
+        settings,
+        model=model,
+        preset_id=preset_id,
+        chat=chat,
+        runtime=runtime,
+        temperature=temperature,
+        top_p=top_p,
+        max_tokens=max_tokens,
+        character_id=getattr(character, 'id', None),
+    )
+    base_url, api_key, protocol = prepared.base_url, prepared.api_key, prepared.protocol
+    llm_provider = prepared.llm_provider
 
     _apply_placeholder_rewrite_to_history(
         chat,
@@ -2005,13 +2101,10 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
     _inject_mvu_state_tables_for_directive(messages, chat, character)
     _inject_knowledge_graph(messages, chat)
 
-    reasoning_cfg = build_reasoning_request_config(settings)
-    thinking_enabled = reasoning_cfg["thinking_enabled"]
-    extra_body = attach_protocol_extra_body(
-        filter_reasoning_extra_body_for_upstream(model, reasoning_cfg["extra_body"]),
-        protocol=protocol,
-        anthropic_prompt_cache=anthropic_prompt_cache,
-    )
+    thinking_enabled = prepared.thinking_enabled
+    extra_body = prepared.extra_body
+    temperature, top_p = prepared.temperature, prepared.top_p
+    messages = prepared.apply_echo_policy(messages)
     if thinking_enabled:
         temperature = None
 
@@ -2021,6 +2114,7 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
             provider=llm_provider,
             protocol=protocol,
             resolved_model=model,
+            protocol_resolution=prepared.resolution.to_public_dict(),
             warnings=worldbook_regex_warnings or None,
         )
         try:
@@ -2028,6 +2122,7 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
             reasoning_text: str | None = None
             duration_sec: float | None = None
             ws_on = web_search_enabled
+            usage_public: dict[str, Any] | None = None
             if ws_on:
                 async for ev in iter_web_search_stream_events(
                     messages=messages,
@@ -2053,6 +2148,8 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
                         reasoning_text = (rt.strip() if isinstance(rt, str) and rt.strip() else None)
                         ds = ev.get("reasoning_duration_sec")
                         duration_sec = ds if isinstance(ds, (int, float)) else None
+                        if isinstance(ev.get("usage"), dict):
+                            usage_public = ev["usage"]
             else:
                 full_text: list[str] = []
                 full_reasoning: list[str] = []
@@ -2079,6 +2176,8 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
                     elif chunk.kind == "content":
                         full_text.append(chunk.text)
                         yield _sse("delta", {"text": chunk.text})
+                    elif chunk.kind == "finish" and chunk.usage:
+                        usage_public = chunk.usage
 
                 streamed = "".join(full_text)
                 assistant_content = streamed.strip()
@@ -2086,6 +2185,7 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
                 duration_sec = None
                 if reasoning_start is not None and reasoning_end is not None:
                     duration_sec = round(max(0.0, reasoning_end - reasoning_start), 1)
+            usage_public = _stamp_usage(usage_public, prepared)
             assistant_msg = None
             if assistant_content or (getattr(req, "mergeAssistantIntoMessageId", None) and reasoning_text):
                 assistant_msg = _append_or_merge_assistant_output(
@@ -2095,6 +2195,7 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
                     character_id=req.characterId,
                     reasoning_content=reasoning_text,
                     reasoning_duration_sec=duration_sec,
+                    usage=usage_public,
                 )
                 chat.updatedAt = _now_iso()
                 save_chat(chat)
@@ -2108,6 +2209,8 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
                     done_payload["reasoningContent"] = reasoning_text
                 if duration_sec is not None and reasoning_text:
                     done_payload["reasoningDurationSec"] = duration_sec
+                if usage_public:
+                    done_payload["usage"] = usage_public
                 yield sse_done(done_payload)
             else:
                 yield sse_done({"ok": True, "chatId": chat.id, "characterId": req.characterId})
@@ -2121,12 +2224,14 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
                 default_message="群聊生成失败",
                 provider=llm_provider,
                 protocol=protocol,
+                enrich=prepared.enrich_error,
             )
 
     if not settings.streamEnabled:
         try:
             req_start = time.monotonic()
             ws_on = web_search_enabled
+            nonstream_usage: dict[str, Any] | None = None
             if ws_on:
                 assistant_content, reasoning_content, req_duration = await nonstream_web_search_rounds(
                     messages=messages,
@@ -2173,6 +2278,8 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
                 assistant_content = result.text.strip()
                 reasoning_content = None
                 req_duration = None
+                nonstream_usage = result.usage
+            nonstream_usage = _stamp_usage(nonstream_usage, prepared)
             assistant_msg = None
             if assistant_content or (getattr(req, "mergeAssistantIntoMessageId", None) and reasoning_content):
                 assistant_msg = _append_or_merge_assistant_output(
@@ -2182,6 +2289,7 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
                     character_id=req.characterId,
                     reasoning_content=(reasoning_content.strip() if isinstance(reasoning_content, str) and reasoning_content.strip() else None),
                     reasoning_duration_sec=req_duration,
+                    usage=nonstream_usage,
                 )
                 chat.updatedAt = _now_iso()
                 save_chat(chat)
@@ -2197,6 +2305,8 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
                 payload["reasoningContent"] = reasoning_content
             if req_duration is not None:
                 payload["reasoningDurationSec"] = req_duration
+            if nonstream_usage:
+                payload["usage"] = nonstream_usage
             signal_generate_done(chat.id)
             return JSONResponse(payload)
         except Exception as e:
@@ -2209,6 +2319,7 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
                 provider=llm_provider,
                 protocol=protocol,
             )
+            error = prepared.enrich_error(error)
             return app_error_response(error, request_id)
 
     return StreamingResponse(
@@ -2409,8 +2520,19 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
     elif chat.overrides.presetId:
         preset_id = chat.overrides.presetId
     
-    base_url, api_key, protocol, anthropic_prompt_cache = _resolve_generation_credentials(settings, model=model, preset_id=preset_id)
-    llm_provider = provider_id_for_protocol(protocol)
+    prepared = _prepare_generation(
+        settings,
+        model=model,
+        preset_id=preset_id,
+        chat=chat,
+        runtime=None,
+        temperature=temperature,
+        top_p=top_p,
+        max_tokens=max_tokens,
+        character_id=getattr(character, 'id', None),
+    )
+    base_url, api_key, protocol = prepared.base_url, prepared.api_key, prepared.protocol
+    llm_provider = prepared.llm_provider
 
     _apply_placeholder_rewrite_to_history(
         chat,
@@ -2464,13 +2586,10 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
     _inject_mvu_state_tables_for_directive(messages, chat, character)
     _inject_knowledge_graph(messages, chat)
 
-    reasoning_cfg = build_reasoning_request_config(settings)
-    thinking_enabled = reasoning_cfg["thinking_enabled"]
-    extra_body = attach_protocol_extra_body(
-        filter_reasoning_extra_body_for_upstream(model, reasoning_cfg["extra_body"]),
-        protocol=protocol,
-        anthropic_prompt_cache=anthropic_prompt_cache,
-    )
+    thinking_enabled = prepared.thinking_enabled
+    extra_body = prepared.extra_body
+    temperature, top_p = prepared.temperature, prepared.top_p
+    messages = prepared.apply_echo_policy(messages)
     if thinking_enabled:
         temperature = None
 
@@ -2480,6 +2599,7 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
             provider=llm_provider,
             protocol=protocol,
             resolved_model=model,
+            protocol_resolution=prepared.resolution.to_public_dict(),
             warnings=worldbook_regex_warnings or None,
         )
         try:
@@ -2487,6 +2607,7 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
             reasoning_text: str | None = None
             duration_sec: float | None = None
             ws_on = web_search_enabled
+            usage_public: dict[str, Any] | None = None
             if ws_on:
                 async for ev in iter_web_search_stream_events(
                     messages=messages,
@@ -2512,6 +2633,8 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
                         reasoning_text = (rt.strip() if isinstance(rt, str) and rt.strip() else None)
                         ds = ev.get("reasoning_duration_sec")
                         duration_sec = ds if isinstance(ds, (int, float)) else None
+                        if isinstance(ev.get("usage"), dict):
+                            usage_public = ev["usage"]
             else:
                 full_text: list[str] = []
                 full_reasoning: list[str] = []
@@ -2538,6 +2661,8 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
                     elif chunk.kind == "content":
                         full_text.append(chunk.text)
                         yield _sse("delta", {"text": chunk.text})
+                    elif chunk.kind == "finish" and chunk.usage:
+                        usage_public = chunk.usage
 
                 streamed = "".join(full_text)
                 assistant_content = streamed.strip()
@@ -2545,6 +2670,7 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
                 duration_sec = None
                 if reasoning_start is not None and reasoning_end is not None:
                     duration_sec = round(max(0.0, reasoning_end - reasoning_start), 1)
+            usage_public = _stamp_usage(usage_public, prepared)
             if assistant_content:
                 assistant_msg = ChatMessage(
                     role="assistant",
@@ -2552,6 +2678,7 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
                     characterId=req.characterId,
                     reasoningContent=reasoning_text,
                     reasoningDurationSec=duration_sec if reasoning_text else None,
+                    usage=usage_public,
                 )
                 chat.messages.append(assistant_msg)
                 chat.updatedAt = _now_iso()
@@ -2567,6 +2694,8 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
                     done_payload["reasoningContent"] = reasoning_text
                 if duration_sec is not None and reasoning_text:
                     done_payload["reasoningDurationSec"] = duration_sec
+                if usage_public:
+                    done_payload["usage"] = usage_public
                 yield sse_done(done_payload)
             else:
                 yield sse_done({
@@ -2585,12 +2714,14 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
                 default_message="群聊插话生成失败",
                 provider=llm_provider,
                 protocol=protocol,
+                enrich=prepared.enrich_error,
             )
 
     if not settings.streamEnabled:
         try:
             req_start = time.monotonic()
             ws_on = web_search_enabled
+            nonstream_usage: dict[str, Any] | None = None
             if ws_on:
                 assistant_content, reasoning_content, req_duration = await nonstream_web_search_rounds(
                     messages=messages,
@@ -2637,6 +2768,8 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
                 assistant_content = result.text.strip()
                 reasoning_content = None
                 req_duration = None
+                nonstream_usage = result.usage
+            nonstream_usage = _stamp_usage(nonstream_usage, prepared)
             assistant_msg = None
             if assistant_content:
                 assistant_msg = ChatMessage(
@@ -2645,6 +2778,7 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
                     characterId=req.characterId,
                     reasoningContent=(reasoning_content.strip() if isinstance(reasoning_content, str) and reasoning_content.strip() else None),
                     reasoningDurationSec=req_duration,
+                    usage=nonstream_usage,
                 )
                 chat.messages.append(assistant_msg)
                 chat.updatedAt = _now_iso()
@@ -2662,6 +2796,8 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
                 payload["reasoningContent"] = reasoning_content
             if req_duration is not None:
                 payload["reasoningDurationSec"] = req_duration
+            if nonstream_usage:
+                payload["usage"] = nonstream_usage
             signal_generate_done(chat.id)
             return JSONResponse(payload)
         except Exception as e:
@@ -2674,6 +2810,7 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
                 provider=llm_provider,
                 protocol=protocol,
             )
+            error = prepared.enrich_error(error)
             return app_error_response(error, request_id)
 
     return StreamingResponse(

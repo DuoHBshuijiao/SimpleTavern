@@ -22,6 +22,7 @@ from app.schemas import (
     Settings,
     SingleInterjectRequest,
 )
+from tests.llm_prepared_stub import prepare_stub
 
 
 def _request(path: str, request_id: str) -> Request:
@@ -69,12 +70,7 @@ def _enter_common_generation_patches(
     stack.enter_context(patch("app.routes.generate.count_tokens_for_messages", return_value=0))
     stack.enter_context(patch("app.routes.generate._inject_mvu_state_tables_for_directive"))
     stack.enter_context(patch("app.routes.generate._inject_knowledge_graph"))
-    stack.enter_context(
-        patch(
-            "app.routes.generate._resolve_generation_credentials",
-            return_value=("https://provider.example/v1", "test-key", "openai_compatible_chat", "off"),
-        )
-    )
+    stack.enter_context(patch("app.routes.generate.prepare_llm_request", prepare_stub))
 
 
 def _assert_terminal_error_stream(stream: str, request_id: str) -> None:

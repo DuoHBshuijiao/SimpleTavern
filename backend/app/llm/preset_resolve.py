@@ -4,19 +4,24 @@ The runtime used to resolve credentials independently in generate,
 assistant and MVU paths.  This module keeps the selection contract in one
 place so invalid presets fail early instead of silently using a different
 endpoint.
+
+T-820/T-821 起额外携带：供应商目录 id / 占位符参数 / 鉴权风格 / 统一 promptCache。
+``protocol`` 可能为 ``auto``（T-822），必须经 ``llm.resolution`` 解析后再进 registry。
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 from app.llm.types import (
     ANTHROPIC_PROMPT_CACHE_OFF,
     OPENAI_COMPATIBLE_CHAT_PROTOCOL,
     normalize_anthropic_prompt_cache,
+    normalize_auth_style,
     normalize_protocol_id,
 )
-from app.schemas import ApiPreset, Settings
+from app.schemas import ApiPreset, PromptCacheConfig, Settings
 
 
 @dataclass(frozen=True)
@@ -27,6 +32,13 @@ class LlmPresetCredentials:
     source: str
     protocol: str = OPENAI_COMPATIBLE_CHAT_PROTOCOL
     anthropic_prompt_cache: str = ANTHROPIC_PROMPT_CACHE_OFF
+    prompt_cache: PromptCacheConfig = field(default_factory=lambda: PromptCacheConfig(mode="off"))
+    provider_id: str | None = None
+    provider_params: dict[str, str] = field(default_factory=dict)
+    auth_style: str | None = None
+    preset_name: str | None = None
+    # 预设 / 全局连接级「回传思考内容」开关；最终生效值还要看 settings.reasoningEchoBack（见 llm.resolution）
+    echo_reasoning: bool = True
 
 
 class LlmPresetResolveError(ValueError):
@@ -47,6 +59,17 @@ def _has_credentials(base_url: str | None, api_key: str | None) -> bool:
     return bool((base_url or "").strip()) and bool((api_key or "").strip())
 
 
+def _prompt_cache_of(obj: Any) -> PromptCacheConfig:
+    raw = getattr(obj, "promptCache", None)
+    if isinstance(raw, PromptCacheConfig):
+        return raw
+    if isinstance(raw, dict):
+        return PromptCacheConfig.model_validate(raw)
+    from app.schemas import prompt_cache_from_legacy
+
+    return prompt_cache_from_legacy(getattr(obj, "anthropicPromptCache", None))
+
+
 def _credential_from_preset(preset: ApiPreset, *, source: str) -> LlmPresetCredentials:
     if not is_llm_api_preset(preset):
         raise LlmPresetResolveError(
@@ -55,17 +78,24 @@ def _credential_from_preset(preset: ApiPreset, *, source: str) -> LlmPresetCrede
         )
     if not (preset.baseUrl or "").strip():
         raise LlmPresetResolveError("MISSING_BASE_URL", f"API 预设「{preset.name}」缺少 Base URL。")
-    if not (preset.apiKey or "").strip():
+    requires_oauth = str(getattr(preset, "authStyle", "") or "").startswith("oauth")
+    if not (preset.apiKey or "").strip() and not requires_oauth:
         raise LlmPresetResolveError("MISSING_API_KEY", f"API 预设「{preset.name}」缺少 API Key。")
     return LlmPresetCredentials(
         base_url=preset.baseUrl.strip(),
-        api_key=preset.apiKey.strip(),
+        api_key=(preset.apiKey or "").strip(),
         preset_id=preset.id,
         source=source,
         protocol=normalize_protocol_id(getattr(preset, "protocol", None)),
         anthropic_prompt_cache=normalize_anthropic_prompt_cache(
             getattr(preset, "anthropicPromptCache", None)
         ),
+        prompt_cache=_prompt_cache_of(preset),
+        provider_id=(getattr(preset, "providerId", None) or None),
+        provider_params=dict(getattr(preset, "providerParams", None) or {}),
+        auth_style=normalize_auth_style(getattr(preset, "authStyle", None)),
+        preset_name=preset.name,
+        echo_reasoning=bool(getattr(preset, "echoReasoning", True)),
     )
 
 
@@ -83,6 +113,12 @@ def _credential_from_global(settings: Settings) -> LlmPresetCredentials | None:
         anthropic_prompt_cache=normalize_anthropic_prompt_cache(
             getattr(settings.llm, "anthropicPromptCache", None)
         ),
+        prompt_cache=_prompt_cache_of(settings.llm),
+        provider_id=(getattr(settings.llm, "providerId", None) or None),
+        provider_params=dict(getattr(settings.llm, "providerParams", None) or {}),
+        auth_style=normalize_auth_style(getattr(settings.llm, "authStyle", None)),
+        preset_name=None,
+        echo_reasoning=bool(getattr(settings.llm, "echoReasoning", True)),
     )
 
 

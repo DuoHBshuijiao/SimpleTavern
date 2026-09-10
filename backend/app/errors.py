@@ -49,6 +49,8 @@ class ErrorEnvelope(BaseModel):
     protocol: str | None = None
     upstream_status: int | None = Field(default=None, alias="upstreamStatus")
     suggested_action: str | None = Field(default=None, alias="suggestedAction")
+    # 可执行动作（前端错误卡片渲染成按钮），如 {type:"open_settings", tab:"presets", presetId, field:"echoReasoning", label}
+    action: dict[str, Any] | None = None
 
 
 class AppError(Exception):
@@ -66,6 +68,7 @@ class AppError(Exception):
         protocol: str | None = None,
         upstream_status: int | None = None,
         suggested_action: str | None = None,
+        action: dict[str, Any] | None = None,
     ) -> None:
         safe_message = redact_sensitive_text(message)
         super().__init__(safe_message)
@@ -80,6 +83,14 @@ class AppError(Exception):
         self.protocol = protocol
         self.upstream_status = upstream_status
         self.suggested_action = suggested_action
+        self.action = dict(action) if isinstance(action, dict) and action else None
+
+    def with_action(self, action: dict[str, Any], *, suggested_action: str | None = None) -> "AppError":
+        """附加可执行动作（就地修改并返回自身，便于链式使用）。"""
+        self.action = dict(action)
+        if suggested_action:
+            self.suggested_action = suggested_action
+        return self
 
     def to_envelope(self, request_id: str | None = None) -> ErrorEnvelope:
         resolved_request_id = self.request_id or request_id or get_request_id()
@@ -96,6 +107,7 @@ class AppError(Exception):
             protocol=self.protocol,
             upstreamStatus=self.upstream_status,
             suggestedAction=self.suggested_action,
+            action=self.action,
         )
 
     def to_dict(self, request_id: str | None = None) -> dict[str, Any]:

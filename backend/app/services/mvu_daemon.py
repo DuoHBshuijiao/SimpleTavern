@@ -21,8 +21,8 @@ logger = logging.getLogger(__name__)
 from app.content_regex_queue import dequeue_by_message_id, get_content_regex_queue_dropped, get_content_regex_queue_size
 from app.errors import as_app_error
 from app.group_mvu import _character_unreadable_error, resolve_chat_mvu_runtime_enablement
-from app.llm.preset_resolve import LlmPresetResolveError, resolve_llm_preset_credentials
-from app.llm.types import attach_protocol_extra_body
+from app.llm.preset_resolve import LlmPresetResolveError
+from app.llm.resolution import prepare_llm_request
 from app.mvu_model_resolve import resolve_mvu_model_from_settings
 from app.mvu_system_prompt import load_mvu_system_prompt
 from app.schemas import (
@@ -30,8 +30,6 @@ from app.schemas import (
     CharacterCard,
     Chat,
     MvuWorkLogEntry,
-    build_reasoning_request_config,
-    filter_reasoning_extra_body_for_upstream,
 )
 from app.services.mvu_agent import MvuAgentEvent, MvuAgentJob, MvuAgentRunContext, MvuAgentService
 from app.storage import (
@@ -315,25 +313,26 @@ async def _run_once(chat_id: str) -> None:
         return
 
     try:
-        credentials = resolve_llm_preset_credentials(settings, model=model, explicit_preset_id=preset_id)
+        # T-822：MVU 与主生成共用自适应协议 / 缓存计划；工具调用温度沿用全局默认
+        prepared = prepare_llm_request(
+            settings,
+            model=model,
+            preset_id=preset_id,
+            temperature=settings.generationDefaults.temperature,
+            chat_id=chat_id,
+            character_id=getattr(chat, "characterId", None),
+        )
     except LlmPresetResolveError as exc:
         logger.error("chat %s: MVU preset resolution failed: %s", chat_id, exc.message)
         await _broadcast(chat_id, MvuAgentEvent("error", {"code": exc.code, "message": exc.message}))
         return
-    base_url = credentials.base_url
-    api_key = credentials.api_key
-    protocol = credentials.protocol
-    anthropic_prompt_cache = credentials.anthropic_prompt_cache
-
-    reasoning_cfg = build_reasoning_request_config(settings)
-    extra_body = attach_protocol_extra_body(
-        filter_reasoning_extra_body_for_upstream(model, reasoning_cfg["extra_body"]),
-        protocol=protocol,
-        anthropic_prompt_cache=anthropic_prompt_cache,
-    )
+    base_url = prepared.base_url
+    api_key = prepared.api_key
+    protocol = prepared.protocol
+    extra_body = prepared.extra_body
     tool_temperature: float | None = None
-    if not reasoning_cfg["thinking_enabled"]:
-        tool_temperature = settings.generationDefaults.temperature
+    if not prepared.thinking_enabled:
+        tool_temperature = prepared.temperature
 
     # 正则模式消费队列；指令模式由生成完成信号触发，不读取/消费正则队列。
     consumed_msg_id: str | None = None

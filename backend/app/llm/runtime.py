@@ -12,6 +12,7 @@ from app.llm.types import (
     OPENAI_COMPATIBLE_CHAT_PROTOCOL,
     GenerationConfig,
     normalize_protocol_id,
+    pop_control_block,
 )
 from app.llm.providers.openai_compatible_chat import (
     ChatCompletionMessage,
@@ -30,14 +31,23 @@ def _config(
     extra_body: dict[str, Any] | None,
     stream: bool,
 ) -> GenerationConfig:
+    """把 extra_body 里的 ``ST_CONTROL_KEY`` 控制块拆到 GenerationConfig 结构化字段（T-821/T-824）。"""
+    remaining, control = pop_control_block(extra_body)
+    headers = control.get("extra_headers")
+    provider_params = control.get("provider_params")
     return GenerationConfig(
         model=model,
         temperature=temperature,
         top_p=top_p,
         max_tokens=max_tokens,
         tools=tools,
-        extra_body=extra_body,
+        extra_body=remaining,
         stream=stream,
+        prompt_cache=control.get("prompt_cache") if isinstance(control.get("prompt_cache"), dict) else None,
+        extra_headers={str(k): str(v) for k, v in headers.items()} if isinstance(headers, dict) and headers else None,
+        auth_style=control.get("auth_style") or None,
+        protocol_variant=control.get("protocol_variant") or None,
+        provider_params={str(k): str(v) for k, v in provider_params.items()} if isinstance(provider_params, dict) and provider_params else None,
     )
 
 

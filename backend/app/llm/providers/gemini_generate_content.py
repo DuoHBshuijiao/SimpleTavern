@@ -8,12 +8,15 @@ Native Google Generative Language API only — NOT the OpenAI-compatible
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, AsyncIterator
 from urllib.parse import urlsplit, urlunsplit, urlencode, parse_qsl
 
 import httpx
 
 from app.errors import AppError, as_app_error
+from app.llm.gemini_cache_store import attach_explicit_cache, forget_cached_name
+from app.llm.prompt_cache import PromptCachePlan
 from app.llm.providers.openai_compatible_chat import (
     STREAM_TEXT_CHUNK_SIZE,
     ChatCompletionMessage,
@@ -25,12 +28,15 @@ from app.llm.types import (
     GenerationConfig,
     Usage,
     WireRequest,
+    append_query_key,
+    auth_headers_for_style,
 )
 from app.services.http_client import get_async_http_client
 from app.services.http_log import log_outbound
 
 _PROVIDER = "gemini"
 _PROTOCOL = GEMINI_GENERATE_CONTENT_PROTOCOL
+_LOGGER = logging.getLogger(__name__)
 _DEFAULT_MAX_TOKENS = 4096
 _MAX_ERROR_BODY_CHARS = 12000
 
@@ -191,8 +197,34 @@ def _models_list_url(base_url: str) -> str:
     return f"{_api_root(base_url)}/models"
 
 
-def _auth_headers(api_key: str) -> dict[str, str]:
-    return {"x-goog-api-key": api_key.strip()}
+def _auth_headers(api_key: str, auth_style: str | None = None) -> dict[str, str]:
+    # Gemini 原生默认是 x-goog-api-key；query_key 不放头。
+    return auth_headers_for_style(api_key, auth_style or "x-goog-api-key")
+
+
+def _request_url(base_url: str, *, model: str, stream: bool, api_key: str, auth_style: str | None) -> str:
+    url = _model_action_url(base_url, model=model, stream=stream)
+    return append_query_key(url, api_key, auth_style or "x-goog-api-key")
+
+
+def _extra_headers(config: GenerationConfig) -> dict[str, str]:
+    raw = getattr(config, "extra_headers", None)
+    if not isinstance(raw, dict):
+        return {}
+    return {str(k).strip(): str(v).strip() for k, v in raw.items() if str(k).strip() and str(v).strip()}
+
+
+def _usage_with_tier(data: dict[str, Any]) -> dict[str, Any] | None:
+    """usageMetadata + 响应顶层 serviceTier（priority / flex）合并，供 decode_usage 归一化。"""
+    usage = data.get("usageMetadata")
+    if not isinstance(usage, dict):
+        return None
+    tier = data.get("serviceTier") or data.get("service_tier")
+    if isinstance(tier, str) and tier and "serviceTier" not in usage:
+        merged = dict(usage)
+        merged["serviceTier"] = tier
+        return merged
+    return usage
 
 
 def _content_to_text(content: Any) -> str:
@@ -699,13 +731,17 @@ def decode_usage(raw: dict[str, Any] | None) -> Usage | None:
         return None
     if total is None and (input_tokens is not None or output_tokens is not None):
         total = (input_tokens or 0) + (output_tokens or 0)
+    # 显式 cachedContents 创建时由 gemini_cache_store 记入；generateContent 本身不返回写入量
+    cache_write = _as_int(raw.get("cacheWriteTokenCount"))
+    tier = raw.get("serviceTier")
     return Usage(
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         total_tokens=total,
         cache_read_input_tokens=cache_read,
-        cache_write_input_tokens=None,
+        cache_write_input_tokens=cache_write,
         reasoning_tokens=thoughts,
+        service_tier=str(tier) if isinstance(tier, str) and tier else None,
         raw=dict(raw),
     )
 
@@ -783,6 +819,26 @@ def _payload_from_config(
     )
 
 
+async def _payload_with_explicit_cache(
+    *,
+    messages: list[dict[str, Any]],
+    config: GenerationConfig,
+    base_url: str,
+    api_key: str,
+) -> dict[str, Any]:
+    payload = _payload_from_config(messages=messages, config=config)
+    plan = PromptCachePlan.from_dict(config.prompt_cache)
+    return await attach_explicit_cache(
+        payload,
+        plan=plan,
+        api_root=_api_root(base_url),
+        api_key=api_key,
+        model=config.model,
+        extra_headers=_extra_headers(config) or None,
+        auth_style=config.auth_style,
+    )
+
+
 async def complete_gemini(
     *,
     base_url: str,
@@ -791,13 +847,16 @@ async def complete_gemini(
     config: GenerationConfig,
     as_message: bool = False,
 ) -> ChatCompletionResult | ChatCompletionMessage:
-    url = _model_action_url(base_url, model=config.model, stream=False)
+    url = _request_url(base_url, model=config.model, stream=False, api_key=api_key, auth_style=config.auth_style)
     headers = {
         "Accept": "application/json",
         "Content-Type": "application/json",
-        **_auth_headers(api_key),
+        **_auth_headers(api_key, config.auth_style),
+        **_extra_headers(config),
     }
-    payload = _payload_from_config(messages=messages, config=config)
+    payload = await _payload_with_explicit_cache(
+        messages=messages, config=config, base_url=base_url, api_key=api_key
+    )
     try:
         async with log_outbound(
             source="llm",
@@ -810,11 +869,23 @@ async def complete_gemini(
             client = get_async_http_client()
             r = await client.post(url, headers=headers, json=payload, timeout=120)
             _log.set_response(status=r.status_code, headers=dict(r.headers), text=r.text)
+            if r.status_code == 404 and payload.get("cachedContent"):
+                _LOGGER.warning(
+                    "Gemini cachedContent 404，已丢弃索引并重建一次: %s",
+                    payload.get("cachedContent"),
+                )
+                forget_cached_name(str(payload.get("cachedContent")))
+                payload = await _payload_with_explicit_cache(
+                    messages=messages, config=config, base_url=base_url, api_key=api_key
+                )
+                r = await client.post(url, headers=headers, json=payload, timeout=120)
+                _log.set_response(status=r.status_code, headers=dict(r.headers), text=r.text)
             _raise_http_error(r)
             data = _decode_json_object(r, context="gemini generateContent")
             _log.set_response(body=data)
             text, reasoning, tool_calls = _extract_text_thoughts_and_tool_calls(data)
-            _ = decode_usage(data.get("usageMetadata") if isinstance(data.get("usageMetadata"), dict) else None)
+            usage = decode_usage(_usage_with_tier(data))
+            usage_dict = usage.to_public_dict() if usage is not None else None
             if as_message:
                 if not text and not reasoning and not tool_calls:
                     raise _protocol_error(
@@ -827,6 +898,7 @@ async def complete_gemini(
                     content=text or None,
                     reasoning_content=reasoning,
                     tool_calls=tool_calls,
+                    usage=usage_dict,
                 )
             if not text.strip() and not reasoning:
                 raise _protocol_error(
@@ -834,7 +906,7 @@ async def complete_gemini(
                     message="上游服务未返回有效文本",
                     detail="gemini generateContent: empty text and thought parts",
                 )
-            return ChatCompletionResult(text=text)
+            return ChatCompletionResult(text=text, usage=usage_dict)
     except AppError:
         raise
     except Exception as exc:
@@ -856,13 +928,16 @@ async def stream_gemini(
     messages: list[dict[str, Any]],
     config: GenerationConfig,
 ) -> AsyncIterator[StreamChunk]:
-    url = _model_action_url(base_url, model=config.model, stream=True)
+    url = _request_url(base_url, model=config.model, stream=True, api_key=api_key, auth_style=config.auth_style)
     headers = {
         "Accept": "text/event-stream",
         "Content-Type": "application/json",
-        **_auth_headers(api_key),
+        **_auth_headers(api_key, config.auth_style),
+        **_extra_headers(config),
     }
-    payload = _payload_from_config(messages=messages, config=config)
+    payload = await _payload_with_explicit_cache(
+        messages=messages, config=config, base_url=base_url, api_key=api_key
+    )
 
     saw_output = False
     terminal_usage: dict[str, Any] | None = None
@@ -880,69 +955,84 @@ async def stream_gemini(
             aggregated_reasoning: list[str] = []
             aggregated_tool_calls: list[dict[str, Any]] = []
             client = get_async_http_client()
-            async with client.stream("POST", url, headers=headers, json=payload, timeout=None) as r:
-                _log.set_response(status=r.status_code, headers=dict(r.headers))
-                await _raise_stream_http_error(r)
-                async for line in r.aiter_lines():
-                    if not line:
+            retried_cache = False
+            while True:
+                async with client.stream("POST", url, headers=headers, json=payload, timeout=None) as r:
+                    _log.set_response(status=r.status_code, headers=dict(r.headers))
+                    if r.status_code == 404 and payload.get("cachedContent") and not retried_cache:
+                        _LOGGER.warning(
+                            "Gemini cachedContent 404（流式），已丢弃索引并重建一次: %s",
+                            payload.get("cachedContent"),
+                        )
+                        await r.aread()
+                        forget_cached_name(str(payload.get("cachedContent")))
+                        payload = await _payload_with_explicit_cache(
+                            messages=messages, config=config, base_url=base_url, api_key=api_key
+                        )
+                        retried_cache = True
                         continue
-                    if line.startswith(":"):
-                        continue
-                    if not line.startswith("data:"):
-                        # Some gateways may emit bare JSON lines; accept objects only.
-                        if line.startswith("{"):
-                            data_str = line
+                    await _raise_stream_http_error(r)
+                    async for line in r.aiter_lines():
+                        if not line:
+                            continue
+                        if line.startswith(":"):
+                            continue
+                        if not line.startswith("data:"):
+                            # Some gateways may emit bare JSON lines; accept objects only.
+                            if line.startswith("{"):
+                                data_str = line
+                            else:
+                                raise _protocol_error(
+                                    code="stream_event_invalid",
+                                    message="上游流包含未知事件帧",
+                                    detail=f"unexpected SSE line: {line[:200]}",
+                                )
                         else:
+                            data_str = line[len("data:") :].strip()
+                        if not data_str or data_str == "[DONE]":
+                            continue
+                        try:
+                            data = json.loads(data_str)
+                        except json.JSONDecodeError as exc:
                             raise _protocol_error(
                                 code="stream_event_invalid",
-                                message="上游流包含未知事件帧",
-                                detail=f"unexpected SSE line: {line[:200]}",
+                                message="上游流包含无法解析的 JSON",
+                                detail=str(exc),
+                            ) from exc
+                        if not isinstance(data, dict):
+                            raise _protocol_error(
+                                code="stream_event_invalid",
+                                message="上游流事件不是对象",
+                                detail=f"got {type(data).__name__}",
                             )
-                    else:
-                        data_str = line[len("data:") :].strip()
-                    if not data_str or data_str == "[DONE]":
-                        continue
-                    try:
-                        data = json.loads(data_str)
-                    except json.JSONDecodeError as exc:
-                        raise _protocol_error(
-                            code="stream_event_invalid",
-                            message="上游流包含无法解析的 JSON",
-                            detail=str(exc),
-                        ) from exc
-                    if not isinstance(data, dict):
-                        raise _protocol_error(
-                            code="stream_event_invalid",
-                            message="上游流事件不是对象",
-                            detail=f"got {type(data).__name__}",
-                        )
-                    if isinstance(data.get("error"), dict):
-                        err = data["error"]
-                        raise _protocol_error(
-                            code="provider_request_failed",
-                            message="Gemini 流式返回错误",
-                            detail=str(err.get("message") or err),
-                            retryable=True,
-                        )
-                    usage = data.get("usageMetadata")
-                    if isinstance(usage, dict):
-                        terminal_usage = usage
-                    text, reasoning, tool_calls = _extract_text_thoughts_and_tool_calls(data)
-                    if reasoning:
-                        saw_output = True
-                        aggregated_reasoning.append(reasoning)
-                        for piece in _iter_text_chunks(reasoning):
-                            yield StreamChunk(kind="reasoning", text=piece)
-                    if text:
-                        saw_output = True
-                        aggregated_content.append(text)
-                        for piece in _iter_text_chunks(text):
-                            yield StreamChunk(kind="content", text=piece)
-                    if tool_calls:
-                        saw_output = True
-                        aggregated_tool_calls.extend(tool_calls)
+                        if isinstance(data.get("error"), dict):
+                            err = data["error"]
+                            raise _protocol_error(
+                                code="provider_request_failed",
+                                message="Gemini 流式返回错误",
+                                detail=str(err.get("message") or err),
+                                retryable=True,
+                            )
+                        usage = data.get("usageMetadata")
+                        if isinstance(usage, dict):
+                            terminal_usage = usage
+                        text, reasoning, tool_calls = _extract_text_thoughts_and_tool_calls(data)
+                        if reasoning:
+                            saw_output = True
+                            aggregated_reasoning.append(reasoning)
+                            for piece in _iter_text_chunks(reasoning):
+                                yield StreamChunk(kind="reasoning", text=piece)
+                        if text:
+                            saw_output = True
+                            aggregated_content.append(text)
+                            for piece in _iter_text_chunks(text):
+                                yield StreamChunk(kind="content", text=piece)
+                        if tool_calls:
+                            saw_output = True
+                            aggregated_tool_calls.extend(tool_calls)
+                    break
 
-            _ = decode_usage(terminal_usage)
+            usage = decode_usage(terminal_usage)
             finish_tool_calls = aggregated_tool_calls or None
             _log.set_response(
                 body={
@@ -959,7 +1049,11 @@ async def stream_gemini(
                     message="上游流未返回任何文本",
                     detail="gemini stream produced no text/thought/tool_call parts",
                 )
-            yield StreamChunk(kind="finish", tool_calls=finish_tool_calls)
+            yield StreamChunk(
+                kind="finish",
+                tool_calls=finish_tool_calls,
+                usage=usage.to_public_dict() if usage is not None else None,
+            )
     except AppError:
         raise
     except Exception as exc:
@@ -1014,11 +1108,12 @@ class GeminiGenerateContentAdapter:
         if not isinstance(config, GenerationConfig):
             raise TypeError("config must be GenerationConfig")
         self.validate_config(base_url=base_url, api_key=api_key)
-        url = _model_action_url(base_url, model=config.model, stream=bool(config.stream))
+        url = _request_url(base_url, model=config.model, stream=bool(config.stream), api_key=api_key, auth_style=config.auth_style)
         headers = {
             "Accept": "application/json" if not config.stream else "text/event-stream",
             "Content-Type": "application/json",
-            **_auth_headers(api_key),
+            **_auth_headers(api_key, config.auth_style),
+            **_extra_headers(config),
         }
         payload = _payload_from_config(messages=messages, config=config)
         return WireRequest(method="POST", url=url, headers=headers, json_body=payload)

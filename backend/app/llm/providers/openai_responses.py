@@ -17,6 +17,12 @@ from urllib.parse import urlsplit, urlunsplit
 import httpx
 
 from app.errors import AppError, as_app_error
+from app.llm.prompt_cache import (
+    PromptCachePlan,
+    openai_responses_cache_fields,
+    openai_responses_developer_item,
+    openai_responses_wants_explicit_breakpoint,
+)
 from app.llm.providers.openai_compatible_chat import (
     STREAM_TEXT_CHUNK_SIZE,
     ChatCompletionMessage,
@@ -192,12 +198,38 @@ def _models_url(base_url: str) -> str:
     return _normalize_base_url(raw) + "/models"
 
 
-def _auth_headers(api_key: str) -> dict[str, str]:
+def _auth_headers(api_key: str, auth_style: str | None = None) -> dict[str, str]:
+    from app.llm.types import auth_headers_for_style
+
     return {
-        "Authorization": f"Bearer {api_key.strip()}",
+        **auth_headers_for_style(api_key, auth_style),
         "HTTP-Referer": _APP_REFERER,
         "X-Title": _APP_TITLE,
     }
+
+
+def _request_url(base_url: str, api_key: str, config: GenerationConfig) -> str:
+    from app.llm.types import append_api_version, append_query_key
+
+    url = _responses_url(base_url)
+    url = append_query_key(url, api_key, config.auth_style)
+    return append_api_version(url, config.provider_params)
+
+
+def _request_headers(api_key: str, config: GenerationConfig, *, accept: str) -> dict[str, str]:
+    return {
+        "Accept": accept,
+        "Content-Type": "application/json",
+        **_auth_headers(api_key, config.auth_style),
+        **_extra_headers(config),
+    }
+
+
+def _extra_headers(config: GenerationConfig) -> dict[str, str]:
+    raw = getattr(config, "extra_headers", None)
+    if not isinstance(raw, dict):
+        return {}
+    return {str(k).strip(): str(v).strip() for k, v in raw.items() if str(k).strip() and str(v).strip()}
 
 
 def _content_to_text(content: Any) -> str:
@@ -420,6 +452,12 @@ def _sanitize_extra_body(extra_body: dict[str, Any] | None) -> dict[str, Any]:
         effort = extra_body.get("reasoning_effort")
     thinking = extra_body.get("thinking")
     thinking_enabled = isinstance(thinking, dict) and thinking.get("type") == "enabled"
+    explicit_none = (
+        isinstance(extra_body.get("reasoning"), dict)
+        and extra_body["reasoning"].get("effort") == "none"
+        and isinstance(thinking, dict)
+        and thinking.get("type") == "disabled"
+    )
     if thinking_enabled or (isinstance(effort, str) and effort and effort != "none"):
         reasoning: dict[str, Any] = {}
         if isinstance(effort, str) and effort and effort != "none":
@@ -428,6 +466,9 @@ def _sanitize_extra_body(extra_body: dict[str, Any] | None) -> dict[str, Any]:
             reasoning["effort"] = "medium"
         reasoning["summary"] = "auto"
         out["reasoning"] = reasoning
+    elif explicit_none:
+        # DeepSeek 默认开思考，关必须显式 none。GPT-6 Astra 等不接受 none：resolution 会省略 reasoning，走上面的分支。
+        out["reasoning"] = {"effort": "none"}
 
     for key, value in extra_body.items():
         if key in {
@@ -477,6 +518,7 @@ def _build_payload(
     extra_body: dict[str, Any] | None,
     tools: list[dict[str, Any]] | None = None,
     tool_choice: Any = None,
+    prompt_cache: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     instructions, input_items = _convert_input(messages)
     if not input_items:
@@ -487,6 +529,7 @@ def _build_payload(
             status_code=400,
         )
 
+    plan = PromptCachePlan.from_dict(prompt_cache) if prompt_cache else None
     payload: dict[str, Any] = {
         "model": model,
         "input": input_items,
@@ -495,7 +538,12 @@ def _build_payload(
         "store": False,
     }
     if instructions:
-        payload["instructions"] = instructions
+        if openai_responses_wants_explicit_breakpoint(plan):
+            # T-821：GPT-5.6+ 显式缓存——system 放进 developer message 的 input_text 块并打 prompt_cache_breakpoint
+            payload["input"] = [openai_responses_developer_item(instructions), *input_items]
+        else:
+            payload["instructions"] = instructions
+    payload.update(openai_responses_cache_fields(plan))
     if max_tokens and max_tokens > 0:
         payload["max_output_tokens"] = int(max_tokens)
     else:
@@ -517,9 +565,11 @@ def _build_payload(
 
     extra = _sanitize_extra_body(extra_body)
     # If reasoning effort is set, Responses often expects temperature omitted/1.
-    if "reasoning" in extra and temperature is not None:
+    if "reasoning" in extra and temperature is not None and extra["reasoning"].get("effort") != "none":
         payload.pop("temperature", None)
     payload.update(extra)
+    for key in [k for k, v in payload.items() if v is None]:
+        payload.pop(key, None)
     return payload
 
 
@@ -609,21 +659,40 @@ def decode_usage(raw: dict[str, Any] | None) -> Usage | None:
         reasoning = _as_int(details.get("reasoning_tokens"))
     input_details = raw.get("input_tokens_details")
     cache_read = None
+    cache_write = None
     if isinstance(input_details, dict):
         cache_read = _as_int(input_details.get("cached_tokens"))
+        # GPT-5.6+ 显式缓存：input_tokens_details.cache_write_tokens（OpenAI 2026-08 起返回）
+        cache_write = _as_int(input_details.get("cache_write_tokens") or input_details.get("cache_creation_tokens"))
     if input_tokens is None and output_tokens is None and total is None:
         return None
     if total is None and (input_tokens is not None or output_tokens is not None):
         total = (input_tokens or 0) + (output_tokens or 0)
+    # 调用方可把响应顶层 service_tier 塞进 usage 再解码（见 _usage_with_service_tier）
+    service_tier = raw.get("service_tier")
     return Usage(
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         total_tokens=total,
         cache_read_input_tokens=cache_read,
-        cache_write_input_tokens=None,
+        cache_write_input_tokens=cache_write,
         reasoning_tokens=reasoning,
+        service_tier=str(service_tier) if isinstance(service_tier, str) and service_tier else None,
         raw=dict(raw),
     )
+
+
+def _usage_with_service_tier(data: dict[str, Any]) -> dict[str, Any] | None:
+    """把响应顶层 service_tier 并入 usage dict，供 decode_usage 归一化。"""
+    usage = data.get("usage")
+    if not isinstance(usage, dict):
+        return None
+    tier = data.get("service_tier")
+    if isinstance(tier, str) and tier and "service_tier" not in usage:
+        merged = dict(usage)
+        merged["service_tier"] = tier
+        return merged
+    return usage
 
 
 async def list_models_responses(*, base_url: str, api_key: str) -> list[str]:
@@ -680,12 +749,8 @@ async def complete_responses(
     config: GenerationConfig,
     as_message: bool = False,
 ) -> ChatCompletionResult | ChatCompletionMessage:
-    url = _responses_url(base_url)
-    headers = {
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-        **_auth_headers(api_key),
-    }
+    url = _request_url(base_url, api_key, config)
+    headers = _request_headers(api_key, config, accept="application/json")
     payload = _build_payload(
         model=config.model,
         messages=messages,
@@ -696,6 +761,7 @@ async def complete_responses(
         extra_body=config.extra_body,
         tools=config.tools,
         tool_choice=config.tool_choice,
+        prompt_cache=config.prompt_cache,
     )
     try:
         async with log_outbound(
@@ -713,13 +779,15 @@ async def complete_responses(
             data = _decode_json_object(r, context="openai responses")
             _log.set_response(body=data)
             text, reasoning, tool_calls = _extract_output(data)
-            _ = decode_usage(data.get("usage") if isinstance(data.get("usage"), dict) else None)
+            usage = decode_usage(_usage_with_service_tier(data))
+            usage_dict = usage.to_public_dict() if usage is not None else None
             if as_message:
                 return ChatCompletionMessage(
                     role="assistant",
                     content=text,
                     reasoning_content=reasoning,
                     tool_calls=tool_calls,
+                    usage=usage_dict,
                 )
             if not text.strip() and not reasoning and not tool_calls:
                 raise _protocol_error(
@@ -727,7 +795,7 @@ async def complete_responses(
                     message="上游服务未返回有效文本",
                     detail="openai responses: empty output_text, reasoning summary, and tool_calls",
                 )
-            return ChatCompletionResult(text=text)
+            return ChatCompletionResult(text=text, usage=usage_dict)
     except AppError:
         raise
     except Exception as exc:
@@ -763,12 +831,8 @@ async def stream_responses(
     messages: list[dict[str, Any]],
     config: GenerationConfig,
 ) -> AsyncIterator[StreamChunk]:
-    url = _responses_url(base_url)
-    headers = {
-        "Accept": "text/event-stream",
-        "Content-Type": "application/json",
-        **_auth_headers(api_key),
-    }
+    url = _request_url(base_url, api_key, config)
+    headers = _request_headers(api_key, config, accept="text/event-stream")
     payload = _build_payload(
         model=config.model,
         messages=messages,
@@ -779,6 +843,7 @@ async def stream_responses(
         extra_body=config.extra_body,
         tools=config.tools,
         tool_choice=config.tool_choice,
+        prompt_cache=config.prompt_cache,
     )
 
     saw_output = False
@@ -927,7 +992,7 @@ async def stream_responses(
                         completed = True
                         resp = data.get("response")
                         if isinstance(resp, dict) and isinstance(resp.get("usage"), dict):
-                            terminal_usage = resp["usage"]
+                            terminal_usage = _usage_with_service_tier(resp)
                         elif isinstance(data.get("usage"), dict):
                             terminal_usage = data["usage"]
                         continue
@@ -935,7 +1000,7 @@ async def stream_responses(
             sorted_tool_calls = (
                 [tool_calls_by_item[k] for k in tool_call_order] if tool_call_order else None
             )
-            _ = decode_usage(terminal_usage)
+            usage = decode_usage(terminal_usage)
             body: dict[str, Any] = {
                 "_aggregated": True,
                 "content": "".join(aggregated_content),
@@ -952,7 +1017,11 @@ async def stream_responses(
                     message="上游流未返回任何文本",
                     detail="openai responses stream produced no output_text/reasoning/function_call",
                 )
-            yield StreamChunk(kind="finish", tool_calls=sorted_tool_calls)
+            yield StreamChunk(
+                kind="finish",
+                tool_calls=sorted_tool_calls,
+                usage=usage.to_public_dict() if usage is not None else None,
+            )
     except AppError:
         raise
     except Exception as exc:
@@ -1006,12 +1075,12 @@ class OpenAIResponsesAdapter:
         if not isinstance(config, GenerationConfig):
             raise TypeError("config must be GenerationConfig")
         self.validate_config(base_url=base_url, api_key=api_key)
-        url = _responses_url(base_url)
-        headers = {
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-            **_auth_headers(api_key),
-        }
+        url = _request_url(base_url, api_key, config)
+        headers = _request_headers(
+            api_key,
+            config,
+            accept="application/json" if not config.stream else "text/event-stream",
+        )
         payload = _build_payload(
             model=config.model,
             messages=messages,
@@ -1022,6 +1091,7 @@ class OpenAIResponsesAdapter:
             extra_body=config.extra_body,
             tools=config.tools,
             tool_choice=config.tool_choice,
+            prompt_cache=config.prompt_cache,
         )
         return WireRequest(method="POST", url=url, headers=headers, json_body=payload)
 

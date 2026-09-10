@@ -51,8 +51,13 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from app.regex_compat import compile_user_regex
 
 
-ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh"]
+ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+REASONING_EFFORT_ORDER: tuple[str, ...] = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
 TtsProvider = Literal["minimax", "glm", "glm_local", "qwen3_local", "omnivoice_local", "openrouter", "siliconflow"]
+
+ReasoningEchoBack = Literal["on", "off", "preset"]
+PromptCacheMode = Literal["auto", "off", "implicit", "explicit", "best_effort"]
+PromptCacheBreakpoint = Literal["system", "tools", "history_tail"]
 
 
 class ReasoningRequestConfig(TypedDict):
@@ -66,19 +71,39 @@ def normalize_reasoning_effort(raw: Any) -> ReasoningEffort:
     归一化 reasoning effort 字段，兼容历史/别名值。
     """
     if isinstance(raw, str):
-        normalized = raw.strip().lower().replace(" ", "_")
-        if normalized == "extra_high":
+        normalized = raw.strip().lower().replace(" ", "_").replace("-", "_")
+        if normalized in {"extra_high", "x_high", "xhigh"}:
             return "xhigh"
-        if normalized in {"none", "minimal", "low", "medium", "high", "xhigh"}:
+        if normalized in {"maximum", "max"}:
+            return "max"
+        if normalized in {"off", "disabled", "false"}:
+            return "none"
+        if normalized in {"none", "minimal", "low", "medium", "high"}:
             return normalized  # type: ignore[return-value]
     return "none"
 
 
-def build_reasoning_request_config(settings: "Settings") -> ReasoningRequestConfig:
+def normalize_reasoning_effort_or_none(raw: Any) -> ReasoningEffort | None:
+    """会话级覆盖用：空值返回 None（= 沿用全局），否则归一化。"""
+    if raw is None:
+        return None
+    if isinstance(raw, str) and not raw.strip():
+        return None
+    return normalize_reasoning_effort(raw)
+
+
+def build_reasoning_request_config(
+    settings: "Settings",
+    *,
+    override: Any = None,
+) -> ReasoningRequestConfig:
     """
     从设置构建统一的推理请求配置（开关 + extra_body）。
+
+    ``override``：会话级 ``params.reasoningEffort``（T-824）；非空时优先于全局 ``settings.reasoningEffort``。
     """
-    effort = normalize_reasoning_effort(getattr(settings, "reasoningEffort", "none"))
+    effort_override = normalize_reasoning_effort_or_none(override)
+    effort = effort_override or normalize_reasoning_effort(getattr(settings, "reasoningEffort", "none"))
     thinking_enabled = effort != "none"
     return {
         "effort": effort,
@@ -142,6 +167,102 @@ class GenerationParams(BaseModel):
     top_p: float | None = Field(default=None, ge=0.0, le=1.0)
     max_tokens: int | None = Field(default=None, ge=1)
     context_size: int | None = Field(default=None, ge=0, description="上下文总长度限制(token)，0或空表示未启用；长期记忆+最近消息<=此值")
+    reasoningEffort: ReasoningEffort | None = Field(
+        default=None,
+        description="会话级思考深度（T-824）；None 表示沿用全局 settings.reasoningEffort",
+    )
+    fastMode: bool | None = Field(
+        default=None,
+        description="会话级 Fast 模式（T-824）：OpenAI service_tier / Anthropic speed / Gemini service_tier；None 表示关闭",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_reasoning_override(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        if "reasoningEffort" in data:
+            incoming = dict(data)
+            incoming["reasoningEffort"] = normalize_reasoning_effort_or_none(incoming.get("reasoningEffort"))
+            return incoming
+        return data
+
+
+class PromptCacheConfig(BaseModel):
+    """
+    统一 prompt cache 配置（T-821）。取代仅 Anthropic 的 ``anthropicPromptCache`` 三档。
+
+    - mode: auto（按供应商目录推荐）| off | implicit（厂商自动断点）| explicit（显式断点）| best_effort（中国厂商尽力缓存）
+    - ttl: 5m | 1h（Anthropic）| 30m（OpenAI GPT-5.6+）| in_memory | 24h（OpenAI 旧模型）| 秒数（Gemini 显式）
+    - breakpoints: system | tools | history_tail
+    - cacheKey: per_chat | per_character | global | 自定义字符串（OpenAI prompt_cache_key）
+    - explicitMarkers: 百炼/Qwen 消息级 cache_control
+    """
+    model_config = ConfigDict(extra="allow")
+
+    mode: PromptCacheMode = "auto"
+    ttl: str | int | None = None
+    breakpoints: list[PromptCacheBreakpoint] = Field(default_factory=lambda: ["system"])
+    cacheKey: str | None = "per_chat"
+    explicitMarkers: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        incoming = dict(data)
+        mode = str(incoming.get("mode") or "auto").strip().lower()
+        if mode in {"on", "enabled", "true"}:
+            mode = "explicit"
+        if mode not in {"auto", "off", "implicit", "explicit", "best_effort"}:
+            mode = "auto"
+        incoming["mode"] = mode
+        ttl = incoming.get("ttl")
+        if isinstance(ttl, str):
+            ttl_key = ttl.strip().lower()
+            incoming["ttl"] = ttl_key or None
+        elif isinstance(ttl, (int, float)) and not isinstance(ttl, bool):
+            incoming["ttl"] = int(ttl) if ttl > 0 else None
+        elif ttl is not None:
+            incoming["ttl"] = None
+        bps = incoming.get("breakpoints")
+        if isinstance(bps, list):
+            cleaned = [str(b) for b in bps if str(b) in {"system", "tools", "history_tail"}]
+            incoming["breakpoints"] = cleaned or ["system"]
+        elif bps is not None:
+            incoming["breakpoints"] = ["system"]
+        return incoming
+
+
+def prompt_cache_from_legacy(anthropic_prompt_cache: Any) -> PromptCacheConfig:
+    """旧 ``anthropicPromptCache``（off/5m/1h）→ ``promptCache``。"""
+    from app.llm.types import normalize_anthropic_prompt_cache
+
+    legacy = normalize_anthropic_prompt_cache(anthropic_prompt_cache)
+    if legacy == "off":
+        # 旧数据缺省即 off：迁移后保持 off，不因升级悄悄开始产生缓存写入费用
+        return PromptCacheConfig(mode="off")
+    return PromptCacheConfig(mode="explicit", ttl=legacy, breakpoints=["system"])
+
+
+def _migrate_prompt_cache_fields(incoming: dict[str, Any]) -> dict[str, Any]:
+    """预设 / 全局共用：补齐 promptCache（缺失时从 anthropicPromptCache 迁移），并回填旧字段供旧前端读取。"""
+    from app.llm.types import normalize_anthropic_prompt_cache
+
+    incoming["anthropicPromptCache"] = normalize_anthropic_prompt_cache(incoming.get("anthropicPromptCache"))
+    raw_cache = incoming.get("promptCache")
+    if isinstance(raw_cache, dict):
+        cache = PromptCacheConfig.model_validate(raw_cache)
+    else:
+        cache = prompt_cache_from_legacy(incoming["anthropicPromptCache"])
+    incoming["promptCache"] = cache.model_dump()
+    # 回填旧字段：显式 5m/1h 保持一致；其余归 off
+    if cache.mode == "explicit" and cache.ttl in {"5m", "1h"}:
+        incoming["anthropicPromptCache"] = cache.ttl
+    elif cache.mode == "off":
+        incoming["anthropicPromptCache"] = "off"
+    return incoming
 
 
 class DraftHelpSettings(BaseModel):
@@ -198,7 +319,18 @@ class SettingsLLM(BaseModel):
     )
     anthropicPromptCache: str = Field(
         default="off",
-        description="Anthropic prompt cache TTL：off|5m|1h；仅 anthropic_messages 生效（T-806）",
+        description="（旧字段，读兼容）Anthropic prompt cache TTL：off|5m|1h；T-821 起由 promptCache 取代",
+    )
+    promptCache: PromptCacheConfig = Field(
+        default_factory=lambda: PromptCacheConfig(mode="off"),
+        description="统一 prompt cache 配置（T-821）",
+    )
+    providerId: str | None = Field(default=None, description="供应商目录 id（T-820）")
+    providerParams: dict[str, str] = Field(default_factory=dict, description="供应商 URL 占位符参数（region/resource/account_id 等）")
+    authStyle: str | None = Field(default=None, description="鉴权风格；None 表示按协议默认（T-820-A2）")
+    echoReasoning: bool = Field(
+        default=True,
+        description="全局连接：历史 assistant 消息是否回传 reasoning_content（settings.reasoningEchoBack=preset 时生效）",
     )
 
     @model_validator(mode="before")
@@ -207,12 +339,7 @@ class SettingsLLM(BaseModel):
         if not isinstance(data, dict):
             return data
         incoming = dict(data)
-        from app.llm.types import normalize_anthropic_prompt_cache
-
-        incoming["anthropicPromptCache"] = normalize_anthropic_prompt_cache(
-            incoming.get("anthropicPromptCache")
-        )
-        return incoming
+        return _migrate_prompt_cache_fields(incoming)
 
 
 class ApiPreset(BaseModel):
@@ -238,11 +365,22 @@ class ApiPreset(BaseModel):
     models: list[str] = Field(default_factory=list)
     protocol: str = Field(
         default="openai_compatible_chat",
-        description="LLM 协议；旧数据缺省映射为 openai_compatible_chat",
+        description="LLM 协议；旧数据缺省映射为 openai_compatible_chat；'auto' 表示按模型识别（T-822）",
     )
     anthropicPromptCache: str = Field(
         default="off",
-        description="Anthropic prompt cache TTL：off|5m|1h；仅 anthropic_messages 生效（T-806）",
+        description="（旧字段，读兼容）Anthropic prompt cache TTL：off|5m|1h；T-821 起由 promptCache 取代",
+    )
+    promptCache: PromptCacheConfig = Field(
+        default_factory=lambda: PromptCacheConfig(mode="off"),
+        description="统一 prompt cache 配置（T-821）",
+    )
+    providerId: str | None = Field(default=None, description="供应商目录 id（T-820）")
+    providerParams: dict[str, str] = Field(default_factory=dict, description="供应商 URL 占位符参数（region/resource/account_id 等）")
+    authStyle: str | None = Field(default=None, description="鉴权风格；None 表示按协议默认（T-820-A2）")
+    echoReasoning: bool = Field(
+        default=True,
+        description="历史 assistant 消息是否回传 reasoning_content（DeepSeek 带 tools 的请求强制要求；settings.reasoningEchoBack=preset 时生效）",
     )
     presetKind: str | None = Field(default=None, description="预设用途；'tts' 表示 TTS 服务预设")
     ttsProvider: TtsProvider | None = Field(default=None, description="TTS 服务提供商；仅当 presetKind='tts' 时有意义")
@@ -292,11 +430,12 @@ class ApiPreset(BaseModel):
         incoming = dict(data)
         if not str(incoming.get("protocol") or "").strip():
             incoming["protocol"] = "openai_compatible_chat"
-        from app.llm.types import normalize_anthropic_prompt_cache
-
-        incoming["anthropicPromptCache"] = normalize_anthropic_prompt_cache(
-            incoming.get("anthropicPromptCache")
-        )
+        incoming = _migrate_prompt_cache_fields(incoming)
+        params = incoming.get("providerParams")
+        if isinstance(params, dict):
+            incoming["providerParams"] = {str(k): str(v) for k, v in params.items() if v is not None}
+        elif params is not None:
+            incoming["providerParams"] = {}
         preset_kind = incoming.get("presetKind")
         provider = incoming.get("ttsProvider")
         if preset_kind == "minimax":
@@ -465,6 +604,10 @@ class Settings(BaseModel):
     themeId: str | None = None
     pureAiMode: bool = False
     reasoningEffort: ReasoningEffort = "none"  # 统一思考档位，none 时关闭，其余档位开启
+    reasoningEchoBack: ReasoningEchoBack = Field(
+        default="preset",
+        description="历史思考内容回传：on 总是回传 / off 从不回传 / preset 按 API 预设（或全局连接）开关",
+    )
     userPersonas: list[UserPersona] = Field(default_factory=list)
     selectedPersonaId: str | None = None
     selectedFont: str | None = None  # 当前选中的自定义字体文件名，存于 data/fonts，不随备份导出
@@ -526,6 +669,8 @@ class AssistantSettings(BaseModel):
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     model: str | None = None
     presetId: str | None = None
+    reasoningEffort: ReasoningEffort | None = Field(default=None, description="助手思考深度（T-824）；None 沿用全局")
+    fastMode: bool | None = Field(default=None, description="助手 Fast 模式（T-824）")
     context_size: int | None = Field(default=None, ge=0, description="上下文总长度限制(token)，0或空表示未启用；最近消息裁剪用")
     tool_read_max_messages: int | None = Field(
         default=None,
@@ -562,6 +707,8 @@ class AssistantSettingsUpdate(BaseModel):
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     model: str | None = None
     presetId: str | None = None
+    reasoningEffort: ReasoningEffort | None = Field(default=None, description="助手思考深度（T-824）；显式 null 表示恢复沿用全局")
+    fastMode: bool | None = Field(default=None, description="助手 Fast 模式（T-824）")
     context_size: int | None = Field(default=None, ge=0, description="上下文总长度限制(token)，0或空表示未启用；最近消息裁剪用")
     tool_read_max_messages: int | None = Field(
         default=None,
@@ -850,6 +997,10 @@ class ChatMessage(BaseModel):
     reasoningDurationSec: float | None = Field(
         default=None,
         description="推理/思考耗时（秒，浮点，前端展示为一位小数）；流式路径取首到末 reasoning chunk 的墙钟时间差",
+    )
+    usage: dict[str, Any] | None = Field(
+        default=None,
+        description="本轮归一化用量（T-821）：input/output/cacheRead/cacheWrite tokens",
     )
     ttsAudioAssetId: str | None = Field(
         default=None,

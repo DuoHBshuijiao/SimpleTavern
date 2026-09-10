@@ -10,14 +10,11 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.llm.preset_resolve import LlmPresetResolveError, resolve_llm_preset_credentials
+from app.llm.preset_resolve import LlmPresetResolveError
+from app.llm.resolution import prepare_llm_request
 from app.llm.runtime import chat_completions_message
-from app.llm.types import OPENAI_COMPATIBLE_CHAT_PROTOCOL, attach_protocol_extra_body
-from app.schemas import (
-    StatusTableDef,
-    build_reasoning_request_config,
-    filter_reasoning_extra_body_for_upstream,
-)
+from app.llm.types import OPENAI_COMPATIBLE_CHAT_PROTOCOL
+from app.schemas import StatusTableDef
 from app.services.st_mvu_compat import extract_st_mvu_import_context, validate_st_mvu_compat_result
 from app.mvu_model_resolve import resolve_mvu_model_from_settings
 from app.storage import load_settings
@@ -122,28 +119,25 @@ def _default_run_context() -> StMvuImportAgentRunContext:
         )
 
     try:
-        credentials = resolve_llm_preset_credentials(settings, model=model)
+        prepared = prepare_llm_request(
+            settings,
+            model=model,
+            temperature=settings.generationDefaults.temperature,
+        )
     except LlmPresetResolveError as exc:
         raise RuntimeError(exc.message) from exc
 
-    reasoning_cfg = build_reasoning_request_config(settings)
-    thinking_enabled = reasoning_cfg["thinking_enabled"]
-    extra_body = attach_protocol_extra_body(
-        filter_reasoning_extra_body_for_upstream(model, reasoning_cfg["extra_body"]),
-        protocol=credentials.protocol,
-        anthropic_prompt_cache=credentials.anthropic_prompt_cache,
-    )
     temperature: float | None = None
-    if not thinking_enabled:
-        temperature = settings.generationDefaults.temperature
+    if not prepared.thinking_enabled:
+        temperature = prepared.temperature
 
     return StMvuImportAgentRunContext(
-        base_url=credentials.base_url,
-        api_key=credentials.api_key,
+        base_url=prepared.base_url,
+        api_key=prepared.api_key,
         model=model,
         temperature=temperature,
-        extra_body=extra_body,
-        protocol=credentials.protocol,
+        extra_body=prepared.extra_body,
+        protocol=prepared.protocol,
     )
 
 

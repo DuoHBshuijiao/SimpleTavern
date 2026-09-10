@@ -11,11 +11,17 @@ from __future__ import annotations
 
 import json
 from typing import Any, AsyncIterator
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import httpx
 
 from app.errors import AppError, as_app_error
+from app.llm.prompt_cache import (
+    PromptCachePlan,
+    anthropic_mark_tools,
+    anthropic_system_blocks,
+    anthropic_top_level_cache_control,
+)
 from app.llm.providers.openai_compatible_chat import (
     STREAM_TEXT_CHUNK_SIZE,
     ChatCompletionMessage,
@@ -35,6 +41,7 @@ from app.services.http_log import log_outbound
 _PROVIDER = "anthropic"
 _PROTOCOL = ANTHROPIC_MESSAGES_PROTOCOL
 _ANTHROPIC_VERSION = "2023-06-01"
+_BEDROCK_ANTHROPIC_VERSION = "bedrock-2023-05-31"
 _DEFAULT_MAX_TOKENS = 4096
 _MAX_ERROR_BODY_CHARS = 12000
 _MESSAGES_SUFFIX = "/messages"
@@ -150,11 +157,80 @@ def _models_url(base_url: str) -> str:
     return _normalize_base_url(raw) + "/models"
 
 
+def _is_bedrock(config: GenerationConfig | None) -> bool:
+    if config is None:
+        return False
+    if str(getattr(config, "protocol_variant", "") or "").strip().lower() == "bedrock":
+        return True
+    host = ""
+    params = getattr(config, "provider_params", None) or {}
+    if isinstance(params, dict):
+        host = str(params.get("_host") or "")
+    return "bedrock-runtime" in host.lower()
+
+
+def _bedrock_invoke_url(base_url: str, model: str, *, stream: bool) -> str:
+    raw = (base_url or "").strip()
+    if not (raw.startswith("http://") or raw.startswith("https://")):
+        raw = "https://" + raw
+    raw = raw.rstrip("/")
+    action = "invoke-with-response-stream" if stream else "invoke"
+    encoded = quote(model.strip(), safe=".-")
+    return f"{raw}/model/{encoded}/{action}"
+
+
+def _request_url(base_url: str, config: GenerationConfig, *, stream: bool) -> str:
+    if _is_bedrock(config):
+        return _bedrock_invoke_url(base_url, config.model, stream=stream)
+    return _messages_url(base_url)
+
+
 def _auth_headers(api_key: str) -> dict[str, str]:
     return {
         "x-api-key": api_key.strip(),
         "anthropic-version": _ANTHROPIC_VERSION,
     }
+
+
+def _request_auth_headers(api_key: str, config: GenerationConfig | None = None) -> dict[str, str]:
+    from app.llm.types import auth_headers_for_style
+
+    style = (config.auth_style if config else None) or None
+    if _is_bedrock(config):
+        return auth_headers_for_style(api_key, style or "bearer")
+    if style in (None, "", "x-api-key"):
+        return _auth_headers(api_key)
+    headers = {"anthropic-version": _ANTHROPIC_VERSION}
+    headers.update(auth_headers_for_style(api_key, style))
+    return headers
+
+
+def _apply_bedrock_payload(payload: dict[str, Any], config: GenerationConfig) -> dict[str, Any]:
+    if not _is_bedrock(config):
+        return payload
+    out = dict(payload)
+    out.pop("model", None)
+    out.pop("stream", None)
+    out["anthropic_version"] = _BEDROCK_ANTHROPIC_VERSION
+    return out
+
+
+def _extra_headers(config: GenerationConfig) -> dict[str, str]:
+    """T-824：调用方要求的额外请求头（如 anthropic-beta: fast-mode-2026-02-01）；多个 anthropic-beta 逗号合并。"""
+    raw = getattr(config, "extra_headers", None)
+    if not isinstance(raw, dict) or not raw:
+        return {}
+    out: dict[str, str] = {}
+    for key, value in raw.items():
+        k = str(key).strip()
+        v = str(value).strip()
+        if not k or not v:
+            continue
+        if k.lower() == "anthropic-beta" and "anthropic-beta" in out:
+            out["anthropic-beta"] = f"{out['anthropic-beta']},{v}"
+        else:
+            out[k.lower() if k.lower() == "anthropic-beta" else k] = v
+    return out
 
 
 def _content_to_text(content: Any) -> str:
@@ -454,11 +530,19 @@ def _sanitize_extra_body(extra_body: dict[str, Any] | None) -> tuple[dict[str, A
 
     if isinstance(thinking, dict) and thinking.get("type") == "enabled":
         thinking_enabled = True
-        budget = _THINKING_BUDGET_BY_EFFORT.get(str(effort or "medium").lower(), 4096)
-        out["thinking"] = {"type": "enabled", "budget_tokens": budget}
+        if isinstance(thinking.get("budget_tokens"), int):
+            out["thinking"] = {"type": "enabled", "budget_tokens": int(thinking["budget_tokens"])}
+        else:
+            budget = _THINKING_BUDGET_BY_EFFORT.get(str(effort or "medium").lower(), 4096)
+            out["thinking"] = {"type": "enabled", "budget_tokens": budget}
+    elif isinstance(thinking, dict) and thinking.get("type") == "adaptive":
+        # T-822：Opus 4.6+ / Sonnet 4.6+ 自适应思考，深度由 output_config.effort 控制
+        thinking_enabled = True
+        out["thinking"] = {"type": "adaptive"}
     elif isinstance(thinking, dict) and thinking.get("type") == "disabled":
         thinking_enabled = False
-        # Omit thinking entirely when disabled.
+        # T-824：显式发送 disabled——DeepSeek 等 Anthropic 兼容端点默认开启思考，省略不等于关闭
+        out["thinking"] = {"type": "disabled"}
 
     # Pass through Anthropic-native keys if callers set them explicitly.
     # cache_control / anthropic_prompt_cache are handled separately on system.
@@ -525,6 +609,7 @@ def _build_payload(
     extra_body: dict[str, Any] | None,
     tools: list[dict[str, Any]] | None = None,
     tool_choice: Any | None = None,
+    prompt_cache: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     system, anth_messages = _convert_messages(messages)
     if not anth_messages:
@@ -542,7 +627,15 @@ def _build_payload(
         "max_tokens": int(max_tokens) if max_tokens and max_tokens > 0 else _DEFAULT_MAX_TOKENS,
         "stream": stream,
     }
-    system_payload = _system_with_cache(system, cache)
+    # T-821：结构化缓存计划优先；缺失时回退 T-806-6A 的 anthropic_prompt_cache TTL
+    plan = PromptCachePlan.from_dict(prompt_cache) if prompt_cache else None
+    if plan is not None:
+        system_payload = anthropic_system_blocks(system, plan)
+        top_level = anthropic_top_level_cache_control(plan)
+        if top_level is not None:
+            payload["cache_control"] = top_level
+    else:
+        system_payload = _system_with_cache(system, cache)
     if system_payload is not None:
         payload["system"] = system_payload
     if thinking_enabled:
@@ -559,14 +652,19 @@ def _build_payload(
         extra_body=extra_body,
     )
     if anth_tools is not None:
-        payload["tools"] = anth_tools
+        payload["tools"] = anthropic_mark_tools(anth_tools, plan) if plan is not None else anth_tools
     if anth_choice is not None:
         payload["tool_choice"] = anth_choice
 
+    top_level_cache = payload.get("cache_control")
     payload.update(extra)
-    # Top-level cache_control is not used for 6A (system-block only).
+    # 顶层 cache_control 只由缓存计划（history_tail 断点）决定，不接受 extra_body 透传
     payload.pop("cache_control", None)
+    if top_level_cache is not None:
+        payload["cache_control"] = top_level_cache
     payload.pop("anthropic_prompt_cache", None)
+    for key in [k for k, v in payload.items() if v is None]:
+        payload.pop(key, None)
     return payload
 
 
@@ -651,6 +749,7 @@ def decode_usage(raw: dict[str, Any] | None) -> Usage | None:
     total = None
     if input_tokens is not None or output_tokens is not None:
         total = (input_tokens or 0) + (output_tokens or 0)
+    speed = raw.get("speed")
     return Usage(
         input_tokens=input_tokens,
         output_tokens=output_tokens,
@@ -658,6 +757,7 @@ def decode_usage(raw: dict[str, Any] | None) -> Usage | None:
         cache_read_input_tokens=cache_read,
         cache_write_input_tokens=cache_write,
         reasoning_tokens=None,
+        service_tier=str(speed) if isinstance(speed, str) and speed else None,
         raw=dict(raw),
     )
 
@@ -719,22 +819,27 @@ async def complete_anthropic(
     config: GenerationConfig,
     as_message: bool = False,
 ) -> ChatCompletionResult | ChatCompletionMessage:
-    url = _messages_url(base_url)
+    url = _request_url(base_url, config, stream=False)
     headers = {
         "Accept": "application/json",
         "Content-Type": "application/json",
-        **_auth_headers(api_key),
+        **_request_auth_headers(api_key, config),
+        **_extra_headers(config),
     }
-    payload = _build_payload(
-        model=config.model,
-        messages=messages,
-        stream=False,
-        temperature=config.temperature,
-        top_p=config.top_p,
-        max_tokens=config.max_tokens,
-        extra_body=config.extra_body,
-        tools=config.tools,
-        tool_choice=config.tool_choice,
+    payload = _apply_bedrock_payload(
+        _build_payload(
+            model=config.model,
+            messages=messages,
+            stream=False,
+            temperature=config.temperature,
+            top_p=config.top_p,
+            max_tokens=config.max_tokens,
+            extra_body=config.extra_body,
+            tools=config.tools,
+            tool_choice=config.tool_choice,
+            prompt_cache=config.prompt_cache,
+        ),
+        config,
     )
     try:
         async with log_outbound(
@@ -752,14 +857,15 @@ async def complete_anthropic(
             data = _decode_json_object(r, context="anthropic messages")
             _log.set_response(body=data)
             text, reasoning, tool_calls = _extract_text_thinking_and_tools(data.get("content"))
-            # Terminal usage for future T-807.
-            _ = decode_usage(data.get("usage") if isinstance(data.get("usage"), dict) else None)
+            usage = decode_usage(data.get("usage") if isinstance(data.get("usage"), dict) else None)
+            usage_dict = usage.to_public_dict() if usage is not None else None
             if as_message:
                 return ChatCompletionMessage(
                     role="assistant",
                     content=text,
                     reasoning_content=reasoning,
                     tool_calls=tool_calls,
+                    usage=usage_dict,
                 )
             if not text.strip() and not reasoning and not tool_calls:
                 raise _protocol_error(
@@ -767,7 +873,7 @@ async def complete_anthropic(
                     message="上游服务未返回有效文本",
                     detail="anthropic messages: empty text, thinking and tool_calls",
                 )
-            return ChatCompletionResult(text=text)
+            return ChatCompletionResult(text=text, usage=usage_dict)
     except AppError:
         raise
     except Exception as exc:
@@ -789,22 +895,27 @@ async def stream_anthropic(
     messages: list[dict[str, Any]],
     config: GenerationConfig,
 ) -> AsyncIterator[StreamChunk]:
-    url = _messages_url(base_url)
+    url = _request_url(base_url, config, stream=True)
     headers = {
         "Accept": "text/event-stream",
         "Content-Type": "application/json",
-        **_auth_headers(api_key),
+        **_request_auth_headers(api_key, config),
+        **_extra_headers(config),
     }
-    payload = _build_payload(
-        model=config.model,
-        messages=messages,
-        stream=True,
-        temperature=config.temperature,
-        top_p=config.top_p,
-        max_tokens=config.max_tokens,
-        extra_body=config.extra_body,
-        tools=config.tools,
-        tool_choice=config.tool_choice,
+    payload = _apply_bedrock_payload(
+        _build_payload(
+            model=config.model,
+            messages=messages,
+            stream=True,
+            temperature=config.temperature,
+            top_p=config.top_p,
+            max_tokens=config.max_tokens,
+            extra_body=config.extra_body,
+            tools=config.tools,
+            tool_choice=config.tool_choice,
+            prompt_cache=config.prompt_cache,
+        ),
+        config,
     )
 
     saw_output = False
@@ -826,6 +937,14 @@ async def stream_anthropic(
             client = get_async_http_client()
             async with client.stream("POST", url, headers=headers, json=payload, timeout=None) as r:
                 _log.set_response(status=r.status_code, headers=dict(r.headers))
+                ctype = (r.headers.get("content-type") or "").lower()
+                if _is_bedrock(config) and "eventstream" in ctype:
+                    raise _protocol_error(
+                        code="provider_capability_unsupported",
+                        message="AWS Bedrock 原生流式返回 eventstream，当前版本请关闭流式传输",
+                        detail="bedrock invoke-with-response-stream uses application/vnd.amazon.eventstream",
+                        status_code=400,
+                    )
                 await _raise_stream_http_error(r)
 
                 event_name = ""
@@ -865,7 +984,14 @@ async def stream_anthropic(
                         )
 
                     etype = event_name or str(data.get("type") or "")
-                    if etype in {"ping", "message_start", "content_block_stop", "message_stop"}:
+                    if etype == "message_start":
+                        # message_start.usage 携带 input / cache_read / cache_creation；message_delta 只补 output_tokens
+                        msg = data.get("message")
+                        start_usage = msg.get("usage") if isinstance(msg, dict) else None
+                        if isinstance(start_usage, dict):
+                            terminal_usage = dict(start_usage)
+                        continue
+                    if etype in {"ping", "content_block_stop", "message_stop"}:
                         continue
                     if etype == "error":
                         err = data.get("error") if isinstance(data.get("error"), dict) else data
@@ -920,7 +1046,9 @@ async def stream_anthropic(
                     if etype == "message_delta":
                         usage = data.get("usage")
                         if isinstance(usage, dict):
-                            terminal_usage = usage
+                            merged = dict(terminal_usage or {})
+                            merged.update({k: v for k, v in usage.items() if v is not None})
+                            terminal_usage = merged
                         continue
 
             sorted_tool_calls: list[dict[str, Any]] | None = None
@@ -940,7 +1068,7 @@ async def stream_anthropic(
                         }
                     )
 
-            _ = decode_usage(terminal_usage)
+            usage = decode_usage(terminal_usage)
             body: dict[str, Any] = {
                 "_aggregated": True,
                 "content": "".join(aggregated_content),
@@ -956,7 +1084,11 @@ async def stream_anthropic(
                     message="上游流未返回任何文本",
                     detail="anthropic stream produced no content/thinking/tool deltas",
                 )
-            yield StreamChunk(kind="finish", tool_calls=sorted_tool_calls)
+            yield StreamChunk(
+                kind="finish",
+                tool_calls=sorted_tool_calls,
+                usage=usage.to_public_dict() if usage is not None else None,
+            )
     except AppError:
         raise
     except Exception as exc:
@@ -1010,22 +1142,27 @@ class AnthropicMessagesAdapter:
         if not isinstance(config, GenerationConfig):
             raise TypeError("config must be GenerationConfig")
         self.validate_config(base_url=base_url, api_key=api_key)
-        url = _messages_url(base_url)
+        url = _request_url(base_url, config, stream=bool(config.stream))
         headers = {
-            "Accept": "application/json",
+            "Accept": "application/json" if not config.stream else "text/event-stream",
             "Content-Type": "application/json",
-            **_auth_headers(api_key),
+            **_request_auth_headers(api_key, config),
+            **_extra_headers(config),
         }
-        payload = _build_payload(
-            model=config.model,
-            messages=messages,
-            stream=bool(config.stream),
-            temperature=config.temperature,
-            top_p=config.top_p,
-            max_tokens=config.max_tokens,
-            extra_body=config.extra_body,
-            tools=config.tools,
-            tool_choice=config.tool_choice,
+        payload = _apply_bedrock_payload(
+            _build_payload(
+                model=config.model,
+                messages=messages,
+                stream=bool(config.stream),
+                temperature=config.temperature,
+                top_p=config.top_p,
+                max_tokens=config.max_tokens,
+                extra_body=config.extra_body,
+                tools=config.tools,
+                tool_choice=config.tool_choice,
+                prompt_cache=config.prompt_cache,
+            ),
+            config,
         )
         return WireRequest(method="POST", url=url, headers=headers, json_body=payload)
 

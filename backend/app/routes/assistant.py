@@ -58,13 +58,11 @@ from app.services.assistant_agent import (
     AssistantAgentRunContext,
     AssistantAgentService,
 )
-from app.llm.preset_resolve import LlmPresetResolveError, resolve_llm_preset_credentials
-from app.llm.types import attach_protocol_extra_body, provider_id_for_protocol
+from app.llm.preset_resolve import LlmPresetResolveError
+from app.llm.resolution import PreparedLlmRequest, prepare_llm_request
 from app.services.user_message_content import build_user_message_content
 from app.schemas import (
     AssistantAppendRole,
-    build_reasoning_request_config,
-    filter_reasoning_extra_body_for_upstream,
     AssistantAttachment,
     AssistantChat,
     AssistantSettings,
@@ -108,19 +106,31 @@ from app.tokenizer_service import trim_assistant_openai_messages_to_context
 router = APIRouter(tags=["assistant"])
 
 
-def _resolve_assistant_credentials(
-    settings: Any, *, model: str, preset_id: str | None
-) -> tuple[str, str, str, str]:
+def _prepare_assistant_request(
+    settings: Any,
+    *,
+    model: str,
+    preset_id: str | None,
+    temperature: float | None,
+    chat_id: str | None,
+    reasoning_override: Any = None,
+    fast_mode: bool | None = None,
+) -> PreparedLlmRequest:
+    """AI 助手：凭据 + 自适应协议 + 缓存计划；思考深度 / Fast 来自 assistantSettings（T-824）。"""
     try:
-        credentials = resolve_llm_preset_credentials(settings, model=model, explicit_preset_id=preset_id)
+        return prepare_llm_request(
+            settings,
+            model=model,
+            preset_id=preset_id,
+            reasoning_override=reasoning_override,
+            fast_mode=fast_mode,
+            temperature=temperature,
+            chat_id=chat_id,
+        )
     except LlmPresetResolveError as exc:
         raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message}) from exc
-    return (
-        credentials.base_url,
-        credentials.api_key,
-        credentials.protocol,
-        credentials.anthropic_prompt_cache,
-    )
+    except AppError:
+        raise
 
 class AssistantStreamRequest(BaseModel):
     """
@@ -846,15 +856,24 @@ async def stream_assistant(req: AssistantStreamRequest, request: Request):
     chat = _resolve_assistant_chat_by_scope(scope, chat_id)
 
     model = req.model or assistant_settings.model or settings.llm.defaultModel
-    reasoning_cfg = build_reasoning_request_config(settings)
-    thinking_enabled = reasoning_cfg["thinking_enabled"]
     temperature = req.temperature if req.temperature is not None else assistant_settings.temperature
-    if thinking_enabled:
-        temperature = None
 
     preset_id = assistant_settings.presetId
-    base_url, api_key, protocol, anthropic_prompt_cache = _resolve_assistant_credentials(settings, model=model, preset_id=preset_id)
-    llm_provider = provider_id_for_protocol(protocol)
+    prepared = _prepare_assistant_request(
+        settings,
+        model=model,
+        preset_id=preset_id,
+        temperature=temperature,
+        chat_id=chat_id,
+        reasoning_override=assistant_settings.reasoningEffort,
+        fast_mode=assistant_settings.fastMode,
+    )
+    base_url, api_key, protocol = prepared.base_url, prepared.api_key, prepared.protocol
+    thinking_enabled = prepared.thinking_enabled
+    temperature = prepared.temperature
+    if thinking_enabled:
+        temperature = None
+    llm_provider = prepared.llm_provider
 
     existing_messages = chat.messages or []
     
@@ -894,11 +913,8 @@ async def stream_assistant(req: AssistantStreamRequest, request: Request):
         allow_web_search=allow_web_search,
         assistant_settings=assistant_settings,
     )
-    extra_body = attach_protocol_extra_body(
-        filter_reasoning_extra_body_for_upstream(model, reasoning_cfg["extra_body"]),
-        protocol=protocol,
-        anthropic_prompt_cache=anthropic_prompt_cache,
-    )
+    extra_body = prepared.extra_body
+    llm_msgs = prepared.apply_echo_policy(llm_msgs)
     agent_ctx = AssistantAgentRunContext(
         base_url=base_url,
         api_key=api_key,
@@ -948,6 +964,7 @@ async def stream_assistant(req: AssistantStreamRequest, request: Request):
             provider=llm_provider,
             protocol=protocol,
             resolved_model=model,
+            protocol_resolution=prepared.resolution.to_public_dict(),
         )
         try:
             async for event in agent.iter_events():
@@ -967,6 +984,7 @@ async def stream_assistant(req: AssistantStreamRequest, request: Request):
                 default_message="助手流式执行失败",
                 provider=llm_provider,
                 protocol=protocol,
+                enrich=prepared.enrich_error,
             )
 
     return StreamingResponse(
