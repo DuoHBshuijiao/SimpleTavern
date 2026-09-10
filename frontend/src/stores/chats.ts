@@ -745,6 +745,16 @@ export const useChatsStore = defineStore('chats', {
         msg.content += delta
       }
     },
+
+    /**
+     * 就地补丁本地消息（流式 done.usage 回填缓存徽标等，不发网络请求）。
+     */
+    patchLocalMessage(messageId: string, patch: Partial<ChatMessage>) {
+      if (!this.activeChat) return
+      const msg = this.activeChat.messages.find((m) => m.id === messageId)
+      if (!msg) return
+      Object.assign(msg, patch)
+    },
   },
 })
 

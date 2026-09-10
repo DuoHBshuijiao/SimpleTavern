@@ -2,9 +2,10 @@
 import { Eye, EyeOff } from 'lucide-vue-next'
 import ModernSelect from '../ModernSelect.vue'
 import SettingsDrawerGlobalAccordion from './SettingsDrawerGlobalAccordion.vue'
+import LlmConnectionAdvancedSection from './LlmConnectionAdvancedSection.vue'
 import { llmProtocolSelectOptions } from '../../constants/llmProtocols'
-import { ANTHROPIC_PROMPT_CACHE_OPTIONS } from '../../constants/anthropicPromptCache'
-import { REASONING_EFFORT_OPTIONS, type Settings } from '../../types/models'
+import { REASONING_EFFORT_OPTIONS, REASONING_ECHO_BACK_OPTIONS, type Settings } from '../../types/models'
+import type { LlmCatalogProvider } from '../../api/llm'
 
 defineProps<{
   draft: Settings
@@ -12,6 +13,7 @@ defineProps<{
     label: string
     options: Array<{ label: string; value: string; presetId?: string | null }>
   }>
+  catalogProvider?: LlmCatalogProvider | null
 }>()
 
 const open = defineModel<boolean>('open', { required: true })
@@ -19,6 +21,7 @@ const showApiKeyModel = defineModel<boolean>('showApiKey', { required: true })
 
 const emit = defineEmits<{
   'mvu-model-select': [option: { value: string; presetId?: string | null }]
+  'open-cache-guide': []
 }>()
 </script>
 
@@ -86,7 +89,21 @@ const emit = defineEmits<{
         placeholder="选择思考深度..."
         class="w-full"
       />
-      <p class="text-xs text-[var(--color-text-muted)]">选「无」则关闭思考；其他档位会开启思考并请求更高推理深度。</p>
+      <p class="text-xs text-[var(--color-text-muted)]">选「无」则关闭思考；其他档位会开启思考并请求更高推理深度。聊天面板可按会话覆盖。</p>
+    </div>
+
+    <div class="space-y-1.5" data-settings-field="reasoningEchoBack">
+      <label class="block text-sm font-medium text-[var(--color-text-secondary)]">回传思考内容</label>
+      <ModernSelect
+        :model-value="draft.reasoningEchoBack || 'preset'"
+        :options="[...REASONING_ECHO_BACK_OPTIONS]"
+        placeholder="按预设…"
+        class="w-full"
+        @update:model-value="(v) => { draft.reasoningEchoBack = String(v) as Settings['reasoningEchoBack'] }"
+      />
+      <p class="text-xs text-[var(--color-text-muted)]">
+        「按预设」看各 API 预设开关；「全部回传 / 不回传」覆盖所有预设。DeepSeek 带工具调用时必须回传，否则会 400。
+      </p>
     </div>
 
     <div class="space-y-1.5">
@@ -112,26 +129,18 @@ const emit = defineEmits<{
         @update:model-value="(v) => { draft.llm.protocol = String(v) }"
       />
       <p class="text-xs text-[var(--color-text-muted)]">
-        仅在使用全局凭证（未匹配到 API 预设）时生效；未知/未实现协议会明确失败。
+        仅在使用全局凭证（未匹配到 API 预设）时生效。选「自动」会按模型家族切换原生协议，结果可在下方预览看到。
       </p>
     </div>
 
-    <div
-      v-if="(draft.llm.protocol || 'openai_compatible_chat') === 'anthropic_messages'"
-      class="space-y-1.5"
-    >
-      <label class="block text-sm font-medium text-[var(--color-text-secondary)]">Anthropic Prompt Cache</label>
-      <ModernSelect
-        :model-value="draft.llm.anthropicPromptCache || 'off'"
-        :options="ANTHROPIC_PROMPT_CACHE_OPTIONS"
-        placeholder="缓存 TTL…"
-        class="w-full"
-        @update:model-value="(v) => { draft.llm.anthropicPromptCache = String(v) }"
-      />
-      <p class="text-xs text-[var(--color-text-muted)]">
-        仅缓存稳定 system 块；默认关闭。上游缓存配置错误会直接报错，不会静默去掉缓存重试。
-      </p>
-    </div>
+    <LlmConnectionAdvancedSection
+      :connection="draft.llm"
+      :models="[draft.llm.defaultModel, ...(draft.llm.usedModels || [])].filter((x): x is string => Boolean(x))"
+      :catalog-provider="catalogProvider ?? null"
+      :reasoning-effort="draft.reasoningEffort"
+      :global-echo-back="draft.reasoningEchoBack ?? 'preset'"
+      @open-cache-guide="emit('open-cache-guide')"
+    />
 
     <div class="space-y-1.5">
       <label class="block text-sm font-medium text-[var(--color-text-secondary)]">默认 API Key</label>

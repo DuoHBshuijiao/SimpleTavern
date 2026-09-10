@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { X, Copy, Check } from 'lucide-vue-next'
+import { X, Copy, Check, Settings2 } from 'lucide-vue-next'
 import type { ErrorStackItem } from '../../composables/useErrorStack'
+import { useUiStore, type SettingsDrawerTab } from '../../stores/ui'
 
 const props = defineProps<{
   item: ErrorStackItem
@@ -16,6 +17,19 @@ const emit = defineEmits<{
 }>()
 
 const copied = ref(false)
+const ui = useUiStore()
+
+const SETTINGS_TABS: readonly SettingsDrawerTab[] = ['global', 'presets', 'chat']
+
+function runAction() {
+  const action = props.item.action
+  if (!action) return
+  if (action.type === 'open_settings') {
+    const tab = SETTINGS_TABS.includes(action.tab as SettingsDrawerTab) ? (action.tab as SettingsDrawerTab) : 'presets'
+    ui.requestFocusSettings({ tab, presetId: action.presetId ?? null, field: action.field ?? null })
+    emit('close', props.item.id)
+  }
+}
 
 async function copyMessage() {
   try {
@@ -56,7 +70,17 @@ async function copyMessage() {
           requestId：<code class="font-mono">{{ item.requestId }}</code>
         </p>
       </div>
-      <div class="px-3 pb-3 flex justify-end">
+      <div class="px-3 pb-3 flex justify-end gap-2">
+        <button
+          v-if="item.action?.type === 'open_settings'"
+          type="button"
+          class="btn btn-xs btn-primary"
+          data-testid="error-action-open-settings"
+          @click="runAction"
+        >
+          <Settings2 class="w-3 h-3" />
+          {{ item.action.label || '打开设置' }}
+        </button>
         <button class="btn btn-xs btn-secondary" @click="copyMessage">
           <Check v-if="copied" class="w-3 h-3" />
           <Copy v-else class="w-3 h-3" />

@@ -54,6 +54,24 @@
     -webkit-backdrop-filter: blur(var(--glass-blur-panel));
   }
 
+  /* 设置深链定位高亮（错误卡片「打开预设开关」跳转后短暂闪烁） */
+  .settings-field-focus-ring {
+    border-radius: var(--radius-xl);
+    animation: settings-field-focus-pulse 2.4s ease-out 1;
+  }
+
+  @keyframes settings-field-focus-pulse {
+    0% {
+      box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-brand) 70%, transparent);
+    }
+    30% {
+      box-shadow: 0 0 0 6px color-mix(in srgb, var(--color-brand) 35%, transparent);
+    }
+    100% {
+      box-shadow: 0 0 0 0 transparent;
+    }
+  }
+
   .surface-inset {
     background-color: var(--color-surface-inset);
     background-image: none;

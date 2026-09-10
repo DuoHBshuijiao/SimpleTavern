@@ -34,13 +34,17 @@
  *    - 依赖：依赖vue、stores、api/http.ts
  *    - 位置：组件层，提供设置管理功能
  */
-import { computed, onMounted, onUnmounted, provide, reactive, ref, watch, type ComponentPublicInstance } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, provide, reactive, ref, watch, type ComponentPublicInstance } from 'vue'
 import { useChatsStore, useCharactersStore, useMvuStore, useSettingsStore } from '../stores'
+import { useUiStore } from '../stores/ui'
 import { isChatMvuRuntimeEnabled } from '../utils/groupMvu'
 import { countActiveEntities, countRelations } from '../utils/kgVisNetwork'
 import {
+  defaultPromptCacheConfig,
+  normalizePromptCacheConfig,
   normalizeReasoningEffort,
   normalizeThemeId,
+  REASONING_ECHO_BACK_VALUES,
   type AutoReadScope,
   type ApiPreset,
   type ApiPresetVoice,
@@ -102,8 +106,10 @@ import {
   type WgslDiagnostic,
 } from '../utils/wgslCompilation'
 import { notifyConfirm, notifyMessage } from '../composables/useNotify'
-import type { LlmProviderPreset } from '../constants/llmProviderPresets'
-import { DEFAULT_LLM_PROTOCOL, LLM_PROTOCOL_OPTIONS, llmProtocolSelectOptions, normalizeLlmProtocol } from '../constants/llmProtocols'
+import { catalogProviderToPreset, LLM_PROVIDER_PRESETS, type LlmProviderPreset } from '../constants/llmProviderPresets'
+import { AUTO_LLM_PROTOCOL, DEFAULT_LLM_PROTOCOL, LLM_PROTOCOL_OPTIONS, llmProtocolSelectOptions, normalizeLlmProtocol } from '../constants/llmProtocols'
+import { fetchLlmCatalog, type LlmCatalog, type LlmCatalogProvider } from '../api/llm'
+import PromptCacheGuideModal from './modals/PromptCacheGuideModal.vue'
 import {
   ANTHROPIC_PROMPT_CACHE_OPTIONS,
   DEFAULT_ANTHROPIC_PROMPT_CACHE,
@@ -207,6 +213,39 @@ const webgpuLastProbeMessage = ref<string | null>(null)
 watch(() => props.initialTab, (newTab) => {
   if (newTab) tab.value = newTab
 }, { immediate: true })
+
+/**
+ * T-822/T-824 深链：错误卡片 action → uiStore.requestFocusSettings({ tab, presetId, field })
+ * 打开抽屉后切到目标预设，把 data-settings-field 对应控件滚入视野并短暂高亮。
+ */
+const uiStore = useUiStore()
+async function applySettingsFocusTarget() {
+  const target = uiStore.consumeSettingsFocus()
+  if (!target) return
+  tab.value = target.tab
+  if (target.presetId && globalDraft.value?.apiPresets.some((p) => p.id === target.presetId)) {
+    editingPresetId.value = target.presetId
+  }
+  if (target.tab === 'global' || target.field === 'reasoningEchoBack' || target.field === 'echoReasoning' || target.field === 'promptCache' || target.field === 'providerParams') {
+    globalAccordionOpen.connection = true
+  }
+  if (!target.field) return
+  await nextTick()
+  // 等一帧让 Tab 内容与预设编辑器渲染完成
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+  const root = drawerDialogRef.value as HTMLElement | null
+  const el = root?.querySelector<HTMLElement>(`[data-settings-field="${target.field}"]`)
+  if (!el) return
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  el.classList.add('settings-field-focus-ring')
+  window.setTimeout(() => el.classList.remove('settings-field-focus-ring'), 2400)
+}
+watch(
+  () => [uiStore.settingsFocusNonce, props.show] as const,
+  ([nonce, show]) => {
+    if (nonce > 0 && show && uiStore.settingsFocusTarget) void applySettingsFocusTarget()
+  },
+)
 
 watch(tab, (t) => {
   if (t === 'chat') chatTabEverOpened.value = true
@@ -1148,10 +1187,75 @@ function isTtsPreset(preset?: ApiPreset | null): boolean {
   return isTtsApiPreset(preset)
 }
 
+/**
+ * 从厂商名录选择一项：写入 baseUrl / providerId / authStyle / 协议，
+ * 并按名录建议模型预填空模型列表（不会覆盖用户已有模型）。
+ */
 function onLlmPresetSelect(p: LlmProviderPreset) {
   const ep = editingPreset.value
   if (!ep) return
   ep.baseUrl = p.baseUrl
+  ep.providerId = p.providerId ?? null
+  ep.authStyle = p.authStyle ?? null
+  if (p.placeholders?.length) {
+    const next: Record<string, string> = { ...(ep.providerParams ?? {}) }
+    for (const ph of p.placeholders) if (!(ph.key in next)) next[ph.key] = ''
+    ep.providerParams = next
+  } else {
+    ep.providerParams = null
+  }
+  const supported = p.supportedProtocols ?? []
+  if (supported.length > 1) ep.protocol = AUTO_LLM_PROTOCOL
+  else if (supported.length === 1) ep.protocol = supported[0] ?? DEFAULT_LLM_PROTOCOL
+  else if (p.defaultProtocol) ep.protocol = p.defaultProtocol
+  if (!ep.models.length && p.suggestedModels?.length) {
+    ep.models = [...p.suggestedModels]
+  }
+  if (!ep.promptCache && p.cacheStrategy && p.cacheStrategy !== 'none') {
+    ep.promptCache = defaultPromptCacheConfig()
+  }
+}
+
+/** 按 baseUrl / providerId 在名录中找对应厂商条目（供高级区块显示占位符与文档链接）。 */
+function catalogProviderFor(conn: { baseUrl?: string | null; providerId?: string | null } | null | undefined): LlmCatalogProvider | null {
+  if (!conn) return null
+  const list = llmCatalog.value?.providers ?? []
+  if (!list.length) return null
+  if (conn.providerId) {
+    const hit = list.find((x) => x.id === conn.providerId)
+    if (hit) return hit
+  }
+  const url = (conn.baseUrl ?? '').trim().toLowerCase().replace(/\/+$/, '')
+  if (!url) return null
+  let best: LlmCatalogProvider | null = null
+  for (const x of list) {
+    const tpl = (x.baseUrlTemplate ?? '').toLowerCase().replace(/\/+$/, '')
+    if (!tpl) continue
+    const host = tpl.replace(/^https?:\/\//, '').split('/')[0] ?? ''
+    if (!host || host.includes('{')) continue
+    if (url.includes(host) && (!best || tpl.length > (best.baseUrlTemplate?.length ?? 0))) best = x
+  }
+  return best
+}
+
+const llmCatalog = ref<LlmCatalog | null>(null)
+const llmComboboxPresets = computed(() => {
+  const list = llmCatalog.value?.providers
+  if (list?.length) return list.map(catalogProviderToPreset)
+  return LLM_PROVIDER_PRESETS
+})
+async function ensureLlmCatalog() {
+  if (llmCatalog.value) return
+  try {
+    llmCatalog.value = await fetchLlmCatalog()
+  } catch {
+    llmCatalog.value = null
+  }
+}
+
+const showPromptCacheGuide = ref(false)
+function openCacheGuide() {
+  showPromptCacheGuide.value = true
 }
 
 function normalizePresetDraft(preset: ApiPreset): ApiPreset {
@@ -1162,6 +1266,11 @@ function normalizePresetDraft(preset: ApiPreset): ApiPreset {
     anthropicPromptCache: isTts
       ? (preset.anthropicPromptCache ?? null)
       : normalizeAnthropicPromptCache(preset.anthropicPromptCache),
+    promptCache: isTts ? (preset.promptCache ?? null) : normalizePromptCacheConfig(preset.promptCache, preset.anthropicPromptCache),
+    echoReasoning: isTts ? (preset.echoReasoning ?? null) : preset.echoReasoning !== false,
+    providerId: preset.providerId ?? null,
+    providerParams: preset.providerParams && Object.keys(preset.providerParams).length ? { ...preset.providerParams } : null,
+    authStyle: preset.authStyle ?? null,
     presetKind: isTts ? 'tts' : (preset.presetKind ?? null),
     ttsProvider: isTts ? resolveTtsProvider(preset) : null,
     voiceCatalog: normalizeVoiceCatalog(preset.voiceCatalog),
@@ -1868,11 +1977,20 @@ watch(
         usedModels: [],
         protocol: DEFAULT_LLM_PROTOCOL,
         anthropicPromptCache: DEFAULT_ANTHROPIC_PROMPT_CACHE,
+        promptCache: defaultPromptCacheConfig(),
+        echoReasoning: true,
       }
     } else {
       s.llm.protocol = normalizeLlmProtocol(s.llm.protocol)
       s.llm.anthropicPromptCache = normalizeAnthropicPromptCache(s.llm.anthropicPromptCache)
+      s.llm.promptCache = normalizePromptCacheConfig(s.llm.promptCache, s.llm.anthropicPromptCache)
+      s.llm.echoReasoning = s.llm.echoReasoning !== false
+      if (s.llm.providerParams && !Object.keys(s.llm.providerParams).length) s.llm.providerParams = null
     }
+    if (!(REASONING_ECHO_BACK_VALUES as readonly string[]).includes(String((s as Settings).reasoningEchoBack))) {
+      ;(s as Settings).reasoningEchoBack = 'preset'
+    }
+    void ensureLlmCatalog()
     if (!(s as Settings).draftHelpDefaults) (s as Settings).draftHelpDefaults = ensureDraftHelpDefaults()
     if (s.selectedFont === undefined) (s as Settings).selectedFont = null
     if ((s as Settings).pageBackgroundImage === undefined) (s as Settings).pageBackgroundImage = null
@@ -2486,8 +2604,13 @@ function createPreset() {
     baseUrl: 'https://api.openai.com',
     apiKey: '',
     models: [],
-    protocol: DEFAULT_LLM_PROTOCOL,
+    protocol: AUTO_LLM_PROTOCOL,
     anthropicPromptCache: DEFAULT_ANTHROPIC_PROMPT_CACHE,
+    promptCache: defaultPromptCacheConfig(),
+    echoReasoning: true,
+    providerId: null,
+    providerParams: null,
+    authStyle: null,
     presetKind: null,
     ttsProvider: null,
     voiceCatalog: [],
@@ -3008,6 +3131,10 @@ provide(
     isTtsPreset,
     setPresetTtsService,
     onLlmPresetSelect,
+    catalogProviderFor,
+    openCacheGuide,
+    llmCatalog,
+    llmComboboxPresets,
     onEditingPresetTtsProviderChange,
     handleApiPresetOrderDragStart,
     handleApiPresetOrderDragOver,
@@ -4156,7 +4283,9 @@ provide(
                 v-model:show-api-key="showApiKey"
                 :draft="globalDraft"
                 :mvu-model-options="globalMvuModelOptions"
+                :catalog-provider="catalogProviderFor(globalDraft.llm)"
                 @mvu-model-select="handleGlobalMvuModelSelect"
+                @open-cache-guide="openCacheGuide"
               />
 
               <SettingsDrawerGlobalWebSearchSection
@@ -4341,6 +4470,11 @@ provide(
   <HttpLogViewerModal
     :show="showHttpLogViewer"
     @update:show="(v) => (showHttpLogViewer = v)"
+  />
+  <PromptCacheGuideModal
+    :show="showPromptCacheGuide"
+    :connection="editingPreset && !isTtsPreset(editingPreset) ? editingPreset : globalDraft?.llm ?? null"
+    @update:show="(v) => (showPromptCacheGuide = v)"
   />
   </div>
 </template>

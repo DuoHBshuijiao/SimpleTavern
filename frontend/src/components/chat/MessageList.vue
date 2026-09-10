@@ -493,6 +493,26 @@ function getReasoningDurationForMessage(m: ChatMessage): number | null {
   return null
 }
 
+function messageCacheBadge(m: ChatMessage): string | null {
+  const u = m.usage
+  if (!u) return null
+  const read = typeof u.cacheReadInputTokens === 'number' ? u.cacheReadInputTokens : 0
+  const write = typeof u.cacheWriteInputTokens === 'number' ? u.cacheWriteInputTokens : 0
+  if (read <= 0 && write <= 0) return null
+  const parts: string[] = []
+  if (read > 0) parts.push(`缓存命中 ${read}`)
+  if (write > 0) parts.push(`缓存写入 ${write}`)
+  return parts.join(' · ')
+}
+
+function messageFastMissBadge(m: ChatMessage): string | null {
+  const u = m.usage
+  if (!u?.fastRequested) return null
+  const tier = String(u.serviceTier || '').toLowerCase()
+  if (!tier || tier === 'default' || tier === 'standard') return 'Fast 未生效'
+  return null
+}
+
 /**
  * 渲染 Markdown；当前正在流式输出的那条助手消息走「补虚闭合」版本，
  * 其它消息用稳定版本，避免为非流式消息付出不必要的补齐成本 / 潜在误判。
@@ -1730,7 +1750,17 @@ onBeforeUnmount(() => {
                 </div>
               </template>
             </AnimatedClipHeight>
-            <!-- 长期记忆已保存标记：不受消息字体大小设置影响 -->
+            <div
+              v-if="m.role === 'assistant' && (messageCacheBadge(m) || messageFastMissBadge(m))"
+              class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 px-1 text-[10px] leading-none text-[var(--color-text-muted)]"
+            >
+              <span v-if="messageCacheBadge(m)" data-testid="cache-usage-badge">{{ messageCacheBadge(m) }}</span>
+              <span
+                v-if="messageFastMissBadge(m)"
+                class="text-[var(--color-warning-text,var(--color-warning))]"
+                data-testid="fast-miss-badge"
+              >{{ messageFastMissBadge(m) }}</span>
+            </div>
             <div
               v-if="m.memoryUpdatedAfterThis"
               class="absolute right-2 bottom-2 flex items-center gap-1 pointer-events-none"

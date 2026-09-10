@@ -3,7 +3,7 @@
  * 与 useNotify 分工：非阻塞业务提示、确认框走全局 AppNotificationHost，本栈保留自动消失与复制。
  */
 import { ref } from 'vue'
-import { ApiError } from '../api/http'
+import { ApiError, type AppErrorAction } from '../api/http'
 
 export interface ErrorStackItem {
   id: string
@@ -15,6 +15,8 @@ export interface ErrorStackItem {
   code?: string
   suggestedAction?: string
   requestId?: string
+  /** 后端给的可执行动作（如跳到预设开关）；有 action 的错误不自动消失 */
+  action?: AppErrorAction
 }
 
 interface InternalErrorStackItem extends ErrorStackItem {
@@ -30,6 +32,7 @@ export interface ErrorStackPushPayload {
   code?: string
   suggestedAction?: string
   requestId?: string
+  action?: AppErrorAction
 }
 
 function normalizeError(raw: unknown): {
@@ -37,6 +40,7 @@ function normalizeError(raw: unknown): {
   code?: string
   suggestedAction?: string
   requestId?: string
+  action?: AppErrorAction
 } {
   if (raw instanceof ApiError) {
     return {
@@ -44,6 +48,7 @@ function normalizeError(raw: unknown): {
       code: raw.code,
       suggestedAction: raw.suggestedAction ?? undefined,
       requestId: raw.requestId,
+      action: raw.action ?? undefined,
     }
   }
   if (raw instanceof Error) {
@@ -57,6 +62,10 @@ function normalizeError(raw: unknown): {
       code: typeof value.code === 'string' ? value.code : undefined,
       suggestedAction: typeof value.suggestedAction === 'string' ? value.suggestedAction : undefined,
       requestId: typeof value.requestId === 'string' ? value.requestId : undefined,
+      action:
+        typeof value.action === 'object' && value.action !== null && typeof (value.action as { type?: unknown }).type === 'string'
+          ? (value.action as AppErrorAction)
+          : undefined,
     }
   }
   if (raw == null) return { message: 'unknown error' }
@@ -106,12 +115,14 @@ export function useErrorStack(defaultTimeoutMs = 6000) {
       code: payload.code ?? normalized.code,
       suggestedAction: payload.suggestedAction ?? normalized.suggestedAction,
       requestId: payload.requestId ?? normalized.requestId,
+      action: payload.action ?? normalized.action,
       timer: null,
       remainingMs: defaultTimeoutMs,
       startedAt: Date.now(),
     }
     items.value.push(item)
-    startTimer(item)
+    // 带动作的错误需要用户点按钮处理，不自动消失
+    if (!item.action) startTimer(item)
   }
 
   const clearAll = () => {

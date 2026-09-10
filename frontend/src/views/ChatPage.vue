@@ -1757,6 +1757,41 @@ async function handleModelSelect(option: any) {
 }
 
 /**
+ * T-824：会话级思考深度覆盖（null = 恢复沿用全局 settings.reasoningEffort）。
+ * 写入 chat.overrides.params.reasoningEffort，后端 prepare_llm_request 按模型能力 clamp 并在 meta.protocolResolution 回报。
+ */
+async function handleReasoningEffortChange(value: string | null) {
+  if (!chats.activeChat) return
+  const overrides = { ...chats.activeChat.overrides }
+  const params = { ...overrides.params }
+  if (value == null || value === '') delete params.reasoningEffort
+  else params.reasoningEffort = value
+  overrides.params = params
+  await chats.updateOverrides(chats.activeChat.id, overrides)
+}
+
+/**
+ * T-824：会话级 Fast 模式（OpenAI service_tier=priority / Anthropic speed=fast / Gemini service_tier）。
+ * null = 关闭并沿用全局（当前全局无 Fast 默认，即关闭）。
+ */
+async function handleFastModeChange(value: boolean | null) {
+  if (!chats.activeChat) return
+  const overrides = { ...chats.activeChat.overrides }
+  const params = { ...overrides.params }
+  if (value == null) delete params.fastMode
+  else params.fastMode = value
+  overrides.params = params
+  await chats.updateOverrides(chats.activeChat.id, overrides)
+}
+
+function applyGenerateDoneUsage(localAssistantId: string, data: unknown) {
+  if (!data || typeof data !== 'object') return
+  const usage = (data as { usage?: ChatMessage['usage'] }).usage
+  if (!usage || typeof usage !== 'object') return
+  chats.patchLocalMessage(localAssistantId, { usage })
+}
+
+/**
  * 滚动到底部
  *
  * 滚动消息列表到底部，用于显示最新消息。
@@ -2378,12 +2413,13 @@ async function runGroupGeneration(
                 chatReasoningContent.value += t
               }
             } else if (evt.event === 'done') {
-              const data = evt.data as { assistantMessageId?: string } | undefined
+              const data = evt.data as { assistantMessageId?: string; usage?: ChatMessage['usage'] } | undefined
               const serverId = data?.assistantMessageId
               if (serverId && chatReasoningContent.value) {
                 chatReasoningMessageId.value = serverId
               }
               pushCurrentReasoningToBlocks(serverId ?? undefined, localAssistantId)
+              applyGenerateDoneUsage(localAssistantId, data)
             } else if (evt.event === 'error') {
               chatReasoningStreamActive.value = false
               clearReasoningPhaseTiming()
@@ -2422,6 +2458,7 @@ async function runGroupGeneration(
           chatReasoningContent.value = res.reasoningContent
         }
         pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined, localAssistantId)
+        applyGenerateDoneUsage(localAssistantId, res)
         chats.appendLocalMessageContent(localAssistantId, res.content || '')
         scrollToBottom()
         void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
@@ -2662,12 +2699,13 @@ async function sendUserMessage() {
                   chatReasoningContent.value += t
                 }
               } else if (evt.event === 'done') {
-                const data = evt.data as { assistantMessageId?: string } | undefined
+                const data = evt.data as { assistantMessageId?: string; usage?: ChatMessage['usage'] } | undefined
                 const serverId = data?.assistantMessageId
                 if (serverId && chatReasoningContent.value) {
                   chatReasoningMessageId.value = serverId
                 }
                 pushCurrentReasoningToBlocks(serverId ?? undefined, localAssistantId)
+                applyGenerateDoneUsage(localAssistantId, data)
               } else if (evt.event === 'error') {
                 chatReasoningStreamActive.value = false
                 clearReasoningPhaseTiming()
@@ -2705,6 +2743,7 @@ async function sendUserMessage() {
             chatReasoningContent.value = res.reasoningContent
           }
           pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined, localAssistantId)
+          applyGenerateDoneUsage(localAssistantId, res)
           chats.appendLocalMessageContent(localAssistantId, res.content || '')
           scrollToBottom()
           void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
@@ -2955,12 +2994,13 @@ async function triggerInterject(characterId: string) {
                 chatReasoningContent.value += t
               }
             } else if (evt.event === 'done') {
-              const data = evt.data as { assistantMessageId?: string } | undefined
+              const data = evt.data as { assistantMessageId?: string; usage?: ChatMessage['usage'] } | undefined
               const serverId = data?.assistantMessageId
               if (serverId && chatReasoningContent.value) {
                 chatReasoningMessageId.value = serverId
               }
               pushCurrentReasoningToBlocks(serverId ?? undefined, localAssistantId)
+              applyGenerateDoneUsage(localAssistantId, data)
             } else if (evt.event === 'error') {
               chatReasoningStreamActive.value = false
               clearReasoningPhaseTiming()
@@ -2994,6 +3034,7 @@ async function triggerInterject(characterId: string) {
           chatReasoningContent.value = res.reasoningContent
         }
         pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined, localAssistantId)
+        applyGenerateDoneUsage(localAssistantId, res)
         chats.appendLocalMessageContent(localAssistantId, res.content || '')
         scrollToBottom()
         void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
@@ -3591,12 +3632,13 @@ async function handleRewriteMessage(m: ChatMessage) {
                   chatReasoningContent.value += t
                 }
               } else if (evt.event === 'done') {
-                const data = evt.data as { assistantMessageId?: string } | undefined
+                const data = evt.data as { assistantMessageId?: string; usage?: ChatMessage['usage'] } | undefined
                 const serverId = data?.assistantMessageId
                 if (serverId && chatReasoningContent.value) {
                   chatReasoningMessageId.value = serverId
                 }
                 pushCurrentReasoningToBlocks(serverId ?? undefined, localAssistantId)
+                applyGenerateDoneUsage(localAssistantId, data)
               } else if (evt.event === 'error') {
                 chatReasoningStreamActive.value = false
                 clearReasoningPhaseTiming()
@@ -3629,6 +3671,7 @@ async function handleRewriteMessage(m: ChatMessage) {
             chatReasoningContent.value = res.reasoningContent
           }
           pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined, localAssistantId)
+          applyGenerateDoneUsage(localAssistantId, res)
           chats.appendLocalMessageContent(localAssistantId, res.content || '')
           scrollToBottom()
           void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
@@ -3672,12 +3715,13 @@ async function handleRewriteMessage(m: ChatMessage) {
                   chatReasoningContent.value += t
                 }
               } else if (evt.event === 'done') {
-                const data = evt.data as { assistantMessageId?: string } | undefined
+                const data = evt.data as { assistantMessageId?: string; usage?: ChatMessage['usage'] } | undefined
                 const serverId = data?.assistantMessageId
                 if (serverId && chatReasoningContent.value) {
                   chatReasoningMessageId.value = serverId
                 }
                 pushCurrentReasoningToBlocks(serverId ?? undefined, localAssistantId)
+                applyGenerateDoneUsage(localAssistantId, data)
               } else if (evt.event === 'error') {
                 chatReasoningStreamActive.value = false
                 clearReasoningPhaseTiming()
@@ -3713,6 +3757,7 @@ async function handleRewriteMessage(m: ChatMessage) {
             chatReasoningContent.value = res.reasoningContent
           }
           pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined, localAssistantId)
+          applyGenerateDoneUsage(localAssistantId, res)
           chats.appendLocalMessageContent(localAssistantId, res.content || '')
           scrollToBottom()
           void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
@@ -4364,12 +4409,13 @@ async function handleSaveAndSend() {
                   chatReasoningContent.value += t
                 }
               } else if (evt.event === 'done') {
-                const data = evt.data as { assistantMessageId?: string } | undefined
+                const data = evt.data as { assistantMessageId?: string; usage?: ChatMessage['usage'] } | undefined
                 const serverId = data?.assistantMessageId
                 if (serverId && chatReasoningContent.value) {
                   chatReasoningMessageId.value = serverId
                 }
                 pushCurrentReasoningToBlocks(serverId ?? undefined, localAssistantId)
+                applyGenerateDoneUsage(localAssistantId, data)
               } else if (evt.event === 'error') {
                 chatReasoningStreamActive.value = false
                 clearReasoningPhaseTiming()
@@ -4398,6 +4444,7 @@ async function handleSaveAndSend() {
             chatReasoningContent.value = res.reasoningContent
           }
           pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined, localAssistantId)
+          applyGenerateDoneUsage(localAssistantId, res)
           chats.appendLocalMessageContent(localAssistantId, res.content || '')
           scrollToBottom()
           void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
@@ -4846,6 +4893,9 @@ const editingPersonaAvatarUrl = computed(() => {
             :current-model="currentModel"
             :current-preset-id="activeChat?.overrides?.presetId ?? null"
             :model-options="chatModelOptions"
+            :reasoning-effort="activeChat?.overrides?.params?.reasoningEffort ?? null"
+            :global-reasoning-effort="settings.settings?.reasoningEffort ?? 'none'"
+            :fast-mode="activeChat?.overrides?.params?.fastMode ?? null"
             :get-member-settings="group.getMemberSettings"
             @send="sendUserMessage"
             @primary-action="handlePrimaryAction"
@@ -4853,6 +4903,8 @@ const editingPersonaAvatarUrl = computed(() => {
             @continue-group="continueGroupChat"
             @trigger-interject="triggerInterject"
             @select-model="handleModelSelect"
+            @update:reasoning-effort="handleReasoningEffortChange"
+            @update:fast-mode="handleFastModeChange"
             @toggle-assistant="assistant.isAssistantPanelOpen.value = !assistant.isAssistantPanelOpen.value"
             @focus-assistant-panel="switchFromMvuToAssistantPanel"
             @select-images="handleSelectImages"

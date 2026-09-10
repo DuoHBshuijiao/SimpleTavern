@@ -57,7 +57,78 @@ export interface GenerationParams {
   max_tokens?: number | null
   /** 上下文总长度限制（token 数），用于裁剪最近消息；实际总限制 = context_size + 角色卡/用户信息/系统提示词 */
   context_size?: number | null
+  /** T-824：会话级思考深度覆盖；null/undefined 沿用全局 settings.reasoningEffort */
+  reasoningEffort?: ReasoningEffort | string | null
+  /** T-824：会话级 Fast 模式（OpenAI service_tier=priority / Anthropic speed=fast / Gemini service_tier）；null 沿用全局 */
+  fastMode?: boolean | null
 }
+
+/** T-821：跨协议提示词缓存策略 */
+export const PROMPT_CACHE_MODES = ['auto', 'off', 'implicit', 'explicit', 'best_effort'] as const
+export type PromptCacheMode = (typeof PROMPT_CACHE_MODES)[number]
+export const PROMPT_CACHE_BREAKPOINTS = ['system', 'tools', 'history_tail'] as const
+export type PromptCacheBreakpoint = (typeof PROMPT_CACHE_BREAKPOINTS)[number]
+
+export interface PromptCacheConfig {
+  /** auto：按供应商策略；off：不缓存；implicit：仅依赖自动缓存；explicit：显式断点；best_effort：中国厂商透传 */
+  mode: PromptCacheMode
+  /** Anthropic：5m|1h；OpenAI：in_memory|24h；Gemini：秒数；null 用供应商默认 */
+  ttl?: string | number | null
+  /** 显式断点位置（仅 explicit 生效） */
+  breakpoints?: PromptCacheBreakpoint[]
+  /** OpenAI prompt_cache_key 派生方式：per_chat|per_character|off */
+  cacheKey?: string | null
+  /** DashScope 等需要在消息上打显式标记 */
+  explicitMarkers?: boolean
+}
+
+export const PROMPT_CACHE_MODE_OPTIONS: Array<{ label: string; value: PromptCacheMode; hint: string }> = [
+  { label: '自动（推荐）', value: 'auto', hint: '按供应商能力：Anthropic/GPT-5.6+ 显式断点，其余依赖自动前缀缓存' },
+  { label: '显式断点', value: 'explicit', hint: '在 system / tools / 历史尾部打 cache_control 或 prompt_cache_breakpoint' },
+  { label: '仅隐式', value: 'implicit', hint: '不发送任何缓存指令，只依赖供应商的自动前缀缓存' },
+  { label: '尽力而为', value: 'best_effort', hint: '中国厂商：透传厂商推荐字段（如 DashScope 显式标记），失败不报错' },
+  { label: '关闭', value: 'off', hint: '不发送缓存指令，也不派生 cache key' },
+]
+
+export function defaultPromptCacheConfig(): PromptCacheConfig {
+  return { mode: 'auto', ttl: null, breakpoints: ['system'], cacheKey: 'per_chat', explicitMarkers: false }
+}
+
+/**
+ * 归一化 promptCache；缺失时按旧字段 anthropicPromptCache 迁移（与后端 prompt_cache_from_legacy 一致）：
+ * 5m/1h → explicit + ttl；off → off；空 → auto。
+ */
+export function normalizePromptCacheConfig(
+  raw: Partial<PromptCacheConfig> | null | undefined,
+  legacyAnthropic?: string | null,
+): PromptCacheConfig {
+  const base = defaultPromptCacheConfig()
+  if (!raw || typeof raw !== 'object') {
+    if (legacyAnthropic === '5m' || legacyAnthropic === '1h') return { ...base, mode: 'explicit', ttl: legacyAnthropic }
+    if (legacyAnthropic === 'off') return { ...base, mode: 'off' }
+    return base
+  }
+  const mode = (PROMPT_CACHE_MODES as readonly string[]).includes(String(raw.mode)) ? (raw.mode as PromptCacheMode) : base.mode
+  const bps = Array.isArray(raw.breakpoints)
+    ? PROMPT_CACHE_BREAKPOINTS.filter((b) => (raw.breakpoints as string[]).includes(b))
+    : base.breakpoints
+  return {
+    mode,
+    ttl: raw.ttl === '' || raw.ttl == null ? null : raw.ttl,
+    breakpoints: bps && bps.length ? [...bps] : ['system'],
+    cacheKey: typeof raw.cacheKey === 'string' && raw.cacheKey ? raw.cacheKey : 'per_chat',
+    explicitMarkers: !!raw.explicitMarkers,
+  }
+}
+
+/** 全局「回传思考内容」三态：on/off 强制；preset 交给预设决定 */
+export const REASONING_ECHO_BACK_VALUES = ['preset', 'on', 'off'] as const
+export type ReasoningEchoBack = (typeof REASONING_ECHO_BACK_VALUES)[number]
+export const REASONING_ECHO_BACK_OPTIONS: Array<{ label: string; value: ReasoningEchoBack }> = [
+  { label: '按预设', value: 'preset' },
+  { label: '全部回传', value: 'on' },
+  { label: '全部不回传', value: 'off' },
+]
 
 export interface DraftHelpSettings {
   /** 草稿助手读取的最近上下文消息条数；空值表示不单独限制，回退到现有上下文逻辑 */
@@ -295,10 +366,20 @@ export interface ApiPreset {
   baseUrl: string
   apiKey: string
   models: string[]
-  /** LLM 协议；缺省 openai_compatible_chat；TTS 预设可忽略 */
+  /** LLM 协议；缺省 openai_compatible_chat；auto 表示按模型家族自动选择（T-822）；TTS 预设可忽略 */
   protocol?: string | null
-  /** Anthropic prompt cache：off|5m|1h；仅 anthropic_messages 生效 */
+  /** @deprecated 旧字段：Anthropic prompt cache off|5m|1h；已迁移到 promptCache，仅保留兼容读取 */
   anthropicPromptCache?: string | null
+  /** T-821：跨协议缓存策略 */
+  promptCache?: PromptCacheConfig | null
+  /** T-820：供应商目录 id（来自 /api/llm/catalog） */
+  providerId?: string | null
+  /** T-820：URL 模板占位参数（Azure resource / Vertex project+location / Bedrock region 等） */
+  providerParams?: Record<string, string> | null
+  /** T-820-A2：鉴权风格；null 按协议默认 */
+  authStyle?: string | null
+  /** 是否把上一轮 reasoning_content 回传给模型（DeepSeek 工具调用要求开启） */
+  echoReasoning?: boolean | null
   presetKind?: string | null
   ttsProvider?: TtsProvider | null
   voiceCatalog?: ApiPresetVoice[]
@@ -358,7 +439,7 @@ const LEGACY_THEME_IDS: Record<string, ThemeId> = {
   light: 'green',
 }
 
-export const REASONING_EFFORT_VALUES = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const
+export const REASONING_EFFORT_VALUES = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const
 export type ReasoningEffort = (typeof REASONING_EFFORT_VALUES)[number]
 
 export const REASONING_EFFORT_OPTIONS: Array<{ label: string; value: ReasoningEffort }> = [
@@ -368,7 +449,19 @@ export const REASONING_EFFORT_OPTIONS: Array<{ label: string; value: ReasoningEf
   { label: 'medium（中）', value: 'medium' },
   { label: 'high（高）', value: 'high' },
   { label: 'extra high（极高）', value: 'xhigh' },
+  { label: 'max（上限）', value: 'max' },
 ]
+
+/** 聊天面板用的短标签 */
+export const REASONING_EFFORT_SHORT_LABELS: Record<ReasoningEffort, string> = {
+  none: '关闭',
+  minimal: '极低',
+  low: '低',
+  medium: '中',
+  high: '高',
+  xhigh: '极高',
+  max: '上限',
+}
 
 /** 将旧版 dark/light 与非法值归一为受支持的主题 ID */
 export function normalizeThemeId(raw: string | null | undefined): ThemeId {
@@ -404,10 +497,15 @@ export interface Settings {
     defaultModel: string
     modelCandidates: string[]
     usedModels: string[]
-    /** 全局 LLM 协议；缺省 openai_compatible_chat */
+    /** 全局 LLM 协议；缺省 openai_compatible_chat；auto 按模型自动选择 */
     protocol?: string | null
-    /** Anthropic prompt cache：off|5m|1h；仅 anthropic_messages 生效 */
+    /** @deprecated 旧字段：Anthropic prompt cache off|5m|1h；已迁移到 promptCache */
     anthropicPromptCache?: string | null
+    promptCache?: PromptCacheConfig | null
+    providerId?: string | null
+    providerParams?: Record<string, string> | null
+    authStyle?: string | null
+    echoReasoning?: boolean | null
   }
   apiPresets: ApiPreset[]
   generationDefaults: GenerationParams
@@ -421,6 +519,8 @@ export interface Settings {
   pureAiMode: boolean
   /** 推理深度档位：none 表示关闭推理，其他档位表示开启推理并设定深度 */
   reasoningEffort?: ReasoningEffort | string | null
+  /** 全局「回传思考内容」三态；preset 时看各预设 echoReasoning */
+  reasoningEchoBack?: ReasoningEchoBack | string | null
   /** 旧版布尔开关，仅用于前端归一化迁移 */
   thinkingMode?: boolean
   userPersonas: UserPersona[]
@@ -562,6 +662,18 @@ export interface ChatMessage {
   reasoningContent?: string | null
   /** 推理/思考耗时（秒，浮点，前端展示一位小数） */
   reasoningDurationSec?: number | null
+  /** 本轮归一化用量（T-821） */
+  usage?: {
+    inputTokens?: number | null
+    outputTokens?: number | null
+    totalTokens?: number | null
+    cacheReadInputTokens?: number | null
+    cacheWriteInputTokens?: number | null
+    reasoningTokens?: number | null
+    serviceTier?: string | null
+    /** 本轮请求了 Fast；若 serviceTier 仍是 default 则前端提示「Fast 未生效」 */
+    fastRequested?: boolean | null
+  } | null
   /** MVU 已消费标记，同一会话最多一条消息持有 */
   mvuProcessed?: boolean
 }

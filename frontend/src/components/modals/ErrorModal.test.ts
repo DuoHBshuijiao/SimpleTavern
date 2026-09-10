@@ -1,7 +1,12 @@
 // @vitest-environment happy-dom
 import { mount } from '@vue/test-utils'
-import { describe, expect, it, vi } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
+import { describe, expect, it, vi, beforeEach } from 'vitest'
 import ErrorModal from './ErrorModal.vue'
+
+beforeEach(() => {
+  setActivePinia(createPinia())
+})
 
 
 describe('ErrorModal', () => {
@@ -36,5 +41,31 @@ describe('ErrorModal', () => {
     expect(writeText).toHaveBeenCalledWith(
       '上游服务鉴权失败\n建议操作：检查 API Key\nrequestId：req_modal_123',
     )
+  })
+
+  it('有 open_settings 动作时渲染跳转按钮', () => {
+    const wrapper = mount(ErrorModal, {
+      props: {
+        item: {
+          id: 'error-2',
+          message: '缺少 reasoning_content',
+          source: 'main',
+          title: '聊天错误',
+          createdAt: Date.now(),
+          timeoutMs: 6000,
+          suggestedAction: '打开预设思考回传开关',
+          action: {
+            type: 'open_settings',
+            tab: 'presets',
+            presetId: 'p1',
+            field: 'echoReasoning',
+            label: '打开预设的思考回传开关',
+          },
+        },
+        offsetY: 0,
+        zIndex: 10,
+      },
+    })
+    expect(wrapper.get('[data-testid="error-action-open-settings"]').text()).toContain('思考回传')
   })
 })

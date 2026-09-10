@@ -34,6 +34,19 @@ export interface AppErrorEnvelope {
   upstreamStatus?: number | null
   suggestedAction?: string | null
   terminal?: boolean
+  action?: AppErrorAction | null
+}
+
+/**
+ * 后端错误附带的可执行动作（T-822/T-824）：目前只有 open_settings，
+ * 用于把用户直接带到 API 预设 / 全局连接的某个开关（如「回传思考内容」）。
+ */
+export interface AppErrorAction {
+  type: 'open_settings' | string
+  label?: string
+  tab?: 'global' | 'presets' | 'chat' | string
+  presetId?: string | null
+  field?: string | null
 }
 
 export class ApiError extends Error {
@@ -46,6 +59,7 @@ export class ApiError extends Error {
   readonly protocol?: string | null
   readonly upstreamStatus?: number | null
   readonly suggestedAction?: string | null
+  readonly action?: AppErrorAction | null
   readonly status?: number
   readonly terminal: boolean
   readonly rawBody?: string
@@ -62,9 +76,21 @@ export class ApiError extends Error {
     this.protocol = envelope.protocol
     this.upstreamStatus = envelope.upstreamStatus
     this.suggestedAction = envelope.suggestedAction
+    this.action = envelope.action ?? undefined
     this.status = options.status
     this.terminal = envelope.terminal ?? false
     this.rawBody = options.rawBody
+  }
+}
+
+function parseErrorAction(raw: unknown): AppErrorAction | undefined {
+  if (!isRecord(raw) || typeof raw.type !== 'string' || !raw.type.trim()) return undefined
+  return {
+    type: raw.type.trim(),
+    label: typeof raw.label === 'string' ? raw.label : undefined,
+    tab: typeof raw.tab === 'string' ? raw.tab : undefined,
+    presetId: typeof raw.presetId === 'string' ? raw.presetId : undefined,
+    field: typeof raw.field === 'string' ? raw.field : undefined,
   }
 }
 
@@ -146,6 +172,7 @@ export function parseApiError(
         envelope && typeof envelope.upstreamStatus === 'number' ? envelope.upstreamStatus : undefined,
       suggestedAction:
         envelope && typeof envelope.suggestedAction === 'string' ? envelope.suggestedAction : undefined,
+      action: envelope ? parseErrorAction(envelope.action) : undefined,
       terminal: envelope?.terminal === true || options.terminal === true,
     },
     { status: options.status, rawBody: options.rawBody },

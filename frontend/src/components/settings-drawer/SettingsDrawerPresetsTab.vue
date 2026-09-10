@@ -4,6 +4,7 @@ import { Eye, EyeOff, Loader2, X } from 'lucide-vue-next'
 import ModernSelect from '../ModernSelect.vue'
 import ThemedCheckbox from '../ThemedCheckbox.vue'
 import LlmPresetNameCombobox from '../LlmPresetNameCombobox.vue'
+import LlmConnectionAdvancedSection from './LlmConnectionAdvancedSection.vue'
 import { SETTINGS_DRAWER_PRESETS_KEY } from '../../composables/settingsDrawerPresetsKey'
 
 const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
@@ -87,6 +88,7 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                             <LlmPresetNameCombobox
                               v-if="!presets.isTtsPreset(presets.editingPreset)"
                               v-model="presets.editingPreset!.name"
+                              :presets="presets.llmComboboxPresets"
                               class="block"
                               placeholder="输入或下拉选择供应商/预设名称"
                               @select="presets.onLlmPresetSelect"
@@ -133,24 +135,7 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                               @update:model-value="(v) => { if (presets.editingPreset) presets.editingPreset.protocol = String(v) }"
                             />
                             <p class="text-xs text-[var(--color-text-muted)]">
-                              默认 OpenAI Compatible Chat；未知/未实现协议会明确失败（不静默回退）。
-                            </p>
-                        </div>
-
-                        <div
-                          v-if="!presets.isTtsPreset(presets.editingPreset) && (presets.editingPreset!.protocol || 'openai_compatible_chat') === 'anthropic_messages'"
-                          class="space-y-1.5"
-                        >
-                            <label class="block text-xs font-medium text-[var(--color-text-secondary)]">Anthropic Prompt Cache</label>
-                            <ModernSelect
-                              :model-value="presets.editingPreset!.anthropicPromptCache || 'off'"
-                              :options="presets.ANTHROPIC_PROMPT_CACHE_OPTIONS"
-                              class="w-full"
-                              placeholder="缓存 TTL…"
-                              @update:model-value="(v) => { if (presets.editingPreset) presets.editingPreset.anthropicPromptCache = String(v) }"
-                            />
-                            <p class="text-xs text-[var(--color-text-muted)]">
-                              仅缓存稳定 system 块；默认关闭。上游错误不会静默去掉缓存重试。
+                              「自动」会按模型名选原生协议（Claude → Anthropic Messages、Gemini → generateContent…），选择结果在下方预览与聊天 meta 中可见；固定某协议则不再自动切换。未知/未实现协议会明确失败（不静默回退）。
                             </p>
                         </div>
 
@@ -266,6 +251,17 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                                  />
                               </div>
                         </div>
+
+                        <!-- v0.810：供应商参数 / 缓存策略 / 回传思考 / 协议预览 -->
+                        <LlmConnectionAdvancedSection
+                          v-if="!presets.isTtsPreset(presets.editingPreset)"
+                          :connection="presets.editingPreset!"
+                          :models="presets.editingPreset!.models"
+                          :catalog-provider="presets.catalogProviderFor(presets.editingPreset!)"
+                          :reasoning-effort="presets.globalDraft!.llm?.reasoningEffort ?? 'none'"
+                          :global-echo-back="presets.globalDraft!.reasoningEchoBack ?? 'preset'"
+                          @open-cache-guide="presets.openCacheGuide"
+                        />
 
                         <div v-if="presets.isTtsPreset(presets.editingPreset)" class="space-y-3 rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-settings-control-bg)] p-3">
                           <p class="text-2xs text-[var(--color-text-muted)]">

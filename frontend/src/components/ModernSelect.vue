@@ -353,6 +353,7 @@ function close() {
  * @param {Option} opt - 选中的选项
  */
 function select(opt: Option) {
+  if (opt.disabled) return
   emit('update:modelValue', opt.value)
   emit('change', opt.value)
   emit('select', opt)
@@ -471,8 +472,12 @@ onUnmounted(() => {
               <div 
                 v-for="opt in item.options" 
                 :key="opt.value"
-                class="px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors flex items-center justify-between group/item pl-4"
-                :class="isOptionSelected(opt) ? 'bg-brand-a20 text-brand' : 'text-[var(--color-text-secondary)] hover:bg-surface-muted'"
+                class="px-3 py-2 rounded-lg text-sm transition-colors flex items-center justify-between group/item pl-4"
+                :class="[
+                  opt.disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
+                  isOptionSelected(opt) ? 'bg-brand-a20 text-brand' : 'text-[var(--color-text-secondary)]',
+                  !opt.disabled && !isOptionSelected(opt) ? 'hover:bg-surface-muted' : '',
+                ]"
                 @click="select(opt)"
               >
                 <span class="truncate">{{ opt.label }}</span>
@@ -484,8 +489,12 @@ onUnmounted(() => {
             <div 
               v-else 
               :key="`single-${idx}`"
-              class="px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors flex items-center justify-between group/item"
-              :class="isOptionSelected(item) ? 'bg-brand-a20 text-brand' : 'text-[var(--color-text-secondary)] hover:bg-surface-muted'"
+              class="px-3 py-2 rounded-lg text-sm transition-colors flex items-center justify-between group/item"
+              :class="[
+                item.disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
+                isOptionSelected(item) ? 'bg-brand-a20 text-brand' : 'text-[var(--color-text-secondary)]',
+                !item.disabled && !isOptionSelected(item) ? 'hover:bg-surface-muted' : '',
+              ]"
               @click="select(item)"
             >
               <span class="truncate">{{ item.label }}</span>
