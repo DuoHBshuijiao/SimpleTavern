@@ -1,0 +1,727 @@
+{
+ "generatedAt": "2026-09-09T09:22:03+00:00",
+ "source": {
+  "repo": "earendil-works/pi",
+  "path": "packages/ai/src/providers",
+  "commit": "561a2e066c0742e3d3e33c75d5d32a69b1d89194",
+  "url": "https://github.com/earendil-works/pi/tree/main/packages/ai/src/providers"
+ },
+ "providers": [
+  {
+   "id": "amazon-bedrock",
+   "name": "Amazon Bedrock",
+   "baseUrl": null,
+   "apis": [
+    "bedrock-converse-stream"
+   ],
+   "protocols": [],
+   "unsupportedApis": [
+    "bedrock-converse-stream"
+   ],
+   "envKeys": [],
+   "hasOAuth": false,
+   "oauthOnly": false,
+   "sourceFile": "amazon-bedrock.ts"
+  },
+  {
+   "id": "ant-ling",
+   "name": "Ant Ling",
+   "baseUrl": "https://api.ant-ling.com/v1",
+   "apis": [
+    "openai-completions"
+   ],
+   "protocols": [
+    "openai_compatible_chat"
+   ],
+   "unsupportedApis": [],
+   "envKeys": [
+    "ANT_LING_API_KEY"
+   ],
+   "hasOAuth": false,
+   "oauthOnly": false,
+   "sourceFile": "ant-ling.ts"
+  },
+  {
+   "id": "anthropic",
+   "name": "Anthropic",
+   "baseUrl": "https://api.anthropic.com",
+   "apis": [
+    "anthropic-messages"
+   ],
+   "protocols": [
+    "anthropic_messages"
+   ],
+   "unsupportedApis": [],
+   "envKeys": [
+    "ANTHROPIC_API_KEY_ENV",
+    "ANTHROPIC_AUTH_TOKEN_ENV",
+    "ANTHROPIC_OAUTH_TOKEN_ENV"
+   ],
+   "hasOAuth": true,
+   "oauthOnly": false,
+   "sourceFile": "anthropic.ts"
+  },
+  {
+   "id": "azure-openai-responses",
+   "name": "Azure OpenAI",
+   "baseUrl": null,
+   "apis": [
+    "azure-openai-responses"
+   ],
+   "protocols": [
+    "openai_responses"
+   ],
+   "unsupportedApis": [],
+   "envKeys": [
+    "AZURE_OPENAI_API_KEY"
+   ],
+   "hasOAuth": false,
+   "oauthOnly": false,
+   "sourceFile": "azure-openai-responses.ts"
+  },
+  {
+   "id": "baseten",
+   "name": "Baseten",
+   "baseUrl": "https://inference.baseten.co/v1",
+   "apis": [
+    "openai-completions"
+   ],
+   "protocols": [
+    "openai_compatible_chat"
+   ],
+   "unsupportedApis": [],
+   "envKeys": [
+    "BASETEN_API_KEY"
+   ],
+   "hasOAuth": false,
+   "oauthOnly": false,
+   "sourceFile": "baseten.ts"
+  },
+  {
+   "id": "cerebras",
+   "name": "Cerebras",
+   "baseUrl": "https://api.cerebras.ai/v1",
+   "apis": [
+    "openai-completions"
+   ],
+   "protocols": [
+    "openai_compatible_chat"
+   ],
+   "unsupportedApis": [],
+   "envKeys": [
+    "CEREBRAS_API_KEY"
+   ],
+   "hasOAuth": false,
+   "oauthOnly": false,
+   "sourceFile": "cerebras.ts"
+  },
+  {
+   "id": "cloudflare-ai-gateway",
+   "name": "Cloudflare AI Gateway",
+   "baseUrl": null,
+   "apis": [
+    "anthropic-messages",
+    "openai-completions",
+    "openai-responses"
+   ],
+   "protocols": [
+    "anthropic_messages",
+    "openai_compatible_chat",
+    "openai_responses"
+   ],
+   "unsupportedApis": [],
+   "envKeys": [],
+   "hasOAuth": false,
+   "oauthOnly": false,
+   "sourceFile": "cloudflare-ai-gateway.ts"
+  },
+  {
+   "id": "cloudflare-workers-ai",
+   "name": "Cloudflare Workers AI",
+   "baseUrl": null,
+   "apis": [
+    "openai-completions"
+   ],
+   "protocols": [
+    "openai_compatible_chat"
+   ],
+   "unsupportedApis": [],
+   "envKeys": [],
+   "hasOAuth": false,
+   "oauthOnly": false,
+   "sourceFile": "cloudflare-workers-ai.ts"
+  },
+  {
+   "id": "deepseek",
+   "name": "DeepSeek",
+   "baseUrl": "https://api.deepseek.com",
+   "apis": [
+    "openai-completions"
+   ],
+   "protocols": [
+    "openai_compatible_chat"
+   ],
+   "unsupportedApis": [],
+   "envKeys": [
+    "DEEPSEEK_API_KEY"
+   ],
+   "hasOAuth": false,
+   "oauthOnly": false,
+   "sourceFile": "deepseek.ts"
+  },
+  {
+   "id": "fireworks",
+   "name": "Fireworks",
+   "baseUrl": "https://api.fireworks.ai/inference",
+   "apis": [
+    "anthropic-messages",
+    "openai-completions"
+   ],
+   "protocols": [
+    "anthropic_messages",
+    "openai_compatible_chat"
+   ],
+   "unsupportedApis": [],
+   "envKeys": [
+    "FIREWORKS_API_KEY"
+   ],
+   "hasOAuth": false,
+   "oauthOnly": false,
+   "sourceFile": "fireworks.ts"
+  },
+  {
+   "id": "github-copilot",
+   "name": "GitHub Copilot",
+   "baseUrl": "https://api.individual.githubcopilot.com",
+   "apis": [
+    "anthropic-messages",
+    "openai-completions",
+    "openai-responses"
+   ],
+   "protocols": [
+    "anthropic_messages",
+    "openai_compatible_chat",
+    "openai_responses"
+   ],
+   "unsupportedApis": [],
+   "envKeys": [
+    "COPILOT_GITHUB_TOKEN"
+   ],
+   "hasOAuth": true,
+   "oauthOnly": false,
+   "sourceFile": "github-copilot.ts"
+  },
+  {
+   "id": "google-vertex",
+   "name": "Google Vertex AI",
+   "baseUrl": null,
+   "apis": [
+    "google-vertex"
+   ],
+   "protocols": [
+    "gemini_generate_content"
+   ],
+   "unsupportedApis": [],
+   "envKeys": [],
+   "hasOAuth": false,
+   "oauthOnly": false,
+   "sourceFile": "google-vertex.ts"
+  },
+  {
+   "id": "google",
+   "name": "Google",
+   "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+   "apis": [
+    "google-generative-ai"
+   ],
+   "protocols": [
+    "gemini_generate_content"
+   ],
+   "unsupportedApis": [],
+   "envKeys": [
+    "GEMINI_API_KEY"
+   ],
+   "hasOAuth": false,
+   "oauthOnly": false,
+   "sourceFile": "google.ts"
+  },
+  {
+   "id": "groq",
+   "name": "Groq",
+   "baseUrl": "https://api.groq.com/openai/v1",
+   "apis": [
+    "openai-completions"
+   ],
+   "protocols": [
+    "openai_compatible_chat"
+   ],
+   "unsupportedApis": [],
+   "envKeys": [
+    "GROQ_API_KEY"
+   ],
+   "hasOAuth": false,
+   "oauthOnly": false,
+   "sourceFile": "groq.ts"
+  },
+  {
+   "id": "huggingface",
+   "name": "Hugging Face",
+   "baseUrl": "https://router.huggingface.co/v1",
+   "apis": [
+    "openai-completions"
+   ],
+   "protocols": [
+    "openai_compatible_chat"
+   ],
+   "unsupportedApis": [],
+   "envKeys": [
+    "HF_TOKEN"
+   ],
+   "hasOAuth": false,
+   "oauthOnly": false,
+   "sourceFile": "huggingface.ts"
+  },
+  {
+   "id": "kimi-coding",
+   "name": "Kimi For Coding",
+   "baseUrl": "https://api.kimi.com/coding",
+   "apis": [
+    "anthropic-messages"
+   ],
+   "protocols": [
+    "anthropic_messages"
+   ],
+   "unsupportedApis": [],
+   "envKeys": [
+    "KIMI_API_KEY"
+   ],
+   "hasOAuth": true,
+   "oauthOnly": false,
+   "sourceFile": "kimi-coding.ts"
+  },
+  {
+   "id": "minimax-cn",
+   "name": "MiniMax CN",
+   "baseUrl": "https://api.minimaxi.com/anthropic",
+   "apis": [
+    "anthropic-messages"
+   ],
+   "protocols": [
+    "anthropic_messages"
+   ],
+   "unsupportedApis": [],
+   "envKeys": [
+    "MINIMAX_CN_API_KEY"
+   ],
+   "hasOAuth": false,
+   "oauthOnly": false,
+   "sourceFile": "minimax-cn.ts"
+  },
+  {
+   "id": "minimax",
+   "name": "MiniMax",
+   "baseUrl": "https://api.minimax.io/anthropic",
+   "apis": [
+    "anthropic-messages"
+   ],
+   "protocols": [
+    "anthropic_messages"
+   ],
+   "unsupportedApis": [],
+   "envKeys": [
+    "MINIMAX_API_KEY"
+   ],
+   "hasOAuth": false,
+   "oauthOnly": false,
+   "sourceFile": "minimax.ts"
+  },
+  {
+   "id": "mistral",
+   "name": "Mistral",
+   "baseUrl": "https://api.mistral.ai",
+   "apis": [
+    "mistral-conversations"
+   ],
+   "protocols": [],
+   "unsupportedApis": [
+    "mistral-conversations"
+   ],
+   "envKeys": [
+    "MISTRAL_API_KEY"
+   ],
+   "hasOAuth": false,
+   "oauthOnly": false,
+   "sourceFile": "mistral.ts"
+  },
+  {
+   "id": "moonshotai-cn",
+   "name": "Moonshot AI CN",
+   "baseUrl": "https://api.moonshot.cn/v1",
+   "apis": [
+    "openai-completions"
+   ],
+   "protocols": [
+    "openai_compatible_chat"
+   ],
+   "unsupportedApis": [],
+   "envKeys": [
+    "MOONSHOT_API_KEY"
+   ],
+   "hasOAuth": false,
+   "oauthOnly": false,
+   "sourceFile": "moonshotai-cn.ts"
+  },
+  {
+   "id": "moonshotai",
+   "name": "Moonshot AI",
+   "baseUrl": "https://api.moonshot.ai/v1",
+   "apis": [
+    "openai-completions"
+   ],
+   "protocols": [
+    "openai_compatible_chat"
+   ],
+   "unsupportedApis": [],
+   "envKeys": [
+    "MOONSHOT_API_KEY"
+   ],
+   "hasOAuth": false,
+   "oauthOnly": false,
+   "sourceFile": "moonshotai.ts"
+  },
+  {
+   "id": "nvidia",
+   "name": "NVIDIA",
+   "baseUrl": "https://integrate.api.nvidia.com/v1",
+   "apis": [
+    "openai-completions"
+   ],
+   "protocols": [
+    "openai_compatible_chat"
+   ],
+   "unsupportedApis": [],
+   "envKeys": [
+    "NVIDIA_API_KEY"
+   ],
+   "hasOAuth": false,
+   "oauthOnly": false,
+   "sourceFile": "nvidia.ts"
+  },
+  {
+   "id": "openai-codex",
+   "name": "OpenAI Codex",
+   "baseUrl": "https://chatgpt.com/backend-api",
+   "apis": [
+    "openai-codex-responses"
+   ],
+   "protocols": [
+    "openai_responses"
+   ],
+   "unsupportedApis": [],
+   "envKeys": [],
+   "hasOAuth": true,
+   "oauthOnly": true,
+   "sourceFile": "openai-codex.ts"
+  },
+  {
+   "id": "openai",
+   "name": "OpenAI",
+   "baseUrl": "https://api.openai.com/v1",
+   "apis": [
+    "openai-responses"
+   ],
+   "protocols": [
+    "openai_responses"
+   ],
+   "unsupportedApis": [],
+   "envKeys": [
+    "OPENAI_API_KEY"
+   ],
+   "hasOAuth": false,
+   "oauthOnly": false,
+   "sourceFile": "openai.ts"
+  },
+  {
+   "id": "opencode-go",
+   "name": "OpenCode Go",
+   "baseUrl": null,
+   "apis": [
+    "anthropic-messages",
+    "openai-completions",
+    "openai-responses"
+   ],
+   "protocols": [
+    "anthropic_messages",
+    "openai_compatible_chat",
+    "openai_responses"
+   ],
+   "unsupportedApis": [],
+   "envKeys": [
+    "OPENCODE_API_KEY"
+   ],
+   "hasOAuth": false,
+   "oauthOnly": false,
+   "sourceFile": "opencode-go.ts"
+  },
+  {
+   "id": "opencode",
+   "name": "OpenCode Zen",
+   "baseUrl": null,
+   "apis": [
+    "anthropic-messages",
+    "google-generative-ai",
+    "openai-completions",
+    "openai-responses"
+   ],
+   "protocols": [
+    "anthropic_messages",
+    "gemini_generate_content",
+    "openai_compatible_chat",
+    "openai_responses"
+   ],
+   "unsupportedApis": [],
+   "envKeys": [
+    "OPENCODE_API_KEY"
+   ],
+   "hasOAuth": false,
+   "oauthOnly": false,
+   "sourceFile": "opencode.ts"
+  },
+  {
+   "id": "openrouter",
+   "name": "OpenRouter",
+   "baseUrl": "https://openrouter.ai/api/v1",
+   "apis": [
+    "anthropic-messages",
+    "openai-completions"
+   ],
+   "protocols": [
+    "anthropic_messages",
+    "openai_compatible_chat"
+   ],
+   "unsupportedApis": [],
+   "envKeys": [
+    "OPENROUTER_API_KEY"
+   ],
+   "hasOAuth": true,
+   "oauthOnly": false,
+   "sourceFile": "openrouter.ts"
+  },
+  {
+   "id": "qwen-token-plan-cn",
+   "name": "Qwen Token Plan CN",
+   "baseUrl": "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+   "apis": [
+    "openai-completions"
+   ],
+   "protocols": [
+    "openai_compatible_chat"
+   ],
+   "unsupportedApis": [],
+   "envKeys": [
+    "QWEN_TOKEN_PLAN_CN_API_KEY"
+   ],
+   "hasOAuth": false,
+   "oauthOnly": false,
+   "sourceFile": "qwen-token-plan-cn.ts"
+  },
+  {
+   "id": "qwen-token-plan-individual",
+   "name": "Qwen Token Plan Individual",
+   "baseUrl": "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
+   "apis": [
+    "openai-completions"
+   ],
+   "protocols": [
+    "openai_compatible_chat"
+   ],
+   "unsupportedApis": [],
+   "envKeys": [
+    "QWEN_TOKEN_PLAN_API_KEY"
+   ],
+   "hasOAuth": false,
+   "oauthOnly": false,
+   "sourceFile": "qwen-token-plan-individual.ts"
+  },
+  {
+   "id": "qwen-token-plan",
+   "name": "Qwen Token Plan",
+   "baseUrl": "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
+   "apis": [
+    "openai-completions"
+   ],
+   "protocols": [
+    "openai_compatible_chat"
+   ],
+   "unsupportedApis": [],
+   "envKeys": [
+    "QWEN_TOKEN_PLAN_API_KEY"
+   ],
+   "hasOAuth": false,
+   "oauthOnly": false,
+   "sourceFile": "qwen-token-plan.ts"
+  },
+  {
+   "id": "together",
+   "name": "Together",
+   "baseUrl": "https://api.together.ai/v1",
+   "apis": [
+    "openai-completions"
+   ],
+   "protocols": [
+    "openai_compatible_chat"
+   ],
+   "unsupportedApis": [],
+   "envKeys": [
+    "TOGETHER_API_KEY"
+   ],
+   "hasOAuth": false,
+   "oauthOnly": false,
+   "sourceFile": "together.ts"
+  },
+  {
+   "id": "vercel-ai-gateway",
+   "name": "Vercel AI Gateway",
+   "baseUrl": "https://ai-gateway.vercel.sh",
+   "apis": [
+    "anthropic-messages"
+   ],
+   "protocols": [
+    "anthropic_messages"
+   ],
+   "unsupportedApis": [],
+   "envKeys": [
+    "AI_GATEWAY_API_KEY"
+   ],
+   "hasOAuth": false,
+   "oauthOnly": false,
+   "sourceFile": "vercel-ai-gateway.ts"
+  },
+  {
+   "id": "xai",
+   "name": "xAI",
+   "baseUrl": "https://api.x.ai/v1",
+   "apis": [
+    "openai-responses"
+   ],
+   "protocols": [
+    "openai_responses"
+   ],
+   "unsupportedApis": [],
+   "envKeys": [
+    "XAI_API_KEY"
+   ],
+   "hasOAuth": true,
+   "oauthOnly": false,
+   "sourceFile": "xai.ts"
+  },
+  {
+   "id": "xiaomi-token-plan-ams",
+   "name": "Xiaomi Token Plan AMS",
+   "baseUrl": "https://token-plan-ams.xiaomimimo.com/v1",
+   "apis": [
+    "openai-completions"
+   ],
+   "protocols": [
+    "openai_compatible_chat"
+   ],
+   "unsupportedApis": [],
+   "envKeys": [
+    "XIAOMI_TOKEN_PLAN_AMS_API_KEY"
+   ],
+   "hasOAuth": false,
+   "oauthOnly": false,
+   "sourceFile": "xiaomi-token-plan-ams.ts"
+  },
+  {
+   "id": "xiaomi-token-plan-cn",
+   "name": "Xiaomi Token Plan CN",
+   "baseUrl": "https://token-plan-cn.xiaomimimo.com/v1",
+   "apis": [
+    "openai-completions"
+   ],
+   "protocols": [
+    "openai_compatible_chat"
+   ],
+   "unsupportedApis": [],
+   "envKeys": [
+    "XIAOMI_TOKEN_PLAN_CN_API_KEY"
+   ],
+   "hasOAuth": false,
+   "oauthOnly": false,
+   "sourceFile": "xiaomi-token-plan-cn.ts"
+  },
+  {
+   "id": "xiaomi-token-plan-sgp",
+   "name": "Xiaomi Token Plan SGP",
+   "baseUrl": "https://token-plan-sgp.xiaomimimo.com/v1",
+   "apis": [
+    "openai-completions"
+   ],
+   "protocols": [
+    "openai_compatible_chat"
+   ],
+   "unsupportedApis": [],
+   "envKeys": [
+    "XIAOMI_TOKEN_PLAN_SGP_API_KEY"
+   ],
+   "hasOAuth": false,
+   "oauthOnly": false,
+   "sourceFile": "xiaomi-token-plan-sgp.ts"
+  },
+  {
+   "id": "xiaomi",
+   "name": "Xiaomi",
+   "baseUrl": "https://api.xiaomimimo.com/v1",
+   "apis": [
+    "openai-completions"
+   ],
+   "protocols": [
+    "openai_compatible_chat"
+   ],
+   "unsupportedApis": [],
+   "envKeys": [
+    "XIAOMI_API_KEY"
+   ],
+   "hasOAuth": false,
+   "oauthOnly": false,
+   "sourceFile": "xiaomi.ts"
+  },
+  {
+   "id": "zai-coding-cn",
+   "name": "Z.AI Coding CN",
+   "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
+   "apis": [
+    "openai-completions"
+   ],
+   "protocols": [
+    "openai_compatible_chat"
+   ],
+   "unsupportedApis": [],
+   "envKeys": [
+    "ZAI_CODING_CN_API_KEY"
+   ],
+   "hasOAuth": false,
+   "oauthOnly": false,
+   "sourceFile": "zai-coding-cn.ts"
+  },
+  {
+   "id": "zai",
+   "name": "Z.AI",
+   "baseUrl": "https://api.z.ai/api/coding/paas/v4",
+   "apis": [
+    "openai-completions"
+   ],
+   "protocols": [
+    "openai_compatible_chat"
+   ],
+   "unsupportedApis": [],
+   "envKeys": [
+    "ZAI_API_KEY"
+   ],
+   "hasOAuth": false,
+   "oauthOnly": false,
+   "sourceFile": "zai.ts"
+  }
+ ]
+}

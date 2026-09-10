@@ -3,6 +3,8 @@
  * URL 与各平台 OpenAI 兼容文档核对日期：2026-04-19。
  */
 
+import type { LlmCatalogProvider, LlmProviderPlaceholder } from '../api/llm'
+
 export interface LlmProviderPreset {
   id: string
   label: string
@@ -12,6 +14,76 @@ export interface LlmProviderPreset {
   /** 含 <resource> / <region> 等占位符，需用户替换 */
   requiresManualEdit?: boolean
   hint?: string
+  // ---- T-820：来自 /api/llm/catalog 的扩展字段（静态兜底表没有） ----
+  /** 名录厂商 id；写入 ApiPreset.providerId */
+  providerId?: string
+  /** 分组：global / cn / gateway / oauth */
+  group?: string
+  /** 默认协议（可为 auto） */
+  defaultProtocol?: string
+  supportedProtocols?: string[]
+  /** 结构化占位符（有则由表单输入 providerParams，而非手改 URL） */
+  placeholders?: LlmProviderPlaceholder[]
+  authStyle?: string
+  requiresOAuth?: boolean
+  cacheStrategy?: string
+  fastMode?: string | null
+  docsUrl?: string | null
+  suggestedModels?: string[]
+}
+
+export const LLM_PROVIDER_GROUP_LABELS: Record<string, string> = {
+  global: '国际厂商',
+  cn: '中国厂商',
+  gateway: '聚合网关',
+  oauth: '需要登录（OAuth）',
+}
+
+export const LLM_PROVIDER_GROUP_ORDER = ['cn', 'global', 'gateway', 'oauth']
+
+export const LLM_CACHE_STRATEGY_LABELS: Record<string, string> = {
+  explicit: '显式缓存',
+  implicit: '自动缓存',
+  best_effort: '尽力缓存',
+  none: '无缓存',
+}
+
+/** 把名录条目转成 combobox 可用的预设项（label 使用中文标签，模板占位符保留 {key} 形式） */
+export function catalogProviderToPreset(p: LlmCatalogProvider): LlmProviderPreset {
+  return {
+    id: p.id,
+    providerId: p.id,
+    label: p.label || p.name,
+    name: p.label || p.name,
+    baseUrl: p.baseUrlTemplate || '',
+    keywords: [...(p.keywords || []), p.id, p.name, ...(p.legacyIds || [])].filter(Boolean),
+    requiresManualEdit: (p.placeholders?.length ?? 0) > 0,
+    hint: p.hint ?? undefined,
+    group: p.group,
+    defaultProtocol: p.defaultProtocol,
+    supportedProtocols: p.supportedProtocols,
+    placeholders: p.placeholders,
+    authStyle: p.authStyle,
+    requiresOAuth: p.requiresOAuth,
+    cacheStrategy: p.cacheStrategy,
+    fastMode: p.fastMode ?? null,
+    docsUrl: p.docsUrl ?? null,
+    suggestedModels: p.suggestedModels,
+  }
+}
+
+/** 名录列表分组排序：中国厂商 → 国际 → 网关 → OAuth；组内保持名录顺序 */
+export function groupProviderPresets(list: LlmProviderPreset[]): Array<{ group: string; label: string; items: LlmProviderPreset[] }> {
+  const buckets = new Map<string, LlmProviderPreset[]>()
+  for (const p of list) {
+    const g = p.group || 'global'
+    if (!buckets.has(g)) buckets.set(g, [])
+    buckets.get(g)!.push(p)
+  }
+  const order = [...LLM_PROVIDER_GROUP_ORDER, ...[...buckets.keys()].filter((g) => !LLM_PROVIDER_GROUP_ORDER.includes(g))]
+  return order
+    .filter((g) => buckets.has(g))
+    .map((g) => ({ group: g, label: LLM_PROVIDER_GROUP_LABELS[g] ?? g, items: buckets.get(g)! }))
 }
 
 // https://openrouter.ai/docs

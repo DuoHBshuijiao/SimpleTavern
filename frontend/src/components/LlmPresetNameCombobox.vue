@@ -1,11 +1,12 @@
 ﻿<script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ChevronDown, X } from 'lucide-vue-next'
-import { LLM_PROVIDER_PRESETS, type LlmProviderPreset } from '../constants/llmProviderPresets'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { ChevronDown, KeyRound, Search, X } from 'lucide-vue-next'
+import { LLM_PROVIDER_PRESETS, groupProviderPresets, LLM_CACHE_STRATEGY_LABELS, type LlmProviderPreset } from '../constants/llmProviderPresets'
+import { LLM_PROTOCOL_SHORT_LABELS } from '../constants/llmProtocols'
 
 const DROPDOWN_GAP_PX = 6
-const PANEL_MAX_PX = 224
-const PANEL_MIN_PX = 96
+const PANEL_MAX_PX = 320
+const PANEL_MIN_PX = 120
 
 const props = withDefaults(
   defineProps<{
@@ -27,7 +28,28 @@ const emit = defineEmits<{
 }>()
 
 const rootRef = ref<HTMLElement | null>(null)
+const searchInputRef = ref<HTMLInputElement | null>(null)
 const dropdownOpen = ref(false)
+/** 面板内独立搜索框：不用主输入框筛选，默认名称如「新 API 预设」不会挡住整表 */
+const filterQuery = ref('')
+
+const groupedPresets = computed(() => {
+  const q = filterQuery.value.trim().toLowerCase()
+  const list = q
+    ? props.presets.filter((p) => {
+        const hay = [p.label, p.name, p.id, p.baseUrl, ...(p.keywords || []), ...(p.suggestedModels || [])].join(' ').toLowerCase()
+        return hay.includes(q)
+      })
+    : props.presets
+  return groupProviderPresets(list)
+})
+
+const totalVisible = computed(() => groupedPresets.value.reduce((n, g) => n + g.items.length, 0))
+
+function protocolBadges(p: LlmProviderPreset): string[] {
+  const list = (p.supportedProtocols || []).filter((x) => x !== 'auto')
+  return list.map((x) => LLM_PROTOCOL_SHORT_LABELS[x] ?? x)
+}
 const dropdownPlacement = ref<'down' | 'up'>('down')
 const panelMaxHeightPx = ref(PANEL_MAX_PX)
 
@@ -119,9 +141,11 @@ onBeforeUnmount(() => {
 
 watch(dropdownOpen, (open) => {
   if (open) {
+    filterQuery.value = ''
     nextTick(() => {
       updateDropdownPlacement()
       bindPlacementListeners()
+      searchInputRef.value?.focus()
     })
   } else {
     unbindPlacementListeners()
@@ -169,26 +193,67 @@ watch(dropdownOpen, (open) => {
           : 'bottom-[calc(100%+0.375rem)] top-auto'
       "
     >
+      <div class="border-b border-[var(--color-border-subtle)] p-1.5">
+        <label class="relative block">
+          <Search class="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--color-text-muted)]" />
+          <input
+            ref="searchInputRef"
+            v-model="filterQuery"
+            type="text"
+            class="input input-sm w-full !pl-7"
+            placeholder="搜索厂商 / 关键词 / 模型名…"
+            aria-label="搜索供应商"
+            @keydown.stop
+          />
+        </label>
+      </div>
       <div
         class="overflow-y-auto p-1 custom-scrollbar"
         :style="{ maxHeight: `${panelMaxHeightPx}px` }"
+        data-testid="llm-provider-list"
       >
-        <button
-          v-for="preset in presets"
-          :key="preset.id"
-          type="button"
-          class="flex w-full flex-col items-start gap-0.5 rounded-lg px-3 py-2 text-left transition-colors hover:bg-surface-hover"
-          @click="choosePreset(preset)"
-        >
-          <div class="w-full truncate text-xs font-medium text-[var(--color-text-secondary)]">
-            {{ preset.label }}
+        <template v-for="group in groupedPresets" :key="group.group">
+          <div class="px-2 pt-1.5 pb-0.5 text-2xs font-bold uppercase tracking-wider text-[var(--color-text-muted)]">
+            {{ group.label }}
           </div>
-          <div class="w-full truncate text-2xs text-[var(--color-text-muted)]">
-            <template v-if="preset.requiresManualEdit">需替换占位符 · </template>{{ preset.baseUrl }}
-          </div>
-        </button>
-        <div v-if="presets.length === 0" class="px-3 py-3 text-xs text-[var(--color-text-muted)]">
-          暂无供应商
+          <button
+            v-for="preset in group.items"
+            :key="preset.id"
+            type="button"
+            class="flex w-full flex-col items-start gap-0.5 rounded-lg px-3 py-2 text-left transition-colors hover:bg-surface-hover"
+            @click="choosePreset(preset)"
+          >
+            <div class="flex w-full min-w-0 items-center gap-1.5">
+              <span class="min-w-0 truncate text-xs font-medium text-[var(--color-text-secondary)]">{{ preset.label }}</span>
+              <span
+                v-for="b in protocolBadges(preset)"
+                :key="b"
+                class="shrink-0 rounded bg-[var(--color-glass-l2)] px-1 py-px text-2xs leading-none text-[var(--color-text-muted)]"
+              >{{ b }}</span>
+              <span
+                v-if="preset.cacheStrategy && preset.cacheStrategy !== 'none'"
+                class="shrink-0 rounded bg-brand-a15 px-1 py-px text-2xs leading-none text-brand"
+              >{{ LLM_CACHE_STRATEGY_LABELS[preset.cacheStrategy] ?? preset.cacheStrategy }}</span>
+              <span
+                v-else-if="preset.cacheStrategy === 'none'"
+                class="shrink-0 rounded bg-[var(--color-glass-l2)] px-1 py-px text-2xs leading-none text-[var(--color-text-muted)]"
+              >无缓存</span>
+              <span
+                v-if="preset.requiresOAuth"
+                class="inline-flex shrink-0 items-center gap-0.5 rounded bg-[color-mix(in_srgb,var(--color-warning)_18%,transparent)] px-1 py-px text-2xs leading-none text-[var(--color-warning-text,var(--color-warning))]"
+              ><KeyRound class="h-2.5 w-2.5" />登录</span>
+              <span
+                v-else-if="preset.requiresManualEdit"
+                class="shrink-0 rounded bg-brand-a15 px-1 py-px text-2xs leading-none text-brand"
+              >需参数</span>
+            </div>
+            <div class="w-full truncate text-2xs text-[var(--color-text-muted)]">
+              {{ preset.baseUrl || '（地址由参数生成）' }}
+            </div>
+          </button>
+        </template>
+        <div v-if="totalVisible === 0" class="px-3 py-3 text-xs text-[var(--color-text-muted)]">
+          {{ presets.length === 0 ? '暂无供应商' : '无匹配厂商；可直接在名称框输入自定义名称' }}
         </div>
       </div>
     </div>
