@@ -2,6 +2,7 @@ import { computed, ref } from 'vue'
 import { apiPost, apiPut } from '../api/http'
 import {
   useSettingsImport,
+  coerceImportWarningText,
   type SillyTavernImportPreview,
 } from './useSettingsImport'
 import { notifyMessage } from './useNotify'
@@ -168,7 +169,7 @@ export function useEmbeddedAvatarImport(options: UseEmbeddedAvatarImportOptions)
         avatarEmbeddedStPendingId.value = ''
         incoming = built.character as unknown as CharacterCard
         worldbookPayload = built.worldbook ? (built.worldbook as unknown as WorldBook) : undefined
-        mergeWarnings = built.warnings
+        mergeWarnings = (built.warnings || []).map(coerceImportWarningText).filter(Boolean)
       } else {
         incoming = embeddedCardPreview.value.card
         worldbookPayload = embeddedCardPreview.value.worldbook ?? undefined
