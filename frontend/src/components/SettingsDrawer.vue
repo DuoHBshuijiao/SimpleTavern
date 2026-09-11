@@ -89,6 +89,7 @@ import SettingsDrawerGlobalAppearanceSection from './settings-drawer/SettingsDra
 import SettingsDrawerGlobalTtsSection from './settings-drawer/SettingsDrawerGlobalTtsSection.vue'
 import SettingsDrawerGlobalAppSection from './settings-drawer/SettingsDrawerGlobalAppSection.vue'
 import SettingsDrawerPresetsTab from './settings-drawer/SettingsDrawerPresetsTab.vue'
+import OAuthLoginModal from './settings-drawer/OAuthLoginModal.vue'
 import SettingsDrawerChatTab from './settings-drawer/SettingsDrawerChatTab.vue'
 import { isTtsApiPreset, resolveTtsProvider } from '../utils/apiPresetKind'
 import { normalizeVoiceCatalog } from '../utils/voiceCatalog'
@@ -108,7 +109,7 @@ import {
 import { notifyConfirm, notifyMessage } from '../composables/useNotify'
 import { catalogProviderToPreset, LLM_PROVIDER_PRESETS, type LlmProviderPreset } from '../constants/llmProviderPresets'
 import { AUTO_LLM_PROTOCOL, DEFAULT_LLM_PROTOCOL, LLM_PROTOCOL_OPTIONS, llmProtocolSelectOptions, normalizeLlmProtocol } from '../constants/llmProtocols'
-import { fetchLlmCatalog, type LlmCatalog, type LlmCatalogProvider } from '../api/llm'
+import { fetchLlmCatalog, fetchOAuthStatus, logoutOAuthPreset, type LlmCatalog, type LlmCatalogProvider, type OAuthStatusPublic } from '../api/llm'
 import PromptCacheGuideModal from './modals/PromptCacheGuideModal.vue'
 import {
   ANTHROPIC_PROMPT_CACHE_OPTIONS,
@@ -249,6 +250,7 @@ watch(
 
 watch(tab, (t) => {
   if (t === 'chat') chatTabEverOpened.value = true
+  if (t === 'presets') void refreshOAuthStatuses()
 })
 
 watch(
@@ -1256,6 +1258,47 @@ async function ensureLlmCatalog() {
 const showPromptCacheGuide = ref(false)
 function openCacheGuide() {
   showPromptCacheGuide.value = true
+}
+
+const oauthStatusByPreset = ref<Record<string, OAuthStatusPublic>>({})
+const showOAuthLogin = ref(false)
+
+function presetRequiresOAuth(preset: ApiPreset | null | undefined): boolean {
+  if (!preset) return false
+  if ((preset.authStyle || '').startsWith('oauth')) return true
+  return !!catalogProviderFor(preset)?.requiresOAuth
+}
+
+function oauthStatusFor(presetId: string | null | undefined): OAuthStatusPublic | null {
+  if (!presetId) return null
+  return oauthStatusByPreset.value[presetId] ?? null
+}
+
+async function refreshOAuthStatuses() {
+  try {
+    const res = await fetchOAuthStatus()
+    oauthStatusByPreset.value = res.presets ?? {}
+  } catch {
+    oauthStatusByPreset.value = {}
+  }
+}
+
+function openOAuthLogin() {
+  if (!editingPreset.value) return
+  showOAuthLogin.value = true
+}
+
+async function logoutCurrentOAuthPreset() {
+  const id = editingPreset.value?.id
+  if (!id) return
+  const ok = await notifyConfirm({ title: '退出登录', message: '确定退出该预设的 OAuth 登录？', variant: 'danger' })
+  if (!ok) return
+  try {
+    await logoutOAuthPreset(id)
+    await refreshOAuthStatuses()
+  } catch (e) {
+    await notifyMessage(e instanceof Error ? e.message : String(e))
+  }
 }
 
 function normalizePresetDraft(preset: ApiPreset): ApiPreset {
@@ -2952,6 +2995,7 @@ async function deletePreset(id: string) {
   if (editingPresetId.value === id) {
     editingPresetId.value = globalDraft.value.apiPresets[0]?.id || null
   }
+  void logoutOAuthPreset(id).then(() => refreshOAuthStatuses()).catch(() => {})
   // 从「最近使用」中移除已不在任何非 TTS 预设（或全局候选）中的模型
   const presets = globalDraft.value.apiPresets
   const available = presets.length > 0
@@ -3027,6 +3071,10 @@ async function openModelSelector(preset: ApiPreset) {
             baseUrl: preset.baseUrl,
             apiKey: preset.apiKey,
             protocol: normalizeLlmProtocol(preset.protocol),
+            providerId: preset.providerId,
+            providerParams: preset.providerParams,
+            presetId: preset.id,
+            authStyle: preset.authStyle,
         })
         candidateModels.value = models
         selectedCandidateModels.value = new Set(preset.models)
@@ -3135,6 +3183,10 @@ provide(
     openCacheGuide,
     llmCatalog,
     llmComboboxPresets,
+    presetRequiresOAuth,
+    oauthStatusFor,
+    openOAuthLogin,
+    logoutCurrentOAuthPreset,
     onEditingPresetTtsProviderChange,
     handleApiPresetOrderDragStart,
     handleApiPresetOrderDragOver,
@@ -4416,6 +4468,15 @@ provide(
     :selected="selectedCandidateModels"
     @toggle="toggleCandidate"
     @confirm="saveModelSelection"
+  />
+
+  <OAuthLoginModal
+    :show="showOAuthLogin"
+    :preset-id="editingPreset?.id ?? null"
+    :provider-id="editingPreset?.providerId ?? catalogProviderFor(editingPreset)?.id ?? null"
+    :provider-label="catalogProviderFor(editingPreset)?.label || editingPreset?.name || 'OAuth'"
+    @close="showOAuthLogin = false"
+    @logged-in="void refreshOAuthStatuses()"
   />
 
   <SettingsDrawerVoiceSelectorModal

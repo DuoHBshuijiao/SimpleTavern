@@ -755,6 +755,9 @@ def prepare_llm_request(
     entry = cat.find_provider(credentials.provider_id) if credentials.provider_id else None
     if entry is None:
         entry = cat.find_provider_by_base_url(resolution.base_url or credentials.base_url)
+    merged_headers = dict(credentials.extra_headers or {})
+    merged_headers.update(headers or {})
+    headers = merged_headers
     merged_extra = attach_control_block(
         merged_extra,
         prompt_cache=resolution.cache.to_dict() if resolution.cache is not None else None,

@@ -19,6 +19,9 @@ def test_auth_headers_by_style() -> None:
     assert auth_headers_for_style("k", "api-key") == {"api-key": "k"}
     assert auth_headers_for_style("k", "x-goog-api-key") == {"x-goog-api-key": "k"}
     assert auth_headers_for_style("k", "query_key") == {}
+    assert auth_headers_for_style("k", "oauth_device") == {"Authorization": "Bearer k"}
+    assert auth_headers_for_style("k", "oauth_pkce") == {"Authorization": "Bearer k"}
+    assert auth_headers_for_style("", "oauth_device") == {}
 
 
 def test_query_key_and_api_version() -> None:

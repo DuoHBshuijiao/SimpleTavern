@@ -163,10 +163,70 @@ export function testModels(
     protocol?: string | null
     providerId?: string | null
     providerParams?: Record<string, string> | null
+    presetId?: string | null
+    authStyle?: string | null
   },
   signal?: AbortSignal,
 ): Promise<string[]> {
   return apiPost<string[]>('/api/llm/test-models', body, signal)
+}
+
+export interface OAuthStatusPublic {
+  loggedIn: boolean
+  expiresAt?: number | null
+  accountId?: string | null
+  provider?: string | null
+  enterpriseUrl?: string | null
+  presetId?: string
+}
+
+export interface OAuthStartResult {
+  sessionId: string
+  method: 'device_code' | 'pkce'
+  provider: string
+  userCode?: string
+  verificationUri?: string
+  interval?: number
+  expiresIn?: number
+  authorizeUrl?: string
+  redirectUri?: string
+}
+
+export interface OAuthPollResult extends OAuthStatusPublic {
+  status: 'pending' | 'slow_down' | 'complete' | 'failed' | 'expired'
+  message?: string
+  intervalSeconds?: number
+  presetId?: string
+}
+
+export function fetchOAuthStatus(presetId?: string): Promise<{ presets?: Record<string, OAuthStatusPublic> } & OAuthStatusPublic> {
+  const q = presetId ? `?presetId=${encodeURIComponent(presetId)}` : ''
+  return apiGet(`/api/llm/oauth/status${q}`)
+}
+
+export function startOAuthLogin(body: {
+  presetId: string
+  providerId?: string | null
+  method?: 'device_code' | 'pkce'
+  enterpriseUrl?: string | null
+}): Promise<OAuthStartResult> {
+  return apiPost('/api/llm/oauth/start', body)
+}
+
+export function pollOAuthLogin(sessionId: string): Promise<OAuthPollResult> {
+  return apiPost('/api/llm/oauth/poll', { sessionId })
+}
+
+export function completeOAuthPkce(sessionId: string, callback: string): Promise<OAuthPollResult> {
+  return apiPost('/api/llm/oauth/complete-pkce', { sessionId, callback })
+}
+
+export function cancelOAuthLogin(sessionId: string): Promise<{ ok: boolean }> {
+  return apiPost('/api/llm/oauth/cancel', { sessionId })
+}
+
+export function logoutOAuthPreset(presetId: string): Promise<{ ok: boolean }> {
+  return apiPost('/api/llm/oauth/logout', { presetId })
 }
 
 /** 与后端 Usage.to_public_dict 字段名保持一致；缺失时返回 null */

@@ -409,7 +409,8 @@
    "defaultProtocol": "openai_compatible_chat",
    "cacheStrategy": "best_effort",
    "docsUrl": "https://docs.github.com/en/copilot",
-   "keywords": ["copilot", "github"]
+   "keywords": ["copilot", "github"],
+   "hint": "登录后即可对话。GitHub Copilot 使用设备码；Enterprise 可填域名。"
   },
   {
    "id": "openai-codex",
@@ -427,7 +428,7 @@
    "docsUrl": "https://developers.openai.com/codex",
    "keywords": ["codex", "chatgpt"],
    "modelsProviderId": "openai",
-   "hint": "非公开 API，鉴权契约变化时会明确报错。"
+   "hint": "非公开 API。默认设备码登录；也可打开授权页后把 localhost:1455 回调 URL 粘贴回来。"
   },
   {
    "id": "deepseek",

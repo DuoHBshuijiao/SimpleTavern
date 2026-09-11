@@ -155,6 +155,29 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                                     <component :is="presets.editingPresetShowApiKey ? Eye : EyeOff" class="w-4 h-4" />
                                 </button>
                              </div>
+                            <div v-if="presets.presetRequiresOAuth(presets.editingPreset)" class="flex flex-wrap items-center gap-2 pt-1">
+                              <span class="text-xs text-[var(--color-text-muted)]">
+                                {{ presets.oauthStatusFor(presets.editingPreset?.id)?.loggedIn ? '已登录' : '需要登录后才能发请求' }}
+                                <span v-if="presets.oauthStatusFor(presets.editingPreset?.id)?.accountId">
+                                  · {{ presets.oauthStatusFor(presets.editingPreset?.id)?.accountId }}
+                                </span>
+                              </span>
+                              <button
+                                type="button"
+                                class="btn btn-xs btn-primary"
+                                @click="presets.openOAuthLogin"
+                              >
+                                {{ presets.oauthStatusFor(presets.editingPreset?.id)?.loggedIn ? '重新登录' : '登录' }}
+                              </button>
+                              <button
+                                v-if="presets.oauthStatusFor(presets.editingPreset?.id)?.loggedIn"
+                                type="button"
+                                class="btn btn-xs btn-secondary"
+                                @click="presets.logoutCurrentOAuthPreset"
+                              >
+                                退出登录
+                              </button>
+                            </div>
                         </div>
 
                         <div class="space-y-2">

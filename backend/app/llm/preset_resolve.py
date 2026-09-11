@@ -39,6 +39,7 @@ class LlmPresetCredentials:
     preset_name: str | None = None
     # 预设 / 全局连接级「回传思考内容」开关；最终生效值还要看 settings.reasoningEchoBack（见 llm.resolution）
     echo_reasoning: bool = True
+    extra_headers: dict[str, str] = field(default_factory=dict)
 
 
 class LlmPresetResolveError(ValueError):
@@ -81,21 +82,25 @@ def _credential_from_preset(preset: ApiPreset, *, source: str) -> LlmPresetCrede
     requires_oauth = str(getattr(preset, "authStyle", "") or "").startswith("oauth")
     if not (preset.apiKey or "").strip() and not requires_oauth:
         raise LlmPresetResolveError("MISSING_API_KEY", f"API 预设「{preset.name}」缺少 API Key。")
-    return LlmPresetCredentials(
-        base_url=preset.baseUrl.strip(),
-        api_key=(preset.apiKey or "").strip(),
-        preset_id=preset.id,
-        source=source,
-        protocol=normalize_protocol_id(getattr(preset, "protocol", None)),
-        anthropic_prompt_cache=normalize_anthropic_prompt_cache(
-            getattr(preset, "anthropicPromptCache", None)
-        ),
-        prompt_cache=_prompt_cache_of(preset),
-        provider_id=(getattr(preset, "providerId", None) or None),
-        provider_params=dict(getattr(preset, "providerParams", None) or {}),
-        auth_style=normalize_auth_style(getattr(preset, "authStyle", None)),
-        preset_name=preset.name,
-        echo_reasoning=bool(getattr(preset, "echoReasoning", True)),
+    from app.llm.oauth.apply import apply_stored_oauth
+
+    return apply_stored_oauth(
+        LlmPresetCredentials(
+            base_url=preset.baseUrl.strip(),
+            api_key=(preset.apiKey or "").strip(),
+            preset_id=preset.id,
+            source=source,
+            protocol=normalize_protocol_id(getattr(preset, "protocol", None)),
+            anthropic_prompt_cache=normalize_anthropic_prompt_cache(
+                getattr(preset, "anthropicPromptCache", None)
+            ),
+            prompt_cache=_prompt_cache_of(preset),
+            provider_id=(getattr(preset, "providerId", None) or None),
+            provider_params=dict(getattr(preset, "providerParams", None) or {}),
+            auth_style=normalize_auth_style(getattr(preset, "authStyle", None)),
+            preset_name=preset.name,
+            echo_reasoning=bool(getattr(preset, "echoReasoning", True)),
+        )
     )
 
 

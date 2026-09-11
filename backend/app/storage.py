@@ -573,6 +573,14 @@ def save_settings(settings: Settings) -> Settings:
     if getattr(settings, "worldBookEntryScanDepthDefault", None) is None:
         settings.worldBookEntryScanDepthDefault = 2
     write_json(_settings_path(), settings.model_dump(mode="json"))
+    try:
+        from app.llm.oauth.store import prune_oauth_tokens
+
+        prune_oauth_tokens({p.id for p in (settings.apiPresets or []) if getattr(p, "id", None)})
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).exception("prune oauth tokens failed")
     return settings
 
 

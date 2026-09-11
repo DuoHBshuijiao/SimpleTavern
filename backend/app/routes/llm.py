@@ -40,6 +40,8 @@ class TestModelsRequest(BaseModel):
     protocol: str | None = Field(default=None, description="LLM 协议；缺省 openai_compatible_chat；auto 时按 base_url 所属厂商推断")
     providerId: str | None = Field(default=None, description="T-820：名录厂商 id，用于 auto 协议与 URL 模板")
     providerParams: dict[str, str] | None = Field(default=None, description="URL 模板占位参数（如 Azure resource）")
+    presetId: str | None = Field(default=None, description="T-830：用已保存预设（含 OAuth token）列模型")
+    authStyle: str | None = None
 
 
 class ResolvePreviewRequest(BaseModel):
@@ -113,14 +115,54 @@ async def get_models() -> list[str]:
 @router.post("/llm/test-models", response_model=list[str])
 async def test_models(req: TestModelsRequest) -> list[str]:
     """使用请求内凭证测试模型列表，不依赖全局设置。"""
-    protocol = _list_models_protocol(req)
-    get_adapter(protocol)
+    extra_headers: dict[str, str] | None = None
+    auth_style = req.authStyle
     base_url = req.baseUrl
-    if req.providerId and req.providerParams:
-        entry = get_catalog().find_provider(req.providerId)
+    api_key = req.apiKey
+    protocol_hint = req.protocol
+    provider_id = req.providerId
+    provider_params = req.providerParams
+    if req.presetId:
+        from app.llm.preset_resolve import LlmPresetResolveError, resolve_llm_preset_credentials
+
+        try:
+            creds = resolve_llm_preset_credentials(load_settings(), explicit_preset_id=req.presetId)
+        except LlmPresetResolveError as exc:
+            raise AppError(
+                code=exc.code,
+                message=exc.message,
+                source="llm.test_models",
+                status_code=exc.status_code,
+                suggested_action="OAuth 厂商请先在预设里登录",
+            ) from exc
+        base_url = creds.base_url
+        api_key = creds.api_key
+        extra_headers = creds.extra_headers or None
+        auth_style = creds.auth_style
+        protocol_hint = creds.protocol
+        provider_id = creds.provider_id
+        provider_params = creds.provider_params or None
+    protocol = _list_models_protocol(
+        TestModelsRequest(
+            baseUrl=base_url,
+            apiKey=api_key or "",
+            protocol=protocol_hint,
+            providerId=provider_id,
+            providerParams=provider_params,
+        )
+    )
+    get_adapter(protocol)
+    if provider_id and provider_params:
+        entry = get_catalog().find_provider(provider_id)
         if entry is not None and entry.requires_placeholders:
-            base_url = entry.render_base_url(req.providerParams, protocol=protocol) or base_url
-    models = await list_models(base_url=base_url, api_key=req.apiKey, protocol=protocol)
+            base_url = entry.render_base_url(provider_params, protocol=protocol) or base_url
+    models = await list_models(
+        base_url=base_url,
+        api_key=api_key,
+        protocol=protocol,
+        extra_headers=extra_headers,
+        auth_style=auth_style,
+    )
     return _require_models(models, source="llm.test_models", protocol=protocol)
 
 

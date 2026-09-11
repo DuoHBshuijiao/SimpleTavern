@@ -51,9 +51,13 @@ def _config(
     )
 
 
-async def list_models(*, base_url: str, api_key: str, protocol: str | None = None) -> list[str]:
+async def list_models(*, base_url: str, api_key: str, protocol: str | None = None, extra_headers: dict[str, str] | None = None, auth_style: str | None = None) -> list[str]:
     adapter = get_adapter(normalize_protocol_id(protocol))
-    return await adapter.list_models(base_url=base_url, api_key=api_key)
+    fn = adapter.list_models
+    try:
+        return await fn(base_url=base_url, api_key=api_key, extra_headers=extra_headers, auth_style=auth_style)
+    except TypeError:
+        return await fn(base_url=base_url, api_key=api_key)
 
 
 async def chat_completions(

@@ -71,8 +71,9 @@ def auth_headers_for_style(api_key: str, auth_style: str | None) -> dict[str, st
         return {"api-key": key}
     if style == "x-goog-api-key":
         return {"x-goog-api-key": key}
-    if style in {"query_key", "oauth_device", "oauth_pkce"}:
+    if style == "query_key":
         return {}
+    # oauth_device / oauth_pkce：已换发的 access token 走 Bearer（T-830）
     return {"Authorization": f"Bearer {key}"}
 
 

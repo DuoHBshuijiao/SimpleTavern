@@ -152,7 +152,11 @@ def _normalize_base_url(base_url: str) -> str:
     base = base.rstrip("/")
     parts = urlsplit(base)
     path = parts.path or ""
+    host = (parts.hostname or "").lower()
     if not path or path == "/":
+        # Copilot 官方端点在根路径：/chat/completions、/models，不能补 /v1
+        if host == "githubcopilot.com" or host.endswith(".githubcopilot.com"):
+            return urlunsplit((parts.scheme, parts.netloc, "", parts.query, parts.fragment)).rstrip("/")
         return urlunsplit((parts.scheme, parts.netloc, "/v1", parts.query, parts.fragment))
     return base
 
@@ -257,7 +261,13 @@ def _request_url_and_headers(
     return url, headers
 
 
-async def list_models_openai_compat(base_url: str, api_key: str) -> list[str]:
+async def list_models_openai_compat(
+    base_url: str,
+    api_key: str,
+    *,
+    extra_headers: dict[str, str] | None = None,
+    auth_style: str | None = None,
+) -> list[str]:
     """
     获取OpenAI兼容API的可用模型列表
     
@@ -285,7 +295,7 @@ async def list_models_openai_compat(base_url: str, api_key: str) -> list[str]:
         )
     try:
         url = _models_url(base_url)
-        headers = {"Accept": "application/json", **_common_headers(api_key)}
+        headers = {"Accept": "application/json", **_common_headers(api_key, auth_style), **(extra_headers or {})}
         async with log_outbound(
             source="llm",
             method="GET",
@@ -1070,8 +1080,17 @@ class OpenAICompatibleChatAdapter:
             payload["tool_choice"] = config.tool_choice
         return WireRequest(method="POST", url=url, headers=headers, json_body=payload)
 
-    async def list_models(self, *, base_url: str, api_key: str) -> list[str]:
-        return await list_models_openai_compat(base_url, api_key)
+    async def list_models(
+        self,
+        *,
+        base_url: str,
+        api_key: str,
+        extra_headers: dict[str, str] | None = None,
+        auth_style: str | None = None,
+    ) -> list[str]:
+        return await list_models_openai_compat(
+            base_url, api_key, extra_headers=extra_headers, auth_style=auth_style
+        )
 
     async def complete(
         self,

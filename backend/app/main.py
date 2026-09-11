@@ -48,6 +48,7 @@ from app.routes.page_backgrounds import router as page_backgrounds_router
 from app.routes.shader_presets import router as shader_presets_router
 from app.routes.settings import router as settings_router
 from app.routes.llm import router as llm_router
+from app.routes.oauth import router as oauth_router
 from app.routes.assistant import router as assistant_router
 from app.routes.tokenizer import router as tokenizer_router
 from app.routes.update import router as update_router
@@ -167,6 +168,7 @@ app.include_router(chats_router, prefix="/api")
 app.include_router(clipboard_router, prefix="/api")
 app.include_router(data_integrity_router, prefix="/api")
 app.include_router(llm_router, prefix="/api")
+app.include_router(oauth_router, prefix="/api")
 app.include_router(generate_router, prefix="/api")
 app.include_router(web_search_router, prefix="/api")
 app.include_router(avatars_router, prefix="/api")
