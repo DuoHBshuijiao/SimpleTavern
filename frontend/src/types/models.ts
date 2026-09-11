@@ -715,6 +715,8 @@ export interface AssistantAttachment {
  *    - probability: 参与概率（0-1，默认1，用于随机决定是否参与本轮对话）
  *    - includePersonality: 是否包含性格描述
  *    - includeScenario: 是否包含场景描述
+ *    - reasoningEffort: 成员级思考深度；null 沿用会话 / 全局
+ *    - fastMode: 成员级 Fast；null 沿用会话，false 显式关闭
  */
 export interface GroupMemberSettings {
   model?: string | null
@@ -724,6 +726,8 @@ export interface GroupMemberSettings {
   probability: number
   includePersonality?: boolean
   includeScenario?: boolean
+  reasoningEffort?: ReasoningEffort | null
+  fastMode?: boolean | null
 }
 
 /**

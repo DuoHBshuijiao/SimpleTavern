@@ -18,6 +18,31 @@ def test_session_override_wins() -> None:
     assert source == "session"
 
 
+def test_member_fast_explicit_false_beats_session_true() -> None:
+    from types import SimpleNamespace
+
+    from app.routes.generate import pick_reasoning_and_fast
+
+    runtime = SimpleNamespace(params=SimpleNamespace(reasoningEffort=None, fastMode=None))
+    chat = SimpleNamespace(overrides=SimpleNamespace(params=SimpleNamespace(reasoningEffort="low", fastMode=True)))
+    member = SimpleNamespace(reasoningEffort="high", fastMode=False)
+    effort, fast = pick_reasoning_and_fast(runtime=runtime, chat=chat, member_settings=member)
+    assert effort == "high"
+    assert fast is False
+
+
+def test_member_unset_inherits_session() -> None:
+    from types import SimpleNamespace
+
+    from app.routes.generate import pick_reasoning_and_fast
+
+    chat = SimpleNamespace(overrides=SimpleNamespace(params=SimpleNamespace(reasoningEffort="xhigh", fastMode=True)))
+    member = SimpleNamespace(reasoningEffort=None, fastMode=None)
+    effort, fast = pick_reasoning_and_fast(runtime=None, chat=chat, member_settings=member)
+    assert effort == "xhigh"
+    assert fast is True
+
+
 def test_global_used_when_no_override() -> None:
     class Settings:
         reasoningEffort = "medium"

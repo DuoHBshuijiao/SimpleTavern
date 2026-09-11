@@ -1294,6 +1294,8 @@ class GroupMemberSettings(BaseModel):
         probability: 参与概率，范围0.0-1.0，控制该成员在群聊中的参与度
         includePersonality: 是否在system prompt中包含personality字段
         includeScenario: 是否在system prompt中包含scenario字段
+        reasoningEffort: 成员级思考深度（T-831）；None 表示沿用会话 / 全局
+        fastMode: 成员级 Fast；None 表示沿用会话 / 全局，False 为显式关闭
     """
     model_config = ConfigDict(extra="allow")
 
@@ -1304,6 +1306,25 @@ class GroupMemberSettings(BaseModel):
     probability: float = Field(default=1.0, ge=0.0, le=1.0)
     includePersonality: bool = True
     includeScenario: bool = True
+    reasoningEffort: ReasoningEffort | None = Field(
+        default=None,
+        description="成员级思考深度（T-831）；None 表示沿用会话 overrides / 全局",
+    )
+    fastMode: bool | None = Field(
+        default=None,
+        description="成员级 Fast（T-831）；None 沿用会话，False 显式关闭",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_reasoning_override(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        if "reasoningEffort" not in data:
+            return data
+        incoming = dict(data)
+        incoming["reasoningEffort"] = normalize_reasoning_effort_or_none(incoming.get("reasoningEffort"))
+        return incoming
 
 
 class Chat(BaseModel):

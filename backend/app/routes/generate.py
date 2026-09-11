@@ -80,6 +80,30 @@ def get_last_generate_prep_profile() -> dict[str, Any] | None:
     return dict(_last_generate_prep_profile) if _last_generate_prep_profile is not None else None
 
 
+def pick_reasoning_and_fast(
+    *,
+    runtime: Any = None,
+    chat: Any = None,
+    member_settings: Any = None,
+) -> tuple[Any, bool]:
+    """思考深度 / Fast：runtime.params → memberSettings → chat.overrides.params。
+
+    ``None`` 表示沿用下一层；成员显式 ``fastMode=False`` 必须关掉。
+    最终 ``fast_mode`` 在全部层都缺省时为 False。
+    """
+
+    def _pick(name: str) -> Any:
+        val = getattr(getattr(runtime, "params", None), name, None) if runtime is not None else None
+        if val is None and member_settings is not None:
+            val = getattr(member_settings, name, None)
+        if val is None and chat is not None:
+            overrides = getattr(chat, "overrides", None)
+            val = getattr(getattr(overrides, "params", None), name, None)
+        return val
+
+    return _pick("reasoningEffort"), bool(_pick("fastMode"))
+
+
 def _prepare_generation(
     settings: Any,
     *,
@@ -87,29 +111,27 @@ def _prepare_generation(
     preset_id: str | None,
     chat: Any = None,
     runtime: Any = None,
+    member_settings: Any = None,
     temperature: float | None = None,
     top_p: float | None = None,
     max_tokens: int | None = None,
     character_id: str | None = None,
 ) -> PreparedLlmRequest:
-    """凭据 + 协议自适应 + 会话级深度 / Fast + 缓存计划（T-822 / T-824 / T-821）。
+    """凭据 + 协议自适应 + 会话/成员级深度 / Fast + 缓存计划（T-822 / T-824 / T-821 / T-831）。
 
-    会话级覆盖优先级：runtime.params > chat.overrides.params > 全局 settings。
+    覆盖优先级：runtime.params > memberSettings > chat.overrides.params > 全局 settings。
     """
-
-    def _pick(name: str) -> Any:
-        val = getattr(getattr(runtime, "params", None), name, None) if runtime is not None else None
-        if val is None and chat is not None:
-            val = getattr(getattr(chat.overrides, "params", None), name, None)
-        return val
+    reasoning_override, fast_mode = pick_reasoning_and_fast(
+        runtime=runtime, chat=chat, member_settings=member_settings
+    )
 
     try:
         return prepare_llm_request(
             settings,
             model=model,
             preset_id=preset_id,
-            reasoning_override=_pick("reasoningEffort"),
-            fast_mode=bool(_pick("fastMode")),
+            reasoning_override=reasoning_override,
+            fast_mode=fast_mode,
             temperature=temperature,
             top_p=top_p,
             max_tokens=max_tokens,
@@ -2041,6 +2063,7 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
         preset_id=preset_id,
         chat=chat,
         runtime=runtime,
+        member_settings=member_settings,
         temperature=temperature,
         top_p=top_p,
         max_tokens=max_tokens,
@@ -2526,6 +2549,7 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
         preset_id=preset_id,
         chat=chat,
         runtime=None,
+        member_settings=member_settings,
         temperature=temperature,
         top_p=top_p,
         max_tokens=max_tokens,

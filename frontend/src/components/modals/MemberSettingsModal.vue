@@ -32,6 +32,7 @@
  *    - 位置：组件层，提供成员设置编辑功能
  */
 import type { GroupMemberSettings, CharacterCard } from '../../types/models'
+import { REASONING_EFFORT_OPTIONS } from '../../types/models'
 import ModernAvatar from '../ModernAvatar.vue'
 import ModernSelect from '../ModernSelect.vue'
 import ThemedCheckbox from '../ThemedCheckbox.vue'
@@ -118,6 +119,29 @@ void dialogRef
 function save() {
   emit('save')
 }
+
+const effortOptions = [
+  { label: '沿用会话 / 全局', value: '' },
+  ...REASONING_EFFORT_OPTIONS.map((o) => ({ label: o.label, value: o.value })),
+]
+function effortValue(): string {
+  return props.settings.reasoningEffort ?? ''
+}
+
+const fastOptions = [
+  { label: '沿用会话 / 全局', value: '' },
+  { label: '开启', value: 'on' },
+  { label: '关闭', value: 'off' },
+]
+function fastValue(): string {
+  if (props.settings.fastMode === true) return 'on'
+  if (props.settings.fastMode === false) return 'off'
+  return ''
+}
+function setFast(v: string) {
+  const next = String(v)
+  updateField('fastMode', next === 'on' ? true : next === 'off' ? false : null)
+}
 </script>
 
 <template>
@@ -200,6 +224,30 @@ function save() {
               max="1"
               step="0.05"
             />
+          </div>
+
+          <div class="form-group">
+            <label class="label">思考深度</label>
+            <ModernSelect
+              :model-value="effortValue()"
+              :options="effortOptions"
+              class="w-full"
+              placeholder="沿用会话 / 全局…"
+              @update:model-value="(v) => updateField('reasoningEffort', String(v) ? String(v) as GroupMemberSettings['reasoningEffort'] : null)"
+            />
+            <div class="form-hint">none 会真正关闭思考。留空则沿用本会话面板或全局默认深度。</div>
+          </div>
+
+          <div class="form-group">
+            <label class="label">Fast 模式</label>
+            <ModernSelect
+              :model-value="fastValue()"
+              :options="fastOptions"
+              class="w-full"
+              placeholder="沿用会话 / 全局…"
+              @update:model-value="(v) => setFast(String(v))"
+            />
+            <div class="form-hint">约 2× 计费。选「关闭」会覆盖会话里已打开的 Fast。</div>
           </div>
 
           <!-- 参与概率 -->

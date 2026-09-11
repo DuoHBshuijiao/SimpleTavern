@@ -741,6 +741,8 @@ export function useChatActions(deps: ChatActionsDeps) {
     probability: 1.0,
     includePersonality: true,
     includeScenario: true,
+    reasoningEffort: null,
+    fastMode: null,
   })
 
   /**
@@ -760,6 +762,8 @@ export function useChatActions(deps: ChatActionsDeps) {
       probability: 1.0,
       includePersonality: true,
       includeScenario: true,
+      reasoningEffort: null,
+      fastMode: null,
     }
     editingMemberSettings.value = { ...settings }
   }
