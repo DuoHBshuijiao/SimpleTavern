@@ -4,9 +4,9 @@
 
 ## 下一步阅读顺序
 
-1. 先读 `docs/state/CURRENT.md`，确认当前任务（现为 v0.810 / T-820~T-824）。
-2. 读 `docs/01-ROADMAP.md` 的 v0.810 段与 `docs/tasks/T-82x-v0810-*.md` 任务卡（当前实施目标）。
-3. 读 `docs/tasks/T-800-v0800-backend-performance.md`，了解 v0.800 依赖与边界（v0.810 建立在 T-804/T-805/T-806-6A/6B 之上）。
+1. 先读 `docs/state/CURRENT.md`，确认当前任务（现为 v0.820 / T-830~T-831）。
+2. 读 `docs/01-ROADMAP.md` 的 v0.820 段与 `docs/tasks/T-830-v0820-oauth-login.md`、`docs/tasks/T-831-v0820-member-reasoning.md`。
+3. 读 `docs/tasks/T-800-v0800-backend-performance.md`，了解 v0.800 依赖与边界。
 4. T-801/T-802 已完成：错误契约见 `T-801`；fallback 清单见 `docs/audits/v0800-backend-fallback-inventory.md`。
 5. 架构契约读 `docs/superpowers/specs/2026-07-10-v0800-backend-trust-layer-design.md`。
 6. 按任务内 `read_first` 阅读源码与契约文件。

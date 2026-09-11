@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.820（进行中）
+
+### OAuth 登录（T-830）
+
+- GitHub Copilot 设备码登录；OpenAI Codex 设备码 + PKCE 粘贴回调。
+- Token 与设置分离；生成请求 Bearer + 厂商头。
+
+### 群聊成员级思考 / Fast（T-831）
+
+- `GroupMemberSettings` 增加 `reasoningEffort` / `fastMode`，优先级对齐群聊 `pick_param`。
+
 ## v0.810
 
 ### 供应商目录与鉴权（T-820 A1/A2）

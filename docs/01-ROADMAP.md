@@ -146,6 +146,31 @@
 - 不引入数据库；Gemini cachedContents 索引仍是 JSON 文件。
 - `backend/app/version.py` 已改为 `v0.810`。
 
+## v0.820 定位
+
+`v0.820` 接续 v0.810：把目录里标了「需登录」的厂商真正接上 OAuth，并把会话级思考深度 / Fast 补到群聊成员。不在本版扩新协议栈。
+
+### 核心原则
+
+1. **OAuth 凭证与 settings.json 分离**：access / refresh 落在 `data/oauth_tokens.json`，设置往返不会冲掉登录态；前端只看到是否已登录。
+2. **设备码优先**：桌面 Web 收不了 Codex CLI 的 `localhost:1455` 回调；Copilot 走 GitHub RFC 8628，Codex 默认走 device-code，PKCE 仅提供「粘贴回调 URL」备用。
+3. **群成员覆盖对齐既有 pick_param**：`runtime.params` → `memberSettings` → `chat.overrides.params` → 全局；`null` 表示沿用，显式 `false` 表示关 Fast。
+
+### 主要交付
+
+| 任务 | 交付 |
+|------|------|
+| T-830 OAuth | Copilot 设备码 + Copilot token 换发；Codex 设备码 + PKCE 粘贴；登录弹窗；`authStyle` oauth 发 Bearer；生成/列模型带厂商头 |
+| T-831 成员级 | `GroupMemberSettings.reasoningEffort/fastMode`；成员设置弹窗；群聊 generate / rewrite 合并 |
+| T-832 P1 | Bedrock eventstream / Converse / Mistral Conversations / Vertex `rawPredict`（本版可滑动） |
+
+### v0.820 边界
+
+- 不改 `version.py` 为 `v0.820`（发版时再改）。
+- 不做 T-806-6C Responses 内建 web_search、真实 Key 缓存探测。
+- 不做本机 `localhost:1455` 回调服务器。
+- 不实现 Bedrock 原生 eventstream 解析（T-832，可滑）。
+
 ## v0.900+ / v1.000
 
 - Playwright E2E。

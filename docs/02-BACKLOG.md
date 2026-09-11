@@ -61,7 +61,7 @@ T-813 → T-814 收尾
 - [x] **T-820 P0** 供应商目录扩充与特殊鉴权支持（信源：pi providers）
   - [x] A1 `sync_llm_catalog.py` + `providers/models generated JSON` + overlay + `catalog.py` + `GET /api/llm/catalog`；combobox 分组/搜索/徽标，选择联动 protocol/authStyle/providerParams
   - [x] A2 AuthStyle/URL 模板泛化：Azure Responses、Vertex Express、Bedrock Anthropic 变体；Cloudflare/Vercel/OpenCode 等目录条目
-  - [ ] A3 GitHub Copilot 设备码 / OpenAI Codex PKCE 登录 → **v0.820**
+  - [x] A3 GitHub Copilot 设备码 / OpenAI Codex PKCE 登录 → **v0.820 T-830**
 - [x] **T-821 P0** 分协议显式缓存策略 + 教学弹窗
   - [x] B1 `promptCache` 字段与迁移、四协议缓存写法、Usage 归一化、Chat 流式 usage 帧、Gemini cachedContents 404 重建
   - [x] B2 预设编辑器/全局连接区「缓存策略」区块 + 消息 usage 缓存徽标
@@ -80,11 +80,16 @@ T-822 前端预览 依赖 T-822 后端 + T-820-A1 前端
 T-823 贯穿
 ```
 
-### v0.820 候选
+## v0.820 任务（当前版本）
 
-- 群聊 `GroupMemberSettings` 成员级思考深度 / Fast 模式。
-- Bedrock Converse、Mistral Conversations、Vertex Anthropic `rawPredict`；Bedrock 原生 eventstream 流式解析。
-- T-820-A3 GitHub Copilot 设备码 / OpenAI Codex PKCE（已从 v0.810 顺延）。
+- [x] **T-830 P0** GitHub Copilot 设备码 / OpenAI Codex 设备码 + PKCE 粘贴；token 落盘与 refresh；登录弹窗
+- [x] **T-831 P0** 群聊成员级 `reasoningEffort` / `fastMode`（generate 合并 + 成员设置 UI）
+- [ ] **T-832 P1** Bedrock Converse / 原生 eventstream、Mistral Conversations、Vertex Anthropic `rawPredict`（可滑动）
+
+### v0.820 已滑出
+
+- T-806-6C Responses 内建 web_search（仍属 v0.800）
+- 真实 API Key 缓存写→读探测（已搁置）
 
 ## v0.900+
 
