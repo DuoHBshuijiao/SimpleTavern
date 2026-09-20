@@ -163,7 +163,7 @@ def attach_protocol_extra_body(
 ) -> dict[str, Any]:
     """Merge protocol-specific knobs into extra_body for adapters (T-806).
 
-    T-821 起结构化缓存计划走 ``ST_CONTROL_KEY`` 控制块；本函数保留给旧调用方（TTS 等）与测试。
+    T-821 起结构化缓存计划走 ``ST_CONTROL_KEY`` 控制块；本函数保留给旧调用方（TTS 等）。
     """
     out = dict(extra_body or {})
     proto = normalize_protocol_id(protocol)

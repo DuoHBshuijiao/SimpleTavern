@@ -2,7 +2,7 @@
 OpenAI兼容 API 兼容门面（T-804）。
 
 真实实现位于 `app.llm.providers.openai_compatible_chat`。
-本模块保持历史公开 ABI，供 generate / assistant / TTS / 测试继续导入。
+本模块保持历史公开 ABI，供 generate / assistant / TTS 继续导入。
 """
 
 from __future__ import annotations

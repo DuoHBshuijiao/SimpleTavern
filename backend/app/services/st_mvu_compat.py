@@ -406,7 +406,7 @@ def build_regex_compat_result(raw: dict[str, Any], analyzer: Analyzer | None = N
 
 
 def build_directive_compat_result(payload: dict[str, Any], analyzer: Analyzer | None = None) -> dict[str, Any]:
-    """生成 directive 兼容结果；analyzer 可替换为真实 Agent 或测试 fake。"""
+    """生成 directive 兼容结果；analyzer 可替换为真实 Agent。"""
     if analyzer is not None:
         return validate_st_mvu_compat_result(analyzer(payload))
     tables = _default_initial_tables(payload)
@@ -414,7 +414,7 @@ def build_directive_compat_result(payload: dict[str, Any], analyzer: Analyzer | 
         {"title": item.get("title"), "reason": "ST 世界书 MVU 候选"}
         for item in (payload.get("characterBookCandidates") or [])[:_MAX_ITEMS]
     ]
-    warnings = ["旧版本地 directive 兼容仅供测试/兜底；正式导入会由 MVU Agent 分析完整 ST 角色卡。"]
+    warnings = ["旧版本地 directive 兼容仅供兜底；正式导入会由 MVU Agent 分析完整 ST 角色卡。"]
     if not tables:
         warnings.append("未提取到明确初始状态表，已仅生成指令模式提示词。")
     return validate_st_mvu_compat_result({

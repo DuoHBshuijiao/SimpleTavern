@@ -1093,7 +1093,7 @@ def _chat_export_participants(chat: Chat) -> str:
 
 
 def _import_warning(code: str, message: str, **fields: Any) -> dict[str, Any]:
-    """统一导入 warning 结构；message 保持可读，便于旧前端与测试检索。"""
+    """统一导入 warning 结构；message 保持可读。"""
     payload: dict[str, Any] = {"code": code, "message": message}
     payload.update(fields)
     return payload

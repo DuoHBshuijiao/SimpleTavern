@@ -8,7 +8,6 @@ chatId → characterId / format 路径索引（T-803-3B）。
 from __future__ import annotations
 
 import threading
-import time
 from pathlib import Path
 from typing import Any, Literal
 
@@ -294,11 +293,3 @@ def warm_chat_path_index() -> dict[str, Any]:
     """启动预热：确保索引 rebuilt。"""
     with _index_lock:
         return _load_or_rebuild_unlocked()
-
-
-def measure_lookup_batch(chat_ids: list[str]) -> float:
-    """测试辅助：连续 lookup 的毫秒耗时。"""
-    started = time.perf_counter()
-    for chat_id in chat_ids:
-        lookup_chat_path(chat_id)
-    return (time.perf_counter() - started) * 1000

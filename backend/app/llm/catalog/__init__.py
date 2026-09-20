@@ -18,7 +18,6 @@ from app.llm.catalog.catalog import (  # noqa: F401
     get_catalog,
     model_family_from_id,
     normalize_model_key,
-    reset_catalog_for_tests,
 )
 
 __all__ = [
@@ -33,5 +32,4 @@ __all__ = [
     "get_catalog",
     "model_family_from_id",
     "normalize_model_key",
-    "reset_catalog_for_tests",
 ]

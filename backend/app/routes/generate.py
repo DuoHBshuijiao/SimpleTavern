@@ -72,13 +72,6 @@ from app.tokenizer_service import (
 router = APIRouter(tags=["generate"])
 ensure_content_regex_scanner_started()
 
-_last_generate_prep_profile: dict[str, Any] | None = None
-
-
-def get_last_generate_prep_profile() -> dict[str, Any] | None:
-    """返回最近一次世界书/trim prep 的分段计时与计数（测试/基线用）。"""
-    return dict(_last_generate_prep_profile) if _last_generate_prep_profile is not None else None
-
 
 def pick_reasoning_and_fast(
     *,
@@ -907,7 +900,6 @@ def prepare_conversation_with_worldbooks(
 
     返回 (conversation, warnings, profile)。
     """
-    global _last_generate_prep_profile
     profile: dict[str, Any] = {
         "segmentsMs": {},
         "counters": {
@@ -1009,7 +1001,6 @@ def prepare_conversation_with_worldbooks(
     conversation = insert_injections_into_conversation(conversation, final_injections)
     profile["segmentsMs"]["worldbookMatch2"] = round((time.perf_counter() - t0) * 1000, 3)
     profile["segmentsMs"]["prepTotal"] = round((time.perf_counter() - prep_started) * 1000, 3)
-    _last_generate_prep_profile = profile
     return conversation, warnings, profile
 
 

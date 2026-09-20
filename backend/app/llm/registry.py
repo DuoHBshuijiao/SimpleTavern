@@ -27,11 +27,6 @@ def _build_registry() -> dict[str, ProviderAdapter]:
     }
 
 
-def reset_adapter_registry_for_tests() -> None:
-    global _REGISTRY
-    _REGISTRY = None
-
-
 def registered_protocols() -> list[str]:
     global _REGISTRY
     if _REGISTRY is None:

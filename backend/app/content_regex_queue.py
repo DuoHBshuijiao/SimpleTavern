@@ -119,12 +119,3 @@ def get_content_regex_queue_dropped(chat_id: str | None = None) -> int:
         if chat_id is None:
             return sum(_dropped_counts.values())
         return int(_dropped_counts.get(chat_id, 0))
-
-
-def reset_content_regex_queue_dropped(chat_id: str | None = None) -> None:
-    """测试辅助：重置丢弃计数。"""
-    with _lock:
-        if chat_id is None:
-            _dropped_counts.clear()
-        else:
-            _dropped_counts.pop(chat_id, None)

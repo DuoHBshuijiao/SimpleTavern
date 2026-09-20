@@ -49,7 +49,7 @@ def _is_closed(client: object | None) -> bool:
 
 
 def get_async_http_client() -> httpx.AsyncClient:
-    """返回进程级 AsyncClient；测试/未 lifespan 时懒创建。"""
+    """返回进程级 AsyncClient；未走 lifespan 时懒创建。"""
     global _async_client
     if _async_client is not None and not _is_closed(_async_client):
         return _async_client
@@ -87,10 +87,3 @@ async def shutdown_http_clients() -> None:
         await async_client.aclose()  # type: ignore[union-attr]
     if sync_client is not None and not _is_closed(sync_client):
         sync_client.close()  # type: ignore[union-attr]
-
-
-def reset_http_clients_for_tests() -> None:
-    """测试辅助：强制丢弃当前 client（不保证已 aclose）。"""
-    global _async_client, _sync_client
-    _async_client = None
-    _sync_client = None

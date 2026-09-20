@@ -200,7 +200,7 @@ def resolve_cache_key(
     if key == "per_chat":
         if chat_id:
             return _h("chat", scope, chat_id), None
-        # 无会话（预览 / 助手 / 测试）时静默退到全局分组键——只是路由提示，不影响正确性
+        # 无会话（预览 / 助手）时静默退到全局分组键——只是路由提示，不影响正确性
         return _h("global", scope), None
     if key == "per_character":
         if character_id:

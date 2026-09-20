@@ -600,10 +600,6 @@ def get_catalog() -> LlmCatalog:
     return _load_catalog_cached()
 
 
-def reset_catalog_for_tests() -> None:
-    _load_catalog_cached.cache_clear()
-
-
 __all__ = [
     "FAMILY_ANTHROPIC",
     "FAMILY_CN_BEST_EFFORT",
@@ -616,5 +612,4 @@ __all__ = [
     "get_catalog",
     "model_family_from_id",
     "normalize_model_key",
-    "reset_catalog_for_tests",
 ]

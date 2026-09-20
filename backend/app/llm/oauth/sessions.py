@@ -67,8 +67,3 @@ def _gc_locked(now: float) -> None:
     dead = [k for k, s in _sessions.items() if s.expires_at <= now]
     for key in dead:
         _sessions.pop(key, None)
-
-
-def reset_sessions_for_tests() -> None:
-    with _lock:
-        _sessions.clear()

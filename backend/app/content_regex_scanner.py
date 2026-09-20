@@ -59,22 +59,6 @@ def get_content_regex_scanner_health() -> dict:
     return _scanner_health.to_dict()
 
 
-def reset_scanner_scan_state_for_tests() -> None:
-    """测试辅助：清空消息签名与 mtime 缓存。"""
-    _processed_signatures.clear()
-    _scan_cache.clear()
-    _last_scan_stats.update(
-        {
-            "lastScanDurationMs": 0.0,
-            "chatsConsidered": 0,
-            "chatsLoaded": 0,
-            "chatsSkippedUnchanged": 0,
-            "messagesScanned": 0,
-            "messagesApplied": 0,
-        }
-    )
-
-
 def _resolve_effective_rules(chat: Any, settings: Any) -> list[Any]:
     global_rules = list(getattr(settings, "contentRegexRuleLibrary", None) or [])
     legacy_rules = list(getattr(getattr(chat, "overrides", None), "contentRegexRules", None) or [])
@@ -117,14 +101,6 @@ def _rules_signature(rules: list[Any]) -> str:
         for r in rules
     ]
     return hashlib.sha1(json.dumps(raw, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
-
-
-def _chat_iter():
-    """兼容旧测试：逐会话 yield 全量 Chat（单次枚举，无群聊双载）。"""
-    for character_id, _chat_id, path in iter_chat_record_paths():
-        chat = _load_chat_from_path(path, character_id, shared=True, attach_memory=False)
-        if chat is not None:
-            yield chat
 
 
 def _scan_depth(chat: Any, rules: list[Any]) -> int:
