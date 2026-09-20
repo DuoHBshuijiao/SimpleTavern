@@ -1,5 +1,8 @@
 # T-006 最终验证与版本号
 
+> **作废**：本文件中的 pytest / npm run test / Vitest 命令已取消。勿再运行或把测试加回仓库。黑盒规格见 docs/specs/BACKEND-API.md 与 docs/specs/FRONTEND-FEATURES.md。
+
+
 - status: done
 - area: release
 - priority: P0

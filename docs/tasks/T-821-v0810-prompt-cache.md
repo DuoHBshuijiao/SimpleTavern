@@ -1,5 +1,8 @@
 # T-821 v0.810 分协议显式缓存策略 + 教学弹窗
 
+> **作废**：本文件中的 pytest / npm run test / Vitest 命令已取消。勿再运行或把测试加回仓库。黑盒规格见 docs/specs/BACKEND-API.md 与 docs/specs/FRONTEND-FEATURES.md。
+
+
 - status: **done**
 - area: `backend/app/llm/params.py`、`llm/prompt_cache.py`、四个 adapter、`schemas.py`、`SettingsDrawerPresetsTab.vue`、`components/prompt-cache/`
 - priority: P0

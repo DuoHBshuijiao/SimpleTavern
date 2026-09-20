@@ -1,5 +1,8 @@
 # T-801 v0.800 Fast-Fail 错误基座
 
+> **作废**：本文件中的 pytest / npm run test / Vitest 命令已取消。勿再运行或把测试加回仓库。黑盒规格见 docs/specs/BACKEND-API.md 与 docs/specs/FRONTEND-FEATURES.md。
+
+
 - status: completed（2026-07-10）
 - area: backend + frontend error transport
 - priority: P0（v0.800 第一批，阻塞其他任务）

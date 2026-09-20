@@ -1,5 +1,7 @@
 # v0.800 Backend Fallback Inventory
 
+> 文中 `test_*.py` 列为当时核对记录；仓库内测试文件已删除，行为以 `docs/specs/BACKEND-API.md` 为准。
+
 - task: `T-802`
 - status: in-progress
 - generated: `2026-07-10`

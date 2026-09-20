@@ -1,5 +1,8 @@
 # T-824 v0.810 聊天栏「模型控制面板」
 
+> **作废**：本文件中的 pytest / npm run test / Vitest 命令已取消。勿再运行或把测试加回仓库。黑盒规格见 docs/specs/BACKEND-API.md 与 docs/specs/FRONTEND-FEATURES.md。
+
+
 - status: **done**
 - area: `frontend/src/components/chat/ModelControlPanel.vue`、`ChatInput.vue`、`ChatPage.vue`、`useAssistant`、`schemas.GenerationParams`、`resolution.py`
 - priority: P0

@@ -1,9 +1,12 @@
 # T-800 v0.800 后端 Fast-Fail、性能、原生协议与计量总卡
 
+> **作废**：本文件中的 pytest / npm run test / Vitest 命令已取消。勿再运行或把测试加回仓库。黑盒规格见 docs/specs/BACKEND-API.md 与 docs/specs/FRONTEND-FEATURES.md。
+
+
 - status: in-progress（实施阶段；T-801 已完成）
 - area: backend 全域 + 必要前端配套
 - theme: **无静默失败、可定位错误、全链路性能与健壮性、原生多厂商协议、精确用量与成本**
-- version_note: 文档宣布进入 v0.800；`backend/app/version.py` 仍保持 `v0.700`，直到首批实现与发布门禁完成
+- version_note: 文档宣布进入 v0.800；`backend/app/version.py` 在发版时再改
 
 ## v0.800 北极星
 
@@ -88,16 +91,16 @@ REST 与 SSE 共用字段：
 | T-806 | P0 | 多套工具调用与消息维护；Anthropic 显式缓存开关 | T-805 | 工具 round-trip、消息转换、缓存开关端到端 |
 | T-807 | P0 | 消息 generation metadata + append-only usage ledger | T-804 | 云端 usage/cost 原样保留并归一化；写入幂等 |
 | T-808 | P1 | 定价引擎、会话/全局统计 API 与设置页仪表盘 | T-807 | 会话/全局/按模型汇总与成本来源可解释 |
-| T-809 | P1 | 网络搜索供应商与 provider-native grounding 扩展 | T-801, T-804 | 无静默切换；每个 provider 独立契约测试 |
-| T-810 | P1 | 生成、Assistant、MVU、知识图谱、正文正则、TTS 性能与健壮性 | T-801, T-803 | 分领域 benchmark + 异常注入测试 |
+| T-809 | P1 | 网络搜索供应商与 provider-native grounding 扩展 | T-801, T-804 | 无静默切换；每个 provider 独立错误语义 |
+| T-810 | P1 | 生成、Assistant、MVU、知识图谱、正文正则、TTS 性能与健壮性 | T-801, T-803 | 分领域性能说明 + 异常可见 |
 | T-811 | P1 | storage、import/export、integrity、fork/chat 索引与警告扩展 | T-801, T-803 | orphan、跳过项、锁冲突均可感知 |
 | T-812 | P1 | `useChatGeneration`：前端 SSE 编排提炼与统一 error/meta/done 消费 | T-801, T-807 | ChatPage 只保留页面编排；停止/失败不丢消息 |
 | T-813 | P1 | 数据迁移、隐私、安全与向后兼容 | T-807, T-808 | 旧 JSON 可加载；密钥/响应敏感字段不进账本 |
-| T-814 | P0 | 全链路验证、文档与 v0.800 发布门禁 | 全部 | pytest、前端 test/build、性能门禁、错误审计通过 |
+| T-814 | P0 | 对照 `docs/specs/` 做发布核对 | 全部 | 规格文档与产品行为一致；仓库内不跑自动化测试 |
 
 ## 全后端覆盖矩阵
 
-每个区域都必须完成“失败语义 + 性能 + 健壮性 + 测试”四列，不接受只改生成路由：
+每个区域都必须完成“失败语义 + 性能 + 健壮性”三列，不接受只改生成路由：
 
 | 区域 | Fast-Fail 重点 | 性能/健壮性重点 |
 |------|----------------|-----------------|
@@ -127,8 +130,8 @@ REST 与 SSE 共用字段：
 - 新增传统数据库依赖；仍使用 JSON/JSONL + 索引文件 + 文件锁。
 - 任何“自动选择最便宜模型/自动换供应商”策略。
 - 以估算 token 覆盖供应商返回 token。
-- 对供应商协议字段进行无文档依据的猜测；实现前必须查官方文档并留 fixture。
-- Playwright 全量 E2E（仍可留 v0.900+）。
+- 对供应商协议字段进行无文档依据的猜测；实现前必须查官方文档并写入规格说明。
+- 仓库内 Playwright / pytest / Vitest。
 
 ## 首批 read_first
 
@@ -143,20 +146,12 @@ REST 与 SSE 共用字段：
 - `frontend/src/api/http.ts`
 - `frontend/src/composables/useErrorStack.ts`
 
-## 验证总门禁
+## 发布核对
 
-```powershell
-cd backend
-python -m pytest tests/ -q
+对照 `docs/specs/BACKEND-API.md` 与 `docs/specs/FRONTEND-FEATURES.md`。仓库内不运行 pytest / Vitest。
 
-cd ..\frontend
-npm run test
-npm run build
-```
+发布前可做：
 
-另需新增：
-
-- 全 backend 静默 fallback 静态审计清单。
-- 协议 fixture / golden tests（流式拆包、工具调用、usage、错误）。
-- 故障注入（超时、断流、损坏 JSON、锁冲突、部分写入）。
-- 性能基线与回归门槛（不得只报告“感觉更快”）。
+- 手工打开应用，走一遍生成 / 导入 / 设置保存。
+- 对照规格文档核对接口与可见控件。
+- 记录性能数字时必须有改前/改后数据。

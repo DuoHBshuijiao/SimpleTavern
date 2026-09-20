@@ -2,6 +2,15 @@
 
 ## v0.820（进行中）
 
+### 并行沙箱
+
+- 新增 `python sandbox.py`：独立 `data-sandbox/` 与端口 9181/9191，仅复制生产 `settings.json`，供浏览器点按且不改写生产 `data/`。用法见 `docs/SANDBOX.md`。
+
+### 规格文档与拆除仓库内自动化测试
+
+- 新增 `docs/specs/BACKEND-API.md`（全部 HTTP/SSE 功能与数据规范）与 `docs/specs/FRONTEND-FEATURES.md`（功能分区与可见控件清单）。
+- 删除前后端单测、pytest / Vitest 依赖、测试专用重置函数与 `data-testid`。后续黑盒测试只依据规格文档、不接触源码。
+
 ### OAuth 登录（T-830）
 
 - GitHub Copilot 设备码登录；OpenAI Codex 设备码 + PKCE 粘贴回调。
@@ -37,9 +46,9 @@
 - 聊天栏胶囊：模型 + 思考深度 + Fast；`none` 在四协议路径上真正关闭思考。
 - 全局/预设「回传思考内容」三态；DeepSeek 关闭回传时的 400 错误卡可跳到对应开关。
 
-### 验证
+### 核对
 
-- 后端 313 项、前端 130 项测试通过；`npm run build` 通过。
+- 当时 `npm run build` 通过。自动化单测条数仅作历史记录，现已拆除。
 - `backend/app/version.py` 已改为 `v0.810`。
 
 ## v0.800（进行中）

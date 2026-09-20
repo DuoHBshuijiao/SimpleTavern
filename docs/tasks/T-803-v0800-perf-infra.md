@@ -1,5 +1,8 @@
 # T-803 v0.800 性能基线与基础设施
 
+> **作废**：本文件中的 pytest / npm run test / Vitest 命令已取消。勿再运行或把测试加回仓库。黑盒规格见 docs/specs/BACKEND-API.md 与 docs/specs/FRONTEND-FEATURES.md。
+
+
 - status: completed（3A–3D 均已完成）
 - area: backend HTTP / I/O / 索引
 - priority: P0

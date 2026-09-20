@@ -1,5 +1,8 @@
 # T-822 v0.810 模型自适应协议与参数翻译
 
+> **作废**：本文件中的 pytest / npm run test / Vitest 命令已取消。勿再运行或把测试加回仓库。黑盒规格见 docs/specs/BACKEND-API.md 与 docs/specs/FRONTEND-FEATURES.md。
+
+
 - status: **done**
 - area: `backend/app/llm/resolution.py`、`preset_resolve.py`、`schemas.py`、7 个调用点（generate×4 / assistant / mvu_daemon / st_mvu_import_agent）、`SettingsDrawerPresetsTab.vue`
 - priority: P0

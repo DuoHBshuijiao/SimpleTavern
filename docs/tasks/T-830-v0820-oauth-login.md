@@ -1,6 +1,6 @@
 # T-830 v0.820 GitHub Copilot / OpenAI Codex OAuth 登录
 
-- status: **done**（自动化门禁已绿；真机 Copilot/Codex 登录需账号点选）
+- status: **done**（真机 Copilot/Codex 登录需账号点选）
 - area: `backend/app/llm/oauth/`、`backend/app/routes/oauth.py`、`preset_resolve.py`、`auth_headers_for_style`、`frontend` 预设登录弹窗
 - priority: P0
 - depends_on: T-820-A1/A2（目录 `oauth_device` / `oauth_pkce` 桩）

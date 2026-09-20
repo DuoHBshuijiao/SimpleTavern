@@ -1,5 +1,8 @@
 # T-805 v0.800 原生 LLM 协议
 
+> **作废**：本文件中的 pytest / npm run test / Vitest 命令已取消。勿再运行或把测试加回仓库。黑盒规格见 docs/specs/BACKEND-API.md 与 docs/specs/FRONTEND-FEATURES.md。
+
+
 - status: **completed**（5A–5D 全部完成；工具/缓存归 T-806）
 - area: backend `llm/` + 预设/设置 UI
 - priority: P0

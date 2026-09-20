@@ -1,5 +1,8 @@
 # T-820 v0.810 供应商目录扩充与特殊鉴权支持
 
+> **作废**：本文件中的 pytest / npm run test / Vitest 命令已取消。勿再运行或把测试加回仓库。黑盒规格见 docs/specs/BACKEND-API.md 与 docs/specs/FRONTEND-FEATURES.md。
+
+
 - status: **done**（A3 OAuth 滑到 v0.820）
 - area: `backend/app/llm/catalog/`、`backend/scripts/sync_llm_catalog.py`、`frontend/src/constants/llmProviderPresets.ts`、`LlmPresetNameCombobox.vue`、adapters
 - priority: P0

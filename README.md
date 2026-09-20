@@ -1,4 +1,4 @@
-> **维护状态**：SimpleTavern 已进入 **v1.0 稳定化阶段**。`v0.600` 是“全局体验一致性与前端系统升级版本”，重点统一按钮、表单、弹窗、抽屉、面板、动效、无障碍和主要工作流稳定性。后续仍会持续接受 bug 修复、数据可靠性、体验一致性、性能优化与文档/测试补强。任务与版本计划见 `docs/00-INDEX.md`。
+> **维护状态**：SimpleTavern 已进入 **v1.0 稳定化阶段**。`v0.600` 是“全局体验一致性与前端系统升级版本”，重点统一按钮、表单、弹窗、抽屉、面板、动效、无障碍和主要工作流稳定性。后续仍会持续接受 bug 修复、数据可靠性、体验一致性、性能优化与文档补强。任务与版本计划见 `docs/00-INDEX.md`。接口与界面规格见 `docs/specs/`。
 <div align="center">
 
 <img src="frontend/public/image1.jpeg" alt="SimpleTavern" />
@@ -128,6 +128,10 @@ npm -v             # 应显示版本号
 
 生产形态下，可先 `npm run build`，再执行 `npm run preview -- --port 9081 --host` 提供静态服务，与一键部署脚本中的前端启动方式一致。
 
+### 并行沙箱（不打扰生产数据）
+
+需要一边继续用现有角色/会话，一边在干净数据上点按核对时，在仓库根目录执行 `python sandbox.py`，浏览器打开 `http://127.0.0.1:9181`。沙箱写入 `data-sandbox/`，端口为 9181/9191，不会改 `data/` 或占用 9081/9091。完整说明见 [`docs/SANDBOX.md`](docs/SANDBOX.md)。
+
 ### 手动部署（最小步骤）
 
 在项目根目录创建并激活虚拟环境：
@@ -180,7 +184,9 @@ npm run build
 
 ### 后端 API 摘要
 
-（以下路径均以 **`/api` 为前缀**；与 `main.py` 中 `include_router(..., prefix="/api")` 及各子路由的 `prefix` 一致。）
+完整功能与数据规范见 **`docs/specs/BACKEND-API.md`**。可见控件清单见 **`docs/specs/FRONTEND-FEATURES.md`**。后续黑盒测试只依据这两份文档，不接触源码。
+
+（以下路径均以 **`/api` 为前缀**；与 `main.py` 中 `include_router(..., prefix="/api")` 及各子路由的 `prefix` 一致。节选。）
 
 | 类别 | 路径/方法（节选） | 说明 |
 | ---- | ---- | ---- |

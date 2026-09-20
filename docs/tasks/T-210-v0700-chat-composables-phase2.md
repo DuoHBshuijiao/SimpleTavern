@@ -1,5 +1,7 @@
 # T-210 v0.700 ChatPage composable 第二批
 
+> **作废**：下文「单测」已从仓库拆除。现行规格见 docs/specs/FRONTEND-FEATURES.md。
+
 - status: done
 - area: frontend
 - theme: 低风险 + 中风险 composable 提炼（行为不变）

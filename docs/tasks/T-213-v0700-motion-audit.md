@@ -1,5 +1,8 @@
 # T-213 v0.700 ChatInput sink 动效与 motion audit
 
+> **作废**：本文件中的 pytest / npm run test / Vitest 命令已取消。勿再运行或把测试加回仓库。黑盒规格见 docs/specs/BACKEND-API.md 与 docs/specs/FRONTEND-FEATURES.md。
+
+
 - status: completed
 - area: frontend
 - theme: 去除 ChatInput 双轨 margin/transform 下沉；常规 UI 动效收束至 150–250ms token

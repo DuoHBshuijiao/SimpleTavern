@@ -1,6 +1,9 @@
 # T-823 v0.810 文档、验证与发布收口
 
-- status: **done**（自动化门禁已绿；`version.py` 已改为 `v0.810`；真实 key 探测已搁置）
+> **作废**：本文件中的 pytest / npm run test / Vitest 命令已取消。勿再运行或把测试加回仓库。黑盒规格见 docs/specs/BACKEND-API.md 与 docs/specs/FRONTEND-FEATURES.md。
+
+
+- status: **done**（`version.py` 已改为 `v0.810`；真实 key 探测已搁置；仓库内自动化测试已拆除）
 - area: `docs/`、`CHANGELOG.md`、`README.md`、`backend/app/version.py`
 - priority: P1
 - depends_on: T-820 / T-821 / T-822 / T-824

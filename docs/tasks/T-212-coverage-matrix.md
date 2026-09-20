@@ -1,5 +1,7 @@
 # T-212 v0.700 ChatPage 子模块拆分 — 覆盖率矩阵
 
+> **作废**：文中「单测」列已无对应文件。现行规格见 docs/specs/FRONTEND-FEATURES.md。
+
 > 扫描时间：2026-06-30（v0.700 约 92%）
 
 ## ChatPage.vue 弹层 / 子模块

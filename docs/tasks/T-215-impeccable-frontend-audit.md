@@ -1,5 +1,8 @@
 # T-215 Impeccable 前端设计审计
 
+> **作废**：本文件中的 pytest / npm run test / Vitest 命令已取消。勿再运行或把测试加回仓库。黑盒规格见 docs/specs/BACKEND-API.md 与 docs/specs/FRONTEND-FEATURES.md。
+
+
 - status: completed（批次 I–VII）
 - area: frontend
 - theme: 语义 token / a11y / 动效属性级 transition / 弹层抽查

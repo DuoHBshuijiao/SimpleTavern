@@ -1,5 +1,8 @@
 # T-214 v0.700 可观测性收尾
 
+> **作废**：本文件中的 pytest / npm run test / Vitest 命令已取消。勿再运行或把测试加回仓库。黑盒规格见 docs/specs/BACKEND-API.md 与 docs/specs/FRONTEND-FEATURES.md。
+
+
 - status: completed
 - area: frontend + docs（v0.700 边界内不扩后端）
 - theme: 导入/完整性提示统一、v0.700 版本收口与 v0.800 排期

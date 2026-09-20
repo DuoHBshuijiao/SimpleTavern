@@ -1,5 +1,8 @@
 # T-806 v0.800 工具与 Anthropic 缓存
 
+> **作废**：本文件中的 pytest / npm run test / Vitest 命令已取消。勿再运行或把测试加回仓库。黑盒规格见 docs/specs/BACKEND-API.md 与 docs/specs/FRONTEND-FEATURES.md。
+
+
 - status: in-progress（**6A/6B 完成**；下一批 6C）
 - area: backend `llm/` + 预设 UI + 各协议工具路径
 - priority: P0

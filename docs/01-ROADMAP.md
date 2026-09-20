@@ -1,8 +1,11 @@
 # v0.600 -> v1.000 路线图
 
+仓库内不包含自动化测试。接口与界面规格见 `docs/specs/BACKEND-API.md` 与 `docs/specs/FRONTEND-FEATURES.md`。勿再加入 pytest / Vitest / Playwright。
+
+
 ## v0.600 定位
 
-`v0.600` 是“全局体验一致性与前端系统升级版本”。本版本将 v0.500 的稳定化基础推进到产品体验层：统一 surface/card/button/input/modal/drawer 视觉语言，收束硬编码视觉方言，并补齐主要弹层、主路径和高频面板的可访问性、性能与测试保护。
+`v0.600` 是“全局体验一致性与前端系统升级版本”。本版本将 v0.500 的稳定化基础推进到产品体验层：统一 surface/card/button/input/modal/drawer 视觉语言，收束硬编码视觉方言，并补齐主要弹层、主路径和高频面板的可访问性与性能。
 
 ## v0.600 已完成
 
@@ -12,18 +15,18 @@
 - 无障碍：补关键图标按钮 `aria-label`，新增通用 dialog Esc/焦点恢复工具并全量接入弹层（含 ChatPage 内联编辑弹层）。
 - 性能：减少叠层 `backdrop-blur`，统一面板层级，保留列表/Markdown/KG/WebGPU/TTS 的轻量更新策略。
 - 稳定性：MVU/知识图谱路由集中 chat fast-fail，404 返回结构化 `code/message/chatId`。
-- 测试：补 UI primitive 与 dialog focus 工具测试，保留正文正则显示测试，新增 MVU route 错误测试。
+- 稳定性：补 UI primitive、dialog focus 与 MVU 路由错误语义（实现侧已不再保留自动化测试）。
 
 ## v0.600 边界
 
 - 不拆分整个 `ChatPage.vue` 或 `SettingsDrawer.vue`。
 - 不新增原生 Responses API、Anthropic Messages API、Gemini 原生 API 协议栈。
-- 不做完整 Playwright E2E 或组件测试体系。
+- 不做仓库内 Playwright 或组件测试体系。
 - 不做后端全局 chatId 索引迁移。
 
 ## v0.601 无障碍约束补强
 
-- 固化“禁止原生元素裸用 `title` 属性，仅允许 `aria-label`（或可见文本 / `aria-labelledby`）”为设计规范（`DESIGN.md` / `PRODUCT.md`），并以前端测试守卫扫描全部 `.vue` 防止回归（PascalCase 组件 `title` prop 豁免）。
+- 固化“禁止原生元素裸用 `title` 属性，仅允许 `aria-label`（或可见文本 / `aria-labelledby`）”为设计规范（`DESIGN.md` / `PRODUCT.md`）。PascalCase 组件的 `title` prop 仍表示可见标题。
 
 ## v0.700 定位
 
@@ -37,8 +40,8 @@
 
 ### v0.700 已完成（100% 前端范围）
 
-- 前端组件测试基座（`@vue/test-utils` + `happy-dom`）。
-- ChatPage composable 第一批：`useChatSearch`、`useImageStickyBinding`、`useForkLineage` + 单测。
+- 前端组件化基座（可挂载的 SFC 与 composable 拆分）。
+- ChatPage composable 第一批：`useChatSearch`、`useImageStickyBinding`、`useForkLineage`。
 - 数据完整性扫描扩展 + 导入 warning 修复。
 - UI/UX 首批：ChatPage 顶栏 + ChatSidebar 选中态 + 图片回退弹层 + 搜索 a11y + 完整性巡检文案。
 
@@ -58,7 +61,7 @@
 
 - 不新增原生 Responses / Anthropic / Gemini 协议栈（已改排至 **v0.800**）。
 - **不在 v0.700**：ChatPage SSE 主体 composable、后端性能、世界书 orphan 扩展、导出跳过 API warnings。
-- Playwright E2E 可推迟至 v0.900+；组件测试基座已扩展。
+- 仓库内不引入 Playwright 或其它自动化测试框架。
 
 ## v0.800 定位
 
@@ -68,7 +71,7 @@
 
 1. **Fast-Fail 全覆盖**：取消静默吞错、空结果伪成功与隐式供应商/模型 fallback。
 2. **用户可感知错误**：REST、SSE、后台任务、工具调用统一结构化错误与 requestId，进入前端错误栈。
-3. **性能 + 健壮性**：所有 backend 组件纳入基准、profiling、故障注入与回归门禁。
+3. **性能 + 健壮性**：所有 backend 组件纳入基准、profiling 与可观测错误语义。
 4. **原生多厂商协议**：OpenAI Responses、Anthropic Messages、Gemini 原生协议；保留 OpenAI-compatible。
 5. **精确用量与成本**：消息元数据记录云端 usage、缓存、TTFT、总耗时、cost；本地账本支持会话/全局/按模型汇总。
 
@@ -98,7 +101,7 @@
 - T-801 已完成：统一 REST/SSE 错误 envelope、requestId、上游错误映射、前端 typed error/错误栈。
 - T-802 六批已完成：LLM/generate、Storage/chat/fork、Assistant/tools、MVU/KG/regex health、Search/Import-Export、TTS/infra（F-001~F-034）。
 - T-804 / T-805 已完成（四协议无工具主路径）。T-806-6A/6B 已完成；**T-806-6C 缩窄为仅 Responses 内建 web_search**，其中「Gemini CachedContents」并入 v0.810 T-821（显式缓存策略）。
-- 当前门禁：后端 280 tests；fork 冷重建 410.05 ms；chat_path 重建 103.11 ms / 暖查找×1000 105.55 ms。
+- 性能基线（历史记录）：fork 冷重建 410.05 ms；chat_path 重建 103.11 ms / 暖查找×1000 105.55 ms。仓库内测试条数不再作为门禁。
 - v0.800 剩余项（T-806-6C、T-807~T-814）保留在 backlog，不因 v0.810 插入而自动顺延或删除。
 
 ### 成本统计 UI
@@ -116,7 +119,7 @@
 - 仍采用 JSON/JSONL + 文件锁，不引入传统数据库。
 - 不做自动换模型、自动换供应商或隐藏协议降级。
 - 模型价格匹配不允许宽泛别名直接产生确定成本；模糊项需用户确认。
-- Playwright 全量 E2E 仍留 v0.900+。
+- 黑盒测试在仓库外进行，依据 `docs/specs/`。
 
 ## v0.810 定位
 
@@ -173,7 +176,7 @@
 
 ## v0.900+ / v1.000
 
-- Playwright E2E。
+- 仓库外黑盒测试（规格见 `docs/specs/`）；本仓库不引入 Playwright / pytest / Vitest。
 - 插件化 provider SDK、跨设备统计同步等后续能力。
 - v0.800 未完成项不得仅因版本切换自动顺延，需在发布评审中明确。
 
@@ -181,5 +184,5 @@
 
 - 现有功能稳定、文档准确、主要错误 fast fail 且可定位。
 - 前端体验统一，主题和叠层行为可预测。
-- 后端生成、MVU、正文正则、导入导出和数据完整性有基本测试保护。
+- `docs/specs/BACKEND-API.md` 与 `docs/specs/FRONTEND-FEATURES.md` 与产品行为一致。
 - 每次任务都能通过 `docs/state/CURRENT.md` 和 `docs/state/LAST_HANDOFF.md` 接力。
