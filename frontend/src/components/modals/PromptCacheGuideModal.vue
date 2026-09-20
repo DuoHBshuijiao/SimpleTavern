@@ -122,7 +122,6 @@ const hitCost = computed(() => Math.round(inputTokens.value * cachedRatio.value 
           v-bind="dialogAttrs"
           tabindex="-1"
           class="surface-panel relative flex h-[92vh] w-full max-w-5xl flex-col overflow-hidden border border-[var(--color-border-subtle)]"
-          data-testid="prompt-cache-guide"
         >
           <header class="flex items-center justify-between gap-3 border-b border-[var(--color-border-subtle)] px-4 py-3">
             <div class="min-w-0">
@@ -274,7 +273,7 @@ const hitCost = computed(() => Math.round(inputTokens.value * cachedRatio.value 
               <ArrowLeft class="h-3.5 w-3.5" />
               上一步
             </button>
-            <button type="button" class="btn btn-sm btn-primary" data-testid="cache-guide-next" @click="next">
+            <button type="button" class="btn btn-sm btn-primary" @click="next">
               <Sparkles v-if="isLast" class="h-3.5 w-3.5" />
               <ArrowRight v-else class="h-3.5 w-3.5" />
               {{ isLast ? '完成并写入' : '下一步' }}

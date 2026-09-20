@@ -1,6 +1,10 @@
-import { defineConfig } from 'vitest/config'
+import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
+
+const parsedPort = Number(process.env.SIMPLETAVERN_FRONTEND_PORT)
+const frontendPort = Number.isFinite(parsedPort) && parsedPort > 0 ? parsedPort : 9081
+const apiProxy = process.env.SIMPLETAVERN_API_PROXY?.trim() || 'http://127.0.0.1:9091'
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -8,21 +12,17 @@ export default defineConfig({
     vue(),
     tailwindcss(),
   ],
-  test: {
-    environment: 'node',
-    include: ['src/**/*.test.ts'],
-  },
   server: {
-    port: 9081,
+    port: frontendPort,
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:9091',
+        target: apiProxy,
         changeOrigin: true,
       },
     },
   },
   preview: {
-    port: 9081,
+    port: frontendPort,
     host: true,
   },
 })

@@ -315,7 +315,6 @@ function toggleOpen() {
       ]"
       :aria-expanded="open"
       aria-haspopup="dialog"
-      data-testid="model-control-trigger"
       :aria-label="triggerAriaLabel"
       @click="toggleOpen"
     >
@@ -369,7 +368,7 @@ function toggleOpen() {
 
       <div class="model-control-panel flex flex-col gap-1" role="dialog" aria-label="模型控制面板">
         <!-- 模型列表 -->
-        <div class="model-control-list max-h-[220px] overflow-y-auto custom-scrollbar pr-0.5" data-testid="model-control-list">
+        <div class="model-control-list max-h-[220px] overflow-y-auto custom-scrollbar pr-0.5">
           <template v-for="(group, gi) in filteredGroups" :key="`g-${gi}-${group.label}`">
             <div class="px-2 pt-1.5 pb-0.5 text-2xs font-bold uppercase tracking-wider text-[var(--color-text-muted)]">
               {{ group.label }}
@@ -397,7 +396,7 @@ function toggleOpen() {
 
         <div class="mx-2 my-1 border-t border-[var(--color-border-subtle)]" />
 
-        <section class="px-2 pb-1" data-testid="model-control-thinking">
+        <section class="px-2 pb-1">
           <button
             type="button"
             class="flex w-full items-center justify-between gap-2 rounded-lg px-1 py-1.5 text-left transition-colors hover:bg-surface-muted"
@@ -426,7 +425,7 @@ function toggleOpen() {
         </section>
 
         <!-- 思考深度 -->
-        <section class="px-2 pb-1" data-testid="model-control-effort">
+        <section class="px-2 pb-1">
           <div class="mb-1.5 flex items-center justify-between gap-2">
             <div class="flex items-center gap-1.5 text-xs font-medium text-[var(--color-text)]">
               <Brain class="h-3.5 w-3.5 text-brand" />
@@ -476,7 +475,7 @@ function toggleOpen() {
         </section>
 
         <!-- Fast 模式 -->
-        <section class="px-2 pb-1" data-testid="model-control-fast">
+        <section class="px-2 pb-1">
           <button
             type="button"
             class="flex w-full items-center justify-between gap-2 rounded-lg px-1 py-1.5 text-left transition-colors"
@@ -511,7 +510,7 @@ function toggleOpen() {
         </section>
 
         <!-- 预览：协议 / 缓存 / 其他调整 -->
-        <section v-if="preview" class="mx-2 mb-2 rounded-lg bg-[var(--color-glass-l2)] px-2.5 py-2 text-2xs leading-4 text-[var(--color-text-secondary)]" data-testid="model-control-preview">
+        <section v-if="preview" class="mx-2 mb-2 rounded-lg bg-[var(--color-glass-l2)] px-2.5 py-2 text-2xs leading-4 text-[var(--color-text-secondary)]">
           <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span class="inline-flex items-center gap-1">
               <Sparkles class="h-3 w-3 text-brand" />

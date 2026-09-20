@@ -210,7 +210,6 @@ watch(dropdownOpen, (open) => {
       <div
         class="overflow-y-auto p-1 custom-scrollbar"
         :style="{ maxHeight: `${panelMaxHeightPx}px` }"
-        data-testid="llm-provider-list"
       >
         <template v-for="group in groupedPresets" :key="group.group">
           <div class="px-2 pt-1.5 pb-0.5 text-2xs font-bold uppercase tracking-wider text-[var(--color-text-muted)]">

@@ -75,7 +75,6 @@ async function copyMessage() {
           v-if="item.action?.type === 'open_settings'"
           type="button"
           class="btn btn-xs btn-primary"
-          data-testid="error-action-open-settings"
           @click="runAction"
         >
           <Settings2 class="w-3 h-3" />

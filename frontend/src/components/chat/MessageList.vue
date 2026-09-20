@@ -1754,11 +1754,10 @@ onBeforeUnmount(() => {
               v-if="m.role === 'assistant' && (messageCacheBadge(m) || messageFastMissBadge(m))"
               class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 px-1 text-[10px] leading-none text-[var(--color-text-muted)]"
             >
-              <span v-if="messageCacheBadge(m)" data-testid="cache-usage-badge">{{ messageCacheBadge(m) }}</span>
+              <span v-if="messageCacheBadge(m)">{{ messageCacheBadge(m) }}</span>
               <span
                 v-if="messageFastMissBadge(m)"
                 class="text-[var(--color-warning-text,var(--color-warning))]"
-                data-testid="fast-miss-badge"
               >{{ messageFastMissBadge(m) }}</span>
             </div>
             <div

@@ -280,7 +280,7 @@ const cacheSummary = computed(() => {
 </script>
 
 <template>
-  <div class="space-y-4" data-testid="llm-connection-advanced">
+  <div class="space-y-4">
     <!-- 供应商参数 -->
     <div v-if="placeholders.length" class="space-y-2" data-settings-field="providerParams">
       <div class="flex items-center justify-between gap-2">
@@ -395,7 +395,6 @@ const cacheSummary = computed(() => {
         class="flex w-full items-center justify-between gap-3 text-left"
         role="switch"
         :aria-checked="echo"
-        data-testid="echo-reasoning-toggle"
         @click="echo = !echo"
       >
         <span class="min-w-0">
@@ -414,7 +413,7 @@ const cacheSummary = computed(() => {
     </section>
 
     <!-- 预览 -->
-    <section class="space-y-2 rounded-xl bg-[var(--color-glass-l2)] p-3" data-testid="llm-resolve-preview">
+    <section class="space-y-2 rounded-xl bg-[var(--color-glass-l2)] p-3">
       <div class="flex flex-wrap items-center justify-between gap-2">
         <span class="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--color-text-secondary)]">
           <Sparkles class="h-3.5 w-3.5 text-brand" />
