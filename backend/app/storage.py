@@ -89,11 +89,14 @@ def _repo_root() -> Path:
 
 def _data_dir() -> Path:
     """
-    获取数据目录路径
-    
-    Returns:
-        Path: data目录的Path对象
+    获取数据目录路径。
+
+    环境变量 ``SIMPLETAVERN_DATA_DIR`` 非空时使用该路径（相对路径相对进程 cwd 解析）。
+    未设置时仍为仓库根下 ``data/``。
     """
+    raw = os.environ.get("SIMPLETAVERN_DATA_DIR", "").strip()
+    if raw:
+        return Path(raw).expanduser().resolve()
     return _repo_root() / "data"
 
 
@@ -399,17 +402,6 @@ _lock_stats: dict[str, float | int] = {
     "sharedAcquireCount": 0,
     "exclusiveAcquireCount": 0,
 }
-
-
-def reset_lock_observability() -> None:
-    """重置锁等待观测计数（测试/基线用）。"""
-    with _lock_stats_lock:
-        _lock_stats["acquireCount"] = 0
-        _lock_stats["waitMsTotal"] = 0.0
-        _lock_stats["waitMsMax"] = 0.0
-        _lock_stats["lastWaitMs"] = 0.0
-        _lock_stats["sharedAcquireCount"] = 0
-        _lock_stats["exclusiveAcquireCount"] = 0
 
 
 def get_lock_observability() -> dict[str, Any]:
