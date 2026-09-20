@@ -340,14 +340,27 @@ def _tool_response_object(content: Any) -> dict[str, Any]:
     return {"result": parsed}
 
 
+def _is_gemini_google_search_tool(tool: dict[str, Any]) -> bool:
+    typ = str(tool.get("type") or "").strip()
+    if typ in {"google_search", "googleSearch", "web_search"}:
+        return True
+    if isinstance(tool.get("googleSearch"), dict) or isinstance(tool.get("google_search"), dict):
+        return True
+    return "googleSearch" in tool or "google_search" in tool
+
+
 def _map_openai_tools_to_gemini(tools: list[Any]) -> list[dict[str, Any]]:
-    """OpenAI function tools → Gemini `tools: [{functionDeclarations: [...]}]`."""
+    """OpenAI function tools → Gemini tools；原生联网用 googleSearch。"""
     if not tools:
         raise _tool_call_invalid(detail="tools is empty")
     declarations: list[dict[str, Any]] = []
+    include_google_search = False
     for idx, tool in enumerate(tools):
         if not isinstance(tool, dict):
             raise _tool_call_invalid(detail=f"tools[{idx}] is not an object")
+        if _is_gemini_google_search_tool(tool):
+            include_google_search = True
+            continue
         fn = tool.get("function") if isinstance(tool.get("function"), dict) else None
         if tool.get("type") == "function" or fn is not None:
             if fn is None:
@@ -364,11 +377,16 @@ def _map_openai_tools_to_gemini(tools: list[Any]) -> list[dict[str, Any]]:
             declarations.append(decl)
             continue
         raise _tool_call_invalid(
-            detail=f"tools[{idx}] is not an OpenAI function tool (got keys={sorted(tool.keys())})"
+            detail=f"tools[{idx}] is not an OpenAI function tool or google_search (got keys={sorted(tool.keys())})"
         )
-    if not declarations:
-        raise _tool_call_invalid(detail="tools produced no functionDeclarations")
-    return [{"functionDeclarations": declarations}]
+    mapped: list[dict[str, Any]] = []
+    if include_google_search:
+        mapped.append({"googleSearch": {}})
+    if declarations:
+        mapped.append({"functionDeclarations": declarations})
+    if not mapped:
+        raise _tool_call_invalid(detail="tools produced no Gemini tool entries")
+    return mapped
 
 
 def _map_tool_choice_to_gemini(tool_choice: Any) -> dict[str, Any]:
@@ -688,6 +706,9 @@ def _extract_text_thoughts_and_tool_calls(
         if fc is None:
             fc = part.get("function_call")
         if isinstance(fc, dict):
+            fc_name = str(fc.get("name") or "").strip().lower()
+            if fc_name in {"google_search", "googlesearch", "web_search"}:
+                continue
             tool_calls.append(_function_call_to_openai_tool_call(fc, index=len(tool_calls)))
             continue
         text = part.get("text")

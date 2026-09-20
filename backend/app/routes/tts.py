@@ -476,6 +476,7 @@ def get_cache_stats():
             "limitBytes": settings.ttsAudioCacheLimitMb * 1024 * 1024,
             "lastPatrolAt": "",
             "prunedFiles": 0,
+            "lastError": None,
         }
     return tts_cache_patrol.get_stats()
 

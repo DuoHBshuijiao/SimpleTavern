@@ -524,7 +524,7 @@ class ShaderPresetMutationResponse(BaseModel):
     )
 
 
-WebSearchProvider = Literal["tavily", "bocha"]
+WebSearchProvider = Literal["tavily", "bocha", "brave"]
 
 
 class WebSearchTavilySettings(BaseModel):
@@ -563,14 +563,31 @@ class WebSearchBochaSettings(BaseModel):
     exclude: str | None = None
 
 
+class WebSearchBraveSettings(BaseModel):
+    """Brave Search API（GET https://api.search.brave.com/res/v1/web/search）。"""
+
+    model_config = ConfigDict(extra="allow")
+
+    apiKey: str = ""
+    count: int | None = Field(default=None, ge=1, le=20)
+    country: str | None = None
+    search_lang: str | None = None
+    freshness: str | None = None
+    safesearch: str | None = None
+
+
 class WebSearchSettings(BaseModel):
-    """主聊天网络搜索：按 provider 选择 Tavily 或博查，嵌套字段与各厂商 Search API 一致。"""
+    """主聊天独立搜索 API：按 provider 选择 Tavily / 博查 / Brave。
+
+    模型原生联网（OpenAI Responses / Anthropic Messages / Gemini）不使用本对象。
+    """
 
     model_config = ConfigDict(extra="allow")
 
     provider: WebSearchProvider = "tavily"
     tavily: WebSearchTavilySettings | None = Field(default_factory=WebSearchTavilySettings)
     bocha: WebSearchBochaSettings | None = Field(default_factory=WebSearchBochaSettings)
+    brave: WebSearchBraveSettings | None = Field(default_factory=WebSearchBraveSettings)
 
 
 class Settings(BaseModel):

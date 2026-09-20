@@ -38,6 +38,7 @@ IntegrityIssueCode = Literal[
     "invalid_json",
     "schema_mismatch",
     "orphan_reference",
+    "orphan_worldbook",
     "read_error",
 ]
 IntegrityTargetKind = Literal[
@@ -67,6 +68,7 @@ _ISSUE_MESSAGES: dict[IntegrityIssueCode, str] = {
     "invalid_json": "JSON 解析失败",
     "schema_mismatch": "JSON 结构不符合预期",
     "orphan_reference": "引用的角色不存在（孤儿会话）",
+    "orphan_worldbook": "引用的世界书不存在",
     "read_error": "文件读取失败",
 }
 
@@ -86,7 +88,7 @@ _REPAIR_ACTIONS: dict[IntegrityTargetKind, RepairAction] = {
 
 def _effective_repair_action(kind: IntegrityTargetKind, code: IntegrityIssueCode) -> RepairAction:
     """孤儿引用所在文件本身可能完好，绝不能按 chat_record 的 delete 自动删除，统一降级为人工处理。"""
-    if code in {"orphan_reference", "read_error"}:
+    if code in {"orphan_reference", "orphan_worldbook", "read_error"}:
         return "none"
     return _REPAIR_ACTIONS[kind]
 
@@ -377,6 +379,9 @@ class DataIntegrityService:
         """有效角色 ID = characters 目录下 *.json 的文件名（即便内容损坏也视为“存在”，其损坏会单独上报）。"""
         return {p.stem for p in list_json_files(characters_dir())}
 
+    def _collect_worldbook_ids(self) -> set[str]:
+        return {p.stem for p in list_json_files(worldbooks_dir())}
+
     def _check_orphan_reference(
         self, target: ScanTarget, raw: Any, valid_character_ids: set[str] | None
     ) -> ScanIssue | None:
@@ -395,6 +400,38 @@ class DataIntegrityService:
             code="orphan_reference",
             message=_ISSUE_MESSAGES["orphan_reference"],
             detail=_normalize_detail(f"characterId={character_id} 无对应角色卡"),
+        )
+
+    def _check_worldbook_orphan(
+        self, target: ScanTarget, raw: Any, valid_worldbook_ids: set[str] | None
+    ) -> ScanIssue | None:
+        if valid_worldbook_ids is None:
+            return None
+        if target.kind not in {"chat_record", "legacy_chat"}:
+            return None
+        if not isinstance(raw, dict):
+            return None
+        overrides = raw.get("overrides")
+        if not isinstance(overrides, dict):
+            return None
+        ids: list[str] = []
+        for wid in overrides.get("worldBookIds") or []:
+            if isinstance(wid, str) and wid.strip():
+                ids.append(wid.strip())
+        for att in overrides.get("worldBookAttachments") or []:
+            if isinstance(att, dict):
+                wid = att.get("worldBookId")
+                if isinstance(wid, str) and wid.strip():
+                    ids.append(wid.strip())
+            elif isinstance(att, str) and att.strip():
+                ids.append(att.strip())
+        missing = [wid for wid in dict.fromkeys(ids) if wid not in valid_worldbook_ids]
+        if not missing:
+            return None
+        return ScanIssue(
+            code="orphan_worldbook",
+            message=_ISSUE_MESSAGES["orphan_worldbook"],
+            detail=_normalize_detail("worldBookIds=" + ",".join(missing)),
         )
 
     def _validate_chat_record_schema(self, raw: Any) -> str | None:
@@ -421,6 +458,7 @@ class DataIntegrityService:
         valid_character_ids: set[str] | None = None,
         *,
         full_validation: bool = False,
+        valid_worldbook_ids: set[str] | None = None,
     ) -> ScanResult:
         stable = await self._read_stable_bytes(target.path)
         if stable is None:
@@ -483,6 +521,10 @@ class DataIntegrityService:
         orphan = self._check_orphan_reference(target, raw, valid_character_ids)
         if orphan is not None:
             return stable.snapshot, orphan
+
+        worldbook_orphan = self._check_worldbook_orphan(target, raw, valid_worldbook_ids)
+        if worldbook_orphan is not None:
+            return stable.snapshot, worldbook_orphan
 
         return None
 
@@ -575,11 +617,13 @@ class DataIntegrityService:
         await asyncio.sleep(STARTUP_SCAN_DELAY_SEC)
         targets = await asyncio.to_thread(self._enumerate_targets)
         valid_character_ids = await asyncio.to_thread(self._collect_character_ids)
+        valid_worldbook_ids = await asyncio.to_thread(self._collect_worldbook_ids)
         for index, target in enumerate(targets):
             result = await self._scan_target(
                 target,
                 valid_character_ids,
                 full_validation=self._has_runtime_issue(target.path),
+                valid_worldbook_ids=valid_worldbook_ids,
             )
             await self._upsert_issue(target, result)
             if index < len(targets) - 1:
@@ -593,11 +637,14 @@ class DataIntegrityService:
         if not cached:
             return
 
-        needs_character_ids = any(
+        needs_chat_refs = any(
             item.target.kind in {"chat_record", "legacy_chat"} for item in cached
         )
         valid_character_ids = (
-            await asyncio.to_thread(self._collect_character_ids) if needs_character_ids else None
+            await asyncio.to_thread(self._collect_character_ids) if needs_chat_refs else None
+        )
+        valid_worldbook_ids = (
+            await asyncio.to_thread(self._collect_worldbook_ids) if needs_chat_refs else None
         )
 
         for recorded in cached:
@@ -607,10 +654,16 @@ class DataIntegrityService:
                 if refreshed_target.kind in {"chat_record", "legacy_chat"}
                 else None
             )
+            book_ids = (
+                valid_worldbook_ids
+                if refreshed_target.kind in {"chat_record", "legacy_chat"}
+                else None
+            )
             result = await self._scan_target(
                 refreshed_target,
                 char_ids,
                 full_validation=recorded.runtime,
+                valid_worldbook_ids=book_ids,
             )
             await self._upsert_issue(refreshed_target, result)
 
@@ -666,6 +719,9 @@ class DataIntegrityService:
             if recorded.target.kind in {"chat_record", "legacy_chat"}
             else None,
             full_validation=recorded.runtime,
+            valid_worldbook_ids=await asyncio.to_thread(self._collect_worldbook_ids)
+            if recorded.target.kind in {"chat_record", "legacy_chat"}
+            else None,
         )
         if isinstance(current_issue, ScanUnavailable):
             return {"path": rel_path, "status": "skipped", "reason": "文件暂时无法稳定读取"}
@@ -702,10 +758,16 @@ class DataIntegrityService:
                     if refreshed_target.kind in {"chat_record", "legacy_chat"}
                     else None
                 )
+                book_ids = (
+                    await asyncio.to_thread(self._collect_worldbook_ids)
+                    if refreshed_target.kind in {"chat_record", "legacy_chat"}
+                    else None
+                )
                 refreshed_issue = await self._scan_target(
                     refreshed_target,
                     char_ids,
                     full_validation=recorded.runtime,
+                    valid_worldbook_ids=book_ids,
                 )
                 await self._upsert_issue(refreshed_target, refreshed_issue)
                 if isinstance(refreshed_issue, ScanUnavailable):
@@ -738,9 +800,21 @@ class DataIntegrityService:
 
             refreshed_target = self._build_target(recorded.target.path)
             if refreshed_target is not None:
+                char_ids = (
+                    await asyncio.to_thread(self._collect_character_ids)
+                    if refreshed_target.kind in {"chat_record", "legacy_chat"}
+                    else None
+                )
+                book_ids = (
+                    await asyncio.to_thread(self._collect_worldbook_ids)
+                    if refreshed_target.kind in {"chat_record", "legacy_chat"}
+                    else None
+                )
                 refreshed_issue = await self._scan_target(
                     refreshed_target,
+                    char_ids,
                     full_validation=recorded.runtime,
+                    valid_worldbook_ids=book_ids,
                 )
                 await self._upsert_issue(refreshed_target, refreshed_issue)
             else:

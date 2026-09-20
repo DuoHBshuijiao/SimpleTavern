@@ -135,7 +135,7 @@ export interface DraftHelpSettings {
   context_message_limit?: number | null
 }
 
-export type WebSearchProvider = 'tavily' | 'bocha'
+export type WebSearchProvider = 'tavily' | 'bocha' | 'brave'
 
 /** Tavily Search POST /search 可选字段（apiKey 存在全局嵌套） */
 export interface WebSearchTavilySettings {
@@ -167,10 +167,21 @@ export interface WebSearchBochaSettings {
   exclude?: string | null
 }
 
+/** Brave Search GET /res/v1/web/search */
+export interface WebSearchBraveSettings {
+  apiKey?: string
+  count?: number | null
+  country?: string | null
+  search_lang?: string | null
+  freshness?: string | null
+  safesearch?: string | null
+}
+
 export interface WebSearchSettings {
   provider: WebSearchProvider
   tavily?: WebSearchTavilySettings
   bocha?: WebSearchBochaSettings
+  brave?: WebSearchBraveSettings
 }
 
 /**

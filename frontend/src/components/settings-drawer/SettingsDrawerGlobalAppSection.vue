@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import SettingsDrawerGlobalAccordion from './SettingsDrawerGlobalAccordion.vue'
+import SettingsDrawerGlobalUsageSummary from './SettingsDrawerGlobalUsageSummary.vue'
 
 defineProps<{
   appVersion: string
   checkUpdateLoading: boolean
   checkUpdateMessage: string
+  chatId: string | null
 }>()
 
 const open = defineModel<boolean>('open', { required: true })
@@ -17,6 +19,7 @@ const emit = defineEmits<{
 
 <template>
   <SettingsDrawerGlobalAccordion v-model:open="open" title="应用与更新">
+    <SettingsDrawerGlobalUsageSummary :chat-id="chatId" />
     <div class="flex flex-wrap items-center gap-2">
       <a
         href="https://duohbshuijiao.github.io/SumOrNot/"

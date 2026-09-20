@@ -676,10 +676,22 @@ function formatTtsProviderLabel(provider: TtsProvider): string {
 }
 
 // --- TTS 缓存统计（打开设置抽屉或开启 TTS 时请求 GET /api/tts/cache/stats，不轮询） ---
-const ttsCacheStats = ref<{ usedBytes: number; limitBytes: number; lastPatrolAt: string; prunedFiles: number } | null>(null)
+const ttsCacheStats = ref<{
+  usedBytes: number
+  limitBytes: number
+  lastPatrolAt: string
+  prunedFiles: number
+  lastError?: { code?: string; message?: string } | string | null
+} | null>(null)
 async function fetchTtsCacheStats() {
   try {
-    const res = await apiGet<{ usedBytes: number; limitBytes: number; lastPatrolAt: string; prunedFiles: number }>('/api/tts/cache/stats')
+    const res = await apiGet<{
+      usedBytes: number
+      limitBytes: number
+      lastPatrolAt: string
+      prunedFiles: number
+      lastError?: { code?: string; message?: string } | string | null
+    }>('/api/tts/cache/stats')
     ttsCacheStats.value = res
   } catch { /* ignore when TTS disabled */ }
 }
@@ -4418,6 +4430,7 @@ provide(
                 :app-version="appVersion"
                 :check-update-loading="checkUpdateLoading"
                 :check-update-message="checkUpdateMessage"
+                :chat-id="chat?.id ?? null"
                 @check-update="checkUpdate"
                 @open-http-log="showHttpLogViewer = true"
               />

@@ -39,6 +39,9 @@ export { AUTO_MEMORY_SUMMARY_USER_MESSAGE } from './useAssistant'
 export { useChatActions } from './useChatActions'
 export type { UseChatActions, ChatActionsDeps } from './useChatActions'
 
+export { useChatGeneration } from './useChatGeneration'
+export type { UseChatGeneration, ChatGenerationDeps } from './useChatGeneration'
+
 export { useAppFont, applyFont } from './useAppFont'
 export { useSettingsImport } from './useSettingsImport'
 export { useViewportNarrowPortrait } from './useViewportNarrowPortrait'

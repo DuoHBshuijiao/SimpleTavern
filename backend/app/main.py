@@ -52,6 +52,7 @@ from app.routes.oauth import router as oauth_router
 from app.routes.assistant import router as assistant_router
 from app.routes.tokenizer import router as tokenizer_router
 from app.routes.update import router as update_router
+from app.routes.usage import router as usage_router
 from app.routes.web_search import router as web_search_router
 from app.routes.worldbooks import router as worldbooks_router
 from app.routes.mvu import router as mvu_router
@@ -60,10 +61,11 @@ from app.services.data_integrity import data_integrity_service
 from app.services.glm_local_tts_process import stop as stop_glm_local_tts
 from app.services.http_client import shutdown_http_clients, startup_http_clients
 from app.services.http_log_sweeper import http_log_sweeper
+from app.services.migration_log import iter_migration_warnings, migration_warning_count
 from app.services.omnivoice_local_tts_process import stop as stop_omnivoice_local_tts
 from app.services.qwen3_local_tts_process import stop as stop_qwen3_local_tts
 from app.services.tts_cache import tts_cache_patrol
-from app.storage import ensure_data_initialized
+from app.storage import ensure_data_initialized, get_lock_observability
 from app.tokenizer_service import warmup_tokenizer
 from app.version import APP_VERSION
 
@@ -151,15 +153,19 @@ install_error_handlers(app)
 
 @app.get("/api/health")
 def health() -> dict:
-    """
-    健康检查端点
-    
-    用于检查应用是否正常运行。
-    
-    Returns:
-        dict: 健康状态 {"ok": True}
-    """
-    return {"ok": True}
+    """进程存活 + 锁/后台巡检/迁移警告可观测快照（T-810 / T-811 / T-813）。"""
+    from app.content_regex_scanner import get_content_regex_scanner_health
+
+    return {
+        "ok": True,
+        "locks": get_lock_observability(),
+        "contentRegex": get_content_regex_scanner_health(),
+        "ttsCache": tts_cache_patrol.get_stats(),
+        "migrationWarnings": {
+            "count": migration_warning_count(),
+            "recent": iter_migration_warnings(limit=5),
+        },
+    }
 
 
 app.include_router(settings_router, prefix="/api")
@@ -180,6 +186,7 @@ app.include_router(import_export_router, prefix="/api")
 app.include_router(assistant_router, prefix="/api")
 app.include_router(tokenizer_router, prefix="/api")
 app.include_router(update_router, prefix="/api")
+app.include_router(usage_router, prefix="/api")
 app.include_router(mvu_router, prefix="/api")
 app.include_router(worldbooks_router, prefix="/api")
 app.include_router(tts_router, prefix="/api")

@@ -27,12 +27,12 @@
   - [x] 6B 多协议工具 round-trip
   - [x] 6C Responses 内建 web_search（Gemini CachedContents 已并入 v0.810 T-821）
 - [x] **T-807 P0** 消息 generation metadata + append-only usage ledger
-- [ ] **T-808 P1** 本地定价引擎 + 会话/全局/按模型统计 API 与设置页 UI
-- [ ] **T-809 P1** 网络搜索供应商与 provider-native grounding 扩展
-- [ ] **T-810 P1** Generate/Assistant/MVU/KG/Regex/TTS 性能与健壮性
-- [ ] **T-811 P1** Storage/Chats/Fork/Import/Export/Integrity 性能与错误收口
-- [ ] **T-812 P1** ChatPage SSE → `useChatGeneration`，统一 meta/usage/done/error
-- [ ] **T-813 P1** 数据迁移、隐私、安全与向后兼容
+- [x] **T-808 P1** 本地定价引擎 + 会话/全局/按模型统计 API 与设置页 UI
+- [x] **T-809 P1** 网络搜索供应商与 provider-native grounding 扩展
+- [x] **T-810 P1** Generate/Assistant/MVU/KG/Regex/TTS 性能与健壮性
+- [x] **T-811 P1** Storage/Chats/Fork/Import/Export/Integrity 性能与错误收口
+- [x] **T-812 P1** ChatPage SSE → `useChatGeneration`，统一 meta/usage/done/error
+- [x] **T-813 P1** 数据迁移、隐私、安全与向后兼容
 - [ ] **T-814 P0** 全链路对照 `docs/specs/` 做发布核对（仓库外黑盒；本仓库不跑自动化测试）
 
 ### 执行顺序

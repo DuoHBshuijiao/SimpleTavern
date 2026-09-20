@@ -53,6 +53,38 @@
 
 ## v0.800（进行中）
 
+### 本地定价与用量仪表盘（T-808）
+
+- 写入 metadata 时按目录/用户价格表估算；云端 `cost.source=provider` 不被覆盖；未知不计 0。
+- 别名与正则有效部分最短 3 字符。用户覆盖 `data/pricing_rules.json`。
+- `GET /api/usage/summary|models|events`、`GET/PUT /api/pricing/rules`。
+- 设置「应用与更新」内、成本计算器上方：当前会话/全局、时间范围、token/缓存/成本来源/按模型表。
+
+### 搜索供应商与原生联网（T-809）
+
+- 独立搜索增加 Brave Search（GET + `X-Subscription-Token`）；429 为配额错误。
+- Anthropic `web_search_20250305`、Gemini `googleSearch`；与 Responses 一样不走本地 Tavily 循环、失败不静默换供应商。
+
+### 领域性能说明与异常可见（T-810）
+
+- 沿用 T-803 基线数字，未发明无测量加速。
+- `GET /api/health` 暴露锁/正文正则/TTS 缓存/迁移警告；TTS 设置页展示缓存巡检 `lastError`。
+
+### 世界书孤儿与锁超时（T-811）
+
+- 完整性扫描 `orphan_worldbook`（引用的世界书不存在，不自动修）。
+- 文件锁等待 30s 超时 → `file_lock_timeout` 503；health `locks.timeoutCount`。
+
+### 前端 SSE 提炼（T-812）
+
+- `useChatGeneration` 统一消费 meta/usage/delta/reasoning/done/error。
+- 停止或失败 persist 本地流式消息，不 reload 冲掉正文。
+
+### 迁移与隐私（T-813）
+
+- `data/migration_warnings.jsonl`：旧设置缺扫描深度/预设 protocol 时可见警告。
+- 账本与 repair 队列脱敏；旧 JSON `extra="allow"` 仍可加载。
+
 ### Responses 内建 web_search（T-806-6C）
 
 - 主聊天 `webSearchEnabled`：协议为 `openai_responses` 时把 `{type:web_search}` 交给厂商，不要求本地 Tavily/博查 Key，也不走函数工具循环。

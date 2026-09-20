@@ -72,6 +72,7 @@ import {
   useAssistant,
   useChatActions,
   useSettingsImport,
+  useChatGeneration,
 } from '../composables'
 import { useEmbeddedAvatarImport, type AvatarCropSavePayload } from '../composables/useEmbeddedAvatarImport'
 import { useGenerationDeferState } from '../composables/useGenerationDeferState'
@@ -275,9 +276,6 @@ const showImageLayer = computed(() => pageBackground.hasImage.value && !webgpuPa
 
 const editingChatId = ref<string | null>(null)
 const editingTitle = ref('')
-const aborter = ref<AbortController | null>(null)
-const stopRequested = ref(false)
-const stopStreamingHold = ref(false)
 const {
   rewriteMergeCtx,
   clearAll: clearGenerationDeferState,
@@ -296,10 +294,6 @@ watch(() => uiStore.settingsDrawerRequestNonce, (nonce) => {
   settingsTab.value = uiStore.requestedSettingsTab
   showSettings.value = true
 })
-
-function shouldIgnoreStreamingEventWhileStopping(eventName: string): boolean {
-  return stopRequested.value && eventName === 'delta'
-}
 
 /**
  * 计算选中的角色
@@ -840,6 +834,28 @@ const stream = useStreamOutput(
   { appendLocalMessageContent: chats.appendLocalMessageContent },
   () => scrollToBottom(true, true),
 )
+
+const {
+  aborter,
+  stopRequested,
+  stopStreamingHold,
+  beginGenerateAbort,
+  applyGenerateDonePayload,
+  makeGenerateSseHandler,
+  consumeGenerationFinallyFlags,
+} = useChatGeneration({
+  chats: {
+    patchLocalMessage: chats.patchLocalMessage,
+    getLocalMessage: (messageId) => chats.activeChat?.messages.find((m) => m.id === messageId),
+  },
+  stream,
+  onAssistantContentDeltaStarted,
+  chatReasoningContent,
+  chatReasoningMessageId,
+  chatReasoningStreamActive,
+  pushCurrentReasoningToBlocks,
+  clearReasoningPhaseTiming,
+})
 
 // 消息版本
 const versions = useMessageVersions()
@@ -1784,12 +1800,6 @@ async function handleFastModeChange(value: boolean | null) {
   await chats.updateOverrides(chats.activeChat.id, overrides)
 }
 
-function applyGenerateDoneUsage(localAssistantId: string, data: unknown) {
-  if (!data || typeof data !== 'object') return
-  const usage = (data as { usage?: ChatMessage['usage'] }).usage
-  if (!usage || typeof usage !== 'object') return
-  chats.patchLocalMessage(localAssistantId, { usage })
-}
 
 /**
  * 滚动到底部
@@ -2397,36 +2407,13 @@ async function runGroupGeneration(
         await postAndConsumeSse(
           '/api/generate/group',
           { chatId, characterId, imageFallbackMode, webSearchEnabled: webSearchSessionEnabled.value },
-          (evt) => {
-            if (evt.event === 'delta') onAssistantContentDeltaStarted()
-            if (shouldIgnoreStreamingEventWhileStopping(evt.event)) return
-            if (evt.event === 'delta') {
-              const data = evt.data as { text?: string } | undefined
-              const t = data?.text
-              if (typeof t === 'string') {
-                stream.appendDeltaBuffered(localAssistantId, t)
-              }
-            } else if (evt.event === 'reasoning') {
-              const data = evt.data as { text?: string } | undefined
-              const t = data?.text
-              if (typeof t === 'string') {
-                chatReasoningContent.value += t
-              }
-            } else if (evt.event === 'done') {
-              const data = evt.data as { assistantMessageId?: string; usage?: ChatMessage['usage'] } | undefined
-              const serverId = data?.assistantMessageId
-              if (serverId && chatReasoningContent.value) {
-                chatReasoningMessageId.value = serverId
-              }
-              pushCurrentReasoningToBlocks(serverId ?? undefined, localAssistantId)
-              applyGenerateDoneUsage(localAssistantId, data)
-            } else if (evt.event === 'error') {
-              chatReasoningStreamActive.value = false
-              clearReasoningPhaseTiming()
-              const data = evt.data as { message?: string } | undefined
-              sseError = String(data?.message ?? 'unknown error')
-            }
-          },
+          makeGenerateSseHandler({
+            localAssistantId,
+            onTerminalError: (data) => {
+              const payload = data as { message?: string } | undefined
+              sseError = String(payload?.message ?? 'unknown error')
+            },
+          }),
           aborter.value?.signal,
         )
         if (sseError) {
@@ -2458,7 +2445,7 @@ async function runGroupGeneration(
           chatReasoningContent.value = res.reasoningContent
         }
         pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined, localAssistantId)
-        applyGenerateDoneUsage(localAssistantId, res)
+        applyGenerateDonePayload(localAssistantId, res)
         chats.appendLocalMessageContent(localAssistantId, res.content || '')
         scrollToBottom()
         void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
@@ -2607,8 +2594,7 @@ async function sendUserMessage() {
   group.resetGroupState()
 
   isGenerating.value = true
-  aborter.value?.abort()
-  aborter.value = new AbortController()
+  beginGenerateAbort()
 
   const useStream = settings.settings?.streamEnabled !== false
 
@@ -2683,34 +2669,7 @@ async function sendUserMessage() {
               userPersona: selectedPersona.value ?? null,
               webSearchEnabled: webSearchSessionEnabled.value,
             },
-            (evt) => {
-              if (evt.event === 'delta') onAssistantContentDeltaStarted()
-              if (shouldIgnoreStreamingEventWhileStopping(evt.event)) return
-              if (evt.event === 'delta') {
-                const data = evt.data as { text?: string } | undefined
-                const t = data?.text
-                if (typeof t === 'string') {
-                  stream.appendDeltaBuffered(localAssistantId, t)
-                }
-              } else if (evt.event === 'reasoning') {
-                const data = evt.data as { text?: string } | undefined
-                const t = data?.text
-                if (typeof t === 'string') {
-                  chatReasoningContent.value += t
-                }
-              } else if (evt.event === 'done') {
-                const data = evt.data as { assistantMessageId?: string; usage?: ChatMessage['usage'] } | undefined
-                const serverId = data?.assistantMessageId
-                if (serverId && chatReasoningContent.value) {
-                  chatReasoningMessageId.value = serverId
-                }
-                pushCurrentReasoningToBlocks(serverId ?? undefined, localAssistantId)
-                applyGenerateDoneUsage(localAssistantId, data)
-              } else if (evt.event === 'error') {
-                chatReasoningStreamActive.value = false
-                clearReasoningPhaseTiming()
-              }
-            },
+            makeGenerateSseHandler({ localAssistantId }),
             aborter.value?.signal,
           )
         } finally {
@@ -2743,7 +2702,7 @@ async function sendUserMessage() {
             chatReasoningContent.value = res.reasoningContent
           }
           pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined, localAssistantId)
-          applyGenerateDoneUsage(localAssistantId, res)
+          applyGenerateDonePayload(localAssistantId, res)
           chats.appendLocalMessageContent(localAssistantId, res.content || '')
           scrollToBottom()
           void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
@@ -2774,12 +2733,7 @@ async function sendUserMessage() {
                   imageFallbackMode: true,
                   userPersona: selectedPersona.value ?? null,
                   webSearchEnabled: webSearchSessionEnabled.value,
-                }, (evt) => {
-                  if (evt.event === 'delta') {
-                    const data = evt.data as { text?: string } | undefined
-                    if (typeof data?.text === 'string') stream.appendDeltaBuffered(localAssistantId, data.text)
-                  }
-                }, aborter.value?.signal)
+                }, makeGenerateSseHandler({ localAssistantId }), aborter.value?.signal)
               } finally {
                 stream.flushForMessage(localAssistantId)
               }
@@ -2813,9 +2767,8 @@ async function sendUserMessage() {
   } finally {
     isGenerating.value = false
     group.currentSpeakerIndex.value = -1
-    if (stopStreamingHold.value) {
+    if (consumeGenerationFinallyFlags(!!streamError.value) === 'persist') {
       await persistLocalStreamingMessages(chatId)
-      stopStreamingHold.value = false
     } else {
       await chats.load(chatId)
       await afterChatReload(chatId)
@@ -2856,16 +2809,15 @@ async function continueGroupChat() {
       streamError.value = e
     }
   } finally {
-    const skippedReload = stopStreamingHold.value
-    if (skippedReload) {
+    const persistInstead = consumeGenerationFinallyFlags(!!streamError.value) === 'persist'
+    if (persistInstead) {
       await persistLocalStreamingMessages(chatId)
-      stopStreamingHold.value = false
     }
     if (!group.isPaused.value) {
       isGenerating.value = false
       group.currentSpeakerIndex.value = -1
       group.pendingMembers.value = []
-      if (!skippedReload) {
+      if (!persistInstead) {
         await chats.load(chatId)
         await afterChatReload(chatId)
         if (!streamError.value) bumpSidebarForActiveChat()
@@ -2899,8 +2851,7 @@ async function startNextRound() {
   const groupDelay = activeChat.value.groupDelay || 1500
 
   isGenerating.value = true
-  aborter.value?.abort()
-  aborter.value = new AbortController()
+  beginGenerateAbort()
 
   try {
     const allMemberIds = [...activeChat.value.memberIds]
@@ -2915,13 +2866,12 @@ async function startNextRound() {
   } finally {
     isGenerating.value = false
     group.currentSpeakerIndex.value = -1
-    const skippedReload = stopStreamingHold.value
-    if (skippedReload) {
+    const persistInstead = consumeGenerationFinallyFlags(!!streamError.value) === 'persist'
+    if (persistInstead) {
       await persistLocalStreamingMessages(chatId)
-      stopStreamingHold.value = false
     }
     if (!group.isPaused.value) {
-      if (!skippedReload) {
+      if (!persistInstead) {
         await chats.load(chatId)
         await afterChatReload(chatId)
         if (!streamError.value) bumpSidebarForActiveChat()
@@ -2947,8 +2897,7 @@ async function triggerInterject(characterId: string) {
   const chatId = activeChat.value.id
   group.isInterjecting.value = true
   streamError.value = null
-  aborter.value?.abort()
-  aborter.value = new AbortController()
+  beginGenerateAbort()
   
   const useStream = settings.settings?.streamEnabled !== false
   const deferredForInterject = getSaveSendDeferForChat(chatId)
@@ -2978,34 +2927,7 @@ async function triggerInterject(characterId: string) {
         await postAndConsumeSse(
           '/api/generate/interject',
           { chatId, characterId, omitMessageIds, webSearchEnabled: webSearchSessionEnabled.value },
-          (evt) => {
-            if (evt.event === 'delta') onAssistantContentDeltaStarted()
-            if (shouldIgnoreStreamingEventWhileStopping(evt.event)) return
-            if (evt.event === 'delta') {
-              const data = evt.data as { text?: string } | undefined
-              const t = data?.text
-              if (typeof t === 'string') {
-                stream.appendDeltaBuffered(localAssistantId, t)
-              }
-            } else if (evt.event === 'reasoning') {
-              const data = evt.data as { text?: string } | undefined
-              const t = data?.text
-              if (typeof t === 'string') {
-                chatReasoningContent.value += t
-              }
-            } else if (evt.event === 'done') {
-              const data = evt.data as { assistantMessageId?: string; usage?: ChatMessage['usage'] } | undefined
-              const serverId = data?.assistantMessageId
-              if (serverId && chatReasoningContent.value) {
-                chatReasoningMessageId.value = serverId
-              }
-              pushCurrentReasoningToBlocks(serverId ?? undefined, localAssistantId)
-              applyGenerateDoneUsage(localAssistantId, data)
-            } else if (evt.event === 'error') {
-              chatReasoningStreamActive.value = false
-              clearReasoningPhaseTiming()
-            }
-          },
+          makeGenerateSseHandler({ localAssistantId }),
           aborter.value?.signal,
         )
       } finally {
@@ -3034,7 +2956,7 @@ async function triggerInterject(characterId: string) {
           chatReasoningContent.value = res.reasoningContent
         }
         pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined, localAssistantId)
-        applyGenerateDoneUsage(localAssistantId, res)
+        applyGenerateDonePayload(localAssistantId, res)
         chats.appendLocalMessageContent(localAssistantId, res.content || '')
         scrollToBottom()
         void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
@@ -3050,9 +2972,8 @@ async function triggerInterject(characterId: string) {
     }
   } finally {
     group.isInterjecting.value = false
-    if (stopStreamingHold.value) {
+    if (consumeGenerationFinallyFlags(generationHadError) === 'persist') {
       await persistLocalStreamingMessages(chatId)
-      stopStreamingHold.value = false
     } else {
       await chats.load(chatId)
       await afterChatReload(chatId)
@@ -3571,8 +3492,7 @@ async function handleRewriteMessage(m: ChatMessage) {
 
   isGenerating.value = true
   streamError.value = null
-  aborter.value?.abort()
-  aborter.value = new AbortController()
+  beginGenerateAbort()
 
   const useStream = settings.settings?.streamEnabled !== false
   const isGroup = activeChat.value.isGroup
@@ -3616,34 +3536,7 @@ async function handleRewriteMessage(m: ChatMessage) {
               mergeAssistantIntoMessageId: anchorId,
               webSearchEnabled: webSearchSessionEnabled.value,
             },
-            (evt) => {
-              if (evt.event === 'delta') onAssistantContentDeltaStarted()
-              if (shouldIgnoreStreamingEventWhileStopping(evt.event)) return
-              if (evt.event === 'delta') {
-                const data = evt.data as { text?: string } | undefined
-                const t = data?.text
-                if (typeof t === 'string') {
-                  stream.appendDeltaBuffered(localAssistantId, t)
-                }
-              } else if (evt.event === 'reasoning') {
-                const data = evt.data as { text?: string } | undefined
-                const t = data?.text
-                if (typeof t === 'string') {
-                  chatReasoningContent.value += t
-                }
-              } else if (evt.event === 'done') {
-                const data = evt.data as { assistantMessageId?: string; usage?: ChatMessage['usage'] } | undefined
-                const serverId = data?.assistantMessageId
-                if (serverId && chatReasoningContent.value) {
-                  chatReasoningMessageId.value = serverId
-                }
-                pushCurrentReasoningToBlocks(serverId ?? undefined, localAssistantId)
-                applyGenerateDoneUsage(localAssistantId, data)
-              } else if (evt.event === 'error') {
-                chatReasoningStreamActive.value = false
-                clearReasoningPhaseTiming()
-              }
-            },
+            makeGenerateSseHandler({ localAssistantId }),
             aborter.value?.signal,
           )
         } finally {
@@ -3671,7 +3564,7 @@ async function handleRewriteMessage(m: ChatMessage) {
             chatReasoningContent.value = res.reasoningContent
           }
           pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined, localAssistantId)
-          applyGenerateDoneUsage(localAssistantId, res)
+          applyGenerateDonePayload(localAssistantId, res)
           chats.appendLocalMessageContent(localAssistantId, res.content || '')
           scrollToBottom()
           void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
@@ -3699,34 +3592,7 @@ async function handleRewriteMessage(m: ChatMessage) {
               mergeAssistantIntoMessageId: anchorId,
               webSearchEnabled: webSearchSessionEnabled.value,
             },
-            (evt) => {
-              if (evt.event === 'delta') onAssistantContentDeltaStarted()
-              if (shouldIgnoreStreamingEventWhileStopping(evt.event)) return
-              if (evt.event === 'delta') {
-                const data = evt.data as { text?: string } | undefined
-                const t = data?.text
-                if (typeof t === 'string') {
-                  stream.appendDeltaBuffered(localAssistantId, t)
-                }
-              } else if (evt.event === 'reasoning') {
-                const data = evt.data as { text?: string } | undefined
-                const t = data?.text
-                if (typeof t === 'string') {
-                  chatReasoningContent.value += t
-                }
-              } else if (evt.event === 'done') {
-                const data = evt.data as { assistantMessageId?: string; usage?: ChatMessage['usage'] } | undefined
-                const serverId = data?.assistantMessageId
-                if (serverId && chatReasoningContent.value) {
-                  chatReasoningMessageId.value = serverId
-                }
-                pushCurrentReasoningToBlocks(serverId ?? undefined, localAssistantId)
-                applyGenerateDoneUsage(localAssistantId, data)
-              } else if (evt.event === 'error') {
-                chatReasoningStreamActive.value = false
-                clearReasoningPhaseTiming()
-              }
-            },
+            makeGenerateSseHandler({ localAssistantId }),
             aborter.value?.signal,
           )
         } finally {
@@ -3757,7 +3623,7 @@ async function handleRewriteMessage(m: ChatMessage) {
             chatReasoningContent.value = res.reasoningContent
           }
           pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined, localAssistantId)
-          applyGenerateDoneUsage(localAssistantId, res)
+          applyGenerateDonePayload(localAssistantId, res)
           chats.appendLocalMessageContent(localAssistantId, res.content || '')
           scrollToBottom()
           void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
@@ -3775,9 +3641,8 @@ async function handleRewriteMessage(m: ChatMessage) {
   } finally {
     isGenerating.value = false
     const skippedReload = stopStreamingHold.value
-    if (skippedReload) {
+    if (consumeGenerationFinallyFlags(generationHadError) === 'persist') {
       await persistLocalStreamingMessages(chatId)
-      stopStreamingHold.value = false
     } else {
       await chats.load(chatId)
       await afterChatReload(chatId)
@@ -4365,8 +4230,7 @@ async function handleSaveAndSend() {
 
   streamError.value = null
   isGenerating.value = true
-  aborter.value?.abort()
-  aborter.value = new AbortController()
+  beginGenerateAbort()
 
   let generationHadError = false
   try {
@@ -4393,34 +4257,7 @@ async function handleSaveAndSend() {
               omitMessageIds,
               webSearchEnabled: webSearchSessionEnabled.value,
             },
-            (evt) => {
-              if (evt.event === 'delta') onAssistantContentDeltaStarted()
-              if (shouldIgnoreStreamingEventWhileStopping(evt.event)) return
-              if (evt.event === 'delta') {
-                const data = evt.data as { text?: string } | undefined
-                const t = data?.text
-                if (typeof t === 'string') {
-                  stream.appendDeltaBuffered(localAssistantId, t)
-                }
-              } else if (evt.event === 'reasoning') {
-                const data = evt.data as { text?: string } | undefined
-                const t = data?.text
-                if (typeof t === 'string') {
-                  chatReasoningContent.value += t
-                }
-              } else if (evt.event === 'done') {
-                const data = evt.data as { assistantMessageId?: string; usage?: ChatMessage['usage'] } | undefined
-                const serverId = data?.assistantMessageId
-                if (serverId && chatReasoningContent.value) {
-                  chatReasoningMessageId.value = serverId
-                }
-                pushCurrentReasoningToBlocks(serverId ?? undefined, localAssistantId)
-                applyGenerateDoneUsage(localAssistantId, data)
-              } else if (evt.event === 'error') {
-                chatReasoningStreamActive.value = false
-                clearReasoningPhaseTiming()
-              }
-            },
+            makeGenerateSseHandler({ localAssistantId }),
             aborter.value?.signal,
           )
         } finally {
@@ -4444,7 +4281,7 @@ async function handleSaveAndSend() {
             chatReasoningContent.value = res.reasoningContent
           }
           pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined, localAssistantId)
-          applyGenerateDoneUsage(localAssistantId, res)
+          applyGenerateDonePayload(localAssistantId, res)
           chats.appendLocalMessageContent(localAssistantId, res.content || '')
           scrollToBottom()
           void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
@@ -4461,9 +4298,8 @@ async function handleSaveAndSend() {
   } finally {
     isGenerating.value = false
     group.currentSpeakerIndex.value = -1
-    if (stopStreamingHold.value) {
+    if (consumeGenerationFinallyFlags(generationHadError) === 'persist') {
       await persistLocalStreamingMessages(chatId)
-      stopStreamingHold.value = false
     } else {
       await chats.load(chatId)
       await afterChatReload(chatId)

@@ -13,7 +13,9 @@ import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
+from app.errors import as_app_error
 from app.storage import get_tts_cache_dir, load_settings
 
 logger = logging.getLogger(__name__)
@@ -32,6 +34,7 @@ class TtsCachePatrol:
         self.limit_bytes: int = 200 * 1024 * 1024
         self.last_patrol_at: str = ""
         self.pruned_files: int = 0
+        self.last_error: dict[str, Any] | None = None
 
     async def start(self) -> None:
         if self._task is None or self._task.done():
@@ -49,10 +52,20 @@ class TtsCachePatrol:
         while True:
             try:
                 await self._patrol_once()
+                self.last_error = None
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as exc:
                 logger.exception("[TTS][cache] patrol error")
+                try:
+                    self.last_error = as_app_error(
+                        exc,
+                        source="tts.cache",
+                        default_code="daemon_failed",
+                        default_message="TTS 缓存巡检失败",
+                    ).to_dict()
+                except Exception:
+                    self.last_error = {"code": "daemon_failed", "message": str(exc)}
             await asyncio.sleep(PATROL_INTERVAL_SECONDS)
 
     async def _patrol_once(self) -> None:
@@ -118,6 +131,7 @@ class TtsCachePatrol:
             "limitBytes": self.limit_bytes,
             "lastPatrolAt": self.last_patrol_at,
             "prunedFiles": self.pruned_files,
+            "lastError": self.last_error,
         }
 
     async def clear_all(self) -> dict:

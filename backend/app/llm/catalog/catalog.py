@@ -417,6 +417,33 @@ class LlmCatalog:
             return None
         return self._by_id.get(key) or self._by_legacy.get(key)
 
+    def iter_model_cost_rows(self) -> list[dict[str, Any]]:
+        """目录内带价格的模型行（供 T-808 定价引擎只读展开）。"""
+        rows: list[dict[str, Any]] = []
+        for pid, models in self._models_by_provider.items():
+            if not isinstance(models, dict):
+                continue
+            for mid, raw in models.items():
+                if not isinstance(raw, dict):
+                    continue
+                cost = raw.get("cost")
+                if not isinstance(cost, dict) or not cost:
+                    continue
+                aliases: list[str] = [str(mid)]
+                name = raw.get("name")
+                if isinstance(name, str) and name.strip() and name.strip() != mid:
+                    aliases.append(name.strip())
+                rows.append(
+                    {
+                        "provider": str(pid),
+                        "canonicalModelId": str(mid),
+                        "aliases": aliases,
+                        "cost": dict(cost),
+                        "updatedAt": self.models_generated_at,
+                    }
+                )
+        return rows
+
     def find_provider_by_base_url(self, base_url: str | None) -> ProviderEntry | None:
         """按 host（+ 尽量长的 path 前缀）匹配供应商；找不到返回 None（调用方决定是否 fast-fail）。"""
         host = _host_of(base_url)

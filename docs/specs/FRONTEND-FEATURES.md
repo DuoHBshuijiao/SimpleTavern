@@ -46,7 +46,7 @@
 
 - 多行输入；发送 / 停止生成。
 - 移除已选图片；选择图片。
-- 网络搜索开关（Tavily/博查，或当前协议为 OpenAI Responses 时走厂商内建 web_search）。
+- 网络搜索开关（独立搜索为 Tavily/博查/Brave，或当前协议为 OpenAI Responses / Anthropic Messages / Gemini 时走厂商原生联网）。
 - 更多输入选项。
 - 写作辅助：写/润色、停止、保留、重写、放弃。
 - 群聊：暂停、继续；成员「单次回应一条」插话。
@@ -65,7 +65,7 @@
 
 三个 Tab：**全局设置**、**API 预设**、**当前会话**。关闭按钮；底部保存。
 
-全局设置折叠区包括：连接（URL/Key/协议/OAuth 登录、模型、缓存策略、回传思考、解析预览、测模型）、外观（主题、字号增减、字体、页面背景图、透明度/模糊、WebGPU 开关与预设编辑）、提示词、网络搜索（Tavily/博查）、TTS、应用（更新检查/下载/执行、数据完整性、备份导入导出相关）。
+全局设置折叠区包括：连接（URL/Key/协议/OAuth 登录、模型、缓存策略、回传思考、解析预览、测模型）、外观（主题、字号增减、字体、页面背景图、透明度/模糊、WebGPU 开关与预设编辑）、提示词、网络搜索（Tavily/博查/Brave，以及原生联网说明）、TTS（含缓存巡检错误）、应用（用量与成本摘要、成本计算器外链、更新检查/下载/执行、数据完整性、备份导入导出相关）。
 
 API 预设：列表、新建/复制/删除、名称 combobox（供应商目录分组搜索）、模型增删、测模型、OAuth 登录/退出、高级连接字段与缓存教学入口。
 
@@ -111,7 +111,7 @@ API 预设：列表、新建/复制/删除、名称 combobox（供应商目录�
 - 文案取 `aria-label` / `placeholder` / 可见文字；动态插值以界面实际为准。
 - 「测模型」「测音色」是产品连通性探测，不是自动化测试。
 
-共 **649** 条可点/可填控件（旧稿标题写 746，清单机械计数 725；725 含大量非点击 caption `label`，且 7 条因属性里的 `>` 被截断而乱码。649 是按上列规则对当前 `.vue` 模板的引号感知抽取）。
+共 **654** 条可点/可填控件（旧稿标题写 746，清单机械计数 725；725 含大量非点击 caption `label`，且 7 条因属性里的 `>` 被截断而乱码。649 是 T-806/T-807 批次按上列规则的抽取；本批 T-808 用量摘要 +3、T-809 Brave 输入 +2 → **654**）。
 
 无独立交互控件、未列入下方清单的组件：`App.vue`（根容器）、`StartupIntegrityWatcher.vue`（空模板，经全局通知框确认修复）、`SelectDropdownSurface.vue`（下拉外壳，控件在插槽内）、`WebSearchQuotaSummary.vue`（只读用量展示）、`ModernAvatar.vue`（只读头像）、`AnimatedClipHeight.vue`（尺寸动画壳）。
 
@@ -227,7 +227,7 @@ API 预设：列表、新建/复制/删除、名称 combobox（供应商目录�
 - **button** `写作辅助`
 - **button** `帮我写点什么`
 - **button** `润色并扩写我的草稿`
-- **button** `网络搜索：开启后每次发送启用，直至关闭；Tavily/博查，或 OpenAI Responses 内建搜索`
+- **button** `网络搜索：开启后每次发送启用，直至关闭；独立搜索为 Tavily/博查/Brave，或当前协议原生联网（Responses / Anthropic / Gemini）`
 - **button** `选择图片`
 - **button** `更多输入选项`
 - **button** `网络搜索`
@@ -374,7 +374,7 @@ API 预设：列表、新建/复制/删除、名称 combobox（供应商目录�
 - **input[type=number]** `未限制`
 - **input[type=number]** `默认 8`
 - **input[type=number]** `未限制`
-- **ThemedCheckbox** `允许网络搜索 开启后聊天助手与工具区助手可调用全局设置里的 Tavily / 博查搜索；MVU Agent 不会挂载此工具。`
+- **ThemedCheckbox** `允许网络搜索 开启后聊天助手与工具区助手可调用全局设置里的 Tavily / 博查 / Brave 搜索；MVU Agent 不会挂载此工具。`
 - **ThemedCheckbox** `允许记忆写入 开启后助手可在当前聊天会话中追加或覆盖长期记忆；仅作用于「聊天助手」，工作区助手不可用。`
 - **ThemedCheckbox** `允许破坏性工具 开启后助手可执行删除文件、删除世界书、覆盖整卡与覆盖全部记忆等不可逆操作。`
 - **button** `取消`
@@ -727,6 +727,12 @@ API 预设：列表、新建/复制/删除、名称 combobox（供应商目录�
 - **button** `检查更新`
 - **a** `…`
 
+### `components/settings-drawer/SettingsDrawerGlobalUsageSummary.vue`
+
+- **button** `刷新`
+- **ThemedRadioTags** `用量统计范围`
+- **ModernSelect** `选择时间范围…`
+
 ### `components/settings-drawer/SettingsDrawerGlobalAppearanceSection.vue`
 
 - **button** `导入图片`
@@ -793,6 +799,8 @@ API 预设：列表、新建/复制/删除、名称 combobox（供应商目录�
 - **input[type=password]** `tvly-...`
 - **input[type=number]** `input`
 - **input[type=text]** `basic / advanced / fast …`
+- **input[type=password]** `BSA...`
+- **input[type=number]** `input`
 - **input[type=password]** `input`
 - **input[type=text]** `https://api.bocha.cn`
 - **input[type=number]** `input`

@@ -7,6 +7,7 @@ export interface TtsCacheStats {
   limitBytes: number
   lastPatrolAt: string
   prunedFiles: number
+  lastError?: { code?: string; message?: string } | string | null
 }
 
 defineProps<{
@@ -92,6 +93,16 @@ function onToggleTts() {
             清空缓存
           </button>
         </div>
+        <p
+          v-if="cacheStats?.lastError"
+          class="text-xs text-[var(--color-error-text)]"
+        >
+          缓存巡检失败：{{
+            typeof cacheStats.lastError === 'string'
+              ? cacheStats.lastError
+              : (cacheStats.lastError.message || cacheStats.lastError.code || '未知错误')
+          }}
+        </p>
       </div>
     </div>
 

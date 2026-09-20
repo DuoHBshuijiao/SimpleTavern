@@ -162,7 +162,7 @@ function effortValue(): string {
               <span>
                 <span class="text-sm text-[var(--color-text)]">允许网络搜索</span>
                 <span class="block text-xs text-[var(--color-text-muted)] mt-1">
-                  开启后聊天助手与工具区助手可调用全局设置里的 Tavily / 博查搜索；MVU Agent 不会挂载此工具。
+                  开启后聊天助手与工具区助手可调用全局设置里的 Tavily / 博查 / Brave 搜索；MVU Agent 不会挂载此工具。
                 </span>
               </span>
             </label>

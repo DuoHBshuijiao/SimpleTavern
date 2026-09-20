@@ -2,13 +2,13 @@
 
 本文只描述对外 HTTP/SSE 接口的功能与数据约定，供仓库外黑盒测试编写用例。不描述内部函数、实现细节或自动化门禁。
 
-覆盖范围：OpenAPI 共 **107** 条路径、**132** 个 HTTP 操作（同一路径上的 GET/PUT/DELETE 等分别计数）。另有 FastAPI 自带 `/docs`、`/redoc`、`/openapi.json`，非正式产品接口。
+覆盖范围：OpenAPI 共 **112** 条路径、**137** 个 HTTP 操作（同一路径上的 GET/PUT/DELETE 等分别计数）。另有 FastAPI 自带 `/docs`、`/redoc`、`/openapi.json`，非正式产品接口。
 
 应用形态：本机单用户。前端默认 `http://127.0.0.1:9081`，后端默认 `http://127.0.0.1:9091`。浏览器请求走 `/api/*`，由前端开发服务器代理到后端。无登录鉴权；OAuth 仅用于向上游 LLM 厂商取 token。
 
 并行沙箱：`python sandbox.py` 使用 `http://127.0.0.1:9181` / `http://127.0.0.1:9191` 与目录 `data-sandbox/`（环境变量 `SIMPLETAVERN_DATA_DIR`）。不改写生产 `data/`，也不占用生产端口。用法见 [`docs/SANDBOX.md`](../SANDBOX.md)。
 
-持久化：JSON 文件位于仓库 `data/`（设置、角色、会话、世界书、头像、字体、背景、TTS 缓存、OAuth token、用量账本 `usage/` 等）。沙箱写入 `data-sandbox/`。
+持久化：JSON 文件位于仓库 `data/`（设置、角色、会话、世界书、头像、字体、背景、TTS 缓存、OAuth token、用量账本 `usage/`、用户价格覆盖 `pricing_rules.json`、迁移警告 `migration_warnings.jsonl` 等）。沙箱写入 `data-sandbox/`。
 
 ## 通用约定
 
@@ -22,7 +22,7 @@
 
 失败时 JSON 主体字段（camelCase）：
 
-- `code`（string）：稳定错误码，如 `request_validation_failed`、`not_found`、`upstream_timeout`、`provider_auth_failed`、`generation_failed`、`MISSING_OAUTH_LOGIN`。
+- `code`（string）：稳定错误码，如 `request_validation_failed`、`not_found`、`upstream_timeout`、`provider_auth_failed`、`generation_failed`、`MISSING_OAUTH_LOGIN`、`file_lock_timeout`、`chat_not_found`、`web_search_not_configured`。
 - `message`（string）：面向用户的说明；密钥等敏感片段会被打码。
 - `detail`（string | null）：补充细节，同样打码，过长截断。
 - `source`（string）：出错子系统，如 `generate.stream`、`llm.registry`。
@@ -49,16 +49,17 @@ data: {JSON}
 - `meta`：开流。`requestId`；可选 `provider`、`protocol`、`resolvedModel`、`warnings[]`、`protocolResolution`、`cache`。
 - `reasoning`：`{ text }` 思考增量。
 - `delta`：`{ text }` 正文增量。
+- `usage`：供应商 usage 归一化后可在 `done` 前出现（camelCase token 字段）。无 usage 时本事件可省略。
 - `done`：终态成功。至少 `ok: true`、`chatId`；常含 `assistantMessageId`、`reasoningContent`、`reasoningDurationSec`、`usage`、`generationMetadata`。群聊另含 `characterId`。
 - `error`：终态失败。错误信封字段 + `terminal: true`。出现 error 时不再发 `done`。
 
 `usage` 对象归一化后常见键（camelCase，与消息 `ChatMessage.usage` 一致）：`inputTokens` / `outputTokens` / `totalTokens` / `reasoningTokens` / `cacheReadInputTokens` / `cacheWriteInputTokens` / `serviceTier`，以及 Fast 是否被请求的 `fastRequested`（供「Fast 未生效」徽标）。旧文档里的 snake_case 别名不是当前生成接口的主形态。
 
-`generationMetadata`（T-807）：`version`、`requestId`、`provider`、`protocol`、`requestedModel`、`resolvedModel`、`startedAt`、可选 `firstTokenLatencyMs` / `totalDurationMs`、`nonStreaming`、`usage`、`cost`（有云端金额则 `source=provider`，否则 `source=unknown` 且不填 0）、`calls[]`、`status`。不含 API Key、完整请求体或敏感 header。
+`generationMetadata`（T-807/T-808）：`version`、`requestId`、`provider`、`protocol`、`requestedModel`、`resolvedModel`、`startedAt`、可选 `firstTokenLatencyMs` / `totalDurationMs`、`nonStreaming`、`usage`、`cost`、`calls[]`、`status`。`cost.source` 为 `provider`（云端金额，不被本地估算覆盖）、`estimated`（目录/用户价格表）或 `unknown`（无法可靠计算，不得填 0）。有估算时额外 `estimatedAmount` / `pricingRuleId`。不含 API Key、完整请求体或敏感 header。
 
 当全局设置 `streamEnabled=false` 时，生成类接口改为一次性 JSON（非 SSE），成功体含 `ok`、`chatId`、助手正文/思考/`usage`/`generationMetadata`；失败仍为错误信封。
 
-用量账本：`data/usage/YYYY-MM.jsonl`（append-only，按 `eventId` 幂等）与 `data/usage/usage_index.json`。沙箱写入 `data-sandbox/usage/`。同一 `requestId` 重放不得覆盖已有事件；新请求必须用新 `requestId`。定价汇总 API 见 T-808，本版不提供。
+用量账本：`data/usage/YYYY-MM.jsonl`（append-only，按 `eventId` 幂等）与 `data/usage/usage_index.json`。沙箱写入 `data-sandbox/usage/`。同一 `requestId` 重放不得覆盖已有事件；新请求必须用新 `requestId`。汇总见 `GET /api/usage/summary|models|events`；本地价格表见 `GET/PUT /api/pricing/rules`。别名最短 3 字符。用户覆盖存 `data/pricing_rules.json`。
 
 助手 `/api/assistant/stream` 额外事件：`tool_record`、`tool_trace`、`card`、`chat_memory_updated`、`worldbook_updated`、`chat_overrides_updated`。
 
@@ -74,7 +75,13 @@ MVU `/api/mvu/{chat_id}/stream`：先补发最多 50 条 `log_history`，随后�
 
 #### `GET /api/health`
 
-进程存活探测，成功体 `{ ok: true }`。
+进程存活探测。成功体：
+
+- `ok`（boolean）恒为 true。
+- `locks`：portalocker 观测。`acquireCount`、`waitMsTotal`、`waitMsMax`、`lastWaitMs`、`sharedAcquireCount`、`exclusiveAcquireCount`、`timeoutCount`、`lastTimeoutWaitMs`、`lastTimeoutAt`、`timeoutSec`（当前 30）。锁等待超过 `timeoutSec` 时业务请求返回 `file_lock_timeout`（HTTP 503，可重试）。
+- `contentRegex`：正文正则后台扫描 health（耗时、跳过数、失败信封）。
+- `ttsCache`：TTS 缓存巡检统计，含可选 `lastError`。
+- `migrationWarnings`：`{ count, recent }`。`recent` 最多 5 条，来自 `data/migration_warnings.jsonl`。
 
 **响应**
 
@@ -82,11 +89,82 @@ MVU `/api/mvu/{chat_id}/stream`：先补发最多 50 条 `log_history`，随后�
 
 #### `GET /api/web-search/status`
 
-Web Search Status
+独立搜索配置与用量代理（前端不直连第三方）。体字段：
+
+- `provider`：当前选中的独立搜索提供方（`tavily` / `bocha` / `brave`）。
+- `tavily` / `bocha`：已配置 Key 时的用量/余额代理结果；未配置则为 `null`。
+- `brave`：已配置 Token 时 `{ ok: true, configured: true, message }`（Brave 无公开余额接口）；未配置为 `null`。
+- `modes.independent`：`["tavily","bocha","brave"]`。
+- `modes.native`：`["openai_responses","anthropic_messages","gemini_generate_content"]`。
 
 **响应**
 
 - `200` `application/json` Successful Response → `any`
+
+### usage
+
+#### `GET /api/usage/summary`
+
+按账本汇总 token / 缓存 / 成本 / 延迟。查询：
+
+- `scope`：`chat` | `global`（默认 `global`）。
+- `chatId`：`scope=chat` 时必填；会话不存在 → `chat_not_found` 404。
+- `range`：`all`（默认）| `7d` | `30d` | `month`（本月 1 日 0 点起）。也可传 `since` / `until` ISO 时间覆盖。
+
+成功体：`ok`、`scope`、`chatId`、`range`、`eventCount`、`summary`。`summary` 含 `requestCount` / `completedCount` / `failedCount` / `cancelledCount`、`inputTokens` / `outputTokens` / `avgInputTokens` / `avgOutputTokens`、`cacheReadInputTokens` / `cacheWriteInputTokens` / `cacheHitRate`、`costByCurrency`（按币种 `provider`/`estimated`/`total`，未知成本不进合计、不计 0）、`unknownCostCount`、TTFT 与总耗时的 avg/P50/P95。
+
+**响应**
+
+- `200` `application/json` Successful Response → `object`
+- `404` 会话不存在 → 错误信封 `chat_not_found`
+- `422` `application/json` Validation Error → `HTTPValidationError`
+
+#### `GET /api/usage/models`
+
+查询参数与 summary 相同。成功体 `models[]`：每行 `provider` / `protocol` / `resolvedModel` 加上与 summary 相同的汇总字段。
+
+**响应**
+
+- `200` `application/json` Successful Response → `object`
+- `404` / `422` 同 summary
+
+#### `GET /api/usage/events`
+
+分页列出账本事件（按 `ts` 降序）。查询在 summary 之外增加：
+
+- `status`：可选，精确匹配 `completed` / `failed` / `cancelled`。
+- `limit`：1–200，默认 50。
+- `offset`：默认 0。
+
+成功体：`total`、`limit`、`offset`、`items[]`。事件字段为账本 allowlist（无 API Key、无完整请求体）。
+
+**响应**
+
+- `200` `application/json` Successful Response → `object`
+- `404` / `422` 同 summary
+
+#### `GET /api/pricing/rules`
+
+列出用户覆盖规则（在前）与目录只读规则（`id` 形如 `catalog:{provider}:{model}`，`readOnly: true`）。体含 `version`、`updatedAt`、`catalogCount`、`userCount`、`rules`。
+
+**响应**
+
+- `200` `application/json` Successful Response → `object`
+
+#### `PUT /api/pricing/rules/{rule_id}`
+
+写入或覆盖一条**用户**价格规则。`rule_id` 须 3–128 位字母数字（可含 `._:-`），不得以 `catalog:` 开头。别名与正则有效部分均不得短于 3 字符。至少提供 `inputPerMillion` / `outputPerMillion` / `cacheReadPerMillion` / `cacheWritePerMillion` 之一。落盘 `data/pricing_rules.json`。
+
+**请求体**
+
+Content-Type: `application/json`
+
+可选字段：`provider`、`canonicalModelId`、`aliases`、`regexAliases`、四项单价、`currency`（默认 USD）、`enabled`、`effectiveFrom`、`effectiveTo`、`sourceUrl`。
+
+**响应**
+
+- `200` `application/json` Successful Response → `{ ok: true, rule }`
+- `422` `application/json` Validation Error → 错误信封或 `HTTPValidationError`
 
 ### settings
 
@@ -514,7 +592,7 @@ Content-Type: `application/json`
 
 #### `POST /api/generate/stream`
 
-单聊生成。默认把用户消息写入会话。`mergeAssistantIntoMessageId` 时把输出并入已有助手消息的新版本。`webSearchEnabled=true` 时：若本轮解析协议为 `openai_responses`，把 `{type:web_search}` 交给厂商内建搜索（不要求本地 Tavily/博查 Key）；其它协议仍走本地 Tavily/博查函数工具循环，未配置则 `web_search_not_configured` fast-fail。禁止 Responses 失败时静默改走 Tavily。`omitMessageIds` 仅本次拼装忽略。成功 `done`/JSON 含归一化 `usage` 与 `generationMetadata`；助手消息同时写入 `generationMetadata`，并追加 `data/usage/YYYY-MM.jsonl`。账本写入失败返回 `usage_persist_failed`（不把该轮伪装成完整成功）。
+单聊生成。默认把用户消息写入会话。`mergeAssistantIntoMessageId` 时把输出并入已有助手消息的新版本。`webSearchEnabled=true` 时：若本轮解析协议为 `openai_responses` / `anthropic_messages` / `gemini_generate_content`，分别把 `{type:web_search}`、`{type:web_search_20250305,name:web_search}`、`{type:google_search}`（Gemini 映射为 `{googleSearch:{}}`）交给厂商原生联网，不要求本地独立搜索 Key，也不走函数工具循环。其它协议走本地 Tavily / 博查 / Brave 函数工具循环，未配置则 `web_search_not_configured` fast-fail。禁止原生联网失败时静默改走独立搜索。`omitMessageIds` 仅本次拼装忽略。成功 `done`/JSON 含归一化 `usage` 与 `generationMetadata`；流式路径在 stamp 后可另发 `event:usage`。助手消息同时写入 `generationMetadata`，并追加 `data/usage/YYYY-MM.jsonl`。账本写入失败返回 `usage_persist_failed`（不把该轮伪装成完整成功）。
 
 **请求体**
 
@@ -544,7 +622,7 @@ Content-Type: `application/json`
 
 #### `POST /api/generate/group`
 
-群聊指定角色回合。成员设置中的模型/温度/思考深度/Fast 优先于会话再全局。`webSearchEnabled` 语义与 `POST /api/generate/stream` 相同（Responses 内建 web_search / 其它协议本地 Tavily 或博查）。
+群聊指定角色回合。成员设置中的模型/温度/思考深度/Fast 优先于会话再全局。`webSearchEnabled` 语义与 `POST /api/generate/stream` 相同（Responses / Anthropic / Gemini 原生联网；其它协议本地 Tavily / 博查 / Brave）。
 
 **请求体**
 
@@ -1355,7 +1433,7 @@ Content-Type: `multipart/form-data`
 
 #### `GET /api/tts/cache/stats`
 
-返回缓存统计（ttsEnabled 关闭时仍允许查询，返回 usedBytes=0）。
+返回缓存统计（ttsEnabled 关闭时仍允许查询，返回 usedBytes=0）。体含 `usedBytes`、`limitBytes`、`lastPatrolAt`、`prunedFiles`、`lastError`（巡检失败时为错误信封或 `{code,message}`，否则 `null`）。
 
 **响应**
 
@@ -1862,7 +1940,7 @@ Content-Type: `application/json`
 
 #### `GET /api/data-integrity/issues`
 
-Get Data Integrity Issues
+启动/巡检扫描结果。`issues[].code` 包括 `empty`、`all_zero`、`invalid_utf8`、`invalid_json`、`schema_mismatch`、`orphan_reference`（会话引用的角色不存在）、`orphan_worldbook`（会话 `worldBookIds` / `worldBookAttachments` 引用的世界书不存在）。`orphan_worldbook` 的 `repairAction` 为 `none`，不会被自动修复。
 
 **响应**
 
@@ -2281,7 +2359,7 @@ AI助手流式请求模型
 - `reasoningContent`: (string | null)。推理/思考链文本（与上游 reasoning_content 对应，持久化用）
 - `reasoningDurationSec`: (number | null)。推理/思考耗时（秒，浮点，前端展示为一位小数）；流式路径取首到末 reasoning chunk 的墙钟时间差
 - `usage`: (object | null)。本轮归一化用量（T-821）：inputTokens/outputTokens/cacheRead/cacheWrite 等 camelCase 字段
-- `generationMetadata`: (object | null)。本轮生成溯源（T-807）：requestId、provider、protocol、模型、usage、cost、耗时；不含密钥或完整请求体
+- `generationMetadata`: (object | null)。本轮生成溯源（T-807/T-808）：requestId、provider、protocol、模型、usage、cost（source=provider|estimated|unknown，未知不填 0）、耗时；不含密钥或完整请求体
 - `ttsAudioAssetId`: (string | null)。已合成的 TTS 音频文件 UUID（对应 data/tts_cache/{uuid}.mp3）
 - `ttsAudioSourceText`: (string | null)。实际送入 TTS 合成的文本（含后处理/翻译后的朗读稿）
 - `mvuProcessed`: (boolean) 默认 false。MVU 已消费标记：该消息的提取数据已被 MVU Agent 处理；同一会话内最多一条消息持有此标记
@@ -2965,11 +3043,23 @@ WebGPU 背景预设元数据。 仅保存元数据，WGSL 源文件本体存于 
 
 ### `WebSearchSettings`
 
-主聊天独立搜索 API：按 provider 选择 Tavily 或博查。当生成协议为 `openai_responses` 且请求 `webSearchEnabled` 时，不使用本对象，而走厂商内建 web_search。
+主聊天独立搜索 API：按 provider 选择 Tavily、博查或 Brave。当生成协议为 `openai_responses` / `anthropic_messages` / `gemini_generate_content` 且请求 `webSearchEnabled` 时，不使用本对象，而走对应厂商原生联网。
 
-- `provider`: (string) 枚举: "tavily", "bocha" 默认 "tavily"。Provider
+- `provider`: (string) 枚举: "tavily", "bocha", "brave" 默认 "tavily"。Provider
 - `tavily`: (WebSearchTavilySettings | null)
 - `bocha`: (WebSearchBochaSettings | null)
+- `brave`: (WebSearchBraveSettings | null)
+
+### `WebSearchBraveSettings`
+
+Brave Search GET https://api.search.brave.com/res/v1/web/search（头 `X-Subscription-Token`）。
+
+- `apiKey`: (string) 默认 ""。Subscription Token
+- `count`: (integer | null) 1–20。Count
+- `country`: (string | null)
+- `search_lang`: (string | null)
+- `freshness`: (string | null)
+- `safesearch`: (string | null)
 
 ### `WebSearchTavilySettings`
 

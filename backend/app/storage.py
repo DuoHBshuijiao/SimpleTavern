@@ -202,9 +202,19 @@ def get_tts_cache_dir() -> Path:
     return _tts_cache_dir()
 
 
+def get_data_dir() -> Path:
+    """数据根目录（生产 ``data/`` 或 ``SIMPLETAVERN_DATA_DIR``）。"""
+    return _data_dir()
+
+
 def get_usage_dir() -> Path:
     """用量账本目录（T-807）：``data/usage/YYYY-MM.jsonl`` 与 ``usage_index.json``。"""
     return _data_dir() / "usage"
+
+
+def get_pricing_rules_path() -> Path:
+    """用户价格覆盖（T-808）：``data/pricing_rules.json``。"""
+    return _data_dir() / "pricing_rules.json"
 
 
 def get_huggingface_data_dir() -> Path:
@@ -400,27 +410,78 @@ class LockedFile:
 
 
 _lock_stats_lock = threading.Lock()
-_lock_stats: dict[str, float | int] = {
+_lock_stats: dict[str, float | int | str | None] = {
     "acquireCount": 0,
     "waitMsTotal": 0.0,
     "waitMsMax": 0.0,
     "lastWaitMs": 0.0,
     "sharedAcquireCount": 0,
     "exclusiveAcquireCount": 0,
+    "timeoutCount": 0,
+    "lastTimeoutWaitMs": 0.0,
+    "lastTimeoutAt": None,
 }
+_LOCK_TIMEOUT_SEC = 30.0
 
 
 def get_lock_observability() -> dict[str, Any]:
     """返回 portalocker 等待观测快照。"""
     with _lock_stats_lock:
         return {
-            "acquireCount": int(_lock_stats["acquireCount"]),
-            "waitMsTotal": round(float(_lock_stats["waitMsTotal"]), 3),
-            "waitMsMax": round(float(_lock_stats["waitMsMax"]), 3),
-            "lastWaitMs": round(float(_lock_stats["lastWaitMs"]), 3),
-            "sharedAcquireCount": int(_lock_stats["sharedAcquireCount"]),
-            "exclusiveAcquireCount": int(_lock_stats["exclusiveAcquireCount"]),
+            "acquireCount": int(_lock_stats["acquireCount"] or 0),
+            "waitMsTotal": round(float(_lock_stats["waitMsTotal"] or 0.0), 3),
+            "waitMsMax": round(float(_lock_stats["waitMsMax"] or 0.0), 3),
+            "lastWaitMs": round(float(_lock_stats["lastWaitMs"] or 0.0), 3),
+            "sharedAcquireCount": int(_lock_stats["sharedAcquireCount"] or 0),
+            "exclusiveAcquireCount": int(_lock_stats["exclusiveAcquireCount"] or 0),
+            "timeoutCount": int(_lock_stats["timeoutCount"] or 0),
+            "lastTimeoutWaitMs": round(float(_lock_stats["lastTimeoutWaitMs"] or 0.0), 3),
+            "lastTimeoutAt": _lock_stats["lastTimeoutAt"],
+            "timeoutSec": _LOCK_TIMEOUT_SEC,
         }
+
+
+def _record_lock_timeout(wait_ms: float) -> None:
+    with _lock_stats_lock:
+        _lock_stats["timeoutCount"] = int(_lock_stats["timeoutCount"] or 0) + 1
+        _lock_stats["lastTimeoutWaitMs"] = wait_ms
+        _lock_stats["lastTimeoutAt"] = datetime.now().astimezone().isoformat()
+
+
+def _is_lock_busy(exc: BaseException) -> bool:
+    names = {type(exc).__name__, type(exc).__qualname__}
+    text = str(exc).lower()
+    if "AlreadyLocked" in names or "LockException" in names:
+        return True
+    return "already locked" in text or "resource temporarily unavailable" in text
+
+
+def _acquire_portalock(fh, *, shared: bool) -> None:
+    """带超时的 portalocker 获取；超时抛 file_lock_timeout。"""
+    mode = portalocker.LOCK_SH if shared else portalocker.LOCK_EX
+    started = time.perf_counter()
+    deadline = started + _LOCK_TIMEOUT_SEC
+    while True:
+        try:
+            portalocker.lock(fh, mode | portalocker.LOCK_NB)
+            _record_lock_wait((time.perf_counter() - started) * 1000.0, shared=shared)
+            return
+        except Exception as exc:
+            if not _is_lock_busy(exc):
+                raise
+            if time.perf_counter() >= deadline:
+                wait_ms = (time.perf_counter() - started) * 1000.0
+                _record_lock_timeout(wait_ms)
+                raise AppError(
+                    code="file_lock_timeout",
+                    message="文件锁等待超时",
+                    detail=f"waitMs={wait_ms:.1f} shared={shared}",
+                    source="storage.lock",
+                    status_code=503,
+                    retryable=True,
+                    suggested_action="稍后重试；若持续出现，检查 data 目录下是否有僵死 .lock 占用",
+                ) from exc
+            time.sleep(0.05)
 
 
 def _record_lock_wait(wait_ms: float, *, shared: bool) -> None:
@@ -451,9 +512,11 @@ def _lock_for(target: Path) -> LockedFile:
     lock_path = Path(str(target) + ".lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     fh = open(lock_path, "a+b")
-    started = time.perf_counter()
-    portalocker.lock(fh, portalocker.LOCK_EX)
-    _record_lock_wait((time.perf_counter() - started) * 1000.0, shared=False)
+    try:
+        _acquire_portalock(fh, shared=False)
+    except Exception:
+        fh.close()
+        raise
     return LockedFile(lock_path=lock_path, lock_handle=fh)
 
 
@@ -493,11 +556,8 @@ def read_bytes_under_lock(path: Path, *, shared: bool = True) -> bytes:
         raise FileNotFoundError(str(path))
     lock_path = Path(str(path) + ".lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    mode = portalocker.LOCK_SH if shared else portalocker.LOCK_EX
     with open(lock_path, "a+b") as fh:
-        started = time.perf_counter()
-        portalocker.lock(fh, mode)
-        _record_lock_wait((time.perf_counter() - started) * 1000.0, shared=shared)
+        _acquire_portalock(fh, shared=shared)
         try:
             with open(path, "rb") as f:
                 return f.read()
@@ -570,8 +630,29 @@ def load_settings() -> Settings:
         Settings: 设置对象
     """
     raw = read_json(_settings_path())
+    needs_migration = False
+    if isinstance(raw, dict):
+        from app.services.migration_log import write_migration_warning
+
+        if "worldBookEntryScanDepthDefault" not in raw:
+            write_migration_warning(
+                code="settings_scan_depth_defaulted",
+                path="settings.json",
+                message="旧设置缺少 worldBookEntryScanDepthDefault，已按默认值 2 读取并回写",
+            )
+            needs_migration = True
+        for preset in raw.get("apiPresets") or []:
+            if not isinstance(preset, dict):
+                continue
+            if not preset.get("protocol"):
+                write_migration_warning(
+                    code="api_preset_protocol_defaulted",
+                    path="settings.json",
+                    message="旧 API 预设缺少 protocol，已按 openai_compatible_chat 读取",
+                    detail=f"presetId={preset.get('id')}",
+                )
+                needs_migration = True
     settings = Settings.model_validate(raw)
-    needs_migration = isinstance(raw, dict) and "worldBookEntryScanDepthDefault" not in raw
     pruned = prune_webgpu_shader_presets(settings)
     if needs_migration or pruned:
         save_settings(settings)

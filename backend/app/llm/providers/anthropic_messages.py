@@ -324,16 +324,33 @@ def _arguments_to_json_string(inp: Any) -> str:
     return "{}"
 
 
+def _is_anthropic_hosted_web_search(tool: dict[str, Any]) -> bool:
+    typ = str(tool.get("type") or "").strip()
+    name = str(tool.get("name") or "").strip()
+    if typ in {"web_search", "web_search_20250305", "web_search_20250219"}:
+        return True
+    if typ == "server_tool" and name == "web_search":
+        return True
+    return False
+
+
 def _convert_tools_openai_to_anthropic(tools: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
-    """OpenAI tools → Anthropic tools (name / description / input_schema)."""
+    """OpenAI tools → Anthropic tools（含原生 web_search server tool）。"""
     if not tools:
         return None
     out: list[dict[str, Any]] = []
     for tool in tools:
         if not isinstance(tool, dict):
             continue
+        if _is_anthropic_hosted_web_search(tool):
+            entry: dict[str, Any] = {"type": "web_search_20250305", "name": "web_search"}
+            max_uses = tool.get("max_uses")
+            if isinstance(max_uses, int) and max_uses > 0:
+                entry["max_uses"] = max_uses
+            out.append(entry)
+            continue
         if isinstance(tool.get("name"), str) and isinstance(tool.get("input_schema"), dict):
-            entry: dict[str, Any] = {
+            entry = {
                 "name": tool["name"].strip(),
                 "input_schema": tool["input_schema"],
             }
@@ -345,7 +362,6 @@ def _convert_tools_openai_to_anthropic(tools: list[dict[str, Any]] | None) -> li
             continue
         fn = tool.get("function") if isinstance(tool.get("function"), dict) else None
         if fn is None and tool.get("type") != "function":
-            # Allow bare {name, description, parameters} shapes.
             fn = tool if isinstance(tool.get("name"), str) else None
         if not isinstance(fn, dict):
             continue
@@ -714,6 +730,8 @@ def _extract_text_thinking_and_tools(
                     },
                 }
             )
+        elif typ in {"server_tool_use", "web_search_tool_result", "web_search_result"}:
+            continue
     text = "".join(texts)
     reasoning = "".join(thinking).strip() or None
     return text, reasoning, tool_calls or None

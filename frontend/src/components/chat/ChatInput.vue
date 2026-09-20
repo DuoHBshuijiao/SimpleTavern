@@ -779,7 +779,7 @@ defineExpose({
                 : 'chat-action-button--secondary'
             "
             :disabled="isGenerating && !showContinueButton"
-            aria-label="网络搜索：开启后每次发送启用，直至关闭；Tavily/博查，或 OpenAI Responses 内建搜索"
+            aria-label="网络搜索：开启后每次发送启用，直至关闭；独立搜索为 Tavily/博查/Brave，或当前协议原生联网（Responses / Anthropic / Gemini）"
             @click="toggleWebSearch"
           >
             <Globe class="w-4 h-4" />

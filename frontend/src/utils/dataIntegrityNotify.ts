@@ -8,6 +8,7 @@ export const ISSUE_CODE_LABELS: Record<string, string> = {
   invalid_json: 'JSON 非法',
   schema_mismatch: '结构不匹配',
   orphan_reference: '角色缺失',
+  orphan_worldbook: '世界书缺失',
 }
 
 export const ISSUE_KIND_LABELS: Record<string, string> = {

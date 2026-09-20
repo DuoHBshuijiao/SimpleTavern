@@ -7,6 +7,7 @@ export type DataIntegrityIssueCode =
   | 'invalid_json'
   | 'schema_mismatch'
   | 'orphan_reference'
+  | 'orphan_worldbook'
 export type DataIntegrityRepairAction = 'delete' | 'reset_json' | 'none'
 
 export type DataIntegrityIssue = {

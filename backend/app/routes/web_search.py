@@ -17,11 +17,27 @@ router = APIRouter()
 async def web_search_status() -> JSONResponse:
     settings = load_settings()
     ws = settings.webSearch
-    out: dict[str, Any] = {"provider": getattr(ws, "provider", None) if ws else None, "tavily": None, "bocha": None}
+    out: dict[str, Any] = {
+        "provider": getattr(ws, "provider", None) if ws else None,
+        "tavily": None,
+        "bocha": None,
+        "brave": None,
+        "modes": {
+            "independent": ["tavily", "bocha", "brave"],
+            "native": ["openai_responses", "anthropic_messages", "gemini_generate_content"],
+        },
+    }
     if not ws:
         return JSONResponse(out)
     if ws.tavily and (ws.tavily.apiKey or "").strip():
         out["tavily"] = await fetch_tavily_usage(ws.tavily.apiKey)
     if ws.bocha and (ws.bocha.apiKey or "").strip():
         out["bocha"] = await fetch_bocha_remaining(ws.bocha.apiKey, ws.bocha.baseUrl if ws.bocha else None)
+    brave = getattr(ws, "brave", None)
+    if brave and (brave.apiKey or "").strip():
+        out["brave"] = {
+            "ok": True,
+            "configured": True,
+            "message": "Brave Search 无公开余额查询接口；已配置 Subscription Token。",
+        }
     return JSONResponse(out)

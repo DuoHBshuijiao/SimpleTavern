@@ -36,7 +36,11 @@ from app.errors import AppError, app_error_response, as_app_error
 from app.llm.preset_resolve import LlmPresetResolveError
 from app.llm.resolution import PreparedLlmRequest, prepare_llm_request
 from app.llm.runtime import chat_completions, chat_completions_message, stream_chat_completions
-from app.llm.types import OPENAI_RESPONSES_PROTOCOL
+from app.llm.types import (
+    ANTHROPIC_MESSAGES_PROTOCOL,
+    GEMINI_GENERATE_CONTENT_PROTOCOL,
+    OPENAI_RESPONSES_PROTOCOL,
+)
 from app.placeholders import replace_placeholders_in_text
 from app.prompt_xml import (
     wrap_acting_as,
@@ -148,12 +152,19 @@ def _stamp_usage(usage: dict[str, Any] | None, prepared: PreparedLlmRequest) -> 
 
 
 RESPONSES_WEB_SEARCH_TOOLS: list[dict[str, Any]] = [{"type": "web_search"}]
+ANTHROPIC_WEB_SEARCH_TOOLS: list[dict[str, Any]] = [{"type": "web_search_20250305", "name": "web_search"}]
+GEMINI_WEB_SEARCH_TOOLS: list[dict[str, Any]] = [{"type": "google_search"}]
+_NATIVE_WEB_SEARCH_PROTOCOLS = {
+    OPENAI_RESPONSES_PROTOCOL,
+    ANTHROPIC_MESSAGES_PROTOCOL,
+    GEMINI_GENERATE_CONTENT_PROTOCOL,
+}
 
 
 def _ensure_web_search_ready(settings: Any, *, requested: bool, protocol: str) -> bool:
     if not requested:
         return False
-    if protocol == OPENAI_RESPONSES_PROTOCOL:
+    if protocol in _NATIVE_WEB_SEARCH_PROTOCOLS:
         return True
     if web_search_is_configured(settings):
         return True
@@ -162,17 +173,23 @@ def _ensure_web_search_ready(settings: Any, *, requested: bool, protocol: str) -
         message="网络搜索已启用，但当前提供方未配置 API Key",
         source="web_search.config",
         status_code=400,
-        suggested_action="在全局设置中配置网络搜索提供方和 API Key，或关闭本轮网络搜索；OpenAI Responses 协议可走厂商内建 web_search，无需本地搜索 Key",
+        suggested_action="在全局设置中配置独立搜索供应商（Tavily / 博查 / Brave）的 API Key，或改用 OpenAI Responses / Anthropic Messages / Gemini 原生联网",
     )
 
 
 def _use_local_web_search_loop(web_search_enabled: bool, protocol: str) -> bool:
-    return bool(web_search_enabled) and protocol != OPENAI_RESPONSES_PROTOCOL
+    return bool(web_search_enabled) and protocol not in _NATIVE_WEB_SEARCH_PROTOCOLS
 
 
 def _generation_tools(*, web_search_enabled: bool, protocol: str) -> list[dict[str, Any]] | None:
-    if web_search_enabled and protocol == OPENAI_RESPONSES_PROTOCOL:
+    if not web_search_enabled:
+        return None
+    if protocol == OPENAI_RESPONSES_PROTOCOL:
         return RESPONSES_WEB_SEARCH_TOOLS
+    if protocol == ANTHROPIC_MESSAGES_PROTOCOL:
+        return ANTHROPIC_WEB_SEARCH_TOOLS
+    if protocol == GEMINI_GENERATE_CONTENT_PROTOCOL:
+        return GEMINI_WEB_SEARCH_TOOLS
     return None
 
 
@@ -1610,6 +1627,8 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
                 if reasoning_start is not None and reasoning_end is not None:
                     duration_sec = round(max(0.0, reasoning_end - reasoning_start), 1)
             usage_public = _stamp_usage(usage_public, prepared)
+            if usage_public:
+                yield _sse("usage", usage_public)
             assistant_msg = None
             if assistant_content or (getattr(req, "mergeAssistantIntoMessageId", None) and reasoning_text):
                 assistant_msg = _append_or_merge_assistant_output(
@@ -2343,6 +2362,8 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
                 if reasoning_start is not None and reasoning_end is not None:
                     duration_sec = round(max(0.0, reasoning_end - reasoning_start), 1)
             usage_public = _stamp_usage(usage_public, prepared)
+            if usage_public:
+                yield _sse("usage", usage_public)
             assistant_msg = None
             if assistant_content or (getattr(req, "mergeAssistantIntoMessageId", None) and reasoning_text):
                 assistant_msg = _append_or_merge_assistant_output(
@@ -2894,6 +2915,8 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
                 if reasoning_start is not None and reasoning_end is not None:
                     duration_sec = round(max(0.0, reasoning_end - reasoning_start), 1)
             usage_public = _stamp_usage(usage_public, prepared)
+            if usage_public:
+                yield _sse("usage", usage_public)
             assistant_msg = None
             if assistant_content:
                 assistant_msg = ChatMessage(

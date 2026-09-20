@@ -117,6 +117,8 @@ const bochaRemaining = computed(() => {
 
 const showTavily = computed(() => props.provider === 'tavily')
 const showBocha = computed(() => props.provider === 'bocha')
+const showBrave = computed(() => props.provider === 'brave')
+const braveBlock = computed(() => asRecord(props.status?.brave))
 
 const emptyHintForCurrentProvider = computed(() => {
   if (!props.status) return ''
@@ -125,6 +127,9 @@ const emptyHintForCurrentProvider = computed(() => {
   }
   if (props.provider === 'bocha' && !bochaBlock.value) {
     return '服务端未返回博查余额（通常表示未保存或未填写博查 API Key）。保存 Key 后重新打开抽屉可刷新。'
+  }
+  if (props.provider === 'brave' && !braveBlock.value) {
+    return '服务端未返回 Brave 配置状态（通常表示未保存或未填写 Subscription Token）。'
   }
   return ''
 })
@@ -200,6 +205,14 @@ const emptyHintForCurrentProvider = computed(() => {
         <p v-else class="text-xs text-[var(--color-text-muted)]">暂无法读取余额字段。</p>
       </template>
       <p v-else class="text-xs text-[var(--color-error-text)]">{{ blockMessage(bochaBlock) }}</p>
+    </div>
+
+    <div v-if="showBrave && braveBlock" class="space-y-3">
+      <div class="text-xs font-medium text-[var(--color-text-secondary)]">Brave Search</div>
+      <p v-if="braveBlock.ok === true" class="text-xs text-[var(--color-text-muted)]">
+        {{ typeof braveBlock.message === 'string' ? braveBlock.message : '已配置 Token。Brave 无公开余额查询接口。' }}
+      </p>
+      <p v-else class="text-xs text-[var(--color-error-text)]">{{ blockMessage(braveBlock) }}</p>
     </div>
 
     <p v-if="emptyHintForCurrentProvider" class="text-xs text-[var(--color-text-muted)]">

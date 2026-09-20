@@ -1,8 +1,8 @@
 """
-主聊天网络搜索：Tavily Search、博查 Bocha Web Search。
+主聊天网络搜索：Tavily Search、博查 Bocha Web Search、Brave Search。
 
-仅调用各厂商官方 REST，不做通用 HTML 抓取。
-成功返回 {ok:true, code, result}；失败返回 {ok:false, code, message, ...}，不再把错误伪装成检索正文。
+仅调用各厂商官方 REST，不做通用 HTML 抓取。失败不自动切换供应商。
+成功返回 {ok:true, code, result}；失败返回 {ok:false, code, message, ...}。
 """
 
 from __future__ import annotations
@@ -50,6 +50,9 @@ def web_search_is_configured(settings: Settings) -> bool:
     if ws.provider == "bocha":
         b = ws.bocha
         return bool(b and (b.apiKey or "").strip())
+    if ws.provider == "brave":
+        br = getattr(ws, "brave", None)
+        return bool(br and (br.apiKey or "").strip())
     return False
 
 
@@ -114,6 +117,82 @@ def _format_bocha_markdown(data: dict[str, Any]) -> str:
     return "\n\n".join(lines)
 
 
+def _format_brave_markdown(data: dict[str, Any]) -> str:
+    lines: list[str] = []
+    web = data.get("web")
+    items = web.get("results") if isinstance(web, dict) else None
+    if not isinstance(items, list):
+        items = data.get("results") if isinstance(data.get("results"), list) else []
+    for i, it in enumerate(items[:20], 1):
+        if not isinstance(it, dict):
+            continue
+        title = str(it.get("title") or "")
+        url = str(it.get("url") or "")
+        desc = str(it.get("description") or it.get("snippet") or "")
+        lines.append(f"{i}. **{title}**\n   {url}\n   {desc}")
+    if not lines:
+        return json.dumps(data, ensure_ascii=False)[:12000]
+    return "\n\n".join(lines)
+
+
+def _brave_request(ws: WebSearchSettings, query: str) -> tuple[str, dict[str, str], dict[str, Any]]:
+    br = getattr(ws, "brave", None)
+    api_key = ((br.apiKey if br else None) or "").strip()
+    params: dict[str, Any] = {"q": query}
+    if br:
+        dumped = br.model_dump(exclude_none=True)
+        count = dumped.get("count")
+        if isinstance(count, int):
+            params["count"] = max(1, min(20, count))
+        for key in ("country", "search_lang", "freshness", "safesearch"):
+            val = dumped.get(key)
+            if isinstance(val, str) and val.strip():
+                params[key] = val.strip()
+    headers = {
+        "Accept": "application/json",
+        "Accept-Encoding": "gzip",
+        "X-Subscription-Token": api_key,
+    }
+    return "https://api.search.brave.com/res/v1/web/search", headers, params
+
+
+def _brave_result_from_response(status_code: int, text: str, data: Any) -> dict[str, Any]:
+    """Brave 同步/异步共用：429 配额、401/403 鉴权，其它 4xx/5xx 与非法 JSON 独立报错。"""
+    if status_code == 429:
+        return _search_err(
+            "web_search_quota",
+            "Brave Search 配额不足或请求过于频繁",
+            provider="brave",
+            status=429,
+            detail=text[:2000],
+        )
+    if status_code in {401, 403}:
+        return _search_err(
+            "web_search_http_error",
+            "Brave Search 鉴权失败",
+            provider="brave",
+            status=status_code,
+            detail=text[:2000],
+        )
+    if status_code >= 400:
+        return _search_err(
+            "web_search_http_error",
+            f"HTTP {status_code}",
+            provider="brave",
+            status=status_code,
+            detail=text[:2000],
+        )
+    if not isinstance(data, dict):
+        return _search_err(
+            "web_search_invalid_response",
+            "Brave Search 返回了无效响应",
+            provider="brave",
+            status=status_code,
+            detail=text[:2000],
+        )
+    return _search_ok(_format_brave_markdown(data), provider="brave")
+
+
 def _tavily_request(ws: WebSearchSettings, query: str) -> tuple[str, dict[str, str], dict[str, Any]]:
     t = ws.tavily
     api_key = ((t.apiKey if t else None) or "").strip()
@@ -138,6 +217,26 @@ async def _tavily_search(ws: WebSearchSettings, query: str) -> dict[str, Any]:
     r.raise_for_status()
     data = r.json()
     return _search_ok(_format_tavily_markdown(data if isinstance(data, dict) else {}), provider="tavily")
+
+
+async def _brave_search(ws: WebSearchSettings, query: str) -> dict[str, Any]:
+    url, headers, params = _brave_request(ws, query)
+    client = get_async_http_client()
+    r = await client.get(url, params=params, headers=headers, timeout=90.0)
+    text = r.text or ""
+    data: Any = None
+    try:
+        data = r.json()
+    except json.JSONDecodeError:
+        if r.status_code < 400:
+            return _search_err(
+                "web_search_invalid_response",
+                f"HTTP {r.status_code}：响应不是合法 JSON",
+                provider="brave",
+                detail=text[:2000],
+                status=r.status_code,
+            )
+    return _brave_result_from_response(r.status_code, text, data)
 
 
 def _bocha_request(ws: WebSearchSettings, query: str) -> tuple[str, dict[str, str], dict[str, Any]]:
@@ -241,6 +340,8 @@ async def run_web_search(settings: Settings, query: str) -> dict[str, Any]:
             return await _tavily_search(ws, q)
         if provider == "bocha":
             return await _bocha_search(ws, q)
+        if provider == "brave":
+            return await _brave_search(ws, q)
     except httpx.HTTPStatusError as e:
         return _map_http_status_error(e, provider=provider)
     except Exception as e:
@@ -287,6 +388,23 @@ def run_web_search_sync(settings: Settings, query: str) -> dict[str, Any]:
                     status=r.status_code,
                 )
             return _parse_bocha_response(r.status_code, text, data)
+        if provider == "brave":
+            url, headers, params = _brave_request(ws, q)
+            r = client.get(url, params=params, headers=headers, timeout=90.0)
+            text = r.text or ""
+            data: Any = None
+            try:
+                data = r.json()
+            except json.JSONDecodeError:
+                if r.status_code < 400:
+                    return _search_err(
+                        "web_search_invalid_response",
+                        f"HTTP {r.status_code}：响应不是合法 JSON",
+                        provider="brave",
+                        detail=text[:2000],
+                        status=r.status_code,
+                    )
+            return _brave_result_from_response(r.status_code, text, data)
     except httpx.HTTPStatusError as e:
         return _map_http_status_error(e, provider=provider)
     except Exception as e:
