@@ -22,11 +22,11 @@
 - [x] **T-803 P0** 性能基线、profiling、共享 HTTP client、索引/锁/原子写（3A–3D 完成）
 - [x] **T-804 P0** LLM 协议内核与 OpenAI-compatible 迁移
 - [x] **T-805 P0** OpenAI Responses / Anthropic Messages / Gemini 原生协议（5A–5D ✅）
-- [ ] **T-806 P0** 工具 round-trip / 消息维护 / 流事件 + Anthropic cache（off/5m/1h）+ Responses 高级能力
+- [x] **T-806 P0** 工具 round-trip / 消息维护 / 流事件 + Anthropic cache（off/5m/1h）+ Responses 高级能力
   - [x] 6A Anthropic cache `off|5m|1h`
   - [x] 6B 多协议工具 round-trip
-  - [ ] 6C Responses 内建 web_search（Gemini CachedContents 已并入 v0.810 T-821）
-- [ ] **T-807 P0** 消息 generation metadata + append-only usage ledger
+  - [x] 6C Responses 内建 web_search（Gemini CachedContents 已并入 v0.810 T-821）
+- [x] **T-807 P0** 消息 generation metadata + append-only usage ledger
 - [ ] **T-808 P1** 本地定价引擎 + 会话/全局/按模型统计 API 与设置页 UI
 - [ ] **T-809 P1** 网络搜索供应商与 provider-native grounding 扩展
 - [ ] **T-810 P1** Generate/Assistant/MVU/KG/Regex/TTS 性能与健壮性
@@ -91,7 +91,7 @@ T-823 贯穿
 
 ### v0.820 已滑出
 
-- T-806-6C Responses 内建 web_search（仍属 v0.800）
+- T-806-6C Responses 内建 web_search（已在 v0.800 完成）
 - 真实 API Key 缓存写→读探测（已搁置）
 
 ## v0.900+

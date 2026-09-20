@@ -5,7 +5,7 @@ Supports:
 - non-stream + stream text paths via /v1/responses typed SSE
 - reasoning_summary → StreamChunk(kind='reasoning')
 - function tools round-trip (Chat tools/messages ↔ Responses tools/items)
-- built-in web_search / hosted tools → provider_capability_unsupported (T-806-6C)
+- built-in web_search / web_search_preview (T-806-6C)；其它 hosted tools 仍 fast-fail
 """
 
 from __future__ import annotations
@@ -48,6 +48,7 @@ _APP_REFERER = "https://github.com/DuoHBshuijiao/SimpleTavern"
 _APP_TITLE = "SimpleTavern"
 
 # Hosted / built-in Responses tool types (not app-defined function tools).
+_WEB_SEARCH_TOOL_TYPES = frozenset({"web_search", "web_search_preview"})
 _BUILTIN_TOOL_TYPES = frozenset(
     {
         "web_search",
@@ -62,6 +63,7 @@ _BUILTIN_TOOL_TYPES = frozenset(
     }
 )
 
+_WEB_SEARCH_OUTPUT_ITEM_TYPES = frozenset({"web_search_call"})
 _BUILTIN_OUTPUT_ITEM_TYPES = frozenset(
     {
         "web_search_call",
@@ -71,6 +73,14 @@ _BUILTIN_OUTPUT_ITEM_TYPES = frozenset(
         "code_interpreter_call",
         "image_generation_call",
         "mcp_call",
+    }
+)
+
+_WEB_SEARCH_STREAM_EVENT_TYPES = frozenset(
+    {
+        "response.web_search_call.in_progress",
+        "response.web_search_call.searching",
+        "response.web_search_call.completed",
     }
 )
 
@@ -106,7 +116,7 @@ def _tools_unsupported(*, detail: str) -> AppError:
         retryable=False,
         provider=_PROVIDER,
         protocol=_PROTOCOL,
-        suggested_action="请改用 function tools，或等待 T-806-6C 内建 web_search 支持",
+        suggested_action="请改用 function tools；内建能力目前仅支持 web_search",
     )
 
 
@@ -277,8 +287,11 @@ def _convert_tools(tools: list[dict[str, Any]] | None) -> list[dict[str, Any]] |
                 status_code=400,
             )
         typ = tool.get("type")
+        if isinstance(typ, str) and typ in _WEB_SEARCH_TOOL_TYPES:
+            out.append({"type": "web_search"})
+            continue
         if isinstance(typ, str) and typ in _BUILTIN_TOOL_TYPES:
-            raise _tools_unsupported(detail=f"built-in tool type={typ!r} (T-806-6C)")
+            raise _tools_unsupported(detail=f"built-in tool type={typ!r}")
         if typ and typ != "function":
             raise _tools_unsupported(detail=f"unsupported tool type={typ!r}")
 
@@ -602,6 +615,8 @@ def _extract_output(data: dict[str, Any]) -> tuple[str, str | None, list[dict[st
             if not isinstance(item, dict):
                 continue
             typ = item.get("type")
+            if typ in _WEB_SEARCH_OUTPUT_ITEM_TYPES:
+                continue
             if typ in _BUILTIN_OUTPUT_ITEM_TYPES:
                 raise _tools_unsupported(detail=f"response output item type={typ}")
             if typ == "function_call":
@@ -935,12 +950,16 @@ async def stream_responses(
                             detail=msg or data_str[:500],
                             retryable=True,
                         )
+                    if etype.startswith("response.web_search_call") or etype in _WEB_SEARCH_STREAM_EVENT_TYPES:
+                        continue
                     if etype in _BUILTIN_STREAM_EVENT_TYPES:
                         raise _tools_unsupported(detail=f"stream event type={etype}")
                     if etype == "response.output_item.added":
                         item = data.get("item")
                         if isinstance(item, dict):
                             item_type = item.get("type")
+                            if item_type in _WEB_SEARCH_OUTPUT_ITEM_TYPES:
+                                continue
                             if item_type in _BUILTIN_OUTPUT_ITEM_TYPES:
                                 raise _tools_unsupported(detail=f"stream output_item type={item_type}")
                             if item_type == "function_call":

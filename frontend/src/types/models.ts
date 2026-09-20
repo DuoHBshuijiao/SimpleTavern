@@ -674,6 +674,8 @@ export interface ChatMessage {
     /** 本轮请求了 Fast；若 serviceTier 仍是 default 则前端提示「Fast 未生效」 */
     fastRequested?: boolean | null
   } | null
+  /** 本轮生成溯源（T-807）；不含密钥或完整请求体 */
+  generationMetadata?: Record<string, unknown> | null
   /** MVU 已消费标记，同一会话最多一条消息持有 */
   mvuProcessed?: boolean
 }

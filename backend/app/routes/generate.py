@@ -36,6 +36,7 @@ from app.errors import AppError, app_error_response, as_app_error
 from app.llm.preset_resolve import LlmPresetResolveError
 from app.llm.resolution import PreparedLlmRequest, prepare_llm_request
 from app.llm.runtime import chat_completions, chat_completions_message, stream_chat_completions
+from app.llm.types import OPENAI_RESPONSES_PROTOCOL
 from app.placeholders import replace_placeholders_in_text
 from app.prompt_xml import (
     wrap_acting_as,
@@ -56,6 +57,7 @@ from app.schemas import (
 )
 from app.services.generate_web_search_runtime import iter_web_search_stream_events, nonstream_web_search_rounds
 from app.services.mvu_daemon import ensure_mvu_worker, signal_generate_done, _resolve_mvu_runtime_config
+from app.services.usage_ledger import append_usage_event, build_generation_metadata
 from app.services.web_search import web_search_is_configured
 from app.services.user_message_content import build_user_message_content
 from app.request_context import REQUEST_ID_HEADER, get_request_id, new_request_id
@@ -145,9 +147,14 @@ def _stamp_usage(usage: dict[str, Any] | None, prepared: PreparedLlmRequest) -> 
     return out or None
 
 
-def _ensure_web_search_ready(settings: Any, *, requested: bool) -> bool:
+RESPONSES_WEB_SEARCH_TOOLS: list[dict[str, Any]] = [{"type": "web_search"}]
+
+
+def _ensure_web_search_ready(settings: Any, *, requested: bool, protocol: str) -> bool:
     if not requested:
         return False
+    if protocol == OPENAI_RESPONSES_PROTOCOL:
+        return True
     if web_search_is_configured(settings):
         return True
     raise AppError(
@@ -155,8 +162,74 @@ def _ensure_web_search_ready(settings: Any, *, requested: bool) -> bool:
         message="网络搜索已启用，但当前提供方未配置 API Key",
         source="web_search.config",
         status_code=400,
-        suggested_action="在全局设置中配置网络搜索提供方和 API Key，或关闭本轮网络搜索",
+        suggested_action="在全局设置中配置网络搜索提供方和 API Key，或关闭本轮网络搜索；OpenAI Responses 协议可走厂商内建 web_search，无需本地搜索 Key",
     )
+
+
+def _use_local_web_search_loop(web_search_enabled: bool, protocol: str) -> bool:
+    return bool(web_search_enabled) and protocol != OPENAI_RESPONSES_PROTOCOL
+
+
+def _generation_tools(*, web_search_enabled: bool, protocol: str) -> list[dict[str, Any]] | None:
+    if web_search_enabled and protocol == OPENAI_RESPONSES_PROTOCOL:
+        return RESPONSES_WEB_SEARCH_TOOLS
+    return None
+
+
+def _persist_generation_record(
+    *,
+    chat: Any,
+    assistant_msg: ChatMessage | None,
+    prepared: PreparedLlmRequest,
+    request_id: str,
+    model: str,
+    usage: dict[str, Any] | None,
+    started_at: str,
+    started_mono: float,
+    first_token_mono: float | None,
+    streaming: bool,
+    settings: Any | None = None,
+    update_used_models: bool = False,
+) -> dict[str, Any]:
+    """给助手消息挂 generationMetadata，落盘会话，再追加 usage ledger（T-807）。"""
+    now = time.monotonic()
+    first_ms = (
+        int(max(0, round((first_token_mono - started_mono) * 1000)))
+        if first_token_mono is not None
+        else None
+    )
+    total_ms = int(max(0, round((now - started_mono) * 1000)))
+    meta = build_generation_metadata(
+        request_id=request_id,
+        chat_id=getattr(chat, "id", None),
+        message_id=getattr(assistant_msg, "id", None) if assistant_msg is not None else None,
+        provider=prepared.llm_provider,
+        protocol=prepared.protocol,
+        requested_model=model,
+        resolved_model=prepared.model or model,
+        usage=usage,
+        started_at=started_at,
+        first_token_latency_ms=first_ms,
+        total_duration_ms=total_ms,
+        streaming=streaming,
+        status="completed",
+    )
+    if assistant_msg is not None:
+        assistant_msg.generationMetadata = meta
+        chat.updatedAt = _now_iso()
+        save_chat(chat)
+    append_usage_event(meta)
+    if (
+        update_used_models
+        and settings is not None
+        and model
+        and model not in settings.llm.usedModels
+    ):
+        settings.llm.usedModels.insert(0, model)
+        settings.llm.usedModels = settings.llm.usedModels[:20]
+        settings.updatedAt = _now_iso()
+        save_settings(settings)
+    return meta
 
 
 def _omit_message_ids_from_request(req: Any) -> set[str]:
@@ -1199,10 +1272,7 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
         raise HTTPException(status_code=404, detail="chat not found")
 
     settings = load_settings()
-    web_search_enabled = _ensure_web_search_ready(
-        settings,
-        requested=bool(getattr(req, "webSearchEnabled", False)),
-    )
+    web_search_requested = bool(getattr(req, "webSearchEnabled", False))
     try:
         character = load_character(chat.characterId)
     except FileNotFoundError:
@@ -1379,6 +1449,10 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
     )
     base_url, api_key, protocol = prepared.base_url, prepared.api_key, prepared.protocol
     llm_provider = prepared.llm_provider
+    web_search_enabled = _ensure_web_search_ready(
+        settings, requested=web_search_requested, protocol=protocol
+    )
+    gen_tools = _generation_tools(web_search_enabled=web_search_enabled, protocol=protocol)
 
     _apply_placeholder_rewrite_to_history(
         chat,
@@ -1460,9 +1534,11 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
             assistant_content = ""
             reasoning_text: str | None = None
             duration_sec: float | None = None
-            ws_on = web_search_enabled
+            started_mono = time.monotonic()
+            started_at = _now_iso()
+            first_token_mono: float | None = None
             usage_public: dict[str, Any] | None = None
-            if ws_on:
+            if _use_local_web_search_loop(web_search_enabled, protocol):
                 async for ev in iter_web_search_stream_events(
                     messages=messages,
                     base_url=base_url,
@@ -1478,8 +1554,12 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
                 ):
                     et = ev["type"]
                     if et == "reasoning":
+                        if first_token_mono is None:
+                            first_token_mono = time.monotonic()
                         yield _sse("reasoning", {"text": ev["text"]})
                     elif et == "delta":
+                        if first_token_mono is None:
+                            first_token_mono = time.monotonic()
                         yield _sse("delta", {"text": ev["text"]})
                     elif et == "done":
                         assistant_content = (ev.get("content_saved") or "").strip()
@@ -1503,16 +1583,21 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
                     top_p=top_p,
                     max_tokens=max_tokens,
                     extra_body=extra_body,
+                    tools=gen_tools,
                     protocol=protocol,
                 ):
                     if chunk.kind == "reasoning":
                         now = time.monotonic()
+                        if first_token_mono is None:
+                            first_token_mono = now
                         if reasoning_start is None:
                             reasoning_start = now
                         reasoning_end = now
                         full_reasoning.append(chunk.text)
                         yield _sse("reasoning", {"text": chunk.text})
                     elif chunk.kind == "content":
+                        if first_token_mono is None:
+                            first_token_mono = time.monotonic()
                         full_text.append(chunk.text)
                         yield _sse("delta", {"text": chunk.text})
                     elif chunk.kind == "finish" and chunk.usage:
@@ -1535,13 +1620,20 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
                     reasoning_duration_sec=duration_sec,
                     usage=usage_public,
                 )
-                chat.updatedAt = _now_iso()
-                save_chat(chat)
-                if model and model not in settings.llm.usedModels:
-                    settings.llm.usedModels.insert(0, model)
-                    settings.llm.usedModels = settings.llm.usedModels[:20]
-                    settings.updatedAt = _now_iso()
-                    save_settings(settings)
+                gen_meta = _persist_generation_record(
+                    chat=chat,
+                    assistant_msg=assistant_msg,
+                    prepared=prepared,
+                    request_id=request_id,
+                    model=model,
+                    usage=usage_public,
+                    started_at=started_at,
+                    started_mono=started_mono,
+                    first_token_mono=first_token_mono,
+                    streaming=True,
+                    settings=settings,
+                    update_used_models=True,
+                )
                 done_payload: dict[str, Any] = {
                     "ok": True,
                     "chatId": chat.id,
@@ -1553,9 +1645,23 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
                     done_payload["reasoningDurationSec"] = duration_sec
                 if usage_public:
                     done_payload["usage"] = usage_public
+                if gen_meta:
+                    done_payload["generationMetadata"] = gen_meta
                 yield sse_done(done_payload)
             else:
-                yield sse_done({"ok": True, "chatId": chat.id})
+                gen_meta = _persist_generation_record(
+                    chat=chat,
+                    assistant_msg=None,
+                    prepared=prepared,
+                    request_id=request_id,
+                    model=model,
+                    usage=usage_public,
+                    started_at=started_at,
+                    started_mono=started_mono,
+                    first_token_mono=first_token_mono,
+                    streaming=True,
+                )
+                yield sse_done({"ok": True, "chatId": chat.id, "generationMetadata": gen_meta})
             signal_generate_done(chat.id)
         except Exception as e:
             yield sse_terminal_error(
@@ -1572,9 +1678,11 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
     if not settings.streamEnabled:
         try:
             req_start = time.monotonic()
-            ws_on = web_search_enabled
+            started_mono = req_start
+            started_at = _now_iso()
+            first_token_mono: float | None = None
             nonstream_usage: dict[str, Any] | None = None
-            if ws_on:
+            if _use_local_web_search_loop(web_search_enabled, protocol):
                 assistant_content, reasoning_content, req_duration = await nonstream_web_search_rounds(
                     messages=messages,
                     base_url=base_url,
@@ -1600,6 +1708,7 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
                     top_p=top_p,
                     max_tokens=max_tokens,
                     extra_body=extra_body,
+                    tools=gen_tools,
                     protocol=protocol,
                 )
                 assistant_content = (resp.content or "").strip()
@@ -1616,6 +1725,7 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
                     top_p=top_p,
                     max_tokens=max_tokens,
                     extra_body=extra_body,
+                    tools=gen_tools,
                     protocol=protocol,
                 )
                 assistant_content = result.text.strip()
@@ -1633,13 +1743,33 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
                     reasoning_duration_sec=req_duration,
                     usage=nonstream_usage,
                 )
-                chat.updatedAt = _now_iso()
-                save_chat(chat)
-                if model and model not in settings.llm.usedModels:
-                    settings.llm.usedModels.insert(0, model)
-                    settings.llm.usedModels = settings.llm.usedModels[:20]
-                    settings.updatedAt = _now_iso()
-                    save_settings(settings)
+                gen_meta = _persist_generation_record(
+                    chat=chat,
+                    assistant_msg=assistant_msg,
+                    prepared=prepared,
+                    request_id=request_id,
+                    model=model,
+                    usage=nonstream_usage,
+                    started_at=started_at,
+                    started_mono=started_mono,
+                    first_token_mono=first_token_mono or time.monotonic(),
+                    streaming=False,
+                    settings=settings,
+                    update_used_models=True,
+                )
+            else:
+                gen_meta = _persist_generation_record(
+                    chat=chat,
+                    assistant_msg=None,
+                    prepared=prepared,
+                    request_id=request_id,
+                    model=model,
+                    usage=nonstream_usage,
+                    started_at=started_at,
+                    started_mono=started_mono,
+                    first_token_mono=first_token_mono or time.monotonic(),
+                    streaming=False,
+                )
             payload = {
                 "ok": True,
                 "chatId": chat.id,
@@ -1653,6 +1783,7 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
                 payload["reasoningDurationSec"] = req_duration
             if nonstream_usage:
                 payload["usage"] = nonstream_usage
+            payload["generationMetadata"] = gen_meta
             signal_generate_done(chat.id)
             return JSONResponse(payload)
         except Exception as e:
@@ -1884,10 +2015,7 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
         raise HTTPException(status_code=400, detail="character is not a member of this group")
 
     settings = load_settings()
-    web_search_enabled = _ensure_web_search_ready(
-        settings,
-        requested=bool(getattr(req, "webSearchEnabled", False)),
-    )
+    web_search_requested = bool(getattr(req, "webSearchEnabled", False))
     pure_ai_mode = _resolve_pure_ai_mode(settings, chat, req.runtimeOverrides)
     try:
         character = load_character(req.characterId)
@@ -2062,6 +2190,10 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
     )
     base_url, api_key, protocol = prepared.base_url, prepared.api_key, prepared.protocol
     llm_provider = prepared.llm_provider
+    web_search_enabled = _ensure_web_search_ready(
+        settings, requested=web_search_requested, protocol=protocol
+    )
+    gen_tools = _generation_tools(web_search_enabled=web_search_enabled, protocol=protocol)
 
     _apply_placeholder_rewrite_to_history(
         chat,
@@ -2135,9 +2267,11 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
             assistant_content = ""
             reasoning_text: str | None = None
             duration_sec: float | None = None
-            ws_on = web_search_enabled
+            started_mono = time.monotonic()
+            started_at = _now_iso()
+            first_token_mono: float | None = None
             usage_public: dict[str, Any] | None = None
-            if ws_on:
+            if _use_local_web_search_loop(web_search_enabled, protocol):
                 async for ev in iter_web_search_stream_events(
                     messages=messages,
                     base_url=base_url,
@@ -2153,8 +2287,12 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
                 ):
                     et = ev["type"]
                     if et == "reasoning":
+                        if first_token_mono is None:
+                            first_token_mono = time.monotonic()
                         yield _sse("reasoning", {"text": ev["text"]})
                     elif et == "delta":
+                        if first_token_mono is None:
+                            first_token_mono = time.monotonic()
                         yield _sse("delta", {"text": ev["text"]})
                     elif et == "done":
                         assistant_content = (ev.get("content_saved") or "").strip()
@@ -2178,16 +2316,21 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
                     top_p=top_p,
                     max_tokens=max_tokens,
                     extra_body=extra_body,
+                    tools=gen_tools,
                     protocol=protocol,
                 ):
                     if chunk.kind == "reasoning":
                         now = time.monotonic()
+                        if first_token_mono is None:
+                            first_token_mono = now
                         if reasoning_start is None:
                             reasoning_start = now
                         reasoning_end = now
                         full_reasoning.append(chunk.text)
                         yield _sse("reasoning", {"text": chunk.text})
                     elif chunk.kind == "content":
+                        if first_token_mono is None:
+                            first_token_mono = time.monotonic()
                         full_text.append(chunk.text)
                         yield _sse("delta", {"text": chunk.text})
                     elif chunk.kind == "finish" and chunk.usage:
@@ -2211,8 +2354,18 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
                     reasoning_duration_sec=duration_sec,
                     usage=usage_public,
                 )
-                chat.updatedAt = _now_iso()
-                save_chat(chat)
+                gen_meta = _persist_generation_record(
+                    chat=chat,
+                    assistant_msg=assistant_msg,
+                    prepared=prepared,
+                    request_id=request_id,
+                    model=model,
+                    usage=usage_public,
+                    started_at=started_at,
+                    started_mono=started_mono,
+                    first_token_mono=first_token_mono,
+                    streaming=True,
+                )
                 done_payload: dict[str, Any] = {
                     "ok": True,
                     "chatId": chat.id,
@@ -2225,9 +2378,23 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
                     done_payload["reasoningDurationSec"] = duration_sec
                 if usage_public:
                     done_payload["usage"] = usage_public
+                if gen_meta:
+                    done_payload["generationMetadata"] = gen_meta
                 yield sse_done(done_payload)
             else:
-                yield sse_done({"ok": True, "chatId": chat.id, "characterId": req.characterId})
+                gen_meta = _persist_generation_record(
+                    chat=chat,
+                    assistant_msg=None,
+                    prepared=prepared,
+                    request_id=request_id,
+                    model=model,
+                    usage=usage_public,
+                    started_at=started_at,
+                    started_mono=started_mono,
+                    first_token_mono=first_token_mono,
+                    streaming=True,
+                )
+                yield sse_done({"ok": True, "chatId": chat.id, "characterId": req.characterId, "generationMetadata": gen_meta})
             signal_generate_done(chat.id)
         except Exception as e:
             yield sse_terminal_error(
@@ -2244,9 +2411,11 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
     if not settings.streamEnabled:
         try:
             req_start = time.monotonic()
-            ws_on = web_search_enabled
+            started_mono = req_start
+            started_at = _now_iso()
+            first_token_mono: float | None = None
             nonstream_usage: dict[str, Any] | None = None
-            if ws_on:
+            if _use_local_web_search_loop(web_search_enabled, protocol):
                 assistant_content, reasoning_content, req_duration = await nonstream_web_search_rounds(
                     messages=messages,
                     base_url=base_url,
@@ -2272,10 +2441,12 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
                     top_p=top_p,
                     max_tokens=max_tokens,
                     extra_body=extra_body,
+                    tools=gen_tools,
                     protocol=protocol,
                 )
                 assistant_content = (resp.content or "").strip()
                 reasoning_content = resp.reasoning_content or None
+                nonstream_usage = resp.usage
                 req_duration = round(max(0.0, time.monotonic() - req_start), 1) if reasoning_content else None
             else:
                 result = await chat_completions(
@@ -2287,6 +2458,7 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
                     top_p=top_p,
                     max_tokens=max_tokens,
                     extra_body=extra_body,
+                    tools=gen_tools,
                     protocol=protocol,
                 )
                 assistant_content = result.text.strip()
@@ -2305,8 +2477,31 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
                     reasoning_duration_sec=req_duration,
                     usage=nonstream_usage,
                 )
-                chat.updatedAt = _now_iso()
-                save_chat(chat)
+                gen_meta = _persist_generation_record(
+                    chat=chat,
+                    assistant_msg=assistant_msg,
+                    prepared=prepared,
+                    request_id=request_id,
+                    model=model,
+                    usage=nonstream_usage,
+                    started_at=started_at,
+                    started_mono=started_mono,
+                    first_token_mono=first_token_mono or time.monotonic(),
+                    streaming=False,
+                )
+            else:
+                gen_meta = _persist_generation_record(
+                    chat=chat,
+                    assistant_msg=None,
+                    prepared=prepared,
+                    request_id=request_id,
+                    model=model,
+                    usage=nonstream_usage,
+                    started_at=started_at,
+                    started_mono=started_mono,
+                    first_token_mono=first_token_mono or time.monotonic(),
+                    streaming=False,
+                )
             payload = {
                 "ok": True,
                 "chatId": chat.id,
@@ -2321,6 +2516,7 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
                 payload["reasoningDurationSec"] = req_duration
             if nonstream_usage:
                 payload["usage"] = nonstream_usage
+            payload["generationMetadata"] = gen_meta
             signal_generate_done(chat.id)
             return JSONResponse(payload)
         except Exception as e:
@@ -2378,10 +2574,7 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
         raise HTTPException(status_code=400, detail="character is not a member of this group")
 
     settings = load_settings()
-    web_search_enabled = _ensure_web_search_ready(
-        settings,
-        requested=bool(getattr(req, "webSearchEnabled", False)),
-    )
+    web_search_requested = bool(getattr(req, "webSearchEnabled", False))
     pure_ai_mode = _resolve_pure_ai_mode(settings, chat, None)
     try:
         character = load_character(req.characterId)
@@ -2548,6 +2741,10 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
     )
     base_url, api_key, protocol = prepared.base_url, prepared.api_key, prepared.protocol
     llm_provider = prepared.llm_provider
+    web_search_enabled = _ensure_web_search_ready(
+        settings, requested=web_search_requested, protocol=protocol
+    )
+    gen_tools = _generation_tools(web_search_enabled=web_search_enabled, protocol=protocol)
 
     _apply_placeholder_rewrite_to_history(
         chat,
@@ -2621,9 +2818,11 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
             assistant_content = ""
             reasoning_text: str | None = None
             duration_sec: float | None = None
-            ws_on = web_search_enabled
+            started_mono = time.monotonic()
+            started_at = _now_iso()
+            first_token_mono: float | None = None
             usage_public: dict[str, Any] | None = None
-            if ws_on:
+            if _use_local_web_search_loop(web_search_enabled, protocol):
                 async for ev in iter_web_search_stream_events(
                     messages=messages,
                     base_url=base_url,
@@ -2639,8 +2838,12 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
                 ):
                     et = ev["type"]
                     if et == "reasoning":
+                        if first_token_mono is None:
+                            first_token_mono = time.monotonic()
                         yield _sse("reasoning", {"text": ev["text"]})
                     elif et == "delta":
+                        if first_token_mono is None:
+                            first_token_mono = time.monotonic()
                         yield _sse("delta", {"text": ev["text"]})
                     elif et == "done":
                         assistant_content = (ev.get("content_saved") or "").strip()
@@ -2664,16 +2867,21 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
                     top_p=top_p,
                     max_tokens=max_tokens,
                     extra_body=extra_body,
+                    tools=gen_tools,
                     protocol=protocol,
                 ):
                     if chunk.kind == "reasoning":
                         now = time.monotonic()
+                        if first_token_mono is None:
+                            first_token_mono = now
                         if reasoning_start is None:
                             reasoning_start = now
                         reasoning_end = now
                         full_reasoning.append(chunk.text)
                         yield _sse("reasoning", {"text": chunk.text})
                     elif chunk.kind == "content":
+                        if first_token_mono is None:
+                            first_token_mono = time.monotonic()
                         full_text.append(chunk.text)
                         yield _sse("delta", {"text": chunk.text})
                     elif chunk.kind == "finish" and chunk.usage:
@@ -2686,6 +2894,7 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
                 if reasoning_start is not None and reasoning_end is not None:
                     duration_sec = round(max(0.0, reasoning_end - reasoning_start), 1)
             usage_public = _stamp_usage(usage_public, prepared)
+            assistant_msg = None
             if assistant_content:
                 assistant_msg = ChatMessage(
                     role="assistant",
@@ -2696,8 +2905,18 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
                     usage=usage_public,
                 )
                 chat.messages.append(assistant_msg)
-                chat.updatedAt = _now_iso()
-                save_chat(chat)
+                gen_meta = _persist_generation_record(
+                    chat=chat,
+                    assistant_msg=assistant_msg,
+                    prepared=prepared,
+                    request_id=request_id,
+                    model=model,
+                    usage=usage_public,
+                    started_at=started_at,
+                    started_mono=started_mono,
+                    first_token_mono=first_token_mono,
+                    streaming=True,
+                )
                 done_payload: dict[str, Any] = {
                     "ok": True,
                     "chatId": chat.id,
@@ -2711,13 +2930,28 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
                     done_payload["reasoningDurationSec"] = duration_sec
                 if usage_public:
                     done_payload["usage"] = usage_public
+                if gen_meta:
+                    done_payload["generationMetadata"] = gen_meta
                 yield sse_done(done_payload)
             else:
+                gen_meta = _persist_generation_record(
+                    chat=chat,
+                    assistant_msg=None,
+                    prepared=prepared,
+                    request_id=request_id,
+                    model=model,
+                    usage=usage_public,
+                    started_at=started_at,
+                    started_mono=started_mono,
+                    first_token_mono=first_token_mono,
+                    streaming=True,
+                )
                 yield sse_done({
                     "ok": True,
                     "chatId": chat.id,
                     "characterId": req.characterId,
                     "isInterject": True,
+                    "generationMetadata": gen_meta,
                 })
             signal_generate_done(chat.id)
         except Exception as e:
@@ -2735,9 +2969,11 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
     if not settings.streamEnabled:
         try:
             req_start = time.monotonic()
-            ws_on = web_search_enabled
+            started_mono = req_start
+            started_at = _now_iso()
+            first_token_mono: float | None = None
             nonstream_usage: dict[str, Any] | None = None
-            if ws_on:
+            if _use_local_web_search_loop(web_search_enabled, protocol):
                 assistant_content, reasoning_content, req_duration = await nonstream_web_search_rounds(
                     messages=messages,
                     base_url=base_url,
@@ -2763,10 +2999,12 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
                     top_p=top_p,
                     max_tokens=max_tokens,
                     extra_body=extra_body,
+                    tools=gen_tools,
                     protocol=protocol,
                 )
                 assistant_content = (resp.content or "").strip()
                 reasoning_content = resp.reasoning_content or None
+                nonstream_usage = resp.usage
                 req_duration = round(max(0.0, time.monotonic() - req_start), 1) if reasoning_content else None
             else:
                 result = await chat_completions(
@@ -2778,6 +3016,7 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
                     top_p=top_p,
                     max_tokens=max_tokens,
                     extra_body=extra_body,
+                    tools=gen_tools,
                     protocol=protocol,
                 )
                 assistant_content = result.text.strip()
@@ -2796,8 +3035,31 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
                     usage=nonstream_usage,
                 )
                 chat.messages.append(assistant_msg)
-                chat.updatedAt = _now_iso()
-                save_chat(chat)
+                gen_meta = _persist_generation_record(
+                    chat=chat,
+                    assistant_msg=assistant_msg,
+                    prepared=prepared,
+                    request_id=request_id,
+                    model=model,
+                    usage=nonstream_usage,
+                    started_at=started_at,
+                    started_mono=started_mono,
+                    first_token_mono=first_token_mono or time.monotonic(),
+                    streaming=False,
+                )
+            else:
+                gen_meta = _persist_generation_record(
+                    chat=chat,
+                    assistant_msg=None,
+                    prepared=prepared,
+                    request_id=request_id,
+                    model=model,
+                    usage=nonstream_usage,
+                    started_at=started_at,
+                    started_mono=started_mono,
+                    first_token_mono=first_token_mono or time.monotonic(),
+                    streaming=False,
+                )
             payload = {
                 "ok": True,
                 "chatId": chat.id,
@@ -2813,6 +3075,7 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
                 payload["reasoningDurationSec"] = req_duration
             if nonstream_usage:
                 payload["usage"] = nonstream_usage
+            payload["generationMetadata"] = gen_meta
             signal_generate_done(chat.id)
             return JSONResponse(payload)
         except Exception as e:

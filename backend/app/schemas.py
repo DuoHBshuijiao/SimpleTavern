@@ -1002,6 +1002,10 @@ class ChatMessage(BaseModel):
         default=None,
         description="本轮归一化用量（T-821）：input/output/cacheRead/cacheWrite tokens",
     )
+    generationMetadata: dict[str, Any] | None = Field(
+        default=None,
+        description="本轮生成溯源（T-807）：requestId/provider/protocol/usage/timing；不含密钥或完整请求体",
+    )
     ttsAudioAssetId: str | None = Field(
         default=None,
         description="已合成的 TTS 音频文件 UUID（对应 data/tts_cache/{uuid}.mp3）",

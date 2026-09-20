@@ -53,6 +53,18 @@
 
 ## v0.800（进行中）
 
+### Responses 内建 web_search（T-806-6C）
+
+- 主聊天 `webSearchEnabled`：协议为 `openai_responses` 时把 `{type:web_search}` 交给厂商，不要求本地 Tavily/博查 Key，也不走函数工具循环。
+- 其它协议仍用 Tavily/博查；未配置则 `web_search_not_configured`。Responses 失败不静默改走 Tavily。
+- adapter 跳过 `web_search_call` 输出项与流事件；其它 hosted tools 仍 fast-fail。
+
+### 用量账本（T-807）
+
+- 助手消息 `generationMetadata`（requestId / provider / protocol / usage / timing / cost）。
+- append-only `data/usage/YYYY-MM.jsonl`，`eventId` 幂等；写失败 `usage_persist_failed` + `repair.jsonl`。
+- 无云端 cost 时标记 unknown，不填 0。定价引擎与统计 API 归 T-808。
+
 ### 多协议工具 round-trip（T-806-6B）
 
 - Anthropic Messages：OpenAI 形 tools ↔ `tool_use`/`tool_result`；流式 finish 携带 tool_calls。

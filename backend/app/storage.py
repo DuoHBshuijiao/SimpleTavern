@@ -202,6 +202,11 @@ def get_tts_cache_dir() -> Path:
     return _tts_cache_dir()
 
 
+def get_usage_dir() -> Path:
+    """用量账本目录（T-807）：``data/usage/YYYY-MM.jsonl`` 与 ``usage_index.json``。"""
+    return _data_dir() / "usage"
+
+
 def get_huggingface_data_dir() -> Path:
     """
     Hugging Face 缓存根目录（用作子进程 HF_HOME）。
@@ -342,6 +347,7 @@ def ensure_data_initialized() -> None:
     _assistant_ingest_dir().mkdir(parents=True, exist_ok=True)
     _worldbooks_dir().mkdir(parents=True, exist_ok=True)
     _tts_cache_dir().mkdir(parents=True, exist_ok=True)
+    get_usage_dir().mkdir(parents=True, exist_ok=True)
     get_huggingface_data_dir().mkdir(parents=True, exist_ok=True)
 
     if not _settings_path().exists():
@@ -515,6 +521,30 @@ def write_json(path: Path, obj: Any) -> None:
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(obj, f, ensure_ascii=False, indent=2)
         os.replace(tmp_path, path)
+
+
+def append_jsonl_object(path: Path, obj: dict[str, Any], *, unique_key: str | None = None) -> bool:
+    """向 JSONL 追加一行对象。``unique_key`` 命中已有行时跳过并返回 False（幂等）。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    needle = None
+    if unique_key:
+        needle = obj.get(unique_key)
+    with _lock_for(path):
+        if needle is not None and path.exists():
+            with open(path, "r", encoding="utf-8") as f:
+                for raw_line in f:
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+                    try:
+                        existing = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(existing, dict) and existing.get(unique_key) == needle:
+                        return False
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(obj, ensure_ascii=False, separators=(",", ":")) + "\n")
+    return True
 
 
 def list_json_files(dir_path: Path) -> list[Path]:

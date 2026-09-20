@@ -156,7 +156,7 @@ const props = withDefaults(
   /** T-824：会话级 Fast 模式（null 沿用全局） */
   fastMode?: boolean | null
   
-  /** 主聊天网络搜索开关：为 true 时每次发送均在服务端挂载搜索工具，直至用户关闭 */
+  /** 主聊天网络搜索开关：为 true 时每次发送均启用搜索，直至用户关闭；Responses 走内建 web_search，其它协议需 Tavily/博查 */
   webSearchEnabled?: boolean
   
   // 辅助函数
@@ -779,7 +779,7 @@ defineExpose({
                 : 'chat-action-button--secondary'
             "
             :disabled="isGenerating && !showContinueButton"
-            aria-label="网络搜索：开启后每次发送启用，直至关闭；需在全局设置配置 Tavily 或博查"
+            aria-label="网络搜索：开启后每次发送启用，直至关闭；Tavily/博查，或 OpenAI Responses 内建搜索"
             @click="toggleWebSearch"
           >
             <Globe class="w-4 h-4" />

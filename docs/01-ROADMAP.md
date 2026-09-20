@@ -100,9 +100,10 @@
 
 - T-801 已完成：统一 REST/SSE 错误 envelope、requestId、上游错误映射、前端 typed error/错误栈。
 - T-802 六批已完成：LLM/generate、Storage/chat/fork、Assistant/tools、MVU/KG/regex health、Search/Import-Export、TTS/infra（F-001~F-034）。
-- T-804 / T-805 已完成（四协议无工具主路径）。T-806-6A/6B 已完成；**T-806-6C 缩窄为仅 Responses 内建 web_search**，其中「Gemini CachedContents」并入 v0.810 T-821（显式缓存策略）。
+- T-804 / T-805 已完成（四协议无工具主路径）。T-806-6A/6B/6C 已完成；「Gemini CachedContents」并入 v0.810 T-821（显式缓存策略）。
+- T-807 已完成（消息 generationMetadata + usage ledger）。
 - 性能基线（历史记录）：fork 冷重建 410.05 ms；chat_path 重建 103.11 ms / 暖查找×1000 105.55 ms。仓库内测试条数不再作为门禁。
-- v0.800 剩余项（T-806-6C、T-807~T-814）保留在 backlog，不因 v0.810 插入而自动顺延或删除。
+- v0.800 剩余项（T-808~T-814）保留在 backlog，不因 v0.810 插入而自动顺延或删除。
 
 ### 成本统计 UI
 

@@ -8,7 +8,7 @@
 
 并行沙箱：`python sandbox.py` 使用 `http://127.0.0.1:9181` / `http://127.0.0.1:9191` 与目录 `data-sandbox/`（环境变量 `SIMPLETAVERN_DATA_DIR`）。不改写生产 `data/`，也不占用生产端口。用法见 [`docs/SANDBOX.md`](../SANDBOX.md)。
 
-持久化：JSON 文件位于仓库 `data/`（设置、角色、会话、世界书、头像、字体、背景、TTS 缓存、OAuth token 等）。沙箱写入 `data-sandbox/`。
+持久化：JSON 文件位于仓库 `data/`（设置、角色、会话、世界书、头像、字体、背景、TTS 缓存、OAuth token、用量账本 `usage/` 等）。沙箱写入 `data-sandbox/`。
 
 ## 通用约定
 
@@ -49,12 +49,16 @@ data: {JSON}
 - `meta`：开流。`requestId`；可选 `provider`、`protocol`、`resolvedModel`、`warnings[]`、`protocolResolution`、`cache`。
 - `reasoning`：`{ text }` 思考增量。
 - `delta`：`{ text }` 正文增量。
-- `done`：终态成功。至少 `ok: true`、`chatId`；常含 `assistantMessageId`、`reasoningContent`、`reasoningDurationSec`、`usage`。群聊另含 `characterId`。
+- `done`：终态成功。至少 `ok: true`、`chatId`；常含 `assistantMessageId`、`reasoningContent`、`reasoningDurationSec`、`usage`、`generationMetadata`。群聊另含 `characterId`。
 - `error`：终态失败。错误信封字段 + `terminal: true`。出现 error 时不再发 `done`。
 
-`usage` 对象归一化后常见键：`input_tokens` / `output_tokens` / `total_tokens` / `reasoning_tokens`，以及缓存读/写相关字段、Fast 是否被请求的标记（供「Fast 未生效」徽标）。
+`usage` 对象归一化后常见键（camelCase，与消息 `ChatMessage.usage` 一致）：`inputTokens` / `outputTokens` / `totalTokens` / `reasoningTokens` / `cacheReadInputTokens` / `cacheWriteInputTokens` / `serviceTier`，以及 Fast 是否被请求的 `fastRequested`（供「Fast 未生效」徽标）。旧文档里的 snake_case 别名不是当前生成接口的主形态。
 
-当全局设置 `streamEnabled=false` 时，生成类接口改为一次性 JSON（非 SSE），成功体含 `ok`、`chatId`、助手正文/思考/usage；失败仍为错误信封。
+`generationMetadata`（T-807）：`version`、`requestId`、`provider`、`protocol`、`requestedModel`、`resolvedModel`、`startedAt`、可选 `firstTokenLatencyMs` / `totalDurationMs`、`nonStreaming`、`usage`、`cost`（有云端金额则 `source=provider`，否则 `source=unknown` 且不填 0）、`calls[]`、`status`。不含 API Key、完整请求体或敏感 header。
+
+当全局设置 `streamEnabled=false` 时，生成类接口改为一次性 JSON（非 SSE），成功体含 `ok`、`chatId`、助手正文/思考/`usage`/`generationMetadata`；失败仍为错误信封。
+
+用量账本：`data/usage/YYYY-MM.jsonl`（append-only，按 `eventId` 幂等）与 `data/usage/usage_index.json`。沙箱写入 `data-sandbox/usage/`。同一 `requestId` 重放不得覆盖已有事件；新请求必须用新 `requestId`。定价汇总 API 见 T-808，本版不提供。
 
 助手 `/api/assistant/stream` 额外事件：`tool_record`、`tool_trace`、`card`、`chat_memory_updated`、`worldbook_updated`、`chat_overrides_updated`。
 
@@ -510,7 +514,7 @@ Content-Type: `application/json`
 
 #### `POST /api/generate/stream`
 
-单聊生成。默认把用户消息写入会话。`mergeAssistantIntoMessageId` 时把输出并入已有助手消息的新版本。`webSearchEnabled` 需已配置 Tavily/博查，否则 fast-fail。`omitMessageIds` 仅本次拼装忽略。
+单聊生成。默认把用户消息写入会话。`mergeAssistantIntoMessageId` 时把输出并入已有助手消息的新版本。`webSearchEnabled=true` 时：若本轮解析协议为 `openai_responses`，把 `{type:web_search}` 交给厂商内建搜索（不要求本地 Tavily/博查 Key）；其它协议仍走本地 Tavily/博查函数工具循环，未配置则 `web_search_not_configured` fast-fail。禁止 Responses 失败时静默改走 Tavily。`omitMessageIds` 仅本次拼装忽略。成功 `done`/JSON 含归一化 `usage` 与 `generationMetadata`；助手消息同时写入 `generationMetadata`，并追加 `data/usage/YYYY-MM.jsonl`。账本写入失败返回 `usage_persist_failed`（不把该轮伪装成完整成功）。
 
 **请求体**
 
@@ -540,7 +544,7 @@ Content-Type: `application/json`
 
 #### `POST /api/generate/group`
 
-群聊指定角色回合。成员设置中的模型/温度/思考深度/Fast 优先于会话再全局。
+群聊指定角色回合。成员设置中的模型/温度/思考深度/Fast 优先于会话再全局。`webSearchEnabled` 语义与 `POST /api/generate/stream` 相同（Responses 内建 web_search / 其它协议本地 Tavily 或博查）。
 
 **请求体**
 
@@ -555,7 +559,7 @@ Content-Type: `application/json`
 
 #### `POST /api/generate/interject`
 
-群聊插话：指定角色额外回复一轮，不推进正常轮转。
+群聊插话：指定角色额外回复一轮，不推进正常轮转。`webSearchEnabled` 语义与 `POST /api/generate/stream` 相同。
 
 **请求体**
 
@@ -2276,7 +2280,8 @@ AI助手流式请求模型
 - `tool_calls`: (array<object> | null)。当 role=assistant 且本轮需调用工具时，与 OpenAI 返回结构兼容（id/type/function）
 - `reasoningContent`: (string | null)。推理/思考链文本（与上游 reasoning_content 对应，持久化用）
 - `reasoningDurationSec`: (number | null)。推理/思考耗时（秒，浮点，前端展示为一位小数）；流式路径取首到末 reasoning chunk 的墙钟时间差
-- `usage`: (object | null)。本轮归一化用量（T-821）：input/output/cacheRead/cacheWrite tokens
+- `usage`: (object | null)。本轮归一化用量（T-821）：inputTokens/outputTokens/cacheRead/cacheWrite 等 camelCase 字段
+- `generationMetadata`: (object | null)。本轮生成溯源（T-807）：requestId、provider、protocol、模型、usage、cost、耗时；不含密钥或完整请求体
 - `ttsAudioAssetId`: (string | null)。已合成的 TTS 音频文件 UUID（对应 data/tts_cache/{uuid}.mp3）
 - `ttsAudioSourceText`: (string | null)。实际送入 TTS 合成的文本（含后处理/翻译后的朗读稿）
 - `mvuProcessed`: (boolean) 默认 false。MVU 已消费标记：该消息的提取数据已被 MVU Agent 处理；同一会话内最多一条消息持有此标记
@@ -2471,7 +2476,7 @@ AI助手流式请求模型
 - `runtimeOverrides`: (ChatOverrides | null)
 - `omitMessageIds`: (array<string>)。仅本次请求拼装 LLM 上下文时忽略的消息 id；不写盘
 - `mergeAssistantIntoMessageId`: (string | null)。将本次助手输出作为指定 assistant 消息的新版变体落盘；为空则追加新消息
-- `webSearchEnabled`: (boolean) 默认 false。Websearchenabled
+- `webSearchEnabled`: (boolean) 默认 false。为 true 时启用本轮网络搜索。`openai_responses` 走厂商内建 `{type:web_search}`；其它协议需已配置 Tavily 或博查，否则 `web_search_not_configured`。
 
 ### `GenerationParams`
 
@@ -2503,7 +2508,7 @@ AI助手流式请求模型
 - `runtimeOverrides`: (ChatOverrides | null)
 - `omitMessageIds`: (array<string>)。仅本次请求拼装 LLM 上下文时忽略的消息 id；不写盘
 - `mergeAssistantIntoMessageId`: (string | null)。将本次助手输出作为指定 assistant 消息的新版变体落盘；为空则追加新消息
-- `webSearchEnabled`: (boolean) 默认 false。Websearchenabled
+- `webSearchEnabled`: (boolean) 默认 false。为 true 时启用本轮网络搜索。`openai_responses` 走厂商内建 `{type:web_search}`；其它协议需已配置 Tavily 或博查，否则 `web_search_not_configured`。
 
 ### `GroupMemberSettings`
 
@@ -2775,7 +2780,7 @@ WGSL 诊断条目（与前端 WgslDiagnostic 对齐；服务端无编译器时�
 - `imageFallbackMode`: (boolean) 默认 false。Imagefallbackmode
 - `omitMessageIds`: (array<string>)。仅本次请求拼装 LLM 上下文时忽略的消息 id；不写盘
 - `mergeAssistantIntoMessageId`: (string | null)。将本次助手输出作为指定 assistant 消息的新版变体落盘；为空则追加新消息
-- `webSearchEnabled`: (boolean) 默认 false。Websearchenabled
+- `webSearchEnabled`: (boolean) 默认 false。为 true 时启用本轮网络搜索。`openai_responses` 走厂商内建 `{type:web_search}`；其它协议需已配置 Tavily 或博查，否则 `web_search_not_configured`。
 
 ### `StateVariables`
 
@@ -2960,7 +2965,7 @@ WebGPU 背景预设元数据。 仅保存元数据，WGSL 源文件本体存于 
 
 ### `WebSearchSettings`
 
-主聊天网络搜索：按 provider 选择 Tavily 或博查，嵌套字段与各厂商 Search API 一致。
+主聊天独立搜索 API：按 provider 选择 Tavily 或博查。当生成协议为 `openai_responses` 且请求 `webSearchEnabled` 时，不使用本对象，而走厂商内建 web_search。
 
 - `provider`: (string) 枚举: "tavily", "bocha" 默认 "tavily"。Provider
 - `tavily`: (WebSearchTavilySettings | null)

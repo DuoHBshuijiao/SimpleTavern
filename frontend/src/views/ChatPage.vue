@@ -1161,7 +1161,7 @@ const showHeaderMoreMenu = ref(false)
 const headerMoreMenuRef = ref<HTMLElement | null>(null)
 const headerMoreButtonRef = ref<HTMLElement | null>(null)
 
-/** 主聊天网络搜索开关：为 true 时每次生成请求挂载搜索工具，直至用户关闭；需全局配置 Tavily/博查 API Key */
+/** 主聊天网络搜索开关：为 true 时每次生成启用搜索，直至关闭；Responses 走内建 web_search，其它协议需 Tavily/博查 */
 const webSearchSessionEnabled = ref(false)
 
 watch(streamError, (value) => {

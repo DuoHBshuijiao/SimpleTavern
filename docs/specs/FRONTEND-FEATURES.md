@@ -46,7 +46,7 @@
 
 - 多行输入；发送 / 停止生成。
 - 移除已选图片；选择图片。
-- 网络搜索开关（需全局配置 Tavily 或博查）。
+- 网络搜索开关（Tavily/博查，或当前协议为 OpenAI Responses 时走厂商内建 web_search）。
 - 更多输入选项。
 - 写作辅助：写/润色、停止、保留、重写、放弃。
 - 群聊：暂停、继续；成员「单次回应一条」插话。
@@ -104,51 +104,114 @@ API 预设：列表、新建/复制/删除、名称 combobox（供应商目录�
 
 ## 按文件的可见控件清单
 
-从 `.vue` 模板抽取交互标签（button/input/select/textarea/自定义表单控件/`role` 交互节点）。动态文案可能显示为插值残留；以界面实际文字为准。共 746 条。设置里的「测模型」「测音色」是产品连通性探测，不是自动化测试。
+计数规则（供仓库外黑盒点按，一条模板节点算一条；`v-for` 不按运行时行数展开）：
+
+- 计入：`button` / `input` / `textarea` / `select` / `a` / `summary`；`role` 为 button/dialog/menu/search/radiogroup 的壳；自定义表单控件（`ThemedCheckbox`、`ThemedRadioTags`、`ModernSelect`、`LlmPresetNameCombobox`、`TtsVoiceInput`、`WgslMonospaceEditor`、`CodeViewer`）；带 `cursor-pointer` / 遮罩关闭的 `@click` 节点。
+- 不计入：纯说明用 `<label>`、只读 `ModernAvatar` / `WebSearchQuotaSummary`、下拉外壳 `SelectDropdownSurface`、根容器与动画壳。已作为按钮计入的节点内部的 `ThemedCheckbox` 不重复计。
+- 文案取 `aria-label` / `placeholder` / 可见文字；动态插值以界面实际为准。
+- 「测模型」「测音色」是产品连通性探测，不是自动化测试。
+
+共 **649** 条可点/可填控件（旧稿标题写 746，清单机械计数 725；725 含大量非点击 caption `label`，且 7 条因属性里的 `>` 被截断而乱码。649 是按上列规则对当前 `.vue` 模板的引号感知抽取）。
 
 无独立交互控件、未列入下方清单的组件：`App.vue`（根容器）、`StartupIntegrityWatcher.vue`（空模板，经全局通知框确认修复）、`SelectDropdownSurface.vue`（下拉外壳，控件在插槽内）、`WebSearchQuotaSummary.vue`（只读用量展示）、`ModernAvatar.vue`（只读头像）、`AnimatedClipHeight.vue`（尺寸动画壳）。
 
 ### `components/AppNotificationHost.vue`
 
+- **[click:div]** `点击遮罩关闭`
+- **[dialog]** `'app-notify-title-${current.id}'`
 - **button** `确定`
 - **button** `取消`
 - **button** `确定` （v-if=current.variant === 'danger'）
 - **button** `确定`
-- **[dialog]** `dialog`
 
 ### `components/AvatarCropper.vue`
 
 - **button** `关闭头像设置弹窗`
-- **input[type=file]** `file`
+- **input[type=file]** `input`
+- **[click:div]** `点击选择图片 支持 JPG、PNG、GIF、WebP 格式（可拖拽到此区域）` （v-if=!imageSrc）
 - **button** `取消`
 - **button** `重新选择` （v-if=imageSrc）
 - **button** `保存头像`
 
+### `components/ConfirmPopover.vue`
+
+- **[dialog]** `确认` （v-if=show）
+- **button** `取消`
+- **button** `确认删除`
+
+### `components/LlmPresetNameCombobox.vue`
+
+- **input[type=text]** `placeholder`
+- **button** `清空`
+- **button** `展开供应商列表`
+- **input[type=text]** `搜索供应商`
+- **button** `无缓存 登录 需参数 （地址由参数生成）` （v-for=preset in group.items）
+
+### `components/ModernSelect.vue`
+
+- **[click:div]** `打开选项列表`
+- **input[type=text]** `搜索或输入新值 / 搜索`
+- **[click:div]** `下拉选项` （v-for=opt in item.options）
+- **[click:div]** `下拉选项`
+
+### `components/SettingsDrawer.vue`
+
+- **[click:div]** `点击遮罩关闭`
+- **button** `关闭设置抽屉`
+- **button** `当前会话` （v-for=t in ['global', 'presets', 'chat']）
+- **button** `取消`
+- **button** `保存设置`
+
+### `components/StartupUpdateCard.vue`
+
+- **button** `忽略`
+- **button** `更新`
+
+### `components/ThemedCheckbox.vue`
+
+- **button** `切换选项`
+
+### `components/ThemedRadioTags.vue`
+
+- **[radiogroup]** `切换选项`
+- **button** `按钮` （v-for=(item, idx) in options）
+
+### `components/TtsVoiceInput.vue`
+
+- **input[type=text]** `placeholder`
+- **button** `清空`
+- **button** `展开音色列表`
+- **button** `按钮` （v-for=voice in filteredVoices）
+
+### `components/WgslMonospaceEditor.vue`
+
+- **textarea** `placeholder`
+
 ### `components/chat/AssistantPanel.vue`
 
+- **[button]** `切换到 MVU 工作日志`
 - **button** `更多`
 - **button** `关闭`
 - **button** `记忆写入`
 - **button** `破坏性工具`
 - **button** `网络搜索`
 - **button** `移除附件`
-- **button** `button`
+- **button** `按钮`
 - **textarea** `输入建议或要求 (Ctrl + Enter)...`
 - **ModernSelect** `模型...`
 - **button** `清空`
 - **button** `发送`
-- **[button]** `切换到 MVU 工作日志`
 
 ### `components/chat/AssistantThread.vue`
 
 - **summary** `查看结果 JSON`
-- **button** `button`
-- **button** ``预览图片 ${getAttachmentLabel(attachment)}``
+- **button** `按钮` （v-for=attachment in getTextAttachments(message)）
+- **button** `'预览图片 ${getAttachmentLabel(attachment)}'` （v-for=attachment in getImageAttachments(message)）
 - **button** `重写` （v-if=message.role === 'assistant'）
 - **button** `编辑`
 - **button** `删除`
+- **[dialog]** `'图片预览：${preview.alt}'` （v-for=preview in imagePreviews）
 - **button** `关闭图片预览`
-- **[dialog]** ``图片预览：${preview.alt}``
 
 ### `components/chat/ChatInput.vue`
 
@@ -160,47 +223,33 @@ API 预设：列表、新建/复制/删除、名称 combobox（供应商目录�
 - **button** `移除图片`
 - **button** `暂停`
 - **button** `继续轮次`
-- **ModernAvatar** `ModernAvatar`
+- **[button]** `'让 ${member.name} 单次回应一条'` （v-for=member in groupMembers）
 - **button** `写作辅助`
 - **button** `帮我写点什么`
 - **button** `润色并扩写我的草稿`
-- **button** `网络搜索：开启后每次发送启用，直至关闭；需在全局设置配置 Tavily 或博查`
+- **button** `网络搜索：开启后每次发送启用，直至关闭；Tavily/博查，或 OpenAI Responses 内建搜索`
 - **button** `选择图片`
 - **button** `更多输入选项`
 - **button** `网络搜索`
 - **button** `选择图片`
-- **input[type=file]** `file`
-- **button** `button`
+- **input[type=file]** `input`
+- **button** `按钮`
 - **button** `打开聊天助手`
 - **button** `打开 MVU 工作日志` （v-if=mvuStore.isConnected）
 - **button** `打开聊天助手`
-- **[button]** ``让 ${member.name} 单次回应一条``
 
 ### `components/chat/ChatSidebar.vue`
 
 - **button** `+ 新建`
-- **ModernAvatar** `ModernAvatar`
 - **button** `编辑身份`
 - **button** `删除身份`
 - **button** `+ 新建`
-- **ModernAvatar** `ModernAvatar`
 - **button** `编辑角色`
 - **button** `删除角色`
 - **button** `+ 群聊`
 - **button** `新建会话`
-- **ModernAvatar** `ModernAvatar`
-- **input[type=text]** `input`
-- **button** `button`
-- **button** `创建分支`
-- **button** `重命名会话`
-- **button** `删除会话`
-- **ModernAvatar** `ModernAvatar`
-- **input[type=text]** `input`
-- **button** `button`
-- **button** `创建副本改为群聊`
-- **button** `创建分支`
-- **button** `重命名群聊`
-- **button** `删除群聊`
+- **[click:div]** `+ ( 人)` （v-for=c in groupList）
+- **[click:div]** `下拉选项` （v-for=c in chatList.filter(chat => !chat.isGroup)）
 - **[button]** `切换侧边栏`
 
 ### `components/chat/ForkLineageBanner.vue`
@@ -209,71 +258,73 @@ API 预设：列表、新建/复制/删除、名称 combobox（供应商目录�
 
 ### `components/chat/InitialStateEditor.vue`
 
-- **label** `初始状态栏`
 - **button** `新建表格`
 - **input[type=text]** `表格名称`
 - **button** `+列`
 - **button** `+行`
 - **button** `删除`
 - **input[type=text]** `列名`
-- **button** `&times;`
+- **button** `×`
 - **input[type=text]** `字段`
 - **input[type=text]** `col`
-- **button** `&times;`
+- **button** `×`
 
 ### `components/chat/MessageList.vue`
 
-- **button** `getMessageAvatar(m) ? `预览 ${getMessageLabel(m)} 的头像` : `${getMessageLabel(m)} 头像``
-- **button** ``已有 ${getOutgoingFork(m)?.count ?? 0} 个分叉，点击查看``
-- **button** `role=menuitem`
-- **button** ``预览图片 ${img.originalName || 'chat-image'}``
-- **button** ``上一个版本 (${getCurrentVersionIndex(m) + 1}/${getVersionCount(m)})``
-- **button** ``下一个版本 (${getCurrentVersionIndex(m) + 1}/${getVersionCount(m)})``
-- **button** `朗读` （v-if=settingsStore.settings?.ttsEnabled && (m.role === 'assistant' || m.role === 'user') && !m.id.startsWith('local_') && getDisplayContent(m).trim()）
+- **button** `getMessageAvatar(m) ? '预览 ${getMessageLabel(m)} 的头像' : '${getMessageLabel(m)} 头像'`
+- **button** `'已有 ${getOutgoingFork(m)?.count ?? 0} 个分叉，点击查看'`
+- **button** `按钮` （v-for=fc in getOutgoingFork(m)?.chats ?? []）
+- **button** `'预览图片 ${img.originalName || 'chat-image'}'` （v-for=img in m.images）
+- **button** `'上一个版本 (${getCurrentVersionIndex(m) + 1}/${getVersionCount(m)})'`
+- **button** `'下一个版本 (${getCurrentVersionIndex(m) + 1}/${getVersionCount(m)})'`
+- **button** `朗读` （v-if=settingsStore.settings?.ttsEnabled && (m.role === 'assistant' || m.role === 'user') && !m.id.startsWith('local_') && getDisplayContent(m).tr）
 - **button** `分支` （v-if=canForkMessage(m)）
 - **button** `重写` （v-if=m.role === 'assistant' && !m.id.startsWith('local_')）
 - **button** `编辑`
 - **button** `删除`
 - **button** `回到底部` （v-if=showScrollToBottom && !isNearBottom）
+- **[dialog]** `'图片预览：${preview.alt}'` （v-for=preview in imagePreviews）
 - **button** `关闭图片预览`
-- **[dialog]** ``图片预览：${preview.alt}``
 
 ### `components/chat/ModelControlPanel.vue`
 
 - **button** `triggerAriaLabel`
-- **label** `label`
-- **button** `role=option`
-- **button** `思考`
-- **button** `button`
-- **button** `chip.available ? `思考深度 ${chip.label}` : `思考深度 ${chip.label}：该模型不支持，将自动收敛到最近可用档``
-- **button** `Fast 模式 约 2× 计费 ·`
+- **input[type=text]** `搜索模型`
 - **[dialog]** `模型控制面板`
+- **button** `按钮` （v-for=opt in group.options）
+- **button** `思考 关 = none`
+- **button** `恢复沿用全局`
 - **[radiogroup]** `思考深度`
+- **button** `chip.available ? '思考深度 ${chip.label}' : '思考深度 ${chip.label}：该模型不支持，将自动收敛到最近可用档'` （v-for=chip in effortChips）
+- **button** `Fast 模式 约 2× 计费 · 当前模型不支持`
 
 ### `components/chat/MvuCapabilityEditor.vue`
 
-- **label** `MVU 模式`
 - **ModernSelect** `选择 MVU 模式...`
-- **label** `MVU 指令`
 - **textarea** `描述如何从回复中识别状态变化、如何更新状态栏。`
 - **button** `新建规则`
 - **input[type=text]** `规则名称（可选）`
-- **label** `updateRule(idx, { enabled: v })" /> 启用`
+- **ThemedCheckbox** `启用`
 - **button** `删除`
 - **textarea** `pattern`
+- **ModernSelect** `选择处理动作...`
+- **ModernSelect** `选择匹配模式...`
+- **input[type=number]** `覆盖深度(可选)`
 - **textarea** `replacement` （v-if=rule.action === 'replace' || rule.action === 'extract_and_replace'）
+- **ModernSelect** `选择提取来源...`
+- **input[type=number]** `提取分组下标` （v-if=rule.extractSource === 'capture_group'）
 
 ### `components/chat/MvuPanel.vue`
 
+- **[button]** `切换到聊天助手`
 - **button** `关闭`
-- **label** `启用知识图谱`
+- **ThemedCheckbox** `启用知识图谱`
 - **button** `查看知识图谱` （v-if=hasKnowledgeGraph）
 - **ModernSelect** `留空则使用默认模型名称与候选回退`
-- **[button]** `切换到聊天助手`
 
 ### `components/chat/ReasoningBubble.vue`
 
-- **button** `isExpanded ? '收起思考' : '展开思考'`
+- **[click:div]** `已思考 秒 已思考 已思考 秒 已思考`
 
 ### `components/chat/StateVariablesBar.vue`
 
@@ -286,17 +337,11 @@ API 预设：列表、新建/复制/删除、名称 combobox（供应商目录�
 - **button** `打开 TTS 队列`
 - **button** `isPlaying && !audioPaused ? '暂停播放' : '播放'`
 - **button** `终止传输`
-- **[region]** `TTS 队列`
 
 ### `components/common/CodeViewer.vue`
 
 - **button** `foldedStarts.has(row.lineIndex) ? '展开' : '折叠'` （v-if=row.kind === 'line' && canFold(row.lineIndex)）
 - **button** `… 折叠了 行`
-
-### `components/ConfirmPopover.vue`
-
-- **button** `button`
-- **[dialog]** `title || message`
 
 ### `components/http-log/HttpLogDetailPane.vue`
 
@@ -309,79 +354,60 @@ API 预设：列表、新建/复制/删除、名称 combobox（供应商目录�
 ### `components/http-log/HttpRecordPreview.vue`
 
 - **CodeViewer** `CodeViewer`
+- **CodeViewer** `CodeViewer`
+- **CodeViewer** `CodeViewer`
 - **CodeViewer** `CodeViewer` （v-if=shouldUseCodeViewer(part.text)）
 - **CodeViewer** `CodeViewer`
-
-### `components/LlmPresetNameCombobox.vue`
-
-- **input[type=text]** `placeholder`
-- **button** `清空`
-- **button** `展开供应商列表`
-- **label** `label`
-- **button** `无缓存 登录 需参数`
+- **CodeViewer** `CodeViewer`
+- **CodeViewer** `CodeViewer`
+- **CodeViewer** `CodeViewer`
+- **CodeViewer** `CodeViewer`
 
 ### `components/modals/AssistantSettingsModal.vue`
 
 - **button** `关闭聊天助手设置弹窗`
-- **label** `温度`
-- **input[type=number]** `number`
-- **label** `思考深度`
+- **input[type=number]** `input`
+- **ModernSelect** `沿用全局…`
 - **button** `Fast 模式 约 2× 计费。不支持的模型会在发送时明确报错。`
-- **label** `上下文长度`
 - **input[type=number]** `未启用（不限制）`
-- **label** `助手读取消息条数上限`
 - **input[type=number]** `未限制（仅受服务端硬上限）`
-- **label** `助手读取消息 token 上限（估算）`
 - **input[type=number]** `未限制`
-- **label** `最大工具轮次`
 - **input[type=number]** `默认 8`
-- **label** `单轮工具数上限`
 - **input[type=number]** `未限制`
-- **label** `允许网络搜索 开启后聊天助手与工具区助手可调用全局设置里的 Tavily / 博查搜索；MVU Agent 不会挂载此工具。`
-- **label** `允许记忆写入 开启后助手可在当前聊天会话中追加或覆盖长期记忆；仅作用于「聊天助手」，工作区助手不可用。`
-- **label** `允许破坏性工具 开启后助手可执行删除文件、删除世界书、覆盖整卡与覆盖全部记忆等不可逆操作。`
+- **ThemedCheckbox** `允许网络搜索 开启后聊天助手与工具区助手可调用全局设置里的 Tavily / 博查搜索；MVU Agent 不会挂载此工具。`
+- **ThemedCheckbox** `允许记忆写入 开启后助手可在当前聊天会话中追加或覆盖长期记忆；仅作用于「聊天助手」，工作区助手不可用。`
+- **ThemedCheckbox** `允许破坏性工具 开启后助手可执行删除文件、删除世界书、覆盖整卡与覆盖全部记忆等不可逆操作。`
 - **button** `取消`
 - **button** `保存`
 
 ### `components/modals/CharacterEditorModal.vue`
 
 - **button** `关闭角色编辑弹窗`
-- **ModernAvatar** `ModernAvatar`
 - **button** `更换头像`
-- **label** `名称 该项参与对话`
 - **input[type=text]** `角色名称`
-- **label** `简介`
 - **textarea** `简短描述`
-- **label** `Personality（性格/外貌） 该项参与对话`
 - **textarea** `详细设定...`
-- **label** `Scenario（情景/世界观） 该项参与对话`
 - **textarea** `世界背景...`
-- **label** `系统提示词 该项参与对话`
 - **textarea** `回复格式要求...`
-- **label** `MVU 能力`
-- **label** `(character!.mvuEnabled = v)" /> 启用 MVU 管线`
-- **label** `首句 支持 占位符 该项参与对话`
+- **ThemedCheckbox** `启用 MVU 管线`
 - **textarea** `开场白...`
-- **label** `额外首句 支持 占位符 该项参与对话`
 - **textarea** `其他开场情景...`
 - **button** `追加为草稿（保留输入框）`
 - **button** `追加为已保存并清空输入`
 - **button** `已保存 草稿`
 - **button** `从列表移除此条`
-- **label** `示例对话 该项参与对话`
 - **textarea** `示例对话...`
-- **label** `绑定世界书 随角色保存；「角色+世界书」ZIP 导出用此顺序`
 - **ModernSelect** `选择世界书加入列表...`
 - **button** `加入`
 - **button** `上移`
 - **button** `下移`
 - **button** `移除`
-- **button** `button`
+- **button** `按钮`
 - **button** `记忆写入，仅聊天会话中可用`
 - **button** `破坏性工具`
 - **button** `网络搜索`
 - **button** `移除图片附件`
-- **button** `button`
+- **button** `按钮`
 - **textarea** `输入建议或要求 (Ctrl + Enter)...`
 - **ModernSelect** `模型...`
 - **button** `发送`
@@ -402,62 +428,60 @@ API 预设：列表、新建/复制/删除、名称 combobox（供应商目录�
 
 - **button** `关闭导入弹窗`
 - **button** `选择文件导入`
-- **button** `button`
-- **input[type=file]** `file`
+- **button** `导入 SillyTavern 数据`
+- **input[type=file]** `input`
+- **input[type=file]** `input`
 - **button** `重新选择`
-- **label** `启用 MVU 兼容 已检测到候选结构`
+- **ThemedCheckbox** `启用 MVU 兼容 已检测到候选结构`
 - **ModernSelect** `选择 MVU 模式`
-- **button** `button`
+- **button** `按钮`
 - **input[type=text]** `https://janitorai.com/chats/...`
 - **button** `打开并尝试获取`
-- **label** `导入后打开该会话`
-- **button** `button`
+- **ModernSelect** `选择角色`
+- **ModernSelect** `选择 Persona`
+- **ThemedCheckbox** `导入后打开该会话`
+- **button** `确认导入 Janitor 聊天`
 - **input[type=text]** `https://janitorai.com/characters/...`
 - **button** `打开并抓取`
 
 ### `components/modals/EmbeddedCardConfirmModal.vue`
 
 - **button** `关闭 PNG 内嵌角色卡确认弹窗`
-- **label** `启用 MVU 兼容 已检测到候选结构`
+- **ThemedCheckbox** `启用 MVU 兼容 已检测到候选结构`
 - **ModernSelect** `选择 MVU 模式`
 - **button** `仅使用头像`
-- **button** `button`
+- **button** `按钮`
 
 ### `components/modals/ErrorModal.vue`
 
 - **button** `关闭错误提示`
-- **button** `button` （v-if=item.action?.type === 'open_settings'）
-- **button** `button`
+- **button** `打开设置` （v-if=item.action?.type === 'open_settings'）
+- **button** `复制错误`
 
 ### `components/modals/GroupCreatorModal.vue`
 
 - **button** `关闭群聊创建弹窗`
-- **label** `群聊名称`
 - **input[type=text]** `新群聊`
-- **button** `button`
-- **label** `系统提示词注入深度`
-- **input[type=number]** `number`
-- **button** `button`
-- **label** `MVU 来源`
-- **ModernAvatar** `ModernAvatar`
-- **label** `{ const inc = groupMemberInclusions[c.id] ?? { includePersonality: true, include`
+- **button** `关闭`
+- **button** `关闭`
+- **input[type=number]** `input`
+- **button** `关闭`
+- **ModernSelect** `（未选择）`
+- **button** `关闭`
+- **ModernSelect** `（请选择）`
+- **[click:div]** `暂无简介 system prompt 插入： Personality Scenario` （v-for=c in characters）
 - **button** `取消`
 - **button** `创建群聊`
 
 ### `components/modals/GroupSettingsModal.vue`
 
 - **button** `关闭群聊设置弹窗`
-- **label** `发言延迟 (ms)`
-- **input[type=number]** `number`
-- **label** `永远在底部（默认）`
-- **button** `button`
-- **label** `系统提示词注入深度`
-- **input[type=number]** `number`
-- **button** `button`
-- **label** `锚定成员（须在成员列表内）`
-- **label** `模板成员（可选，仅作记录）`
-- **label** `成员与发言顺序`
-- **ModernAvatar** `ModernAvatar`
+- **input[type=number]** `input`
+- **button** `关闭`
+- **input[type=number]** `input`
+- **button** `关闭`
+- **ModernSelect** `选择成员`
+- **ModernSelect** `可选`
 - **button** `详情设置`
 - **button** `取消`
 - **button** `保存并应用`
@@ -469,8 +493,9 @@ API 预设：列表、新建/复制/删除、名称 combobox（供应商目录�
 - **button** `复制`
 - **button** `清空`
 - **button** `关闭` （v-if=!isNarrowPortrait）
+- **button** `ERR — stream ms` （v-for=it in items）
 - **button** `ERR — stream ms`
-- **button** `button` （v-if=selectedId === it.id）
+- **button** `查看` （v-if=selectedId === it.id）
 
 ### `components/modals/KnowledgeGraphModal.vue`
 
@@ -478,52 +503,46 @@ API 预设：列表、新建/复制/删除、名称 combobox（供应商目录�
 - **button** `新建实体`
 - **button** `新建关系`
 - **button** `关闭知识图谱弹窗`
-- **label** `注入位置`
-- **label** `注入深度（从末尾计）` （v-if=injectPositionUi === 'depth'）
-- **label** `锚定消息角色` （v-if=injectPositionUi === 'before_last'）
+- **ModernSelect** `ModernSelect`
+- **input[type=number]** `input`
+- **ModernSelect** `ModernSelect`
 - **button** `添加首个实体`
-- **label** `名称`
-- **label** `类型 ({ label: t, value: t }))" class="w-full" @select="onEntityTypeSelect" />`
-- **label** `属性（每行 键: 值）`
+- **input[type=text]** `input`
+- **ModernSelect** `ModernSelect`
+- **textarea** `textarea`
 - **button** `保存`
 - **button** `取消` （v-if=panelMode === 'view'）
 - **button** `删除实体` （v-if=selectedEntity && panelMode === 'view'）
 - **button** `删除`
-- **label** `主体 { newRelSubject = typeof opt === 'string' ? opt : String(opt.value) }" />`
-- **label** `谓语`
-- **label** `客体为字面量（非实体）`
-- **label** `客体实体 { newRelObject = typeof opt === 'string' ? opt : String(opt.value) }" />` （v-if=!useLiteralObject）
-- **label** `客体字面量`
+- **ModernSelect** `选择实体`
+- **input[type=text]** `如：信任、位于`
+- **input[type=checkbox]** `input`
+- **ModernSelect** `选择实体`
+- **input[type=text]** `input`
 - **button** `保存`
 - **button** `取消`
 
 ### `components/modals/MemberSettingsModal.vue`
 
 - **button** `关闭成员设置弹窗`
-- **ModernAvatar** `ModernAvatar`
-- **label** `绑定模型`
 - **button** `清除`
 - **ModernSelect** `使用全局模型...`
-- **label** `Temperature (覆写)`
 - **input[type=number]** `使用全局设置`
-- **label** `Top P (覆写)`
 - **input[type=number]** `使用全局设置`
-- **label** `思考深度`
-- **label** `Fast 模式`
-- **label** `参与概率`
-- **input[type=number]** `number`
-- **label** `system prompt 插入字段`
-- **label** `插入 Personality`
-- **label** `插入 Scenario`
+- **ModernSelect** `沿用会话 / 全局…`
+- **ModernSelect** `沿用会话 / 全局…`
+- **input[type=number]** `input`
+- **ThemedCheckbox** `插入 Personality`
+- **ThemedCheckbox** `插入 Scenario`
 - **button** `取消`
 - **button** `保存`
 
 ### `components/modals/MessageEditorModal.vue`
 
 - **button** `关闭编辑消息弹窗`
-- **label** `发送者 / 头像`
-- **ModernAvatar** `ModernAvatar`
-- **label** `内容`
+- **[click:div]** `系统`
+- **[click:div]** `角色`
+- **[click:div]** `用户`
 - **textarea** `输入消息内容（支持 Markdown）`
 - **button** `取消`
 - **button** `仅保存`
@@ -532,11 +551,8 @@ API 预设：列表、新建/复制/删除、名称 combobox（供应商目录�
 ### `components/modals/PersonaEditorModal.vue`
 
 - **button** `关闭身份编辑弹窗`
-- **ModernAvatar** `ModernAvatar`
 - **button** `更换头像`
-- **label** `姓名（ ）`
 - **input[type=text]** `你的角色名称`
-- **label** `简介`
 - **textarea** `你的角色身份、背景等`
 - **button** `取消`
 - **button** `保存`
@@ -550,19 +566,21 @@ API 预设：列表、新建/复制/删除、名称 combobox（供应商目录�
 
 ### `components/modals/PromptCacheGuideModal.vue`
 
+- **[click:div]** `点击遮罩关闭`
 - **button** `关闭教学`
-- **label** `输入 token：`
-- **button** `button`
+- **input[type=range]** `input`
+- **button** `按钮` （v-for=card in MODE_CARDS）
+- **button** `现在写入当前预设`
 - **button** `我了解费用，允许以后在 HTTP 日志里核对 cache 读写（本页不自动发请求）`
 - **button** `上一步`
-- **button** `button`
+- **button** `下一步`
 
 ### `components/modals/WebGpuShaderEditorModal.vue`
 
 - **button** `关闭`
-- **label** `预设名称`
 - **input[type=text]** `为此预设命名`
 - **WgslMonospaceEditor** `请选择或新建 WebGPU 预设后编辑 WGSL`
+- **[click:li]** `li` （v-for=(d, i) in diagnostics）
 - **button** `编译`
 - **button** `保存源码`
 - **button** `运行（仅本次）`
@@ -570,7 +588,6 @@ API 预设：列表、新建/复制/删除、名称 combobox（供应商目录�
 ### `components/modals/WorldBookEditorModal.vue`
 
 - **button** `关闭`
-- **label** `书名`
 - **input[type=text]** `世界书名称`
 - **button** `新增条目`
 - **button** `上移`
@@ -578,16 +595,15 @@ API 预设：列表、新建/复制/删除、名称 combobox（供应商目录�
 - **button** `编辑`
 - **button** `复制`
 - **button** `删除`
-- **button** `button`
+- **button** `删除世界书`
 - **button** `取消`
-- **button** `button`
+- **button** `保存`
 
 ### `components/modals/WorldBookEntryEditModal.vue`
 
 - **button** `关闭`
-- **label** `标题`
 - **input[type=text]** `条目标题`
-- **label** `启用`
+- **ThemedCheckbox** `启用`
 - **textarea** `例如 keyword 或 /keyword/iu`
 - **textarea** `匹配后注入的文本`
 - **textarea** `测试文本`
@@ -598,54 +614,48 @@ API 预设：列表、新建/复制/删除、名称 combobox（供应商目录�
 ### `components/modals/WorldBookSessionAttachModal.vue`
 
 - **button** `关闭`
-- **label** `扫描深度`
 - **input[type=text]** `scanPlaceholder()`
-- **label** `插入深度`
-- **input[type=number]** `number`
+- **input[type=number]** `input`
 - **button** `取消`
 - **button** `保存`
 
-### `components/ModernSelect.vue`
-
-- **input[type=text]** `allowCreate ? '搜索或输入新值...' : '搜索...'`
-
 ### `components/settings-drawer/LlmConnectionAdvancedSection.vue`
 
-- **label** `供应商参数`
 - **a** `官方文档` （v-if=catalogProvider?.docsUrl）
-- **label** `label`
+- **input[type=text]** `ph.example || ph.key`
 - **a** `文档` （v-if=catalogProvider.docsUrl）
-- **label** `提示词缓存策略`
 - **button** `缓存原理与断点教学`
-- **button** `button`
+- **ModernSelect** `选择缓存模式…`
+- **ModernSelect** `供应商默认`
+- **ModernSelect** `ModernSelect`
+- **button** `按钮` （v-for=bp in PROMPT_CACHE_BREAKPOINTS）
 - **button** `在消息上打显式缓存标记（百炼 DashScope 等中国厂商需要）`
-- **button** `回传思考内容（reasoning_content） 开：把上一轮 assistant 的思考链一并发回（DeepSeek 带工具调用时 必须 开启）；关：省 t`
+- **button** `回传思考内容（reasoning_content） 开：把上一轮 assistant 的思考链一并发回（DeepSeek 带工具调用时必须开启）；关：省 token，多数厂商可接受。`
+- **ModernSelect** `选择要预览的模型` （v-if=previewModelOptions.length）
 - **input[type=text]** `输入模型名预览（如 claude-opus-4-6）`
 
 ### `components/settings-drawer/OAuthLoginModal.vue`
 
 - **button** `关闭登录弹窗`
-- **label** `GitHub Enterprise 域名（可选）`
 - **input[type=text]** `github.com`
-- **label** `登录方式`
 - **button** `设备码`
 - **button** `浏览器粘贴回调`
-- **button** `button`
+- **button** `复制`
 - **a** `打开验证页面` （v-if=verificationUri）
 - **a** `打开 ChatGPT 授权页`
 - **textarea** `http://localhost:1455/auth/callback?code=…&state=…`
 - **button** `取消`
 - **button** `开始登录` （v-if=!sessionId）
-- **button** `完成登录` （v-else-if=authorizeUrl）
+- **button** `完成登录` （v-if=authorizeUrl）
 
 ### `components/settings-drawer/SettingsDrawerChatRegexSection.vue`
 
-- **button** `正文正则后处理（规则全局可见，会话独立启用）`
-- **label** `默认扫描深度（最近 assistant 条数）`
-- **input[type=number]** `number`
+- **button** `正文正则后处理（规则全局可见，会话独立启用） 展开`
+- **input[type=number]** `input`
 - **button** `全部启用`
 - **button** `全部禁用`
 - **button** `新建规则`
+- **ThemedCheckbox** `编辑 上移 下移 删除`
 - **button** `编辑`
 - **button** `上移`
 - **button** `下移`
@@ -653,49 +663,38 @@ API 预设：列表、新建/复制/删除、名称 combobox（供应商目录�
 
 ### `components/settings-drawer/SettingsDrawerChatTab.vue`
 
-- **label** `会话系统提示`
 - **button** `追加全局`
 - **button** `覆盖全局`
 - **textarea** `留空则使用角色默认提示词`
-- **label** `长期记忆`
 - **button** `从已存记忆处截断`
 - **button** `恢复完整上下文`
 - **input[type=number]** `N`
 - **textarea** `会插入系统提示词，留空则不启用`
-- **label** `每隔几条消息自动总结`
 - **input[type=number]** `关闭`
-- **label** `静默总结`
-- **label** `模型覆盖`
+- **ThemedCheckbox** `静默总结`
 - **ModernSelect** `选择模型 (自动关联预设)...`
-- **label** `Temperature`
 - **input[type=number]** `使用全局`
-- **label** `Top P`
 - **input[type=number]** `使用全局`
-- **label** `最大输出长度`
 - **input[type=number]** `使用全局`
-- **label** `上下文长度`
 - **input[type=number]** `未启用（使用全局）`
-- **label** `草稿助手上下文条数限制`
 - **input[type=text]** `使用全局；留空则继续回退`
-- **label** `{ if (chat.chatDraft) chat.chatDraft.groupMvuEnabled = v }" /> 启用群聊 MVU`
-- **label** `锚定成员`
-- **label** `模板成员（可选）`
-- **label** `{ if (chat.chatDraft) chat.chatDraft.knowledgeGraphEnabled = v }" /> 启用知识图谱`
+- **ThemedCheckbox** `启用群聊 MVU`
+- **ModernSelect** `选择成员`
+- **ModernSelect** `可选`
+- **ThemedCheckbox** `启用知识图谱`
 - **button** `打开图谱`
 - **button** `清空图谱` （v-if=chat.mvuStore.hasKnowledgeGraph）
 
 ### `components/settings-drawer/SettingsDrawerChatTtsSection.vue`
 
-- **label** `TTS 模型`
 - **ModernSelect** `选择 TTS 模型...`
-- **button** `button`
-- **label** `朗读间隔（秒）`
-- **input[type=number]** `number`
+- **button** `按钮` （v-for=option in chat.TTS_AUTO_READ_OPTIONS）
+- **input[type=number]** `input`
 - **button** `启用文本后处理`
 - **button** `注入英文情绪标签`
-- **label** `后处理目标语言`
 - **input[type=text]** `例如 简体中文、English（留空则不按语言翻译）`
 - **ModernSelect** `选择文本后处理模型...` （v-if=chat.chatDraft.tts?.preprocessEnabled）
+- **TtsVoiceInput** `输入或下拉选择 voice_id`
 - **TtsVoiceInput** `输入或下拉选择 voice_id`
 
 ### `components/settings-drawer/SettingsDrawerChatWorldBookSection.vue`
@@ -706,12 +705,12 @@ API 预设：列表、新建/复制/删除、名称 combobox（供应商目录�
 - **button** `取消`
 - **ModernSelect** `选择世界书加入会话顺序...`
 - **button** `加入顺序`
-- **button** `button`
+- **button** `设为全局`
 - **button** `移除会话`
 - **button** `编辑`
-- **button** `全部世界书（ 本）`
+- **button** `全部世界书（ 本） 展开`
 - **button** `编辑`
-- **button** `button`
+- **button** `收起列表`
 - **button** `编辑`
 - **button** `上移`
 - **button** `下移`
@@ -719,287 +718,218 @@ API 预设：列表、新建/复制/删除、名称 combobox（供应商目录�
 
 ### `components/settings-drawer/SettingsDrawerGlobalAccordion.vue`
 
-- **button** `button`
-
-### `components/settings-drawer/SettingsDrawerGlobalAppearanceSection.vue`
-
-- **button** `导入图片`
-- **button** `清除` （v-if=draft.pageBackgroundImage）
-- **input[type=file]** `file`
-- **label** `透明度 % 100% 为完整显示图片，降低后可透出主题底色。`
-- **label** `模糊 px 仅作用于图片层，不会影响主题底色与界面内容。`
-- **label** `启用着色器背景`
-- **button** `button`
-- **button** `新建预设`
-- **ModernSelect** `ModernSelect`
-- **button** `编辑`
-- **button** `运行`
-- **button** `删除`
-- **label** `界面色系`
-- **ModernSelect** `选择色系...`
-- **ModernSelect** `选择字体...`
-- **button** `减小字号`
-- **input[type=number]** `number`
-- **button** `增大字号`
-- **button** `导入字体`
-- **input[type=file]** `file`
-- **button** `基本设置`
-- **button** `包含角色卡`
-- **button** `包含全部聊天记录`
-- **button** `button`
-- **input[type=file]** `file`
-- **button** `清除`
-- **label** `启用 MVU 兼容 已检测到候选结构`
-- **ModernSelect** `选择 MVU 模式`
-- **button** `button`
+- **button** `按钮`
 
 ### `components/settings-drawer/SettingsDrawerGlobalAppSection.vue`
 
 - **a** `成本计算器`
 - **button** `查看 HTTP 请求`
 - **button** `检查更新`
-- **a** `a`
+- **a** `…`
+
+### `components/settings-drawer/SettingsDrawerGlobalAppearanceSection.vue`
+
+- **button** `导入图片`
+- **button** `清除` （v-if=draft.pageBackgroundImage）
+- **input[type=file]** `input`
+- **input[type=range]** `input`
+- **input[type=range]** `input`
+- **button** `已关闭`
+- **button** `新建预设`
+- **ModernSelect** `ModernSelect`
+- **[click:div]** `编辑 运行 删除`
+- **ModernSelect** `选择色系...`
+- **ModernSelect** `选择字体...`
+- **button** `减小字号`
+- **input[type=number]** `input`
+- **button** `增大字号`
+- **button** `导入字体`
+- **input[type=file]** `input`
+- **button** `基本设置`
+- **button** `包含角色卡`
+- **button** `包含全部聊天记录`
+- **button** `导入数据`
+- **button** `仅选择 SillyTavern 角色卡（PNG / JSON）`
+- **input[type=file]** `input`
+- **input[type=file]** `input`
+- **button** `清除`
+- **ThemedCheckbox** `启用 MVU 兼容 已检测到候选结构`
+- **ModernSelect** `选择 MVU 模式`
+- **button** `按钮`
 
 ### `components/settings-drawer/SettingsDrawerGlobalConnectionSection.vue`
 
-- **label** `流式传输`
-- **button** `button`
-- **label** `纯 AI 模式`
-- **button** `button`
-- **label** `思考模式`
+- **button** `已关闭`
+- **button** `已关闭：正常对话模式`
 - **ModernSelect** `选择思考深度...`
-- **label** `回传思考内容`
-- **label** `默认 API 基础地址`
+- **ModernSelect** `按预设…`
 - **input[type=text]** `https://api.openai.com 或 …/v1/chat/completions`
-- **label** `默认 LLM 协议`
-- **label** `默认 API Key`
+- **ModernSelect** `选择协议…`
 - **input[type=showApiKeyModel ? 'text' : 'password']** `input`
-- **button** `button`
-- **label** `默认模型名称`
+- **button** `按钮`
 - **input[type=text]** `例如: gpt-3.5-turbo`
-- **label** `MVU Agent 模型`
 - **ModernSelect** `留空则使用默认模型名称与候选回退`
 
 ### `components/settings-drawer/SettingsDrawerGlobalPromptsSection.vue`
 
-- **label** `全局系统提示词`
 - **textarea** `textarea`
-- **label** `预填内容`
-- **button** `button`
+- **button** `已关闭：保留文案但暂不生效`
 - **textarea** `以助手身份附加在请求末尾，模型在其后续写；留空则不启用`
-- **label** `Temperature`
 - **input[type=number]** `默认`
-- **label** `Top P`
 - **input[type=number]** `默认`
-- **label** `最大输出长度`
 - **input[type=number]** `默认`
-- **label** `上下文长度`
 - **input[type=number]** `未启用（默认不限制）`
-- **label** `草稿助手上下文条数限制`
 - **input[type=text]** `未启用（跟随当前逻辑）`
 
 ### `components/settings-drawer/SettingsDrawerGlobalTtsSection.vue`
 
-- **label** `启用文字转语音`
-- **button** `button`
-- **label** `缓存上限（MB）`
-- **input[type=number]** `number`
+- **button** `已关闭`
+- **input[type=number]** `input`
 - **button** `清空缓存`
 
 ### `components/settings-drawer/SettingsDrawerGlobalWebSearchSection.vue`
 
-- **label** `提供方`
 - **ModernSelect** `选择搜索提供方…`
-- **label** `Tavily API Key`
 - **input[type=password]** `tvly-...`
-- **label** `max_results（0–20）`
-- **input[type=number]** `number`
-- **label** `search_depth`
+- **input[type=number]** `input`
 - **input[type=text]** `basic / advanced / fast …`
-- **label** `博查 API Key`
-- **input[type=password]** `password`
-- **label** `API 根地址`
+- **input[type=password]** `input`
 - **input[type=text]** `https://api.bocha.cn`
-- **label** `count（1–50）`
-- **input[type=number]** `number`
-- **WebSearchQuotaSummary** `WebSearchQuotaSummary`
+- **input[type=number]** `input`
 
 ### `components/settings-drawer/SettingsDrawerModelSelectorModal.vue`
 
+- **[click:div]** `点击遮罩关闭`
+- **[dialog]** `model-selector-title`
 - **button** `关闭模型选择弹窗`
 - **input[type=text]** `筛选模型...`
+- **[click:div]** `下拉选项` （v-for=m in candidates）
 - **button** `取消`
 - **button** `确认`
-- **[dialog]** `model-selector-title`
 
 ### `components/settings-drawer/SettingsDrawerPresetsTab.vue`
 
 - **button** `+ 新建`
-- **button** `button`
-- **label** `预设名称`
+- **[click:div]** `t` （v-for=(presetItem, idx) in presets.globalDraft!.apiPresets）
 - **button** `作为 TTS 服务`
 - **LlmPresetNameCombobox** `输入或下拉选择供应商/预设名称` （v-if=!presets.isTtsPreset(presets.editingPreset)）
-- **input[type=text]** `text`
-- **label** `TTS 提供商`
+- **input[type=text]** `input`
 - **ModernSelect** `选择 TTS 提供商…`
-- **label** `API 基础地址`
 - **input[type=text]** `presets.editingPresetBaseUrlPlaceholder`
-- **label** `LLM 协议`
-- **label** `API Key`
+- **ModernSelect** `选择协议…`
 - **input[type=presets.editingPresetShowApiKey ? 'text' : 'password']** `input`
-- **button** `button`
+- **button** `按钮`
+- **button** `登录`
 - **button** `退出登录` （v-if=presets.oauthStatusFor(presets.editingPreset?.id)?.loggedIn）
-- **label** `模型列表`
 - **button** `从 API 获取并筛选`
 - **button** `全选`
 - **button** `清空选择`
 - **button** `删除所选`
 - **button** `清空全部`
+- **[button]** `下拉选项` （v-for=(m, idx) in presets.editingPreset!.models）
 - **button** `移除此模型`
-- **label** `仓库路径`
+- **input[type=text]** `手动输入模型名...`
 - **input[type=text]** `E:\GLM-TTS（GLM-TTS 仓库根目录）`
-- **label** `端口`
 - **input[type=number]** `8088`
-- **label** `托管启动`
-- **button** `button`
-- **label** `仓库路径`
+- **button** `手动启动`
 - **input[type=text]** `E:\Qwen3-TTS（Qwen3-TTS 仓库根目录）`
-- **label** `主端口（CustomVoice 网关）`
 - **input[type=number]** `8080`
-- **label** `语音克隆端口（Base 网关）`
 - **input[type=number]** `留空 = 主端口 + 1`
-- **label** `托管启动`
-- **button** `button`
-- **label** `设备`
+- **button** `手动启动`
 - **input[type=text]** `cuda:0`
-- **label** `CustomVoice 模型 ID（/custom_voice）`
 - **input[type=text]** `Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice`
-- **label** `Base 模型 ID（/voice_clone）`
 - **input[type=text]** `Qwen/Qwen3-TTS-12Hz-1.7B-Base`
-- **label** `默认语言`
 - **input[type=text]** `Auto`
-- **label** `仓库路径`
 - **input[type=text]** `E:\OmniVoice（OmniVoice 仓库根目录）`
-- **label** `端口`
 - **input[type=number]** `8089`
-- **label** `托管启动`
-- **button** `button`
-- **label** `模型 ID / 路径`
+- **button** `手动启动`
 - **input[type=text]** `k2-fsa/OmniVoice`
-- **label** `设备`
 - **input[type=text]** `cuda:0（留空则交给 OmniVoice 自动选择）`
-- **label** `默认语言`
 - **input[type=text]** `例如 zh、Chinese、English（可留空）`
-- **label** `音色列表`
 - **button** `从 API 获取并筛选` （v-if=presets.editingPresetSupportsVoiceFetch）
 - **button** `全选`
 - **button** `清空选择`
 - **button** `删除所选`
 - **button** `清空全部`
-- **button** `button`
+- **button** `按钮` （v-for=voice in presets.editingPresetVoiceCatalog）
+- **input[type=text]** `手动输入 voice_id 后按回车添加…`
 - **input[type=text]** `音色 ID（唯一标识）`
 - **input[type=text]** `音色名称（显示用）`
 - **input[type=text]** `参考音频路径（wav/flac 绝对路径）`
 - **input[type=text]** `参考音频对应转写文本（推荐填写）`
 - **button** `添加音色`
+- **input[type=text]** `参考音频路径`
+- **input[type=text]** `参考转写文本`
 - **input[type=text]** `音色 ID（唯一标识；无参考音频时作为 speaker 传给 custom_voice）`
 - **input[type=text]** `显示名称（可选）`
 - **input[type=text]** `参考音频路径（wav/flac 绝对路径，语音克隆时填写）`
 - **input[type=text]** `参考音频对应转写文本（语音克隆时推荐填写）`
 - **input[type=text]** `instruction（可选，仅 custom_voice 模式）`
 - **button** `添加音色`
+- **input[type=text]** `显示名称`
+- **input[type=text]** `参考音频路径`
+- **input[type=text]** `参考转写文本`
+- **input[type=text]** `instruction（可选）`
 - **input[type=text]** `音色 ID（用于会话里选择）`
 - **input[type=text]** `显示名称（可选）`
 - **input[type=text]** `参考音频路径（克隆模式，可选）`
 - **input[type=text]** `参考音频转写文本（克隆模式，可选）`
 - **input[type=text]** `instruction / instruct（音色设计模式，可选）`
 - **button** `添加音色`
+- **input[type=text]** `显示名称`
+- **input[type=text]** `参考音频路径（可选）`
+- **input[type=text]** `参考转写文本（可选）`
+- **input[type=text]** `instruction / instruct（可选）`
 - **button** `选择参考音频`
-- **input[type=file]** `file`
+- **input[type=file]** `input`
 - **input[type=text]** `自定义音色名称（customName）`
+- **ModernSelect** `TTS 模型（如 FunAudioLLM/CosyVoice2-0.5B）`
 - **textarea** `参考音频对应文本（必填）`
-- **button** `button`
+- **button** `上传并写入音色`
 - **a** `OpenRouter 文档`
 - **button** `选择源音频`
-- **input[type=file]** `file`
+- **input[type=file]** `input`
 - **input[type=text]** `voice_id`
+- **ModernSelect** `presets.editingPresetTtsProvider === 'glm' ? '复刻模型（可选，默认 glm-tts-clone）' : '试听模型（可选）'`
 - **textarea** `presets.editingPresetTtsProvider === 'glm' ? '试听文本（GLM 必填，留空则后端用默认试听文案）' : '试听文本（可选）'`
 - **button** `选择示例音频`
-- **input[type=file]** `file` （v-if=presets.editingPresetSupportsPromptAudio）
+- **input[type=file]** `input` （v-if=presets.editingPresetSupportsPromptAudio）
 - **input[type=text]** `presets.editingPresetTtsProvider === 'glm' ? '示例音频文本（可选）' : '示例音频对应文本（可选）'`
 - **button** `降噪`
 - **button** `音量归一`
-- **button** `button`
+- **button** `复刻并试听`
 - **textarea** `用自然语言描述想要的声音`
 - **textarea** `试听文本`
 - **input[type=text]** `voice_id（可选，不填则自动生成）`
-- **button** `button`
-- **[button]** `button`
+- **button** `生成并试听`
 
 ### `components/settings-drawer/SettingsDrawerRegexRuleEditorModal.vue`
 
+- **[dialog]** `regex-editor-title`
 - **button** `关闭正文正则规则编辑弹窗`
-- **label** `规则名称（可选）`
 - **input[type=text]** `留空将使用 pattern 前缀`
-- **label** `Pattern`
 - **textarea** `支持 /pattern/imsu 或普通正则`
-- **label** `动作`
 - **ModernSelect** `ModernSelect`
-- **label** `Replacement`
-- **label** `提取来源`
+- **textarea** `支持 $1 / $<name>，保存后会归一化`
 - **ModernSelect** `ModernSelect`
-- **label** `提取分组下标`
 - **input[type=number]** `默认 1`
-- **label** `匹配模式`
 - **ModernSelect** `ModernSelect`
-- **label** `覆盖扫描深度（可选）`
 - **input[type=number]** `留空使用会话默认深度`
 - **ThemedRadioTags** `试运行来源`
 - **textarea** `输入测试文本（最多 10000 字符）` （v-if=trialSourceMode === 'manual'）
 - **button** `试运行`
 - **button** `取消`
 - **button** `保存`
-- **[dialog]** `regex-editor-title`
 
 ### `components/settings-drawer/SettingsDrawerVoiceSelectorModal.vue`
 
+- **[click:div]** `点击遮罩关闭`
+- **[dialog]** `voice-selector-title`
 - **button** `关闭音色选择弹窗`
 - **input[type=text]** `筛选音色（名称、ID、类型）...`
+- **[click:div]** `下拉选项` （v-for=v in candidates）
 - **button** `取消`
 - **button** `确认`
-- **[dialog]** `voice-selector-title`
-
-### `components/SettingsDrawer.vue`
-
-- **button** `关闭设置抽屉`
-- **button** `button`
-- **button** `取消`
-- **button** `button`
-
-### `components/StartupUpdateCard.vue`
-
-- **button** `button`
-- **button** `更新`
-
-### `components/ThemedCheckbox.vue`
-
-- **button** `ariaLabel`
-
-### `components/ThemedRadioTags.vue`
-
-- **button** `role=radio`
-- **[radiogroup]** `ariaLabel`
-
-### `components/TtsVoiceInput.vue`
-
-- **input[type=text]** `placeholder`
-- **button** `清空`
-- **button** `展开音色列表`
-- **button** `button`
-
-### `components/WgslMonospaceEditor.vue`
-
-- **textarea** `placeholder`
 
 ### `views/ChatPage.vue`
 
@@ -1007,21 +937,21 @@ API 预设：列表、新建/复制/删除、名称 combobox（供应商目录�
 - **button** `群聊设置 群聊` （v-if=activeChat.isGroup）
 - **button** `设置 设置`
 - **button** `更多操作`
+- **[menu]** `更多操作` （v-if=showHeaderMoreMenu）
 - **button** `导出当前会话 聊天记录`
 - **button** `导入会话 JSON / 扩展来源`
+- **[search]** `会话内搜索` （v-if=showChatSearch）
 - **input[type=text]** `搜索当前会话`
 - **button** `上一个搜索结果`
 - **button** `下一个搜索结果`
 - **button** `关闭会话搜索`
-- **button** `button`
-- **ModernAvatar** `ModernAvatar`
+- **button** `搜索命中摘要` （v-for=(hit, idx) in chatSearchChipsDisplayHits）
+- **[click:div]** `%` （v-for=(member, idx) in groupMembers）
 - **button** `导出`
 - **button** `导入`
 - **button** `设置`
 - **button** `创建角色`
+- **[click:div]** `点击遮罩关闭`
+- **[dialog]** `image-fallback-title`
 - **button** `返回`
 - **button** `清除图片重试`
-- **[menu]** `更多操作`
-- **[search]** `会话内搜索`
-- **[dialog]** `image-fallback-title`
-
