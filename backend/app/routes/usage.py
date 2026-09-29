@@ -125,6 +125,7 @@ def usage_summary(
         "range": range or "all",
         "eventCount": len(events),
         "summary": summary,
+        "models": summarize_ledger_by_model(events),
     }
 
 

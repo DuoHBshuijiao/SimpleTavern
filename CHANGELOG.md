@@ -2,6 +2,19 @@
 
 ## v0.820（进行中）
 
+### 静态审查修复
+
+- 头像/角色/会话/世界书路径拒绝 `..` 与分隔符；ZIP 非法头像跳过，非法世界书 id 改写。
+- CORS 默认本机 Origin，`allow_credentials=False`；发布默认绑 `127.0.0.1`（`SIMPLETAVERN_BIND` / `SIMPLETAVERN_CORS_ORIGINS`）。
+- 独立搜索多轮保存全文并合并 usage；停止时忽略非 error 的 SSE，落盘按前缀去重。
+- 博查 baseUrl 主机白名单；检索结果成帧截断；用量按 ISO 比较、summary 带 models；密钥文件 chmod 0o600。
+
+### Gemini 搜索来源
+
+- `webSearchEnabled` 不再在 `gemini_generate_content` 上强制 `googleSearch`。
+- 全局 `webSearch.geminiSearch` 与会话 `overrides.params.geminiSearch`（请求体 `geminiSearch`，null 沿用全局）二选一：原生 Google Search 或第三方 Tavily/博查/Brave。
+- 独立路径仍要求第三方 Key；禁止原生与独立静默互切。OpenAI Responses / Anthropic 仍自动原生。
+
 ### 并行沙箱
 
 - 新增 `python sandbox.py`：独立 `data-sandbox/` 与端口 9181/9191，仅复制生产 `settings.json`，供浏览器点按且不改写生产 `data/`。用法见 `docs/SANDBOX.md`。

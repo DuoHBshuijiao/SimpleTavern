@@ -19,8 +19,9 @@ logger = logging.getLogger(__name__)
 _MAX_DETAIL_CHARS = 2000
 _SENSITIVE_TEXT_PATTERNS = (
     re.compile(r"(?i)(authorization\s*[:=]\s*(?:bearer\s+)?)([^\s,;]+)"),
-    re.compile(r"""(?i)(["']?(?:api[-_]?key|access[-_]?token|token|secret|cookie)["']?\s*[:=]\s*["']?)([^"'\s,;}]+)"""),
+    re.compile(r"""(?i)(["']?(?:api[-_]?key|access[-_]?token|token|secret|cookie|password|passwd)["']?\s*[:=]\s*["']?)([^"'\s,;}]+)"""),
     re.compile(r"\bsk-[A-Za-z0-9_-]{12,}\b"),
+    re.compile(r"\bAIza[0-9A-Za-z_-]{20,}\b"),
 )
 
 

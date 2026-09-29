@@ -1734,6 +1734,12 @@ const currentModel = computed(() => {
   return chats.activeChat?.overrides?.params?.model || settings.settings?.llm.defaultModel || '未设置'
 })
 
+const geminiSearchRequestValue = computed((): 'native' | 'independent' | null => {
+  const v = chats.activeChat?.overrides?.params?.geminiSearch
+  if (v === 'native' || v === 'independent') return v
+  return null
+})
+
 /**
  * 计算助手当前模型
  *
@@ -1780,7 +1786,7 @@ async function handleReasoningEffortChange(value: string | null) {
   if (!chats.activeChat) return
   const overrides = { ...chats.activeChat.overrides }
   const params = { ...overrides.params }
-  if (value == null || value === '') delete params.reasoningEffort
+  if (value == null || value === '') params.reasoningEffort = null
   else params.reasoningEffort = value
   overrides.params = params
   await chats.updateOverrides(chats.activeChat.id, overrides)
@@ -1794,8 +1800,17 @@ async function handleFastModeChange(value: boolean | null) {
   if (!chats.activeChat) return
   const overrides = { ...chats.activeChat.overrides }
   const params = { ...overrides.params }
-  if (value == null) delete params.fastMode
+  if (value == null) params.fastMode = null
   else params.fastMode = value
+  overrides.params = params
+  await chats.updateOverrides(chats.activeChat.id, overrides)
+}
+
+async function handleGeminiSearchChange(value: 'native' | 'independent' | null) {
+  if (!chats.activeChat) return
+  const overrides = { ...chats.activeChat.overrides }
+  const params = { ...overrides.params }
+  params.geminiSearch = value
   overrides.params = params
   await chats.updateOverrides(chats.activeChat.id, overrides)
 }
@@ -2406,7 +2421,8 @@ async function runGroupGeneration(
       try {
         await postAndConsumeSse(
           '/api/generate/group',
-          { chatId, characterId, imageFallbackMode, webSearchEnabled: webSearchSessionEnabled.value },
+          { chatId, characterId, imageFallbackMode, webSearchEnabled: webSearchSessionEnabled.value,
+            geminiSearch: geminiSearchRequestValue.value },
           makeGenerateSseHandler({
             localAssistantId,
             onTerminalError: (data) => {
@@ -2438,6 +2454,7 @@ async function runGroupGeneration(
         characterId,
         imageFallbackMode,
         webSearchEnabled: webSearchSessionEnabled.value,
+            geminiSearch: geminiSearchRequestValue.value,
       })
       
       if (res.ok) {
@@ -2668,6 +2685,8 @@ async function sendUserMessage() {
               senderAvatar: selectedPersona.value?.avatar ?? null,
               userPersona: selectedPersona.value ?? null,
               webSearchEnabled: webSearchSessionEnabled.value,
+            geminiSearch: geminiSearchRequestValue.value,
+            geminiSearch: geminiSearchRequestValue.value,
             },
             makeGenerateSseHandler({ localAssistantId }),
             aborter.value?.signal,
@@ -2695,6 +2714,7 @@ async function sendUserMessage() {
           senderAvatar: selectedPersona.value?.avatar ?? null,
           userPersona: selectedPersona.value ?? null,
           webSearchEnabled: webSearchSessionEnabled.value,
+            geminiSearch: geminiSearchRequestValue.value,
         })
         
         if (res.ok) {
@@ -2733,6 +2753,8 @@ async function sendUserMessage() {
                   imageFallbackMode: true,
                   userPersona: selectedPersona.value ?? null,
                   webSearchEnabled: webSearchSessionEnabled.value,
+            geminiSearch: geminiSearchRequestValue.value,
+            geminiSearch: geminiSearchRequestValue.value,
                 }, makeGenerateSseHandler({ localAssistantId }), aborter.value?.signal)
               } finally {
                 stream.flushForMessage(localAssistantId)
@@ -2746,6 +2768,8 @@ async function sendUserMessage() {
                 imageFallbackMode: true,
                 userPersona: selectedPersona.value ?? null,
                 webSearchEnabled: webSearchSessionEnabled.value,
+            geminiSearch: geminiSearchRequestValue.value,
+            geminiSearch: geminiSearchRequestValue.value,
               })
               if (!retryRes.ok) throw new Error(retryRes.error || 'unknown error')
               chats.appendLocalMessageContent(localAssistantId, retryRes.content || '')
@@ -2926,7 +2950,8 @@ async function triggerInterject(characterId: string) {
       try {
         await postAndConsumeSse(
           '/api/generate/interject',
-          { chatId, characterId, omitMessageIds, webSearchEnabled: webSearchSessionEnabled.value },
+          { chatId, characterId, omitMessageIds, webSearchEnabled: webSearchSessionEnabled.value,
+            geminiSearch: geminiSearchRequestValue.value },
           makeGenerateSseHandler({ localAssistantId }),
           aborter.value?.signal,
         )
@@ -2949,6 +2974,7 @@ async function triggerInterject(characterId: string) {
         characterId,
         omitMessageIds,
         webSearchEnabled: webSearchSessionEnabled.value,
+            geminiSearch: geminiSearchRequestValue.value,
       })
       
       if (res.ok) {
@@ -3130,30 +3156,38 @@ async function persistLocalStreamingMessages(chatId: string) {
       continue
     }
 
-    const serverAssistantsSameBody = serverMessages.filter(
-      (m) =>
-        !m.id.startsWith('local_') &&
-        m.role === 'assistant' &&
-        (m.characterId ?? null) === candidate.characterId &&
-        (m.content || '').trim() === candidate.content,
-    )
+    const lastServerAssistant = [...serverMessages]
+      .reverse()
+      .find(
+        (m) =>
+          !m.id.startsWith('local_') &&
+          m.role === 'assistant' &&
+          (m.characterId ?? null) === candidate.characterId,
+      )
+
+    const serverBody = (lastServerAssistant?.content || '').trim()
+    const localBody = candidate.content
+    const isPrefixDupe = (() => {
+      if (!lastServerAssistant) return false
+      if (!localBody) return Boolean(serverBody)
+      if (!serverBody) return false
+      return serverBody === localBody || serverBody.startsWith(localBody) || localBody.startsWith(serverBody)
+    })()
 
     if (
-      serverAssistantsSameBody.some(
-        (m) =>
-          normReasoning(m.reasoningContent) === normReasoning(reasoningForThis) &&
-          durationMatches(m.reasoningDurationSec, durationForThis),
-      )
+      isPrefixDupe &&
+      lastServerAssistant &&
+      normReasoning(lastServerAssistant.reasoningContent) === normReasoning(reasoningForThis) &&
+      durationMatches(lastServerAssistant.reasoningDurationSec, durationForThis)
     ) {
       continue
     }
 
-    const serverMatch = serverAssistantsSameBody[0]
+    const serverMatch = isPrefixDupe ? lastServerAssistant : undefined
 
     if (serverMatch) {
       const needReason =
-        !!reasoningForThis &&
-        normReasoning(serverMatch.reasoningContent) !== normReasoning(reasoningForThis)
+        !!reasoningForThis && !normReasoning(serverMatch.reasoningContent)
       const needDur =
         typeof durationForThis === 'number' &&
         Number.isFinite(durationForThis) &&
@@ -3535,6 +3569,8 @@ async function handleRewriteMessage(m: ChatMessage) {
               omitMessageIds,
               mergeAssistantIntoMessageId: anchorId,
               webSearchEnabled: webSearchSessionEnabled.value,
+            geminiSearch: geminiSearchRequestValue.value,
+            geminiSearch: geminiSearchRequestValue.value,
             },
             makeGenerateSseHandler({ localAssistantId }),
             aborter.value?.signal,
@@ -3557,6 +3593,7 @@ async function handleRewriteMessage(m: ChatMessage) {
           omitMessageIds,
           mergeAssistantIntoMessageId: anchorId,
           webSearchEnabled: webSearchSessionEnabled.value,
+            geminiSearch: geminiSearchRequestValue.value,
         })
         
         if (res.ok) {
@@ -3591,6 +3628,8 @@ async function handleRewriteMessage(m: ChatMessage) {
               omitMessageIds,
               mergeAssistantIntoMessageId: anchorId,
               webSearchEnabled: webSearchSessionEnabled.value,
+            geminiSearch: geminiSearchRequestValue.value,
+            geminiSearch: geminiSearchRequestValue.value,
             },
             makeGenerateSseHandler({ localAssistantId }),
             aborter.value?.signal,
@@ -3616,6 +3655,7 @@ async function handleRewriteMessage(m: ChatMessage) {
           omitMessageIds,
           mergeAssistantIntoMessageId: anchorId,
           webSearchEnabled: webSearchSessionEnabled.value,
+            geminiSearch: geminiSearchRequestValue.value,
         })
         
         if (res.ok) {
@@ -4256,6 +4296,8 @@ async function handleSaveAndSend() {
               userPersona: selectedPersona.value ?? null,
               omitMessageIds,
               webSearchEnabled: webSearchSessionEnabled.value,
+            geminiSearch: geminiSearchRequestValue.value,
+            geminiSearch: geminiSearchRequestValue.value,
             },
             makeGenerateSseHandler({ localAssistantId }),
             aborter.value?.signal,
@@ -4274,6 +4316,7 @@ async function handleSaveAndSend() {
           userPersona: selectedPersona.value ?? null,
           omitMessageIds,
           webSearchEnabled: webSearchSessionEnabled.value,
+            geminiSearch: geminiSearchRequestValue.value,
         })
 
         if (res.ok) {
@@ -4752,7 +4795,10 @@ const editingPersonaAvatarUrl = computed(() => {
             @draft-helper-stop="handleDraftHelperStop"
             @toggle-mvu-panel="mvuPanelOpen = !mvuPanelOpen"
             :web-search-enabled="webSearchSessionEnabled"
+            :gemini-search="activeChat?.overrides?.params?.geminiSearch ?? null"
+            :global-gemini-search="settings.settings?.webSearch?.geminiSearch ?? 'native'"
             @update:web-search-enabled="webSearchSessionEnabled = $event"
+            @update:gemini-search="handleGeminiSearchChange"
           />
 
           <!-- TTS 播放/下载 FAB（仅在 TTS 启用时显示） -->

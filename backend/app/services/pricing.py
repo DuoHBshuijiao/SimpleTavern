@@ -63,7 +63,16 @@ def _alias_ok(alias: str) -> bool:
 
 def _regex_ok(pattern: str) -> bool:
     compact = re.sub(r"[\\^$.*+?()[\]{}|]", "", pattern)
-    return len(compact.strip()) >= MIN_ALIAS_LEN
+    if len(compact.strip()) < MIN_ALIAS_LEN:
+        return False
+    # 拒绝 (a+)+ / (a*){2,} 一类嵌套量词，降低用户规则 ReDoS
+    if re.search(r"\([^()]*[+*{][^()]*\)[+*{]", pattern):
+        return False
+    try:
+        re.compile(pattern)
+    except re.error:
+        return False
+    return True
 
 
 def _rule_id_for_catalog(provider: str, model_id: str) -> str:

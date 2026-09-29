@@ -9,7 +9,7 @@ FastAPI应用入口模块
 
 主要功能：
     - 创建FastAPI应用
-    - 配置CORS（允许所有来源，便于本地开发）
+    - 配置CORS（默认本机 Origin；可用 SIMPLETAVERN_CORS_ORIGINS 追加）
     - 应用启动时初始化数据目录
     - 注册所有API路由
     - 提供健康检查端点
@@ -28,6 +28,7 @@ FastAPI应用入口模块
 from __future__ import annotations
 
 import asyncio
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -139,10 +140,35 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="SimpleTavern", version=APP_VERSION, lifespan=lifespan)
 
+
+def _cors_allow_origins() -> list[str]:
+    """默认只放行本机前端 Origin；局域网请设置 SIMPLETAVERN_CORS_ORIGINS。"""
+    defaults = (
+        "http://127.0.0.1:9081",
+        "http://localhost:9081",
+        "http://127.0.0.1:9181",
+        "http://localhost:9181",
+        "http://127.0.0.1:4173",
+        "http://localhost:4173",
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+    )
+    extra = os.environ.get("SIMPLETAVERN_CORS_ORIGINS", "")
+    origins: list[str] = []
+    seen: set[str] = set()
+    for item in [*defaults, *[part.strip() for part in extra.split(",")]]:
+        origin = item.strip().rstrip("/")
+        if not origin or origin in seen:
+            continue
+        seen.add(origin)
+        origins.append(origin)
+    return origins
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_cors_allow_origins(),
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=[REQUEST_ID_HEADER],

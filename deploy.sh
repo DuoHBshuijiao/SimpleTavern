@@ -278,20 +278,21 @@ fi
 # ========================================
 # 启动服务
 # ========================================
+BIND_HOST="${SIMPLETAVERN_BIND:-127.0.0.1}"
 print_info "启动后端服务..."
 cd "$BACKEND_DIR"
-"$VENV_PYTHON" -m uvicorn app.main:app --host 0.0.0.0 --port 9091 &
+"$VENV_PYTHON" -m uvicorn app.main:app --host "$BIND_HOST" --port 9091 &
 BACKEND_PID=$!
 sleep 3
-print_success "后端服务已启动: http://localhost:9091"
+print_success "后端服务已启动: http://127.0.0.1:9091"
 echo ""
 
 print_info "启动前端服务..."
 cd "$FRONTEND_DIR"
-npm run preview -- --port 9081 --host &
+npm run preview -- --port 9081 --host "$BIND_HOST" &
 FRONTEND_PID=$!
 sleep 3
-print_success "前端服务已启动: http://localhost:9081"
+print_success "前端服务已启动: http://127.0.0.1:9081"
 echo ""
 
 # ========================================

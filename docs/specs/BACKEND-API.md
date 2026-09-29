@@ -4,7 +4,7 @@
 
 覆盖范围：OpenAPI 共 **112** 条路径、**137** 个 HTTP 操作（同一路径上的 GET/PUT/DELETE 等分别计数）。另有 FastAPI 自带 `/docs`、`/redoc`、`/openapi.json`，非正式产品接口。
 
-应用形态：本机单用户。前端默认 `http://127.0.0.1:9081`，后端默认 `http://127.0.0.1:9091`。浏览器请求走 `/api/*`，由前端开发服务器代理到后端。无登录鉴权；OAuth 仅用于向上游 LLM 厂商取 token。
+应用形态：本机单用户。前端默认 `http://127.0.0.1:9081`，后端默认 `http://127.0.0.1:9091`。浏览器请求走 `/api/*`，由前端开发服务器代理到后端。无登录鉴权；OAuth 仅用于向上游 LLM 厂商取 token。CORS 默认只放行本机 Origin（9081 / 9181 等），`allow_credentials=False`。局域网请设 `SIMPLETAVERN_CORS_ORIGINS` 与 `SIMPLETAVERN_BIND`。发布脚本默认绑 `127.0.0.1`。
 
 并行沙箱：`python sandbox.py` 使用 `http://127.0.0.1:9181` / `http://127.0.0.1:9191` 与目录 `data-sandbox/`（环境变量 `SIMPLETAVERN_DATA_DIR`）。不改写生产 `data/`，也不占用生产端口。用法见 [`docs/SANDBOX.md`](../SANDBOX.md)。
 
@@ -111,7 +111,7 @@ MVU `/api/mvu/{chat_id}/stream`：先补发最多 50 条 `log_history`，随后�
 - `chatId`：`scope=chat` 时必填；会话不存在 → `chat_not_found` 404。
 - `range`：`all`（默认）| `7d` | `30d` | `month`（本月 1 日 0 点起）。也可传 `since` / `until` ISO 时间覆盖。
 
-成功体：`ok`、`scope`、`chatId`、`range`、`eventCount`、`summary`。`summary` 含 `requestCount` / `completedCount` / `failedCount` / `cancelledCount`、`inputTokens` / `outputTokens` / `avgInputTokens` / `avgOutputTokens`、`cacheReadInputTokens` / `cacheWriteInputTokens` / `cacheHitRate`、`costByCurrency`（按币种 `provider`/`estimated`/`total`，未知成本不进合计、不计 0）、`unknownCostCount`、TTFT 与总耗时的 avg/P50/P95。
+成功体：`ok`、`scope`、`chatId`、`range`、`eventCount`、`summary`、`models`（与 `GET /api/usage/models` 同行结构，避免设置页打两次）。`summary` 含 `requestCount` / `completedCount` / `failedCount` / `cancelledCount`、`inputTokens` / `outputTokens` / `avgInputTokens` / `avgOutputTokens`、`cacheReadInputTokens` / `cacheWriteInputTokens` / `cacheHitRate`、`costByCurrency`（按币种 `provider`/`estimated`/`total`；合计=`provider` 实付，估算不加进合计、未知成本不计 0）、`unknownCostCount`、TTFT 与总耗时的 avg/P50/P95。
 
 **响应**
 
@@ -130,7 +130,7 @@ MVU `/api/mvu/{chat_id}/stream`：先补发最多 50 条 `log_history`，随后�
 
 #### `GET /api/usage/events`
 
-分页列出账本事件（按 `ts` 降序）。查询在 summary 之外增加：
+分页列出账本事件（按 `ts` 降序）。**设置页没有入口**，仅 API。查询在 summary 之外增加：
 
 - `status`：可选，精确匹配 `completed` / `failed` / `cancelled`。
 - `limit`：1–200，默认 50。
@@ -145,7 +145,7 @@ MVU `/api/mvu/{chat_id}/stream`：先补发最多 50 条 `log_history`，随后�
 
 #### `GET /api/pricing/rules`
 
-列出用户覆盖规则（在前）与目录只读规则（`id` 形如 `catalog:{provider}:{model}`，`readOnly: true`）。体含 `version`、`updatedAt`、`catalogCount`、`userCount`、`rules`。
+列出用户覆盖规则（在前）与目录只读规则（`id` 形如 `catalog:{provider}:{model}`，`readOnly: true`）。体含 `version`、`updatedAt`、`catalogCount`、`userCount`、`rules`。**设置页没有价格表编辑入口**，只能打本 API 或改 `data/pricing_rules.json`。
 
 **响应**
 
@@ -592,7 +592,7 @@ Content-Type: `application/json`
 
 #### `POST /api/generate/stream`
 
-单聊生成。默认把用户消息写入会话。`mergeAssistantIntoMessageId` 时把输出并入已有助手消息的新版本。`webSearchEnabled=true` 时：若本轮解析协议为 `openai_responses` / `anthropic_messages` / `gemini_generate_content`，分别把 `{type:web_search}`、`{type:web_search_20250305,name:web_search}`、`{type:google_search}`（Gemini 映射为 `{googleSearch:{}}`）交给厂商原生联网，不要求本地独立搜索 Key，也不走函数工具循环。其它协议走本地 Tavily / 博查 / Brave 函数工具循环，未配置则 `web_search_not_configured` fast-fail。禁止原生联网失败时静默改走独立搜索。`omitMessageIds` 仅本次拼装忽略。成功 `done`/JSON 含归一化 `usage` 与 `generationMetadata`；流式路径在 stamp 后可另发 `event:usage`。助手消息同时写入 `generationMetadata`，并追加 `data/usage/YYYY-MM.jsonl`。账本写入失败返回 `usage_persist_failed`（不把该轮伪装成完整成功）。
+单聊生成。默认把用户消息写入会话。`mergeAssistantIntoMessageId` 时把输出并入已有助手消息的新版本。`webSearchEnabled=true` 时：若本轮解析协议为 `openai_responses` / `anthropic_messages`，分别把 `{type:web_search}`、`{type:web_search_20250305,name:web_search}` 交给厂商原生联网，不要求本地独立搜索 Key。若协议为 `gemini_generate_content`，按 `geminiSearch`（请求体 > 会话 `overrides.params.geminiSearch` > 全局 `webSearch.geminiSearch`，缺省 `native`）分流：`native` 发送 `{type:google_search}`（映射 `{googleSearch:{}}`），不要求独立搜索 Key；`independent` 走本地 Tavily / 博查 / Brave 函数工具循环，未配置则 `web_search_not_configured`。其它协议一律走独立搜索循环。禁止原生联网失败时静默改走独立搜索，也禁止独立失败时静默改走原生。`omitMessageIds` 仅本次拼装忽略。成功 `done`/JSON 含归一化 `usage` 与 `generationMetadata`；流式路径在 stamp 后可另发 `event:usage`。助手消息同时写入 `generationMetadata`，并追加 `data/usage/YYYY-MM.jsonl`。账本写入失败返回 `usage_persist_failed`（不把该轮伪装成完整成功）。
 
 **请求体**
 
@@ -622,7 +622,7 @@ Content-Type: `application/json`
 
 #### `POST /api/generate/group`
 
-群聊指定角色回合。成员设置中的模型/温度/思考深度/Fast 优先于会话再全局。`webSearchEnabled` 语义与 `POST /api/generate/stream` 相同（Responses / Anthropic / Gemini 原生联网；其它协议本地 Tavily / 博查 / Brave）。
+群聊指定角色回合。成员设置中的模型/温度/思考深度/Fast 优先于会话再全局。`webSearchEnabled` / `geminiSearch` 语义与 `POST /api/generate/stream` 相同（Responses / Anthropic 原生联网；Gemini 按 geminiSearch 分流；其它协议本地 Tavily / 博查 / Brave）。
 
 **请求体**
 
@@ -637,7 +637,7 @@ Content-Type: `application/json`
 
 #### `POST /api/generate/interject`
 
-群聊插话：指定角色额外回复一轮，不推进正常轮转。`webSearchEnabled` 语义与 `POST /api/generate/stream` 相同。
+群聊插话：指定角色额外回复一轮，不推进正常轮转。`webSearchEnabled` / `geminiSearch` 语义与 `POST /api/generate/stream` 相同。
 
 **请求体**
 
@@ -2554,7 +2554,8 @@ AI助手流式请求模型
 - `runtimeOverrides`: (ChatOverrides | null)
 - `omitMessageIds`: (array<string>)。仅本次请求拼装 LLM 上下文时忽略的消息 id；不写盘
 - `mergeAssistantIntoMessageId`: (string | null)。将本次助手输出作为指定 assistant 消息的新版变体落盘；为空则追加新消息
-- `webSearchEnabled`: (boolean) 默认 false。为 true 时启用本轮网络搜索。`openai_responses` 走厂商内建 `{type:web_search}`；其它协议需已配置 Tavily 或博查，否则 `web_search_not_configured`。
+- `webSearchEnabled`: (boolean) 默认 false。为 true 时启用本轮网络搜索。`openai_responses` / `anthropic_messages` 走厂商原生联网；`gemini_generate_content` 按 `geminiSearch` 分流（见上）；其它协议需已配置 Tavily / 博查 / Brave，否则 `web_search_not_configured`。
+- `geminiSearch`: (string | null) 枚举 `native` | `independent`。null 沿用会话再沿用全局。仅 Gemini 协议有效。
 
 ### `GenerationParams`
 
@@ -2567,6 +2568,7 @@ AI助手流式请求模型
 - `context_size`: (integer | null)。上下文总长度限制(token)，0或空表示未启用；长期记忆+最近消息<=此值
 - `reasoningEffort`: (string | null)。会话级思考深度（T-824）；None 表示沿用全局 settings.reasoningEffort
 - `fastMode`: (boolean | null)。会话级 Fast 模式（T-824）：OpenAI service_tier / Anthropic speed / Gemini service_tier；None 表示关闭
+- `geminiSearch`: (string | null) 枚举 `native` | `independent`。会话级 Gemini 搜索来源；None 沿用全局 `webSearch.geminiSearch`
 
 ### `GlmLocalActionReq`
 
@@ -2586,7 +2588,8 @@ AI助手流式请求模型
 - `runtimeOverrides`: (ChatOverrides | null)
 - `omitMessageIds`: (array<string>)。仅本次请求拼装 LLM 上下文时忽略的消息 id；不写盘
 - `mergeAssistantIntoMessageId`: (string | null)。将本次助手输出作为指定 assistant 消息的新版变体落盘；为空则追加新消息
-- `webSearchEnabled`: (boolean) 默认 false。为 true 时启用本轮网络搜索。`openai_responses` 走厂商内建 `{type:web_search}`；其它协议需已配置 Tavily 或博查，否则 `web_search_not_configured`。
+- `webSearchEnabled`: (boolean) 默认 false。为 true 时启用本轮网络搜索。`openai_responses` / `anthropic_messages` 走厂商原生联网；`gemini_generate_content` 按 `geminiSearch` 分流（见上）；其它协议需已配置 Tavily / 博查 / Brave，否则 `web_search_not_configured`。
+- `geminiSearch`: (string | null) 枚举 `native` | `independent`。null 沿用会话再沿用全局。仅 Gemini 协议有效。
 
 ### `GroupMemberSettings`
 
@@ -2858,7 +2861,8 @@ WGSL 诊断条目（与前端 WgslDiagnostic 对齐；服务端无编译器时�
 - `imageFallbackMode`: (boolean) 默认 false。Imagefallbackmode
 - `omitMessageIds`: (array<string>)。仅本次请求拼装 LLM 上下文时忽略的消息 id；不写盘
 - `mergeAssistantIntoMessageId`: (string | null)。将本次助手输出作为指定 assistant 消息的新版变体落盘；为空则追加新消息
-- `webSearchEnabled`: (boolean) 默认 false。为 true 时启用本轮网络搜索。`openai_responses` 走厂商内建 `{type:web_search}`；其它协议需已配置 Tavily 或博查，否则 `web_search_not_configured`。
+- `webSearchEnabled`: (boolean) 默认 false。为 true 时启用本轮网络搜索。`openai_responses` / `anthropic_messages` 走厂商原生联网；`gemini_generate_content` 按 `geminiSearch` 分流（见上）；其它协议需已配置 Tavily / 博查 / Brave，否则 `web_search_not_configured`。
+- `geminiSearch`: (string | null) 枚举 `native` | `independent`。null 沿用会话再沿用全局。仅 Gemini 协议有效。
 
 ### `StateVariables`
 
@@ -3043,9 +3047,10 @@ WebGPU 背景预设元数据。 仅保存元数据，WGSL 源文件本体存于 
 
 ### `WebSearchSettings`
 
-主聊天独立搜索 API：按 provider 选择 Tavily、博查或 Brave。当生成协议为 `openai_responses` / `anthropic_messages` / `gemini_generate_content` 且请求 `webSearchEnabled` 时，不使用本对象，而走对应厂商原生联网。
+主聊天独立搜索 API：按 provider 选择 Tavily、博查或 Brave。Gemini 是否走 Google 原生 Search 由 `geminiSearch` 显式选择（默认 `native`），不再在 `gemini_generate_content` 上由 `webSearchEnabled` 自动强制。OpenAI Responses / Anthropic Messages 打开搜索后仍不使用本对象。
 
 - `provider`: (string) 枚举: "tavily", "bocha", "brave" 默认 "tavily"。Provider
+- `geminiSearch`: (string) 枚举: "native", "independent" 默认 "native"。Gemini 搜索来源
 - `tavily`: (WebSearchTavilySettings | null)
 - `bocha`: (WebSearchBochaSettings | null)
 - `brave`: (WebSearchBraveSettings | null)

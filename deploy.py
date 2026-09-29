@@ -428,6 +428,11 @@ def _windows_cmd_k_in_dir(cmd_line: str, cwd: Path) -> subprocess.Popen:
         creationflags=subprocess.CREATE_NEW_CONSOLE,
     )
 
+def _bind_host() -> str:
+    """发布默认只绑回环；局域网请设置 SIMPLETAVERN_BIND=0.0.0.0。"""
+    return os.environ.get("SIMPLETAVERN_BIND", "").strip() or "127.0.0.1"
+
+
 def _windows_npm_cmd_fragment(npm_cmd: str) -> str:
     """供 cmd 使用的 npm 调用片段：Windows 上 npm 实为 npm.cmd，不能 CreateProcess 直接当 exe 跑。"""
     n = npm_cmd.strip()
@@ -450,7 +455,7 @@ def _windows_try_backend_cmd_k(venv_python: str, backend_dir: Path, backend_port
         return None
     rel_norm = os.path.normpath(rel).replace("/", "\\")
     cmd_line = (
-        f"{rel_norm} -m uvicorn app.main:app --host 0.0.0.0 --port {backend_port} --timeout-graceful-shutdown 3 || pause"
+        f"{rel_norm} -m uvicorn app.main:app --host {_bind_host()} --port {backend_port} --timeout-graceful-shutdown 3 || pause"
     )
     return _windows_cmd_k_in_dir(cmd_line, bd)
 
@@ -458,12 +463,13 @@ def start_services(venv_python, npm_cmd, backend_dir, frontend_dir):
     """启动后端和前端服务"""
     backend_port = 9091
     frontend_port = 9081
-    backend_url = f"http://localhost:{backend_port}"
-    frontend_url = f"http://localhost:{frontend_port}"
+    bind_host = _bind_host()
+    backend_url = f"http://127.0.0.1:{backend_port}"
+    frontend_url = f"http://127.0.0.1:{frontend_port}"
     
     # 启动后端
     print_info("启动后端服务...")
-    backend_cmd = [venv_python, "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", str(backend_port), "--timeout-graceful-shutdown", "3"]
+    backend_cmd = [venv_python, "-m", "uvicorn", "app.main:app", "--host", bind_host, "--port", str(backend_port), "--timeout-graceful-shutdown", "3"]
     if platform.system() == 'Windows':
         # 优先 cmd /k + 相对路径（如 ..\venv\Scripts\python.exe）：命令行不含带括号/空格的用户绝对路径；
         # 失败时 || pause 保留窗口。无法写相对路径时退回 CreateProcess 直接调 python.exe。
@@ -505,11 +511,11 @@ def start_services(venv_python, npm_cmd, backend_dir, frontend_dir):
         # 仅把「npm run …」交给 cmd，项目路径只用 cwd=frontend_dir，避免路径含空格/括号时整行解析失败。
         npm_part = _windows_npm_cmd_fragment(npm_cmd)
         frontend_cmd_line = (
-            f"{npm_part} run preview -- --port {frontend_port} --host || pause"
+            f"{npm_part} run preview -- --port {frontend_port} --host {bind_host} || pause"
         )
         frontend_process = _windows_cmd_k_in_dir(frontend_cmd_line, frontend_dir)
     else:
-        frontend_cmd = [npm_cmd, "run", "preview", "--", "--port", str(frontend_port), "--host"]
+        frontend_cmd = [npm_cmd, "run", "preview", "--", "--port", str(frontend_port), "--host", bind_host]
         frontend_process = subprocess.Popen(
             frontend_cmd,
             cwd=frontend_dir,

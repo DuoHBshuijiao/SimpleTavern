@@ -565,6 +565,14 @@ def read_bytes_under_lock(path: Path, *, shared: bool = True) -> bytes:
             portalocker.unlock(fh)
 
 
+def _chmod_owner_rw(path: Path) -> None:
+    """尽量把敏感 JSON 收成 0o600；Windows 等不支持时忽略。"""
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+
+
 def write_json(path: Path, obj: Any) -> None:
     """
     写入JSON文件（带文件锁保护，使用临时文件确保原子性）
@@ -580,7 +588,40 @@ def write_json(path: Path, obj: Any) -> None:
     with _lock_for(path):
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(obj, f, ensure_ascii=False, indent=2)
+        _chmod_owner_rw(tmp_path)
         os.replace(tmp_path, path)
+        _chmod_owner_rw(path)
+
+
+_jsonl_unique_cache: dict[str, tuple[int, int, set[Any]]] = {}
+
+
+def _jsonl_unique_ids_locked(path: Path, unique_key: str) -> set[Any]:
+    """持锁读取 jsonl 中 unique_key 集合；按 mtime+size 缓存，避免热路径整文件重扫。"""
+    cache_key = str(path)
+    try:
+        st = path.stat()
+    except OSError:
+        empty: set[Any] = set()
+        _jsonl_unique_cache[cache_key] = (0, 0, empty)
+        return empty
+    cached = _jsonl_unique_cache.get(cache_key)
+    if cached and cached[0] == st.st_mtime_ns and cached[1] == st.st_size:
+        return cached[2]
+    ids: set[Any] = set()
+    with open(path, "r", encoding="utf-8") as f:
+        for raw_line in f:
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                existing = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(existing, dict) and unique_key in existing:
+                ids.add(existing.get(unique_key))
+    _jsonl_unique_cache[cache_key] = (st.st_mtime_ns, st.st_size, ids)
+    return ids
 
 
 def append_jsonl_object(path: Path, obj: dict[str, Any], *, unique_key: str | None = None) -> bool:
@@ -590,20 +631,22 @@ def append_jsonl_object(path: Path, obj: dict[str, Any], *, unique_key: str | No
     if unique_key:
         needle = obj.get(unique_key)
     with _lock_for(path):
-        if needle is not None and path.exists():
-            with open(path, "r", encoding="utf-8") as f:
-                for raw_line in f:
-                    line = raw_line.strip()
-                    if not line:
-                        continue
-                    try:
-                        existing = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    if isinstance(existing, dict) and existing.get(unique_key) == needle:
-                        return False
+        known_ids: set[Any] | None = None
+        if needle is not None and unique_key:
+            known_ids = _jsonl_unique_ids_locked(path, unique_key)
+            if needle in known_ids:
+                return False
         with open(path, "a", encoding="utf-8") as f:
             f.write(json.dumps(obj, ensure_ascii=False, separators=(",", ":")) + "\n")
+        if needle is not None and unique_key:
+            if known_ids is None:
+                known_ids = set()
+            known_ids.add(needle)
+            try:
+                st = path.stat()
+                _jsonl_unique_cache[str(path)] = (st.st_mtime_ns, st.st_size, known_ids)
+            except OSError:
+                _jsonl_unique_cache.pop(str(path), None)
     return True
 
 
@@ -787,7 +830,8 @@ def worldbook_path(worldbook_id: str) -> Path:
     Returns:
         Path: 世界书JSON文件路径
     """
-    return _worldbooks_dir() / f"{worldbook_id}.json"
+    safe = require_safe_storage_id(worldbook_id, label="世界书 id")
+    return _worldbooks_dir() / f"{safe}.json"
 
 
 def ai_workspace_dir() -> Path:
@@ -820,6 +864,69 @@ def _normalize_attachment_storage_key(value: str) -> str:
     if not key or any(token in key for token in ("..", "/", "\\")):
         raise ValueError("invalid attachment storage key")
     return key
+
+
+SAFE_AVATAR_FILENAME_RE = re.compile(r"^[A-Za-z0-9_.\-]+$")
+
+
+def is_safe_storage_id(value: str) -> bool:
+    """角色 / 会话 / 世界书 id：拒绝空串、首尾空白、路径分隔符与 ``..``。"""
+    key = (value or "").strip()
+    if not key or key != (value or ""):
+        return False
+    if any(token in key for token in ("..", "/", "\\", "\x00")):
+        return False
+    return True
+
+
+def require_safe_storage_id(value: str, *, label: str = "id") -> str:
+    key = (value or "").strip()
+    if not is_safe_storage_id(key):
+        raise AppError(
+            code="invalid_storage_id",
+            message=f"{label}含有非法路径字符",
+            detail=(key or "")[:80] or None,
+            source="storage.path",
+            status_code=400,
+            suggested_action="仅使用不含路径分隔符或 .. 的 id",
+        )
+    return key
+
+
+def is_safe_avatar_filename(filename: str) -> bool:
+    name = (filename or "").strip()
+    if not name or name != (filename or ""):
+        return False
+    if any(token in name for token in ("..", "/", "\\", "\x00")):
+        return False
+    return bool(SAFE_AVATAR_FILENAME_RE.fullmatch(name))
+
+
+def require_safe_avatar_filename(filename: str) -> str:
+    name = (filename or "").strip()
+    if not is_safe_avatar_filename(name):
+        raise AppError(
+            code="invalid_avatar_filename",
+            message="头像文件名不合法",
+            detail=(name or "")[:80] or None,
+            source="storage.avatar",
+            status_code=400,
+            suggested_action="仅使用字母、数字、点、下划线和短横线作为头像文件名",
+        )
+    avatars = _avatars_dir().resolve()
+    target = (avatars / name).resolve()
+    try:
+        target.relative_to(avatars)
+    except ValueError as exc:
+        raise AppError(
+            code="invalid_avatar_filename",
+            message="头像路径超出头像目录",
+            detail=name[:80],
+            source="storage.avatar",
+            status_code=400,
+            suggested_action="仅使用目录内的头像文件名",
+        ) from exc
+    return name
 
 
 def _assistant_attachment_dir(storage_scope: str, storage_key: str) -> Path:
@@ -872,7 +979,8 @@ def character_path(character_id: str) -> Path:
     Returns:
         Path: 角色JSON文件路径（{character_id}.json）
     """
-    return _characters_dir() / f"{character_id}.json"
+    safe = require_safe_storage_id(character_id, label="角色 id")
+    return _characters_dir() / f"{safe}.json"
 
 
 def _report_runtime_integrity_failure(
@@ -1128,7 +1236,8 @@ def chat_dir(character_id: str) -> Path:
     Returns:
         Path: 该角色的聊天目录路径（data/chats/{character_id}）
     """
-    return _chats_dir() / character_id
+    safe = require_safe_storage_id(character_id, label="角色 id")
+    return _chats_dir() / safe
 
 
 def chat_folder(character_id: str, chat_id: str) -> Path:
@@ -1142,7 +1251,8 @@ def chat_folder(character_id: str, chat_id: str) -> Path:
     Returns:
         Path: 聊天会话文件夹路径（data/chats/{character_id}/{chat_id}）
     """
-    return chat_dir(character_id) / chat_id
+    safe_chat = require_safe_storage_id(chat_id, label="会话 id")
+    return chat_dir(character_id) / safe_chat
 
 
 def chat_record_path(character_id: str, chat_id: str) -> Path:
@@ -2158,13 +2268,15 @@ def _list_meta_to_chat(meta: ChatListMeta) -> Chat:
 
 def _collect_chat_summaries_for_character(character_id: str) -> list[Chat]:
     out: list[Chat] = []
+    if not is_safe_storage_id(character_id):
+        return out
     base = chat_dir(character_id)
     if not base.exists():
         return out
     seen_ids: set[str] = set()
 
     for entry in base.iterdir():
-        if not entry.is_dir():
+        if not entry.is_dir() or not is_safe_storage_id(entry.name):
             continue
         record_path = entry / CHAT_RECORD_FILENAME
         if record_path.exists():
@@ -2175,6 +2287,8 @@ def _collect_chat_summaries_for_character(character_id: str) -> list[Chat]:
 
     for p in list_json_files(base):
         if p.name == CHAT_MEMORY_FILENAME:
+            continue
+        if not is_safe_storage_id(p.stem):
             continue
         if p.stem in seen_ids:
             continue
@@ -2200,7 +2314,7 @@ def list_group_chat_summaries() -> list[Chat]:
     if not base.exists():
         return out
     for character_dir in base.iterdir():
-        if not character_dir.is_dir():
+        if not character_dir.is_dir() or not is_safe_storage_id(character_dir.name):
             continue
         for chat in _collect_chat_summaries_for_character(character_dir.name):
             if chat.isGroup:
@@ -2215,10 +2329,10 @@ def iter_fork_chat_summaries() -> Iterable[ForkChatSummary]:
     if not base.exists():
         return
     for character_dir in base.iterdir():
-        if not character_dir.is_dir():
+        if not character_dir.is_dir() or not is_safe_storage_id(character_dir.name):
             continue
         for entry in character_dir.iterdir():
-            if not entry.is_dir():
+            if not entry.is_dir() or not is_safe_storage_id(entry.name):
                 continue
             record_path = entry / CHAT_RECORD_FILENAME
             if not record_path.is_file():
@@ -2248,7 +2362,8 @@ def avatar_path(filename: str) -> Path:
     Returns:
         Path: 头像文件完整路径
     """
-    return _avatars_dir() / filename
+    safe = require_safe_avatar_filename(filename)
+    return _avatars_dir() / safe
 
 
 def save_avatar(filename: str, data: bytes) -> str:
@@ -2263,8 +2378,9 @@ def save_avatar(filename: str, data: bytes) -> str:
         str: 保存的文件名
     """
     p = avatar_path(filename)
+    p.parent.mkdir(parents=True, exist_ok=True)
     p.write_bytes(data)
-    return filename
+    return p.name
 
 
 def delete_avatar(filename: str) -> None:

@@ -62,7 +62,9 @@ import {
   TOP_BAR_AGENT_AFTER_TTS_GAP_PX,
   type HeaderMorphPhase,
 } from '../../constants/chatHeaderMorph'
-import type { CharacterCard, GroupMemberSettings } from '../../types/models'
+import type { CharacterCard, GeminiSearchMode, GroupMemberSettings } from '../../types/models'
+import { isTtsApiPreset } from '../../utils/apiPresetKind'
+import { useSettingsStore } from '../../stores'
 import { validateFilesForTarget } from '../../utils/attachmentPolicy'
 import { resolveRichPaste } from '../../utils/richPaste'
 import ModernAvatar from '../ModernAvatar.vue'
@@ -156,8 +158,12 @@ const props = withDefaults(
   /** T-824：会话级 Fast 模式（null 沿用全局） */
   fastMode?: boolean | null
   
-  /** 主聊天网络搜索开关：为 true 时每次发送均启用搜索，直至用户关闭；Responses 走内建 web_search，其它协议需 Tavily/博查 */
+  /** 主聊天网络搜索开关：为 true 时每次发送均启用搜索，直至用户关闭 */
   webSearchEnabled?: boolean
+  /** 会话级 Gemini 搜索来源；null 沿用全局 */
+  geminiSearch?: GeminiSearchMode | null
+  /** 全局 webSearch.geminiSearch */
+  globalGeminiSearch?: GeminiSearchMode | null
   
   // 辅助函数
   getMemberSettings: (memberId: string) => GroupMemberSettings
@@ -173,6 +179,8 @@ const props = withDefaults(
     reasoningEffort: null,
     globalReasoningEffort: 'none',
     fastMode: null,
+    geminiSearch: null,
+    globalGeminiSearch: 'native',
   }
 )
 
@@ -197,9 +205,11 @@ const emit = defineEmits<{
   'toggle-mvu-panel': []
   'focus-assistant-panel': []
   'update:webSearchEnabled': [value: boolean]
+  'update:geminiSearch': [value: GeminiSearchMode | null]
 }>()
 
 const mvuStore = useMvuStore()
+const settingsStore = useSettingsStore()
 const imageInputRef = ref<HTMLInputElement | null>(null)
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const showDraftHelperMenu = ref(false)
@@ -252,6 +262,41 @@ function onMvueFabClick(e: MouseEvent) {
 
 function toggleWebSearch() {
   emit('update:webSearchEnabled', !props.webSearchEnabled)
+}
+
+const composerProtocol = computed(() => {
+  const s = settingsStore.settings
+  if (!s) return 'auto'
+  const preset = props.currentPresetId
+    ? s.apiPresets.find((p) => p.id === props.currentPresetId && !isTtsApiPreset(p))
+    : s.apiPresets.find((p) => !isTtsApiPreset(p) && p.models.includes(props.currentModel))
+  return String(preset?.protocol ?? s.llm.protocol ?? 'auto')
+})
+
+const showGeminiSearchSource = computed(() => {
+  if (!props.webSearchEnabled) return false
+  const proto = composerProtocol.value.trim().toLowerCase()
+  if (proto === 'gemini_generate_content') return true
+  if (proto === 'auto' || proto === '') return /gemini/i.test(props.currentModel || '')
+  return false
+})
+
+const effectiveGeminiSearch = computed((): GeminiSearchMode => {
+  if (props.geminiSearch === 'native' || props.geminiSearch === 'independent') return props.geminiSearch
+  if (props.globalGeminiSearch === 'independent') return 'independent'
+  return 'native'
+})
+
+const isOverridingGeminiSearch = computed(
+  () => props.geminiSearch === 'native' || props.geminiSearch === 'independent',
+)
+
+function setGeminiSearch(value: GeminiSearchMode) {
+  emit('update:geminiSearch', value)
+}
+
+function clearGeminiSearchOverride() {
+  emit('update:geminiSearch', null)
 }
 
 function openImagePickerFromOverflow() {
@@ -732,6 +777,48 @@ defineExpose({
             </template>
           </div>
           
+          <div
+            v-if="showGeminiSearchSource"
+            class="flex min-w-0 flex-col gap-1.5 px-1"
+          >
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-xs text-[var(--color-text-secondary)]">Gemini 搜索来源</span>
+              <button
+                v-if="isOverridingGeminiSearch"
+                type="button"
+                class="text-2xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
+                @click="clearGeminiSearchOverride"
+              >
+                恢复沿用全局
+              </button>
+            </div>
+            <div class="flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                class="rounded-full px-2.5 py-1 text-2xs transition-colors"
+                :class="
+                  effectiveGeminiSearch === 'native'
+                    ? 'bg-brand-a20 text-brand ring-1 ring-[var(--color-brand-a40)]'
+                    : 'bg-surface-muted text-[var(--color-text-secondary)] hover:bg-surface-hover'
+                "
+                @click="setGeminiSearch('native')"
+              >
+                原生 Google Search
+              </button>
+              <button
+                type="button"
+                class="rounded-full px-2.5 py-1 text-2xs transition-colors"
+                :class="
+                  effectiveGeminiSearch === 'independent'
+                    ? 'bg-brand-a20 text-brand ring-1 ring-[var(--color-brand-a40)]'
+                    : 'bg-surface-muted text-[var(--color-text-secondary)] hover:bg-surface-hover'
+                "
+                @click="setGeminiSearch('independent')"
+              >
+                第三方（Tavily / 博查 / Brave）
+              </button>
+            </div>
+          </div>
           <div class="flex min-w-0 shrink items-center gap-3">
           <div class="flex items-center gap-0 shrink-0">
           <div ref="draftHelperMenuAnchorRef" class="relative">
@@ -779,7 +866,7 @@ defineExpose({
                 : 'chat-action-button--secondary'
             "
             :disabled="isGenerating && !showContinueButton"
-            aria-label="网络搜索：开启后每次发送启用，直至关闭；独立搜索为 Tavily/博查/Brave，或当前协议原生联网（Responses / Anthropic / Gemini）"
+            aria-label="网络搜索：开启后每次发送启用，直至关闭；Gemini 可选手动选择原生 Google Search 或第三方 Tavily/博查/Brave；OpenAI Responses / Anthropic 仍走厂商原生联网"
             @click="toggleWebSearch"
           >
             <Globe class="w-4 h-4" />

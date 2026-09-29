@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Iterator
 from uuid import uuid4
 
@@ -332,15 +332,51 @@ def append_usage_event(metadata: dict[str, Any], *, status: str | None = None) -
     return True
 
 
-def _iter_shard_paths() -> list[Any]:
+def _parse_ledger_dt(raw: Any) -> datetime | None:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _month_start_utc(year: int, month: int) -> datetime:
+    return datetime(year, month, 1, tzinfo=timezone.utc)
+
+
+def _next_month_start_utc(year: int, month: int) -> datetime:
+    if month == 12:
+        return datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+    return datetime(year, month + 1, 1, tzinfo=timezone.utc)
+
+
+def _iter_shard_paths(*, since: datetime | None = None, until: datetime | None = None) -> list[Any]:
     directory = get_usage_dir()
     if not directory.exists():
         return []
-    paths = [
-        p
-        for p in directory.iterdir()
-        if p.is_file() and p.suffix.lower() == ".jsonl" and p.name not in {_REPAIR_NAME}
-    ]
+    paths = []
+    for p in directory.iterdir():
+        if not p.is_file() or p.suffix.lower() != ".jsonl" or p.name in {_REPAIR_NAME}:
+            continue
+        stem = p.stem
+        parts = stem.split("-")
+        if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+            year, month = int(parts[0]), int(parts[1])
+            if 1 <= month <= 12:
+                start = _month_start_utc(year, month)
+                end = _next_month_start_utc(year, month)
+                if since is not None and end <= since:
+                    continue
+                if until is not None and start > until:
+                    continue
+        paths.append(p)
     return sorted(paths)
 
 
@@ -367,9 +403,9 @@ def iter_ledger_events(
     """按时间升序产出账本事件；过滤条件均为可选。"""
     chat_filter = (chat_id or "").strip() or None
     status_filter = (status or "").strip() or None
-    since_text = (since or "").strip() or None
-    until_text = (until or "").strip() or None
-    for path in _iter_shard_paths():
+    since_dt = _parse_ledger_dt(since)
+    until_dt = _parse_ledger_dt(until)
+    for path in _iter_shard_paths(since=since_dt, until=until_dt):
         try:
             with open(path, "r", encoding="utf-8") as fh:
                 for raw in fh:
@@ -380,10 +416,10 @@ def iter_ledger_events(
                         continue
                     if status_filter and str(event.get("status") or "") != status_filter:
                         continue
-                    ts = str(event.get("ts") or event.get("startedAt") or "")
-                    if since_text and ts and ts < since_text:
+                    ts_dt = _parse_ledger_dt(event.get("ts") or event.get("startedAt") or "")
+                    if since_dt and ts_dt and ts_dt < since_dt:
                         continue
-                    if until_text and ts and ts > until_text:
+                    if until_dt and ts_dt and ts_dt > until_dt:
                         continue
                     yield _sanitize_event(event)
         except OSError:

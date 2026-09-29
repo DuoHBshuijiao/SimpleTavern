@@ -50,6 +50,8 @@ export type ChatRole = MainChatRole | 'tool'
  *    - top_p: 核采样参数，控制输出的多样性
  *    - max_tokens: 最大生成token数
  */
+export type GeminiSearchMode = 'native' | 'independent'
+
 export interface GenerationParams {
   model?: string | null
   temperature?: number | null
@@ -61,6 +63,8 @@ export interface GenerationParams {
   reasoningEffort?: ReasoningEffort | string | null
   /** T-824：会话级 Fast 模式（OpenAI service_tier=priority / Anthropic speed=fast / Gemini service_tier）；null 沿用全局 */
   fastMode?: boolean | null
+  /** Gemini 搜索来源：native = Google Search；independent = Tavily/博查/Brave；null 沿用全局 */
+  geminiSearch?: GeminiSearchMode | null
 }
 
 /** T-821：跨协议提示词缓存策略 */
@@ -179,6 +183,8 @@ export interface WebSearchBraveSettings {
 
 export interface WebSearchSettings {
   provider: WebSearchProvider
+  /** Gemini 主聊天搜索来源，缺省 native */
+  geminiSearch?: GeminiSearchMode | null
   tavily?: WebSearchTavilySettings
   bocha?: WebSearchBochaSettings
   brave?: WebSearchBraveSettings

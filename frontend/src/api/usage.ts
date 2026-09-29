@@ -37,6 +37,7 @@ export type UsageSummaryResponse = {
   range: string
   eventCount: number
   summary: UsageSummaryMetrics
+  models?: UsageModelRow[]
 }
 
 export type UsageModelRow = UsageSummaryMetrics & {

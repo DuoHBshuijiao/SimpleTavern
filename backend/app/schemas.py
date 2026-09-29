@@ -46,7 +46,7 @@ import re
 from typing import Any, Literal, TypedDict
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.regex_compat import compile_user_regex
 
@@ -137,6 +137,59 @@ def filter_reasoning_extra_body_for_upstream(model: str | None, extra_body: dict
     return {k: v for k, v in extra_body.items() if k not in _REASONING_EXTRA_BODY_KEYS_INCOMPATIBLE_WITH_GEMINI}
 
 
+GeminiSearchMode = Literal["native", "independent"]
+_SECRETISH_KEY_RE = re.compile(
+    r"(?i)(api[_-]?key|access[_-]?token|token|secret|password|passwd|authorization|cookie)"
+)
+_GENERATION_METADATA_ALLOWLIST = frozenset(
+    {
+        "version",
+        "requestId",
+        "chatId",
+        "messageId",
+        "provider",
+        "protocol",
+        "requestedModel",
+        "resolvedModel",
+        "startedAt",
+        "status",
+        "nonStreaming",
+        "firstTokenLatencyMs",
+        "totalDurationMs",
+        "usage",
+        "cost",
+        "calls",
+        "protocolResolution",
+        "cache",
+        "warnings",
+        "eventId",
+    }
+)
+
+
+def normalize_gemini_search(value: Any, *, default: GeminiSearchMode | None = None) -> GeminiSearchMode | None:
+    if value is None or value == "":
+        return default
+    text = str(value).strip().lower()
+    if text in ("native", "independent"):
+        return text  # type: ignore[return-value]
+    return default
+
+
+def sanitize_generation_metadata(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, dict) or not raw:
+        return None
+    out: dict[str, Any] = {}
+    for key, val in raw.items():
+        name = str(key)
+        if name not in _GENERATION_METADATA_ALLOWLIST:
+            continue
+        if _SECRETISH_KEY_RE.search(name):
+            continue
+        out[name] = val
+    return out or None
+
+
 def _now_iso() -> str:
     """
     获取当前时间的ISO格式字符串
@@ -175,17 +228,25 @@ class GenerationParams(BaseModel):
         default=None,
         description="会话级 Fast 模式（T-824）：OpenAI service_tier / Anthropic speed / Gemini service_tier；None 表示关闭",
     )
+    geminiSearch: GeminiSearchMode | None = Field(
+        default=None,
+        description="会话级 Gemini 搜索来源；None 表示沿用全局 webSearch.geminiSearch",
+    )
 
     @model_validator(mode="before")
     @classmethod
     def _normalize_reasoning_override(cls, data: Any) -> Any:
         if not isinstance(data, dict):
             return data
-        if "reasoningEffort" in data:
-            incoming = dict(data)
+        incoming = dict(data)
+        changed = False
+        if "reasoningEffort" in incoming:
             incoming["reasoningEffort"] = normalize_reasoning_effort_or_none(incoming.get("reasoningEffort"))
-            return incoming
-        return data
+            changed = True
+        if "geminiSearch" in incoming:
+            incoming["geminiSearch"] = normalize_gemini_search(incoming.get("geminiSearch"), default=None)
+            changed = True
+        return incoming if changed else data
 
 
 class PromptCacheConfig(BaseModel):
@@ -530,7 +591,7 @@ WebSearchProvider = Literal["tavily", "bocha", "brave"]
 class WebSearchTavilySettings(BaseModel):
     """Tavily Search 请求参数（与官方 POST /search 对齐；apiKey 存于本地设置）。"""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="ignore")
 
     apiKey: str = ""
     max_results: int | None = Field(default=None, ge=0, le=20)
@@ -552,7 +613,7 @@ class WebSearchTavilySettings(BaseModel):
 class WebSearchBochaSettings(BaseModel):
     """博查 Web Search 请求参数（POST /v1/web-search；count 1–50 以正文说明为准）。"""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="ignore")
 
     apiKey: str = ""
     baseUrl: str = "https://api.bocha.cn"
@@ -566,7 +627,7 @@ class WebSearchBochaSettings(BaseModel):
 class WebSearchBraveSettings(BaseModel):
     """Brave Search API（GET https://api.search.brave.com/res/v1/web/search）。"""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="ignore")
 
     apiKey: str = ""
     count: int | None = Field(default=None, ge=1, le=20)
@@ -579,15 +640,21 @@ class WebSearchBraveSettings(BaseModel):
 class WebSearchSettings(BaseModel):
     """主聊天独立搜索 API：按 provider 选择 Tavily / 博查 / Brave。
 
-    模型原生联网（OpenAI Responses / Anthropic Messages / Gemini）不使用本对象。
+    Gemini 是否走 Google 原生 Search 由 ``geminiSearch`` 显式选择，不由协议自动强制。
     """
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="ignore")
 
     provider: WebSearchProvider = "tavily"
+    geminiSearch: GeminiSearchMode = "native"
     tavily: WebSearchTavilySettings | None = Field(default_factory=WebSearchTavilySettings)
     bocha: WebSearchBochaSettings | None = Field(default_factory=WebSearchBochaSettings)
     brave: WebSearchBraveSettings | None = Field(default_factory=WebSearchBraveSettings)
+
+    @field_validator("geminiSearch", mode="before")
+    @classmethod
+    def _normalize_gemini_search(cls, value: Any) -> GeminiSearchMode:
+        return normalize_gemini_search(value, default="native") or "native"
 
 
 class Settings(BaseModel):
@@ -609,7 +676,7 @@ class Settings(BaseModel):
         createdAt: 创建时间
         updatedAt: 更新时间
     """
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="ignore")
 
     version: int = 1
     llm: SettingsLLM = Field(default_factory=SettingsLLM)
@@ -1048,6 +1115,13 @@ class ChatMessage(BaseModel):
                 raise ValueError("role=reasoning 消息不可包含 tool_call_id")
         if self.tool_calls is not None and self.role != "assistant":
             raise ValueError("仅 assistant 消息可包含 tool_calls")
+        extra = self.__pydantic_extra__
+        if extra:
+            for key in list(extra):
+                if _SECRETISH_KEY_RE.search(str(key)):
+                    extra.pop(key, None)
+        if self.generationMetadata:
+            self.generationMetadata = sanitize_generation_metadata(self.generationMetadata)
         return self
 
 
@@ -1650,6 +1724,10 @@ class GenerateStreamRequest(BaseModel):
         description="将本次助手输出作为指定 assistant 消息的新版变体落盘；为空则追加新消息",
     )
     webSearchEnabled: bool = False
+    geminiSearch: GeminiSearchMode | None = Field(
+        default=None,
+        description="本轮 Gemini 搜索来源；null 沿用会话 overrides.params.geminiSearch 再沿用全局 webSearch.geminiSearch",
+    )
 
 
 class DraftHelpRequest(BaseModel):
@@ -1701,6 +1779,10 @@ class GroupGenerateRequest(BaseModel):
         description="将本次助手输出作为指定 assistant 消息的新版变体落盘；为空则追加新消息",
     )
     webSearchEnabled: bool = False
+    geminiSearch: GeminiSearchMode | None = Field(
+        default=None,
+        description="本轮 Gemini 搜索来源；null 沿用会话 overrides.params.geminiSearch 再沿用全局 webSearch.geminiSearch",
+    )
 
 
 class SingleInterjectRequest(BaseModel):
@@ -1725,3 +1807,7 @@ class SingleInterjectRequest(BaseModel):
         description="将本次助手输出作为指定 assistant 消息的新版变体落盘；为空则追加新消息",
     )
     webSearchEnabled: bool = False
+    geminiSearch: GeminiSearchMode | None = Field(
+        default=None,
+        description="本轮 Gemini 搜索来源；null 沿用会话 overrides.params.geminiSearch 再沿用全局 webSearch.geminiSearch",
+    )

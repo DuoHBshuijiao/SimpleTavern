@@ -47,7 +47,7 @@ export function useChatGeneration(deps: ChatGenerationDeps) {
   }
 
   function shouldIgnoreStreamingEventWhileStopping(eventName: string): boolean {
-    return stopRequested.value && eventName === 'delta'
+    return stopRequested.value && eventName !== 'error'
   }
 
   function applyGenerateDonePayload(localAssistantId: string, data: unknown) {

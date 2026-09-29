@@ -22,6 +22,33 @@ from app.services.web_search import (
 )
 
 WEB_SEARCH_MAX_TOOL_ROUNDS = 8
+_USAGE_SUM_KEYS = (
+    "inputTokens",
+    "outputTokens",
+    "totalTokens",
+    "cacheReadInputTokens",
+    "cacheWriteInputTokens",
+    "reasoningTokens",
+)
+
+
+def merge_public_usage(left: dict[str, Any] | None, right: dict[str, Any] | None) -> dict[str, Any] | None:
+    """跨独立搜索轮次累加 token；档位等非求和字段以后一轮为准。"""
+    if not isinstance(left, dict):
+        return dict(right) if isinstance(right, dict) else None
+    if not isinstance(right, dict):
+        return dict(left)
+    out = dict(left)
+    for key in _USAGE_SUM_KEYS:
+        a, b = left.get(key), right.get(key)
+        if isinstance(a, (int, float)) or isinstance(b, (int, float)):
+            out[key] = int((a or 0) + (b or 0))
+    for key, val in right.items():
+        if key in _USAGE_SUM_KEYS:
+            continue
+        if val is not None:
+            out[key] = val
+    return out
 
 
 def normalize_tool_calls_ids(tool_calls: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
@@ -134,10 +161,12 @@ async def iter_web_search_stream_events(
     Yields:
       {"type": "reasoning", "text": str}
       {"type": "delta", "text": str}
-      {"type": "done", "content_saved": str, "reasoning_full": str | None, "reasoning_duration_sec": float | None}
+      {"type": "done", "content_saved": str, "reasoning_full": str | None, "reasoning_duration_sec": float | None, "usage": dict | None}
     """
     msgs = deepcopy(messages)
     full_reasoning: list[str] = []
+    accumulated_content: list[str] = []
+    merged_usage: dict[str, Any] | None = None
     reasoning_start: float | None = None
     reasoning_end: float | None = None
 
@@ -179,6 +208,10 @@ async def iter_web_search_stream_events(
                 yield {"type": "delta", "text": chunk.text}
             elif chunk.kind == "finish":
                 finish_tc = chunk.tool_calls
+                if isinstance(chunk.usage, dict):
+                    merged_usage = merge_public_usage(merged_usage, chunk.usage)
+
+        accumulated_content.extend(round_content)
 
         if use_tools and finish_tc:
             norm = normalize_tool_calls_ids(finish_tc)
@@ -204,7 +237,7 @@ async def iter_web_search_stream_events(
                 continue
 
         reasoning_full = "".join(full_reasoning).strip()
-        saved_content = "".join(round_content).strip()
+        saved_content = "".join(accumulated_content).strip()
         dur: float | None = None
         if reasoning_start is not None and reasoning_end is not None and reasoning_full:
             dur = round(max(0.0, reasoning_end - reasoning_start), 1)
@@ -213,6 +246,7 @@ async def iter_web_search_stream_events(
             "reasoning_full": reasoning_full or None,
             "content_saved": saved_content,
             "reasoning_duration_sec": dur,
+            "usage": merged_usage,
         }
         return
 
@@ -230,13 +264,15 @@ async def nonstream_web_search_rounds(
     settings: Settings,
     web_search_enabled: bool,
     protocol: str = OPENAI_COMPATIBLE_CHAT_PROTOCOL,
-) -> tuple[str, str | None, float | None]:
+) -> tuple[str, str | None, float | None, dict[str, Any] | None]:
     """
     非流式多轮。
-    返回 (assistant 正文, reasoning 全文或 None, reasoning 耗时秒或 None)。
+    返回 (assistant 正文, reasoning 全文或 None, reasoning 耗时秒或 None, 合并 usage 或 None)。
     """
     msgs = deepcopy(messages)
     reasoning_parts: list[str] = []
+    content_parts: list[str] = []
+    merged_usage: dict[str, Any] | None = None
     req_start = time.monotonic()
 
     use_web = web_search_enabled and web_search_is_configured(settings)
@@ -263,10 +299,13 @@ async def nonstream_web_search_rounds(
         rc = resp.reasoning_content
         if isinstance(rc, str) and rc:
             reasoning_parts.append(rc)
+        merged_usage = merge_public_usage(merged_usage, resp.usage)
 
         if use_tools and resp.tool_calls:
             norm = normalize_tool_calls_ids(resp.tool_calls)
             if norm:
+                if resp.content:
+                    content_parts.append(resp.content)
                 asst: dict[str, Any] = {
                     "role": "assistant",
                     "content": resp.content or None,
@@ -288,8 +327,10 @@ async def nonstream_web_search_rounds(
                 tool_rounds_used += 1
                 continue
 
+        if resp.content:
+            content_parts.append(resp.content)
         reasoning_full = "".join(reasoning_parts).strip() or None
         dur: float | None = None
         if reasoning_full:
             dur = round(max(0.0, time.monotonic() - req_start), 1)
-        return (resp.content or "").strip(), reasoning_full, dur
+        return "".join(content_parts).strip(), reasoning_full, dur, merged_usage

@@ -305,11 +305,13 @@ function ensureWebSearchSettingsShape(s: Settings) {
   if (!s.webSearch) {
     s.webSearch = {
       provider: 'tavily',
+      geminiSearch: 'native',
       tavily: { apiKey: '' },
       bocha: { apiKey: '', baseUrl: 'https://api.bocha.cn' },
     }
   }
   if (!s.webSearch.provider) s.webSearch.provider = 'tavily'
+  if (!s.webSearch.geminiSearch) s.webSearch.geminiSearch = 'native'
   if (!s.webSearch.tavily) s.webSearch.tavily = { apiKey: '' }
   if (!s.webSearch.bocha) s.webSearch.bocha = { apiKey: '', baseUrl: 'https://api.bocha.cn' }
   if (!s.webSearch.bocha.baseUrl) s.webSearch.bocha.baseUrl = 'https://api.bocha.cn'

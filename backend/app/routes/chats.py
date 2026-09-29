@@ -406,6 +406,9 @@ def _merge_overrides(existing: Chat, incoming: UpdateChatRequest) -> None:
         # context_size 允许显式设为 None 表示“未启用”；其他参数仅在有值时覆盖
         if key == "context_size" or val is not None:
             setattr(existing.overrides.params, key, val)
+    for key in ("reasoningEffort", "fastMode", "geminiSearch"):
+        if key in ov.params.model_fields_set:
+            setattr(existing.overrides.params, key, getattr(ov.params, key))
 
 
 class UploadChatImageItem(BaseModel):

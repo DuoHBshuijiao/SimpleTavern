@@ -123,10 +123,10 @@ npm -v             # 应显示版本号
 
 | 部分 | 目录 | 命令 |
 | ---- | ---- | ---- |
-| 后端 | `backend` | 激活虚拟环境后：`python -m uvicorn app.main:app --reload --port 9091`（允许局域网访问可加 `--host 0.0.0.0`） |
+| 后端 | `backend` | 激活虚拟环境后：`python -m uvicorn app.main:app --reload --port 9091`（允许局域网访问可设 `SIMPLETAVERN_BIND=0.0.0.0` 并加 `--host 0.0.0.0`，同时配置 `SIMPLETAVERN_CORS_ORIGINS`） |
 | 前端 | `frontend` | 先 `npm install`，然后 `npm run dev`（开发服务器默认监听 `9081`，Vite 将 `/api` 代理到 `http://127.0.0.1:9091`，见 `vite.config.ts`） |
 
-生产形态下，可先 `npm run build`，再执行 `npm run preview -- --port 9081 --host` 提供静态服务，与一键部署脚本中的前端启动方式一致。
+生产形态下，可先 `npm run build`，再执行 `npm run preview -- --port 9081 --host 127.0.0.1` 提供静态服务，与一键部署脚本中的前端启动方式一致。局域网预览请设 `SIMPLETAVERN_BIND`。
 
 ### 并行沙箱（不打扰生产数据）
 
@@ -232,7 +232,7 @@ npm run build
 | **剪贴板本地路径安全** | QQ 等应用粘贴的 HTML 可能包含 `file://` 链接，浏览器无法直接读取。后端剪贴板接口仅允许解析**系统临时目录**下的路径，拒绝访问其他位置，降低任意文件读取风险。 |
 | **SSE 界面响应** | 前端大约每 20 个事件主动让出主线程一次，避免高频率流式输出时界面卡顿。 |
 | **存储并发** | 虽然为单用户设计，但前端并发请求可能导致瞬时并发写入。关键写路径使用文件锁 (`portalocker`) 防止文件撕裂。按 `chatId` 查找会话需扫描角色目录，数据量极大时可能产生额外 I/O。 |
-| **CORS** | 后端默认 `allow_origins=["*"]`，方便本地使用。若将服务暴露于不可信网络，请自行收紧。 |
+| **CORS** | 后端默认只放行本机 Origin（9081 / 9181 等），`allow_credentials=False`。局域网访问时设置 `SIMPLETAVERN_CORS_ORIGINS`（逗号分隔）并配合 `SIMPLETAVERN_BIND`。 |
 | **部署脚本（Windows）** | 对命令行引号做了特殊处理，避免嵌套 `cmd` 引号错误。 |
 
 ### 扩展与资源

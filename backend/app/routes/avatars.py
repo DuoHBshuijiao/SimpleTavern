@@ -32,6 +32,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from app.errors import AppError
 from app.schemas import CharacterCard, WorldBook
 from app.storage import avatar_path, avatars_dir, delete_avatar, save_avatar
 
@@ -279,6 +280,8 @@ def upload_avatar(req: UploadAvatarRequest) -> UploadAvatarResponse:
         return UploadAvatarResponse(filename=filename, embeddedCharacterCard=embedded_preview)
     
     except HTTPException:
+        raise
+    except AppError:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

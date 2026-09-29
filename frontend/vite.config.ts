@@ -5,6 +5,7 @@ import tailwindcss from '@tailwindcss/vite'
 const parsedPort = Number(process.env.SIMPLETAVERN_FRONTEND_PORT)
 const frontendPort = Number.isFinite(parsedPort) && parsedPort > 0 ? parsedPort : 9081
 const apiProxy = process.env.SIMPLETAVERN_API_PROXY?.trim() || 'http://127.0.0.1:9091'
+const previewHost = process.env.SIMPLETAVERN_BIND?.trim() || '127.0.0.1'
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -23,6 +24,6 @@ export default defineConfig({
   },
   preview: {
     port: frontendPort,
-    host: true,
+    host: previewHost,
   },
 })

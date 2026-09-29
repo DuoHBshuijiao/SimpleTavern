@@ -23,6 +23,7 @@ watch(
   () => props.draft.webSearch,
   (ws) => {
     if (ws && !ws.brave) ws.brave = { apiKey: '' }
+    if (ws && !ws.geminiSearch) ws.geminiSearch = 'native'
   },
   { immediate: true },
 )
@@ -31,9 +32,38 @@ watch(
 <template>
   <SettingsDrawerGlobalAccordion v-model:open="open" title="网络搜索" content-class="space-y-5">
     <p class="text-xs text-[var(--color-text-muted)]">
-      分两类，互不自动切换：独立搜索供应商（Tavily / 博查 / Brave，走本地工具循环）与模型原生联网（OpenAI Responses web_search、Anthropic web_search、Gemini Google Search）。输入区打开搜索后，当前协议若支持原生联网则不消耗独立搜索 Key；其它协议需要下方 API Key。
+      分两类，互不自动切换：独立搜索供应商（Tavily / 博查 / Brave，走本地工具循环）与模型原生联网。OpenAI Responses / Anthropic Messages 打开搜索后走厂商原生。Gemini 必须在下方显式选择「原生 Google Search」或「第三方」；选第三方时需要独立搜索 API Key。
     </p>
     <div v-if="draft.webSearch" class="space-y-4">
+      <div class="space-y-1.5">
+        <label class="block text-sm font-medium text-[var(--color-text-secondary)]">Gemini 搜索来源</label>
+        <div class="flex flex-wrap gap-1.5">
+          <button
+            type="button"
+            class="rounded-full px-2.5 py-1 text-xs transition-colors"
+            :class="
+              (draft.webSearch.geminiSearch || 'native') === 'native'
+                ? 'bg-brand-a20 text-brand ring-1 ring-[var(--color-brand-a40)]'
+                : 'bg-surface-muted text-[var(--color-text-secondary)] hover:bg-surface-hover'
+            "
+            @click="draft.webSearch.geminiSearch = 'native'"
+          >
+            原生 Google Search
+          </button>
+          <button
+            type="button"
+            class="rounded-full px-2.5 py-1 text-xs transition-colors"
+            :class="
+              draft.webSearch.geminiSearch === 'independent'
+                ? 'bg-brand-a20 text-brand ring-1 ring-[var(--color-brand-a40)]'
+                : 'bg-surface-muted text-[var(--color-text-secondary)] hover:bg-surface-hover'
+            "
+            @click="draft.webSearch.geminiSearch = 'independent'"
+          >
+            第三方（Tavily / 博查 / Brave）
+          </button>
+        </div>
+      </div>
       <div class="space-y-1.5">
         <label class="block text-sm font-medium text-[var(--color-text-secondary)]">提供方</label>
         <ModernSelect

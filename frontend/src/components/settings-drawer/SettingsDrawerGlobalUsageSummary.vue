@@ -3,7 +3,6 @@ import { computed, ref, watch } from 'vue'
 import ModernSelect from '../ModernSelect.vue'
 import ThemedRadioTags from '../ThemedRadioTags.vue'
 import {
-  getUsageModels,
   getUsageSummary,
   type UsageModelRow,
   type UsageRange,
@@ -115,11 +114,11 @@ async function refresh() {
       chatId: scope.value === 'chat' ? props.chatId : null,
       range: range.value,
     }
-    const [sum, modelRes] = await Promise.all([getUsageSummary(params), getUsageModels(params)])
+    const sum = await getUsageSummary(params)
     if (seq !== refreshSeq) return
     summary.value = sum.summary
     eventCount.value = sum.eventCount
-    models.value = modelRes.models
+    models.value = sum.models || []
   } catch (e: unknown) {
     if (seq !== refreshSeq) return
     errorText.value = e instanceof Error ? e.message : String(e)
@@ -205,7 +204,7 @@ watch(
       <ul v-if="costLines.length" class="space-y-0.5 text-[var(--color-text)]">
         <li v-for="line in costLines" :key="line.currency" class="tabular-nums">
           {{ line.currency }} 合计 {{ money.format(line.total) }}
-          （云端 {{ money.format(line.provider) }} · 估算 {{ money.format(line.estimated) }}）
+          （云端 {{ money.format(line.provider) }} · 估算 {{ money.format(line.estimated) }}；合计=实付，估算不加进合计）
         </li>
       </ul>
       <p v-else class="text-[var(--color-text-muted)]">尚无已知金额。</p>

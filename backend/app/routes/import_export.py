@@ -80,6 +80,7 @@ from app.storage import (
     save_settings,
     load_worldbook,
     save_worldbook,
+    is_safe_storage_id,
     worldbooks_dir,
 )
 
@@ -2134,8 +2135,12 @@ def _import_from_zip(payload: bytes) -> dict[str, Any]:
             if not filename:
                 continue
             data = zf.read(name)
-            avatars_dir().mkdir(parents=True, exist_ok=True)
-            avatar_path(filename).write_bytes(data)
+            try:
+                avatars_dir().mkdir(parents=True, exist_ok=True)
+                save_avatar(filename, data)
+            except Exception:
+                warnings.append(f"{name}: 跳过非法头像文件名")
+                continue
         for name in zf.namelist():
             if name.startswith("worldbooks/") and name.endswith(".json"):
                 raw = json.loads(zf.read(name).decode("utf-8"))
@@ -2144,7 +2149,12 @@ def _import_from_zip(payload: bytes) -> dict[str, Any]:
                     original_id = name.split("/")[-1].replace(".json", "")
                     raw["id"] = original_id
                 target_id = original_id
-                if target_id in existing_worldbook_ids:
+                if not is_safe_storage_id(original_id):
+                    target_id = uuid4().hex
+                    raw["id"] = target_id
+                    worldbook_id_map[original_id] = target_id
+                    warnings.append(f"{name}: 世界书 id 含非法路径字符，已改写为新 id")
+                elif target_id in existing_worldbook_ids:
                     target_id = uuid4().hex
                     raw["id"] = target_id
                     worldbook_id_map[original_id] = target_id
@@ -2157,6 +2167,10 @@ def _import_from_zip(payload: bytes) -> dict[str, Any]:
         for name in zf.namelist():
             if name.startswith("characters/") and name.endswith(".json"):
                 raw = json.loads(zf.read(name).decode("utf-8"))
+                card_id = str(raw.get("id") or "").strip()
+                if not is_safe_storage_id(card_id):
+                    warnings.append(f"{name}: 跳过非法角色 id")
+                    continue
                 attached = list(raw.get("attachedWorldBookIds") or [])
                 if attached:
                     raw["attachedWorldBookIds"] = [worldbook_id_map.get(wid, wid) for wid in attached]
@@ -2179,6 +2193,11 @@ def _import_from_zip(payload: bytes) -> dict[str, Any]:
             # 若 JSON 中缺少 characterId（历史/导出兼容），从路径补全
             if not raw.get("characterId"):
                 raw["characterId"] = character_id_from_path
+            chat_id = str(raw.get("id") or parts[2] or "").strip()
+            character_id = str(raw.get("characterId") or "").strip()
+            if not is_safe_storage_id(chat_id) or not is_safe_storage_id(character_id):
+                warnings.append(f"{name}: 跳过非法会话路径")
+                continue
             chat = Chat.model_validate(raw)
             save_chat(chat)
             if "chat" not in imported:
@@ -2193,6 +2212,9 @@ def _import_from_zip(payload: bytes) -> dict[str, Any]:
                 continue
             character_id_from_path = parts[1]
             chat_id_from_path = parts[2]
+            if not is_safe_storage_id(character_id_from_path) or not is_safe_storage_id(chat_id_from_path):
+                warnings.append(f"{name}: 跳过非法长期记忆路径")
+                continue
             try:
                 raw = json.loads(zf.read(name).decode("utf-8"))
                 content = raw.get("longTermMemory") if isinstance(raw, dict) else None

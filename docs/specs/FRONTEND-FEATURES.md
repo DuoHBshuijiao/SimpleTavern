@@ -44,11 +44,11 @@
 
 ### 5. 输入区
 
-- 多行输入；发送 / 停止生成。
+- 多行输入；发送 / 停止。
 - 移除已选图片；选择图片。
-- 网络搜索开关（独立搜索为 Tavily/博查/Brave，或当前协议为 OpenAI Responses / Anthropic Messages / Gemini 时走厂商原生联网）。
+- 网络搜索开关（独立搜索为 Tavily/博查/Brave）。打开搜索且当前协议为 Gemini（或 auto 且模型名含 gemini）时出现「Gemini 搜索来源」：原生 Google Search / 第三方（Tavily / 博查 / Brave），可恢复沿用全局。OpenAI Responses / Anthropic Messages 打开搜索后仍走厂商原生联网。
 - 更多输入选项。
-- 写作辅助：写/润色、停止、保留、重写、放弃。
+- 写作辅助：写/润色、终止、保留、重写、放弃。
 - 群聊：暂停、继续；成员「单次回应一条」插话。
 - 模型控制面板：模型搜索与选择、思考开关、思考深度档位、Fast、解析预览。
 - 打开聊天助手；打开 MVU 工作日志。
@@ -57,7 +57,7 @@
 
 - 状态栏：展示 MVU 表字段，点击打开 MVU 面板。
 - MVU 面板：切到助手、关闭、知识图谱开关、打开知识图谱、工作日志、模型选择、能力/初始状态编辑。
-- 助手面板：切到 MVU、更多菜单、关闭、设置、附件移除、发送/停止、重置会话、删除工作区聊天。
+- 助手面板：切到 MVU、更多菜单、关闭、设置、附件移除、发送（主聊天才有停止）、重置会话、删除工作区聊天。
 - 助手消息：重写、编辑、删除、图片预览。
 - TTS 浮层：打开队列、播放/暂停、终止传输、队列列表。
 
@@ -65,7 +65,7 @@
 
 三个 Tab：**全局设置**、**API 预设**、**当前会话**。关闭按钮；底部保存。
 
-全局设置折叠区包括：连接（URL/Key/协议/OAuth 登录、模型、缓存策略、回传思考、解析预览、测模型）、外观（主题、字号增减、字体、页面背景图、透明度/模糊、WebGPU 开关与预设编辑）、提示词、网络搜索（Tavily/博查/Brave，以及原生联网说明）、TTS（含缓存巡检错误）、应用（用量与成本摘要、成本计算器外链、更新检查/下载/执行、数据完整性、备份导入导出相关）。
+全局设置折叠区包括：连接（URL/Key/协议/OAuth 登录、模型、缓存策略、回传思考、解析预览、测模型）、外观（主题、字号增减、字体、页面背景图、透明度/模糊、WebGPU 开关与预设编辑）、提示词、网络搜索（Tavily/博查/Brave、Gemini 搜索来源、以及 OpenAI/Anthropic 原生联网说明）、TTS（含缓存巡检错误）、应用（用量与成本摘要、成本计算器外链、更新检查/下载/执行、数据完整性、备份导入导出相关）。定价规则与用量 events API **没有设置页入口**，只能打 API 或改 `pricing_rules.json`。
 
 API 预设：列表、新建/复制/删除、名称 combobox（供应商目录分组搜索）、模型增删、测模型、OAuth 登录/退出、高级连接字段与缓存教学入口。
 
@@ -111,7 +111,7 @@ API 预设：列表、新建/复制/删除、名称 combobox（供应商目录�
 - 文案取 `aria-label` / `placeholder` / 可见文字；动态插值以界面实际为准。
 - 「测模型」「测音色」是产品连通性探测，不是自动化测试。
 
-共 **654** 条可点/可填控件（旧稿标题写 746，清单机械计数 725；725 含大量非点击 caption `label`，且 7 条因属性里的 `>` 被截断而乱码。649 是 T-806/T-807 批次按上列规则的抽取；本批 T-808 用量摘要 +3、T-809 Brave 输入 +2 → **654**）。
+共 **659** 条可点/可填控件（旧稿标题写 746，清单机械计数 725；725 含大量非点击 caption `label`，且 7 条因属性里的 `>` 被截断而乱码。649 是 T-806/T-807 批次按上列规则的抽取；本批 T-808 用量摘要 +3、T-809 Brave 输入 +2 → 654；Gemini 搜索来源会话 3 枚 + 全局 2 枚 → **659**）。
 
 无独立交互控件、未列入下方清单的组件：`App.vue`（根容器）、`StartupIntegrityWatcher.vue`（空模板，经全局通知框确认修复）、`SelectDropdownSurface.vue`（下拉外壳，控件在插槽内）、`WebSearchQuotaSummary.vue`（只读用量展示）、`ModernAvatar.vue`（只读头像）、`AnimatedClipHeight.vue`（尺寸动画壳）。
 
@@ -227,11 +227,14 @@ API 预设：列表、新建/复制/删除、名称 combobox（供应商目录�
 - **button** `写作辅助`
 - **button** `帮我写点什么`
 - **button** `润色并扩写我的草稿`
-- **button** `网络搜索：开启后每次发送启用，直至关闭；独立搜索为 Tavily/博查/Brave，或当前协议原生联网（Responses / Anthropic / Gemini）`
+- **button** `网络搜索：开启后每次发送启用，直至关闭；Gemini 可选手动选择原生 Google Search 或第三方 Tavily/博查/Brave；OpenAI Responses / Anthropic 仍走厂商原生联网`
 - **button** `选择图片`
 - **button** `更多输入选项`
 - **button** `网络搜索`
 - **button** `选择图片`
+- **button** `恢复沿用全局` （v-if=showGeminiSearchSource && isOverridingGeminiSearch）
+- **button** `原生 Google Search` （v-if=showGeminiSearchSource）
+- **button** `第三方（Tavily / 博查 / Brave）` （v-if=showGeminiSearchSource）
 - **input[type=file]** `input`
 - **button** `按钮`
 - **button** `打开聊天助手`
@@ -795,6 +798,8 @@ API 预设：列表、新建/复制/删除、名称 combobox（供应商目录�
 
 ### `components/settings-drawer/SettingsDrawerGlobalWebSearchSection.vue`
 
+- **button** `原生 Google Search`
+- **button** `第三方（Tavily / 博查 / Brave）`
 - **ModernSelect** `选择搜索提供方…`
 - **input[type=password]** `tvly-...`
 - **input[type=number]** `input`
