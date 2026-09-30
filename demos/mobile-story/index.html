@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#182322">
+  <title>SimpleTavern · 移动交互 Demo</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <svg class="icon-definitions" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <defs>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+      <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h12M4 18h16"/></symbol>
+      <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+      <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M12 19V5m-6 6 6-6 6 6"/></symbol>
+      <symbol id="i-back" viewBox="0 0 24 24"><path d="m14 5-7 7 7 7"/></symbol>
+      <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+      <symbol id="i-book" viewBox="0 0 24 24"><path d="M12 5v15M3 4c3-1 6-1 9 1 3-2 6-2 9-1v15c-3-1-6-1-9 1-3-2-6-2-9-1Z"/></symbol>
+      <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14A9 9 0 0 1 10 3a9 9 0 1 0 10 11Z"/><path d="M17 3v4m-2-2h4"/></symbol>
+      <symbol id="i-feather" viewBox="0 0 24 24"><path d="M4 20 17 7M7 17l-1-6c2-6 9-8 14-7 1 5-1 12-7 14Z"/><path d="M10 14h5"/></symbol>
+      <symbol id="i-compass" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m15 9-2 4-4 2 2-4Z"/></symbol>
+      <symbol id="i-person" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></symbol>
+      <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+      <symbol id="i-edit" viewBox="0 0 24 24"><path d="m15 4 5 5M4 20l5-1L20 8a3 3 0 0 0-4-4L5 15Z"/></symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5M19 11a7 7 0 0 0-12-5L4 9m1 4a7 7 0 0 0 12 5l3-3"/></symbol>
+      <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></symbol>
+      <symbol id="i-branch" viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="5" r="2"/><path d="M6 7v10m0-4c8 0 12-2 12-6"/></symbol>
+      <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
+      <symbol id="i-attachment" viewBox="0 0 24 24"><path d="m8 12 7-7a4 4 0 0 1 6 6L10 22a6 6 0 0 1-8-8L13 3m-8 13 10-10a2 2 0 0 1 3 3L8 19"/></symbol>
+      <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.5"/><path d="m3 17 5-5 4 4 4-6 5 7"/></symbol>
+      <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></symbol>
+      <symbol id="i-model" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5Zm-9 9 9 5 9-5m-18 5 9 5 9-5"/></symbol>
+      <symbol id="i-depth" viewBox="0 0 24 24"><path d="M4 6h16M4 12h12M4 18h8"/><circle cx="19" cy="17" r="3"/></symbol>
+      <symbol id="i-new-chat" viewBox="0 0 24 24"><path d="M12 4H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h13a2 2 0 0 0 2-2v-7m-9 1 9-9 3 3-9 9-4 1Z"/></symbol>
+    </defs>
+  </svg>
+
+  <div class="preview-layout">
+    <aside class="preview-guide" aria-label="Demo 说明与快捷入口">
+      <a class="wordmark" href="./index.html">SimpleTavern<span>移动交互草案</span></a>
+      <h1>对话在前，<br>工具随手可取。</h1>
+      <p class="guide-copy">先看框架和操作关系。<br>日常留在对话里，需要时再向下深入。</p>
+      <nav class="preview-links" aria-label="预览路径">
+        <button data-action="add"><span>展开＋，添加内容</span><svg class="icon"><use href="#i-plus"/></svg></button>
+        <button data-action="history"><span>找回另一段故事</span><svg class="icon"><use href="#i-menu"/></svg></button>
+        <button data-action="context"><span>打开标题里的会话菜单</span><svg class="icon"><use href="#i-settings"/></svg></button>
+        <button data-action="new-chat"><span>开始一个全新会话</span><svg class="icon"><use href="#i-new-chat"/></svg></button>
+        <button data-action="first-run"><span>看看第一次打开</span><svg class="icon"><use href="#i-arrow"/></svg></button>
+      </nav>
+      <p class="prototype-note">纯网页互动演示<br>人物、故事和回复均为虚构示例</p>
+    </aside>
+
+    <main class="device" id="device" aria-label="SimpleTavern 手机原型">
+      <div class="app-content" id="app-content">
+        <div class="demo-label"><span>SimpleTavern</span><span>交互 Demo · 虚构内容</span></div>
+        <header class="chat-header" id="chat-header"></header>
+        <section class="conversation" id="conversation" aria-label="当前会话"></section>
+        <footer class="composer-area">
+          <div class="generation-state" id="generation-state" aria-live="polite"></div>
+          <div class="composer-addons" id="composer-addons" aria-label="已添加的内容" hidden></div>
+          <form class="composer" id="message-form">
+            <button type="button" class="compose-plus icon-button" data-action="add" aria-label="添加内容与工具" aria-haspopup="dialog"><svg class="icon"><use href="#i-plus"/></svg></button>
+            <label class="sr-only" for="message-input">写下你的回应</label>
+            <textarea id="message-input" rows="1" placeholder="写下你的回应…" maxlength="4000"></textarea>
+            <button type="submit" class="send-button icon-button" id="send-button" aria-label="发送消息" disabled><svg class="icon"><use href="#i-arrow"/></svg></button>
+          </form>
+          <div class="composer-meta" id="composer-meta"></div>
+        </footer>
+      </div>
+      <div class="sheet-layer" id="sheet-layer" hidden></div>
+      <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+      <input type="file" id="attachment-picker" multiple hidden>
+      <input type="file" id="image-picker" accept="image/*" multiple hidden>
+    </main>
+  </div>
+</body>
+</html>
