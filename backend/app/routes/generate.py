@@ -62,7 +62,7 @@ from app.schemas import (
 from app.services.generate_web_search_runtime import iter_web_search_stream_events, nonstream_web_search_rounds
 from app.services.mvu_daemon import ensure_mvu_worker, signal_generate_done, _resolve_mvu_runtime_config
 from app.services.usage_ledger import append_usage_event, build_generation_metadata
-from app.services.web_search import web_search_is_configured
+from app.services.native_web import resolve_web_plan
 from app.services.user_message_content import build_user_message_content
 from app.request_context import REQUEST_ID_HEADER, get_request_id, new_request_id
 from app.sse import sse_done, sse_event, sse_meta, sse_terminal_error
@@ -151,15 +151,6 @@ def _stamp_usage(usage: dict[str, Any] | None, prepared: PreparedLlmRequest) -> 
     return out or None
 
 
-RESPONSES_WEB_SEARCH_TOOLS: list[dict[str, Any]] = [{"type": "web_search"}]
-ANTHROPIC_WEB_SEARCH_TOOLS: list[dict[str, Any]] = [{"type": "web_search_20250305", "name": "web_search"}]
-GEMINI_WEB_SEARCH_TOOLS: list[dict[str, Any]] = [{"type": "google_search"}]
-_ALWAYS_NATIVE_WEB_SEARCH_PROTOCOLS = {
-    OPENAI_RESPONSES_PROTOCOL,
-    ANTHROPIC_MESSAGES_PROTOCOL,
-}
-
-
 def _resolve_gemini_search(*, req: Any, chat: Any, settings: Any) -> str:
     from app.schemas import normalize_gemini_search
 
@@ -173,52 +164,6 @@ def _resolve_gemini_search(*, req: Any, chat: Any, settings: Any) -> str:
     ws = getattr(settings, "webSearch", None)
     global_v = normalize_gemini_search(getattr(ws, "geminiSearch", None) if ws is not None else None, default="native")
     return global_v or "native"
-
-
-def _ensure_web_search_ready(
-    settings: Any,
-    *,
-    requested: bool,
-    protocol: str,
-    gemini_search: str = "native",
-) -> bool:
-    if not requested:
-        return False
-    if protocol in _ALWAYS_NATIVE_WEB_SEARCH_PROTOCOLS:
-        return True
-    if protocol == GEMINI_GENERATE_CONTENT_PROTOCOL and gemini_search == "native":
-        return True
-    if web_search_is_configured(settings):
-        return True
-    raise AppError(
-        code="web_search_not_configured",
-        message="网络搜索已启用，但当前提供方未配置 API Key",
-        source="web_search.config",
-        status_code=400,
-        suggested_action="在全局设置中配置独立搜索供应商（Tavily / 博查 / Brave）的 API Key，或将 Gemini 搜索来源改为原生 Google Search，或改用 OpenAI Responses / Anthropic Messages 原生联网",
-    )
-
-
-def _use_local_web_search_loop(web_search_enabled: bool, protocol: str, gemini_search: str = "native") -> bool:
-    if not web_search_enabled:
-        return False
-    if protocol in _ALWAYS_NATIVE_WEB_SEARCH_PROTOCOLS:
-        return False
-    if protocol == GEMINI_GENERATE_CONTENT_PROTOCOL:
-        return gemini_search == "independent"
-    return True
-
-
-def _generation_tools(*, web_search_enabled: bool, protocol: str, gemini_search: str = "native") -> list[dict[str, Any]] | None:
-    if not web_search_enabled:
-        return None
-    if protocol == OPENAI_RESPONSES_PROTOCOL:
-        return RESPONSES_WEB_SEARCH_TOOLS
-    if protocol == ANTHROPIC_MESSAGES_PROTOCOL:
-        return ANTHROPIC_WEB_SEARCH_TOOLS
-    if protocol == GEMINI_GENERATE_CONTENT_PROTOCOL and gemini_search == "native":
-        return GEMINI_WEB_SEARCH_TOOLS
-    return None
 
 
 def _persist_generation_record(
@@ -1495,12 +1440,10 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
     base_url, api_key, protocol = prepared.base_url, prepared.api_key, prepared.protocol
     llm_provider = prepared.llm_provider
     gemini_search = _resolve_gemini_search(req=req, chat=chat, settings=settings)
-    web_search_enabled = _ensure_web_search_ready(
-        settings, requested=web_search_requested, protocol=protocol, gemini_search=gemini_search
-    )
-    gen_tools = _generation_tools(
-        web_search_enabled=web_search_enabled, protocol=protocol, gemini_search=gemini_search
-    )
+    web_plan = resolve_web_plan(settings, requested=web_search_requested, protocol=protocol,
+        base_url=base_url, preset_id=prepared.credentials.preset_id, gemini_search=gemini_search)
+    web_search_enabled = bool(web_plan.tools)
+    gen_tools = None if web_plan.local else (web_plan.tools or None)
 
     _apply_placeholder_rewrite_to_history(
         chat,
@@ -1586,7 +1529,7 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
             started_at = _now_iso()
             first_token_mono: float | None = None
             usage_public: dict[str, Any] | None = None
-            if _use_local_web_search_loop(web_search_enabled, protocol, gemini_search):
+            if web_plan.local:
                 async for ev in iter_web_search_stream_events(
                     messages=messages,
                     base_url=base_url,
@@ -1599,6 +1542,7 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
                     protocol=protocol,
                     settings=settings,
                     web_search_enabled=True,
+                    web_plan=web_plan,
                 ):
                     et = ev["type"]
                     if et == "reasoning":
@@ -1609,6 +1553,8 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
                         if first_token_mono is None:
                             first_token_mono = time.monotonic()
                         yield _sse("delta", {"text": ev["text"]})
+                    elif et == "web_tool":
+                        yield _sse("web_tool", {k: v for k, v in ev.items() if k != "type"})
                     elif et == "done":
                         assistant_content = (ev.get("content_saved") or "").strip()
                         rt = ev.get("reasoning_full")
@@ -1732,7 +1678,7 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
             started_at = _now_iso()
             first_token_mono: float | None = None
             nonstream_usage: dict[str, Any] | None = None
-            if _use_local_web_search_loop(web_search_enabled, protocol, gemini_search):
+            if web_plan.local:
                 assistant_content, reasoning_content, req_duration, nonstream_usage = await nonstream_web_search_rounds(
                     messages=messages,
                     base_url=base_url,
@@ -1745,6 +1691,7 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
                     protocol=protocol,
                     settings=settings,
                     web_search_enabled=True,
+                    web_plan=web_plan,
                 )
                 if reasoning_content is None:
                     req_duration = None
@@ -2241,12 +2188,10 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
     base_url, api_key, protocol = prepared.base_url, prepared.api_key, prepared.protocol
     llm_provider = prepared.llm_provider
     gemini_search = _resolve_gemini_search(req=req, chat=chat, settings=settings)
-    web_search_enabled = _ensure_web_search_ready(
-        settings, requested=web_search_requested, protocol=protocol, gemini_search=gemini_search
-    )
-    gen_tools = _generation_tools(
-        web_search_enabled=web_search_enabled, protocol=protocol, gemini_search=gemini_search
-    )
+    web_plan = resolve_web_plan(settings, requested=web_search_requested, protocol=protocol,
+        base_url=base_url, preset_id=prepared.credentials.preset_id, gemini_search=gemini_search)
+    web_search_enabled = bool(web_plan.tools)
+    gen_tools = None if web_plan.local else (web_plan.tools or None)
 
     _apply_placeholder_rewrite_to_history(
         chat,
@@ -2324,7 +2269,7 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
             started_at = _now_iso()
             first_token_mono: float | None = None
             usage_public: dict[str, Any] | None = None
-            if _use_local_web_search_loop(web_search_enabled, protocol, gemini_search):
+            if web_plan.local:
                 async for ev in iter_web_search_stream_events(
                     messages=messages,
                     base_url=base_url,
@@ -2337,6 +2282,7 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
                     protocol=protocol,
                     settings=settings,
                     web_search_enabled=True,
+                    web_plan=web_plan,
                 ):
                     et = ev["type"]
                     if et == "reasoning":
@@ -2347,6 +2293,8 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
                         if first_token_mono is None:
                             first_token_mono = time.monotonic()
                         yield _sse("delta", {"text": ev["text"]})
+                    elif et == "web_tool":
+                        yield _sse("web_tool", {k: v for k, v in ev.items() if k != "type"})
                     elif et == "done":
                         assistant_content = (ev.get("content_saved") or "").strip()
                         rt = ev.get("reasoning_full")
@@ -2470,7 +2418,7 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
             started_at = _now_iso()
             first_token_mono: float | None = None
             nonstream_usage: dict[str, Any] | None = None
-            if _use_local_web_search_loop(web_search_enabled, protocol, gemini_search):
+            if web_plan.local:
                 assistant_content, reasoning_content, req_duration, nonstream_usage = await nonstream_web_search_rounds(
                     messages=messages,
                     base_url=base_url,
@@ -2483,6 +2431,7 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
                     protocol=protocol,
                     settings=settings,
                     web_search_enabled=True,
+                    web_plan=web_plan,
                 )
                 if reasoning_content is None:
                     req_duration = None
@@ -2797,12 +2746,10 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
     base_url, api_key, protocol = prepared.base_url, prepared.api_key, prepared.protocol
     llm_provider = prepared.llm_provider
     gemini_search = _resolve_gemini_search(req=req, chat=chat, settings=settings)
-    web_search_enabled = _ensure_web_search_ready(
-        settings, requested=web_search_requested, protocol=protocol, gemini_search=gemini_search
-    )
-    gen_tools = _generation_tools(
-        web_search_enabled=web_search_enabled, protocol=protocol, gemini_search=gemini_search
-    )
+    web_plan = resolve_web_plan(settings, requested=web_search_requested, protocol=protocol,
+        base_url=base_url, preset_id=prepared.credentials.preset_id, gemini_search=gemini_search)
+    web_search_enabled = bool(web_plan.tools)
+    gen_tools = None if web_plan.local else (web_plan.tools or None)
 
     _apply_placeholder_rewrite_to_history(
         chat,
@@ -2880,7 +2827,7 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
             started_at = _now_iso()
             first_token_mono: float | None = None
             usage_public: dict[str, Any] | None = None
-            if _use_local_web_search_loop(web_search_enabled, protocol, gemini_search):
+            if web_plan.local:
                 async for ev in iter_web_search_stream_events(
                     messages=messages,
                     base_url=base_url,
@@ -2893,6 +2840,7 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
                     protocol=protocol,
                     settings=settings,
                     web_search_enabled=True,
+                    web_plan=web_plan,
                 ):
                     et = ev["type"]
                     if et == "reasoning":
@@ -2903,6 +2851,8 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
                         if first_token_mono is None:
                             first_token_mono = time.monotonic()
                         yield _sse("delta", {"text": ev["text"]})
+                    elif et == "web_tool":
+                        yield _sse("web_tool", {k: v for k, v in ev.items() if k != "type"})
                     elif et == "done":
                         assistant_content = (ev.get("content_saved") or "").strip()
                         rt = ev.get("reasoning_full")
@@ -3033,7 +2983,7 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
             started_at = _now_iso()
             first_token_mono: float | None = None
             nonstream_usage: dict[str, Any] | None = None
-            if _use_local_web_search_loop(web_search_enabled, protocol, gemini_search):
+            if web_plan.local:
                 assistant_content, reasoning_content, req_duration, nonstream_usage = await nonstream_web_search_rounds(
                     messages=messages,
                     base_url=base_url,
@@ -3046,6 +2996,7 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
                     protocol=protocol,
                     settings=settings,
                     web_search_enabled=True,
+                    web_plan=web_plan,
                 )
                 if reasoning_content is None:
                     req_duration = None

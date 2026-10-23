@@ -60,10 +60,27 @@ def get_session(session_id: str) -> OAuthSession | None:
 
 def drop_session(session_id: str) -> None:
     with _lock:
-        _sessions.pop((session_id or "").strip(), None)
+        session = _sessions.pop((session_id or "").strip(), None)
+        if session:
+            session.extra["cancelled"] = True
+            listener = session.extra.get("listener")
+            if listener:
+                listener.close()
 
 
 def _gc_locked(now: float) -> None:
     dead = [k for k, s in _sessions.items() if s.expires_at <= now]
     for key in dead:
-        _sessions.pop(key, None)
+        session = _sessions.pop(key, None)
+        if session:
+            session.extra["cancelled"] = True
+            listener = session.extra.get("listener")
+            if listener:
+                listener.close()
+
+
+def cancel_preset_sessions(preset_id: str) -> None:
+    with _lock:
+        ids = [s.id for s in _sessions.values() if s.preset_id == preset_id]
+    for sid in ids:
+        drop_session(sid)

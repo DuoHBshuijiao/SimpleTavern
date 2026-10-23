@@ -763,7 +763,7 @@ def prepare_llm_request(
         prompt_cache=resolution.cache.to_dict() if resolution.cache is not None else None,
         extra_headers=headers or None,
         auth_style=credentials.auth_style or (entry.auth_style if entry else None),
-        protocol_variant=entry.protocol_variant if entry else None,
+        protocol_variant="chatgpt_subscription" if credentials.provider_id == "openai-chatgpt" else (entry.protocol_variant if entry else None),
         provider_params=dict(credentials.provider_params) if credentials.provider_params else None,
     )
     if resolution.thinking_enabled and out_temperature is not None and resolution.effective == ANTHROPIC_MESSAGES_PROTOCOL:

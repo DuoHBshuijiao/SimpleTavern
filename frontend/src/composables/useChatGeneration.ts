@@ -35,12 +35,14 @@ export type GenerateDonePayload = {
 
 export function useChatGeneration(deps: ChatGenerationDeps) {
   const aborter = ref<AbortController | null>(null)
+  const webToolStatus = ref('')
   const stopRequested = ref(false)
   const stopStreamingHold = ref(false)
 
   function beginGenerateAbort() {
     aborter.value?.abort()
     aborter.value = new AbortController()
+    webToolStatus.value = ''
     stopRequested.value = false
     stopStreamingHold.value = false
     return aborter.value.signal
@@ -97,6 +99,12 @@ export function useChatGeneration(deps: ChatGenerationDeps) {
     const { localAssistantId, onTerminalError } = options
     return (evt: SseEvent) => {
       if (shouldIgnoreStreamingEventWhileStopping(evt.event)) return
+      if (evt.event === 'web_tool') {
+        const data = evt.data as { tool?: string; phase?: string; ok?: boolean }
+        const tool = data.tool === 'web_fetch' ? '网页读取' : '网络搜索'
+        webToolStatus.value = data.phase === 'start' ? `${tool}中…` : data.ok === false ? `${tool}失败` : `${tool}完成`
+        return
+      }
       if (evt.event === 'delta') deps.onAssistantContentDeltaStarted()
       if (evt.event === 'meta') {
         applyMetaPayload(localAssistantId, evt.data)
@@ -153,6 +161,7 @@ export function useChatGeneration(deps: ChatGenerationDeps) {
   }
 
   return {
+    webToolStatus,
     aborter,
     stopRequested,
     stopStreamingHold,

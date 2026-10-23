@@ -127,6 +127,7 @@ const props = withDefaults(
   // 输入状态
   modelValue: string
   isGenerating: boolean
+  webToolStatus?: string
   streamError: string | null
   draftImages: DraftImagePreview[]
   draftHelperStatus: 'reasoning' | 'writing' | 'done' | null
@@ -933,6 +934,7 @@ defineExpose({
             class="hidden"
             @change="handleImageInputChange"
           />
+          <p v-if="isGenerating && webToolStatus" role="status" class="text-xs text-[var(--color-text-secondary)]">{{ webToolStatus }}</p>
           <div class="min-w-0 max-w-[240px] shrink flex-1">
           <ModelControlPanel
             :current-model="currentModel"
@@ -948,7 +950,7 @@ defineExpose({
             @update:fast-mode="emit('update:fastMode', $event)"
           />
           </div>
-          <button 
+          <button
             class="chat-action-button shadow-lg transition-[transform,box-shadow] active:scale-95"
             :class="[primaryActionClass, primaryActionDisabled ? 'opacity-50 cursor-not-allowed' : 'hover:shadow-brand hover:-translate-y-0.5']"
             :disabled="primaryActionDisabled"

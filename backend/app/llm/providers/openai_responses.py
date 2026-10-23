@@ -221,12 +221,16 @@ def _auth_headers(api_key: str, auth_style: str | None = None) -> dict[str, str]
 def _request_url(base_url: str, api_key: str, config: GenerationConfig) -> str:
     from app.llm.types import append_api_version, append_query_key
 
+    if config.protocol_variant == "chatgpt_subscription":
+        return "https://api.openai.com/v1/responses"
     url = _responses_url(base_url)
     url = append_query_key(url, api_key, config.auth_style)
     return append_api_version(url, config.provider_params)
 
 
 def _request_headers(api_key: str, config: GenerationConfig, *, accept: str) -> dict[str, str]:
+    if config.protocol_variant == "chatgpt_subscription":
+        return {"Accept": accept, "Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
     return {
         "Accept": accept,
         "Content-Type": "application/json",
@@ -369,6 +373,7 @@ def _function_call_to_chat_tool_call(item: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": call_id if isinstance(call_id, str) else str(call_id),
         "type": "function",
+        **({"namespace": item["namespace"]} if item.get("namespace") else {}),
         "function": {
             "name": name,
             "arguments": _arguments_to_str(item.get("arguments")),
@@ -435,6 +440,7 @@ def _convert_input(messages: list[dict[str, Any]]) -> tuple[str | None, list[dic
                             "call_id": call_id.strip(),
                             "name": name,
                             "arguments": _arguments_to_str(fn.get("arguments")),
+                            **({"namespace": tc["namespace"]} if tc.get("namespace") else {}),
                         }
                     )
                 continue
@@ -532,6 +538,7 @@ def _build_payload(
     tools: list[dict[str, Any]] | None = None,
     tool_choice: Any = None,
     prompt_cache: dict[str, Any] | None = None,
+    protocol_variant: str | None = None,
 ) -> dict[str, Any]:
     instructions, input_items = _convert_input(messages)
     if not input_items:
@@ -583,6 +590,24 @@ def _build_payload(
     payload.update(extra)
     for key in [k for k, v in payload.items() if v is None]:
         payload.pop(key, None)
+    if protocol_variant == "chatgpt_subscription":
+        for key in ("background", "conversation", "max_output_tokens", "max_tool_calls", "metadata",
+                    "moderation", "multi_agent", "prompt", "prompt_cache_retention", "safety_identifier",
+                    "temperature", "top_logprobs", "top_p", "truncation", "user", "previous_response_id"):
+            payload.pop(key, None)
+        payload.update(store=False, stream=True)
+        functions = [tool for tool in payload.get("tools", []) if tool.get("type") == "function"]
+        hosted = [tool for tool in payload.get("tools", []) if tool.get("type") != "function"]
+        if functions:
+            hosted.append({"type": "namespace", "name": "simpletavern", "description": "SimpleTavern application tools", "tools": functions})
+            for item in payload["input"]:
+                if item.get("type") == "function_call":
+                    item.setdefault("namespace", "simpletavern")
+            choice = payload.get("tool_choice")
+            if isinstance(choice, dict) and choice.get("type") == "function":
+                choice["namespace"] = "simpletavern"
+        if hosted:
+            payload["tools"] = hosted
     return payload
 
 
@@ -602,6 +627,27 @@ def _decode_json_object(response: httpx.Response, *, context: str) -> dict[str, 
             detail=f"{context}: expected object, got {type(data).__name__}",
         )
     return data
+
+
+def _web_citation_footer(items: list[dict[str, Any]]) -> str:
+    """Keep the provider's actual citations clickable in saved plain-text transcripts."""
+    from urllib.parse import quote
+    sources: dict[str, str] = {}
+    for item in items:
+        blocks = item.get("content") if item.get("type") == "message" else []
+        for block in blocks or []:
+            if not isinstance(block, dict):
+                continue
+            for annotation in block.get("annotations") or []:
+                if not isinstance(annotation, dict) or annotation.get("type") != "url_citation":
+                    continue
+                url = str(annotation.get("url") or "")
+                if urlsplit(url).scheme not in {"http", "https"}:
+                    continue
+                title = str(annotation.get("title") or url).replace("[", "(").replace("]", ")").replace("\n", " ")
+                sources[url] = title
+    links = ["- [" + title + "](<" + quote(url, safe=":/?#[]@!$&'*+,;=%~-._") + ">)" for url, title in sources.items()]
+    return "\n\n来源：\n" + "\n".join(links) if links else ""
 
 
 def _extract_output(data: dict[str, Any]) -> tuple[str, str | None, list[dict[str, Any]] | None]:
@@ -710,11 +756,13 @@ def _usage_with_service_tier(data: dict[str, Any]) -> dict[str, Any] | None:
     return usage
 
 
-async def list_models_responses(*, base_url: str, api_key: str) -> list[str]:
+async def list_models_responses(*, base_url: str, api_key: str, auth_style: str | None = None,
+                                extra_headers: dict[str, str] | None = None) -> list[str]:
     url = _models_url(base_url)
     headers = {
         "Accept": "application/json",
-        **_auth_headers(api_key),
+        **_auth_headers(api_key, auth_style),
+        **(extra_headers or {}),
     }
     try:
         async with log_outbound(
@@ -730,6 +778,9 @@ async def list_models_responses(*, base_url: str, api_key: str) -> list[str]:
             _raise_http_error(r)
             data = _decode_json_object(r, context="openai models")
             _log.set_response(body=data)
+            if isinstance(data.get("models"), list):
+                return [item["slug"] for item in data["models"] if isinstance(item, dict)
+                        and item.get("visibility") == "list" and isinstance(item.get("slug"), str) and item["slug"]]
             raw_data = data.get("data")
             if not isinstance(raw_data, list):
                 raise _protocol_error(
@@ -764,6 +815,19 @@ async def complete_responses(
     config: GenerationConfig,
     as_message: bool = False,
 ) -> ChatCompletionResult | ChatCompletionMessage:
+    if config.protocol_variant == "chatgpt_subscription":
+        text, reasoning, calls, usage = [], [], None, None
+        async for chunk in stream_responses(base_url=base_url, api_key=api_key, messages=messages, config=config):
+            if chunk.kind == "content":
+                text.append(chunk.text)
+            elif chunk.kind == "reasoning":
+                reasoning.append(chunk.text)
+            elif chunk.kind == "finish":
+                calls, usage = chunk.tool_calls, chunk.usage
+        if as_message:
+            return ChatCompletionMessage(role="assistant", content="".join(text),
+                reasoning_content="".join(reasoning) or None, tool_calls=calls, usage=usage)
+        return ChatCompletionResult(text="".join(text), usage=usage)
     url = _request_url(base_url, api_key, config)
     headers = _request_headers(api_key, config, accept="application/json")
     payload = _build_payload(
@@ -777,6 +841,7 @@ async def complete_responses(
         tools=config.tools,
         tool_choice=config.tool_choice,
         prompt_cache=config.prompt_cache,
+        protocol_variant=config.protocol_variant,
     )
     try:
         async with log_outbound(
@@ -794,6 +859,7 @@ async def complete_responses(
             data = _decode_json_object(r, context="openai responses")
             _log.set_response(body=data)
             text, reasoning, tool_calls = _extract_output(data)
+            text += _web_citation_footer(data.get("output") or [])
             usage = decode_usage(_usage_with_service_tier(data))
             usage_dict = usage.to_public_dict() if usage is not None else None
             if as_message:
@@ -859,11 +925,13 @@ async def stream_responses(
         tools=config.tools,
         tool_choice=config.tool_choice,
         prompt_cache=config.prompt_cache,
+        protocol_variant=config.protocol_variant,
     )
 
     saw_output = False
     terminal_usage: dict[str, Any] | None = None
     completed = False
+    provider_items: dict[str, dict[str, Any]] = {}
 
     try:
         async with log_outbound(
@@ -930,6 +998,8 @@ async def stream_responses(
                         # output_item.done may carry final function_call; sync if present.
                         if etype == "response.output_item.done":
                             item = data.get("item")
+                            if isinstance(item, dict) and item.get("type") in {"web_search_call", "message"}:
+                                provider_items[str(item.get("id") or data.get("output_index"))] = item
                             if isinstance(item, dict) and item.get("type") == "function_call":
                                 item_id = item.get("id")
                                 key = item_id if isinstance(item_id, str) and item_id else f"idx-{data.get('output_index')}"
@@ -950,6 +1020,12 @@ async def stream_responses(
                             detail=msg or data_str[:500],
                             retryable=True,
                         )
+                    if etype in {"response.failed", "response.incomplete", "response.cancelled"}:
+                        response = data.get("response") if isinstance(data.get("response"), dict) else {}
+                        error = response.get("error") if isinstance(response.get("error"), dict) else {}
+                        raise _protocol_error(code=str(error.get("code") or "provider_response_incomplete"),
+                            message="OpenAI Responses 请求未成功完成", detail=str(error.get("message") or response.get("incomplete_details") or etype),
+                            retryable=False)
                     if etype.startswith("response.web_search_call") or etype in _WEB_SEARCH_STREAM_EVENT_TYPES:
                         continue
                     if etype in _BUILTIN_STREAM_EVENT_TYPES:
@@ -1010,6 +1086,10 @@ async def stream_responses(
                     if etype == "response.completed":
                         completed = True
                         resp = data.get("response")
+                        if isinstance(resp, dict):
+                            for idx, item in enumerate(resp.get("output") or []):
+                                if isinstance(item, dict) and item.get("type") in {"web_search_call", "message"}:
+                                    provider_items[str(item.get("id") or idx)] = item
                         if isinstance(resp, dict) and isinstance(resp.get("usage"), dict):
                             terminal_usage = _usage_with_service_tier(resp)
                         elif isinstance(data.get("usage"), dict):
@@ -1030,16 +1110,23 @@ async def stream_responses(
             if sorted_tool_calls:
                 body["tool_calls"] = sorted_tool_calls
             _log.set_response(body=body)
+            if not completed:
+                raise _protocol_error(code="stream_interrupted", message="上游连接在生成完成前中断",
+                    detail="Missing response.completed terminal event", retryable=True)
             if not saw_output:
                 raise _protocol_error(
                     code="provider_response_invalid",
                     message="上游流未返回任何文本",
                     detail="openai responses stream produced no output_text/reasoning/function_call",
                 )
+            footer = _web_citation_footer(list(provider_items.values()))
+            if footer:
+                yield StreamChunk(kind="content", text=footer)
             yield StreamChunk(
                 kind="finish",
                 tool_calls=sorted_tool_calls,
                 usage=usage.to_public_dict() if usage is not None else None,
+                provider_content=list(provider_items.values()) or None,
             )
     except AppError:
         raise
@@ -1098,7 +1185,7 @@ class OpenAIResponsesAdapter:
         headers = _request_headers(
             api_key,
             config,
-            accept="application/json" if not config.stream else "text/event-stream",
+            accept="application/json" if not config.stream and config.protocol_variant != "chatgpt_subscription" else "text/event-stream",
         )
         payload = _build_payload(
             model=config.model,
@@ -1111,12 +1198,14 @@ class OpenAIResponsesAdapter:
             tools=config.tools,
             tool_choice=config.tool_choice,
             prompt_cache=config.prompt_cache,
+            protocol_variant=config.protocol_variant,
         )
         return WireRequest(method="POST", url=url, headers=headers, json_body=payload)
 
-    async def list_models(self, *, base_url: str, api_key: str) -> list[str]:
+    async def list_models(self, *, base_url: str, api_key: str, auth_style: str | None = None,
+                          extra_headers: dict[str, str] | None = None) -> list[str]:
         self.validate_config(base_url=base_url, api_key=api_key)
-        return await list_models_responses(base_url=base_url, api_key=api_key)
+        return await list_models_responses(base_url=base_url, api_key=api_key, auth_style=auth_style, extra_headers=extra_headers)
 
     async def complete(
         self,

@@ -349,6 +349,13 @@ def _convert_tools_openai_to_anthropic(tools: list[dict[str, Any]] | None) -> li
                 entry["max_uses"] = max_uses
             out.append(entry)
             continue
+        if str(tool.get("type") or "").startswith("web_fetch"):
+            entry = {"type": "web_fetch_20250910", "name": "web_fetch"}
+            for key in ("max_uses", "allowed_domains", "blocked_domains", "max_content_tokens", "citations"):
+                if key in tool:
+                    entry[key] = tool[key]
+            out.append(entry)
+            continue
         if isinstance(tool.get("name"), str) and isinstance(tool.get("input_schema"), dict):
             entry = {
                 "name": tool["name"].strip(),
@@ -483,6 +490,11 @@ def _convert_messages(messages: list[dict[str, Any]]) -> tuple[str | None, list[
             continue
 
         if role == "assistant":
+            native_content = msg.get("_anthropic_content")
+            if isinstance(native_content, list) and native_content:
+                converted.append({"role": "assistant", "content": native_content})
+                i += 1
+                continue
             tool_blocks = _assistant_tool_use_blocks(msg)
             text_content = _to_anthropic_content(content)
             if tool_blocks:
@@ -730,7 +742,7 @@ def _extract_text_thinking_and_tools(
                     },
                 }
             )
-        elif typ in {"server_tool_use", "web_search_tool_result", "web_search_result"}:
+        elif typ in {"server_tool_use", "web_search_tool_result", "web_search_result", "web_fetch_tool_result"}:
             continue
     text = "".join(texts)
     reasoning = "".join(thinking).strip() or None
@@ -829,7 +841,7 @@ async def list_models_anthropic(*, base_url: str, api_key: str) -> list[str]:
         ) from exc
 
 
-async def complete_anthropic(
+async def _complete_anthropic_once(
     *,
     base_url: str,
     api_key: str,
@@ -884,6 +896,8 @@ async def complete_anthropic(
                     reasoning_content=reasoning,
                     tool_calls=tool_calls,
                     usage=usage_dict,
+                    provider_content=data.get("content") if isinstance(data.get("content"), list) else None,
+                    stop_reason=data.get("stop_reason"),
                 )
             if not text.strip() and not reasoning and not tool_calls:
                 raise _protocol_error(
@@ -906,7 +920,7 @@ async def complete_anthropic(
         ) from exc
 
 
-async def stream_anthropic(
+async def _stream_anthropic_once(
     *,
     base_url: str,
     api_key: str,
@@ -940,6 +954,10 @@ async def stream_anthropic(
     terminal_usage: dict[str, Any] | None = None
     # index → {id, name, arguments_acc}
     pending_tools: dict[int, dict[str, str]] = {}
+    native_blocks: dict[int, dict[str, Any]] = {}
+    native_inputs: dict[int, str] = {}
+    stop_reason: str | None = None
+    saw_message_stop = False
 
     try:
         async with log_outbound(
@@ -1009,7 +1027,18 @@ async def stream_anthropic(
                         if isinstance(start_usage, dict):
                             terminal_usage = dict(start_usage)
                         continue
-                    if etype in {"ping", "content_block_stop", "message_stop"}:
+                    if etype == "message_stop":
+                        saw_message_stop = True
+                        continue
+                    if etype == "content_block_stop":
+                        index = data.get("index")
+                        if index in native_inputs and index in native_blocks:
+                            try:
+                                native_blocks[index]["input"] = json.loads(native_inputs[index] or "{}")
+                            except ValueError as exc:
+                                raise _protocol_error(code="stream_event_invalid", message="工具参数不是有效 JSON", detail=str(exc)) from exc
+                        continue
+                    if etype == "ping":
                         continue
                     if etype == "error":
                         err = data.get("error") if isinstance(data.get("error"), dict) else data
@@ -1024,6 +1053,10 @@ async def stream_anthropic(
                         )
                     if etype == "content_block_start":
                         block = data.get("content_block")
+                        idx_raw = data.get("index")
+                        if isinstance(block, dict) and isinstance(idx_raw, int):
+                            native_blocks[idx_raw] = dict(block)
+                            saw_output = True
                         if isinstance(block, dict) and block.get("type") == "tool_use":
                             idx_raw = data.get("index")
                             idx = idx_raw if isinstance(idx_raw, int) else len(pending_tools)
@@ -1039,6 +1072,15 @@ async def stream_anthropic(
                         if not isinstance(delta, dict):
                             continue
                         dtype = delta.get("type")
+                        index = data.get("index")
+                        native = native_blocks.get(index, {})
+                        if dtype in {"text_delta", "thinking_delta", "signature_delta"}:
+                            key = {"text_delta": "text", "thinking_delta": "thinking", "signature_delta": "signature"}[dtype]
+                            native[key] = str(native.get(key) or "") + str(delta.get(key) or "")
+                        elif dtype == "input_json_delta" and isinstance(index, int):
+                            native_inputs[index] = native_inputs.get(index, "") + str(delta.get("partial_json") or "")
+                        elif dtype == "citations_delta" and isinstance(delta.get("citation"), dict):
+                            native.setdefault("citations", []).append(delta["citation"])
                         if dtype == "text_delta":
                             text = delta.get("text")
                             if isinstance(text, str) and text:
@@ -1062,6 +1104,9 @@ async def stream_anthropic(
                                 saw_output = True
                         continue
                     if etype == "message_delta":
+                        delta = data.get("delta")
+                        if isinstance(delta, dict) and isinstance(delta.get("stop_reason"), str):
+                            stop_reason = delta["stop_reason"]
                         usage = data.get("usage")
                         if isinstance(usage, dict):
                             merged = dict(terminal_usage or {})
@@ -1096,6 +1141,8 @@ async def stream_anthropic(
             if sorted_tool_calls:
                 body["tool_calls"] = sorted_tool_calls
             _log.set_response(body=body)
+            if not saw_message_stop:
+                raise _protocol_error(code="stream_incomplete", message="Anthropic 响应流提前中断", detail="missing message_stop", retryable=True)
             if not saw_output:
                 raise _protocol_error(
                     code="provider_response_invalid",
@@ -1106,6 +1153,8 @@ async def stream_anthropic(
                 kind="finish",
                 tool_calls=sorted_tool_calls,
                 usage=usage.to_public_dict() if usage is not None else None,
+                provider_content=[native_blocks[i] for i in sorted(native_blocks)],
+                stop_reason=stop_reason,
             )
     except AppError:
         raise
@@ -1119,6 +1168,74 @@ async def stream_anthropic(
             provider=_PROVIDER,
             protocol=_PROTOCOL,
         ) from exc
+
+
+def _native_source_links(blocks: list[dict[str, Any]]) -> str:
+    links: dict[str, str] = {}
+    for block in blocks:
+        items = block.get("citations") or []
+        if block.get("type") == "web_search_tool_result" and isinstance(block.get("content"), list):
+            items = items + block["content"]
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            url = item.get("url")
+            if isinstance(url, str) and url.startswith(("https://", "http://")) and not any(c in url for c in "<>\n\r"):
+                title = str(item.get("title") or "来源").replace("[", "").replace("]", "")[:120]
+                links[url] = title
+    return "\n\n来源：" + " · ".join(f"[{title}](<{url}>)" for url, title in list(links.items())[:20]) if links else ""
+
+
+async def complete_anthropic(*, base_url: str, api_key: str, messages: list[dict[str, Any]],
+                             config: GenerationConfig, as_message: bool = False) -> ChatCompletionResult | ChatCompletionMessage:
+    from app.services.generate_web_search_runtime import merge_public_usage
+    transcript = list(messages)
+    texts: list[str] = []
+    reasoning: list[str] = []
+    blocks: list[dict[str, Any]] = []
+    usage = None
+    for _ in range(8):
+        result = await _complete_anthropic_once(base_url=base_url, api_key=api_key, messages=transcript, config=config, as_message=True)
+        texts.append(result.content or "")
+        reasoning.append(result.reasoning_content or "")
+        blocks.extend(result.provider_content or [])
+        usage = merge_public_usage(usage, result.usage)
+        if result.stop_reason != "pause_turn":
+            text = "".join(texts) + _native_source_links(blocks)
+            if as_message:
+                return ChatCompletionMessage(role="assistant", content=text, reasoning_content="".join(reasoning) or None,
+                    tool_calls=result.tool_calls, usage=usage, provider_content=blocks, stop_reason=result.stop_reason)
+            return ChatCompletionResult(text=text, usage=usage)
+        transcript.append({"role": "assistant", "content": result.content or "", "_anthropic_content": result.provider_content})
+    raise _protocol_error(code="web_tool_loop_limit", message="原生联网续轮达到上限", detail="Anthropic pause_turn exceeded 8 turns")
+
+
+async def stream_anthropic(*, base_url: str, api_key: str, messages: list[dict[str, Any]],
+                           config: GenerationConfig) -> AsyncIterator[StreamChunk]:
+    from app.services.generate_web_search_runtime import merge_public_usage
+    transcript = list(messages)
+    blocks: list[dict[str, Any]] = []
+    usage = None
+    for _ in range(8):
+        terminal = None
+        async for chunk in _stream_anthropic_once(base_url=base_url, api_key=api_key, messages=transcript, config=config):
+            if chunk.kind != "finish":
+                yield chunk
+            else:
+                terminal = chunk
+        if terminal is None:
+            raise _protocol_error(code="stream_incomplete", message="原生联网响应未完成", detail="missing finish")
+        blocks.extend(terminal.provider_content or [])
+        usage = merge_public_usage(usage, terminal.usage)
+        if terminal.stop_reason != "pause_turn":
+            links = _native_source_links(blocks)
+            if links:
+                yield StreamChunk(kind="content", text=links)
+            yield StreamChunk(kind="finish", tool_calls=terminal.tool_calls, usage=usage,
+                provider_content=blocks, stop_reason=terminal.stop_reason)
+            return
+        transcript.append({"role": "assistant", "content": "", "_anthropic_content": terminal.provider_content})
+    raise _protocol_error(code="web_tool_loop_limit", message="原生联网续轮达到上限", detail="Anthropic pause_turn exceeded 8 turns")
 
 
 class AnthropicMessagesAdapter:

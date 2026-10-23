@@ -839,6 +839,7 @@ const {
   aborter,
   stopRequested,
   stopStreamingHold,
+  webToolStatus,
   beginGenerateAbort,
   applyGenerateDonePayload,
   makeGenerateSseHandler,
@@ -2686,7 +2687,6 @@ async function sendUserMessage() {
               userPersona: selectedPersona.value ?? null,
               webSearchEnabled: webSearchSessionEnabled.value,
             geminiSearch: geminiSearchRequestValue.value,
-            geminiSearch: geminiSearchRequestValue.value,
             },
             makeGenerateSseHandler({ localAssistantId }),
             aborter.value?.signal,
@@ -2754,7 +2754,6 @@ async function sendUserMessage() {
                   userPersona: selectedPersona.value ?? null,
                   webSearchEnabled: webSearchSessionEnabled.value,
             geminiSearch: geminiSearchRequestValue.value,
-            geminiSearch: geminiSearchRequestValue.value,
                 }, makeGenerateSseHandler({ localAssistantId }), aborter.value?.signal)
               } finally {
                 stream.flushForMessage(localAssistantId)
@@ -2768,7 +2767,6 @@ async function sendUserMessage() {
                 imageFallbackMode: true,
                 userPersona: selectedPersona.value ?? null,
                 webSearchEnabled: webSearchSessionEnabled.value,
-            geminiSearch: geminiSearchRequestValue.value,
             geminiSearch: geminiSearchRequestValue.value,
               })
               if (!retryRes.ok) throw new Error(retryRes.error || 'unknown error')
@@ -3570,7 +3568,6 @@ async function handleRewriteMessage(m: ChatMessage) {
               mergeAssistantIntoMessageId: anchorId,
               webSearchEnabled: webSearchSessionEnabled.value,
             geminiSearch: geminiSearchRequestValue.value,
-            geminiSearch: geminiSearchRequestValue.value,
             },
             makeGenerateSseHandler({ localAssistantId }),
             aborter.value?.signal,
@@ -3628,7 +3625,6 @@ async function handleRewriteMessage(m: ChatMessage) {
               omitMessageIds,
               mergeAssistantIntoMessageId: anchorId,
               webSearchEnabled: webSearchSessionEnabled.value,
-            geminiSearch: geminiSearchRequestValue.value,
             geminiSearch: geminiSearchRequestValue.value,
             },
             makeGenerateSseHandler({ localAssistantId }),
@@ -4297,7 +4293,6 @@ async function handleSaveAndSend() {
               omitMessageIds,
               webSearchEnabled: webSearchSessionEnabled.value,
             geminiSearch: geminiSearchRequestValue.value,
-            geminiSearch: geminiSearchRequestValue.value,
             },
             makeGenerateSseHandler({ localAssistantId }),
             aborter.value?.signal,
@@ -4755,6 +4750,7 @@ const editingPersonaAvatarUrl = computed(() => {
             :on-assistant-fab-snap-end="() => runChatFabSeparation('assistant')"
             :is-generating="isGenerating"
             :stream-error="streamErrorMessage"
+            :web-tool-status="webToolStatus"
             :draft-images="draftImages"
             :draft-helper-status="draftHelper.status"
             :is-group="activeChat.isGroup"

@@ -378,6 +378,8 @@ class StreamChunk:
     tool_calls: list[dict[str, Any]] | None = None
     # T-821：终态归一化用量（Usage.to_public_dict），仅 kind='finish' 携带
     usage: dict[str, Any] | None = None
+    provider_content: list[dict[str, Any]] | None = None
+    stop_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -413,6 +415,8 @@ class ChatCompletionMessage:
     reasoning_content: str | None
     tool_calls: list[dict[str, Any]] | None
     usage: dict[str, Any] | None = None
+    provider_content: list[dict[str, Any]] | None = None
+    stop_reason: str | None = None
 
 
 def usage_public(raw: dict[str, Any] | None, *, decoder: Any = None) -> dict[str, Any] | None:

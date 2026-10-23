@@ -378,6 +378,9 @@ export interface UserPersona {
  *    - models: 可用模型列表
  */
 export interface ApiPreset {
+  webSearchSource?: 'native' | 'independent' | null
+  webSearchSearchEnabled?: boolean | null
+  webSearchFetchEnabled?: boolean | null
   id: string
   name: string
   baseUrl: string

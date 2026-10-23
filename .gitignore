@@ -1,0 +1,6 @@
+# Local dependencies and validation output
+node_modules/
+.npm-cache/
+frontend/dist/
+__pycache__/
+*.py[cod]

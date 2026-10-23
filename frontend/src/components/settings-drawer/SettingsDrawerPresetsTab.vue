@@ -1,5 +1,6 @@
 ﻿<script setup lang="ts">
 import { inject } from 'vue'
+import SubscriptionUsagePanel from './SubscriptionUsagePanel.vue'
 import { Eye, EyeOff, Loader2, X } from 'lucide-vue-next'
 import ModernSelect from '../ModernSelect.vue'
 import ThemedCheckbox from '../ThemedCheckbox.vue'
@@ -140,8 +141,8 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                         </div>
 
                         <div class="space-y-1.5">
-                            <label class="block text-xs font-medium text-[var(--color-text-secondary)]">API Key</label>
-                             <div class="relative">
+                            <label v-if="!presets.presetRequiresOAuth(presets.editingPreset)" class="block text-xs font-medium text-[var(--color-text-secondary)]">API Key</label>
+                             <div v-if="!presets.presetRequiresOAuth(presets.editingPreset)" class="relative">
                                 <input 
                                     v-model="presets.editingPreset!.apiKey" 
                                     :type="presets.editingPresetShowApiKey ? 'text' : 'password'"
@@ -155,6 +156,7 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                                     <component :is="presets.editingPresetShowApiKey ? Eye : EyeOff" class="w-4 h-4" />
                                 </button>
                              </div>
+                            <p v-if="presets.presetRequiresOAuth(presets.editingPreset)" class="text-xs text-[var(--color-text-secondary)]">开始登录会先保存当前预设，授权凭据独立保存在本机。</p>
                             <div v-if="presets.presetRequiresOAuth(presets.editingPreset)" class="flex flex-wrap items-center gap-2 pt-1">
                               <span class="text-xs text-[var(--color-text-muted)]">
                                 {{ presets.oauthStatusFor(presets.editingPreset?.id)?.loggedIn ? '已登录' : '需要登录后才能发请求' }}
@@ -167,7 +169,7 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                                 class="btn btn-xs btn-primary"
                                 @click="presets.openOAuthLogin"
                               >
-                                {{ presets.oauthStatusFor(presets.editingPreset?.id)?.loggedIn ? '重新登录' : '登录' }}
+                                {{ presets.oauthStatusFor(presets.editingPreset?.id)?.loggedIn ? '重新登录' : presets.editingPreset.providerId === 'openai-chatgpt' ? '使用 ChatGPT 登录' : '登录' }}
                               </button>
                               <button
                                 v-if="presets.oauthStatusFor(presets.editingPreset?.id)?.loggedIn"
@@ -180,6 +182,16 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                             </div>
                         </div>
 
+                        <p v-if="presets.editingPreset.providerId === 'openai-chatgpt'" class="text-xs leading-relaxed text-[var(--color-text-secondary)]">通过 OpenAI 官方提供的 Sign in with ChatGPT，使用你的 ChatGPT 订阅额度。本功能目前处于预览阶段，OpenAI 可能随时调整可用范围、使用限制或接入方式。</p>
+                        <p v-if="presets.editingPreset.providerId === 'openai-chatgpt' && presets.oauthStatusFor(presets.editingPreset.id)?.loggedIn && presets.oauthStatusFor(presets.editingPreset.id)?.subscriptionAuthorized === false" role="status" class="text-xs text-error">已登录，但尚未获得 ChatGPT 订阅使用授权，请重新登录并确认订阅授权。</p>
+                        <SubscriptionUsagePanel
+                          v-if="['openai-chatgpt', 'openai-codex', 'xai-oauth'].includes(presets.editingPreset.providerId || '')"
+                          :key="presets.editingPreset.id"
+                          :preset-id="presets.editingPreset.id"
+                          :provider-id="presets.editingPreset.providerId"
+                          :logged-in="!!presets.oauthStatusFor(presets.editingPreset.id)?.loggedIn"
+                          :account-id="presets.oauthStatusFor(presets.editingPreset.id)?.accountId"
+                        />
                         <div class="space-y-2">
                              <div class="flex justify-between items-center gap-2 flex-wrap">
                                  <label class="block text-xs font-medium text-[var(--color-text-secondary)]">模型列表</label>

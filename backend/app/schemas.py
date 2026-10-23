@@ -387,6 +387,9 @@ class SettingsLLM(BaseModel):
         description="统一 prompt cache 配置（T-821）",
     )
     providerId: str | None = Field(default=None, description="供应商目录 id（T-820）")
+    webSearchSource: Literal["native", "independent"] | None = Field(default=None, description="联网来源；缺省保留历史协议选择")
+    webSearchSearchEnabled: bool = True
+    webSearchFetchEnabled: bool = True
     providerParams: dict[str, str] = Field(default_factory=dict, description="供应商 URL 占位符参数（region/resource/account_id 等）")
     authStyle: str | None = Field(default=None, description="鉴权风格；None 表示按协议默认（T-820-A2）")
     echoReasoning: bool = Field(
@@ -1044,6 +1047,7 @@ class ChatMessage(BaseModel):
     id: str = Field(default_factory=lambda: uuid4().hex)
     role: ChatRole
     content: str
+    anthropicContent: list[dict[str, Any]] | None = Field(default=None, description="Anthropic 服务端工具/引用/签名块；跨客户端工具续轮原样回传")
     images: list["ChatImageAttachment"] = Field(default_factory=list)
     attachments: list["AssistantAttachment"] = Field(default_factory=list)
     characterId: str | None = None

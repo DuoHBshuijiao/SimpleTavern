@@ -84,6 +84,18 @@ _SENSITIVE_BODY_KEYS = (
     "token",
     "access_token",
     "accesstoken",
+    "refresh_token",
+    "refreshtoken",
+    "id_token",
+    "idtoken",
+    "id_token_hint",
+    "client_secret",
+    "clientsecret",
+    "code_verifier",
+    "codeverifier",
+    "device_code",
+    "devicecode",
+    "code",
     "secret",
     "authorization",
 )
@@ -528,7 +540,7 @@ def _sanitize_url(url: str) -> str:
                 out.append(p)
                 continue
             k, v = p.split("=", 1)
-            if k.lower() in ("apikey", "api_key", "token", "access_token", "key"):
+            if k.lower() in (*_SENSITIVE_BODY_KEYS, "key"):
                 out.append(f"{k}={_redaction_marker()}")
             else:
                 out.append(f"{k}={v}")

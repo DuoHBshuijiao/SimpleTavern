@@ -27,6 +27,9 @@ import {
 
 /** 预设 / 全局连接的公共子集 */
 export interface LlmConnectionLike {
+  webSearchSource?: 'native' | 'independent' | null
+  webSearchSearchEnabled?: boolean | null
+  webSearchFetchEnabled?: boolean | null
   baseUrl: string
   protocol?: string | null
   providerId?: string | null
@@ -221,6 +224,11 @@ const showExplicitControls = computed(() => cache.value.mode === 'explicit' || c
 
 // ---- 供应商参数 ------------------------------------------------------------
 
+const linkedWeb = computed(() => props.connection.webSearchSource !== 'independent' && (props.connection.protocol === 'openai_responses' || ['openai', 'openai-chatgpt', 'openai-codex'].includes(props.connection.providerId || '') || props.models.some(m => /^(gpt|o[134])/.test(m))))
+function setSearchEnabled(enabled: boolean) {
+  props.connection.webSearchSearchEnabled = enabled
+  if (linkedWeb.value) props.connection.webSearchFetchEnabled = enabled
+}
 const placeholders = computed(() => props.catalogProvider?.placeholders ?? [])
 function paramValue(key: string): string {
   return props.connection.providerParams?.[key] ?? ''
@@ -281,6 +289,23 @@ const cacheSummary = computed(() => {
 
 <template>
   <div class="space-y-4">
+    <fieldset class="space-y-2" data-settings-field="webSearchSource">
+      <legend class="text-xs font-medium text-[var(--color-text-secondary)]">联网高级设置</legend>
+      <label class="block space-y-1">
+        <span class="text-xs text-[var(--color-text-secondary)]">联网来源</span>
+        <select class="input input-sm w-full" :value="connection.webSearchSource || ''" @change="connection.webSearchSource = (($event.target as HTMLSelectElement).value || null) as 'native' | 'independent' | null">
+          <option value="">沿用原有行为</option><option value="native">供应商原生</option><option value="independent">独立搜索（Tavily / 博查 / Brave）</option>
+        </select>
+      </label>
+      <label class="flex items-center gap-2 text-xs text-[var(--color-text-secondary)]">
+        <input type="checkbox" :checked="connection.webSearchSearchEnabled !== false" @change="setSearchEnabled(($event.target as HTMLInputElement).checked)" />
+        {{ linkedWeb ? '搜索与网页读取联动' : '允许搜索' }}
+      </label>
+      <label v-if="!linkedWeb && connection.webSearchSource !== 'independent'" class="flex items-center gap-2 text-xs text-[var(--color-text-secondary)]">
+        <input type="checkbox" :checked="connection.webSearchFetchEnabled !== false" @change="connection.webSearchFetchEnabled = ($event.target as HTMLInputElement).checked" />允许网页抓取
+      </label>
+      <p class="text-xs leading-relaxed text-[var(--color-text-secondary)]">仍需打开聊天或助手中的联网总开关。独立服务仅提供搜索。GPT 原生搜索包含网页读取动作，无法独立控制；供应商或模型不支持时会明确报错，不会自动切换付费服务。</p>
+    </fieldset>
     <!-- 供应商参数 -->
     <div v-if="placeholders.length" class="space-y-2" data-settings-field="providerParams">
       <div class="flex items-center justify-between gap-2">

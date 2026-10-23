@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.services.http_client import get_async_http_client
+import httpx
 
 
 async def request_json(
@@ -16,15 +16,10 @@ async def request_json(
     json_body: Any = None,
     timeout: float = 20.0,
 ) -> tuple[int, Any, str]:
-    client = get_async_http_client()
-    response = await client.request(
-        method,
-        url,
-        headers=headers,
-        data=data,
-        json=json_body,
-        timeout=timeout,
-    )
+    # Credential resolution can run refresh in a short-lived worker event loop.
+    # A process-wide AsyncClient would reuse connections bound to a closed loop.
+    async with httpx.AsyncClient(follow_redirects=False, timeout=timeout) as client:
+        response = await client.request(method, url, headers=headers, data=data, json=json_body)
     text = response.text
     parsed: Any = None
     if text:

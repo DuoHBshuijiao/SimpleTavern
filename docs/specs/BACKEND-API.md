@@ -1,8 +1,42 @@
 # SimpleTavern 后端 API 规范
 
+新增联网与订阅契约见本文「2026-10-22 原生联网与订阅接入增补」。
+
+## 2026-10-22 原生联网与订阅接入增补
+
+本节补充现有 OAuth/生成接口；新增一条 `GET /api/llm/oauth/usage` 路径。跨端计划见 [原生联网与订阅账号接入](../tasks/2026-10-22-native-web-subscription.md)。
+
+### 预设和授权
+
+- 新供应商 `openai-chatgpt`：OpenAI 官方 Sign in with ChatGPT 预览接入；与历史 `openai-codex` 独立。推理固定使用公开 `https://api.openai.com/v1/responses`，模型目录为当前账号的 `/v1/models`。旧 Codex 凭据不自动迁移。
+- `POST /api/llm/oauth/start` 的 `providerId` 新增 `openai-chatgpt`、`xai-oauth`，必须与已保存预设一致。ChatGPT 返回 `method=pkce`、`authorizeUrl`、`redirectUri`、`sessionId`、`expiresIn`；系统浏览器完成后由本机 127.0.0.1 回环监听收取回调，前端轮询原有 poll 接口，无需粘贴回调。
+- 新安装生成稳定 host ID；首次动态注册保存签发的 client ID 后兑换授权码；重新登录复用注册。每次校验 state、PKCE、nonce 及 ID token 签名/签发者/受众/有效期/账号。身份登录成功并不等于获准使用订阅，公开状态新增 `email`、`subscriptionAuthorized`；未获授订阅权限时不发推理请求。
+- Grok 使用 xAI 设备码兼容流程；可选 `clientId` 或预设 `providerParams.client_id` 覆盖公开 Grok 客户端 ID。返回设备码与验证链接，遵循 pending/slow_down/expired/failed/complete，实际可用模型取决于账号权限。不自动使用 API Key。
+- 退出取消待完成授权、清除凭据，并尝试远端撤销；ChatGPT 保留非秘密注册供重新登录。Windows 凭据采用当前 OS 用户 DPAPI，其他平台凭据文件权限 0600；设置备份不包含令牌。日志脱敏刷新令牌、ID token 和授权敏感字段。
+- ChatGPT 订阅 HTTP 请求始终 `store=false, stream=true`；非流式产品入口在本地聚合 SSE。过滤预览机制不支持的采样、输出上限和远端历史字段；应用 function tools 放入 namespace。仅 `response.completed` 表示成功，中途额度错误、不完整或断流均保留错误语义。
+
+### 订阅用量
+
+`GET /api/llm/oauth/usage?presetId=<id>&refresh=false` 返回 `provider, state, plan, checkedAt, windows, manageUrl, errorCode`。窗口字段：`id, label, windowMinutes, usedPercent, remainingPercent, resetsAt`；时间为 ISO8601，缺失数据保持空值。
+
+目前没有核实可用于新 SIWC/Grok 授权的订阅额度读取接口，因此已登录返回 `state=unsupported`、空 windows、`errorCode=quota_api_not_documented`；未登录返回 `not_logged_in`。不伪造 Plus/Pro 套餐、5小时、周额度或刷新时间，不将 Codex 私有用量替代新机制用量。ChatGPT 管理链接为 `https://chatgpt.com/settings/usage`。refresh 参数保留，当前不触发推理或付费探测。
+
+### 联网配置和生成
+
+- ApiPreset 新增可选 `webSearchSource=native|independent`、`webSearchSearchEnabled`、`webSearchFetchEnabled`（后两项默认 true）。缺少来源时保留历史协议选择；新建预设在前端显式设置 native。
+- 主聊天、群聊、重新生成和助手根据选中预设共用来源判定；总开关关闭时不提供联网工具。来源失败不会自动切换独立服务或 API Key。
+- DeepSeek 官方 HTTPS 连接的 native 模式复用该预设 Key 调用官方 `/v1/tools/search`、`/v1/tools/fetch`；查询最长128字符，URL为不含账号密码的 HTTP(S) 地址，响应受读取与截断预算限制。抓取由供应商远端执行。应用工具循环沿用8轮上限。
+- Claude 使用 `web_search_20250305`、`web_fetch_20250910`，可分别启停。pause_turn 最多续轮8次，服务端结果/思考签名块在应用工具往返中原样保留。保存的回答附可点击来源；助手历史通过 `anthropicContent` 保留服务端上下文。
+- GPT Responses 搜索和打开网页联动，以搜索开关控制整个原生工具，不伪造独立 web_fetch 参数。联网仍受模型与账号/工作区策略限制。独立搜索服务保持原有行为，不支持单独抓取模式。
+- DeepSeek/独立搜索主聊天 SSE 增补 `web_tool` 事件：`tool, phase=start|complete, source, ok?`，用于显示搜索/读取状态；正文来源链接随会话保存。
+
+### 待外部验收
+
+真实 Plus/Pro/Grok 授权、浏览器回环、额度耗尽和实际联网调用尚未使用真实账号验收。重点核对：旧预设来源、搜索后读取/仅读取、混合工具续轮、取消/过期/拒绝、刷新轮换、未授订阅权限、断流及管理用量入口。构建检查不能替代这些验收。
+
 本文只描述对外 HTTP/SSE 接口的功能与数据约定，供仓库外黑盒测试编写用例。不描述内部函数、实现细节或自动化门禁。
 
-覆盖范围：OpenAPI 共 **112** 条路径、**137** 个 HTTP 操作（同一路径上的 GET/PUT/DELETE 等分别计数）。另有 FastAPI 自带 `/docs`、`/redoc`、`/openapi.json`，非正式产品接口。
+覆盖范围：原规格基线为 OpenAPI **112** 条路径、**137** 个 HTTP 操作；2026-10-22 新增 OAuth usage GET 路径，增补契约见本文末尾。另有 FastAPI 自带 `/docs`、`/redoc`、`/openapi.json`，非正式产品接口。
 
 应用形态：本机单用户。前端默认 `http://127.0.0.1:9081`，后端默认 `http://127.0.0.1:9091`。浏览器请求走 `/api/*`，由前端开发服务器代理到后端。无登录鉴权；OAuth 仅用于向上游 LLM 厂商取 token。CORS 默认只放行本机 Origin（9081 / 9181 等），`allow_credentials=False`。局域网请设 `SIMPLETAVERN_CORS_ORIGINS` 与 `SIMPLETAVERN_BIND`。发布脚本默认绑 `127.0.0.1`。
 

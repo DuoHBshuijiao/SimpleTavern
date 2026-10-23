@@ -1279,6 +1279,7 @@ const showOAuthLogin = ref(false)
 
 function presetRequiresOAuth(preset: ApiPreset | null | undefined): boolean {
   if (!preset) return false
+  if (['openai-chatgpt', 'openai-codex', 'xai-oauth'].includes(preset.providerId || '')) return true
   if ((preset.authStyle || '').startsWith('oauth')) return true
   return !!catalogProviderFor(preset)?.requiresOAuth
 }
@@ -1297,9 +1298,19 @@ async function refreshOAuthStatuses() {
   }
 }
 
-function openOAuthLogin() {
-  if (!editingPreset.value) return
-  showOAuthLogin.value = true
+async function openOAuthLogin() {
+  if (!editingPreset.value || !settingsStore.settings) return
+  try {
+    const preset = normalizePresetDraft(JSON.parse(JSON.stringify(editingPreset.value)))
+    const next = JSON.parse(JSON.stringify(settingsStore.settings)) as Settings
+    const index = next.apiPresets.findIndex(p => p.id === preset.id)
+    if (index < 0) next.apiPresets.push(preset)
+    else next.apiPresets[index] = preset
+    await settingsStore.save(next)
+    showOAuthLogin.value = true
+  } catch (e) {
+    await notifyMessage(`登录前保存预设失败：${e instanceof Error ? e.message : String(e)}`)
+  }
 }
 
 async function logoutCurrentOAuthPreset() {
@@ -2658,6 +2669,9 @@ function createPreset() {
   const newPreset: ApiPreset = {
     id: crypto.randomUUID().replace(/-/g, ''),
     name: '新 API 预设',
+    webSearchSource: 'native',
+    webSearchSearchEnabled: true,
+    webSearchFetchEnabled: true,
     baseUrl: 'https://api.openai.com',
     apiKey: '',
     models: [],

@@ -250,6 +250,10 @@ def _assistant_messages_to_openai(messages: list[ChatMessage]) -> list[dict[str,
     out: list[dict[str, Any]] = []
     _LEGACY_TOOL_TRACE_MAX = 2000
     for m in messages:
+        if m.role == "assistant" and m.anthropicContent:
+            out.append({"role": "assistant", "content": m.content or "", "tool_calls": m.tool_calls,
+                        "_anthropic_content": m.anthropicContent})
+            continue
         if m.role == "reasoning":
             rc = (m.content or "").strip()
             if rc:
@@ -905,6 +909,9 @@ async def stream_assistant(req: AssistantStreamRequest, request: Request):
         allow_write_memory = False
     allow_destructive_tools = bool(req.allowDestructiveTools) if req.allowDestructiveTools is not None else False
     allow_web_search = bool(req.allowWebSearch) if req.allowWebSearch is not None else False
+    from app.services.native_web import resolve_web_plan
+    web_plan = resolve_web_plan(settings, requested=allow_web_search, protocol=protocol,
+        base_url=base_url, preset_id=prepared.credentials.preset_id)
     tool_ctx = AssistantToolContext(
         chat_id=chat_id,
         scope=scope,
@@ -928,6 +935,8 @@ async def stream_assistant(req: AssistantStreamRequest, request: Request):
         max_tool_turns=req.maxToolTurns or assistant_settings.maxToolTurns or 8,
         max_tools_per_turn=req.maxToolsPerTurn or assistant_settings.maxToolsPerTurn,
         protocol=protocol,
+        web_plan=web_plan,
+        web_settings=settings,
     )
     agent = AssistantAgentService(agent_ctx)
 

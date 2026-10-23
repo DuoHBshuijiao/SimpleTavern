@@ -14,8 +14,9 @@ from app.assistant_tools.executor import build_openai_tools_list, execute_tool
 from app.assistant_tools import result as tool_result
 from app.errors import AppError, as_app_error
 from app.llm.runtime import chat_completions_message, stream_chat_completions
-from app.llm.types import OPENAI_COMPATIBLE_CHAT_PROTOCOL, provider_id_for_protocol
+from app.llm.types import ANTHROPIC_MESSAGES_PROTOCOL, OPENAI_COMPATIBLE_CHAT_PROTOCOL, provider_id_for_protocol
 from app.schemas import AssistantChat, ChatMessage
+from app.services.native_web import WebPlan, execute_web_tool
 
 
 AssistantChatLoader = Callable[[], AssistantChat]
@@ -67,9 +68,15 @@ class AssistantAgentRunContext:
     max_tool_turns: int = 8
     max_tools_per_turn: int | None = None
     protocol: str = OPENAI_COMPATIBLE_CHAT_PROTOCOL
+    web_plan: WebPlan | None = None
+    web_settings: Any = None
 
     def tools(self) -> list[dict[str, Any]]:
-        return build_openai_tools_list(self.tool_ctx)
+        tools = build_openai_tools_list(self.tool_ctx)
+        if self.web_plan is not None:
+            tools = [t for t in tools if (t.get("function") or {}).get("name") not in {"web_search", "web_fetch"}]
+            tools.extend(self.web_plan.tools)
+        return tools
 
 
 def normalize_tool_calls_ids(tool_calls: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
@@ -221,6 +228,8 @@ class AssistantAgentService:
                 }
                 if resp.reasoning_content:
                     llm_assistant_msg["reasoning_content"] = resp.reasoning_content
+                if resp.provider_content and self._ctx.protocol == ANTHROPIC_MESSAGES_PROTOCOL:
+                    llm_assistant_msg["_anthropic_content"] = resp.provider_content
                 if tool_calls_for_llm is not None:
                     llm_assistant_msg["tool_calls"] = tool_calls_for_llm
                 current_messages.append(llm_assistant_msg)
@@ -238,6 +247,7 @@ class AssistantAgentService:
                     assistant_msg = ChatMessage(
                         role=resp.role or "assistant",
                         content=resp.content or "",
+                        anthropicContent=resp.provider_content if self._ctx.protocol == ANTHROPIC_MESSAGES_PROTOCOL else None,
                         reasoningContent=None,
                     )
                     self._append_message(assistant_msg)
@@ -266,10 +276,11 @@ class AssistantAgentService:
                         role=resp.role or "assistant",
                         content=resp.content or "",
                         tool_calls=list(tool_calls_for_llm or []),
+                        anthropicContent=resp.provider_content if self._ctx.protocol == ANTHROPIC_MESSAGES_PROTOCOL else None,
                         reasoningContent=None,
                     )
                 )
-                executed, _ = self._execute_tool_calls(
+                executed, _ = await self._execute_tool_calls(
                     tool_calls_for_llm or [],
                     current_messages,
                     start_index=len(tool_traces),
@@ -332,6 +343,8 @@ class AssistantAgentService:
                         yield AssistantAgentEvent("delta", {"text": chunk.text})
                     elif chunk.kind == "finish":
                         tool_calls_from_stream = chunk.tool_calls
+                        if chunk.provider_content and self._ctx.protocol == ANTHROPIC_MESSAGES_PROTOCOL:
+                            llm_assistant_msg["_anthropic_content"] = chunk.provider_content
 
                 reasoning_duration_sec: float | None = None
                 if reasoning_phase_started is not None:
@@ -360,6 +373,7 @@ class AssistantAgentService:
                     assistant_msg = ChatMessage(
                         role="assistant",
                         content=final_content,
+                        anthropicContent=llm_assistant_msg.get("_anthropic_content"),
                         reasoningContent=None,
                     )
                     self._append_message(assistant_msg)
@@ -371,11 +385,12 @@ class AssistantAgentService:
                         role="assistant",
                         content=final_content or "",
                         tool_calls=list(normalized_stream),
+                        anthropicContent=llm_assistant_msg.get("_anthropic_content"),
                         reasoningContent=None,
                     )
                 )
 
-                executed, tool_idx = self._execute_tool_calls(
+                executed, tool_idx = await self._execute_tool_calls(
                     normalized_stream,
                     current_messages,
                     start_index=tool_idx,
@@ -416,7 +431,7 @@ class AssistantAgentService:
         chat.messages.append(message)
         self._ctx.save_chat(chat)
 
-    def _execute_tool_calls(
+    async def _execute_tool_calls(
         self,
         tool_calls: list[dict[str, Any]],
         current_messages: list[dict[str, Any]],
@@ -449,15 +464,20 @@ class AssistantAgentService:
                     chat_overrides_updated=None,
                 )
             else:
-                assert args is not None
-                exec_outcome = execute_tool(tool_name, args, self._ctx.tool_ctx)
-                outcome = _ExecutedToolOutcome(
-                    result=exec_outcome.result,
-                    card=exec_outcome.card,
-                    chat_memory_updated=exec_outcome.chat_memory_updated,
-                    worldbook_updated=exec_outcome.worldbook_updated,
-                    chat_overrides_updated=exec_outcome.chat_overrides_updated,
-                )
+                if tool_name in {"web_search", "web_fetch"} and self._ctx.web_plan is not None:
+                    result = await execute_web_tool(self._ctx.web_plan, name=tool_name, args=args or {},
+                        settings=self._ctx.web_settings, api_key=self._ctx.api_key)
+                    outcome = _ExecutedToolOutcome(result=result, card=None, chat_memory_updated=None,
+                        worldbook_updated=None, chat_overrides_updated=None)
+                else:
+                    exec_outcome = execute_tool(tool_name, args or {}, self._ctx.tool_ctx)
+                    outcome = _ExecutedToolOutcome(
+                        result=exec_outcome.result,
+                        card=exec_outcome.card,
+                        chat_memory_updated=exec_outcome.chat_memory_updated,
+                        worldbook_updated=exec_outcome.worldbook_updated,
+                        chat_overrides_updated=exec_outcome.chat_overrides_updated,
+                    )
             result = outcome.result
             tid = str(tool_call.get("id") or "").strip()
             record = tool_record_payload(tool_name, tool_idx, result, args)

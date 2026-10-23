@@ -172,6 +172,8 @@ export function testModels(
 }
 
 export interface OAuthStatusPublic {
+  subscriptionAuthorized?: boolean
+  scopes?: string[]
   loggedIn: boolean
   expiresAt?: number | null
   accountId?: string | null
@@ -209,6 +211,7 @@ export function startOAuthLogin(body: {
   providerId?: string | null
   method?: 'device_code' | 'pkce'
   enterpriseUrl?: string | null
+  clientId?: string | null
 }): Promise<OAuthStartResult> {
   return apiPost('/api/llm/oauth/start', body)
 }
@@ -246,4 +249,25 @@ export function normalizeUsage(raw: unknown): LlmUsage | null {
   }
   const hasAny = Object.values(out).some((v) => v !== null && v !== undefined)
   return hasAny ? out : null
+}
+
+export interface OAuthUsageWindow {
+  id: string
+  label?: string | null
+  windowMinutes?: number | null
+  usedPercent?: number | null
+  remainingPercent?: number | null
+  resetsAt?: string | number | null
+}
+export interface OAuthUsage {
+  provider: string
+  state: 'available' | 'unsupported' | 'not_logged_in' | 'error'
+  plan?: string | null
+  checkedAt?: string | number | null
+  windows: OAuthUsageWindow[]
+  manageUrl?: string | null
+  errorCode?: string | null
+}
+export function fetchOAuthUsage(presetId: string, refresh = false): Promise<OAuthUsage> {
+  return apiGet(`/api/llm/oauth/usage?presetId=${encodeURIComponent(presetId)}&refresh=${refresh}`)
 }

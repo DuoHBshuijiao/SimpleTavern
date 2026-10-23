@@ -2,6 +2,54 @@
  "$comment": "人工维护层（T-820）。piId 关联 providers.generated.json；无 piId 的条目为系统已有/经核查保留的第三方供应商。字段含义见 docs/tasks/T-820-v0810-provider-catalog.md。",
  "providers": [
   {
+   "id": "openai-chatgpt",
+   "label": "ChatGPT 订阅（官方登录）",
+   "name": "Sign in with ChatGPT",
+   "region": "global",
+   "group": "oauth",
+   "baseUrlTemplate": "https://api.openai.com/v1",
+   "authStyle": "oauth_pkce",
+   "defaultProtocol": "openai_responses",
+   "supportedProtocols": [
+    "openai_responses"
+   ],
+   "protocolVariant": "chatgpt_subscription",
+   "cacheStrategy": "implicit",
+   "docsUrl": "https://developers.openai.com/siwc/token-sharing-open-source",
+   "keywords": [
+    "chatgpt",
+    "plus",
+    "pro",
+    "订阅",
+    "官方登录"
+   ],
+   "hint": "通过 OpenAI 官方提供的 Sign in with ChatGPT，使用你的 ChatGPT 订阅额度。本功能目前处于预览阶段，OpenAI 可能随时调整可用范围、使用限制或接入方式。",
+   "requiresOAuth": true
+  },
+  {
+   "id": "xai-oauth",
+   "label": "Grok 订阅（账号登录）",
+   "name": "xAI Grok OAuth",
+   "region": "global",
+   "group": "oauth",
+   "baseUrlTemplate": "https://api.x.ai/v1",
+   "authStyle": "oauth_device",
+   "defaultProtocol": "openai_responses",
+   "supportedProtocols": [
+    "openai_responses"
+   ],
+   "cacheStrategy": "implicit",
+   "docsUrl": "https://docs.x.ai/build/enterprise",
+   "keywords": [
+    "grok",
+    "xai",
+    "订阅",
+    "oauth"
+   ],
+   "hint": "通过 xAI 官方设备授权登录。实际模型访问取决于账号权限；不自动切换 API Key。目前未提供可核实的订阅额度查询接口。",
+   "requiresOAuth": true
+  },
+  {
    "id": "openai",
    "piId": "openai",
    "label": "OpenAI 官方",

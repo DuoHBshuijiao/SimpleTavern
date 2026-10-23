@@ -14,6 +14,7 @@ from app.errors import AppError
 from app.llm.runtime import chat_completions_message, stream_chat_completions
 from app.llm.types import OPENAI_COMPATIBLE_CHAT_PROTOCOL, provider_id_for_protocol
 from app.schemas import Settings
+from app.services.native_web import WebPlan, execute_web_tool, web_tool_content
 from app.services.web_search import (
     OPENAI_WEB_SEARCH_TOOLS,
     format_web_search_tool_content,
@@ -22,6 +23,19 @@ from app.services.web_search import (
 )
 
 WEB_SEARCH_MAX_TOOL_ROUNDS = 8
+
+
+async def _execute_planned_tool(plan: WebPlan, call: dict[str, Any], settings: Settings, api_key: str) -> dict[str, Any]:
+    fn = call.get("function") or {}
+    try:
+        args = json.loads(fn.get("arguments") or "{}")
+    except (ValueError, TypeError):
+        args = None
+    if not isinstance(args, dict):
+        return {"ok": False, "code": "tool_arguments_invalid", "message": "联网工具参数必须为 JSON 对象"}
+    return await execute_web_tool(plan, name=str(fn.get("name") or ""), args=args, settings=settings, api_key=api_key)
+
+
 _USAGE_SUM_KEYS = (
     "inputTokens",
     "outputTokens",
@@ -156,6 +170,7 @@ async def iter_web_search_stream_events(
     settings: Settings,
     web_search_enabled: bool,
     protocol: str = OPENAI_COMPATIBLE_CHAT_PROTOCOL,
+    web_plan: WebPlan | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """
     Yields:
@@ -170,7 +185,7 @@ async def iter_web_search_stream_events(
     reasoning_start: float | None = None
     reasoning_end: float | None = None
 
-    use_web = web_search_enabled and web_search_is_configured(settings)
+    use_web = web_search_enabled and (web_plan.local if web_plan else web_search_is_configured(settings))
     tool_rounds_used = 0
 
     while True:
@@ -178,7 +193,7 @@ async def iter_web_search_stream_events(
         eb = dict(extra_body or {})
         if use_tools:
             eb["tool_choice"] = "auto"
-        tools = OPENAI_WEB_SEARCH_TOOLS if use_tools else None
+        tools = (web_plan.tools if web_plan else OPENAI_WEB_SEARCH_TOOLS) if use_tools else None
         round_content: list[str] = []
         round_reasoning_chunks: list[str] = []
         finish_tc = None
@@ -224,13 +239,20 @@ async def iter_web_search_stream_events(
                     asst["reasoning_content"] = rc_round
                 msgs.append(asst)
                 for tc in norm:
-                    query = _parse_web_search_query(tc, protocol=protocol)
-                    body = await run_web_search(settings, query)
+                    if web_plan:
+                        fn = tc.get("function") or {}
+                        name = str(fn.get("name") or "")
+                        yield {"type": "web_tool", "tool": name, "phase": "start", "source": web_plan.source}
+                        body = await _execute_planned_tool(web_plan, tc, settings, api_key)
+                        yield {"type": "web_tool", "tool": name, "phase": "complete", "source": web_plan.source, "ok": bool(body.get("ok"))}
+                    else:
+                        query = _parse_web_search_query(tc, protocol=protocol)
+                        body = await run_web_search(settings, query)
                     msgs.append(
                         {
                             "role": "tool",
                             "tool_call_id": tc["id"],
-                            "content": format_web_search_tool_content(body),
+                            "content": web_tool_content(body) if web_plan else format_web_search_tool_content(body),
                         }
                     )
                 tool_rounds_used += 1
@@ -264,6 +286,7 @@ async def nonstream_web_search_rounds(
     settings: Settings,
     web_search_enabled: bool,
     protocol: str = OPENAI_COMPATIBLE_CHAT_PROTOCOL,
+    web_plan: WebPlan | None = None,
 ) -> tuple[str, str | None, float | None, dict[str, Any] | None]:
     """
     非流式多轮。
@@ -275,7 +298,7 @@ async def nonstream_web_search_rounds(
     merged_usage: dict[str, Any] | None = None
     req_start = time.monotonic()
 
-    use_web = web_search_enabled and web_search_is_configured(settings)
+    use_web = web_search_enabled and (web_plan.local if web_plan else web_search_is_configured(settings))
     tool_rounds_used = 0
 
     while True:
@@ -283,7 +306,7 @@ async def nonstream_web_search_rounds(
         eb = dict(extra_body or {})
         if use_tools:
             eb["tool_choice"] = "auto"
-        tools = OPENAI_WEB_SEARCH_TOOLS if use_tools else None
+        tools = (web_plan.tools if web_plan else OPENAI_WEB_SEARCH_TOOLS) if use_tools else None
         resp = await chat_completions_message(
             base_url=base_url,
             api_key=api_key,
@@ -315,13 +338,16 @@ async def nonstream_web_search_rounds(
                     asst["reasoning_content"] = rc
                 msgs.append(asst)
                 for tc in norm:
-                    query = _parse_web_search_query(tc, protocol=protocol)
-                    body = await run_web_search(settings, query)
+                    if web_plan:
+                        body = await _execute_planned_tool(web_plan, tc, settings, api_key)
+                    else:
+                        query = _parse_web_search_query(tc, protocol=protocol)
+                        body = await run_web_search(settings, query)
                     msgs.append(
                         {
                             "role": "tool",
                             "tool_call_id": tc["id"],
-                            "content": format_web_search_tool_content(body),
+                            "content": web_tool_content(body) if web_plan else format_web_search_tool_content(body),
                         }
                     )
                 tool_rounds_used += 1

@@ -1,7 +1,8 @@
 # 当前任务
 
-- current: 无进行中的规格化任务（本批已完成 T-808～T-813 编码，待人类提交）
-- status: v0.800 剩余 **T-814** 发布核对（仓库外黑盒）。未启动 v0.900。未做 bug/优化扫尾。
+- current: 原生联网与订阅账号接入（2026-10-22，首轮代码与构建完成，真实账号验收及额度接口待补）
+- feature_plan: `docs/tasks/2026-10-22-native-web-subscription.md`；官方 Sign in with ChatGPT 替代新增功能中的 Codex 后端接入思路，历史 Codex 预设独立兼容。
+- status: 当前功能按 feature_plan 核对；历史 v0.800 仍待 T-814 仓库外黑盒发布核对，未启动 v0.900。
 - next_read: `docs/specs/BACKEND-API.md`、`docs/specs/FRONTEND-FEATURES.md`、`docs/SANDBOX.md`
 - goal: 后续只做仓库外黑盒测试；实现侧不再新增断言、门禁或测试框架
 

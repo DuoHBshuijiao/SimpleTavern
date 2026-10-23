@@ -75,6 +75,7 @@ const emit = defineEmits<{
 }>()
 
 const settings = useSettingsStore()
+const usingChatGPTPlan = computed(() => settings.settings?.apiPresets.find(p => p.id === props.currentPresetId)?.providerId === 'openai-chatgpt')
 
 const open = ref(false)
 const anchorRef = ref<HTMLElement | null>(null)
@@ -305,6 +306,9 @@ function toggleOpen() {
 
 <template>
   <div class="relative min-w-0 w-full">
+    <div v-if="usingChatGPTPlan" class="mb-1 flex flex-wrap items-center gap-x-2 text-xs text-[var(--color-text-secondary)]" aria-label="ChatGPT 订阅使用状态">
+      <span>使用 ChatGPT 订阅</span><a href="https://chatgpt.com/settings/usage" target="_blank" rel="noopener noreferrer" class="text-brand hover:underline">管理用量</a>
+    </div>
     <button
       ref="anchorRef"
       type="button"

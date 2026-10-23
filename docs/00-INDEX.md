@@ -2,6 +2,8 @@
 
 本目录用于让 AI 在无完整聊天上下文时继续推进 `v0.500 -> v1.000` 稳定化工作。
 
+当前跨端功能计划：[原生联网与订阅账号接入](tasks/2026-10-22-native-web-subscription.md)。ChatGPT 接入采用 OpenAI 官方 Sign in with ChatGPT 预览机制。
+
 ## 测试策略（强制）
 
 仓库内**不再包含** pytest / Vitest / Playwright 或任何自动化测试流程、门禁命令、`data-testid` 或断言代码。
