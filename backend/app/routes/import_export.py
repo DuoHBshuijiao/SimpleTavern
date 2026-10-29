@@ -66,9 +66,13 @@ from app.services.st_mvu_compat import (
 from app.services.st_mvu_import_agent import run_st_mvu_import_agent
 from app.storage import (
     avatar_path,
+    ai_workspace_dir,
+    assistant_chat_path,
+    assistant_settings_path,
     avatars_dir,
     characters_dir,
     chats_dir,
+    get_usage_dir,
     list_characters,
     load_character,
     load_chat,
@@ -1454,7 +1458,7 @@ def backup_settings(scope: str = Query("basic")) -> Response:
     将设置、角色、聊天等数据打包为zip文件。支持三种范围：
     - basic: 仅设置和Persona头像
     - with_characters: 包含角色和角色头像
-    - with_chats: 包含所有聊天记录
+    - with_chats: 包含所有聊天记录、媒体、助手配置与历史、工作区、用量账本
     
     Args:
         scope: 备份范围（basic/with_characters/with_chats），默认为basic
@@ -1465,9 +1469,17 @@ def backup_settings(scope: str = Query("basic")) -> Response:
     Raises:
         HTTPException: 范围不支持时抛出400错误
     """
+    if scope not in ("basic", "with_characters", "with_chats"):
+        raise HTTPException(status_code=400, detail="unsupported scope")
     settings = load_settings()
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        def write_tree(directory, prefix: str) -> None:
+            root = directory.resolve()
+            for path in sorted(directory.rglob("*")):
+                if path.is_file() and not path.is_symlink() and path.resolve().is_relative_to(root):
+                    zf.write(path, arcname=f"{prefix}/{path.relative_to(directory).as_posix()}")
+
         zf.writestr("settings.json", json.dumps(settings.model_dump(mode="json"), ensure_ascii=False, indent=2))
         for persona in settings.userPersonas:
             if not persona.avatar:
@@ -1475,8 +1487,6 @@ def backup_settings(scope: str = Query("basic")) -> Response:
             p = avatar_path(persona.avatar)
             if p.exists():
                 zf.write(p, arcname=f"avatars/{p.name}")
-        if scope not in ("basic", "with_characters", "with_chats"):
-            raise HTTPException(status_code=400, detail="unsupported scope")
         if scope in ("with_characters", "with_chats"):
             for p in characters_dir().glob("*.json"):
                 zf.write(p, arcname=f"characters/{p.name}")
@@ -1493,9 +1503,12 @@ def backup_settings(scope: str = Query("basic")) -> Response:
             for p in worldbooks_dir().glob("*.json"):
                 zf.write(p, arcname=f"worldbooks/{p.name}")
         if scope == "with_chats":
-            for p in chats_dir().rglob("*.json"):
-                rel = p.relative_to(chats_dir())
-                zf.write(p, arcname=f"chats/{rel.as_posix()}")
+            write_tree(chats_dir(), "chats")
+            write_tree(ai_workspace_dir(), "ai_workspace")
+            write_tree(get_usage_dir(), "usage")
+            for path in (assistant_settings_path(), assistant_chat_path()):
+                if path.is_file() and not path.is_symlink():
+                    zf.write(path, arcname=path.name)
     buffer.seek(0)
     return Response(
         content=buffer.read(),

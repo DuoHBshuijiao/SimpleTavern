@@ -760,9 +760,9 @@ def _slice_conversation_with_anchor(
             keep_before = 0
             if (
                 isinstance(context_start_keep_before_messages, int)
-                and context_start_keep_before_messages >= 2
+                and context_start_keep_before_messages >= 1
             ):
-                keep_before = context_start_keep_before_messages - 1
+                keep_before = context_start_keep_before_messages
             start_idx = max(0, i - keep_before)
             break
     return conversation[start_idx:]
