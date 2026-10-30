@@ -58,6 +58,49 @@ class BackupMigrationTest(unittest.TestCase):
         with self.archive("with_characters") as archive:
             self.assertEqual({"settings.json", "characters/hero.json", "worldbooks/lore.json"}, set(archive.namelist()))
 
+    def restore_into_new_data_dir(self, payload):
+        target = tempfile.TemporaryDirectory()
+        self.addCleanup(target.cleanup)
+        root = Path(target.name)
+        with patch.dict(os.environ, {"SIMPLETAVERN_DATA_DIR": str(root)}):
+            result = import_export._import_from_zip(payload)
+        return root, result
+
+    def test_full_backup_restores_every_migration_file(self):
+        payload = import_export.backup_settings("with_chats").body
+        root, result = self.restore_into_new_data_dir(payload)
+        self.assertEqual([], result["warnings"])
+        for name, expected in self.payloads.items():
+            if name.endswith("/chat.json") or name.startswith(("characters/", "worldbooks/")):
+                continue  # rewritten by their save functions
+            self.assertEqual(expected, (root / name).read_bytes(), name)
+        self.assertTrue((root / "chats/hero/chat/chat.json").is_file())
+        self.assertTrue((root / "usage/usage_index.json").is_file())
+
+    def test_usage_import_merges_by_event_id(self):
+        payload = import_export.backup_settings("with_chats").body
+        target = tempfile.TemporaryDirectory()
+        self.addCleanup(target.cleanup)
+        root = Path(target.name)
+        (root / "usage").mkdir()
+        (root / "usage/2026-10.jsonl").write_bytes(b'{"eventId":"local-1"}\n{"eventId":"event-1"}\n')
+        with patch.dict(os.environ, {"SIMPLETAVERN_DATA_DIR": str(root)}):
+            import_export._import_from_zip(payload)
+            import_export._import_from_zip(payload)
+        lines = (root / "usage/2026-10.jsonl").read_bytes().splitlines()
+        self.assertEqual([b'{"eventId":"local-1"}', b'{"eventId":"event-1"}'], lines)
+
+    def test_paths_outside_their_folder_are_skipped(self):
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as zf:
+            zf.writestr("chats/hero/chat/chat.json", '{"id":"chat","messages":[]}')
+            zf.writestr("chats/hero/chat/../../../escaped.txt", "x")
+            zf.writestr("ai_workspace/../escaped.txt", "x")
+        root, result = self.restore_into_new_data_dir(buffer.getvalue())
+        self.assertFalse((root / "escaped.txt").exists())
+        self.assertFalse((root.parent / "escaped.txt").exists())
+        self.assertEqual(2, len(result["warnings"]))
+
     def test_invalid_scope_is_rejected(self):
         with self.assertRaises(HTTPException) as error:
             self.archive("unknown")

@@ -34,6 +34,7 @@ import re
 import base64
 import zipfile
 from datetime import datetime, timedelta
+from pathlib import Path
 from urllib.parse import quote, urlparse
 from typing import Any
 from uuid import uuid4
@@ -71,6 +72,7 @@ from app.storage import (
     assistant_settings_path,
     avatars_dir,
     characters_dir,
+    chat_folder,
     chats_dir,
     get_usage_dir,
     list_characters,
@@ -2118,11 +2120,62 @@ async def _import_from_json(raw: Any) -> dict[str, Any]:
     raise HTTPException(status_code=400, detail="unrecognized json format")
 
 
+def _restore_file(base: Path, rel: str, data: bytes) -> bool:
+    """把 ZIP 里的一个文件写到 base 下的 rel；rel 越出 base（如含 ..）时不写，返回 False。"""
+    root = base.resolve()
+    target = (base / rel).resolve()
+    if not rel or target == root or not target.is_relative_to(root):
+        return False
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(data)
+    return True
+
+
+def _merge_usage_shard(base: Path, rel: str, data: bytes) -> bool:
+    """
+    把 ZIP 里的一个用量账本分片并入本地同名分片：按 eventId 去重（无 eventId 的按整行），只追加本地没有的事件，
+    所以重复导入同一份备份不会重复计数。
+    """
+    root = base.resolve()
+    target = (base / rel).resolve()
+    if not rel or target == root or not target.is_relative_to(root):
+        return False
+
+    def key(line: str) -> str:
+        try:
+            event = json.loads(line)
+        except ValueError:
+            return line
+        event_id = event.get("eventId") if isinstance(event, dict) else None
+        return f"id:{event_id}" if event_id else line
+
+    existing: list[str] = []
+    if target.is_file():
+        existing = [line for line in target.read_text(encoding="utf-8").splitlines() if line.strip()]
+    seen = {key(line) for line in existing}
+    added: list[str] = []
+    for line in data.decode("utf-8").splitlines():
+        if not line.strip():
+            continue
+        k = key(line)
+        if k in seen:
+            continue
+        seen.add(k)
+        added.append(line)
+    if added:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        lead = b"\n" if existing and not target.read_bytes().endswith(b"\n") else b""
+        with target.open("ab") as f:
+            f.write(lead + ("\n".join(added) + "\n").encode("utf-8"))
+    return True
+
+
 def _import_from_zip(payload: bytes) -> dict[str, Any]:
     """
     从ZIP文件导入
     
-    导入设置、角色、聊天和头像文件。
+    导入设置、角色、聊天和头像文件，以及完整备份（with_chats）里的其余内容：会话目录下的知识图谱、MVU 日志、
+    助手记录、媒体等文件，AI 工作区，用量账本（按 eventId 合并），助手设置与助手聊天记录。
     
     Args:
         payload: ZIP文件二进制数据
@@ -2134,6 +2187,8 @@ def _import_from_zip(payload: bytes) -> dict[str, Any]:
     warnings: list[str] = []
     worldbook_id_map: dict[str, str] = {}
     existing_worldbook_ids = {p.stem for p in worldbooks_dir().glob("*.json")}
+    # ZIP 里的会话目录 (角色, 会话) → 导入后的会话文件夹，用来放该会话的其余文件。
+    chat_folders: dict[tuple[str, str], Path] = {}
     with zipfile.ZipFile(io.BytesIO(payload)) as zf:
         if "settings.json" in zf.namelist():
             raw_settings = json.loads(zf.read("settings.json").decode("utf-8"))
@@ -2213,6 +2268,7 @@ def _import_from_zip(payload: bytes) -> dict[str, Any]:
                 continue
             chat = Chat.model_validate(raw)
             save_chat(chat)
+            chat_folders[(parts[1], parts[2])] = chat_folder(chat.characterId, chat.id)
             if "chat" not in imported:
                 imported.append("chat")
         # 恢复长期记忆：处理 zip 中的 chat_memory.json（与 load_chat_memory 格式兼容）
@@ -2241,6 +2297,53 @@ def _import_from_zip(payload: bytes) -> dict[str, Any]:
                 if len(detail) > 160:
                     detail = detail[:157] + "..."
                 warnings.append(f"{name}: 长期记忆恢复失败（{detail}）")
+        # 完整备份里的其余内容。
+        usage_merged = False
+        for name in zf.namelist():
+            if name.endswith("/"):
+                continue
+            parts = name.split("/")
+            if name.startswith("chats/"):
+                if len(parts) < 5 and parts[-1] in ("chat.json", "chat_memory.json"):
+                    continue
+                folder = chat_folders.get((parts[1], parts[2])) if len(parts) >= 4 else None
+                if folder is None:
+                    continue  # 会话本身没导入（非法路径等，已有警告）
+                if _restore_file(folder, "/".join(parts[3:]), zf.read(name)):
+                    if "chat_files" not in imported:
+                        imported.append("chat_files")
+                else:
+                    warnings.append(f"{name}: 跳过非法路径")
+            elif name.startswith("ai_workspace/"):
+                if _restore_file(ai_workspace_dir(), name.split("/", 1)[1], zf.read(name)):
+                    if "ai_workspace" not in imported:
+                        imported.append("ai_workspace")
+                else:
+                    warnings.append(f"{name}: 跳过非法路径")
+            elif name.startswith("usage/") and name.endswith(".jsonl"):
+                if _merge_usage_shard(get_usage_dir(), name.split("/", 1)[1], zf.read(name)):
+                    usage_merged = True
+                    if "usage" not in imported:
+                        imported.append("usage")
+                else:
+                    warnings.append(f"{name}: 跳过非法路径")
+            elif name in (assistant_settings_path().name, assistant_chat_path().name):
+                data = zf.read(name)
+                try:
+                    json.loads(data.decode("utf-8"))
+                except ValueError:
+                    warnings.append(f"{name}: 不是有效的 JSON，已跳过")
+                    continue
+                target = assistant_settings_path() if name == assistant_settings_path().name else assistant_chat_path()
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(data)
+                if "assistant" not in imported:
+                    imported.append("assistant")
+        if usage_merged:
+            # 索引由分片推出，合并后重建；ZIP 里的旧索引不导入。
+            from app.services.usage_ledger import rebuild_index
+
+            rebuild_index()
     return {"imported": imported, "warnings": warnings}
 
 
