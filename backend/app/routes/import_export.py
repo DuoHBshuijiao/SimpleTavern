@@ -684,7 +684,8 @@ def _parse_character_from_json(char: dict[str, Any], avatar_url_hint: str | None
     fms = char.get("first_messages")
     all_messages: list[str] = []
     if isinstance(fms, list):
-        all_messages = [str(x).strip() for x in fms if str(x).strip()]
+        # JanitorAI writes null for an empty greeting; str(None) used to save the text "None".
+        all_messages = [x.strip() for x in fms if isinstance(x, str) and x.strip()]
     if not all_messages and isinstance(char.get("first_message"), str) and (char.get("first_message") or "").strip():
         all_messages = [str(char.get("first_message") or "").strip()]
 
