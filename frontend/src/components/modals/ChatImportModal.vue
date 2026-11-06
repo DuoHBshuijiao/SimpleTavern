@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { X } from 'lucide-vue-next'
 import { apiGet } from '../../api/http'
 import { useSettingsImport, type ImportWarningItem, coerceImportWarningText } from '../../composables/useSettingsImport'
 import { notifyMessage } from '../../composables/useNotify'
 import type { CharacterCard, Chat, MvuMode, UserPersona } from '../../types/models'
 import ModernSelect from '../ModernSelect.vue'
-import ThemedCheckbox from '../ThemedCheckbox.vue'
+import SettingsField from '../settings-drawer/SettingsField.vue'
+import SettingsSwitch from '../settings-drawer/SettingsSwitch.vue'
+import SettingsHint from '../settings-drawer/SettingsHint.vue'
 import { useDialogBehavior } from '../../composables/useDialogBehavior'
 import { dialogAria } from '../../utils/uiPrimitives'
 
@@ -442,194 +445,180 @@ async function confirmJanitorImport() {
         tabindex="-1"
         class="modal-content modal-surface chat-modal-width-568-90 min-w-0"
       >
-        <div class="modal-header border-b border-[var(--color-border-subtle)]">
-          <h3 :id="titleId" class="modal-title text-[var(--color-text)]">导入</h3>
-          <button type="button" class="modal-close" aria-label="关闭导入弹窗" @click="close">×</button>
+        <div class="modal-header">
+          <h3 :id="titleId" class="modal-title">导入</h3>
+          <button type="button" class="modal-close" aria-label="关闭导入弹窗" @click="close">
+            <X class="w-5 h-5" />
+          </button>
         </div>
-        <div class="modal-body">
-          <div class="max-h-[65vh] space-y-4 overflow-y-auto pr-1">
-            <section class="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface-muted)] p-4">
-              <h4 class="text-sm font-medium text-[var(--color-text-secondary)]">本地文件导入</h4>
-              <p class="mt-2 text-xs text-[var(--color-text-muted)]">
-                支持 txt/json/jsonl/zip；其中 PNG 或 SillyTavern 形状 JSON 会先进入下方预览（含 MVU 选项），与设置里「仅备份 JSON」区分。
-              </p>
-              <p class="mt-1 text-xs text-[var(--color-text-muted)]">专用按钮同样仅用于 PNG / ST 角色 JSON；不支持 ST 聊天记录导入。</p>
-              <div class="mt-3 flex flex-wrap gap-2">
-                <button class="btn btn-sm btn-secondary" @click="triggerImport">选择文件导入</button>
-                <button class="btn btn-sm btn-secondary" :disabled="stPreviewLoading" @click="triggerStImport">
-                  {{ stPreviewLoading ? '读取预览中...' : '导入 SillyTavern 数据' }}
-                </button>
-                <input ref="importInputRef" type="file" class="hidden" accept=".txt,.json,.jsonl,.zip,.png" @change="handleImportChange" />
-                <input ref="stImportInputRef" type="file" class="hidden" accept=".png,.json" @change="handleStImportChange" />
-              </div>
-              <div
-                v-if="stPreview"
-                class="mt-3 rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-surface-overlay)] p-3 text-xs text-[var(--color-text-muted)]"
-              >
-                <div class="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <div class="text-[var(--color-text-secondary)]">SillyTavern 预览</div>
-                    <div class="mt-1">
+        <div class="modal-body custom-scrollbar">
+          <section class="settings-group">
+            <div class="settings-group-title">本地文件导入</div>
+            <SettingsHint more="其中 PNG 或 SillyTavern 形状 JSON 会先进入下方预览（含 MVU 选项），与设置里「仅备份 JSON」区分。专用按钮同样仅用于 PNG / ST 角色 JSON；不支持 ST 聊天记录导入。">
+              支持 txt/json/jsonl/zip；不支持 ST 聊天记录。
+            </SettingsHint>
+            <div class="flex flex-wrap gap-2">
+              <button class="btn btn-sm btn-secondary" @click="triggerImport">选择文件导入</button>
+              <button class="btn btn-sm btn-secondary" :disabled="stPreviewLoading" @click="triggerStImport">
+                {{ stPreviewLoading ? '读取预览中...' : '导入 SillyTavern 数据' }}
+              </button>
+              <input ref="importInputRef" type="file" class="hidden" accept=".txt,.json,.jsonl,.zip,.png" @change="handleImportChange" />
+              <input ref="stImportInputRef" type="file" class="hidden" accept=".png,.json" @change="handleStImportChange" />
+            </div>
+
+            <template v-if="stPreview">
+              <div class="settings-readout space-y-2">
+                <div class="flex items-start justify-between gap-2">
+                  <div class="min-w-0">
+                    <div class="settings-label">SillyTavern 预览</div>
+                    <div class="mt-1 break-words">
                       角色名：<span class="text-[var(--color-text)]">{{ stPreview.characterName || '未知' }}</span>
                     </div>
                   </div>
-                  <button class="btn btn-xs btn-secondary" :disabled="stConfirming" @click="resetStPreview">重新选择</button>
+                  <button class="btn btn-xs btn-secondary shrink-0" :disabled="stConfirming" @click="resetStPreview">重新选择</button>
                 </div>
-                <div class="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
+                <div class="grid grid-cols-1 gap-x-3 gap-y-1 sm:grid-cols-2">
                   <div>世界书：<span class="text-[var(--color-text)]">{{ stPreview.worldBookName || '未检测到' }}</span></div>
                   <div>世界书条目：<span class="text-[var(--color-text)]">{{ stPreview.worldBookEntryCount }}</span></div>
                   <div>tavern_helper：<span class="text-[var(--color-text)]">{{ stPreview.mvu.hasTavernHelper ? '已检测到' : '未检测到' }}</span></div>
                   <div>regex_scripts：<span class="text-[var(--color-text)]">{{ stPreview.mvu.regexScriptCount }}</span></div>
                 </div>
-                <div
-                  v-if="stPreviewWarnings.length"
-                  class="mt-2 rounded-md border border-[var(--color-border-subtle)] bg-[var(--color-surface-muted)] p-2 text-[var(--color-text)]"
-                >
-                  <div class="text-[var(--color-text-secondary)]">导入警告</div>
-                  <ul class="mt-1 list-disc space-y-1 pl-4">
-                    <li v-for="(warning, idx) in stPreviewWarnings" :key="idx">
-                      {{ coerceImportWarningText(warning) }}
-                    </li>
-                  </ul>
-                </div>
-                <p v-if="stPreview.worldBookEntryCount" class="mt-2 text-[var(--color-text-muted)]">
-                  ST 世界书将作为 SimpleTavern 世界书完整保留；MVU 兼容只生成指令或正文正则，不删除原条目。
-                </p>
-                <p class="mt-1 text-[var(--color-text-muted)]">
-                  Regex 模式会尝试转换可表达的 regex_scripts；指令模式会把完整 ST 卡上下文交给 MVU Agent，生成 MVU 指令与初始状态表，Tavern Helper JS 不会执行。
-                </p>
-                <div
-                  v-if="stPreview.mvu.characterBookCandidates.length"
-                  class="mt-2 rounded-md border border-[var(--color-border-subtle)] bg-[var(--color-surface-muted)] p-2"
-                >
-                  <div class="text-[var(--color-text-secondary)]">世界书 MVU 候选</div>
-                  <div class="mt-1 space-y-1">
-                    <div
-                      v-for="candidate in stPreview.mvu.characterBookCandidates"
-                      :key="candidate.title"
-                      class="flex items-center justify-between gap-2"
-                    >
-                      <span class="truncate text-[var(--color-text)]">{{ candidate.title }}</span>
-                      <span>{{ candidate.enabled ? '启用' : '禁用' }}</span>
-                    </div>
-                  </div>
-                </div>
-                <label class="mt-3 flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
-                  <ThemedCheckbox :checked="stEnableMvuCompatibility" @update:checked="stEnableMvuCompatibility = $event" />
-                  启用 MVU 兼容
-                  <span v-if="stDetectedMvu" class="text-[var(--color-text-secondary)]">已检测到候选结构</span>
-                </label>
-                <div class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-[1fr_auto]">
-                  <div>
-                    <div class="mb-1 text-xs text-[var(--color-text-muted)]">MVU 模式</div>
-                    <ModernSelect
-                      :model-value="stMvuMode"
-                      :options="stMvuModeOptions"
-                      placeholder="选择 MVU 模式"
-                      @update:model-value="updateStMvuMode"
-                    />
-                  </div>
-                  <div class="flex items-end">
-                    <button class="btn btn-sm btn-primary" :disabled="!stPendingId || stConfirming" @click="confirmStImport">
-                      {{ stConfirmLabel }}
-                    </button>
-                  </div>
-                </div>
-                <div v-if="stExpiresAt" class="mt-2 text-[var(--color-text-muted)]">预览暂存至：{{ stExpiresAt }}</div>
               </div>
-            </section>
 
-            <section class="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface-muted)] p-4">
-              <h4 class="text-sm font-medium text-[var(--color-text-secondary)]">JanitorAI 聊天迁移</h4>
-              <p class="mt-2 text-xs text-[var(--color-text-muted)]">
-                填写 JanitorAI 聊天链接后打开页面，扩展会在该页面首次合法捕获时自动提交到本地。
-              </p>
-              <div class="mt-3 flex gap-2">
-                <input
-                  v-model="janitorLink"
-                  class="input flex-1"
-                  placeholder="https://janitorai.com/chats/..."
+              <div v-if="stPreviewWarnings.length" class="settings-readout">
+                <div class="settings-label">导入警告</div>
+                <ul class="mt-1 list-disc space-y-1 pl-4 text-[var(--color-text)]">
+                  <li v-for="(warning, idx) in stPreviewWarnings" :key="idx">
+                    {{ coerceImportWarningText(warning) }}
+                  </li>
+                </ul>
+              </div>
+
+              <div v-if="stPreview.mvu.characterBookCandidates.length" class="settings-readout">
+                <div class="settings-label">世界书 MVU 候选</div>
+                <div class="mt-1 space-y-1">
+                  <div
+                    v-for="candidate in stPreview.mvu.characterBookCandidates"
+                    :key="candidate.title"
+                    class="flex items-center justify-between gap-3"
+                  >
+                    <span class="min-w-0 truncate text-[var(--color-text)]">{{ candidate.title }}</span>
+                    <span class="shrink-0 whitespace-nowrap">{{ candidate.enabled ? '启用' : '禁用' }}</span>
+                  </div>
+                </div>
+              </div>
+
+              <SettingsSwitch
+                label="启用 MVU 兼容"
+                :model-value="stEnableMvuCompatibility"
+                :hint="stDetectedMvu ? '已检测到候选结构。' : undefined"
+                :more="stPreview.worldBookEntryCount ? 'ST 世界书将作为 SimpleTavern 世界书完整保留；MVU 兼容只生成指令或正文正则，不删除原条目。' : undefined"
+                @update:model-value="stEnableMvuCompatibility = $event"
+              />
+              <SettingsField
+                label="MVU 模式"
+                hint="Tavern Helper JS 不会执行。"
+                more="Regex 模式会尝试转换可表达的 regex_scripts；指令模式会把完整 ST 卡上下文交给 MVU Agent，生成 MVU 指令与初始状态表，Tavern Helper JS 不会执行。"
+              >
+                <ModernSelect
+                  :model-value="stMvuMode"
+                  :options="stMvuModeOptions"
+                  placeholder="选择 MVU 模式"
+                  @update:model-value="updateStMvuMode"
                 />
-                <button class="btn btn-sm btn-secondary" @click="openJanitorLinkAndTryCapture">打开并尝试获取</button>
-              </div>
-
-              <div class="mt-4 rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-surface-overlay)] p-3">
-                <div class="text-xs text-[var(--color-text-muted)]">
-                  {{ pendingLoading ? '正在读取待导入预览...' : (pendingPreview ? '已检测到待导入数据' : '尚未检测到待导入数据') }}
-                </div>
-                <div v-if="pendingError" class="mt-2 text-xs text-[var(--color-error)]">{{ pendingError }}</div>
-                <div v-if="pendingPreview" class="mt-2 space-y-2 text-xs text-[var(--color-text-muted)]">
-                  <div>角色名：<span class="text-[var(--color-text)]">{{ pendingPreview.botName || '未知' }}</span></div>
-                  <div>消息数：<span class="text-[var(--color-text)]">{{ pendingPreview.messageCount }}</span></div>
-                  <div v-if="pendingPreview.sampleMessages?.length" class="mt-1">
-                    <div class="text-[var(--color-text-secondary)]">预览：</div>
-                    <div
-                      class="mt-1 flex gap-2 items-stretch rounded-lg border border-[var(--color-border)] bg-surface-overlay shadow-lg max-h-48 overflow-x-auto overflow-y-hidden px-2 py-1"
-                    >
-                      <div
-                        v-for="(item, idx) in pendingPreview.sampleMessages"
-                        :key="`${item.role}_${idx}`"
-                        class="shrink-0 flex flex-col w-[200px] h-[140px] min-h-0 min-w-0 px-3 py-2 text-xs border border-[var(--color-border-subtle)] rounded-md bg-[var(--color-surface-muted)] text-left"
-                      >
-                        <span class="text-[var(--color-text-secondary)] shrink-0 mb-1">{{ item.role === 'assistant' ? '角色' : '用户' }}</span>
-                        <div class="text-[var(--color-text-muted)] min-h-0 flex-1 overflow-hidden line-clamp-6 break-words">{{ item.content }}</div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
-                <div>
-                  <div class="mb-1 text-xs text-[var(--color-text-muted)]">目标角色</div>
-                  <ModernSelect
-                    :key="characterListKey"
-                    :model-value="selectedCharacterId"
-                    :options="characterOptions"
-                    placeholder="选择角色"
-                    @update:model-value="(v) => selectedCharacterId = v"
-                  />
-                </div>
-                <div>
-                  <div class="mb-1 text-xs text-[var(--color-text-muted)]">Persona（用户身份）</div>
-                  <ModernSelect
-                    :model-value="selectedPersonaId"
-                    :options="personaOptions"
-                    placeholder="选择 Persona"
-                    @update:model-value="(v) => selectedPersonaId = v"
-                  />
-                </div>
-              </div>
-              <label class="mt-3 flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
-                <ThemedCheckbox :checked="openAfterImport" @update:checked="openAfterImport = $event" />
-                导入后打开该会话
-              </label>
-              <div class="mt-3">
-                <button
-                  class="btn btn-sm btn-primary"
-                  :disabled="!pendingId || !selectedCharacterId || janitorConfirming"
-                  @click="confirmJanitorImport"
-                >
-                  {{ janitorConfirming ? '导入中...' : '确认导入 Janitor 聊天' }}
+              </SettingsField>
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <span v-if="stExpiresAt" class="settings-hint">预览暂存至：{{ stExpiresAt }}</span>
+                <button class="btn btn-sm btn-primary ml-auto" :disabled="!stPendingId || stConfirming" @click="confirmStImport">
+                  {{ stConfirmLabel }}
                 </button>
               </div>
-            </section>
+            </template>
+          </section>
 
-            <section class="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface-muted)] p-4">
-              <h4 class="text-sm font-medium text-[var(--color-text-secondary)]">导入 JAI 角色（链接）</h4>
-              <p class="mt-2 text-xs text-[var(--color-text-muted)]">
-                填写 JanitorAI 公开角色页链接后在新标签页打开；已安装的「SimpleTavern Janitor Bridge」扩展会抓取页面 HTML 并提交到本地，自动提取名称、简介、Personality、Scenario、首句与角色图片。
-              </p>
-              <div class="mt-3 flex gap-2">
-                <input
-                  v-model="jaiCharacterUrl"
-                  class="input flex-1"
-                  placeholder="https://janitorai.com/characters/..."
-                />
-                <button class="btn btn-sm btn-secondary" @click="openJaiCharacterUrlAndCapture">打开并抓取</button>
+          <section class="settings-group">
+            <div class="settings-group-title">JanitorAI 聊天迁移</div>
+            <SettingsHint>填写 JanitorAI 聊天链接后打开页面，扩展会在该页面首次合法捕获时自动提交到本地。</SettingsHint>
+            <div class="flex flex-wrap gap-2">
+              <input
+                v-model="janitorLink"
+                class="input min-w-[12rem] flex-1"
+                placeholder="https://janitorai.com/chats/..."
+              />
+              <button class="btn btn-sm btn-secondary" @click="openJanitorLinkAndTryCapture">打开并尝试获取</button>
+            </div>
+
+            <div class="settings-readout">
+              <div>
+                {{ pendingLoading ? '正在读取待导入预览...' : (pendingPreview ? '已检测到待导入数据' : '尚未检测到待导入数据') }}
               </div>
-            </section>
-          </div>
+              <div v-if="pendingError" class="mt-2 text-[var(--color-error)]">{{ pendingError }}</div>
+              <div v-if="pendingPreview" class="mt-2 space-y-2">
+                <div>角色名：<span class="text-[var(--color-text)]">{{ pendingPreview.botName || '未知' }}</span></div>
+                <div>消息数：<span class="text-[var(--color-text)]">{{ pendingPreview.messageCount }}</span></div>
+                <div v-if="pendingPreview.sampleMessages?.length">
+                  <div class="settings-label">预览</div>
+                  <div class="mt-1 flex gap-2 items-stretch overflow-x-auto overflow-y-hidden custom-scrollbar pb-1">
+                    <div
+                      v-for="(item, idx) in pendingPreview.sampleMessages"
+                      :key="`${item.role}_${idx}`"
+                      class="settings-item shrink-0 flex flex-col w-[200px] h-[140px] min-h-0 min-w-0 text-left"
+                    >
+                      <span class="settings-label shrink-0 mb-1">{{ item.role === 'assistant' ? '角色' : '用户' }}</span>
+                      <div class="min-h-0 flex-1 overflow-hidden line-clamp-6 break-words">{{ item.content }}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <SettingsField label="目标角色">
+              <ModernSelect
+                :key="characterListKey"
+                :model-value="selectedCharacterId"
+                :options="characterOptions"
+                placeholder="选择角色"
+                @update:model-value="(v) => selectedCharacterId = v"
+              />
+            </SettingsField>
+            <SettingsField label="Persona（用户身份）">
+              <ModernSelect
+                :model-value="selectedPersonaId"
+                :options="personaOptions"
+                placeholder="选择 Persona"
+                @update:model-value="(v) => selectedPersonaId = v"
+              />
+            </SettingsField>
+            <SettingsSwitch
+              label="导入后打开该会话"
+              :model-value="openAfterImport"
+              @update:model-value="openAfterImport = $event"
+            />
+            <div class="flex justify-end">
+              <button
+                class="btn btn-sm btn-primary"
+                :disabled="!pendingId || !selectedCharacterId || janitorConfirming"
+                @click="confirmJanitorImport"
+              >
+                {{ janitorConfirming ? '导入中...' : '确认导入 Janitor 聊天' }}
+              </button>
+            </div>
+          </section>
+
+          <section class="settings-group">
+            <div class="settings-group-title">导入 JAI 角色（链接）</div>
+            <SettingsHint more="填写 JanitorAI 公开角色页链接后在新标签页打开；已安装的「SimpleTavern Janitor Bridge」扩展会抓取页面 HTML 并提交到本地，自动提取名称、简介、Personality、Scenario、首句与角色图片。">
+              需要已安装「SimpleTavern Janitor Bridge」扩展。
+            </SettingsHint>
+            <div class="flex flex-wrap gap-2">
+              <input
+                v-model="jaiCharacterUrl"
+                class="input min-w-[12rem] flex-1"
+                placeholder="https://janitorai.com/characters/..."
+              />
+              <button class="btn btn-sm btn-secondary" @click="openJaiCharacterUrlAndCapture">打开并抓取</button>
+            </div>
+          </section>
         </div>
       </div>
     </div>

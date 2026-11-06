@@ -36,6 +36,9 @@ import type { Chat, CharacterCard, ChatContentRegexRule, ChatMvuMode, ChatOverri
 import ModernAvatar from '../ModernAvatar.vue'
 import ModernSelect from '../ModernSelect.vue'
 import MvuCapabilityEditor from '../chat/MvuCapabilityEditor.vue'
+import SettingsField from '../settings-drawer/SettingsField.vue'
+import SettingsSwitch from '../settings-drawer/SettingsSwitch.vue'
+import SettingsHint from '../settings-drawer/SettingsHint.vue'
 import { GripVertical, X } from 'lucide-vue-next'
 import { useDialogBehavior } from '../../composables/useDialogBehavior'
 import { dialogAria } from '../../utils/uiPrimitives'
@@ -219,104 +222,73 @@ void dialogRef
         <div class="modal-header">
           <h3 :id="titleId" class="modal-title">群聊设置 - {{ chat.title }}</h3>
           <button type="button" class="modal-close" aria-label="关闭群聊设置弹窗" @click="close">
-              <X class="w-5 h-5" />
+            <X class="w-5 h-5" />
           </button>
         </div>
-        
-        <div class="modal-body space-y-6">
-          <!-- 群聊发言延迟 -->
-          <div class="form-group">
-            <label class="label">发言延迟 (ms)</label>
-            <input 
-              v-model.number="groupDelayDraft"
-              type="number"
-              class="input"
-              step="100"
-              min="0"
+
+        <div class="modal-body">
+          <div class="settings-group">
+            <div class="settings-group-title">发言与系统提示词</div>
+            <SettingsField label="发言延迟 (ms)" hint="角色连续发言之间的间隔时间。">
+              <input
+                v-model.number="groupDelayDraft"
+                type="number"
+                class="input w-full"
+                step="100"
+                min="0"
+              />
+            </SettingsField>
+            <SettingsSwitch
+              label="永远在底部（默认）"
+              :model-value="groupSystemAlwaysAtBottomDraft"
+              hint="开启时整段 system 在消息最前。"
+              more="开启时整段 system 在消息最前，与旧版一致；关闭后按下方深度将整段 system 插入历史，利于部分 KV 命中。"
+              @update:model-value="groupSystemAlwaysAtBottomDraft = $event"
             />
-            <div class="form-hint">角色连续发言之间的间隔时间</div>
+            <SettingsField
+              label="系统提示词注入深度"
+              hint="仅关闭「永远在底部」时生效。"
+              more="整段 system 将插在倒数第 N 条消息（含世界书产生条目）之前；仅关闭「永远在底部」时生效。"
+              :class="{ 'opacity-50 pointer-events-none': groupSystemAlwaysAtBottomDraft }"
+            >
+              <input
+                v-model.number="groupSystemInjectDepthDraft"
+                type="number"
+                class="input w-full"
+                min="0"
+                step="1"
+              />
+            </SettingsField>
           </div>
 
-          <div class="form-group">
-            <label class="label text-brand-light">永远在底部（默认）</label>
-            <div class="flex items-start justify-between gap-3">
-              <p class="min-w-0 flex-1 text-xs text-muted">
-                开启时整段 system 在消息最前，与旧版一致；关闭后按下方深度将整段 system 插入历史，利于部分 KV 命中。
-              </p>
-              <button
-                type="button"
-                class="flex shrink-0 items-center gap-2"
-                :aria-pressed="groupSystemAlwaysAtBottomDraft"
-                @click="groupSystemAlwaysAtBottomDraft = !groupSystemAlwaysAtBottomDraft"
-              >
-                <div
-                  class="w-10 h-5 rounded-full relative transition-colors duration-200"
-                  :class="groupSystemAlwaysAtBottomDraft ? 'bg-brand' : 'bg-surface-muted'"
-                >
-                  <div
-                    class="absolute top-1 w-3 h-3 rounded-full bg-[var(--color-text-primary)] transition-transform duration-200"
-                    :class="groupSystemAlwaysAtBottomDraft ? 'left-6' : 'left-1'"
-                  />
-                </div>
-                <span class="min-w-[2.5rem] text-center text-xs text-muted">{{ groupSystemAlwaysAtBottomDraft ? '开启' : '关闭' }}</span>
-              </button>
-            </div>
-          </div>
-          <div class="form-group" :class="{ 'opacity-50 pointer-events-none': groupSystemAlwaysAtBottomDraft }">
-            <label class="label">系统提示词注入深度</label>
-            <input
-              v-model.number="groupSystemInjectDepthDraft"
-              type="number"
-              class="input"
-              min="0"
-              step="1"
+          <div class="settings-group">
+            <div class="settings-group-title">MVU</div>
+            <SettingsSwitch
+              label="启用群聊 MVU"
+              :model-value="groupMvuEnabledDraft"
+              hint="由锚定成员的状态栏与 MVU 模式驱动。"
+              more="启用后由锚定成员的状态栏与 MVU 模式（指令 / 正则）驱动；与会话设置抽屉写入同一套 overrides。"
+              @update:model-value="groupMvuEnabledDraft = $event"
             />
-            <div class="form-hint">整段 system 将插在倒数第 N 条消息（含世界书产生条目）之前；仅关闭「永远在底部」时生效。</div>
-          </div>
-
-          <div class="form-group surface-muted p-3 space-y-3">
-            <div class="text-sm font-medium text-brand">MVU</div>
-            <div class="flex items-start justify-between gap-3">
-              <p class="min-w-0 flex-1 text-xs text-muted">启用后由锚定成员的状态栏与 MVU 模式（指令 / 正则）驱动；与会话设置抽屉写入同一套 overrides。</p>
-              <button
-                type="button"
-                class="flex shrink-0 items-center gap-2"
-                :aria-pressed="groupMvuEnabledDraft"
-                @click="groupMvuEnabledDraft = !groupMvuEnabledDraft"
-              >
-                <div
-                  class="w-10 h-5 rounded-full relative transition-colors duration-200"
-                  :class="groupMvuEnabledDraft ? 'bg-brand' : 'bg-surface-muted'"
-                >
-                  <div
-                    class="absolute top-1 w-3 h-3 rounded-full bg-[var(--color-text-primary)] transition-transform duration-200"
-                    :class="groupMvuEnabledDraft ? 'left-6' : 'left-1'"
-                  />
-                </div>
-                <span class="min-w-[2.5rem] text-center text-xs text-muted">{{ groupMvuEnabledDraft ? '开启' : '关闭' }}</span>
-              </button>
-            </div>
-            <div v-if="groupMvuEnabledDraft" class="space-y-3">
-              <div class="space-y-1.5">
-                <label class="block text-xs text-muted">锚定成员（须在成员列表内）</label>
+            <template v-if="groupMvuEnabledDraft">
+              <SettingsField label="锚定成员（须在成员列表内）">
                 <ModernSelect
                   :model-value="groupMvuAnchorDraft || ''"
-                  @update:model-value="(v) => (groupMvuAnchorDraft = v || null)"
                   :options="groupMvuAnchorSelectOptions"
                   placeholder="选择成员"
                   class="w-full"
+                  @update:model-value="(v) => (groupMvuAnchorDraft = v || null)"
                 />
-              </div>
-              <div class="space-y-1.5">
-                <label class="block text-xs text-muted">模板成员（可选，仅作记录）</label>
+              </SettingsField>
+              <SettingsField label="模板成员（可选，仅作记录）">
                 <ModernSelect
                   :model-value="groupMvuTemplateDraft || ''"
-                  @update:model-value="(v) => (groupMvuTemplateDraft = v || null)"
                   :options="groupMvuTemplateSelectOptions"
                   placeholder="可选"
                   class="w-full"
+                  @update:model-value="(v) => (groupMvuTemplateDraft = v || null)"
                 />
-              </div>
+              </SettingsField>
               <MvuCapabilityEditor
                 :mvu-mode="mvuModeDraft"
                 :mvu-directive="mvuDirectiveDraft"
@@ -329,57 +301,43 @@ void dialogRef
                 @update:content-regex-rules="(v) => (contentRegexRulesDraft = v)"
                 @update:initial-state-tables="(v) => (stateTablesDraft = v)"
               />
-            </div>
+            </template>
           </div>
 
-          <!-- 成员列表与排序 -->
-          <div class="form-group">
-            <label class="label">成员与发言顺序</label>
-            <div class="form-hint mb-3">拖动成员卡片可更改在“自动发言”模式下的发言顺序</div>
-            
-            <div class="space-y-2">
-              <div 
-                v-for="(id, idx) in memberIdsDraft" 
+          <div class="settings-group">
+            <div class="settings-group-title">成员与发言顺序</div>
+            <SettingsHint>拖动成员卡片可更改在“自动发言”模式下的发言顺序。</SettingsHint>
+            <div class="flex flex-col gap-2">
+              <div
+                v-for="(id, idx) in memberIdsDraft"
                 :key="id"
-                class="surface-muted interactive-surface flex items-center gap-3 p-3 group/item"
-                :class="draggingIdx === idx ? 'surface-selected opacity-40 scale-95' : ''"
+                class="settings-item flex items-center gap-3"
+                :class="{ 'settings-item--dragging': draggingIdx === idx }"
                 draggable="true"
                 @dragstart="handleDragStart(idx)"
                 @dragover="handleDragOver($event, idx)"
                 @dragend="handleDragEnd"
               >
-                <!-- 拖动手柄 -->
-                <div class="cursor-move text-muted px-1">
-                  <GripVertical class="w-5 h-5" />
+                <div class="cursor-move text-muted">
+                  <GripVertical class="w-4 h-4" />
                 </div>
-
-                <!-- 序号 -->
-                <div class="surface-inset w-6 h-6 rounded-full flex items-center justify-center text-2xs text-muted font-bold">
+                <div class="w-4 shrink-0 text-center text-2xs text-muted font-bold">
                   {{ idx + 1 }}
                 </div>
-
-                <!-- 头像 -->
-                <ModernAvatar 
-                  :src="getCharacter(id)?.avatar ? `/api/avatars/${getCharacter(id)?.avatar}` : null" 
-                  :name="getCharacter(id)?.name || '未知'" 
-                  :size="32" 
-                  aspect="1" 
-                  rounded="rounded-lg" 
+                <ModernAvatar
+                  :src="getCharacter(id)?.avatar ? `/api/avatars/${getCharacter(id)?.avatar}` : null"
+                  :name="getCharacter(id)?.name || '未知'"
+                  :size="32"
+                  aspect="1"
+                  rounded="rounded-lg"
                 />
-
-                <!-- 名称 -->
                 <div class="flex-1 min-w-0">
                   <div class="font-medium text-sm text-primary truncate">{{ getCharacter(id)?.name || '未知角色' }}</div>
                   <div v-if="chat.memberSettings?.[id]?.probability !== undefined && chat.memberSettings[id].probability < 1" class="text-2xs text-warning">
                     参与概率: {{ Math.round(Number(chat.memberSettings?.[id]?.probability) * 100) }}%
                   </div>
                 </div>
-
-                <!-- 操作 -->
-                <button 
-                  class="btn btn-xs btn-ghost"
-                  @click="emit('open-member-settings', id)"
-                >
+                <button class="btn btn-xs btn-ghost" @click="emit('open-member-settings', id)">
                   详情设置
                 </button>
               </div>

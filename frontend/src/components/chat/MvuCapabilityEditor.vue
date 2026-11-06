@@ -12,7 +12,7 @@
  */
 import InitialStateEditor from './InitialStateEditor.vue'
 import ModernSelect from '../ModernSelect.vue'
-import ThemedCheckbox from '../ThemedCheckbox.vue'
+import SettingsField from '../settings-drawer/SettingsField.vue'
 import type { ChatContentRegexRule, ChatMvuMode, StatusTableDef } from '../../types/models'
 
 const props = withDefaults(defineProps<{
@@ -106,131 +106,142 @@ void modeSelectValue
 </script>
 
 <template>
-  <div class="space-y-3">
-    <div class="grid grid-cols-1 md:grid-cols-[minmax(12rem,220px)_1fr] gap-3">
-      <div class="space-y-1.5">
-        <label class="block text-xs font-medium text-[var(--color-text-secondary)]">MVU 模式</label>
-        <ModernSelect
-          :model-value="props.mvuMode ?? ''"
-          :options="modeOptions"
-          placeholder="选择 MVU 模式..."
-          @update:model-value="onModeChange"
-        />
-      </div>
-      <div class="text-xs text-[var(--color-text-muted)] self-end pb-2">
-        正则模式使用正文正则提取状态变更；指令模式保存给后续 MVU 流程读取的自然语言规则。
-      </div>
-    </div>
+  <div class="flex flex-col gap-4">
+    <SettingsField
+      label="MVU 模式"
+      hint="决定如何从回复中得到状态变更。"
+      more="正则模式使用正文正则提取状态变更；指令模式保存给后续 MVU 流程读取的自然语言规则。"
+    >
+      <ModernSelect
+        :model-value="props.mvuMode ?? ''"
+        :options="modeOptions"
+        :placeholder="props.allowInherit ? '继承（未指定）' : '选择 MVU 模式...'"
+        @update:model-value="onModeChange"
+      />
+    </SettingsField>
 
-    <div v-if="props.mvuMode === 'directive'" class="space-y-1.5">
-      <label class="block text-xs font-medium text-[var(--color-text-secondary)]">MVU 指令</label>
+    <SettingsField v-if="props.mvuMode === 'directive'" label="MVU 指令">
       <textarea
         :value="props.mvuDirective ?? ''"
-        class="input textarea h-32"
+        class="input textarea h-32 w-full"
         placeholder="描述如何从回复中识别状态变化、如何更新状态栏。"
         @input="onDirectiveInput"
       ></textarea>
-    </div>
+    </SettingsField>
 
-    <template v-else-if="props.mvuMode === 'regex'">
-      <div class="flex items-center justify-between">
-        <div class="text-xs text-[var(--color-text-muted)]">正文正则规则</div>
+    <SettingsField v-else-if="props.mvuMode === 'regex'" label="正文正则规则">
+      <template #actions>
         <button type="button" class="btn btn-xs btn-secondary" @click="addRule">新建规则</button>
-      </div>
-      <div class="space-y-2">
+      </template>
+      <div class="flex flex-col gap-2">
         <div
           v-for="(rule, idx) in props.contentRegexRules || []"
           :key="rule.id || idx"
-          class="rounded-lg border border-[var(--color-border-subtle)] bg-surface-muted p-2 space-y-2"
+          class="settings-item flex flex-col gap-3"
         >
           <div class="flex items-center gap-2">
             <input
               :value="rule.name ?? ''"
-              class="input flex-1"
+              class="input min-w-0 flex-1"
               placeholder="规则名称（可选）"
               @input="updateRule(idx, { name: ($event.target as HTMLInputElement).value })"
             />
-            <label class="inline-flex items-center gap-1 text-xs cursor-pointer select-none">
-              <ThemedCheckbox
-                :checked="rule.enabled"
-                @update:checked="(v: boolean) => updateRule(idx, { enabled: v })"
+            <button
+              type="button"
+              role="switch"
+              class="settings-switch"
+              :class="{ 'settings-switch--on': rule.enabled }"
+              :aria-checked="rule.enabled"
+              aria-label="启用规则"
+              @click="updateRule(idx, { enabled: !rule.enabled })"
+            >
+              <span class="settings-switch-knob" />
+            </button>
+            <button type="button" class="btn btn-xs btn-secondary shrink-0" @click="removeRule(idx)">删除</button>
+          </div>
+          <SettingsField label="Pattern">
+            <textarea
+              :value="rule.pattern"
+              class="input textarea h-20 w-full"
+              placeholder="pattern"
+              @input="updateRule(idx, { pattern: ($event.target as HTMLTextAreaElement).value })"
+            ></textarea>
+          </SettingsField>
+          <div class="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(8rem,1fr))]">
+            <SettingsField label="处理动作">
+              <ModernSelect
+                :model-value="rule.action"
+                :options="[
+                  { label: '删除', value: 'remove' },
+                  { label: '替换', value: 'replace' },
+                  { label: '提取', value: 'extract' },
+                  { label: '提取并替换显示', value: 'extract_and_replace' },
+                ]"
+                placeholder="选择处理动作..."
+                @update:model-value="(v: string) => updateRule(idx, { action: v as ChatContentRegexRule['action'] })"
               />
-              <span>启用</span>
-            </label>
-            <button type="button" class="btn btn-xs btn-secondary" @click="removeRule(idx)">删除</button>
+            </SettingsField>
+            <SettingsField label="匹配模式">
+              <ModernSelect
+                :model-value="rule.matchMode ?? 'global'"
+                :options="[
+                  { label: '全局命中', value: 'global' },
+                  { label: '首个命中', value: 'first' },
+                ]"
+                placeholder="选择匹配模式..."
+                @update:model-value="(v: string) => updateRule(idx, { matchMode: v as ChatContentRegexRule['matchMode'] })"
+              />
+            </SettingsField>
+            <SettingsField label="覆盖深度">
+              <input
+                :value="rule.scanDepthOverride ?? ''"
+                type="number"
+                min="1"
+                class="input w-full"
+                placeholder="可选"
+                @input="updateRule(idx, { scanDepthOverride: (() => { const n = Number(($event.target as HTMLInputElement).value); return Number.isFinite(n) && n >= 1 ? n : null })() })"
+              />
+            </SettingsField>
           </div>
-          <textarea
-            :value="rule.pattern"
-            class="input textarea h-20"
-            placeholder="pattern"
-            @input="updateRule(idx, { pattern: ($event.target as HTMLTextAreaElement).value })"
-          ></textarea>
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
-            <ModernSelect
-              :model-value="rule.action"
-              :options="[
-                { label: '删除', value: 'remove' },
-                { label: '替换', value: 'replace' },
-                { label: '提取', value: 'extract' },
-                { label: '提取并替换显示', value: 'extract_and_replace' },
-              ]"
-              placeholder="选择处理动作..."
-              @update:model-value="(v: string) => updateRule(idx, { action: v as ChatContentRegexRule['action'] })"
-            />
-            <ModernSelect
-              :model-value="rule.matchMode ?? 'global'"
-              :options="[
-                { label: '全局命中', value: 'global' },
-                { label: '首个命中', value: 'first' },
-              ]"
-              placeholder="选择匹配模式..."
-              @update:model-value="(v: string) => updateRule(idx, { matchMode: v as ChatContentRegexRule['matchMode'] })"
-            />
-            <input
-              :value="rule.scanDepthOverride ?? ''"
-              type="number"
-              min="1"
-              class="input"
-              placeholder="覆盖深度(可选)"
-              @input="updateRule(idx, { scanDepthOverride: (() => { const n = Number(($event.target as HTMLInputElement).value); return Number.isFinite(n) && n >= 1 ? n : null })() })"
-            />
-          </div>
-          <textarea
-            v-if="rule.action === 'replace' || rule.action === 'extract_and_replace'"
-            :value="rule.replacement ?? ''"
-            class="input textarea h-16"
-            placeholder="replacement"
-            @input="updateRule(idx, { replacement: ($event.target as HTMLTextAreaElement).value })"
-          ></textarea>
-          <div v-if="rule.action === 'extract' || rule.action === 'extract_and_replace'" class="grid grid-cols-1 md:grid-cols-2 gap-2">
-            <ModernSelect
-              :model-value="rule.extractSource ?? 'whole_match'"
-              :options="[
-                { label: '整段匹配', value: 'whole_match' },
-                { label: '捕获分组', value: 'capture_group' },
-              ]"
-              placeholder="选择提取来源..."
-              @update:model-value="(v: string) => updateRule(idx, { extractSource: v as ChatContentRegexRule['extractSource'] })"
-            />
-            <input
-              v-if="rule.extractSource === 'capture_group'"
-              :value="rule.extractGroupIndex ?? ''"
-              type="number"
-              min="0"
-              class="input"
-              placeholder="提取分组下标"
-              @input="updateRule(idx, { extractGroupIndex: (() => { const n = Number(($event.target as HTMLInputElement).value); return Number.isFinite(n) && n >= 0 ? n : null })() })"
-            />
+          <SettingsField v-if="rule.action === 'replace' || rule.action === 'extract_and_replace'" label="Replacement">
+            <textarea
+              :value="rule.replacement ?? ''"
+              class="input textarea h-16 w-full"
+              placeholder="replacement"
+              @input="updateRule(idx, { replacement: ($event.target as HTMLTextAreaElement).value })"
+            ></textarea>
+          </SettingsField>
+          <div
+            v-if="rule.action === 'extract' || rule.action === 'extract_and_replace'"
+            class="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(8rem,1fr))]"
+          >
+            <SettingsField label="提取来源">
+              <ModernSelect
+                :model-value="rule.extractSource ?? 'whole_match'"
+                :options="[
+                  { label: '整段匹配', value: 'whole_match' },
+                  { label: '捕获分组', value: 'capture_group' },
+                ]"
+                placeholder="选择提取来源..."
+                @update:model-value="(v: string) => updateRule(idx, { extractSource: v as ChatContentRegexRule['extractSource'] })"
+              />
+            </SettingsField>
+            <SettingsField v-if="rule.extractSource === 'capture_group'" label="提取分组下标">
+              <input
+                :value="rule.extractGroupIndex ?? ''"
+                type="number"
+                min="0"
+                class="input w-full"
+                @input="updateRule(idx, { extractGroupIndex: (() => { const n = Number(($event.target as HTMLInputElement).value); return Number.isFinite(n) && n >= 0 ? n : null })() })"
+              />
+            </SettingsField>
           </div>
         </div>
-        <div
-          v-if="!(props.contentRegexRules || []).length"
-          class="text-xs text-[var(--color-text-muted)] border border-dashed border-[var(--color-border-subtle)] rounded-lg px-3 py-2"
-        >
+        <div v-if="!(props.contentRegexRules || []).length" class="settings-readout">
           暂无规则。
         </div>
       </div>
-    </template>
+    </SettingsField>
 
     <InitialStateEditor
       :tables="props.initialStateTables || []"

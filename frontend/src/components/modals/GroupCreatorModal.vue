@@ -30,10 +30,14 @@
  *    - 位置：组件层，提供群聊创建功能
  */
 import { ref, computed, watch } from 'vue'
+import { X } from 'lucide-vue-next'
 import type { CharacterCard, ChatContentRegexRule, ChatMvuMode, GroupMvuPreset, StatusTableDef } from '../../types/models'
 import ModernAvatar from '../ModernAvatar.vue'
 import ModernSelect from '../ModernSelect.vue'
 import ThemedCheckbox from '../ThemedCheckbox.vue'
+import SettingsField from '../settings-drawer/SettingsField.vue'
+import SettingsSwitch from '../settings-drawer/SettingsSwitch.vue'
+import SettingsHint from '../settings-drawer/SettingsHint.vue'
 import MvuCapabilityEditor from '../chat/MvuCapabilityEditor.vue'
 import { characterHasMvuProfileData } from '../../utils/groupMvu'
 import { useDialogBehavior } from '../../composables/useDialogBehavior'
@@ -326,186 +330,150 @@ void dialogRef
       <div ref="dialogRef" v-bind="dialogAttrs" tabindex="-1" class="modal-content modal-surface chat-modal-width-600-90">
         <div class="modal-header">
           <h3 :id="titleId" class="modal-title">{{ isMigrateMode ? '从单聊转为群聊' : '创建群聊' }}</h3>
-          <button type="button" class="modal-close" aria-label="关闭群聊创建弹窗" @click="close">×</button>
+          <button type="button" class="modal-close" aria-label="关闭群聊创建弹窗" @click="close">
+            <X class="w-5 h-5" />
+          </button>
         </div>
         <div class="modal-body">
-          <div class="space-y-6">
-            <div class="form-group">
-              <label class="label">群聊名称</label>
-              <input 
-                v-model="groupTitle" 
-                class="input" 
-                placeholder="新群聊" 
+          <div class="settings-group">
+            <SettingsField label="群聊名称">
+              <input v-model="groupTitle" class="input w-full" placeholder="新群聊" />
+            </SettingsField>
+          </div>
+
+          <div class="settings-group">
+            <div class="settings-group-title">本次聊天设置</div>
+            <SettingsSwitch
+              label="纯 AI 模式"
+              :model-value="groupPureAiMode"
+              hint="不注入 Persona，用户发言将以 system 影响世界。"
+              @update:model-value="groupPureAiMode = $event"
+            />
+            <SettingsSwitch
+              label="永远在底部（默认）"
+              :model-value="groupSystemAlwaysAtBottom"
+              hint="开启时整段 system 在首条。"
+              more="开启时整段 system 在首条，与旧版一致；关闭后可用下方「注入深度」将整段 system 插入历史。"
+              @update:model-value="groupSystemAlwaysAtBottom = $event"
+            />
+            <SettingsField label="系统提示词注入深度" :class="{ 'opacity-50 pointer-events-none': groupSystemAlwaysAtBottom }">
+              <input
+                v-model.number="groupSystemInjectDepth"
+                type="number"
+                min="0"
+                class="input w-full"
+                step="1"
               />
-            </div>
+            </SettingsField>
+          </div>
 
-            <div class="surface-muted p-3">
-              <div class="text-sm text-secondary font-medium mb-2">本次聊天设置</div>
-              <div class="flex items-center justify-between gap-3">
-                <div class="min-w-0 flex-1 text-sm text-muted">纯 AI 模式（不注入 Persona，用户发言将以 system 影响世界）</div>
-                <button
-                  type="button"
-                  class="flex shrink-0 items-center gap-2"
-                  @click="groupPureAiMode = !groupPureAiMode"
-                >
-                  <div class="w-10 h-5 rounded-full relative transition-colors duration-200" :class="groupPureAiMode ? 'bg-brand' : 'bg-surface-muted'">
-                    <div class="absolute top-1 w-3 h-3 rounded-full bg-[var(--color-text-primary)] transition-transform duration-200" :class="groupPureAiMode ? 'left-6' : 'left-1'"></div>
-                  </div>
-                  <span class="min-w-[2.5rem] text-center text-xs text-muted">{{ groupPureAiMode ? '开启' : '关闭' }}</span>
-                </button>
-              </div>
-              <div class="mt-3 space-y-3 pt-2 border-t border-[var(--color-border-subtle)]">
-                <div class="flex items-center justify-between gap-3">
-                  <div class="min-w-0 flex-1 text-sm text-muted">永远在底部（默认）</div>
-                  <button
-                    type="button"
-                    class="flex shrink-0 items-center gap-2"
-                    @click="groupSystemAlwaysAtBottom = !groupSystemAlwaysAtBottom"
-                  >
-                    <div class="w-10 h-5 rounded-full relative transition-colors duration-200" :class="groupSystemAlwaysAtBottom ? 'bg-brand' : 'bg-surface-muted'">
-                      <div class="absolute top-1 w-3 h-3 rounded-full bg-[var(--color-text-primary)] transition-transform duration-200" :class="groupSystemAlwaysAtBottom ? 'left-6' : 'left-1'"></div>
-                    </div>
-                    <span class="min-w-[2.5rem] text-center text-xs text-muted">{{ groupSystemAlwaysAtBottom ? '开启' : '关闭' }}</span>
-                  </button>
-                </div>
-                <p class="text-xs text-muted">开启时整段 system 在首条，与旧版一致；关闭后可用下方「注入深度」将整段 system 插入历史。</p>
-                <div :class="{ 'opacity-50 pointer-events-none': groupSystemAlwaysAtBottom }">
-                  <label class="text-xs text-muted">系统提示词注入深度</label>
-                  <input
-                    v-model.number="groupSystemInjectDepth"
-                    type="number"
-                    min="0"
-                    class="input mt-1 w-full"
-                    step="1"
-                  />
-                </div>
-              </div>
-            </div>
+          <div v-if="!isMigrateMode" class="settings-group">
+            <div class="settings-group-title">群聊首句（故事背景）</div>
+            <SettingsSwitch
+              label="启用某角色的 First Message 作为开场"
+              :model-value="groupFirstMessageEnabled"
+              hint="创建后会在聊天窗口内直接插入该角色的首句（会写入聊天记录）。"
+              @update:model-value="groupFirstMessageEnabled = $event"
+            />
+            <SettingsField v-if="groupFirstMessageEnabled" label="选择角色">
+              <ModernSelect
+                :model-value="groupFirstMessageCharacterId || ''"
+                :options="groupFirstMessageOptions"
+                :disabled="selectedMemberIds.length === 0"
+                placeholder="（未选择）"
+                class="w-full"
+                @update:model-value="(v) => groupFirstMessageCharacterId = v || null"
+              />
+            </SettingsField>
+          </div>
 
-            <div v-if="!isMigrateMode" class="surface-muted p-3">
-              <div class="text-sm text-secondary font-medium mb-2">群聊首句（故事背景）</div>
-              <div class="flex items-center justify-between gap-3 mb-2">
-                <div class="min-w-0 flex-1 text-sm text-muted">启用某角色的 First Message 作为开场</div>
-                <button type="button" class="flex shrink-0 items-center gap-2" @click="groupFirstMessageEnabled = !groupFirstMessageEnabled">
-                  <div class="w-10 h-5 rounded-full relative transition-colors duration-200" :class="groupFirstMessageEnabled ? 'bg-brand' : 'bg-surface-muted'">
-                    <div class="absolute top-1 w-3 h-3 rounded-full bg-[var(--color-text-primary)] transition-transform duration-200" :class="groupFirstMessageEnabled ? 'left-6' : 'left-1'"></div>
-                  </div>
-                  <span class="min-w-[2.5rem] text-center text-xs text-muted">{{ groupFirstMessageEnabled ? '启用' : '关闭' }}</span>
-                </button>
-              </div>
-              <div v-if="groupFirstMessageEnabled" class="flex items-center gap-2">
-                <span class="text-xs text-muted shrink-0">选择角色：</span>
+          <div v-if="!isMigrateMode" class="settings-group">
+            <div class="settings-group-title">群聊 MVU</div>
+            <SettingsSwitch
+              label="启用群聊 MVU"
+              :model-value="groupMvuEnabled"
+              hint="状态栏 / 指令 / 正则队列。"
+              @update:model-value="groupMvuEnabled = $event"
+            />
+            <template v-if="groupMvuEnabled">
+              <SettingsField
+                label="MVU 来源"
+                :hint="selectedMemberIds.length < 2 ? '请先选择至少两名群成员后再选择 MVU 来源。' : undefined"
+              >
                 <ModernSelect
-                  :model-value="groupFirstMessageCharacterId || ''"
-                  @update:model-value="(v) => groupFirstMessageCharacterId = v || null"
-                  :options="groupFirstMessageOptions"
-                  :disabled="selectedMemberIds.length === 0"
-                  placeholder="（未选择）"
-                  class="flex-1"
+                  :model-value="groupMvuSourceKey"
+                  :options="groupMvuSourceOptions"
+                  :disabled="selectedMemberIds.length < 2"
+                  placeholder="（请选择）"
+                  class="w-full"
+                  @update:model-value="(v) => (groupMvuSourceKey = v)"
                 />
-              </div>
-              <div class="text-xs text-muted mt-2">创建后会在聊天窗口内直接插入该角色的首句（会写入聊天记录）。</div>
-            </div>
+              </SettingsField>
+              <MvuCapabilityEditor
+                v-if="groupMvuSourceKey"
+                :mvu-mode="mvuModeDraft"
+                :mvu-directive="mvuDirectiveDraft"
+                :content-regex-rules="contentRegexRulesDraft"
+                :initial-state-tables="initialStateTablesDraft"
+                :allow-inherit="true"
+                tables-empty-hint="暂无状态表格。点击「新建表格」开始配置。"
+                @update:mvu-mode="(v) => (mvuModeDraft = v)"
+                @update:mvu-directive="(v) => (mvuDirectiveDraft = v)"
+                @update:content-regex-rules="(v) => (contentRegexRulesDraft = v)"
+                @update:initial-state-tables="(v) => (initialStateTablesDraft = v)"
+              />
+            </template>
+          </div>
 
-            <div v-if="!isMigrateMode" class="surface-muted p-3 space-y-3">
-              <div class="text-sm text-secondary font-medium">群聊 MVU</div>
-              <div class="flex items-center justify-between gap-3">
-                <div class="min-w-0 flex-1 text-sm text-muted">启用群聊 MVU（状态栏 / 指令 / 正则队列）</div>
-                <button
-                  type="button"
-                  class="flex shrink-0 items-center gap-2"
-                  @click="groupMvuEnabled = !groupMvuEnabled"
-                >
-                  <div
-                    class="w-10 h-5 rounded-full relative transition-colors duration-200"
-                    :class="groupMvuEnabled ? 'bg-brand' : 'bg-surface-muted'"
-                  >
-                    <div
-                      class="absolute top-1 w-3 h-3 rounded-full bg-[var(--color-text-primary)] transition-transform duration-200"
-                      :class="groupMvuEnabled ? 'left-6' : 'left-1'"
-                    />
-                  </div>
-                  <span class="min-w-[2.5rem] text-center text-xs text-muted">{{ groupMvuEnabled ? '开启' : '关闭' }}</span>
-                </button>
-              </div>
-              <div v-if="groupMvuEnabled" class="space-y-3 pt-2 border-t border-[var(--color-border-subtle)]">
-                <div class="space-y-1.5">
-                  <label class="block text-xs text-muted">MVU 来源</label>
-                  <ModernSelect
-                    :model-value="groupMvuSourceKey"
-                    @update:model-value="(v) => (groupMvuSourceKey = v)"
-                    :options="groupMvuSourceOptions"
-                    :disabled="selectedMemberIds.length < 2"
-                    placeholder="（请选择）"
-                    class="w-full"
+          <div class="settings-group">
+            <div class="settings-group-title">选择群成员</div>
+            <SettingsHint>
+              {{ isMigrateMode ? '当前单聊角色已固定为首位，请再选择至少一名其他角色。' : '至少选择 2 个角色。' }}
+            </SettingsHint>
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+              <div
+                v-for="c in characters"
+                :key="c.id"
+                class="settings-item flex items-start gap-3 cursor-pointer hover:bg-surface-hover"
+                :class="{ 'settings-item--selected': selectedMemberIds.includes(c.id) }"
+                @click="toggleMemberSelection(c.id)"
+              >
+                <div class="relative shrink-0">
+                  <ModernAvatar
+                    :src="c.avatar ? `/api/avatars/${c.avatar}` : null"
+                    :name="c.name"
+                    :size="40"
+                    aspect="auto"
+                    object-fit="contain"
+                    rounded="rounded-lg"
                   />
-                  <p v-if="selectedMemberIds.length < 2" class="text-xs text-muted">请先选择至少两名群成员后再选择 MVU 来源。</p>
-                </div>
-                <MvuCapabilityEditor
-                  v-if="groupMvuSourceKey"
-                  :mvu-mode="mvuModeDraft"
-                  :mvu-directive="mvuDirectiveDraft"
-                  :content-regex-rules="contentRegexRulesDraft"
-                  :initial-state-tables="initialStateTablesDraft"
-                  :allow-inherit="true"
-                  tables-empty-hint="暂无状态表格。点击「新建表格」开始配置。"
-                  @update:mvu-mode="(v) => (mvuModeDraft = v)"
-                  @update:mvu-directive="(v) => (mvuDirectiveDraft = v)"
-                  @update:content-regex-rules="(v) => (contentRegexRulesDraft = v)"
-                  @update:initial-state-tables="(v) => (initialStateTablesDraft = v)"
-                />
-              </div>
-            </div>
-            
-            <div>
-              <div class="text-sm text-muted mb-3">
-                {{ isMigrateMode ? '当前单聊角色已固定为首位，请再选择至少一名其他角色：' : '选择群成员 (至少选择2个角色):' }}
-              </div>
-              <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
-                <div 
-                  v-for="c in characters"
-                  :key="c.id"
-                  class="flex items-start gap-3 p-3 rounded-xl cursor-pointer transition-[border-color,background-color,box-shadow,color] border-2"
-                  :class="selectedMemberIds.includes(c.id) ? 'surface-selected' : 'surface-muted interactive-surface border-transparent'"
-                  @click="toggleMemberSelection(c.id)"
-                >
-                  <div class="relative shrink-0">
-                    <ModernAvatar 
-                      :src="c.avatar ? `/api/avatars/${c.avatar}` : null" 
-                      :name="c.name" 
-                      :size="40" 
-                      aspect="auto"
-                      object-fit="contain"
-                      rounded="rounded-lg"
-                    />
-                    <div 
-                      v-if="selectedMemberIds.includes(c.id)"
-                      class="absolute -top-1 -right-1 w-5 h-5 bg-brand rounded-full flex items-center justify-center text-on-brand text-xs font-bold"
-                    >
-                      {{ selectedMemberIds.indexOf(c.id) + 1 }}
-                    </div>
+                  <div
+                    v-if="selectedMemberIds.includes(c.id)"
+                    class="absolute -top-1 -right-1 w-5 h-5 bg-brand rounded-full flex items-center justify-center text-on-brand text-xs font-bold"
+                  >
+                    {{ selectedMemberIds.indexOf(c.id) + 1 }}
                   </div>
-                  <div class="flex-1 min-w-0">
-                    <div class="font-medium text-sm truncate" :class="selectedMemberIds.includes(c.id) ? 'text-brand-light' : 'text-secondary'">{{ c.name }}</div>
-                    <div class="text-xs text-muted truncate">{{ c.description || '暂无简介' }}</div>
-                    <div v-if="selectedMemberIds.includes(c.id)" class="mt-2 space-y-1" @click.stop>
-                      <div class="text-2xs text-muted">system prompt 插入：</div>
-                      <div class="flex flex-wrap gap-3 text-xs text-secondary">
-                        <label class="flex items-center gap-1 cursor-pointer">
-                          <ThemedCheckbox
-                            :checked="(groupMemberInclusions[c.id]?.includePersonality ?? true)"
-                            @update:checked="(checked) => { const inc = groupMemberInclusions[c.id] ?? { includePersonality: true, includeScenario: true }; groupMemberInclusions[c.id] = inc; inc.includePersonality = checked }"
-                          />
-                          Personality
-                        </label>
-                        <label class="flex items-center gap-1 cursor-pointer">
-                          <ThemedCheckbox
-                            :checked="(groupMemberInclusions[c.id]?.includeScenario ?? true)"
-                            @update:checked="(checked) => { const inc = groupMemberInclusions[c.id] ?? { includePersonality: true, includeScenario: true }; groupMemberInclusions[c.id] = inc; inc.includeScenario = checked }"
-                          />
-                          Scenario
-                        </label>
-                      </div>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="font-medium text-sm truncate text-[var(--color-text)]">{{ c.name }}</div>
+                  <div class="settings-hint truncate">{{ c.description || '暂无简介' }}</div>
+                  <div v-if="selectedMemberIds.includes(c.id)" class="mt-2 space-y-1" @click.stop>
+                    <div class="text-2xs text-muted">system prompt 插入：</div>
+                    <div class="flex flex-wrap gap-3 text-xs text-secondary">
+                      <label class="flex items-center gap-1 cursor-pointer">
+                        <ThemedCheckbox
+                          :checked="(groupMemberInclusions[c.id]?.includePersonality ?? true)"
+                          @update:checked="(checked) => { const inc = groupMemberInclusions[c.id] ?? { includePersonality: true, includeScenario: true }; groupMemberInclusions[c.id] = inc; inc.includePersonality = checked }"
+                        />
+                        Personality
+                      </label>
+                      <label class="flex items-center gap-1 cursor-pointer">
+                        <ThemedCheckbox
+                          :checked="(groupMemberInclusions[c.id]?.includeScenario ?? true)"
+                          @update:checked="(checked) => { const inc = groupMemberInclusions[c.id] ?? { includePersonality: true, includeScenario: true }; groupMemberInclusions[c.id] = inc; inc.includeScenario = checked }"
+                        />
+                        Scenario
+                      </label>
                     </div>
                   </div>
                 </div>

@@ -9,6 +9,7 @@ import { apiDelete, apiGet, apiPut } from '../../api/http'
 import type { WorldBook, WorldBookEntry } from '../../types/models'
 import { formatApiError, validateWorldBookEntry } from '../../utils/worldBookValidation'
 import ConfirmPopover from '../ConfirmPopover.vue'
+import SettingsField from '../settings-drawer/SettingsField.vue'
 import WorldBookEntryEditModal from './WorldBookEntryEditModal.vue'
 import { useDialogBehavior } from '../../composables/useDialogBehavior'
 import { dialogAria } from '../../utils/uiPrimitives'
@@ -336,39 +337,35 @@ async function save() {
             </button>
           </div>
 
-          <div class="modal-body overflow-y-auto custom-scrollbar min-h-0 space-y-4">
-            <div v-if="loading" class="text-center text-[var(--color-text-muted)] py-8">加载中…</div>
+          <div class="modal-body custom-scrollbar min-h-0">
+            <div v-if="loading" class="settings-hint text-center py-8">加载中…</div>
             <template v-else-if="book">
-              <div
-                v-if="saveError"
-                class="text-sm text-[var(--color-error)] bg-[var(--color-surface-overlay)] border border-[var(--color-border)] rounded-lg px-3 py-2"
-              >
-                {{ saveError }}
+              <div class="settings-group">
+                <div v-if="saveError" role="alert" class="settings-readout text-[var(--color-error)]">
+                  {{ saveError }}
+                </div>
+                <SettingsField label="书名">
+                  <input v-model="bookName" type="text" class="input w-full" placeholder="世界书名称" />
+                </SettingsField>
               </div>
 
-              <div class="space-y-1.5">
-                <label class="text-xs font-medium text-[var(--color-text-secondary)]">书名</label>
-                <input v-model="bookName" type="text" class="input w-full" placeholder="世界书名称" />
-              </div>
-
-              <div class="flex items-center justify-between gap-2 pt-2">
-                <span class="text-sm font-medium text-[var(--color-text-secondary)]">条目</span>
-                <button type="button" class="btn btn-sm btn-secondary inline-flex items-center gap-1" @click="addEntry">
-                  <Plus class="w-4 h-4" />
-                  新增条目
-                </button>
-              </div>
-
-              <div class="space-y-2 max-h-[min(50vh,420px)] overflow-y-auto custom-scrollbar pr-1">
-                <div
-                  v-for="e in sortedEntries"
-                  :key="e.id"
-                  class="rounded-lg border border-[var(--color-border-subtle)] bg-surface-muted p-3 flex flex-col gap-2"
-                >
-                  <div class="flex items-start justify-between gap-2">
+              <div class="settings-group">
+                <div class="settings-field-head">
+                  <div class="settings-group-title">条目</div>
+                  <button type="button" class="btn btn-sm btn-secondary inline-flex items-center gap-1" @click="addEntry">
+                    <Plus class="w-4 h-4" />
+                    新增条目
+                  </button>
+                </div>
+                <div class="flex flex-col gap-2">
+                  <div
+                    v-for="e in sortedEntries"
+                    :key="e.id"
+                    class="settings-item flex items-start justify-between gap-2"
+                  >
                     <div class="min-w-0 flex-1">
                       <div class="text-sm text-[var(--color-text)] font-medium truncate">{{ entrySummary(e) }}</div>
-                      <div class="text-xs text-[var(--color-text-muted)] mt-0.5 truncate">
+                      <div class="settings-hint mt-0.5 truncate">
                         {{ (e.regex || '').trim() ? '已填正则' : '无正则' }}
                       </div>
                       <div class="text-2xs text-[var(--color-text-muted)] mt-0.5">{{ entryTokenHint(e.id) }}</div>
@@ -416,16 +413,13 @@ async function save() {
                       </button>
                     </div>
                   </div>
-                </div>
-                <div
-                  v-if="sortedEntries.length === 0"
-                  class="text-xs text-[var(--color-text-muted)] text-center py-6 border border-dashed border-[var(--color-border-subtle)] rounded-lg"
-                >
-                  暂无条目，点击「新增条目」添加。
+                  <div v-if="sortedEntries.length === 0" class="settings-readout text-center">
+                    暂无条目，点击「新增条目」添加。
+                  </div>
                 </div>
               </div>
             </template>
-            <div v-else-if="!loading" class="text-center text-[var(--color-text-muted)] py-6">无法加载世界书</div>
+            <div v-else-if="!loading" class="settings-hint text-center py-6">无法加载世界书</div>
           </div>
 
           <div class="modal-footer shrink-0 flex flex-wrap items-center justify-between gap-2">

@@ -31,11 +31,14 @@
  *    - 依赖：依赖vue
  *    - 位置：组件层，提供成员设置编辑功能
  */
+import { X } from 'lucide-vue-next'
 import type { GroupMemberSettings, CharacterCard } from '../../types/models'
 import { REASONING_EFFORT_OPTIONS } from '../../types/models'
 import ModernAvatar from '../ModernAvatar.vue'
 import ModernSelect from '../ModernSelect.vue'
-import ThemedCheckbox from '../ThemedCheckbox.vue'
+import SettingsField from '../settings-drawer/SettingsField.vue'
+import SettingsSwitch from '../settings-drawer/SettingsSwitch.vue'
+import SettingsHint from '../settings-drawer/SettingsHint.vue'
 import { useDialogBehavior } from '../../composables/useDialogBehavior'
 import { dialogAria } from '../../utils/uiPrimitives'
 
@@ -151,153 +154,141 @@ function setFast(v: string) {
       <div ref="dialogRef" v-bind="dialogAttrs" tabindex="-1" class="modal-content modal-surface chat-modal-width-500-90">
         <div class="modal-header">
           <h3 :id="titleId" class="modal-title">成员设置</h3>
-          <button type="button" class="modal-close" aria-label="关闭成员设置弹窗" @click="close">×</button>
+          <button type="button" class="modal-close" aria-label="关闭成员设置弹窗" @click="close">
+            <X class="w-5 h-5" />
+          </button>
         </div>
-        <div class="modal-body space-y-6">
-          <!-- 角色信息 -->
-          <div v-if="character" class="flex items-center gap-3 pb-4 border-b border-[var(--color-border-subtle)]">
-            <ModernAvatar 
-              :src="character.avatar ? `/api/avatars/${character.avatar}` : null" 
-              :name="character.name" 
-              :size="48" 
-              aspect="0.75"
-              rounded="rounded-lg"
-            />
-            <div>
-              <div class="font-bold text-lg text-primary">{{ character.name }}</div>
-              <div class="text-xs text-muted">独立设置（覆盖全局）</div>
-            </div>
-          </div>
-
-          <!-- 模型绑定 -->
-          <div class="form-group">
-            <div class="flex items-center justify-between gap-2 mb-2">
-              <label class="label mb-0">绑定模型</label>
-              <button
-                type="button"
-                class="btn btn-xs btn-secondary shrink-0"
-                :disabled="!settings.model && !settings.presetId"
-                @click="clearBoundModel"
-              >
-                清除
-              </button>
-            </div>
-            <ModernSelect
-              :model-value="settings.model"
-              :selected-preset-id="settings.presetId ?? null"
-              :options="modelOptions"
-              placement="bottom"
-              placeholder="使用全局模型..."
-              class="w-full"
-              searchable
-              allow-create
-              @select="handleModelSelect"
-            />
-            <div class="form-hint">为该成员绑定专属模型，留空则使用全局设置</div>
-          </div>
-
-          <!-- Temperature -->
-          <div class="form-group">
-            <label class="label">Temperature (覆写)</label>
-            <input 
-              type="number"
-              :value="settings.temperature ?? ''"
-              @input="updateField('temperature', ($event.target as HTMLInputElement).value ? parseFloat(($event.target as HTMLInputElement).value) : null)"
-              class="input"
-              placeholder="使用全局设置"
-              min="0"
-              max="2"
-              step="0.1"
-            />
-          </div>
-
-          <!-- Top P -->
-          <div class="form-group">
-            <label class="label">Top P (覆写)</label>
-            <input 
-              type="number"
-              :value="settings.top_p ?? ''"
-              @input="updateField('top_p', ($event.target as HTMLInputElement).value ? parseFloat(($event.target as HTMLInputElement).value) : null)"
-              class="input"
-              placeholder="使用全局设置"
-              min="0"
-              max="1"
-              step="0.05"
-            />
-          </div>
-
-          <div class="form-group">
-            <label class="label">思考深度</label>
-            <ModernSelect
-              :model-value="effortValue()"
-              :options="effortOptions"
-              class="w-full"
-              placeholder="沿用会话 / 全局…"
-              @update:model-value="(v) => updateField('reasoningEffort', String(v) ? String(v) as GroupMemberSettings['reasoningEffort'] : null)"
-            />
-            <div class="form-hint">none 会真正关闭思考。留空则沿用本会话面板或全局默认深度。</div>
-          </div>
-
-          <div class="form-group">
-            <label class="label">Fast 模式</label>
-            <ModernSelect
-              :model-value="fastValue()"
-              :options="fastOptions"
-              class="w-full"
-              placeholder="沿用会话 / 全局…"
-              @update:model-value="(v) => setFast(String(v))"
-            />
-            <div class="form-hint">约 2× 计费。选「关闭」会覆盖会话里已打开的 Fast。</div>
-          </div>
-
-          <!-- 参与概率 -->
-          <div class="form-group">
-            <label class="label">参与概率</label>
+        <div class="modal-body">
+          <div v-if="character" class="settings-group">
             <div class="flex items-center gap-3">
-              <input 
+              <ModernAvatar
+                :src="character.avatar ? `/api/avatars/${character.avatar}` : null"
+                :name="character.name"
+                :size="48"
+                aspect="0.75"
+                rounded="rounded-lg"
+              />
+              <div class="min-w-0">
+                <div class="settings-group-title truncate">{{ character.name }}</div>
+                <div class="settings-hint">独立设置（覆盖全局）</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <div class="settings-group-title">模型</div>
+            <SettingsField label="绑定模型" hint="为该成员绑定专属模型，留空则使用全局设置。">
+              <template #actions>
+                <button
+                  type="button"
+                  class="btn btn-xs btn-secondary shrink-0"
+                  :disabled="!settings.model && !settings.presetId"
+                  @click="clearBoundModel"
+                >
+                  清除
+                </button>
+              </template>
+              <ModernSelect
+                :model-value="settings.model"
+                :selected-preset-id="settings.presetId ?? null"
+                :options="modelOptions"
+                placement="bottom"
+                placeholder="使用全局模型..."
+                class="w-full"
+                searchable
+                allow-create
+                @select="handleModelSelect"
+              />
+            </SettingsField>
+            <SettingsField label="Temperature (覆写)">
+              <input
                 type="number"
-                :value="settings.probability"
-                @input="updateField('probability', parseFloat(($event.target as HTMLInputElement).value) || 1)"
-                class="input w-24"
+                :value="settings.temperature ?? ''"
+                class="input w-full"
+                placeholder="使用全局设置"
+                min="0"
+                max="2"
+                step="0.1"
+                @input="updateField('temperature', ($event.target as HTMLInputElement).value ? parseFloat(($event.target as HTMLInputElement).value) : null)"
+              />
+            </SettingsField>
+            <SettingsField label="Top P (覆写)">
+              <input
+                type="number"
+                :value="settings.top_p ?? ''"
+                class="input w-full"
+                placeholder="使用全局设置"
                 min="0"
                 max="1"
-                step="0.1"
+                step="0.05"
+                @input="updateField('top_p', ($event.target as HTMLInputElement).value ? parseFloat(($event.target as HTMLInputElement).value) : null)"
               />
-              <div class="flex-1">
-                <div class="h-2 bg-[var(--color-surface-muted)] rounded-full overflow-hidden">
-                  <div 
-                    class="h-full bg-[var(--color-success)] transition-[width] duration-[var(--motion-duration-expand)] ease-out"
-                    :style="{ width: `${(settings.probability ?? 1) * 100}%` }"
-                  ></div>
-                </div>
-              </div>
-              <span class="text-sm text-muted w-12 text-right">{{ Math.round((settings.probability ?? 1) * 100) }}%</span>
-            </div>
-            <div class="form-hint">设置为 100% 表示每轮必定发言，低于 100% 则按概率随机参与</div>
+            </SettingsField>
+            <SettingsField
+              label="思考深度"
+              hint="留空沿用会话或全局默认深度。"
+              more="none 会真正关闭思考。留空则沿用本会话面板或全局默认深度。"
+            >
+              <ModernSelect
+                :model-value="effortValue()"
+                :options="effortOptions"
+                class="w-full"
+                placeholder="沿用会话 / 全局…"
+                @update:model-value="(v) => updateField('reasoningEffort', String(v) ? String(v) as GroupMemberSettings['reasoningEffort'] : null)"
+              />
+            </SettingsField>
+            <SettingsField label="Fast 模式" hint="约 2× 计费。" more="选「关闭」会覆盖会话里已打开的 Fast。">
+              <ModernSelect
+                :model-value="fastValue()"
+                :options="fastOptions"
+                class="w-full"
+                placeholder="沿用会话 / 全局…"
+                @update:model-value="(v) => setFast(String(v))"
+              />
+            </SettingsField>
           </div>
 
-          <!-- system prompt 插入字段 -->
-          <div class="form-group">
-            <label class="label">system prompt 插入字段</label>
-            <div class="flex flex-wrap gap-4">
-              <label class="flex items-center gap-2 text-sm text-secondary cursor-pointer">
-                <ThemedCheckbox
-                  :checked="settings.includePersonality !== false"
-                  @update:checked="updateField('includePersonality', $event)"
+          <div class="settings-group">
+            <div class="settings-group-title">发言</div>
+            <SettingsField label="参与概率" hint="设置为 100% 表示每轮必定发言，低于 100% 则按概率随机参与。">
+              <div class="flex items-center gap-3">
+                <input
+                  type="number"
+                  :value="settings.probability"
+                  class="input w-24"
+                  min="0"
+                  max="1"
+                  step="0.1"
+                  @input="updateField('probability', parseFloat(($event.target as HTMLInputElement).value) || 1)"
                 />
-                插入 Personality
-              </label>
-              <label class="flex items-center gap-2 text-sm text-secondary cursor-pointer">
-                <ThemedCheckbox
-                  :checked="settings.includeScenario !== false"
-                  @update:checked="updateField('includeScenario', $event)"
-                />
-                插入 Scenario
-              </label>
-            </div>
-            <div class="form-hint">
-              关闭后，该成员对应字段将不会被注入到本轮/后续的 system prompt（用于避免多人共享世界观时的重复设定）。
-            </div>
+                <div class="flex-1">
+                  <div class="h-2 bg-[var(--color-surface-muted)] rounded-full overflow-hidden">
+                    <div
+                      class="h-full bg-[var(--color-success)] transition-[width] duration-[var(--motion-duration-expand)] ease-out"
+                      :style="{ width: `${(settings.probability ?? 1) * 100}%` }"
+                    ></div>
+                  </div>
+                </div>
+                <span class="text-sm text-muted w-12 text-right">{{ Math.round((settings.probability ?? 1) * 100) }}%</span>
+              </div>
+            </SettingsField>
+          </div>
+
+          <div class="settings-group">
+            <div class="settings-group-title">system prompt 插入字段</div>
+            <SettingsHint more="关闭后，该成员对应字段将不会被注入到本轮/后续的 system prompt（用于避免多人共享世界观时的重复设定）。">
+              关闭后该字段不再注入 system prompt。
+            </SettingsHint>
+            <SettingsSwitch
+              label="插入 Personality"
+              :model-value="settings.includePersonality !== false"
+              @update:model-value="updateField('includePersonality', $event)"
+            />
+            <SettingsSwitch
+              label="插入 Scenario"
+              :model-value="settings.includeScenario !== false"
+              @update:model-value="updateField('includeScenario', $event)"
+            />
           </div>
         </div>
         <div class="modal-footer">

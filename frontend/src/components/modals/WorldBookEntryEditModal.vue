@@ -5,7 +5,9 @@
 import { ref, watch } from 'vue'
 import { X } from 'lucide-vue-next'
 import type { WorldBookEntry } from '../../types/models'
-import ThemedCheckbox from '../ThemedCheckbox.vue'
+import SettingsField from '../settings-drawer/SettingsField.vue'
+import SettingsSwitch from '../settings-drawer/SettingsSwitch.vue'
+import SettingsHint from '../settings-drawer/SettingsHint.vue'
 import { buildRegexFromInput } from '../../utils/regexCompat'
 import { validateWorldBookEntry } from '../../utils/worldBookValidation'
 import { useDialogBehavior } from '../../composables/useDialogBehavior'
@@ -99,57 +101,47 @@ void dialogRef
               <X class="w-5 h-5" />
             </button>
           </div>
-          <div class="modal-body overflow-y-auto custom-scrollbar min-h-0 space-y-4">
-            <div
-              v-if="localError"
-              class="text-sm text-[var(--color-error)] bg-[var(--color-surface-overlay)] border border-[var(--color-border)] rounded-lg px-3 py-2"
-            >
-              {{ localError }}
-            </div>
-
-            <div class="space-y-1.5">
-              <label class="text-xs font-medium text-[var(--color-text-secondary)]">标题</label>
-              <input v-model="draft.title" type="text" class="input w-full" placeholder="条目标题" />
-            </div>
-
-            <div class="flex items-center gap-3">
-              <label class="flex items-center gap-2 text-sm text-[var(--color-text-secondary)] cursor-pointer">
-                <ThemedCheckbox :checked="draft.enabled" @update:checked="draft.enabled = $event" />
-                启用
-              </label>
-            </div>
-
-            <p class="text-xs text-[var(--color-text-muted)]">
-              扫描深度与插入深度在「当前会话 → 世界书顺序」中按每本书单独设置，不再保存在条目内。
-            </p>
-
-            <div class="space-y-2 border-t border-[var(--color-border-subtle)] pt-4">
-              <div class="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider">正则表达式</div>
-              <textarea
-                v-model="draft.regex"
-                rows="4"
-                class="input textarea w-full font-mono text-sm resize-y min-h-[96px]"
-                placeholder="例如 keyword 或 /keyword/iu"
-              />
-            </div>
-
-            <div class="space-y-2">
-              <div class="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider">正文内容</div>
-              <textarea
-                v-model="draft.content"
-                rows="8"
-                class="input textarea w-full text-sm resize-y min-h-[160px]"
-                placeholder="匹配后注入的文本"
-              />
-            </div>
-
-            <div class="space-y-2 rounded-lg border border-[var(--color-border-subtle)] bg-surface-muted p-3">
-              <div class="text-xs text-[var(--color-text-muted)]">试匹配（可选，支持直接粘贴 /pattern/iu；浏览器 RegExp 与 Python re 仍可能有细微差异）</div>
-              <textarea v-model="testText" rows="2" class="input textarea w-full text-sm" placeholder="测试文本" />
-              <div class="flex items-center gap-2">
-                <button type="button" class="btn btn-sm btn-secondary" @click="tryMatch">试匹配</button>
-                <span v-if="testResult" class="text-xs text-[var(--color-text-secondary)]">{{ testResult }}</span>
+          <div class="modal-body custom-scrollbar min-h-0">
+            <div class="settings-group">
+              <div v-if="localError" role="alert" class="settings-readout text-[var(--color-error)]">
+                {{ localError }}
               </div>
+              <SettingsField label="标题">
+                <input v-model="draft.title" type="text" class="input w-full" placeholder="条目标题" />
+              </SettingsField>
+              <SettingsSwitch
+                label="启用"
+                :model-value="draft.enabled"
+                hint="扫描深度与插入深度按每本书单独设置。"
+                more="扫描深度与插入深度在「当前会话 → 世界书顺序」中按每本书单独设置，不再保存在条目内。"
+                @update:model-value="draft.enabled = $event"
+              />
+              <SettingsField label="正则表达式">
+                <textarea
+                  v-model="draft.regex"
+                  rows="4"
+                  class="input textarea w-full font-mono text-sm resize-y min-h-[96px]"
+                  placeholder="例如 keyword 或 /keyword/iu"
+                />
+              </SettingsField>
+              <SettingsField label="正文内容">
+                <textarea
+                  v-model="draft.content"
+                  rows="8"
+                  class="input textarea w-full text-sm resize-y min-h-[160px]"
+                  placeholder="匹配后注入的文本"
+                />
+              </SettingsField>
+            </div>
+
+            <div class="settings-group">
+              <div class="settings-field-head">
+                <div class="settings-group-title">试匹配</div>
+                <button type="button" class="btn btn-xs btn-secondary" @click="tryMatch">试匹配</button>
+              </div>
+              <SettingsHint more="可选。浏览器 RegExp 与 Python re 仍可能有细微差异。">支持直接粘贴 /pattern/iu。</SettingsHint>
+              <textarea v-model="testText" rows="2" class="input textarea w-full text-sm" placeholder="测试文本" />
+              <div v-if="testResult" class="settings-readout break-words">{{ testResult }}</div>
             </div>
           </div>
           <div class="modal-footer shrink-0">

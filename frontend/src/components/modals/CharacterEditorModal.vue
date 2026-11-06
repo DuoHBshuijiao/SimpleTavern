@@ -3,7 +3,9 @@ import { X, Sparkles, Loader2, MoreHorizontal, GripVertical, Check, Plus, Globe 
 import type { AssistantAttachment, CharacterCard, MvuMode } from '../../types/models'
 import ModernAvatar from '../ModernAvatar.vue'
 import ModernSelect from '../ModernSelect.vue'
-import ThemedCheckbox from '../ThemedCheckbox.vue'
+import SettingsField from '../settings-drawer/SettingsField.vue'
+import SettingsSwitch from '../settings-drawer/SettingsSwitch.vue'
+import SettingsHint from '../settings-drawer/SettingsHint.vue'
 import { MvuCapabilityEditor, AssistantThread } from '../chat'
 import { useDialogBehavior } from '../../composables/useDialogBehavior'
 import { dialogAria } from '../../utils/uiPrimitives'
@@ -87,6 +89,7 @@ void dialogRef
 </script>
 
 <template>
+  <Transition name="modal">
   <div v-if="show" class="modal">
     <div class="modal-backdrop" @click="emit('cancel')"></div>
     <div ref="dialogRef" v-bind="dialogAttrs" tabindex="-1" class="modal-content modal-surface chat-modal-width-1200-90">
@@ -113,70 +116,136 @@ void dialogRef
                 : 'min-w-[min(50%,18rem)] flex-1 basis-0 overflow-y-auto'
             "
           >
-            <div class="space-y-6">
-              <div class="flex gap-6">
-                <div class="flex flex-col items-center gap-3">
-                  <ModernAvatar
-                    :src="avatarUrl"
-                    :size="120"
-                    aspect="auto"
-                    object-fit="cover"
-                    :object-position="avatarObjectPositionByFocus(character.avatarFocusX, character.avatarFocusY)"
-                    rounded="rounded-xl"
-                    class="border-2 border-brand-a40 shadow-heavy bg-surface-overlay"
-                  />
-                  <button class="btn btn-sm btn-secondary" @click="emit('open-avatar-cropper')">更换头像</button>
-                </div>
-                <div class="flex-1 space-y-4">
-                  <div class="form-group">
-                    <label class="label">
-                      <span>名称</span>
-                      <span class="opacity-60 text-xs ml-2 text-brand">该项参与对话</span>
-                    </label>
-                    <input v-model="character.name" class="input" placeholder="角色名称" />
+            <div>
+              <div class="settings-group">
+                <div class="settings-group-title">基本信息</div>
+                <div class="flex gap-6 max-sm:flex-col max-sm:gap-4">
+                  <div class="flex shrink-0 flex-col items-center gap-3">
+                    <ModernAvatar
+                      :src="avatarUrl"
+                      :size="120"
+                      aspect="auto"
+                      object-fit="cover"
+                      :object-position="avatarObjectPositionByFocus(character.avatarFocusX, character.avatarFocusY)"
+                      rounded="rounded-xl"
+                      class="bg-surface-overlay"
+                    />
+                    <button type="button" class="btn btn-sm btn-secondary" @click="emit('open-avatar-cropper')">更换头像</button>
                   </div>
-                  <div class="form-group">
-                    <label class="label">简介</label>
-                    <textarea v-model="character.description" class="input textarea h-20" placeholder="简短描述"></textarea>
+                  <div class="flex min-w-0 flex-1 flex-col gap-4">
+                    <SettingsField label="名称" hint="参与对话。">
+                      <input v-model="character.name" class="input w-full" placeholder="角色名称" />
+                    </SettingsField>
+                    <SettingsField label="简介" hint="不参与对话。">
+                      <textarea v-model="character.description" class="input textarea h-20 w-full" placeholder="简短描述"></textarea>
+                    </SettingsField>
                   </div>
                 </div>
               </div>
 
-              <div class="form-group">
-                <label class="label">
-                  <span>Personality（性格/外貌）</span>
-                  <span class="opacity-60 text-xs ml-2 text-brand">该项参与对话</span>
-                </label>
-                <textarea v-model="character.personality" class="input textarea h-32" placeholder="详细设定..."></textarea>
+              <div class="settings-group">
+                <div class="settings-group-title">角色设定</div>
+                <SettingsHint>本组都参与对话。</SettingsHint>
+                <SettingsField label="Personality（性格/外貌）">
+                  <textarea v-model="character.personality" class="input textarea h-32 w-full" placeholder="详细设定..."></textarea>
+                </SettingsField>
+                <SettingsField label="Scenario（情景/世界观）">
+                  <textarea v-model="character.scenario" class="input textarea h-24 w-full" placeholder="世界背景..."></textarea>
+                </SettingsField>
+                <SettingsField label="系统提示词">
+                  <textarea v-model="character.systemPrompt" class="input textarea h-32 w-full" placeholder="回复格式要求..."></textarea>
+                </SettingsField>
               </div>
 
-              <div class="form-group">
-                <label class="label">
-                  <span>Scenario（情景/世界观）</span>
-                  <span class="opacity-60 text-xs ml-2 text-brand">该项参与对话</span>
-                </label>
-                <textarea v-model="character.scenario" class="input textarea h-24" placeholder="世界背景..."></textarea>
+              <div class="settings-group">
+                <div class="settings-group-title">开场与示例</div>
+                <SettingsHint>本组都参与对话。</SettingsHint>
+                <SettingsField label="首句" hint="支持 {{user}} 占位符。">
+                  <textarea v-model="character.firstMessage" class="input textarea h-24 w-full" placeholder="开场白..."></textarea>
+                </SettingsField>
+                <SettingsField
+                  label="额外首句"
+                  hint="支持 {{user}} 占位符。只有「已保存」的条目会进入开场变体。"
+                  more="对号：追加为草稿并保留输入；加号：追加为「已保存」并清空输入。仅「已保存」的额外首句会进入单聊开场变体；草稿仅本地编辑用。下方列出全部条目（含「（空）」），均可删除。保存角色时会去掉空文本；占位符替换后为空也不会写入变体。"
+                >
+                  <div class="overflow-x-auto custom-scrollbar pb-1">
+                    <div class="flex w-full min-w-0 min-h-[6.5rem] flex-nowrap items-stretch gap-2">
+                      <textarea
+                        v-model="extraFirstMessageDraft"
+                        class="input textarea h-24 max-w-full shrink-0"
+                        :style="{
+                          width: hasAnyExtraFirstEntries ? 'min(50%, 18rem)' : 'min(70%, 28rem)',
+                        }"
+                        placeholder="其他开场情景..."
+                      />
+                      <div class="flex shrink-0 flex-col justify-center gap-1.5">
+                        <button
+                          type="button"
+                          class="icon-button h-9 w-9"
+                          aria-label="追加为草稿（保留输入框）"
+                          @click="appendExtraFirstMessageCheck()"
+                        >
+                          <Check class="w-[18px] h-[18px]" />
+                        </button>
+                        <button
+                          type="button"
+                          class="icon-button h-9 w-9"
+                          aria-label="追加为已保存并清空输入"
+                          @click="appendExtraFirstMessagePlus()"
+                        >
+                          <Plus class="w-[18px] h-[18px]" />
+                        </button>
+                      </div>
+                      <div
+                        v-if="extraFirstMessageEntriesIndexed.length"
+                        class="flex shrink-0 items-stretch gap-2"
+                      >
+                        <div
+                          v-for="entry in extraFirstMessageEntriesIndexed"
+                          :key="entry.index"
+                          class="flex shrink-0 items-start gap-1"
+                        >
+                          <button
+                            type="button"
+                            class="settings-item shrink-0 inline-flex flex-col items-start text-left text-xs w-[200px] min-h-[4.5rem] max-h-28 overflow-y-auto custom-scrollbar text-[var(--color-text)] hover:bg-surface-hover"
+                            :class="{ 'text-[var(--color-text-muted)]': extraEntryIsEmpty(entry) }"
+                            @click="fillExtraFirstDraft(entry.text)"
+                          >
+                            <span
+                              v-if="entry.chip"
+                              class="mb-1 shrink-0 rounded px-1 py-0.5 text-2xs bg-brand-a10 text-brand"
+                            >已保存</span>
+                            <span
+                              v-else
+                              class="mb-1 shrink-0 rounded px-1 py-0.5 text-2xs text-[var(--color-text-muted)] bg-surface-muted"
+                            >草稿</span>
+                            <span class="whitespace-pre-wrap break-words">{{ displayExtraEntryLabel(entry) }}</span>
+                          </button>
+                          <button
+                            type="button"
+                            class="shrink-0 inline-flex h-7 w-7 items-center justify-center rounded text-[var(--color-text-muted)] hover:bg-surface-muted hover:text-[var(--color-text)]"
+                            aria-label="从列表移除此条"
+                            @click.stop="removeExtraFirstMessageAt(entry.index)"
+                          >
+                            <X class="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </SettingsField>
+                <SettingsField label="示例对话">
+                  <textarea v-model="character.exampleDialogue" class="input textarea h-48 w-full" placeholder="示例对话..."></textarea>
+                </SettingsField>
               </div>
 
-              <div class="form-group">
-                <label class="label">
-                  <span>系统提示词</span>
-                  <span class="opacity-60 text-xs ml-2 text-brand">该项参与对话</span>
-                </label>
-                <textarea v-model="character.systemPrompt" class="input textarea h-32" placeholder="回复格式要求..."></textarea>
-              </div>
-
-              <div class="form-group rounded-xl border border-[var(--color-border-subtle)] bg-surface-overlay/80 p-4 space-y-3">
-                <label class="label">
-                  <span>MVU 能力</span>
-                </label>
-                <label class="inline-flex items-center gap-2 text-sm text-[var(--color-text-secondary)] cursor-pointer select-none">
-                  <ThemedCheckbox
-                    :checked="character.mvuEnabled === true"
-                    @update:checked="(v) => (character!.mvuEnabled = v)"
-                  />
-                  <span>启用 MVU 管线</span>
-                </label>
+              <div class="settings-group">
+                <div class="settings-group-title">MVU 能力</div>
+                <SettingsSwitch
+                  label="启用 MVU 管线"
+                  :model-value="character.mvuEnabled === true"
+                  @update:model-value="(v) => (character!.mvuEnabled = v)"
+                />
                 <MvuCapabilityEditor
                   :mvu-mode="character.mvuMode ?? 'regex'"
                   :mvu-directive="character.mvuDirective ?? ''"
@@ -192,112 +261,12 @@ void dialogRef
                 />
               </div>
 
-              <div class="form-group">
-                <label class="label">
-                  <span>首句</span>
-                  <span class="opacity-60 text-xs ml-2" v-pre>支持 {{user}} 占位符</span>
-                  <span class="opacity-60 text-xs ml-2 text-brand">该项参与对话</span>
-                </label>
-                <textarea v-model="character.firstMessage" class="input textarea h-24" placeholder="开场白..."></textarea>
-              </div>
-
-              <div class="form-group">
-                <label class="label">
-                  <span>额外首句</span>
-                  <span class="opacity-60 text-xs ml-2" v-pre>支持 {{user}} 占位符</span>
-                  <span class="opacity-60 text-xs ml-2 text-brand">该项参与对话</span>
-                </label>
-                <div class="overflow-x-auto custom-scrollbar rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay/50 p-2">
-                  <div class="flex w-full min-w-0 min-h-[6.5rem] flex-nowrap items-stretch gap-2">
-                    <textarea
-                      v-model="extraFirstMessageDraft"
-                      class="input textarea h-24 max-w-full shrink-0"
-                      :style="{
-                        width: hasAnyExtraFirstEntries ? 'min(50%, 18rem)' : 'min(70%, 28rem)',
-                      }"
-                      placeholder="其他开场情景..."
-                    />
-                    <div class="flex shrink-0 flex-col justify-center gap-1.5">
-                      <button
-                        type="button"
-                        class="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[var(--color-border-subtle)] bg-surface-overlay text-[var(--color-text-secondary)] hover:bg-surface-muted transition-colors"
-                        aria-label="追加为草稿（保留输入框）"
-                        @click="appendExtraFirstMessageCheck()"
-                      >
-                        <Check class="w-[18px] h-[18px]" />
-                      </button>
-                      <button
-                        type="button"
-                        class="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[var(--color-border-subtle)] bg-surface-overlay text-[var(--color-text-secondary)] hover:bg-surface-muted transition-colors"
-                        aria-label="追加为已保存并清空输入"
-                        @click="appendExtraFirstMessagePlus()"
-                      >
-                        <Plus class="w-[18px] h-[18px]" />
-                      </button>
-                    </div>
-                    <div
-                      v-if="extraFirstMessageEntriesIndexed.length"
-                      class="flex shrink-0 items-stretch gap-2"
-                    >
-                      <div
-                        v-for="entry in extraFirstMessageEntriesIndexed"
-                        :key="entry.index"
-                        class="flex shrink-0 items-start gap-1"
-                      >
-                        <button
-                          type="button"
-                          class="shrink-0 inline-flex flex-col items-start text-left px-3 py-2 text-xs border rounded-md hover:bg-surface-muted transition-colors w-[200px] min-h-[4.5rem] max-h-28 overflow-y-auto custom-scrollbar bg-surface-muted/80 text-[var(--color-text)]"
-                          :class="
-                            extraEntryIsEmpty(entry)
-                              ? 'border-dashed border-[var(--color-border)] text-[var(--color-text-muted)]'
-                              : 'border-[var(--color-border-subtle)]'
-                          "
-                          @click="fillExtraFirstDraft(entry.text)"
-                        >
-                          <span
-                            v-if="entry.chip"
-                            class="mb-1 shrink-0 rounded px-1 py-0.5 text-2xs bg-brand-a10 text-brand border border-brand-a20"
-                          >已保存</span>
-                          <span
-                            v-else
-                            class="mb-1 shrink-0 rounded px-1 py-0.5 text-2xs text-[var(--color-text-muted)] border border-[var(--color-border-subtle)]"
-                          >草稿</span>
-                          <span class="whitespace-pre-wrap break-words">{{ displayExtraEntryLabel(entry) }}</span>
-                        </button>
-                        <button
-                          type="button"
-                          class="shrink-0 inline-flex h-7 w-7 items-center justify-center rounded border border-[var(--color-border-subtle)] text-[var(--color-text-muted)] hover:bg-surface-muted hover:text-[var(--color-text)]"
-                          aria-label="从列表移除此条"
-                          @click.stop="removeExtraFirstMessageAt(entry.index)"
-                        >
-                          <X class="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <p class="text-xs text-[var(--color-text-muted)] mt-1.5 leading-relaxed">
-                  对号：追加为草稿并保留输入；加号：追加为「已保存」并清空输入。仅「已保存」的额外首句会进入单聊开场变体；草稿仅本地编辑用。下方列出全部条目（含「（空）」），均可删除。保存角色时会去掉空文本；占位符替换后为空也不会写入变体。
-                </p>
-              </div>
-
-              <div class="form-group">
-                <label class="label">
-                  <span>示例对话</span>
-                  <span class="opacity-60 text-xs ml-2 text-brand">该项参与对话</span>
-                </label>
-                <textarea v-model="character.exampleDialogue" class="input textarea h-48" placeholder="示例对话..."></textarea>
-              </div>
-
-              <div class="form-group rounded-xl border border-[var(--color-border-subtle)] bg-surface-overlay/80 p-4">
-                <label class="label">
-                  <span>绑定世界书</span>
-                  <span class="opacity-60 text-xs ml-2 text-brand">随角色保存；「角色+世界书」ZIP 导出用此顺序</span>
-                </label>
-                <p class="text-xs text-[var(--color-text-muted)] mb-3 leading-relaxed">
-                  与「设置 → 当前会话」中的会话世界书顺序独立；保存后写入角色卡上的绑定列表，供含世界书 ZIP 等使用。
-                </p>
-                <div class="flex flex-wrap items-center gap-2 mb-3">
+              <div class="settings-group">
+                <div class="settings-group-title">绑定世界书</div>
+                <SettingsHint more="「角色+世界书」ZIP 导出用此顺序。与「设置 → 当前会话」中的会话世界书顺序独立；保存后写入角色卡上的绑定列表，供含世界书 ZIP 等使用。">
+                  随角色保存，与会话世界书顺序独立。
+                </SettingsHint>
+                <div class="flex flex-wrap items-center gap-2">
                   <ModernSelect
                     v-model="addCharacterEditorWbId"
                     :options="characterEditorWorldBookSelectOptions"
@@ -306,12 +275,12 @@ void dialogRef
                   />
                   <button type="button" class="btn btn-sm btn-secondary shrink-0" @click="addCharacterEditorWorldBook()">加入</button>
                 </div>
-                <div class="space-y-1.5 max-h-[200px] overflow-y-auto custom-scrollbar pr-1">
+                <div class="flex flex-col gap-1.5 max-h-[200px] overflow-y-auto custom-scrollbar pr-1">
                   <div
                     v-for="(wbId, idx) in (character.attachedWorldBookIds || [])"
                     :key="`${wbId}-${idx}`"
-                    class="flex items-center justify-between gap-2 rounded-lg border border-[var(--color-border-subtle)] bg-surface-muted px-2 py-1.5 transition-[border-color,background-color,box-shadow]"
-                    :class="characterEditorWbDraggingIdx === idx ? 'opacity-50 border-brand-a50' : ''"
+                    class="settings-item flex items-center justify-between gap-2"
+                    :class="{ 'settings-item--dragging': characterEditorWbDraggingIdx === idx }"
                     draggable="true"
                     @dragstart="handleCharacterEditorWbDragStart(idx)"
                     @dragover="handleCharacterEditorWbDragOver($event, idx)"
@@ -329,7 +298,7 @@ void dialogRef
                       <button type="button" class="btn btn-xs btn-secondary" @click.stop="removeCharacterEditorWorldBook(wbId)">移除</button>
                     </div>
                   </div>
-                  <div v-if="!(character.attachedWorldBookIds || []).length" class="text-xs text-[var(--color-text-muted)] py-2 text-center border border-dashed border-[var(--color-border-subtle)] rounded-lg">
+                  <div v-if="!(character.attachedWorldBookIds || []).length" class="settings-readout text-center">
                     未绑定世界书
                   </div>
                 </div>
@@ -493,4 +462,5 @@ void dialogRef
       </div>
     </div>
   </div>
+  </Transition>
 </template>

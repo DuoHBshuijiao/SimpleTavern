@@ -1,24 +1,19 @@
 ﻿<template>
-  <div class="space-y-3">
-    <div class="flex items-center justify-between">
-      <label class="label">
-        <span>初始状态栏</span>
-        <span v-if="props.subtitle" class="opacity-60 text-xs ml-2">{{ props.subtitle }}</span>
-      </label>
+  <div class="settings-field">
+    <div class="settings-field-head">
+      <span class="settings-label">初始状态栏</span>
       <button type="button" class="btn btn-xs btn-secondary" @click="addTable">新建表格</button>
     </div>
+    <p v-if="props.subtitle" class="settings-hint">{{ props.subtitle }}</p>
 
-    <div
-      v-if="!localTables.length"
-      class="text-xs text-[var(--color-text-muted)] border border-dashed border-[var(--color-border-subtle)] rounded-lg px-3 py-2"
-    >
+    <div v-if="!localTables.length" class="settings-readout">
       {{ props.emptyHint }}
     </div>
 
     <div
       v-for="(table, ti) in localTables"
       :key="ti"
-      class="rounded-lg border border-[var(--color-border-subtle)] bg-surface-muted p-3 space-y-2"
+      class="settings-item space-y-2"
     >
       <div class="flex items-center gap-2 flex-wrap">
         <input v-model="table.name" class="input flex-1 text-sm min-w-[120px]" placeholder="表格名称" @input="emitUpdate" />
@@ -31,10 +26,10 @@
         <span
           v-for="(_col, ci) in table.columns"
           :key="ci"
-          class="inline-flex items-center gap-1 text-2xs px-1.5 py-0.5 rounded-full bg-[var(--color-brand-a15)] text-[var(--color-brand)]"
+          class="inline-flex items-center gap-1 text-2xs px-1.5 py-0.5 rounded-full bg-surface-muted text-[var(--color-text-secondary)]"
         >
           <input
-            class="bg-transparent border-none outline-none text-2xs w-[60px] text-[var(--color-brand)]"
+            class="bg-transparent border-none outline-none text-2xs w-[60px] text-[var(--color-text-secondary)]"
             placeholder="列名"
             :value="table.columns[ci]"
             @input="onColumnNameInput(ti, ci, $event)"
@@ -81,9 +76,7 @@
           </tbody>
         </table>
       </div>
-      <div v-else class="text-xs text-[var(--color-text-muted)]">
-        请先添加列和行。
-      </div>
+      <p v-else class="settings-hint">请先添加列和行。</p>
     </div>
   </div>
 </template>
