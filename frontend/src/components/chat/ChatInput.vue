@@ -51,7 +51,7 @@
  *    - 依赖：依赖vue
  *    - 位置：组件层，提供聊天输入功能
  */
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useAssistantFabPosition, ASSISTANT_FAB_SIZE, ASSISTANT_FAB_GAP } from '../../composables/useAssistantFabPosition'
 import { notifyMessage } from '../../composables/useNotify'
 import {
@@ -118,6 +118,8 @@ const props = withDefaults(
   isNarrowPortrait?: boolean
   /** 顶栏变形阶段：与 ChatPage headerMorphPhase 一致 */
   headerMorphPhase?: HeaderMorphPhase
+  /** 每完整写完一段回复加一，输入框边缘走一次光 */
+  generationDoneTick?: number
   /** 侧栏收起且顶栏 squeeze 完成后：顶栏下显示 Agent 胶囊（与 TTS 顶栏条时机一致） */
   showAgentTopBarControls?: boolean
   /** 全局 TTS 是否启用（决定 Agent 顶栏是否让位给队列/播放） */
@@ -360,6 +362,14 @@ const groupShowsRoundStatus = computed(() => {
  *
  * 根据当前状态（流式传输、继续按钮、群聊等）返回相应的按钮标签。
  */
+const doneGlowKey = ref(0)
+watch(
+  () => props.generationDoneTick ?? 0,
+  (tick, prev) => {
+    if (tick > prev) doneGlowKey.value = tick
+  },
+)
+
 const primaryActionLabel = computed(() => {
   if (props.isStreamingActive) return '停止'
   if (props.showContinueButton && props.isGroup) {
@@ -659,6 +669,13 @@ defineExpose({
       @dragleave="handleDragLeave"
       @drop.prevent="handleDrop"
     >
+      <span
+        v-if="doneGlowKey > 0"
+        :key="doneGlowKey"
+        class="chat-input-done-glow"
+        aria-hidden="true"
+        @animationend="doneGlowKey = 0"
+      />
       <div v-if="draftHelperStatus" class="flex items-center justify-between gap-3 px-3 py-2 rounded-lg bg-[var(--color-border-subtle)] border border-[var(--color-border)]">
         <div class="text-xs text-[var(--color-text-secondary)] min-w-0">{{ draftHelperStatusText }}</div>
         <button
@@ -951,12 +968,14 @@ defineExpose({
           />
           </div>
           <button
-            class="chat-action-button shadow-lg transition-[transform,box-shadow] active:scale-95"
+            class="chat-action-button chat-action-button--morph shadow-lg active:scale-95"
             :class="[primaryActionClass, primaryActionDisabled ? 'opacity-50 cursor-not-allowed' : 'hover:shadow-brand hover:-translate-y-0.5']"
             :disabled="primaryActionDisabled"
             @click="emit('primary-action')"
           >
-            {{ primaryActionLabel }}
+            <Transition name="chat-action-label" mode="out-in">
+              <span :key="primaryActionLabel">{{ primaryActionLabel }}</span>
+            </Transition>
           </button>
           </div>
       </div>
@@ -1064,6 +1083,82 @@ defineExpose({
   margin-top: 0;
   /* impeccable-disable-next-line layout-transition: sink 布局补偿须与 morph-wrap transform 同频 */
   transition: margin-top var(--chat-input-trans-dur, 320ms) var(--chat-input-trans-ease, ease);
+}
+
+/* “停止”和“发送”之间颜色平滑过渡，文字淡入淡出 */
+.chat-action-button--morph {
+  transition:
+    transform var(--transition-normal),
+    box-shadow var(--transition-normal),
+    background-color 260ms ease,
+    border-color 260ms ease,
+    color 260ms ease;
+}
+
+.chat-action-label-enter-active,
+.chat-action-label-leave-active {
+  transition: opacity 120ms ease;
+}
+
+.chat-action-label-enter-from,
+.chat-action-label-leave-to {
+  opacity: 0;
+}
+
+/* 写完一段回复：输入框边缘走一圈很淡的光 */
+@property --chat-input-glow-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.chat-input-done-glow {
+  position: absolute;
+  inset: -1px;
+  z-index: 30;
+  padding: 1px;
+  border-radius: inherit;
+  pointer-events: none;
+  background: conic-gradient(
+    from var(--chat-input-glow-angle),
+    transparent 0deg,
+    transparent 250deg,
+    color-mix(in srgb, var(--color-brand) 50%, transparent) 330deg,
+    transparent 360deg
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  animation: chat-input-done-glow 1100ms ease-out both;
+}
+
+@keyframes chat-input-done-glow {
+  0% {
+    --chat-input-glow-angle: 0deg;
+    opacity: 0;
+  }
+  15% {
+    opacity: 0.4;
+  }
+  75% {
+    opacity: 0.4;
+  }
+  100% {
+    --chat-input-glow-angle: 360deg;
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-action-button--morph,
+  .chat-action-label-enter-active,
+  .chat-action-label-leave-active {
+    transition: none;
+  }
+
+  .chat-input-done-glow {
+    display: none;
+  }
 }
 
 .chat-input-shell--sink {

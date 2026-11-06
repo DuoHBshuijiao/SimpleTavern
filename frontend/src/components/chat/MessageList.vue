@@ -557,7 +557,15 @@ function messageRowMemoDeps(m: ChatMessage): unknown[] {
     isReasoningExpanded(m.id),
     m.images?.length ?? 0,
     canRetryUserMessage(m),
+    isAwaitingFirstToken(m),
   ]
+}
+
+/** 已发出请求、还没收到任何思考或正文：头像外圈转一段弧线 */
+function isAwaitingFirstToken(m: ChatMessage): boolean {
+  if (m.role !== 'assistant' || !m.id.startsWith('local_')) return false
+  if (!props.isGenerating && !props.isInterjecting) return false
+  return !getDisplayText(m).trim() && !getReasoningForMessage(m)
 }
 
 /** 会话末尾是没有回复的用户消息时（生成失败、中途停止、回复被删），可直接重新生成，不必再发一遍 */
@@ -1241,7 +1249,12 @@ function updateViewport() {
 }
 
 const totalCount = computed(() => props.messages.length)
-const headerOverlayOffset = computed(() => Math.max(0, props.headerInsetPx) + 16)
+const headerOverlayOffset = computed(() => Math.max(0, props.headerInsetPx) + 24)
+/** 消息滚到顶栏和输入框时淡出：只作用于消息层，背景图不受影响 */
+const scrollEdgeMask = computed(() => {
+  const top = Math.max(0, props.headerInsetPx)
+  return `linear-gradient(to bottom, transparent ${top + 6}px, #000 ${top + 24}px, #000 calc(100% - 20px), transparent 100%)`
+})
 const bottomScrollPaddingPx = computed(() => {
   return SCROLL_BOTTOM_BASE_PADDING_PX + Math.max(0, Math.ceil(props.bottomScrollExtraPx ?? 0))
 })
@@ -1578,6 +1591,8 @@ onBeforeUnmount(() => {
         paddingBottom: `${bottomScrollPaddingPx}px`,
         transform: 'translateZ(0)',
         contain: 'content',
+        maskImage: scrollEdgeMask,
+        WebkitMaskImage: scrollEdgeMask,
       }"
       @scroll="handleScroll"
       @wheel.passive="handleListWheel"
@@ -1597,7 +1612,10 @@ onBeforeUnmount(() => {
         ]"
       >
         <!-- 头像 -->
-        <div class="flex-shrink-0 mt-1">
+        <div class="relative flex-shrink-0 mt-1">
+          <Transition name="avatar-wait">
+            <span v-if="isAwaitingFirstToken(m)" class="avatar-wait-arc" aria-hidden="true" />
+          </Transition>
           <div v-if="m.role === 'system'" class="w-10 h-10 rounded-full bg-[var(--color-warning-bg)] flex items-center justify-center text-[var(--color-warning-text)]">
             <Settings class="w-6 h-6" />
           </div>
@@ -2085,10 +2103,64 @@ onBeforeUnmount(() => {
   animation: message-row-assistant-enter 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+/*
+ * 等待首包：一段中性弧线沿头像外圈转动，头像本身不动。转的是角度，圆角外形不跟着转。
+ * 不要用主题色或渐变拖尾：那样读起来像发光，界面里不引入光源。
+ */
+@property --avatar-wait-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.avatar-wait-arc {
+  position: absolute;
+  top: -3px;
+  left: -3px;
+  width: 46px; /* 头像 40px，外扩 3px；外层比头像高，不能用 inset */
+  height: 46px;
+  z-index: 1;
+  padding: 2px;
+  border-radius: calc(var(--radius-xl) + 3px);
+  pointer-events: none;
+  opacity: 0.5;
+  background: conic-gradient(
+    from var(--avatar-wait-angle),
+    var(--color-text-muted) 0deg 90deg,
+    transparent 90.5deg 360deg
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  animation: avatar-wait-spin 1.4s linear infinite;
+}
+
+@keyframes avatar-wait-spin {
+  to {
+    --avatar-wait-angle: 360deg;
+  }
+}
+
+.avatar-wait-enter-active,
+.avatar-wait-leave-active {
+  transition: opacity 200ms ease;
+}
+
+.avatar-wait-enter-from,
+.avatar-wait-leave-to {
+  opacity: 0;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .message-bubble--user-send-enter,
   .message-row--assistant-enter {
     animation: none;
+  }
+
+  /* 不转动，停在一段静止的弧上，仍然表示正在等待 */
+  .avatar-wait-arc {
+    animation: none;
+    --avatar-wait-angle: 45deg;
   }
 }
 </style>

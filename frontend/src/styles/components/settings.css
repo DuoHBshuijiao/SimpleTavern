@@ -48,7 +48,7 @@
     font-size: 0.8125rem;
     font-weight: 500;
     line-height: 1.4;
-    color: color-mix(in srgb, var(--color-text) 80%, var(--color-text-muted));
+    color: var(--color-text-secondary);
   }
 
   .settings-hint {

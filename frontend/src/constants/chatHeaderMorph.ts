@@ -2,6 +2,9 @@
 
 export type HeaderMorphPhase = 'inset' | 'lifting' | 'full'
 
+/** 侧栏收起后停顿再进入沉浸，有蓄力确认的手感。有意保留，不要改成立即衔接 */
+export const HEADER_COLLAPSE_HOLD_MS = 800
+
 /** 阶段 1：顶栏上移贴顶（与输入区下沉同频） */
 export const HEADER_LIFT_MS = 420
 export const HEADER_LIFT_EASE = 'cubic-bezier(0.45, 0.05, 0.55, 0.95)'

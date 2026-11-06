@@ -222,6 +222,7 @@ const chatHeaderLayout = useChatHeaderLayout({
   sidebarCollapsed,
   isNarrowPortrait,
   isTtsEnabled: () => settings.settings?.ttsEnabled === true,
+  getPanelInsetPx: () => sidePanelInsetPx.value,
 })
 
 const {
@@ -844,6 +845,7 @@ const {
   applyGenerateDonePayload,
   makeGenerateSseHandler,
   consumeGenerationFinallyFlags,
+  generationDoneTick,
 } = useChatGeneration({
   chats: {
     patchLocalMessage: chats.patchLocalMessage,
@@ -903,6 +905,23 @@ const isStreamEnabled = computed(() => settings.settings?.streamEnabled !== fals
 // MVU Store
 const mvuStore = useMvuStore()
 const mvuPanelOpen = ref(false)
+
+/** 助手和 MVU 面板占用的宽度（面板 360 + 右边距 16 + 间隔 12） */
+const SIDE_PANEL_INSET_PX = 388
+/** 聊天区至少留这么宽才让位，否则面板仍然盖在上面 */
+const SIDE_PANEL_MIN_CHAT_PX = 560
+const SIDEBAR_WIDTH_PX = 352
+const viewportWidth = ref(window.innerWidth)
+function syncViewportWidth() {
+  viewportWidth.value = window.innerWidth
+}
+onMounted(() => window.addEventListener('resize', syncViewportWidth, { passive: true }))
+onBeforeUnmount(() => window.removeEventListener('resize', syncViewportWidth))
+const sidePanelInsetPx = computed(() => {
+  if (!assistant.isAssistantPanelOpen.value && !mvuPanelOpen.value) return 0
+  const sidebar = sidebarCollapsed.value || isNarrowPortrait.value ? 0 : SIDEBAR_WIDTH_PX
+  return viewportWidth.value - sidebar - SIDE_PANEL_INSET_PX >= SIDE_PANEL_MIN_CHAT_PX ? SIDE_PANEL_INSET_PX : 0
+})
 const knowledgeGraphModalOpen = ref(false)
 
 function openKnowledgeGraphModal() {
@@ -4447,9 +4466,10 @@ const editingPersonaAvatarUrl = computed(() => {
       <div
         class="flex-1 flex min-w-0 min-h-0 transition-[padding,transform] duration-300 ease-in-out overflow-hidden"
         :class="{ 'pl-4': sidebarCollapsed && !isNarrowPortrait }"
-        :style="
-          isNarrowPortrait && !sidebarCollapsed ? { transform: 'translateX(21rem)' } : {}
-        "
+        :style="{
+          ...(isNarrowPortrait && !sidebarCollapsed ? { transform: 'translateX(21rem)' } : {}),
+          paddingRight: `${sidePanelInsetPx}px`,
+        }"
       >
       <main ref="chatMainRef" class="flex-1 flex flex-col relative min-w-0 bg-transparent">
       
@@ -4763,6 +4783,7 @@ const editingPersonaAvatarUrl = computed(() => {
             :sidebar-collapsed="sidebarCollapsed"
             :is-narrow-portrait="isNarrowPortrait"
             :header-morph-phase="headerMorphPhase"
+            :generation-done-tick="generationDoneTick"
             :show-agent-top-bar-controls="agentTopBarControlsVisible"
             :tts-enabled="!!settings.settings?.ttsEnabled"
             :tts-top-bar-controls-visible="ttsTopBarControlsVisible"

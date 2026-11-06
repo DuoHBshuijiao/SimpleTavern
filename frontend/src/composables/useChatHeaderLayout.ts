@@ -1,5 +1,6 @@
 import { computed, onBeforeUnmount, ref, watch, type ComputedRef, type CSSProperties, type Ref } from 'vue'
 import {
+  HEADER_COLLAPSE_HOLD_MS,
   HEADER_EXPAND_MS,
   HEADER_LIFT_EASE,
   HEADER_LIFT_MS,
@@ -22,6 +23,8 @@ export interface UseChatHeaderLayoutOptions {
   sidebarCollapsed: Ref<boolean>
   isNarrowPortrait: Ref<boolean>
   isTtsEnabled: () => boolean
+  /** 助手和 MVU 面板让位的宽度，顶栏跟着收窄 */
+  getPanelInsetPx: () => number
 }
 
 /**
@@ -29,7 +32,7 @@ export interface UseChatHeaderLayoutOptions {
  * 提炼自 ChatPage.vue；`headerMorphPhase` 亦供 WebGPU 背景与 ChatInput 同步。
  */
 export function useChatHeaderLayout(options: UseChatHeaderLayoutOptions) {
-  const { sidebarCollapsed, isNarrowPortrait, isTtsEnabled } = options
+  const { sidebarCollapsed, isNarrowPortrait, isTtsEnabled, getPanelInsetPx } = options
 
   const headerMorphPhase = ref<HeaderMorphPhase>('inset')
   const headerEasingMs = ref(320)
@@ -66,7 +69,7 @@ export function useChatHeaderLayout(options: UseChatHeaderLayoutOptions) {
         headerMorphPhase.value = 'full'
         headerLiftChainTimer = null
       }, HEADER_LIFT_MS)
-    }, 1000)
+    }, HEADER_COLLAPSE_HOLD_MS)
   })
 
   const chatHeaderStyle: ComputedRef<ChatHeaderFixedStyle> = computed(() => {
@@ -75,7 +78,8 @@ export function useChatHeaderLayout(options: UseChatHeaderLayoutOptions) {
     const ms = headerEasingMs.value
     const insetLeft =
       collapsed || isNarrowPortrait.value ? 'calc(1rem + 0.75rem)' : 'calc(21rem + 0.75rem)'
-    const insetRight = '0.75rem'
+    const panelInset = getPanelInsetPx()
+    const insetRight = panelInset > 0 ? `${panelInset}px` : '0.75rem'
     const insetTop = '0.75rem'
     const radiusOpen = 'var(--radius-2xl)'
 
@@ -87,10 +91,10 @@ export function useChatHeaderLayout(options: UseChatHeaderLayoutOptions) {
       return {
         position: 'fixed',
         left: '0',
-        right: '0',
+        right: panelInset > 0 ? `${panelInset}px` : '0',
         top: '0',
         zIndex: headerZ,
-        borderRadius: '0',
+        borderRadius: panelInset > 0 ? radiusOpen : '0',
         transition: `left ${HEADER_SQUEEZE_MS}ms ${HEADER_SQUEEZE_EASE}, right ${HEADER_SQUEEZE_MS}ms ${HEADER_SQUEEZE_EASE}, border-radius ${HEADER_SQUEEZE_MS}ms ${HEADER_SQUEEZE_EASE}`,
       }
     }

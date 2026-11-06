@@ -201,11 +201,12 @@
       border-color var(--transition-fast);
   }
 
-  /* 只有用户气泡模糊；助手气泡不模糊，避免大面积遮挡用户的背景图 */
+  /*
+   * 气泡不模糊是有意的，避免遮挡用户的背景图。
+   * 消息滚动区带淡出遮罩，遮罩会隔断内部元素的 backdrop-filter，这里加模糊也不会生效。
+   */
   .message-bubble--user {
     background-color: var(--color-brand-a15);
-    -webkit-backdrop-filter: blur(var(--glass-blur-soft));
-    backdrop-filter: blur(var(--glass-blur-soft));
     border: 1px solid var(--color-brand-a20);
     color: var(--color-text-primary);
     border-top-right-radius: var(--radius-sm);

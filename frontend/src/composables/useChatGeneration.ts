@@ -38,6 +38,8 @@ export function useChatGeneration(deps: ChatGenerationDeps) {
   const webToolStatus = ref('')
   const stopRequested = ref(false)
   const stopStreamingHold = ref(false)
+  /** 每完整写完一段回复加一；停止和失败不会走到这里 */
+  const generationDoneTick = ref(0)
 
   function beginGenerateAbort() {
     aborter.value?.abort()
@@ -53,6 +55,7 @@ export function useChatGeneration(deps: ChatGenerationDeps) {
   }
 
   function applyGenerateDonePayload(localAssistantId: string, data: unknown) {
+    generationDoneTick.value += 1
     if (!data || typeof data !== 'object') return
     const payload = data as GenerateDonePayload
     const patch: Partial<ChatMessage> = {}
@@ -162,6 +165,7 @@ export function useChatGeneration(deps: ChatGenerationDeps) {
 
   return {
     webToolStatus,
+    generationDoneTick,
     aborter,
     stopRequested,
     stopStreamingHold,

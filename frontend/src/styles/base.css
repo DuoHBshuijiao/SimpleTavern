@@ -122,8 +122,8 @@
 
   /* ========== Prose / Markdown 内容样式 ========== */
   /**
-   * :root 使用 font-synthesis: none；无 Italic 面的字体在 em 上需合成斜体才可见。
-   * 默认在 .prose 内允许合成斜体（style）。自定义字体经检测为单字重时 useAppFont 会设置
+   * :root 使用 font-synthesis: none。旁白（em）已改用正体加颜色，但引用块等仍可能用到斜体，
+   * 所以 .prose 内继续允许合成斜体（style）。自定义字体经检测为单字重时 useAppFont 会设置
    * data-custom-font-single-weight="true"，下一条规则覆盖为 weight style，同时兜底粗体。
    */
   .prose {
@@ -155,8 +155,8 @@
 
   .prose em,
   .prose i {
-    font-style: italic;
-    color: var(--color-text-secondary);
+    font-style: normal;
+    color: var(--color-text-narration);
   }
 
   .prose strong,

@@ -450,7 +450,9 @@
   /* ========== 文字色 (Slate) ========== */
   --color-text: var(--app-color-text);
   --color-text-primary: var(--app-color-text); /* Slate-50 */
-  --color-text-secondary: var(--app-color-text-muted); /* Slate-400 */
+  --color-text-secondary: color-mix(in srgb, var(--app-color-text) 40%, var(--app-color-text-muted));
+  /* 旁白：正体，靠柔和的主题色调和正文区分 */
+  --color-text-narration: color-mix(in srgb, var(--app-color-text) 60%, var(--app-color-primary));
   --color-text-muted: var(--app-color-text-muted); /* Slate-500 */
   
   /* ========== 边框色 (Subtle) ========== */
@@ -678,7 +680,8 @@
 
   --color-text: var(--app-color-text);
   --color-text-primary: var(--app-color-text);
-  --color-text-secondary: var(--app-color-text-muted);
+  --color-text-secondary: color-mix(in srgb, var(--app-color-text) 40%, var(--app-color-text-muted));
+  --color-text-narration: color-mix(in srgb, var(--app-color-text) 60%, var(--app-color-primary));
   --color-text-muted: var(--app-color-text-muted);
 
   --color-border: var(--app-color-border);
