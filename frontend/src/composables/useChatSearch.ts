@@ -22,8 +22,8 @@ export function splitSnippetByQuery(snippet: string, query: string): Array<{ tex
 export interface UseChatSearchOptions {
   /** 当前会话 getter；为空时搜索直接清空结果 */
   getActiveChat: () => Chat | null | undefined
-  /** 跳转到指定消息序号（由页面负责滚动到 MessageList 对应项） */
-  jumpToMessageIndex: (index: number) => void
+  /** 跳转到指定消息（由页面负责滚动到 MessageList 对应项） */
+  jumpToMessage: (messageId: string) => void
   /** 搜索输入框引用（由页面提供并绑定到模板 ref，打开搜索栏时用于聚焦/全选） */
   chatSearchInputRef: Ref<HTMLInputElement | null>
   /** 打开搜索栏前的副作用（如关闭顶栏“更多”菜单） */
@@ -34,11 +34,11 @@ export interface UseChatSearchOptions {
  * 会话内搜索状态机：顶栏搜索栏的展开/收起动画时序、结果 chip 行的展开/收起、
  * 防抖查询、结果导航与跳转。提炼自 ChatPage.vue，行为保持不变。
  *
- * 依赖通过参数注入：`getActiveChat`（查询作用域）、`jumpToMessageIndex`（滚动定位）、
+ * 依赖通过参数注入：`getActiveChat`（查询作用域）、`jumpToMessage`（滚动定位）、
  * `beforeOpen`（打开前副作用）。定时器在组件卸载时自动清理。
  */
 export function useChatSearch(options: UseChatSearchOptions) {
-  const { getActiveChat, jumpToMessageIndex, chatSearchInputRef } = options
+  const { getActiveChat, jumpToMessage, chatSearchInputRef } = options
 
   const showChatSearch = ref(false)
   /** 关闭搜索栏时先跑完面板离场动画再显示「搜索」chip，避免与收起动画抢布局造成顿挫 */
@@ -78,6 +78,10 @@ export function useChatSearch(options: UseChatSearchOptions) {
   }
   const chatSearchQuery = ref('')
   const chatSearchLoading = ref(false)
+  /** 最近一次完成搜索的关键词，用来区分“还没搜”和“搜了没结果” */
+  const chatSearchCompletedQuery = ref('')
+  let chatSearchSeq = 0
+  let chatSearchTimer: ReturnType<typeof setTimeout> | null = null
   const chatSearchResults = ref<ChatSearchHit[]>([])
   /** 当前高亮的搜索结果 chip；-1 表示未选中（搜索成功后不再默认选中首条） */
   const chatSearchCursor = ref(-1)
@@ -153,9 +157,11 @@ export function useChatSearch(options: UseChatSearchOptions) {
   async function runChatSearch() {
     const chat = getActiveChat()
     const q = chatSearchQuery.value.trim()
+    const seq = ++chatSearchSeq
     if (!chat || !q) {
       chatSearchResults.value = []
       chatSearchCursor.value = -1
+      chatSearchCompletedQuery.value = ''
       return
     }
     chatSearchLoading.value = true
@@ -163,14 +169,27 @@ export function useChatSearch(options: UseChatSearchOptions) {
       const res = await apiGet<{ query: string; total: number; hits: ChatSearchHit[] }>(
         `/api/chats/${encodeURIComponent(chat.id)}/search?q=${encodeURIComponent(q)}`
       )
+      // 输入比响应快时，旧响应不能盖掉新结果
+      if (seq !== chatSearchSeq) return
       chatSearchResults.value = Array.isArray(res?.hits) ? res.hits : []
       chatSearchCursor.value = -1
+      chatSearchCompletedQuery.value = q
     } finally {
-      chatSearchLoading.value = false
+      if (seq === chatSearchSeq) chatSearchLoading.value = false
     }
   }
 
-  let chatSearchTimer: ReturnType<typeof setTimeout> | null = null
+  /** 回车：结果已就绪就跳下一个（Shift 上一个），关键词刚改过就先搜完再跳 */
+  async function handleChatSearchEnter(backward = false) {
+    const q = chatSearchQuery.value.trim()
+    if (!q) return
+    if (q !== chatSearchCompletedQuery.value) {
+      if (chatSearchTimer) clearTimeout(chatSearchTimer)
+      await runChatSearch()
+    }
+    if (backward) goToPrevSearchResult()
+    else goToNextSearchResult()
+  }
 
   function goToNextSearchResult() {
     const list = chatSearchHitsForNav.value
@@ -181,7 +200,7 @@ export function useChatSearch(options: UseChatSearchOptions) {
     } else {
       chatSearchCursor.value = (chatSearchCursor.value + 1) % total
     }
-    jumpToMessageIndex(list[chatSearchCursor.value]!.messageIndex)
+    jumpToMessage(list[chatSearchCursor.value]!.messageId)
   }
 
   function goToPrevSearchResult() {
@@ -193,14 +212,14 @@ export function useChatSearch(options: UseChatSearchOptions) {
     } else {
       chatSearchCursor.value = (chatSearchCursor.value - 1 + total) % total
     }
-    jumpToMessageIndex(list[chatSearchCursor.value]!.messageIndex)
+    jumpToMessage(list[chatSearchCursor.value]!.messageId)
   }
 
   function jumpToSearchResult(idx: number) {
     const hit = chatSearchHitsForNav.value[idx]
     if (!hit) return
     chatSearchCursor.value = idx
-    jumpToMessageIndex(hit.messageIndex)
+    jumpToMessage(hit.messageId)
   }
 
   function openChatSearchBar() {
@@ -281,6 +300,7 @@ export function useChatSearch(options: UseChatSearchOptions) {
     chatSearchContentRevealed.value = false
     showChatSearch.value = false
     chatSearchQuery.value = ''
+    chatSearchCompletedQuery.value = ''
     chatSearchResults.value = []
     chatSearchCursor.value = -1
   }
@@ -300,6 +320,7 @@ export function useChatSearch(options: UseChatSearchOptions) {
     SEARCH_EXPAND_COLLAPSE_MS,
     chatSearchQuery,
     chatSearchLoading,
+    chatSearchCompletedQuery,
     chatSearchResults,
     chatSearchCursor,
     chatSearchChipsGridOpen,
@@ -307,6 +328,7 @@ export function useChatSearch(options: UseChatSearchOptions) {
     chatSearchChipsDisplayHits,
     chatSearchHitsForNav,
     runChatSearch,
+    handleChatSearchEnter,
     goToNextSearchResult,
     goToPrevSearchResult,
     jumpToSearchResult,

@@ -114,6 +114,8 @@ const props = defineProps<{
   headerInsetPx: number
   /** 底部叠层额外占位（px）；只增加真实可滚动高度，不参与消息虚拟高度计算 */
   bottomScrollExtraPx?: number
+  /** 搜索当前定位到的消息，用中性底色标出 */
+  searchTargetMessageId?: string | null
   /** 侧栏是否折叠；用于侧栏宽度动画结束后合并重排补偿，降低抖动 */
   sidebarCollapsed?: boolean
   /** 本次发送的用户消息 id：播放一次性自下而上入场动画（纯 AI 模式为 system 角色） */
@@ -229,6 +231,16 @@ let pendingHeightFlushRaf: number | null = null
 let pendingAlignAfterHeightFlush = false
 /** scrollToBottomAfterLayout 请求强制贴底，不受上一会话 wasNearBottom 影响 */
 let pendingAlignForce = false
+/**
+ * 进入会话后停在最后一条消息开头。放不下一屏时才生效，放得下就等同贴底。
+ * 用户自己滚到底、发送或重写之前都不跟底，否则图片加载等高度变化会把人拉到结尾。
+ */
+let holdAtLastMessageStart = false
+/** 这段时间内行高还在收敛，每次高度变化都重新对齐；用户一滚动就结束 */
+const LAST_MESSAGE_START_SETTLE_MS = 1200
+let lastMessageStartAlignUntil = 0
+let messageJumpToken = 0
+const MESSAGE_JUMP_SETTLE_FRAMES = 12
 
 const MARKDOWN_HTML_CACHE_LIMIT = 400
 const markdownHtmlCache = new Map<string, string>()
@@ -558,6 +570,7 @@ function messageRowMemoDeps(m: ChatMessage): unknown[] {
     m.images?.length ?? 0,
     canRetryUserMessage(m),
     isAwaitingFirstToken(m),
+    m.id === props.searchTargetMessageId,
   ]
 }
 
@@ -950,6 +963,7 @@ function shouldAutoFollowBottom(el: HTMLElement): boolean {
 }
 
 function effectiveCanFollow(el: HTMLElement): boolean {
+  if (holdAtLastMessageStart) return false
   if (userDismissedAutoFollow.value) return false
   return wasNearBottomBeforeMutation.value || shouldAutoFollowBottom(el)
 }
@@ -974,6 +988,7 @@ function handleListWheel(e: WheelEvent) {
   const root = scrollRef.value
   if (!root || e.currentTarget !== root) return
   cancelPendingBottomSnap()
+  stopProgrammaticAlign()
   if (e.deltaY <= 0) return
   if (isWheelTargetInsideNestedScrollable(e.target, root)) return
   userDismissedAutoFollow.value = true
@@ -985,6 +1000,7 @@ function handleListPointerDown(e: PointerEvent) {
   if (!el || e.currentTarget !== el) return
   if (e.button !== 0) return
   cancelPendingBottomSnap()
+  stopProgrammaticAlign()
   const barW = el.offsetWidth - el.clientWidth
   if (barW <= 0) return
   const rect = el.getBoundingClientRect()
@@ -1004,6 +1020,66 @@ function alignToBottom(el: HTMLElement, instant: boolean) {
   if (instant) {
     el.style.scrollBehavior = previousBehavior
   }
+}
+
+/** 用户开始操作：让出正在进行的进入定位和搜索跳转校正 */
+function stopProgrammaticAlign() {
+  lastMessageStartAlignUntil = 0
+  messageJumpToken += 1
+}
+
+function setScrollTopInstant(el: HTMLElement, top: number) {
+  const previousBehavior = el.style.scrollBehavior
+  el.style.scrollBehavior = 'auto'
+  el.scrollTop = Math.max(0, top)
+  syncScrollMetrics(el)
+  el.style.scrollBehavior = previousBehavior
+}
+
+/** 行顶对齐到第一条消息在滚动区里的位置，也就是顶栏和淡出区下方 */
+function scrollTopForRow(row: HTMLElement): number {
+  return row.offsetTop - headerOverlayOffset.value
+}
+
+function alignToLastMessageStart(el: HTMLElement) {
+  const last = props.messages[props.messages.length - 1]
+  if (!last) return
+  const row = rowEls.get(last.id)
+  if (!row) {
+    // 最后一条还没进虚拟窗口（首次挂载时窗口在顶部）：先按估高跳过去，渲染出来后再对齐
+    alignToBottom(el, true)
+    schedulePendingHeightFlush(true)
+    return
+  }
+  const top = scrollTopForRow(row)
+  const maxTop = Math.max(0, el.scrollHeight - el.clientHeight)
+  if (top >= maxTop) {
+    // 最后一条放得下，定位结果就是贴底，后面按普通跟底走
+    holdAtLastMessageStart = false
+    setScrollTopInstant(el, maxTop)
+    return
+  }
+  holdAtLastMessageStart = true
+  setScrollTopInstant(el, top)
+}
+
+/** 进入会话：行高落盘后定位到最后一条消息开头。正在生成时仍然贴底看输出。 */
+function alignLastMessageStartAfterLayout() {
+  if (props.isGenerating || props.isInterjecting) {
+    scrollToBottomAfterLayout(true, true)
+    return
+  }
+  userDismissedAutoFollow.value = false
+  wasNearBottomBeforeMutation.value = true
+  cancelPendingBottomSnap()
+  messageJumpToken += 1
+  holdAtLastMessageStart = true
+  lastMessageStartAlignUntil = performance.now() + LAST_MESSAGE_START_SETTLE_MS
+  pendingAlignForce = false
+  pendingAlignAfterHeightFlush = true
+  nextTick(() => {
+    schedulePendingHeightFlush(true)
+  })
 }
 
 function cancelPendingBottomSnap() {
@@ -1097,6 +1173,8 @@ function findIndexByOffset(offset: number, prefix: number[] = prefixHeights.valu
  * 切换会话后贴底：先批量落盘行高，再单次 alignToBottom，避免与 ResizeObserver 多轨抢 scrollHeight。
  */
 function scrollToBottomAfterLayout(instant = true, force = true) {
+  holdAtLastMessageStart = false
+  lastMessageStartAlignUntil = 0
   if (force || instant) {
     userDismissedAutoFollow.value = false
   }
@@ -1116,6 +1194,8 @@ function scrollToBottom(instant = false, force = false) {
     const el = scrollRef.value
     if (!el) return
     if (force || instant) {
+      holdAtLastMessageStart = false
+      lastMessageStartAlignUntil = 0
       userDismissedAutoFollow.value = false
     }
     const canAutoFollow = effectiveCanFollow(el)
@@ -1171,6 +1251,8 @@ function scrollToBottomAnimated(duration: number = USER_SEND_SCROLL_ANIM_MS) {
   nextTick(() => {
     const el = scrollRef.value
     if (!el) return
+    holdAtLastMessageStart = false
+    lastMessageStartAlignUntil = 0
     userDismissedAutoFollow.value = false
     cancelPendingBottomSnap()
     cancelUserSendScrollAnim()
@@ -1237,6 +1319,10 @@ function handleScroll() {
   syncScrollMetrics(el)
   pendingBottomSnapRefresh?.()
   const nowDist = realDistanceFromBottom.value
+  // 收敛期间的到底事件来自切换会话时那次估高贴底，不算用户滚到底
+  if (holdAtLastMessageStart && nowDist <= SCROLL_BOTTOM_NEAR_THRESHOLD && performance.now() >= lastMessageStartAlignUntil) {
+    holdAtLastMessageStart = false
+  }
   // 从贴底带外重新滚入带内时恢复跟底；带内向上滚仅置位 dismiss，不会在仍 ≤300px 时被误清除
   if (nowDist <= AUTO_FOLLOW_DISTANCE_THRESHOLD && oldDist > AUTO_FOLLOW_DISTANCE_THRESHOLD) {
     userDismissedAutoFollow.value = false
@@ -1282,6 +1368,10 @@ function alignAfterHeightFlush(instant = true, force = false) {
   if (!el) return
   if (userSendScrollActive.value) {
     syncScrollMetrics(el)
+    return
+  }
+  if (holdAtLastMessageStart && !force) {
+    alignToLastMessageStart(el)
     return
   }
   if (force || effectiveCanFollow(el)) {
@@ -1411,12 +1501,32 @@ function playRowFlip() {
   }
 }
 
-function scrollToMessage(messageIndex: number) {
-  if (!scrollRef.value || totalCount.value <= 0) return
-  const idx = Math.max(0, Math.min(totalCount.value - 1, messageIndex))
-  const y = prefixHeights.value[idx] ?? 0
-  scrollRef.value.scrollTop = y
-  scrollTop.value = y
+/**
+ * 跳到指定消息（搜索用）。目标可能还没进虚拟窗口，第一次只能按估高定位，
+ * 窗口切过去、真实行高写回后再校正几帧。用瞬移：平滑滚动会一路经过未渲染的区域。
+ */
+function scrollToMessage(messageId: string) {
+  const el = scrollRef.value
+  if (!el) return
+  const idx = props.messages.findIndex((m) => m.id === messageId)
+  if (idx < 0) return
+  holdAtLastMessageStart = false
+  lastMessageStartAlignUntil = 0
+  cancelPendingBottomSnap()
+  const token = ++messageJumpToken
+  const align = () => {
+    const row = rowEls.get(messageId)
+    setScrollTopInstant(el, row ? scrollTopForRow(row) : (prefixHeights.value[idx] ?? 0))
+  }
+  align()
+  let frames = 0
+  const settle = () => {
+    if (token !== messageJumpToken || scrollRef.value !== el) return
+    align()
+    frames += 1
+    if (frames < MESSAGE_JUMP_SETTLE_FRAMES) requestAnimationFrame(settle)
+  }
+  requestAnimationFrame(settle)
 }
 
 watch(
@@ -1448,6 +1558,10 @@ watch(
       // 先用默认行高估算贴底，避免沿用上一会话 scrollTop 导致虚拟窗口错位
       alignToBottom(el, true)
       syncScrollMetrics(el)
+      // 最后一条进窗口后立刻对齐，赶在绘制前，否则会先闪一帧结尾
+      nextTick(() => {
+        if (holdAtLastMessageStart && scrollRef.value === el) alignToLastMessageStart(el)
+      })
     })
   },
 )
@@ -1473,6 +1587,10 @@ watch(
   () => {
     nextTick(() => {
       if (!scrollRef.value) return
+      if (holdAtLastMessageStart && performance.now() < lastMessageStartAlignUntil) {
+        alignToLastMessageStart(scrollRef.value)
+        return
+      }
       syncScrollMetrics(scrollRef.value)
     })
   },
@@ -1518,6 +1636,7 @@ onUpdated(() => {
 defineExpose({
   scrollToBottom,
   scrollToBottomAfterLayout,
+  alignLastMessageStartAfterLayout,
   scrollToBottomAnimated,
   scrollToMessage,
   scrollRef,
@@ -1535,6 +1654,10 @@ onMounted(() => {
       // 避免 isGenerating=true 激活的 outputPhase 把 rAF 平滑滚动抢回瞬移。
       if (userSendScrollActive.value) {
         syncScrollMetrics(el)
+        return
+      }
+      if (holdAtLastMessageStart && performance.now() < lastMessageStartAlignUntil) {
+        alignToLastMessageStart(el)
         return
       }
       const canFollow = effectiveCanFollow(el)
@@ -1609,6 +1732,7 @@ onBeforeUnmount(() => {
         :class="[
           m.role === 'user' ? 'flex-row-reverse' : 'flex-row',
           isAssistantRowEntering(m) ? 'message-row--assistant-enter' : '',
+          m.id === searchTargetMessageId ? 'message-row--search-target' : '',
         ]"
       >
         <!-- 头像 -->
@@ -2111,6 +2235,37 @@ onBeforeUnmount(() => {
   syntax: '<angle>';
   inherits: false;
   initial-value: 0deg;
+}
+
+/*
+ * 搜索跳转的目标消息：中性底色，不用主题色，也不做发光。
+ * 铺在行外扩的伪元素上，不改变行高，虚拟列表的测量不受影响。
+ */
+.message-row--search-target {
+  position: relative;
+}
+
+.message-row--search-target::before {
+  content: '';
+  position: absolute;
+  inset: -0.5rem -0.75rem;
+  z-index: -1;
+  border-radius: var(--radius-xl);
+  background-color: color-mix(in srgb, var(--color-text) 8%, transparent);
+  pointer-events: none;
+  animation: message-search-target-in var(--motion-duration-normal) ease-out;
+}
+
+@keyframes message-search-target-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .message-row--search-target::before {
+    animation: none;
+  }
 }
 
 .avatar-wait-arc {

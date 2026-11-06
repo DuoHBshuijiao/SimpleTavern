@@ -1166,12 +1166,13 @@ const {
   SEARCH_EXPAND_COLLAPSE_MS,
   chatSearchQuery,
   chatSearchLoading,
+  chatSearchCompletedQuery,
   chatSearchCursor,
   chatSearchChipsGridOpen,
   chatSearchChipsCollapsing,
   chatSearchChipsDisplayHits,
   chatSearchHitsForNav,
-  runChatSearch,
+  handleChatSearchEnter,
   goToNextSearchResult,
   goToPrevSearchResult,
   jumpToSearchResult,
@@ -1180,11 +1181,33 @@ const {
   resetChatSearchForChatSwitch,
 } = useChatSearch({
   getActiveChat: () => activeChat.value,
-  jumpToMessageIndex,
+  jumpToMessage,
   chatSearchInputRef,
   beforeOpen: () => {
     showHeaderMoreMenu.value = false
   },
+})
+
+/** 搜索状态：当前位置和总数，没有结果时说明原因 */
+const chatSearchStatusText = computed(() => {
+  const total = chatSearchHitsForNav.value.length
+  if (total) return chatSearchCursor.value < 0 ? `共 ${total} 条` : `${chatSearchCursor.value + 1}/${total}`
+  if (chatSearchLoading.value) return '搜索中...'
+  const query = chatSearchQuery.value.trim()
+  return query && query === chatSearchCompletedQuery.value ? '无结果' : '输入后定位消息'
+})
+
+const chatSearchTargetMessageId = computed(() => {
+  if (!chatSearchContentRevealed.value || chatSearchCursor.value < 0) return null
+  return chatSearchHitsForNav.value[chatSearchCursor.value]?.messageId ?? null
+})
+
+// 结果卡片横向排列，用“下一个”翻到屏幕外时跟过去
+watch(chatSearchCursor, (cursor) => {
+  if (cursor < 0) return
+  nextTick(() => {
+    document.querySelector(`[data-search-chip="${cursor}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  })
 })
 const {
   entrancingUserMessageId,
@@ -1864,10 +1887,10 @@ function scrollToBottom(instant = false, force = false) {
   })
 }
 
-/** 切换会话：等 MessageList 批量行高落盘后再单次贴底 */
-function scrollToBottomAfterLayout(instant = true, force = true) {
+/** 切换会话：等 MessageList 批量行高落盘后定位到最后一条消息开头 */
+function alignLastMessageStartAfterLayout() {
   nextTick(() => {
-    messageListRef.value?.scrollToBottomAfterLayout?.(instant, force)
+    messageListRef.value?.alignLastMessageStartAfterLayout?.()
   })
 }
 
@@ -1882,9 +1905,9 @@ function scrollToBottomAnimated() {
   })
 }
 
-function jumpToMessageIndex(index: number) {
+function jumpToMessage(messageId: string) {
   nextTick(() => {
-    messageListRef.value?.scrollToMessage(index)
+    messageListRef.value?.scrollToMessage(messageId)
   })
 }
 
@@ -2289,7 +2312,7 @@ watch(
   () => activeChat.value?.id,
   (next, prev) => {
     if (next && next !== prev) {
-      scrollToBottomAfterLayout(true, true)
+      alignLastMessageStartAfterLayout()
     }
     if (prev != null && next !== prev) {
       clearMessageListEnterAnimations()
@@ -4612,7 +4635,7 @@ const editingPersonaAvatarUrl = computed(() => {
                         <div class="leading-tight">
                           <div class="text-xs text-[var(--color-text-secondary)]">会话搜索</div>
                           <div class="text-2xs text-[var(--color-text-muted)]">
-                            {{ chatSearchHitsForNav.length ? (chatSearchCursor < 0 ? `—/${chatSearchHitsForNav.length}` : `${chatSearchCursor + 1}/${chatSearchHitsForNav.length}`) : (chatSearchLoading ? '搜索中...' : '输入后定位消息') }}
+                            {{ chatSearchStatusText }}
                           </div>
                         </div>
                       </div>
@@ -4623,7 +4646,8 @@ const editingPersonaAvatarUrl = computed(() => {
                         class="min-w-0 flex-1 bg-transparent text-sm outline-none"
                         placeholder="搜索当前会话"
                         aria-label="搜索当前会话"
-                        @keydown.enter.prevent="runChatSearch"
+                        @keydown.enter.exact.prevent="handleChatSearchEnter(false)"
+                        @keydown.enter.shift.exact.prevent="handleChatSearchEnter(true)"
                         @keydown.esc.prevent="closeChatSearchBar"
                       />
 
@@ -4648,8 +4672,10 @@ const editingPersonaAvatarUrl = computed(() => {
                           <button
                             v-for="(hit, idx) in chatSearchChipsDisplayHits"
                             :key="`${hit.messageId}_${hit.messageIndex}`"
-                            class="inline-flex w-[220px] shrink-0 items-start rounded-lg border border-[var(--color-border-subtle)] px-3 py-2 text-left text-xs transition-colors hover:bg-surface-muted"
-                            :class="idx === chatSearchCursor ? 'bg-surface-muted' : 'bg-surface-muted/55'"
+                            class="inline-flex w-[220px] shrink-0 items-start rounded-lg border px-3 py-2 text-left text-xs transition-colors hover:bg-surface-muted"
+                            :class="idx === chatSearchCursor ? 'bg-surface-muted border-[var(--color-border-strong)]' : 'bg-surface-muted/55 border-[var(--color-border-subtle)]'"
+                            :aria-current="idx === chatSearchCursor ? 'true' : undefined"
+                            :data-search-chip="idx"
                             @click="jumpToSearchResult(idx)"
                           >
                             <span>
@@ -4736,6 +4762,7 @@ const editingPersonaAvatarUrl = computed(() => {
           <MessageList
             ref="messageListRef"
             :chat-id="activeChat.id"
+            :search-target-message-id="chatSearchTargetMessageId"
             :messages="messageListMessages"
             :is-group="activeChat.isGroup"
             :selected-character="selectedCharacter"
