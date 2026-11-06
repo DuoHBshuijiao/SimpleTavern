@@ -14,7 +14,7 @@ const open = defineModel<boolean>('open', { required: true })
   <div class="overflow-hidden rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-settings-panel-bg)]">
     <button
       type="button"
-      class="flex w-full cursor-pointer select-none items-center justify-between gap-3 px-4 py-3.5 text-left text-sm text-[var(--color-text-secondary)] hover:bg-surface-hover/40"
+      class="flex w-full cursor-pointer select-none items-center justify-between gap-3 px-4 py-3.5 text-left text-sm font-medium text-[var(--color-text)] hover:bg-surface-hover/40"
       :aria-expanded="open"
       @click="open = !open"
     >
@@ -31,7 +31,7 @@ const open = defineModel<boolean>('open', { required: true })
       <div class="min-h-0 overflow-hidden">
         <div
           class="border-t border-[var(--color-border-subtle)] px-4 pb-4 pt-4"
-          :class="contentClass ?? 'space-y-3'"
+          :class="contentClass"
         >
           <slot />
         </div>

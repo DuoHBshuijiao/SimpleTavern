@@ -6,6 +6,8 @@ import ModernSelect from '../ModernSelect.vue'
 import ThemedCheckbox from '../ThemedCheckbox.vue'
 import LlmPresetNameCombobox from '../LlmPresetNameCombobox.vue'
 import LlmConnectionAdvancedSection from './LlmConnectionAdvancedSection.vue'
+import SettingsField from './SettingsField.vue'
+import SettingsHint from './SettingsHint.vue'
 import { SETTINGS_DRAWER_PRESETS_KEY } from '../../composables/settingsDrawerPresetsKey'
 
 const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
@@ -20,7 +22,7 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                   class="sticky top-0 z-10 flex min-w-0 flex-[0_0_min(11rem,34%)] flex-col self-start border-r border-[var(--color-border-subtle)] pr-3"
                 >
                     <div :ref="presets.bindPresetListHeader" class="mb-2 flex items-center justify-between gap-1.5">
-                        <span class="shrink-0 text-xs text-[var(--color-text-secondary)] sm:text-sm">预设列表</span>
+                        <span class="settings-label shrink-0">预设列表</span>
                         <button
                           type="button"
                           class="inline-flex min-h-8 shrink-0 items-center rounded-md bg-brand-a20 px-2 py-0.5 text-2xs font-medium leading-tight text-brand transition-colors hover:bg-brand-a30 touch-manipulation sm:px-2.5 sm:text-xs"
@@ -67,25 +69,26 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                               <X class="h-3.5 w-3.5" />
                             </button>
                         </div>
-                         <div v-if="presets.globalDraft!.apiPresets.length === 0" class="text-xs text-[var(--color-text-muted)] text-center py-4">无预设</div>
+                         <div v-if="presets.globalDraft!.apiPresets.length === 0" class="settings-hint text-center py-4">无预设</div>
                     </div>
                 </div>
 
                 <!-- Preset Editor -->
                 <div class="min-w-0 flex-1 flex flex-col" v-if="presets.editingPreset">
-                     <div class="min-w-0 space-y-4 pb-4">
-                        <div class="space-y-1.5">
-                            <div class="flex items-center justify-between gap-3">
-                              <label class="block text-xs font-medium text-[var(--color-text-secondary)]">预设名称</label>
+                     <div class="min-w-0 pb-4">
+                      <div class="settings-group">
+                        <div class="settings-group-title">连接</div>
+                        <SettingsField label="预设名称">
+                            <template #actions>
                               <button
                                 type="button"
-                                class="inline-flex items-center gap-2 text-xs text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text)]"
+                                class="settings-hint inline-flex items-center gap-2 transition-colors hover:text-[var(--color-text)]"
                                 @click="presets.setPresetTtsService(presets.editingPreset!, !presets.isTtsPreset(presets.editingPreset))"
                               >
                                 <ThemedCheckbox :checked="presets.isTtsPreset(presets.editingPreset)" />
                                 <span>作为 TTS 服务</span>
                               </button>
-                            </div>
+                            </template>
                             <LlmPresetNameCombobox
                               v-if="!presets.isTtsPreset(presets.editingPreset)"
                               v-model="presets.editingPreset!.name"
@@ -98,36 +101,34 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                               v-else
                               v-model="presets.editingPreset!.name"
                               type="text"
-                              class="input input-sm w-full"
+                              class="input w-full"
                             />
-                            <div v-if="presets.isTtsPreset(presets.editingPreset)" class="space-y-1.5">
-                              <label class="block text-2xs font-medium text-[var(--color-text-muted)]">TTS 提供商</label>
-                              <ModernSelect
-                                :model-value="presets.editingPresetTtsProvider"
-                                :options="presets.TTS_PROVIDER_OPTIONS"
-                                class="w-full"
-                                placeholder="选择 TTS 提供商…"
-                                @update:model-value="presets.onEditingPresetTtsProviderChange"
-                              />
-                            </div>
-                        </div>
+                        </SettingsField>
+                        <SettingsField v-if="presets.isTtsPreset(presets.editingPreset)" label="TTS 提供商">
+                          <ModernSelect
+                            :model-value="presets.editingPresetTtsProvider"
+                            :options="presets.TTS_PROVIDER_OPTIONS"
+                            class="w-full"
+                            placeholder="选择 TTS 提供商…"
+                            @update:model-value="presets.onEditingPresetTtsProviderChange"
+                          />
+                        </SettingsField>
 
-                         <div class="space-y-1.5">
-                            <label class="block text-xs font-medium text-[var(--color-text-secondary)]">API 基础地址</label>
-                            <input 
-                                v-model="presets.editingPreset!.baseUrl" 
-                                type="text" 
+                        <SettingsField label="API 基础地址" :hint="presets.editingPresetBaseUrlHint">
+                            <input
+                                v-model="presets.editingPreset!.baseUrl"
+                                type="text"
                                 :placeholder="presets.editingPresetBaseUrlPlaceholder"
-                                class="input input-sm w-full"
+                                class="input w-full"
                             />
-                            <p class="text-xs text-[var(--color-text-muted)]">{{ presets.editingPresetBaseUrlHint }}</p>
-                        </div>
+                        </SettingsField>
 
-                        <div
+                        <SettingsField
                           v-if="!presets.isTtsPreset(presets.editingPreset)"
-                          class="space-y-1.5"
+                          label="LLM 协议"
+                          hint="「自动」按模型名选原生协议。"
+                          more="「自动」会按模型名选原生协议（Claude → Anthropic Messages、Gemini → generateContent…），选择结果在下方预览与聊天 meta 中可见；固定某协议则不再自动切换。未知/未实现协议会明确失败（不静默回退）。"
                         >
-                            <label class="block text-xs font-medium text-[var(--color-text-secondary)]">LLM 协议</label>
                             <ModernSelect
                               :model-value="presets.editingPreset!.protocol || 'openai_compatible_chat'"
                               :options="presets.llmProtocolSelectOptions(presets.editingPreset!.protocol)"
@@ -135,30 +136,28 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                               placeholder="选择协议…"
                               @update:model-value="(v) => { if (presets.editingPreset) presets.editingPreset.protocol = String(v) }"
                             />
-                            <p class="text-xs text-[var(--color-text-muted)]">
-                              「自动」会按模型名选原生协议（Claude → Anthropic Messages、Gemini → generateContent…），选择结果在下方预览与聊天 meta 中可见；固定某协议则不再自动切换。未知/未实现协议会明确失败（不静默回退）。
-                            </p>
-                        </div>
+                        </SettingsField>
 
-                        <div class="space-y-1.5">
-                            <label v-if="!presets.presetRequiresOAuth(presets.editingPreset)" class="block text-xs font-medium text-[var(--color-text-secondary)]">API Key</label>
+                        <div class="settings-field">
+                            <span v-if="!presets.presetRequiresOAuth(presets.editingPreset)" class="settings-label">API Key</span>
                              <div v-if="!presets.presetRequiresOAuth(presets.editingPreset)" class="relative">
-                                <input 
-                                    v-model="presets.editingPreset!.apiKey" 
+                                <input
+                                    v-model="presets.editingPreset!.apiKey"
                                     :type="presets.editingPresetShowApiKey ? 'text' : 'password'"
-                                    class="input input-sm w-full pr-8"
+                                    class="input w-full pr-8"
                                 />
-                                <button 
+                                <button
                                     type="button"
                                     class="absolute right-1.5 top-1/2 inline-flex min-h-9 min-w-9 -translate-y-1/2 items-center justify-center rounded-md text-[var(--color-text-muted)] touch-manipulation hover:text-[var(--color-text-secondary)]"
+                                    :aria-label="presets.editingPresetShowApiKey ? '隐藏 API Key' : '显示 API Key'"
                                     @click="presets.editingPresetShowApiKey = !presets.editingPresetShowApiKey"
                                 >
                                     <component :is="presets.editingPresetShowApiKey ? Eye : EyeOff" class="w-4 h-4" />
                                 </button>
                              </div>
-                            <p v-if="presets.presetRequiresOAuth(presets.editingPreset)" class="text-xs text-[var(--color-text-secondary)]">开始登录会先保存当前预设，授权凭据独立保存在本机。</p>
+                            <p v-if="presets.presetRequiresOAuth(presets.editingPreset)" class="settings-hint">开始登录会先保存当前预设，授权凭据独立保存在本机。</p>
                             <div v-if="presets.presetRequiresOAuth(presets.editingPreset)" class="flex flex-wrap items-center gap-2 pt-1">
-                              <span class="text-xs text-[var(--color-text-muted)]">
+                              <span class="settings-hint">
                                 {{ presets.oauthStatusFor(presets.editingPreset?.id)?.loggedIn ? '已登录' : '需要登录后才能发请求' }}
                                 <span v-if="presets.oauthStatusFor(presets.editingPreset?.id)?.accountId">
                                   · {{ presets.oauthStatusFor(presets.editingPreset?.id)?.accountId }}
@@ -182,7 +181,7 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                             </div>
                         </div>
 
-                        <p v-if="presets.editingPreset.providerId === 'openai-chatgpt'" class="text-xs leading-relaxed text-[var(--color-text-secondary)]">通过 OpenAI 官方提供的 Sign in with ChatGPT，使用你的 ChatGPT 订阅额度。本功能目前处于预览阶段，OpenAI 可能随时调整可用范围、使用限制或接入方式。</p>
+                        <p v-if="presets.editingPreset.providerId === 'openai-chatgpt'" class="settings-hint">通过 OpenAI 官方提供的 Sign in with ChatGPT，使用你的 ChatGPT 订阅额度。本功能目前处于预览阶段，OpenAI 可能随时调整可用范围、使用限制或接入方式。</p>
                         <p v-if="presets.editingPreset.providerId === 'openai-chatgpt' && presets.oauthStatusFor(presets.editingPreset.id)?.loggedIn && presets.oauthStatusFor(presets.editingPreset.id)?.subscriptionAuthorized === false" role="status" class="text-xs text-error">已登录，但尚未获得 ChatGPT 订阅使用授权，请重新登录并确认订阅授权。</p>
                         <SubscriptionUsagePanel
                           v-if="['openai-chatgpt', 'openai-codex', 'xai-oauth'].includes(presets.editingPreset.providerId || '')"
@@ -192,11 +191,13 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                           :logged-in="!!presets.oauthStatusFor(presets.editingPreset.id)?.loggedIn"
                           :account-id="presets.oauthStatusFor(presets.editingPreset.id)?.accountId"
                         />
-                        <div class="space-y-2">
-                             <div class="flex justify-between items-center gap-2 flex-wrap">
-                                 <label class="block text-xs font-medium text-[var(--color-text-secondary)]">模型列表</label>
+                      </div>
+
+                        <div class="settings-group">
+                             <div class="settings-field-head">
+                                 <div class="settings-group-title">模型列表</div>
                                  <button 
-                                    class="text-xs text-brand hover:text-brand-hover flex items-center gap-1 shrink-0" 
+                                    class="text-xs text-brand hover:underline flex items-center gap-1 shrink-0" 
                                     :disabled="presets.presetModelsLoading"
                                     @click="presets.openModelSelector(presets.editingPreset!)"
                                  >
@@ -206,11 +207,11 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                              </div>
                              <div
                                v-if="presets.editingPreset!.models.length"
-                               class="flex flex-wrap items-center gap-x-1 gap-y-0.5 text-2xs leading-tight text-[var(--color-text-secondary)]"
+                               class="flex flex-wrap items-center gap-x-1 gap-y-0.5"
                              >
                                <button
                                  type="button"
-                                 class="min-h-0 rounded px-0.5 py-0 text-brand hover:underline disabled:pointer-events-none disabled:opacity-40"
+                                 class="min-h-0 rounded px-0.5 py-0 text-xs text-brand hover:underline disabled:pointer-events-none disabled:opacity-40"
                                  @click="presets.selectAllPresetModelNames"
                                >
                                  全选
@@ -218,7 +219,7 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                                <span class="select-none text-[var(--color-text-muted)]">·</span>
                                <button
                                  type="button"
-                                 class="min-h-0 rounded px-0.5 py-0 text-brand hover:underline disabled:pointer-events-none disabled:opacity-40"
+                                 class="min-h-0 rounded px-0.5 py-0 text-xs text-brand hover:underline disabled:pointer-events-none disabled:opacity-40"
                                  :disabled="presets.presetModelListSelection.size === 0"
                                  @click="presets.clearPresetModelListSelection"
                                >
@@ -227,7 +228,7 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                                <span class="select-none text-[var(--color-text-muted)]">·</span>
                                <button
                                  type="button"
-                                 class="min-h-0 rounded px-0.5 py-0 text-error/90 hover:underline disabled:pointer-events-none disabled:opacity-40"
+                                 class="min-h-0 rounded px-0.5 py-0 text-xs text-error/90 hover:underline disabled:pointer-events-none disabled:opacity-40"
                                  :disabled="presets.presetModelListSelection.size === 0"
                                  @click="presets.removeSelectedPresetModelNames"
                                >
@@ -236,13 +237,13 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                                <span class="select-none text-[var(--color-text-muted)]">·</span>
                                <button
                                  type="button"
-                                 class="min-h-0 rounded px-0.5 py-0 text-error/90 hover:underline disabled:pointer-events-none disabled:opacity-40"
+                                 class="min-h-0 rounded px-0.5 py-0 text-xs text-error/90 hover:underline disabled:pointer-events-none disabled:opacity-40"
                                  @click="presets.clearAllPresetModelNames"
                                >
                                  清空全部
                                </button>
                              </div>
-                             <div class="drawer-scroll bg-surface-overlay border border-[var(--color-border)] rounded-lg p-2 min-h-[100px] max-h-[200px] overflow-y-auto custom-scrollbar">
+                             <div class="drawer-scroll settings-readout max-h-[200px] overflow-y-auto custom-scrollbar">
                                  <div class="flex flex-wrap gap-2">
                                      <div
                                        v-for="(m, idx) in presets.editingPreset!.models"
@@ -265,7 +266,7 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                                           <X class="w-3 h-3" />
                                          </button>
                                      </div>
-                                      <div v-if="!presets.editingPreset!.models.length" class="text-xs text-[var(--color-text-muted)] w-full text-center py-4">
+                                      <div v-if="!presets.editingPreset!.models.length" class="settings-hint w-full text-center py-4">
                                           点击上方「从 API 获取并筛选」或手动添加
                                       </div>
                                  </div>
@@ -275,7 +276,7 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                                  <input 
                                     type="text" 
                                     placeholder="手动输入模型名..."
-                                    class="input input-sm flex-1 rounded px-2 py-1 text-xs outline-none"
+                                    class="input flex-1"
                                     @keydown.enter="(e) => {
                                         const val = (e.target as HTMLInputElement).value.trim();
                                         if(val && !presets.editingPreset!.models.includes(val)) {
@@ -298,52 +299,52 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                           @open-cache-guide="presets.openCacheGuide"
                         />
 
-                        <div v-if="presets.isTtsPreset(presets.editingPreset)" class="space-y-3 rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-settings-control-bg)] p-3">
-                          <p class="text-2xs text-[var(--color-text-muted)]">
+                        <div v-if="presets.isTtsPreset(presets.editingPreset)" class="settings-group">
+                          <p class="settings-hint">
                             当前提供商：{{ presets.formatTtsProviderLabel(presets.editingPresetTtsProvider) }}
                           </p>
 
                           <!-- GLM-TTS 本地专属配置 -->
                           <template v-if="presets.editingPresetIsGlmLocal">
                             <div class="space-y-2">
-                              <label class="block text-xs font-medium text-[var(--color-text-secondary)]">仓库路径</label>
-                              <input v-model="presets.editingPreset!.ttsGlmLocalRepoPath" type="text" class="input input-sm w-full" placeholder="E:\GLM-TTS（GLM-TTS 仓库根目录）" />
-                              <p class="text-2xs text-[var(--color-text-muted)]">指向包含 run_api_gpu.ps1 的已就绪 GLM-TTS 目录。</p>
+                              <label class="settings-label block">仓库路径</label>
+                              <input v-model="presets.editingPreset!.ttsGlmLocalRepoPath" type="text" class="input w-full" placeholder="E:\GLM-TTS（GLM-TTS 仓库根目录）" />
+                              <p class="settings-hint">指向包含 run_api_gpu.ps1 的已就绪 GLM-TTS 目录。</p>
                             </div>
                             <div class="flex items-center gap-3">
                               <div class="flex-1 space-y-1">
-                                <label class="block text-xs font-medium text-[var(--color-text-secondary)]">端口</label>
-                                <input v-model.number="presets.editingPreset!.ttsGlmLocalPort" type="number" min="1" max="65535" class="input input-sm w-full" placeholder="8088" />
+                                <label class="settings-label block">端口</label>
+                                <input v-model.number="presets.editingPreset!.ttsGlmLocalPort" type="number" min="1" max="65535" class="input w-full" placeholder="8088" />
                               </div>
                               <div class="flex-1 space-y-1">
-                                <label class="block text-xs font-medium text-[var(--color-text-secondary)]">托管启动</label>
+                                <label class="settings-label block">托管启动</label>
                                 <button type="button" class="btn btn-xs w-full" :class="presets.editingPreset!.ttsGlmLocalManaged ? 'btn-primary' : 'btn-secondary'" @click="presets.editingPreset!.ttsGlmLocalManaged = !presets.editingPreset!.ttsGlmLocalManaged">
                                   {{ presets.editingPreset!.ttsGlmLocalManaged ? '由程序启动' : '手动启动' }}
                                 </button>
                               </div>
                             </div>
-                            <p class="text-2xs text-[var(--color-text-muted)]">「由程序启动」会在首次合成前自动运行 run_api_gpu.ps1；「手动启动」需自行启动本地 API。</p>
+                            <SettingsHint more="「由程序启动」会在首次合成前自动运行 run_api_gpu.ps1；「手动启动」需自行启动本地 API。">「由程序启动」会在首次合成前自动运行脚本。</SettingsHint>
                           </template>
 
                           <template v-else-if="presets.editingPresetIsQwen3Local">
                             <div class="space-y-2">
-                              <label class="block text-xs font-medium text-[var(--color-text-secondary)]">仓库路径</label>
-                              <input v-model="presets.editingPreset!.ttsQwen3LocalRepoPath" type="text" class="input input-sm w-full" placeholder="E:\Qwen3-TTS（Qwen3-TTS 仓库根目录）" />
-                              <p class="text-2xs text-[var(--color-text-muted)]">指向安装好 Qwen3-TTS 与 its gateway 的仓库目录；托管模式会从这里启动 uvicorn 网关。</p>
+                              <label class="settings-label block">仓库路径</label>
+                              <input v-model="presets.editingPreset!.ttsQwen3LocalRepoPath" type="text" class="input w-full" placeholder="E:\Qwen3-TTS（Qwen3-TTS 仓库根目录）" />
+                              <p class="settings-hint">指向安装好 Qwen3-TTS 与 its gateway 的仓库目录；托管模式会从这里启动 uvicorn 网关。</p>
                             </div>
                             <div class="grid gap-3 md:grid-cols-2">
                               <div class="space-y-1">
-                                <label class="block text-xs font-medium text-[var(--color-text-secondary)]">主端口（CustomVoice 网关）</label>
-                                <input v-model.number="presets.editingPreset!.ttsQwen3LocalPort" type="number" min="1" max="65535" class="input input-sm w-full" placeholder="8080" />
+                                <label class="settings-label block">主端口（CustomVoice 网关）</label>
+                                <input v-model.number="presets.editingPreset!.ttsQwen3LocalPort" type="number" min="1" max="65535" class="input w-full" placeholder="8080" />
                               </div>
                               <div class="space-y-1">
-                                <label class="block text-xs font-medium text-[var(--color-text-secondary)]">语音克隆端口（Base 网关）</label>
+                                <label class="settings-label block">语音克隆端口（Base 网关）</label>
                                 <input
                                   :value="presets.editingPreset!.ttsQwen3LocalVoiceClonePort ?? ''"
                                   type="number"
                                   min="1"
                                   max="65535"
-                                  class="input input-sm w-full"
+                                  class="input w-full"
                                   placeholder="留空 = 主端口 + 1"
                                   @input="presets.onQwen3VoiceClonePortInput"
                                 />
@@ -351,48 +352,46 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                             </div>
                             <div class="grid gap-3 md:grid-cols-2">
                               <div class="space-y-1">
-                                <label class="block text-xs font-medium text-[var(--color-text-secondary)]">托管启动</label>
+                                <label class="settings-label block">托管启动</label>
                                 <button type="button" class="btn btn-xs w-full" :class="presets.editingPreset!.ttsQwen3LocalManaged ? 'btn-primary' : 'btn-secondary'" @click="presets.editingPreset!.ttsQwen3LocalManaged = !presets.editingPreset!.ttsQwen3LocalManaged">
                                   {{ presets.editingPreset!.ttsQwen3LocalManaged ? '由程序启动' : '手动启动' }}
                                 </button>
                               </div>
                               <div class="space-y-1">
-                                <label class="block text-xs font-medium text-[var(--color-text-secondary)]">设备</label>
-                                <input v-model="presets.editingPreset!.ttsQwen3LocalDevice" type="text" class="input input-sm w-full" placeholder="cuda:0" />
+                                <label class="settings-label block">设备</label>
+                                <input v-model="presets.editingPreset!.ttsQwen3LocalDevice" type="text" class="input w-full" placeholder="cuda:0" />
                               </div>
                             </div>
                             <div class="grid gap-3 md:grid-cols-2">
                               <div class="space-y-1">
-                                <label class="block text-xs font-medium text-[var(--color-text-secondary)]">CustomVoice 模型 ID（/custom_voice）</label>
-                                <input v-model="presets.editingPreset!.ttsQwen3LocalModelId" type="text" class="input input-sm w-full" placeholder="Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice" />
+                                <label class="settings-label block">CustomVoice 模型 ID（/custom_voice）</label>
+                                <input v-model="presets.editingPreset!.ttsQwen3LocalModelId" type="text" class="input w-full" placeholder="Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice" />
                               </div>
                               <div class="space-y-1">
-                                <label class="block text-xs font-medium text-[var(--color-text-secondary)]">Base 模型 ID（/voice_clone）</label>
-                                <input v-model="presets.editingPreset!.ttsQwen3LocalBaseModelId" type="text" class="input input-sm w-full" placeholder="Qwen/Qwen3-TTS-12Hz-1.7B-Base" />
+                                <label class="settings-label block">Base 模型 ID（/voice_clone）</label>
+                                <input v-model="presets.editingPreset!.ttsQwen3LocalBaseModelId" type="text" class="input w-full" placeholder="Qwen/Qwen3-TTS-12Hz-1.7B-Base" />
                               </div>
                             </div>
                             <div class="space-y-1">
-                              <label class="block text-xs font-medium text-[var(--color-text-secondary)]">默认语言</label>
-                              <input v-model="presets.editingPreset!.ttsQwen3LocalDefaultLanguage" type="text" class="input input-sm w-full" placeholder="Auto" />
+                              <label class="settings-label block">默认语言</label>
+                              <input v-model="presets.editingPreset!.ttsQwen3LocalDefaultLanguage" type="text" class="input w-full" placeholder="Auto" />
                             </div>
-                            <p class="text-2xs text-[var(--color-text-muted)]">
-                              托管模式会启动<strong>两个</strong> uvicorn：主端口加载 CustomVoice（仅 speaker → /v1/tts/custom_voice）；语音克隆端口加载 Base（参考音频+转写 → /v1/tts/voice_clone）。两端口必须不同；手动启动时需自行各启一个网关并填好 Base URL（主地址对应主端口）。
-                            </p>
+                            <SettingsHint more="托管模式会启动两个 uvicorn：主端口加载 CustomVoice（仅 speaker → /v1/tts/custom_voice）；语音克隆端口加载 Base（参考音频+转写 → /v1/tts/voice_clone）。两端口必须不同；手动启动时需自行各启一个网关并填好 Base URL（主地址对应主端口）。">托管模式会启动两个网关，两个端口必须不同。</SettingsHint>
                           </template>
 
                           <template v-else-if="presets.editingPresetIsOmniVoiceLocal">
                             <div class="space-y-2">
-                              <label class="block text-xs font-medium text-[var(--color-text-secondary)]">仓库路径</label>
-                              <input v-model="presets.editingPreset!.ttsOmniVoiceLocalRepoPath" type="text" class="input input-sm w-full" placeholder="E:\OmniVoice（OmniVoice 仓库根目录）" />
-                              <p class="text-2xs text-[var(--color-text-muted)]">指向安装好 OmniVoice 与其 .venv 的仓库目录；托管模式会从这里启动 uvicorn。</p>
+                              <label class="settings-label block">仓库路径</label>
+                              <input v-model="presets.editingPreset!.ttsOmniVoiceLocalRepoPath" type="text" class="input w-full" placeholder="E:\OmniVoice（OmniVoice 仓库根目录）" />
+                              <p class="settings-hint">指向安装好 OmniVoice 与其 .venv 的仓库目录；托管模式会从这里启动 uvicorn。</p>
                             </div>
                             <div class="grid gap-3 md:grid-cols-2">
                               <div class="space-y-1">
-                                <label class="block text-xs font-medium text-[var(--color-text-secondary)]">端口</label>
-                                <input v-model.number="presets.editingPreset!.ttsOmniVoiceLocalPort" type="number" min="1" max="65535" class="input input-sm w-full" placeholder="8089" />
+                                <label class="settings-label block">端口</label>
+                                <input v-model.number="presets.editingPreset!.ttsOmniVoiceLocalPort" type="number" min="1" max="65535" class="input w-full" placeholder="8089" />
                               </div>
                               <div class="space-y-1">
-                                <label class="block text-xs font-medium text-[var(--color-text-secondary)]">托管启动</label>
+                                <label class="settings-label block">托管启动</label>
                                 <button type="button" class="btn btn-xs w-full" :class="presets.editingPreset!.ttsOmniVoiceLocalManaged ? 'btn-primary' : 'btn-secondary'" @click="presets.editingPreset!.ttsOmniVoiceLocalManaged = !presets.editingPreset!.ttsOmniVoiceLocalManaged">
                                   {{ presets.editingPreset!.ttsOmniVoiceLocalManaged ? '由程序启动' : '手动启动' }}
                                 </button>
@@ -400,27 +399,27 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                             </div>
                             <div class="grid gap-3 md:grid-cols-2">
                               <div class="space-y-1">
-                                <label class="block text-xs font-medium text-[var(--color-text-secondary)]">模型 ID / 路径</label>
-                                <input v-model="presets.editingPreset!.ttsOmniVoiceLocalModelId" type="text" class="input input-sm w-full" placeholder="k2-fsa/OmniVoice" />
+                                <label class="settings-label block">模型 ID / 路径</label>
+                                <input v-model="presets.editingPreset!.ttsOmniVoiceLocalModelId" type="text" class="input w-full" placeholder="k2-fsa/OmniVoice" />
                               </div>
                               <div class="space-y-1">
-                                <label class="block text-xs font-medium text-[var(--color-text-secondary)]">设备</label>
-                                <input v-model="presets.editingPreset!.ttsOmniVoiceLocalDevice" type="text" class="input input-sm w-full" placeholder="cuda:0（留空则交给 OmniVoice 自动选择）" />
+                                <label class="settings-label block">设备</label>
+                                <input v-model="presets.editingPreset!.ttsOmniVoiceLocalDevice" type="text" class="input w-full" placeholder="cuda:0（留空则交给 OmniVoice 自动选择）" />
                               </div>
                             </div>
                             <div class="space-y-1">
-                              <label class="block text-xs font-medium text-[var(--color-text-secondary)]">默认语言</label>
-                              <input v-model="presets.editingPreset!.ttsOmniVoiceLocalDefaultLanguage" type="text" class="input input-sm w-full" placeholder="例如 zh、Chinese、English（可留空）" />
+                              <label class="settings-label block">默认语言</label>
+                              <input v-model="presets.editingPreset!.ttsOmniVoiceLocalDefaultLanguage" type="text" class="input w-full" placeholder="例如 zh、Chinese、English（可留空）" />
                             </div>
-                            <p class="text-2xs text-[var(--color-text-muted)]">托管模式会执行 python -m uvicorn omnivoice.api.server:app --host 127.0.0.1 --port &lt;port&gt;，并通过环境变量传入模型与 device；后端调用 JSON 接口 /v1/tts。</p>
+                            <SettingsHint more="托管模式会执行 python -m uvicorn omnivoice.api.server:app --host 127.0.0.1 --port <port>，并通过环境变量传入模型与 device；后端调用 JSON 接口 /v1/tts。">托管模式由程序启动 uvicorn 并传入模型与设备。</SettingsHint>
                           </template>
 
                           <div class="flex items-center justify-between gap-2 flex-wrap">
-                            <label class="block text-xs font-medium text-[var(--color-text-secondary)]">音色列表</label>
+                            <label class="settings-label block">音色列表</label>
                             <button
                               v-if="presets.editingPresetSupportsVoiceFetch"
                               type="button"
-                              class="text-xs text-brand hover:text-brand-hover flex items-center gap-1 shrink-0"
+                              class="text-xs text-brand hover:underline flex items-center gap-1 shrink-0"
                               :disabled="presets.presetVoicesLoading"
                               @click="presets.openVoiceSelector(presets.editingPreset!)"
                             >
@@ -431,18 +430,18 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
 
                           <div
                             v-if="presets.editingPresetVoiceCatalog.length"
-                            class="flex flex-wrap items-center gap-x-1 gap-y-0.5 text-2xs leading-tight text-[var(--color-text-secondary)]"
+                            class="flex flex-wrap items-center gap-x-1 gap-y-0.5"
                           >
-                            <button type="button" class="min-h-0 rounded px-0.5 py-0 text-brand hover:underline" @click="presets.selectAllPresetVoices">全选</button>
+                            <button type="button" class="min-h-0 rounded px-0.5 py-0 text-xs text-brand hover:underline" @click="presets.selectAllPresetVoices">全选</button>
                             <span class="select-none text-[var(--color-text-muted)]">·</span>
-                            <button type="button" class="min-h-0 rounded px-0.5 py-0 text-brand hover:underline disabled:pointer-events-none disabled:opacity-40" :disabled="presets.presetVoiceListSelection.size === 0" @click="presets.clearPresetVoiceSelection">清空选择</button>
+                            <button type="button" class="min-h-0 rounded px-0.5 py-0 text-xs text-brand hover:underline disabled:pointer-events-none disabled:opacity-40" :disabled="presets.presetVoiceListSelection.size === 0" @click="presets.clearPresetVoiceSelection">清空选择</button>
                             <span class="select-none text-[var(--color-text-muted)]">·</span>
-                            <button type="button" class="min-h-0 rounded px-0.5 py-0 text-error/90 hover:underline disabled:pointer-events-none disabled:opacity-40" :disabled="presets.presetVoiceListSelection.size === 0" @click="presets.removeSelectedPresetVoices">删除所选</button>
+                            <button type="button" class="min-h-0 rounded px-0.5 py-0 text-xs text-error/90 hover:underline disabled:pointer-events-none disabled:opacity-40" :disabled="presets.presetVoiceListSelection.size === 0" @click="presets.removeSelectedPresetVoices">删除所选</button>
                             <span class="select-none text-[var(--color-text-muted)]">·</span>
-                            <button type="button" class="min-h-0 rounded px-0.5 py-0 text-error/90 hover:underline disabled:pointer-events-none disabled:opacity-40" :disabled="presets.editingPresetVoiceCatalog.length === 0" @click="presets.clearAllPresetVoices">清空全部</button>
+                            <button type="button" class="min-h-0 rounded px-0.5 py-0 text-xs text-error/90 hover:underline disabled:pointer-events-none disabled:opacity-40" :disabled="presets.editingPresetVoiceCatalog.length === 0" @click="presets.clearAllPresetVoices">清空全部</button>
                           </div>
 
-                          <div class="drawer-scroll bg-surface-overlay border border-[var(--color-border)] rounded-lg p-2 min-h-[96px] max-h-[200px] overflow-y-auto custom-scrollbar">
+                          <div class="drawer-scroll settings-readout max-h-[200px] overflow-y-auto custom-scrollbar">
                             <div class="flex flex-wrap gap-2">
                               <button
                                 v-for="voice in presets.editingPresetVoiceCatalog"
@@ -453,9 +452,9 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                                 @click="presets.togglePresetVoiceSelection(voice.voiceId)"
                               >
                                 <span class="min-w-0 truncate">{{ voice.name }}</span>
-                                <span class="rounded-full bg-surface-muted px-1.5 py-0.5 text-2xs text-[var(--color-text-muted)]">{{ voice.voiceType }}</span>
+                                <span class="rounded-full bg-surface-muted px-1.5 py-0.5 settings-hint">{{ voice.voiceType }}</span>
                               </button>
-                              <div v-if="!presets.editingPresetVoiceCatalog.length" class="text-xs text-[var(--color-text-muted)] w-full text-center py-4">{{ presets.editingPresetIsGlmLocal ? '请在下方添加本地参考音色' : presets.editingPresetIsQwen3Local ? '请在下方添加 Qwen3 音色条目' : presets.editingPresetIsOmniVoiceLocal ? '请在下方添加 OmniVoice 音色条目' : '点击上方「从 API 获取并筛选」或下方手动添加 voice_id' }}</div>
+                              <div v-if="!presets.editingPresetVoiceCatalog.length" class="settings-hint w-full text-center py-4">{{ presets.editingPresetIsGlmLocal ? '请在下方添加本地参考音色' : presets.editingPresetIsQwen3Local ? '请在下方添加 Qwen3 音色条目' : presets.editingPresetIsOmniVoiceLocal ? '请在下方添加 OmniVoice 音色条目' : '点击上方「从 API 获取并筛选」或下方手动添加 voice_id' }}</div>
                             </div>
                           </div>
 
@@ -463,7 +462,7 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                             <input
                               type="text"
                               placeholder="手动输入 voice_id 后按回车添加…"
-                              class="input input-sm flex-1 rounded px-2 py-1 text-xs outline-none font-mono"
+                              class="input flex-1 font-mono"
                               @keydown.enter="
                                 (e) => {
                                   const val = (e.target as HTMLInputElement).value.trim()
@@ -478,13 +477,13 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
 
                           <!-- GLM-TTS（本地）参考音色编辑 -->
                           <template v-if="presets.editingPresetIsGlmLocal">
-                            <div class="space-y-2 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay px-3 py-3">
-                              <div class="text-xs font-medium text-[var(--color-text-secondary)]">添加本地参考音色</div>
-                              <input v-model="presets.glmLocalVoiceDraft.voiceId" type="text" class="input input-sm w-full" placeholder="音色 ID（唯一标识）" />
-                              <input v-model="presets.glmLocalVoiceDraft.name" type="text" class="input input-sm w-full" placeholder="音色名称（显示用）" />
-                              <input v-model="presets.glmLocalVoiceDraft.promptAudioPath" type="text" class="input input-sm w-full font-mono" placeholder="参考音频路径（wav/flac 绝对路径）" />
-                              <input v-model="presets.glmLocalVoiceDraft.promptText" type="text" class="input input-sm w-full" placeholder="参考音频对应转写文本（推荐填写）" />
-                              <p class="text-2xs text-[var(--color-text-muted)]">每条音色需要一段参考音频和对应文本。路径为本机文件绝对路径。</p>
+                            <div class="settings-group">
+                              <div class="settings-label">添加本地参考音色</div>
+                              <input v-model="presets.glmLocalVoiceDraft.voiceId" type="text" class="input w-full" placeholder="音色 ID（唯一标识）" />
+                              <input v-model="presets.glmLocalVoiceDraft.name" type="text" class="input w-full" placeholder="音色名称（显示用）" />
+                              <input v-model="presets.glmLocalVoiceDraft.promptAudioPath" type="text" class="input w-full font-mono" placeholder="参考音频路径（wav/flac 绝对路径）" />
+                              <input v-model="presets.glmLocalVoiceDraft.promptText" type="text" class="input w-full" placeholder="参考音频对应转写文本（推荐填写）" />
+                              <p class="settings-hint">每条音色需要一段参考音频和对应文本。路径为本机文件绝对路径。</p>
                               <button
                                 type="button"
                                 class="btn btn-sm btn-primary w-full"
@@ -494,24 +493,24 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                             </div>
 
                             <!-- 已添加的音色详情编辑 -->
-                            <div v-for="voice in presets.editingPresetVoiceCatalog" :key="'detail-' + voice.voiceId" class="space-y-1 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay/60 px-3 py-2 text-xs">
+                            <div v-for="voice in presets.editingPresetVoiceCatalog" :key="'detail-' + voice.voiceId" class="settings-item space-y-1 text-xs">
                               <div class="flex items-center justify-between">
-                                <span class="font-medium text-[var(--color-text-secondary)]">{{ voice.name }} <span class="text-2xs text-[var(--color-text-muted)]">({{ voice.voiceId }})</span></span>
+                                <span class="font-medium text-[var(--color-text-secondary)]">{{ voice.name }} <span class="settings-hint">({{ voice.voiceId }})</span></span>
                               </div>
-                              <input :value="voice.promptAudioPath ?? ''" type="text" class="input input-sm w-full font-mono text-2xs" placeholder="参考音频路径" @change="(e) => presets.updateGlmLocalVoiceField(voice.voiceId, 'promptAudioPath', (e.target as HTMLInputElement).value)" />
-                              <input :value="voice.promptText ?? ''" type="text" class="input input-sm w-full text-2xs" placeholder="参考转写文本" @change="(e) => presets.updateGlmLocalVoiceField(voice.voiceId, 'promptText', (e.target as HTMLInputElement).value)" />
+                              <input :value="voice.promptAudioPath ?? ''" type="text" class="input w-full font-mono" placeholder="参考音频路径" @change="(e) => presets.updateGlmLocalVoiceField(voice.voiceId, 'promptAudioPath', (e.target as HTMLInputElement).value)" />
+                              <input :value="voice.promptText ?? ''" type="text" class="input w-full" placeholder="参考转写文本" @change="(e) => presets.updateGlmLocalVoiceField(voice.voiceId, 'promptText', (e.target as HTMLInputElement).value)" />
                             </div>
                           </template>
 
                           <template v-else-if="presets.editingPresetIsQwen3Local">
-                            <div class="space-y-2 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay px-3 py-3">
-                              <div class="text-xs font-medium text-[var(--color-text-secondary)]">添加 Qwen3 音色</div>
-                              <input v-model="presets.qwen3LocalVoiceDraft.voiceId" type="text" class="input input-sm w-full font-mono" placeholder="音色 ID（唯一标识；无参考音频时作为 speaker 传给 custom_voice）" />
-                              <input v-model="presets.qwen3LocalVoiceDraft.name" type="text" class="input input-sm w-full" placeholder="显示名称（可选）" />
-                              <input v-model="presets.qwen3LocalVoiceDraft.promptAudioPath" type="text" class="input input-sm w-full font-mono" placeholder="参考音频路径（wav/flac 绝对路径，语音克隆时填写）" />
-                              <input v-model="presets.qwen3LocalVoiceDraft.promptText" type="text" class="input input-sm w-full" placeholder="参考音频对应转写文本（语音克隆时推荐填写）" />
-                              <input v-model="presets.qwen3LocalVoiceDraft.instruction" type="text" class="input input-sm w-full" placeholder="instruction（可选，仅 custom_voice 模式）" />
-                              <p class="text-2xs text-[var(--color-text-muted)]">参考音频与转写走第二端口上的 Base 网关（/voice_clone）；仅 speaker 走主端口 CustomVoice（/custom_voice）。路径为本机绝对路径。</p>
+                            <div class="settings-group">
+                              <div class="settings-label">添加 Qwen3 音色</div>
+                              <input v-model="presets.qwen3LocalVoiceDraft.voiceId" type="text" class="input w-full font-mono" placeholder="音色 ID（唯一标识；无参考音频时作为 speaker 传给 custom_voice）" />
+                              <input v-model="presets.qwen3LocalVoiceDraft.name" type="text" class="input w-full" placeholder="显示名称（可选）" />
+                              <input v-model="presets.qwen3LocalVoiceDraft.promptAudioPath" type="text" class="input w-full font-mono" placeholder="参考音频路径（wav/flac 绝对路径，语音克隆时填写）" />
+                              <input v-model="presets.qwen3LocalVoiceDraft.promptText" type="text" class="input w-full" placeholder="参考音频对应转写文本（语音克隆时推荐填写）" />
+                              <input v-model="presets.qwen3LocalVoiceDraft.instruction" type="text" class="input w-full" placeholder="instruction（可选，仅 custom_voice 模式）" />
+                              <SettingsHint more="参考音频与转写走第二端口上的 Base 网关（/voice_clone）；仅 speaker 走主端口 CustomVoice（/custom_voice）。路径为本机绝对路径。">路径为本机绝对路径。</SettingsHint>
                               <button
                                 type="button"
                                 class="btn btn-sm btn-primary w-full"
@@ -520,24 +519,24 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                               >添加音色</button>
                             </div>
 
-                            <div v-for="voice in presets.editingPresetVoiceCatalog" :key="'detail-qwen-' + voice.voiceId" class="space-y-1 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay/60 px-3 py-2 text-xs">
+                            <div v-for="voice in presets.editingPresetVoiceCatalog" :key="'detail-qwen-' + voice.voiceId" class="settings-item space-y-1 text-xs">
                               <div class="font-medium text-[var(--color-text-secondary)]">{{ voice.voiceId }}</div>
-                              <input :value="voice.name" type="text" class="input input-sm w-full text-2xs" placeholder="显示名称" @change="(e) => presets.updateQwen3LocalVoiceField(voice.voiceId, 'name', (e.target as HTMLInputElement).value)" />
-                              <input :value="voice.promptAudioPath ?? ''" type="text" class="input input-sm w-full font-mono text-2xs" placeholder="参考音频路径" @change="(e) => presets.updateQwen3LocalVoiceField(voice.voiceId, 'promptAudioPath', (e.target as HTMLInputElement).value)" />
-                              <input :value="voice.promptText ?? ''" type="text" class="input input-sm w-full text-2xs" placeholder="参考转写文本" @change="(e) => presets.updateQwen3LocalVoiceField(voice.voiceId, 'promptText', (e.target as HTMLInputElement).value)" />
-                              <input :value="voice.instruction ?? ''" type="text" class="input input-sm w-full text-2xs" placeholder="instruction（可选）" @change="(e) => presets.updateQwen3LocalVoiceField(voice.voiceId, 'instruction', (e.target as HTMLInputElement).value)" />
+                              <input :value="voice.name" type="text" class="input w-full" placeholder="显示名称" @change="(e) => presets.updateQwen3LocalVoiceField(voice.voiceId, 'name', (e.target as HTMLInputElement).value)" />
+                              <input :value="voice.promptAudioPath ?? ''" type="text" class="input w-full font-mono" placeholder="参考音频路径" @change="(e) => presets.updateQwen3LocalVoiceField(voice.voiceId, 'promptAudioPath', (e.target as HTMLInputElement).value)" />
+                              <input :value="voice.promptText ?? ''" type="text" class="input w-full" placeholder="参考转写文本" @change="(e) => presets.updateQwen3LocalVoiceField(voice.voiceId, 'promptText', (e.target as HTMLInputElement).value)" />
+                              <input :value="voice.instruction ?? ''" type="text" class="input w-full" placeholder="instruction（可选）" @change="(e) => presets.updateQwen3LocalVoiceField(voice.voiceId, 'instruction', (e.target as HTMLInputElement).value)" />
                             </div>
                           </template>
 
                           <template v-else-if="presets.editingPresetIsOmniVoiceLocal">
-                            <div class="space-y-2 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay px-3 py-3">
-                              <div class="text-xs font-medium text-[var(--color-text-secondary)]">添加 OmniVoice 音色条目</div>
-                              <input v-model="presets.omniVoiceLocalVoiceDraft.voiceId" type="text" class="input input-sm w-full font-mono" placeholder="音色 ID（用于会话里选择）" />
-                              <input v-model="presets.omniVoiceLocalVoiceDraft.name" type="text" class="input input-sm w-full" placeholder="显示名称（可选）" />
-                              <input v-model="presets.omniVoiceLocalVoiceDraft.promptAudioPath" type="text" class="input input-sm w-full font-mono" placeholder="参考音频路径（克隆模式，可选）" />
-                              <input v-model="presets.omniVoiceLocalVoiceDraft.promptText" type="text" class="input input-sm w-full" placeholder="参考音频转写文本（克隆模式，可选）" />
-                              <input v-model="presets.omniVoiceLocalVoiceDraft.instruction" type="text" class="input input-sm w-full" placeholder="instruction / instruct（音色设计模式，可选）" />
-                              <p class="text-2xs text-[var(--color-text-muted)]">优先级为：参考音频可读则走克隆；否则有 instruction 走音色设计；两者都留空时仅按文本自动生成音色。</p>
+                            <div class="settings-group">
+                              <div class="settings-label">添加 OmniVoice 音色条目</div>
+                              <input v-model="presets.omniVoiceLocalVoiceDraft.voiceId" type="text" class="input w-full font-mono" placeholder="音色 ID（用于会话里选择）" />
+                              <input v-model="presets.omniVoiceLocalVoiceDraft.name" type="text" class="input w-full" placeholder="显示名称（可选）" />
+                              <input v-model="presets.omniVoiceLocalVoiceDraft.promptAudioPath" type="text" class="input w-full font-mono" placeholder="参考音频路径（克隆模式，可选）" />
+                              <input v-model="presets.omniVoiceLocalVoiceDraft.promptText" type="text" class="input w-full" placeholder="参考音频转写文本（克隆模式，可选）" />
+                              <input v-model="presets.omniVoiceLocalVoiceDraft.instruction" type="text" class="input w-full" placeholder="instruction / instruct（音色设计模式，可选）" />
+                              <SettingsHint more="优先级为：参考音频可读则走克隆；否则有 instruction 走音色设计；两者都留空时仅按文本自动生成音色。">优先走参考音频克隆，其次 instruction，都空则自动生成。</SettingsHint>
                               <button
                                 type="button"
                                 class="btn btn-sm btn-primary w-full"
@@ -546,27 +545,25 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                               >添加音色</button>
                             </div>
 
-                            <div v-for="voice in presets.editingPresetVoiceCatalog" :key="'detail-omnivoice-' + voice.voiceId" class="space-y-1 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay/60 px-3 py-2 text-xs">
+                            <div v-for="voice in presets.editingPresetVoiceCatalog" :key="'detail-omnivoice-' + voice.voiceId" class="settings-item space-y-1 text-xs">
                               <div class="font-medium text-[var(--color-text-secondary)]">{{ voice.voiceId }}</div>
-                              <input :value="voice.name" type="text" class="input input-sm w-full text-2xs" placeholder="显示名称" @change="(e) => presets.updateOmniVoiceLocalVoiceField(voice.voiceId, 'name', (e.target as HTMLInputElement).value)" />
-                              <input :value="voice.promptAudioPath ?? ''" type="text" class="input input-sm w-full font-mono text-2xs" placeholder="参考音频路径（可选）" @change="(e) => presets.updateOmniVoiceLocalVoiceField(voice.voiceId, 'promptAudioPath', (e.target as HTMLInputElement).value)" />
-                              <input :value="voice.promptText ?? ''" type="text" class="input input-sm w-full text-2xs" placeholder="参考转写文本（可选）" @change="(e) => presets.updateOmniVoiceLocalVoiceField(voice.voiceId, 'promptText', (e.target as HTMLInputElement).value)" />
-                              <input :value="voice.instruction ?? ''" type="text" class="input input-sm w-full text-2xs" placeholder="instruction / instruct（可选）" @change="(e) => presets.updateOmniVoiceLocalVoiceField(voice.voiceId, 'instruction', (e.target as HTMLInputElement).value)" />
+                              <input :value="voice.name" type="text" class="input w-full" placeholder="显示名称" @change="(e) => presets.updateOmniVoiceLocalVoiceField(voice.voiceId, 'name', (e.target as HTMLInputElement).value)" />
+                              <input :value="voice.promptAudioPath ?? ''" type="text" class="input w-full font-mono" placeholder="参考音频路径（可选）" @change="(e) => presets.updateOmniVoiceLocalVoiceField(voice.voiceId, 'promptAudioPath', (e.target as HTMLInputElement).value)" />
+                              <input :value="voice.promptText ?? ''" type="text" class="input w-full" placeholder="参考转写文本（可选）" @change="(e) => presets.updateOmniVoiceLocalVoiceField(voice.voiceId, 'promptText', (e.target as HTMLInputElement).value)" />
+                              <input :value="voice.instruction ?? ''" type="text" class="input w-full" placeholder="instruction / instruct（可选）" @change="(e) => presets.updateOmniVoiceLocalVoiceField(voice.voiceId, 'instruction', (e.target as HTMLInputElement).value)" />
                             </div>
                           </template>
 
                           <template v-else-if="presets.editingPresetIsSiliconflow">
-                            <div class="space-y-2 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay px-3 py-3">
-                              <div class="text-xs font-medium text-[var(--color-text-secondary)]">硅基流动 · 上传参考音频</div>
-                              <p class="text-2xs text-[var(--color-text-muted)]">
-                                需提供参考音频文件、与音频一致的转写文本，以及自定义音色名（对应官方 customName）；成功后返回的 uri 将写入音色目录。
-                              </p>
+                            <div class="settings-group">
+                              <div class="settings-label">硅基流动 · 上传参考音频</div>
+                              <SettingsHint more="需提供参考音频文件、与音频一致的转写文本，以及自定义音色名（对应官方 customName）；成功后返回的 uri 将写入音色目录。">需要参考音频、一致的转写文本和自定义音色名。</SettingsHint>
                               <div class="flex flex-wrap gap-2">
                                 <button type="button" class="btn btn-xs btn-secondary" @click="presets.pickTtsCloneSourceFile">选择参考音频</button>
-                                <span class="text-2xs text-[var(--color-text-muted)]">{{ presets.ttsCloneSourceFile?.name || '未选择文件' }}</span>
+                                <span class="settings-hint">{{ presets.ttsCloneSourceFile?.name || '未选择文件' }}</span>
                               </div>
                               <input :ref="presets.bindTtsCloneSourceInput" type="file" class="hidden" accept=".mp3,.wav,.m4a,.opus" @change="presets.onTtsCloneSourceChange" />
-                              <input v-model="presets.ttsCloneDraft.voiceId" type="text" class="input input-sm w-full" placeholder="自定义音色名称（customName）" />
+                              <input v-model="presets.ttsCloneDraft.voiceId" type="text" class="input w-full" placeholder="自定义音色名称（customName）" />
                               <ModernSelect
                                 v-model="presets.ttsCloneDraft.model"
                                 :options="presets.ttsSessionModelOptions"
@@ -579,13 +576,13 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                               <button type="button" class="btn btn-sm btn-primary w-full" :disabled="presets.ttsCloneLoading" @click="presets.submitTtsClone">{{ presets.ttsCloneLoading ? '上传中...' : '上传并写入音色' }}</button>
                               <audio v-if="presets.ttsClonePreviewUrl" :src="presets.ttsClonePreviewUrl" controls class="w-full"></audio>
                             </div>
-                            <div class="rounded-lg border border-dashed border-[var(--color-border-subtle)] bg-surface-overlay px-3 py-3 text-xs text-[var(--color-text-muted)]">
+                            <div class="settings-hint">
                               硅基流动不提供与本应用内 MiniMax「音色设计」等价的云端接口；可使用上方上传或模型预置音色。
                             </div>
                           </template>
 
                           <template v-else-if="presets.editingPresetIsOpenrouter">
-                            <div class="rounded-lg border border-dashed border-[var(--color-border-subtle)] bg-surface-overlay px-3 py-3 text-xs text-[var(--color-text-muted)] space-y-2">
+                            <div class="settings-hint space-y-2">
                               <p>OpenRouter TTS 不支持在本面板内上传参考音频：请在下方「音色目录」填写模型文档要求的 <span class="font-mono">voice</span>；上游路由与偏好请在 OpenRouter 网站自行配置。</p>
                               <p>详见 <a href="https://openrouter.ai/docs" target="_blank" rel="noopener noreferrer" class="text-brand underline">OpenRouter 文档</a>。</p>
                             </div>
@@ -594,14 +591,14 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                           <!-- MiniMax / GLM（云端）：手动添加 + 克隆 + 设计 -->
                           <template v-else>
                             <div class="flex flex-col gap-3">
-                              <div class="space-y-2 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay px-3 py-3">
-                                <div class="text-xs font-medium text-[var(--color-text-secondary)]">音色快速复刻</div>
+                              <div class="settings-group">
+                                <div class="settings-label">音色快速复刻</div>
                               <div class="flex flex-wrap gap-2">
                                 <button type="button" class="btn btn-xs btn-secondary" @click="presets.pickTtsCloneSourceFile">选择源音频</button>
-                                <span class="text-2xs text-[var(--color-text-muted)]">{{ presets.ttsCloneSourceFile?.name || '未选择文件' }}</span>
+                                <span class="settings-hint">{{ presets.ttsCloneSourceFile?.name || '未选择文件' }}</span>
                               </div>
                               <input :ref="presets.bindTtsCloneSourceInput" type="file" class="hidden" accept=".mp3,.wav,.m4a" @change="presets.onTtsCloneSourceChange" />
-                              <input v-model="presets.ttsCloneDraft.voiceId" type="text" class="input input-sm w-full" placeholder="voice_id" />
+                              <input v-model="presets.ttsCloneDraft.voiceId" type="text" class="input w-full" placeholder="voice_id" />
                               <ModernSelect
                                 v-model="presets.ttsCloneDraft.model"
                                 :options="presets.ttsSessionModelOptions"
@@ -613,11 +610,11 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                               <textarea v-model="presets.ttsCloneDraft.previewText" rows="2" class="input textarea w-full resize-y" :placeholder="presets.editingPresetTtsProvider === 'glm' ? '试听文本（GLM 必填，留空则后端用默认试听文案）' : '试听文本（可选）'"></textarea>
                               <div v-if="presets.editingPresetSupportsPromptAudio" class="flex flex-wrap gap-2">
                                 <button type="button" class="btn btn-xs btn-secondary" @click="presets.pickTtsClonePromptFile">选择示例音频</button>
-                                <span class="text-2xs text-[var(--color-text-muted)]">{{ presets.ttsClonePromptFile?.name || '可选' }}</span>
+                                <span class="settings-hint">{{ presets.ttsClonePromptFile?.name || '可选' }}</span>
                               </div>
                               <input v-if="presets.editingPresetSupportsPromptAudio" :ref="presets.bindTtsClonePromptInput" type="file" class="hidden" accept=".mp3,.wav,.m4a" @change="presets.onTtsClonePromptChange" />
-                              <input v-model="presets.ttsCloneDraft.promptText" type="text" class="input input-sm w-full" :placeholder="presets.editingPresetTtsProvider === 'glm' ? '示例音频文本（可选）' : '示例音频对应文本（可选）'" />
-                              <div v-if="presets.editingPresetSupportsPromptAudio" class="flex flex-wrap gap-4 text-xs text-[var(--color-text-secondary)]">
+                              <input v-model="presets.ttsCloneDraft.promptText" type="text" class="input w-full" :placeholder="presets.editingPresetTtsProvider === 'glm' ? '示例音频文本（可选）' : '示例音频对应文本（可选）'" />
+                              <div v-if="presets.editingPresetSupportsPromptAudio" class="settings-hint flex flex-wrap gap-4">
                                 <button type="button" class="inline-flex items-center gap-2 transition-colors hover:text-[var(--color-text)]" @click="presets.ttsCloneDraft.needNoiseReduction = !presets.ttsCloneDraft.needNoiseReduction">
                                   <ThemedCheckbox :checked="presets.ttsCloneDraft.needNoiseReduction" />
                                   <span>降噪</span>
@@ -627,21 +624,21 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                                   <span>音量归一</span>
                                 </button>
                               </div>
-                              <p v-if="presets.editingPresetTtsProvider === 'glm'" class="text-2xs text-[var(--color-text-muted)]">GLM 复刻会使用上传的源音频作为样本；额外示例音频与降噪/归一化参数不适用。</p>
+                              <p v-if="presets.editingPresetTtsProvider === 'glm'" class="settings-hint">GLM 复刻会使用上传的源音频作为样本；额外示例音频与降噪/归一化参数不适用。</p>
                               <button type="button" class="btn btn-sm btn-primary w-full" :disabled="presets.ttsCloneLoading" @click="presets.submitTtsClone">{{ presets.ttsCloneLoading ? '复刻中...' : '复刻并试听' }}</button>
                               <audio v-if="presets.ttsClonePreviewUrl" :src="presets.ttsClonePreviewUrl" controls class="w-full"></audio>
                             </div>
 
-                            <div v-if="presets.editingPresetSupportsVoiceDesign" class="space-y-2 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay px-3 py-3">
-                              <div class="text-xs font-medium text-[var(--color-text-secondary)]">音色设计</div>
+                            <div v-if="presets.editingPresetSupportsVoiceDesign" class="settings-group">
+                              <div class="settings-label">音色设计</div>
                               <textarea v-model="presets.ttsDesignDraft.prompt" rows="3" class="input textarea w-full resize-y" placeholder="用自然语言描述想要的声音"></textarea>
                               <textarea v-model="presets.ttsDesignDraft.previewText" rows="2" class="input textarea w-full resize-y" placeholder="试听文本"></textarea>
-                              <input v-model="presets.ttsDesignDraft.voiceId" type="text" class="input input-sm w-full" placeholder="voice_id（可选，不填则自动生成）" />
+                              <input v-model="presets.ttsDesignDraft.voiceId" type="text" class="input w-full" placeholder="voice_id（可选，不填则自动生成）" />
                               <button type="button" class="btn btn-sm btn-primary w-full" :disabled="presets.ttsDesignLoading" @click="presets.submitTtsDesign">{{ presets.ttsDesignLoading ? '设计中...' : '生成并试听' }}</button>
                               <audio v-if="presets.ttsDesignPreviewUrl" :src="presets.ttsDesignPreviewUrl" controls class="w-full"></audio>
                             </div>
 
-                            <div v-else class="rounded-lg border border-dashed border-[var(--color-border-subtle)] bg-surface-overlay px-3 py-3 text-xs text-[var(--color-text-muted)]">
+                            <div v-else class="settings-hint">
                               GLM TTS 暂不支持音色设计，当前仅支持音色列表、上传与音色复刻。
                             </div>
                           </div>

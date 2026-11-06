@@ -158,7 +158,7 @@ watch(dropdownOpen, (open) => {
     <input
       :value="modelValue"
       type="text"
-      class="input input-sm w-full pr-20"
+      class="input w-full pr-20"
       :placeholder="placeholder"
       :disabled="disabled"
       @input="onInput"

@@ -1,0 +1,157 @@
+/**
+ * 设置页样式。层级固定为四级，改设置页时只用这里的类，不要再写一次性的边框和字号：
+ *
+ *   标签页 → 面板（SettingsDrawerGlobalAccordion，唯一带边框的一层）
+ *          → 分组 .settings-group（小标题 + 分隔线，不带框）
+ *          → 字段 SettingsField / SettingsSwitch（不带框）
+ *
+ * 只读信息用 .settings-readout，列表条目用 .settings-item（都是淡底、无边框）。
+ * 说明文字一律用 SettingsHint：一句短说明，长的收进 ⓘ。
+ */
+@layer components {
+  .settings-group {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .settings-group + .settings-group {
+    margin-top: 1.25rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--color-border-subtle);
+  }
+
+  .settings-group-title {
+    font-size: var(--text-sm);
+    font-weight: 600;
+    line-height: 1.4;
+    color: var(--color-text);
+  }
+
+  .settings-field {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 0.375rem;
+  }
+
+  .settings-field-head {
+    display: flex;
+    min-height: 1.5rem;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+
+  .settings-label {
+    min-width: 0;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    line-height: 1.4;
+    color: color-mix(in srgb, var(--color-text) 80%, var(--color-text-muted));
+  }
+
+  .settings-hint {
+    font-size: var(--text-xs);
+    line-height: 1.5;
+    color: var(--color-text-muted);
+  }
+
+  .settings-hint-toggle {
+    display: inline-flex;
+    margin-left: 0.25rem;
+    padding: 0.125rem;
+    vertical-align: -0.125rem;
+    border-radius: 9999px;
+    color: var(--color-text-muted);
+    transition: color var(--transition-fast);
+  }
+
+  .settings-hint-toggle:hover,
+  .settings-hint-toggle[aria-expanded='true'] {
+    color: var(--color-brand);
+  }
+
+  .settings-hint-more {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows var(--motion-duration-expand) ease-out;
+  }
+
+  .settings-hint-more--open {
+    grid-template-rows: 1fr;
+  }
+
+  .settings-switch {
+    position: relative;
+    width: 2.25rem;
+    height: 1.25rem;
+    flex-shrink: 0;
+    border-radius: 9999px;
+    background-color: var(--color-track);
+    transition: background-color 200ms ease-out;
+  }
+
+  .settings-switch--on {
+    background-color: var(--color-brand);
+  }
+
+  .settings-switch:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  .settings-switch:focus-visible {
+    outline: 2px solid var(--color-focus-ring);
+    outline-offset: 2px;
+  }
+
+  .settings-switch-knob {
+    position: absolute;
+    top: 0.125rem;
+    left: 0.125rem;
+    width: 1rem;
+    height: 1rem;
+    border-radius: 9999px;
+    background-color: var(--color-on-brand);
+    transition: transform 200ms ease-out;
+  }
+
+  .settings-switch--on .settings-switch-knob {
+    transform: translateX(1rem);
+  }
+
+  /* 只读信息：预览、用量、状态 */
+  .settings-readout {
+    border-radius: var(--radius-lg);
+    background-color: color-mix(in srgb, var(--color-text) 4%, transparent);
+    padding: 0.625rem 0.75rem;
+    font-size: var(--text-xs);
+    line-height: 1.5;
+    color: var(--color-text-muted);
+  }
+
+  /* 列表条目：世界书、规则、音色 */
+  .settings-item {
+    border-radius: var(--radius-lg);
+    background-color: color-mix(in srgb, var(--color-text) 4%, transparent);
+    padding: 0.5rem 0.625rem;
+    transition: background-color var(--transition-fast), opacity var(--transition-fast);
+  }
+
+  .settings-item--selected {
+    background-color: var(--color-brand-a10);
+  }
+
+  .settings-item--dragging {
+    opacity: 0.5;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .settings-hint-more,
+    .settings-switch,
+    .settings-switch-knob {
+      transition: none;
+    }
+  }
+}

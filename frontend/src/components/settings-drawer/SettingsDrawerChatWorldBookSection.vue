@@ -1,16 +1,20 @@
 ﻿<script setup lang="ts">
-import { inject } from 'vue'
+import { inject, ref } from 'vue'
 import { SETTINGS_DRAWER_CHAT_KEY } from '../../composables/settingsDrawerChatKey'
 import ModernSelect from '../ModernSelect.vue'
 import { GripVertical } from 'lucide-vue-next'
+import SettingsDrawerGlobalAccordion from './SettingsDrawerGlobalAccordion.vue'
+import SettingsHint from './SettingsHint.vue'
 
 const chat = inject(SETTINGS_DRAWER_CHAT_KEY)!
+const open = ref(true)
 </script>
 
 <template>
-<div class="space-y-2">
+<SettingsDrawerGlobalAccordion v-model:open="open" title="世界书">
+<div class="settings-group">
   <div class="flex flex-wrap items-center justify-between gap-2">
-    <div class="text-sm font-medium text-[var(--color-text-secondary)]">世界书</div>
+    <div class="settings-group-title">当前会话</div>
     <template v-if="!chat.worldBookCreateExpanded">
       <button type="button" class="btn btn-xs btn-secondary" @click="chat.worldBookCreateExpanded = true">
         新建世界书
@@ -28,9 +32,9 @@ const chat = inject(SETTINGS_DRAWER_CHAT_KEY)!
       <button type="button" class="btn btn-xs btn-secondary" @click="chat.cancelWorldBookCreate">取消</button>
     </div>
   </div>
-  <div class="rounded-lg border border-[var(--color-border-subtle)] bg-surface-muted p-3 text-xs text-[var(--color-text-muted)]">
-    全局激活的世界书会自动对当前会话生效；你也可以把世界书仅绑定到当前会话。会话内顺序用于预算淘汰优先级（靠后更先被丢弃）。
-  </div>
+  <SettingsHint more="全局激活的世界书会自动对当前会话生效；你也可以把世界书仅绑定到当前会话。会话内顺序用于预算淘汰优先级（靠后更先被丢弃）。">
+    全局激活的世界书自动生效，也可以只绑定到当前会话。
+  </SettingsHint>
   <div class="flex items-center gap-2">
     <ModernSelect
       v-model="chat.addWorldBookId"
@@ -40,11 +44,11 @@ const chat = inject(SETTINGS_DRAWER_CHAT_KEY)!
     />
     <button class="btn btn-sm btn-secondary" @click="chat.addWorldBookToOrder">加入顺序</button>
   </div>
-  <div class="drawer-scroll max-h-[180px] space-y-2 overflow-y-auto rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay p-2">
+  <div class="drawer-scroll max-h-[180px] space-y-1 overflow-y-auto">
     <div
       v-for="book in chat.currentChatWorldbooks"
       :key="book.id"
-      class="rounded-lg border border-[var(--color-border-subtle)] bg-surface-muted p-2"
+      class="settings-item"
     >
       <div class="flex items-center justify-between gap-2">
         <div class="text-sm text-[var(--color-text)]">
@@ -64,28 +68,26 @@ const chat = inject(SETTINGS_DRAWER_CHAT_KEY)!
         </div>
       </div>
     </div>
-    <div v-if="chat.currentChatWorldbooks.length === 0" class="text-xs text-[var(--color-text-muted)]">
+    <div v-if="chat.currentChatWorldbooks.length === 0" class="settings-hint">
       当前会话暂无已激活世界书。
     </div>
   </div>
-  <div class="rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay overflow-hidden">
-    <button
-      type="button"
-      class="w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-xs font-medium text-[var(--color-text-secondary)] hover:bg-surface-muted transition-colors"
-      @click="chat.toggleAllWorldBooksSection"
-    >
-      <span>全部世界书（{{ chat.worldbooks.length }} 本）</span>
-      <span class="text-[var(--color-text-muted)]">{{ chat.allWorldBooksSectionOpen ? '收起' : '展开' }}</span>
-    </button>
-    <div v-show="chat.allWorldBooksSectionOpen" class="px-2 pb-2 space-y-1.5 border-t border-[var(--color-border-subtle)] pt-2">
+  <div>
+    <div class="settings-field-head">
+      <span class="settings-label">全部世界书（{{ chat.worldbooks.length }} 本）</span>
+      <button type="button" class="settings-hint hover:underline" @click="chat.toggleAllWorldBooksSection">
+        {{ chat.allWorldBooksSectionOpen ? '收起' : '展开' }}
+      </button>
+    </div>
+    <div v-show="chat.allWorldBooksSectionOpen" class="mt-1 space-y-1">
       <div
         v-for="book in chat.worldBooksListVisible"
         :key="book.id"
-        class="flex items-center justify-between gap-2 rounded-md border border-[var(--color-border-subtle)] bg-surface-muted px-2 py-1.5"
+        class="settings-item flex items-center justify-between gap-2"
       >
         <div class="min-w-0 flex-1">
           <div class="text-xs text-[var(--color-text)] truncate">{{ book.name || book.id }}</div>
-          <div class="text-2xs text-[var(--color-text-muted)] leading-tight mt-0.5">
+          <div class="settings-hint mt-0.5">
             {{ chat.worldbookTokenHint(book.id) }}
           </div>
         </div>
@@ -93,7 +95,7 @@ const chat = inject(SETTINGS_DRAWER_CHAT_KEY)!
           编辑
         </button>
       </div>
-      <div v-if="chat.worldbooks.length === 0" class="text-xs text-[var(--color-text-muted)] px-1 py-1">暂无世界书。</div>
+      <div v-if="chat.worldbooks.length === 0" class="settings-hint">暂无世界书。</div>
       <div v-else-if="chat.worldbooks.length > 5" class="flex justify-center pt-1">
         <button type="button" class="btn btn-xs btn-secondary" @click="chat.allWorldBooksListExpanded = !chat.allWorldBooksListExpanded">
           {{ chat.allWorldBooksListExpanded ? '收起列表' : `展开全部（${chat.worldbooks.length} 本）` }}
@@ -101,16 +103,17 @@ const chat = inject(SETTINGS_DRAWER_CHAT_KEY)!
       </div>
     </div>
   </div>
-  <div class="space-y-1 rounded-lg border border-[var(--color-border-subtle)] bg-surface-overlay p-2">
-    <div class="text-xs text-[var(--color-text-muted)]">会话世界书顺序</div>
-    <p class="text-2xs text-[var(--color-text-muted)] mb-1 leading-snug">
-      拖动条目或用上移/下移调整顺序（预算淘汰时靠后的书先被丢弃）。扫描深度与插入深度在「编辑」中设置（按会话）。
-    </p>
+  </div>
+<div class="settings-group">
+    <div class="settings-group-title">会话世界书顺序</div>
+    <SettingsHint more="拖动条目或用上移/下移调整顺序（预算淘汰时靠后的书先被丢弃）。扫描深度与插入深度在「编辑」中设置（按会话）。">
+      拖动调整顺序，预算不够时靠后的先被丢弃。
+    </SettingsHint>
     <div
       v-for="(att, idx) in (chat.chatDraft.worldBookAttachments || [])"
       :key="`${att.worldBookId}-${idx}`"
-      class="flex items-center justify-between gap-2 rounded-md border border-[var(--color-border-subtle)] bg-surface-muted px-2 py-1 transition-[border-color,opacity,background-color]"
-      :class="chat.worldBookOrderDraggingIdx === idx ? 'opacity-50 border-brand-a50' : ''"
+      class="settings-item flex items-center justify-between gap-2"
+      :class="chat.worldBookOrderDraggingIdx === idx ? 'settings-item--dragging' : ''"
       draggable="true"
       @dragstart="chat.handleWorldBookOrderDragStart(idx)"
       @dragover="chat.handleWorldBookOrderDragOver($event, idx)"
@@ -122,7 +125,7 @@ const chat = inject(SETTINGS_DRAWER_CHAT_KEY)!
         </span>
         <div class="flex min-w-0 flex-1 flex-col gap-0.5">
           <span class="truncate text-xs text-[var(--color-text)]">{{ Number(idx) + 1 }}. {{ chat.worldBookName(att.worldBookId) }}</span>
-          <div class="text-2xs text-[var(--color-text-muted)] leading-tight">
+          <div class="settings-hint">
             扫描：{{ chat.scanDepthDisplay(att.scanDepth) }}　深度：{{ att.insertDepth ?? 5 }}
           </div>
         </div>
@@ -134,6 +137,6 @@ const chat = inject(SETTINGS_DRAWER_CHAT_KEY)!
         <button type="button" class="btn btn-xs btn-secondary" @click.stop="chat.clearWorldBookSessionActivationById(att.worldBookId)">删除</button>
       </div>
     </div>
-  </div>
 </div>
+</SettingsDrawerGlobalAccordion>
 </template>

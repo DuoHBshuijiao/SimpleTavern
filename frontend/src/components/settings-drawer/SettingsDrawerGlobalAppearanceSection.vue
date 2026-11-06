@@ -3,6 +3,9 @@ import { ref } from 'vue'
 import ModernSelect from '../ModernSelect.vue'
 import ThemedCheckbox from '../ThemedCheckbox.vue'
 import SettingsDrawerGlobalAccordion from './SettingsDrawerGlobalAccordion.vue'
+import SettingsField from './SettingsField.vue'
+import SettingsHint from './SettingsHint.vue'
+import SettingsSwitch from './SettingsSwitch.vue'
 import { THEME_OPTIONS, type MvuMode, type Settings } from '../../types/models'
 import type { SillyTavernImportPreview } from '../../composables/useSettingsImport'
 import type { CSSProperties } from 'vue'
@@ -83,44 +86,33 @@ function triggerStImport() {
 </script>
 
 <template>
-  <SettingsDrawerGlobalAccordion v-model:open="open" title="外观与数据" content-class="space-y-5">
-    <div class="space-y-3 rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-settings-control-bg)] p-3.5">
-      <div class="flex flex-wrap items-start justify-between gap-3">
-        <div class="min-w-0 space-y-1">
-          <div class="text-sm font-medium text-[var(--color-text-secondary)]">页面背景</div>
-          <p class="text-xs leading-relaxed text-[var(--color-text-muted)]">
-            图片只叠在主题底色之上；调低透明度时，底部纯色玻璃底会继续透出。
-          </p>
-        </div>
-        <div class="flex flex-wrap gap-2">
-          <button
-            type="button"
-            class="inline-flex min-h-10 items-center whitespace-nowrap rounded-lg bg-surface-muted px-4 py-2 text-sm text-[var(--color-text)] transition-colors hover:bg-surface-hover"
-            @click="triggerPageBackgroundImport"
-          >
-            导入图片
-          </button>
-          <button
-            v-if="draft.pageBackgroundImage"
-            type="button"
-            class="inline-flex min-h-10 items-center whitespace-nowrap rounded-lg border border-[var(--color-border-subtle)] bg-transparent px-4 py-2 text-sm text-[var(--color-text-secondary)] transition-colors hover:bg-surface-hover/30 hover:text-[var(--color-text)]"
-            @click="emit('clear-page-background')"
-          >
-            清除
-          </button>
-        </div>
-        <input
-          ref="pageBackgroundInputRef"
-          type="file"
-          class="hidden"
-          accept="image/*,.png,.jpg,.jpeg,.webp,.gif"
-          @change="emit('page-background-file', $event)"
-        />
+  <SettingsDrawerGlobalAccordion v-model:open="open" title="外观与数据">
+    <div class="settings-group">
+      <div class="settings-group-title">页面背景</div>
+      <SettingsHint more="图片只叠在主题底色之上；调低透明度时，底部纯色玻璃底会继续透出。100% 为完整显示图片。模糊仅作用于图片层，不会影响主题底色与界面内容。">
+        图片叠在主题底色之上，调低透明度可透出底色。
+      </SettingsHint>
+      <div class="flex flex-wrap gap-2">
+        <button type="button" class="btn btn-sm btn-secondary" @click="triggerPageBackgroundImport">导入图片</button>
+        <button
+          v-if="draft.pageBackgroundImage"
+          type="button"
+          class="btn btn-sm btn-secondary"
+          @click="emit('clear-page-background')"
+        >
+          清除
+        </button>
       </div>
-
+      <input
+        ref="pageBackgroundInputRef"
+        type="file"
+        class="hidden"
+        accept="image/*,.png,.jpg,.jpeg,.webp,.gif"
+        @change="emit('page-background-file', $event)"
+      />
       <div
         v-if="pageBackgroundImageUrl"
-        class="w-1/2 min-w-[12rem] max-w-[22rem] overflow-hidden rounded-xl border border-[var(--color-border-subtle)] bg-surface-muted/70"
+        class="w-1/2 min-w-[12rem] max-w-[22rem] overflow-hidden rounded-lg"
       >
         <div class="h-32 overflow-hidden">
           <img
@@ -131,67 +123,38 @@ function triggerStImport() {
           />
         </div>
       </div>
-      <div
-        v-else
-        class="rounded-xl border border-dashed border-[var(--color-border-subtle)] bg-[var(--color-settings-control-bg)] px-3 py-4 text-xs leading-relaxed text-[var(--color-text-muted)]"
-      >
-        还未导入页面背景。聊天页将继续仅使用当前主题底色。
-      </div>
-
+      <p v-else class="settings-hint">还未导入页面背景，聊天页仅使用主题底色。</p>
       <div class="grid gap-3 md:grid-cols-2">
-        <label class="space-y-2">
-          <div class="flex items-center justify-between gap-2 text-xs text-[var(--color-text-secondary)]">
-            <span>透明度</span>
-            <span>{{ pageBackgroundOpacity }}%</span>
-          </div>
+        <label class="settings-field">
+          <span class="settings-field-head">
+            <span class="settings-label">透明度</span>
+            <span class="settings-hint">{{ pageBackgroundOpacity }}%</span>
+          </span>
           <input v-model="pageBackgroundOpacity" type="range" min="0" max="100" step="1" class="input-range" />
-          <p class="text-xs text-[var(--color-text-muted)]">100% 为完整显示图片，降低后可透出主题底色。</p>
         </label>
-        <label class="space-y-2">
-          <div class="flex items-center justify-between gap-2 text-xs text-[var(--color-text-secondary)]">
-            <span>模糊</span>
-            <span>{{ pageBackgroundBlur }} px</span>
-          </div>
+        <label class="settings-field">
+          <span class="settings-field-head">
+            <span class="settings-label">模糊</span>
+            <span class="settings-hint">{{ pageBackgroundBlur }} px</span>
+          </span>
           <input v-model="pageBackgroundBlur" type="range" min="0" max="64" step="1" class="input-range" />
-          <p class="text-xs text-[var(--color-text-muted)]">仅作用于图片层，不会影响主题底色与界面内容。</p>
         </label>
       </div>
     </div>
 
-    <div class="space-y-3 rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-settings-control-bg)] p-3.5">
-      <div class="space-y-2">
-        <div class="text-sm font-medium text-[var(--color-text-secondary)]">WebGPU 着色器背景</div>
-        <p class="text-xs leading-relaxed text-[var(--color-text-muted)]">
-          运行态可先编译并应用，不会自动写入后端；仅「保存设置」才持久化。
-        </p>
-        <label class="block text-sm font-medium text-[var(--color-text-secondary)]">启用着色器背景</label>
-        <button
-          type="button"
-          class="group flex min-h-11 w-full cursor-pointer items-center gap-3 py-1 text-left"
-          @click="draft.webgpuBackgroundEnabled = !draft.webgpuBackgroundEnabled"
-        >
-          <div
-            class="relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200 ease-out"
-            :class="draft.webgpuBackgroundEnabled ? 'bg-brand' : 'bg-[var(--color-track)]'"
-          >
-            <div
-              class="absolute left-1 top-1 h-4 w-4 rounded-full bg-[var(--color-on-brand)]"
-              :style="{
-                transform: draft.webgpuBackgroundEnabled ? 'translateX(1.25rem)' : 'translateX(0)',
-                transition: 'transform 200ms ease-out',
-              }"
-            />
-          </div>
-          <span class="text-xs text-[var(--color-text-secondary)]">
-            {{ draft.webgpuBackgroundEnabled ? '已启用' : '已关闭' }}
-          </span>
-        </button>
-      </div>
-
+    <div class="settings-group">
+      <div class="settings-group-title">WebGPU 着色器背景</div>
+      <SettingsSwitch
+        :model-value="!!draft.webgpuBackgroundEnabled"
+        label="启用着色器背景"
+        hint="点「保存设置」才持久化。"
+        more="运行态可先编译并应用，不会自动写入后端；仅「保存设置」才持久化。"
+        @update:model-value="(v) => { draft.webgpuBackgroundEnabled = v }"
+      />
       <div class="flex flex-wrap gap-2">
         <button
           type="button"
-          class="min-h-9 rounded-lg bg-surface-muted px-3 py-1.5 text-xs transition-colors hover:bg-surface-hover disabled:opacity-50"
+          class="btn btn-xs btn-secondary"
           :disabled="webgpuPresetCreateBusy"
           @click="emit('create-webgpu-preset')"
         >
@@ -201,9 +164,9 @@ function triggerStImport() {
 
       <div class="space-y-2">
         <div class="flex items-center justify-between gap-3">
-          <span class="text-xs text-[var(--color-text-secondary)]">活动预设</span>
+          <span class="settings-label">活动预设</span>
           <div class="flex shrink-0 items-center gap-1.5">
-            <span class="whitespace-nowrap text-2xs text-[var(--color-text-muted)]">渲染性能</span>
+            <span class="settings-hint whitespace-nowrap">渲染性能</span>
             <ModernSelect
               v-model="webgpuTargetFps"
               :options="webgpuTargetFpsOptions"
@@ -212,7 +175,7 @@ function triggerStImport() {
             />
           </div>
         </div>
-        <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-2xs leading-snug text-[var(--color-text-muted)]">
+        <div class="settings-hint flex flex-wrap items-center gap-x-2 gap-y-1">
           <span>适配器：{{ webgpuAvailability === 'available' ? '可用' : webgpuAvailability === 'unavailable' ? '不可用' : '检测中' }}</span>
           <span v-if="webgpuHasRuntimeOverride">· 运行态覆盖</span>
           <span v-if="webgpuPresetSourceDirty">· 未保存</span>
@@ -223,7 +186,7 @@ function triggerStImport() {
         >
           编译失败，请使用对应预设行的「编辑」查看详情。
         </p>
-        <div class="space-y-2 rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-settings-control-bg)] p-2">
+        <div class="space-y-1">
           <template v-for="item in webgpuPresets" :key="item.id">
             <div
               class="flex min-h-9 w-full flex-wrap items-center gap-1.5 rounded-md px-1 py-0.5 text-xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-brand-a40"
@@ -269,27 +232,25 @@ function triggerStImport() {
               </div>
             </div>
           </template>
-          <div v-if="webgpuPresets.length === 0" class="px-2 py-2 text-xs text-[var(--color-text-muted)]">
+          <div v-if="webgpuPresets.length === 0" class="settings-hint">
             暂无预设
           </div>
         </div>
       </div>
     </div>
 
-    <div class="space-y-1.5">
-      <label class="block text-sm font-medium text-[var(--color-text-secondary)]">界面色系</label>
-      <ModernSelect
-        v-model="draft.themeId"
-        :options="[...THEME_OPTIONS]"
-        placeholder="选择色系..."
-        class="w-full"
-      />
-      <p class="text-xs text-[var(--color-text-muted)]">暗色玻璃底，仅强调色随主题变化；未设置时默认为雾玫瑰。</p>
-    </div>
-
-    <div class="space-y-3">
-      <div class="text-sm font-medium text-[var(--color-text-secondary)]">字体</div>
-      <div class="gap-2" :class="isNarrowPortrait ? 'flex flex-col' : 'flex flex-wrap items-center'">
+    <div class="settings-group">
+      <div class="settings-group-title">界面与字体</div>
+      <SettingsField label="界面色系" hint="暗色玻璃底，仅强调色随主题变化。" more="未设置时默认为雾玫瑰。">
+        <ModernSelect
+          v-model="draft.themeId"
+          :options="[...THEME_OPTIONS]"
+          placeholder="选择色系..."
+          class="w-full"
+        />
+      </SettingsField>
+      <SettingsField label="字体">
+        <div class="gap-2" :class="isNarrowPortrait ? 'flex flex-col' : 'flex flex-wrap items-center'">
         <div class="relative min-w-0 group" :class="isNarrowPortrait ? 'w-full' : 'max-w-[172px] flex-1'">
           <ModernSelect
             v-model="fontModel"
@@ -329,7 +290,7 @@ function triggerStImport() {
           </div>
           <button
             type="button"
-            class="inline-flex min-h-10 items-center whitespace-nowrap rounded-lg bg-surface-muted px-4 py-2 text-sm text-[var(--color-text)] transition-colors hover:bg-surface-hover"
+            class="btn btn-sm btn-secondary"
             @click="triggerFontImport"
           >
             导入字体
@@ -343,22 +304,23 @@ function triggerStImport() {
           />
         </div>
       </div>
+      </SettingsField>
     </div>
 
-    <div class="space-y-3">
-      <div class="text-sm font-medium text-[var(--color-text-secondary)]">数据备份与导入</div>
+    <div class="settings-group">
+      <div class="settings-group-title">数据备份与导入</div>
       <div class="flex flex-col gap-2">
         <div class="grid grid-cols-2 gap-2">
           <button
             type="button"
-            class="min-h-10 min-w-0 rounded-lg bg-surface-muted px-3 py-2 text-center text-sm leading-tight text-[var(--color-text)] transition-colors hover:bg-surface-hover"
+            class="btn btn-sm btn-secondary min-w-0"
             @click="emit('backup', 'basic')"
           >
             基本设置
           </button>
           <button
             type="button"
-            class="min-h-10 min-w-0 rounded-lg bg-surface-muted px-3 py-2 text-center text-sm leading-tight text-[var(--color-text)] transition-colors hover:bg-surface-hover"
+            class="btn btn-sm btn-secondary min-w-0"
             @click="emit('backup', 'with_characters')"
           >
             包含角色卡
@@ -367,14 +329,14 @@ function triggerStImport() {
         <div class="grid grid-cols-2 gap-2">
           <button
             type="button"
-            class="min-h-10 min-w-0 rounded-lg bg-surface-muted px-3 py-2 text-center text-sm leading-tight text-[var(--color-text)] transition-colors hover:bg-surface-hover"
+            class="btn btn-sm btn-secondary min-w-0"
             @click="emit('backup', 'with_chats')"
           >
             包含全部聊天记录
           </button>
           <button
             type="button"
-            class="min-h-10 min-w-0 rounded-lg bg-surface-muted px-3 py-2 text-center text-sm leading-tight text-[var(--color-text)] transition-colors hover:bg-surface-hover"
+            class="btn btn-sm btn-secondary min-w-0"
             :disabled="stPreviewLoading"
             @click="triggerImport"
           >
@@ -383,7 +345,7 @@ function triggerStImport() {
         </div>
         <button
           type="button"
-          class="min-h-10 w-full rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-surface-overlay)] px-3 py-2 text-center text-sm leading-tight text-[var(--color-text-secondary)] transition-colors hover:bg-surface-hover"
+          class="btn btn-sm btn-secondary w-full"
           :disabled="stPreviewLoading"
           @click="triggerStImport"
         >
@@ -399,13 +361,13 @@ function triggerStImport() {
         <input ref="stImportInputRef" type="file" class="hidden" accept=".png,.json" @change="emit('st-import-file', $event)" />
         <div
           v-if="stPreview"
-          class="rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-surface-overlay)] p-3 text-xs text-[var(--color-text-muted)]"
+          class="settings-readout"
         >
           <div class="flex flex-wrap items-center justify-between gap-2">
-            <div class="text-[var(--color-text-secondary)]">SillyTavern 预览</div>
+            <div class="font-medium text-[var(--color-text-secondary)]">SillyTavern 预览</div>
             <button
               type="button"
-              class="min-h-8 rounded-md bg-surface-muted px-2 py-1 text-[var(--color-text)] hover:bg-surface-hover"
+              class="btn btn-xs btn-secondary"
               @click="emit('reset-st-preview')"
             >
               清除
@@ -449,12 +411,9 @@ function triggerStImport() {
           <div v-if="stExpiresAt" class="mt-2 text-[var(--color-text-muted)]">预览暂存至：{{ stExpiresAt }}</div>
         </div>
       </div>
-      <div class="text-xs text-[var(--color-text-muted)]">
-        PNG 或 SillyTavern 形状 JSON 会先显示预览并可勾选 MVU；普通备份 JSON 仍走一键导入。
-      </div>
-      <div class="text-xs text-[var(--color-text-muted)]">
-        备份会导出全部系统设置（含用户 Persona 头像）；“包含角色卡/包含全部聊天记录”同时包含世界书数据。
-      </div>
+      <SettingsHint more="PNG 或 SillyTavern 形状 JSON 会先显示预览并可勾选 MVU；普通备份 JSON 仍走一键导入。备份会导出全部系统设置（含用户 Persona 头像）；“包含角色卡/包含全部聊天记录”同时包含世界书数据。">
+        备份含全部系统设置；角色卡和聊天记录备份同时含世界书。
+      </SettingsHint>
     </div>
   </SettingsDrawerGlobalAccordion>
 </template>

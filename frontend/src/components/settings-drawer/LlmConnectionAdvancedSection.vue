@@ -12,6 +12,9 @@
  */
 import { computed, ref, watch } from 'vue'
 import { BookOpen, ExternalLink, Loader2, Sparkles } from 'lucide-vue-next'
+import SettingsField from './SettingsField.vue'
+import SettingsHint from './SettingsHint.vue'
+import SettingsSwitch from './SettingsSwitch.vue'
 import ModernSelect from '../ModernSelect.vue'
 import ThemedCheckbox from '../ThemedCheckbox.vue'
 import type { LlmCatalogProvider } from '../../api/llm'
@@ -285,74 +288,88 @@ const cacheSummary = computed(() => {
   const bps = c.breakpoints?.length ? `，断点：${c.breakpoints.join(' / ')}` : ''
   return `${mode}${ttl}${bps}`
 })
+
+const webSearchSourceOptions = [
+  { label: '沿用原有行为', value: '' },
+  { label: '供应商原生', value: 'native' },
+  { label: '独立搜索（Tavily / 博查 / Brave）', value: 'independent' },
+]
 </script>
 
 <template>
-  <div class="space-y-4">
-    <fieldset class="space-y-2" data-settings-field="webSearchSource">
-      <legend class="text-xs font-medium text-[var(--color-text-secondary)]">联网高级设置</legend>
-      <label class="block space-y-1">
-        <span class="text-xs text-[var(--color-text-secondary)]">联网来源</span>
-        <select class="input input-sm w-full" :value="connection.webSearchSource || ''" @change="connection.webSearchSource = (($event.target as HTMLSelectElement).value || null) as 'native' | 'independent' | null">
-          <option value="">沿用原有行为</option><option value="native">供应商原生</option><option value="independent">独立搜索（Tavily / 博查 / Brave）</option>
-        </select>
-      </label>
-      <label class="flex items-center gap-2 text-xs text-[var(--color-text-secondary)]">
-        <input type="checkbox" :checked="connection.webSearchSearchEnabled !== false" @change="setSearchEnabled(($event.target as HTMLInputElement).checked)" />
-        {{ linkedWeb ? '搜索与网页读取联动' : '允许搜索' }}
-      </label>
-      <label v-if="!linkedWeb && connection.webSearchSource !== 'independent'" class="flex items-center gap-2 text-xs text-[var(--color-text-secondary)]">
-        <input type="checkbox" :checked="connection.webSearchFetchEnabled !== false" @change="connection.webSearchFetchEnabled = ($event.target as HTMLInputElement).checked" />允许网页抓取
-      </label>
-      <p class="text-xs leading-relaxed text-[var(--color-text-secondary)]">仍需打开聊天或助手中的联网总开关。独立服务仅提供搜索。GPT 原生搜索包含网页读取动作，无法独立控制；供应商或模型不支持时会明确报错，不会自动切换付费服务。</p>
-    </fieldset>
-    <!-- 供应商参数 -->
-    <div v-if="placeholders.length" class="space-y-2" data-settings-field="providerParams">
-      <div class="flex items-center justify-between gap-2">
-        <label class="block text-xs font-medium text-[var(--color-text-secondary)]">供应商参数</label>
-        <a
-          v-if="catalogProvider?.docsUrl"
-          :href="catalogProvider.docsUrl"
-          target="_blank"
-          rel="noreferrer"
-          class="inline-flex items-center gap-1 text-2xs text-brand hover:underline"
-        >
-          官方文档 <ExternalLink class="h-3 w-3" />
-        </a>
-      </div>
-      <div class="grid gap-2 sm:grid-cols-2">
-        <label v-for="ph in placeholders" :key="ph.key" class="block space-y-1">
-          <span class="text-2xs text-[var(--color-text-muted)]">{{ ph.label || ph.key }}</span>
-          <input
-            :value="paramValue(ph.key)"
-            type="text"
-            class="input input-sm w-full"
-            :placeholder="ph.example || ph.key"
-            @input="setParam(ph.key, ($event.target as HTMLInputElement).value)"
-          />
-          <span v-if="ph.hint" class="block text-2xs text-[var(--color-text-muted)]">{{ ph.hint }}</span>
-        </label>
-      </div>
-      <p class="text-2xs text-[var(--color-text-muted)]">
-        地址模板：<code class="font-mono">{{ catalogProvider?.baseUrlTemplate }}</code>；保存后由后端按参数生成，缺参会明确报错。
-      </p>
+  <section class="settings-group" data-settings-field="webSearchSource">
+    <div class="settings-group-title">联网高级设置</div>
+    <SettingsHint more="仍需打开聊天或助手中的联网总开关。独立服务仅提供搜索。GPT 原生搜索包含网页读取动作，无法独立控制；供应商或模型不支持时会明确报错，不会自动切换付费服务。">
+      还需打开聊天或助手中的联网总开关。
+    </SettingsHint>
+    <SettingsField label="联网来源">
+      <ModernSelect
+        :model-value="connection.webSearchSource || ''"
+        :options="webSearchSourceOptions"
+        placeholder="沿用原有行为"
+        class="w-full"
+        @update:model-value="(v) => { connection.webSearchSource = (String(v) || null) as 'native' | 'independent' | null }"
+      />
+    </SettingsField>
+    <SettingsSwitch
+      :label="linkedWeb ? '搜索与网页读取联动' : '允许搜索'"
+      :model-value="connection.webSearchSearchEnabled !== false"
+      @update:model-value="setSearchEnabled"
+    />
+    <SettingsSwitch
+      v-if="!linkedWeb && connection.webSearchSource !== 'independent'"
+      label="允许网页抓取"
+      :model-value="connection.webSearchFetchEnabled !== false"
+      @update:model-value="(v) => { connection.webSearchFetchEnabled = v }"
+    />
+  </section>
+
+  <section v-if="placeholders.length" class="settings-group" data-settings-field="providerParams">
+    <div class="settings-field-head">
+      <div class="settings-group-title">供应商参数</div>
+      <a
+        v-if="catalogProvider?.docsUrl"
+        :href="catalogProvider.docsUrl"
+        target="_blank"
+        rel="noreferrer"
+        class="inline-flex items-center gap-1 text-xs text-brand hover:underline"
+      >
+        官方文档 <ExternalLink class="h-3 w-3" />
+      </a>
     </div>
-    <p v-else-if="catalogProvider?.hint" class="rounded-lg bg-[var(--color-glass-l2)] px-3 py-2 text-2xs leading-4 text-[var(--color-text-secondary)]">
+    <div class="grid gap-3 sm:grid-cols-2">
+      <SettingsField v-for="ph in placeholders" :key="ph.key" :label="ph.label || ph.key" :hint="ph.hint || undefined">
+        <input
+          :value="paramValue(ph.key)"
+          type="text"
+          class="input w-full"
+          :placeholder="ph.example || ph.key"
+          @input="setParam(ph.key, ($event.target as HTMLInputElement).value)"
+        />
+      </SettingsField>
+    </div>
+    <p class="settings-hint">
+      地址模板：<code class="font-mono">{{ catalogProvider?.baseUrlTemplate }}</code>；保存后由后端按参数生成，缺参会明确报错。
+    </p>
+  </section>
+  <p v-else-if="catalogProvider?.hint" class="settings-group settings-hint">
+    <span>
       {{ catalogProvider.hint }}
       <a v-if="catalogProvider.docsUrl" :href="catalogProvider.docsUrl" target="_blank" rel="noreferrer" class="ml-1 inline-flex items-center gap-0.5 text-brand hover:underline">
         文档 <ExternalLink class="h-3 w-3" />
       </a>
-    </p>
+    </span>
+  </p>
 
-    <!-- 缓存策略 -->
-    <section class="space-y-2 rounded-xl border border-[var(--color-border-subtle)] p-3" data-settings-field="promptCache">
-      <div class="flex items-center justify-between gap-2">
-        <label class="block text-xs font-medium text-[var(--color-text-secondary)]">提示词缓存策略</label>
-        <button type="button" class="inline-flex items-center gap-1 text-2xs text-brand hover:underline" @click="emit('open-cache-guide')">
-          <BookOpen class="h-3 w-3" />
-          缓存原理与断点教学
-        </button>
-      </div>
+  <section class="settings-group" data-settings-field="promptCache">
+    <div class="settings-field-head">
+      <div class="settings-group-title">提示词缓存策略</div>
+      <button type="button" class="inline-flex items-center gap-1 text-xs text-brand hover:underline" @click="emit('open-cache-guide')">
+        <BookOpen class="h-3 w-3" />
+        缓存原理与断点教学
+      </button>
+    </div>
+    <SettingsField :hint="cacheModeHint">
       <ModernSelect
         :model-value="cache.mode"
         :options="cacheModeOptions"
@@ -360,123 +377,102 @@ const cacheSummary = computed(() => {
         placeholder="选择缓存模式…"
         @update:model-value="(v) => { if (!cacheModeDisabledReason(String(v) as PromptCacheMode)) cache = { ...cache, mode: String(v) as PromptCacheMode } }"
       />
-      <p class="text-2xs leading-4 text-[var(--color-text-muted)]">{{ cacheModeHint }}</p>
+    </SettingsField>
 
-      <template v-if="cache.mode !== 'off'">
-        <div class="grid gap-2 sm:grid-cols-2">
-          <div class="space-y-1">
-            <span class="block text-2xs text-[var(--color-text-muted)]">缓存 TTL</span>
-            <ModernSelect :model-value="ttlValue" :options="ttlOptions" class="w-full" placeholder="供应商默认" @update:model-value="(v) => { if (!ttlDisabledReason(String(v))) (ttlValue = String(v)) }" />
-          </div>
-          <div class="space-y-1">
-            <span class="block text-2xs text-[var(--color-text-muted)]">缓存键（OpenAI prompt_cache_key）</span>
-            <ModernSelect
-              :model-value="cache.cacheKey || 'per_chat'"
-              :options="cacheKeyOptions"
-              class="w-full"
-              :disabled="Boolean(cacheKeyDisabledReason)"
-              @update:model-value="(v) => (cache = { ...cache, cacheKey: String(v) })"
-            />
-            <p v-if="cacheKeyDisabledReason" class="text-2xs text-[var(--color-text-muted)]">{{ cacheKeyDisabledReason }}</p>
-          </div>
-        </div>
-
-        <div v-if="showExplicitControls" class="space-y-1">
-          <span class="block text-2xs text-[var(--color-text-muted)]">显式断点位置（Anthropic cache_control / GPT-5.6+ prompt_cache_breakpoint）</span>
-          <p v-if="breakpointsDisabledReason" class="text-2xs text-[var(--color-text-muted)]">{{ breakpointsDisabledReason }}</p>
-          <div class="flex flex-col gap-1" :class="breakpointsDisabledReason ? 'pointer-events-none opacity-60' : ''">
-            <button
-              v-for="bp in PROMPT_CACHE_BREAKPOINTS"
-              :key="bp"
-              type="button"
-              class="inline-flex items-center gap-2 text-left text-xs text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text)]"
-              :class="bp === 'system' ? 'cursor-default opacity-80' : ''"
-              @click="toggleBreakpoint(bp)"
-            >
-              <ThemedCheckbox :checked="hasBreakpoint(bp)" />
-              <span>{{ BREAKPOINT_LABELS[bp] }}</span>
-            </button>
-          </div>
-        </div>
-
-        <button
-          type="button"
-          class="inline-flex items-center gap-2 text-left text-xs text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text)]"
-          :class="markersDisabledReason ? 'opacity-60' : ''"
-          :disabled="Boolean(markersDisabledReason)"
-          @click="cache = { ...cache, explicitMarkers: !cache.explicitMarkers }"
-        >
-          <ThemedCheckbox :checked="!!cache.explicitMarkers" />
-          <span>在消息上打显式缓存标记（百炼 DashScope 等中国厂商需要）</span>
-        </button>
-        <p v-if="markersDisabledReason" class="text-2xs text-[var(--color-text-muted)]">{{ markersDisabledReason }}</p>
-      </template>
-    </section>
-
-    <!-- 回传思考内容 -->
-    <section class="space-y-1.5 rounded-xl border border-[var(--color-border-subtle)] p-3" data-settings-field="echoReasoning">
-      <button
-        type="button"
-        class="flex w-full items-center justify-between gap-3 text-left"
-        role="switch"
-        :aria-checked="echo"
-        @click="echo = !echo"
-      >
-        <span class="min-w-0">
-          <span class="block text-xs font-medium text-[var(--color-text-secondary)]">回传思考内容（reasoning_content）</span>
-          <span class="block text-2xs leading-4 text-[var(--color-text-muted)]">
-            开：把上一轮 assistant 的思考链一并发回（DeepSeek 带工具调用时<b>必须</b>开启）；关：省 token，多数厂商可接受。
-          </span>
-        </span>
-        <span class="relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors" :class="echo ? 'bg-brand' : 'bg-[var(--color-track)]'">
-          <span class="absolute h-4 w-4 rounded-full bg-[var(--color-on-brand)] shadow transition-transform" :class="echo ? 'translate-x-4' : 'translate-x-0.5'" />
-        </span>
-      </button>
-      <p v-if="echoOverriddenByGlobal" class="text-2xs text-[var(--color-warning-text,var(--color-warning))]">
-        全局设置当前为「{{ globalEchoBack === 'on' ? '全部回传' : '全部不回传' }}」，会覆盖此处开关；改回「按预设」才生效。
-      </p>
-    </section>
-
-    <!-- 预览 -->
-    <section class="space-y-2 rounded-xl bg-[var(--color-glass-l2)] p-3">
-      <div class="flex flex-wrap items-center justify-between gap-2">
-        <span class="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--color-text-secondary)]">
-          <Sparkles class="h-3.5 w-3.5 text-brand" />
-          这次会怎么发
-          <Loader2 v-if="loading" class="h-3 w-3 animate-spin text-[var(--color-text-muted)]" />
-        </span>
-        <div class="min-w-[10rem] flex-1 sm:max-w-[16rem]">
+    <template v-if="cache.mode !== 'off'">
+      <div class="grid gap-3 sm:grid-cols-2">
+        <SettingsField label="缓存 TTL">
+          <ModernSelect :model-value="ttlValue" :options="ttlOptions" class="w-full" placeholder="供应商默认" @update:model-value="(v) => { if (!ttlDisabledReason(String(v))) (ttlValue = String(v)) }" />
+        </SettingsField>
+        <SettingsField label="缓存键" hint="OpenAI prompt_cache_key" :more="cacheKeyDisabledReason || undefined">
           <ModernSelect
-            v-if="previewModelOptions.length"
-            :model-value="previewModel"
-            :options="previewModelOptions"
-            class="w-full !text-xs"
-            searchable
-            allow-create
-            placeholder="选择要预览的模型"
-            @update:model-value="(v) => (previewModel = String(v))"
+            :model-value="cache.cacheKey || 'per_chat'"
+            :options="cacheKeyOptions"
+            class="w-full"
+            :disabled="Boolean(cacheKeyDisabledReason)"
+            @update:model-value="(v) => (cache = { ...cache, cacheKey: String(v) })"
           />
-          <input v-else v-model="previewModel" type="text" class="input input-sm w-full" placeholder="输入模型名预览（如 claude-opus-4-6）" />
-        </div>
+        </SettingsField>
       </div>
-      <div v-if="preview" class="space-y-1 text-2xs leading-4 text-[var(--color-text-secondary)]">
-        <div class="flex flex-wrap gap-x-3 gap-y-1">
-          <span>协议：<b class="font-medium text-[var(--color-text)]">{{ preview.effectiveLabel }}</b><span v-if="preview.requested === 'auto'" class="ml-1 rounded bg-brand-a15 px-1 text-brand">自动</span></span>
-          <span>思考：<b class="font-medium text-[var(--color-text)]">{{ preview.effort }}</b><span class="text-[var(--color-text-muted)]">（可用：{{ preview.availableEfforts.join(' / ') || '—' }}）</span></span>
-          <span>Fast：{{ preview.supportsFastMode ? '支持' : '不支持' }}</span>
-          <span v-if="preview.providerLabel">供应商：{{ preview.providerLabel }}</span>
-          <span>能力来源：{{ preview.capabilitiesSource }}</span>
+
+      <SettingsField
+        v-if="showExplicitControls"
+        label="显式断点位置"
+        :hint="breakpointsDisabledReason || 'Anthropic cache_control / GPT-5.6+ prompt_cache_breakpoint'"
+      >
+        <div class="flex flex-col gap-1" :class="breakpointsDisabledReason ? 'pointer-events-none opacity-60' : ''">
+          <button
+            v-for="bp in PROMPT_CACHE_BREAKPOINTS"
+            :key="bp"
+            type="button"
+            class="inline-flex items-center gap-2 text-left text-xs text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text)]"
+            :class="bp === 'system' ? 'cursor-default opacity-80' : ''"
+            @click="toggleBreakpoint(bp)"
+          >
+            <ThemedCheckbox :checked="hasBreakpoint(bp)" />
+            <span>{{ BREAKPOINT_LABELS[bp] }}</span>
+          </button>
         </div>
-        <div v-if="cacheSummary">缓存：{{ cacheSummary }}</div>
-        <ul v-if="preview.adjustments.length" class="list-disc space-y-0.5 pl-4 text-[var(--color-text-muted)]">
-          <li v-for="(adj, i) in preview.adjustments" :key="`${adj.type}-${i}`">{{ describeAdjustment(adj) }}</li>
-        </ul>
-        <ul v-if="preview.reasons.length" class="space-y-0.5 text-[var(--color-text-muted)]">
-          <li v-for="(r, i) in preview.reasons" :key="i">· {{ r }}</li>
-        </ul>
+      </SettingsField>
+
+      <SettingsSwitch
+        label="在消息上打显式缓存标记"
+        :model-value="!!cache.explicitMarkers"
+        :disabled="Boolean(markersDisabledReason)"
+        :hint="markersDisabledReason || '百炼 DashScope 等中国厂商需要。'"
+        @update:model-value="(v) => (cache = { ...cache, explicitMarkers: v })"
+      />
+    </template>
+  </section>
+
+  <section class="settings-group" data-settings-field="echoReasoning">
+    <SettingsSwitch
+      v-model="echo"
+      label="回传思考内容（reasoning_content）"
+      hint="DeepSeek 带工具调用时必须开启。"
+      more="开：把上一轮 assistant 的思考链一并发回；关：省 token，多数厂商可接受。"
+    />
+    <p v-if="echoOverriddenByGlobal" class="text-xs text-[var(--color-warning-text,var(--color-warning))]">
+      全局设置当前为「{{ globalEchoBack === 'on' ? '全部回传' : '全部不回传' }}」，会覆盖此处开关；改回「按预设」才生效。
+    </p>
+  </section>
+
+  <section class="settings-group">
+    <div class="settings-field-head">
+      <span class="settings-group-title inline-flex items-center gap-1.5">
+        <Sparkles class="h-3.5 w-3.5 text-brand" />
+        这次会怎么发
+        <Loader2 v-if="loading" class="h-3 w-3 animate-spin text-[var(--color-text-muted)]" />
+      </span>
+    </div>
+    <ModernSelect
+      v-if="previewModelOptions.length"
+      :model-value="previewModel"
+      :options="previewModelOptions"
+      class="w-full"
+      searchable
+      allow-create
+      placeholder="选择要预览的模型"
+      @update:model-value="(v) => (previewModel = String(v))"
+    />
+    <input v-else v-model="previewModel" type="text" class="input w-full" placeholder="输入模型名预览（如 claude-opus-4-6）" />
+    <div v-if="preview" class="settings-readout space-y-1">
+      <div class="flex flex-wrap gap-x-3 gap-y-1">
+        <span>协议：<b class="font-medium text-[var(--color-text)]">{{ preview.effectiveLabel }}</b><span v-if="preview.requested === 'auto'" class="ml-1 rounded bg-brand-a15 px-1 text-brand">自动</span></span>
+        <span>思考：<b class="font-medium text-[var(--color-text)]">{{ preview.effort }}</b>（可用：{{ preview.availableEfforts.join(' / ') || '—' }}）</span>
+        <span>Fast：{{ preview.supportsFastMode ? '支持' : '不支持' }}</span>
+        <span v-if="preview.providerLabel">供应商：{{ preview.providerLabel }}</span>
+        <span>能力来源：{{ preview.capabilitiesSource }}</span>
       </div>
-      <p v-else-if="error" class="text-2xs text-[var(--color-error-text)]">预览失败：{{ error }}</p>
-      <p v-else class="text-2xs text-[var(--color-text-muted)]">选择或输入一个模型名即可看到协议 / 思考深度 / 缓存的真实落地方式。</p>
-    </section>
-  </div>
+      <div v-if="cacheSummary">缓存：{{ cacheSummary }}</div>
+      <ul v-if="preview.adjustments.length" class="list-disc space-y-0.5 pl-4">
+        <li v-for="(adj, i) in preview.adjustments" :key="`${adj.type}-${i}`">{{ describeAdjustment(adj) }}</li>
+      </ul>
+      <ul v-if="preview.reasons.length" class="space-y-0.5">
+        <li v-for="(r, i) in preview.reasons" :key="i">· {{ r }}</li>
+      </ul>
+    </div>
+    <p v-else-if="error" class="text-xs text-[var(--color-error-text)]">预览失败：{{ error }}</p>
+    <p v-else class="settings-hint">选择或输入一个模型名即可看到协议 / 思考深度 / 缓存的真实落地方式。</p>
+  </section>
 </template>

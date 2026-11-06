@@ -2,6 +2,8 @@
 import { computed, ref, watch } from 'vue'
 import ModernSelect from '../ModernSelect.vue'
 import ThemedRadioTags from '../ThemedRadioTags.vue'
+import SettingsField from './SettingsField.vue'
+import SettingsHint from './SettingsHint.vue'
 import {
   getUsageSummary,
   type UsageModelRow,
@@ -141,12 +143,12 @@ watch(
 </script>
 
 <template>
-  <section class="space-y-3 rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-settings-control-bg)] p-3">
+  <section class="settings-group">
     <div class="flex flex-wrap items-center justify-between gap-2">
-      <h3 class="text-sm font-medium text-[var(--color-text-secondary)]">用量与成本</h3>
+      <h3 class="settings-group-title">用量与成本</h3>
       <button
         type="button"
-        class="min-h-8 rounded-lg bg-surface-muted px-3 py-1.5 text-xs text-[var(--color-text)] transition-colors hover:bg-surface-hover disabled:opacity-60"
+        class="btn btn-xs btn-secondary"
         :disabled="loading"
         @click="refresh"
       >
@@ -159,56 +161,50 @@ watch(
       aria-label="用量统计范围"
       @update:model-value="onScope"
     />
-    <p v-if="!chatId" class="text-2xs text-[var(--color-text-muted)]">
-      没有打开的会话，「当前会话」不可用。
-    </p>
-    <div class="space-y-1.5">
-      <label class="block text-xs text-[var(--color-text-muted)]">时间范围</label>
+    <p v-if="!chatId" class="settings-hint">没有打开的会话，「当前会话」不可用。</p>
+    <SettingsField label="时间范围">
       <ModernSelect :model-value="range" :options="RANGE_OPTIONS" placeholder="选择时间范围…" class="w-full" @update:model-value="onRange" />
-    </div>
+    </SettingsField>
     <p v-if="errorText" class="text-xs text-[var(--color-error-text)]">{{ errorText }}</p>
-    <p class="text-2xs text-[var(--color-text-muted)]">
-      账本事件 {{ eventCount }} 条。云端金额不被本地估算覆盖；未知成本不计 0。
-    </p>
+    <SettingsHint more="云端金额不被本地估算覆盖；未知成本不计 0。">账本事件 {{ eventCount }} 条。</SettingsHint>
     <div v-if="summary" class="grid grid-cols-2 gap-2 text-xs">
-      <div class="rounded-lg bg-surface-muted/60 p-2">
+      <div class="settings-readout">
         <div class="text-[var(--color-text-muted)]">输入 / 输出 token</div>
         <div class="tabular-nums text-[var(--color-text)]">{{ fmtNum(summary.inputTokens) }} / {{ fmtNum(summary.outputTokens) }}</div>
-        <div class="mt-1 text-2xs text-[var(--color-text-muted)]">
+        <div class="mt-1">
           平均 {{ fmtNum(summary.avgInputTokens) }} / {{ fmtNum(summary.avgOutputTokens) }}
         </div>
       </div>
-      <div class="rounded-lg bg-surface-muted/60 p-2">
+      <div class="settings-readout">
         <div class="text-[var(--color-text-muted)]">缓存读 / 写</div>
         <div class="tabular-nums text-[var(--color-text)]">{{ fmtNum(summary.cacheReadInputTokens) }} / {{ fmtNum(summary.cacheWriteInputTokens) }}</div>
-        <div class="mt-1 text-2xs text-[var(--color-text-muted)]">命中率 {{ fmtPct(summary.cacheHitRate) }}</div>
+        <div class="mt-1">命中率 {{ fmtPct(summary.cacheHitRate) }}</div>
       </div>
-      <div class="rounded-lg bg-surface-muted/60 p-2">
+      <div class="settings-readout">
         <div class="text-[var(--color-text-muted)]">请求</div>
         <div class="tabular-nums text-[var(--color-text)]">{{ summary.requestCount }}</div>
-        <div class="mt-1 text-2xs text-[var(--color-text-muted)]">
+        <div class="mt-1">
           成功 {{ summary.completedCount }} · 失败 {{ summary.failedCount }} · 取消 {{ summary.cancelledCount }}
         </div>
       </div>
-      <div class="rounded-lg bg-surface-muted/60 p-2">
+      <div class="settings-readout">
         <div class="text-[var(--color-text-muted)]">TTFT / 总耗时</div>
         <div class="tabular-nums text-[var(--color-text)]">{{ fmtMs(summary.avgFirstTokenLatencyMs) }}</div>
-        <div class="mt-1 text-2xs text-[var(--color-text-muted)]">
+        <div class="mt-1">
           P50 {{ fmtMs(summary.p50FirstTokenLatencyMs) }} · P95 {{ fmtMs(summary.p95FirstTokenLatencyMs) }} · 平均总 {{ fmtMs(summary.avgTotalDurationMs) }}
         </div>
       </div>
     </div>
-    <div class="space-y-1 text-xs">
-      <div class="font-medium text-[var(--color-text-secondary)]">成本来源</div>
-      <p class="text-2xs text-[var(--color-text-muted)]">云端 = 供应商返回金额；本地估算 = 目录/用户价格表；未知 = 无法可靠计算。</p>
-      <ul v-if="costLines.length" class="space-y-0.5 text-[var(--color-text)]">
+    <div class="settings-field">
+      <span class="settings-label">成本来源</span>
+      <SettingsHint more="云端 = 供应商返回金额；本地估算 = 目录/用户价格表；未知 = 无法可靠计算。">未知成本事件 {{ summary?.unknownCostCount ?? 0 }} 条。</SettingsHint>
+      <ul v-if="costLines.length" class="space-y-0.5 text-xs text-[var(--color-text)]">
         <li v-for="line in costLines" :key="line.currency" class="tabular-nums">
           {{ line.currency }} 合计 {{ money.format(line.total) }}
           （云端 {{ money.format(line.provider) }} · 估算 {{ money.format(line.estimated) }}；合计=实付，估算不加进合计）
         </li>
       </ul>
-      <p v-else class="text-[var(--color-text-muted)]">尚无已知金额。</p>
-      <p class="text-2xs text-[var(--color-text-muted)]">未知成本事件 {{ summary?.unknownCostCount ?? 0 }} 条</p>
+      <p v-else class="settings-hint">尚无已知金额。</p>
     </div>
     <div v-if="models.length" class="overflow-x-auto">
       <table class="w-full min-w-[28rem] text-left text-2xs">
