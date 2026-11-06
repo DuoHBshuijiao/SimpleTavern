@@ -142,12 +142,15 @@ The palette is a restrained dark glass system with theme-driven accents. The def
 - **Label** (500, 0.75rem, 1.25): compact controls, chips, captions, status labels.
 - **Caption XS** (500, 0.625rem / `text-2xs`, 1.2): dense cockpit badges, SYSTEM tags, micro metadata. Prefer this over arbitrary `text-[10px]`.
 - **Mono** (0.75rem): IDs, model names, code, HTTP details, shader/source snippets.
+- **Narration** (`--color-text-narration`, body size and weight): `em` in chat messages. Upright, separated from dialogue by a soft theme-tinted color rather than by slant.
 
 ### Named Rules
 
 **The Product Sans Rule.** Do not introduce display fonts into labels, buttons, data, settings, or logs.
 
 **The Dense But Legible Rule.** Compact UI is allowed, but placeholder text, hints, and secondary text must still be readable on the actual glass surface behind them.
+
+**The Upright Narration Rule.** Do not italicize narration. Most Chinese fonts have no italic face, so the slant is synthesized and hurts long reading. Blockquotes and other Markdown may still use italics.
 
 ## 4. Elevation
 
@@ -165,6 +168,12 @@ SimpleTavern uses tonal glass layering as the primary elevation model. Shadows s
 **The Depth Ladder Rule.** Never choose surface color by eye alone. Map the surface to L0-L6 first, then use the matching token.
 
 **The Nested Blur Rule.** Do not stack strong blur decoratively. If a child surface is deeper, make it clearer and more solid, not merely blurrier.
+
+**The Scroll Mask Rule.** The message scroller fades out at its top and bottom edges with `mask-image`. A mask, like `opacity` below 1 or `filter` on an ancestor, cuts its descendants off from the page behind, so `backdrop-filter` inside the scroller has no effect. Bubbles therefore have no blur, and blur must not be added to anything inside the scroller. The fade was chosen over blur on purpose.
+
+**The Background Belongs To The User Rule.** The background image is part of the user's own aesthetic. Do not cover it with blurred bubbles, reading veils, or brightness treatment. Readability over an image is the user's call through the opacity setting: judge the UI at a sensible level (around 30%), never at 100%.
+
+**The No New Light Sources Rule.** Glass implies no light source of its own, so a glow implies one the app does not have. Do not add glowing arcs, light sweeps, colored halos, or accent color with a gradient tail. Before adding any effect, ask whether it reads as light, and start from the plainer version: neutral colors, flat fills, material-like movement. The end-of-generation ring and the colored button shadows predate this rule and stay for now; they are not a precedent.
 
 ## 5. Components
 
@@ -194,6 +203,23 @@ SimpleTavern uses tonal glass layering as the primary elevation model. Shadows s
 - **Focus:** border and focus ring shift to theme accent.
 - **Error / Disabled:** semantic state colors and opacity, never invisible controls.
 
+### Settings and Form Hierarchy
+
+Settings tabs and form modals share one fixed structure, defined at the top of `styles/components/settings.css`. Use these classes and components instead of one-off borders, backgrounds, and font sizes:
+
+- **Panel** (`SettingsDrawerGlobalAccordion`, or the modal itself): the only layer with a border.
+- **Group** (`.settings-group`, `.settings-group-title`): a small title and a divider between groups, no box.
+- **Field** (`SettingsField`, `SettingsSwitch`): label, control, hint. No border or background of its own.
+- **Read-only info** (`.settings-readout`) and **list items** (`.settings-item`): a faint fill, no border.
+
+Named rules:
+
+**The One Sentence Hint Rule.** A hint is one short sentence through `SettingsHint` or the `hint` prop. Longer explanations go behind the ⓘ through `more`. Do not delete an explanation to make room, and do not write hints by hand.
+
+**The Switch Rule.** A boolean setting is a `SettingsSwitch`. The switch itself shows its state, so do not add "on" or "off" text. Checkboxes stay only for compact multi-selection inside a list item.
+
+**The Short Placeholder Rule.** A placeholder must fit its control at the narrowest width. Move anything longer into the hint.
+
 ### Navigation
 
 - **Style:** app-shell navigation uses the same glass ladder as the rest of the app. Left sidebar keeps a dark/light/dark sandwich structure; settings drawer stays darker with progressively brighter inner panels.
@@ -203,6 +229,8 @@ SimpleTavern uses tonal glass layering as the primary elevation model. Shadows s
 - **Modal:** L5 glass surface with strong border, modal shadow, and modal blur.
 - **Drawer:** settings/dock surface with panel blur and clear border separation.
 - **Popover / Dropdown:** L6 glass surface; must not be clipped by parent overflow. Prefer teleport/fixed positioning where needed.
+- **Modal motion:** every modal uses `<Transition name="modal">`. It fades the backdrop and the content separately and never the `.modal` root, because `opacity` below 1 on the root disables the blur of everything inside until the last frame, and the blur then pops in.
+- **Layered dismissal:** Escape and Tab belong to the topmost dialog only, through `useDialogBehavior`. One key press closes one layer.
 
 ## 6. Do's and Don'ts
 
@@ -214,6 +242,7 @@ SimpleTavern uses tonal glass layering as the primary elevation model. Shadows s
 - **Do** respect `prefers-reduced-motion`; motion should communicate state changes.
 - **Do** make deep interaction layers clearer and more readable than their parent surfaces.
 - **Do** give every icon-only or otherwise ambiguous control an accessible name through `aria-label` (or visible text / `aria-labelledby`).
+- **Do** mark transient targets, such as a search result's message, with a neutral fill rather than the accent color or a glow.
 
 ### Don't:
 
@@ -222,6 +251,9 @@ SimpleTavern uses tonal glass layering as the primary elevation model. Shadows s
 - **Don't** turn the interface into a terminal-only developer tool that feels hostile to maintenance tasks.
 - **Don't** use glassmorphism as decoration without readability, hierarchy, or performance discipline.
 - **Don't** use visual background gradients, except the MVU scanning animation.
+- **Don't** add `backdrop-filter` inside the message scroller, or new glow effects anywhere.
+- **Don't** scale or pulse avatars, or animate the whole chat area when switching chats.
+- **Don't** shorten the pause after the sidebar collapses before immersive mode. It is a deliberate charging-up beat, not a delay to optimize away.
 - **Don't** add colored side-stripe borders to cards, list items, callouts, or alerts.
 - **Don't** use gradient text.
 - **Don't** use the bare native `title` attribute as a tooltip or accessible label on controls; it is not reliably exposed to keyboard or assistive technology, so always use `aria-label` (or visible text) instead.
