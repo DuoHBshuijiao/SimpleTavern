@@ -187,8 +187,19 @@
   }
 
   /* ========== Vue Transition Animations ========== */
+  /*
+   * 所有弹窗共用这一套入场和退场：<Transition name="modal">。
+   * 不要淡入淡出根元素 .modal：opacity 小于 1 的祖先会隔断子元素的 backdrop-filter，
+   * 动画期间模糊完全不生效，结束那一帧才突然出现（已实测）。淡入淡出放在直接子元素上。
+   * 根元素的 transition 只是让 Vue 知道要等多久，属性值不变，不会真的播放。
+   */
   .modal-enter-active,
   .modal-leave-active {
+    transition: opacity var(--transition-normal);
+  }
+
+  .modal-enter-active > *,
+  .modal-leave-active > * {
     transition: opacity var(--transition-normal);
   }
 
@@ -197,25 +208,14 @@
     transition: transform var(--transition-normal), opacity var(--transition-normal);
   }
 
-  .modal-enter-from,
-  .modal-leave-to {
+  .modal-enter-from > *,
+  .modal-leave-to > * {
     opacity: 0;
   }
 
   .modal-enter-from .modal-content,
   .modal-leave-to .modal-content {
-    opacity: 0.92;
     transform: scale(0.98) translateY(8px);
-  }
-
-  .modal-enter-to,
-  .modal-leave-from {
-    opacity: 1;
-  }
-
-  .modal-enter-to .modal-content,
-  .modal-leave-from .modal-content {
-    transform: scale(1) translateY(0);
   }
 
 
@@ -294,6 +294,8 @@
   @media (prefers-reduced-motion: reduce) {
     .modal-enter-active,
     .modal-leave-active,
+    .modal-enter-active > *,
+    .modal-leave-active > *,
     .modal-enter-active .modal-content,
     .modal-leave-active .modal-content,
     .drawer-right,

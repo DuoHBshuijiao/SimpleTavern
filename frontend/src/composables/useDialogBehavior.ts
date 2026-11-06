@@ -17,6 +17,9 @@ const FOCUSABLE_SELECTOR = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(',')
 
+/** 当前打开的弹窗，后打开的在末尾 */
+const openDialogs: object[] = []
+
 function readIsOpen(source: DialogOpenSource): boolean {
   return typeof source === 'function' ? source() : source.value
 }
@@ -40,17 +43,24 @@ export function useDialogBehavior(
   const autoFocus = options.autoFocus !== false
   const restoreFocus = options.restoreFocus !== false
   let previouslyFocused: HTMLElement | null = null
+  const dialogToken = {}
 
   function removeKeydown() {
+    const index = openDialogs.indexOf(dialogToken)
+    if (index !== -1) openDialogs.splice(index, 1)
     if (typeof document === 'undefined') return
     document.removeEventListener('keydown', onDocumentKeydown)
   }
 
   function onDocumentKeydown(event: KeyboardEvent) {
     if (!readIsOpen(isOpen)) return
+    // 弹窗可以叠加，一次按键只归最上层
+    if (openDialogs[openDialogs.length - 1] !== dialogToken) return
 
     if (event.key === 'Escape' && closeOnEscape) {
       event.preventDefault()
+      // 抽屉和聊天页在 window 上另有 Esc 处理，不拦住的话弹窗一关它们会接着关下一层
+      event.stopPropagation()
       close()
       return
     }
@@ -87,6 +97,7 @@ export function useDialogBehavior(
       }
 
       previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null
+      openDialogs.push(dialogToken)
       document.addEventListener('keydown', onDocumentKeydown)
       await nextTick()
       if (!autoFocus) return
