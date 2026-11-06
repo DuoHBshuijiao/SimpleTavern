@@ -1,6 +1,32 @@
 # Local dependencies and validation output
 node_modules/
 .npm-cache/
-frontend/dist/
+dist/
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.mypy_cache/
+/venv/
+.venv/
+
+# User data: chats, characters and real API keys. Never commit.
+/data/
+
+# System and editor files (frontend/.vscode is tracked on purpose)
+.DS_Store
+/.vscode/
+
+# Local agent and tool state
+/.claude/
+/CLAUDE.md
+/.cursor/
+/.shared/
+/.memsearch/
+/.impeccable.md
+
+# Temporary output
+/temp/
+/temp_commit_msg.txt
+/session.log
+/stickers/
+/received/
