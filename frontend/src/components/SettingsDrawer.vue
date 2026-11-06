@@ -235,16 +235,21 @@ async function applySettingsFocusTarget() {
   // 等一帧让 Tab 内容与预设编辑器渲染完成
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
   const root = drawerDialogRef.value as HTMLElement | null
-  const el = root?.querySelector<HTMLElement>(`[data-settings-field="${target.field}"]`)
+  // 全局和预设两个 Tab 用同一个连接组件，同名字段各有一份，隐藏的那份不能作为目标
+  const el = Array.from(
+    root?.querySelectorAll<HTMLElement>(`[data-settings-field="${target.field}"]`) ?? [],
+  ).find((node) => node.offsetParent !== null)
   if (!el) return
   el.scrollIntoView({ behavior: 'smooth', block: 'center' })
   el.classList.add('settings-field-focus-ring')
   window.setTimeout(() => el.classList.remove('settings-field-focus-ring'), 2400)
 }
+// 从关闭状态跳转时，草稿和预设页要等加载完才存在，就绪前不要消费目标
+const settingsDraftReady = ref(false)
 watch(
-  () => [uiStore.settingsFocusNonce, props.show] as const,
-  ([nonce, show]) => {
-    if (nonce > 0 && show && uiStore.settingsFocusTarget) void applySettingsFocusTarget()
+  () => [uiStore.settingsFocusNonce, props.show, settingsDraftReady.value, preloaded.value] as const,
+  ([nonce, show, draftReady, tabsReady]) => {
+    if (nonce > 0 && show && draftReady && tabsReady && uiStore.settingsFocusTarget) void applySettingsFocusTarget()
   },
 )
 
@@ -2018,7 +2023,10 @@ function cancelWorldBookCreate() {
 watch(
   () => props.show,
   async (open) => {
-    if (!open) return
+    if (!open) {
+      settingsDraftReady.value = false
+      return
+    }
     if (!settingsStore.settings) await settingsStore.load()
     const s = clone(settingsStore.settings!)
     savedThemePreviewId.value = normalizeThemeId((s as Settings).themeId)
@@ -2077,6 +2085,7 @@ watch(
     markSavedPageBackground((s as Settings).pageBackgroundImage ?? null)
     ensureWebSearchSettingsShape(s as Settings)
     globalDraft.value = s
+    settingsDraftReady.value = true
     setDocumentTheme(normalizeThemeId((s as Settings).themeId))
     await loadWebGpuPresetSource((s as Settings).webgpuBackgroundActivePresetId ?? null)
     chatDraft.value = ensureOverrides(props.chat ? clone(props.chat.overrides) : undefined)

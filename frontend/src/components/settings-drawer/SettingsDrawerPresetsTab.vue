@@ -16,10 +16,10 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
 <template>
   <div class="space-y-6">
             <div v-if="!presets.globalDraft" class="text-center text-[var(--color-text-muted)] py-8">加载中...</div>
-            <div v-else class="flex gap-3 items-start">
+            <div v-else class="flex gap-3 items-start max-sm:flex-col max-sm:items-stretch">
                 <!-- Preset List：sticky 吸附，右侧长表单滚动时左栏留在可视区；列表过长时仅内层滚动 -->
                 <div
-                  class="sticky top-0 z-10 flex min-w-0 flex-[0_0_min(11rem,34%)] flex-col self-start border-r border-[var(--color-border-subtle)] pr-3"
+                  class="sticky top-0 z-10 flex min-w-0 flex-[0_0_min(11rem,34%)] flex-col self-start border-r border-[var(--color-border-subtle)] pr-3 max-sm:static max-sm:flex-none max-sm:self-stretch max-sm:border-r-0 max-sm:pr-0"
                 >
                     <div :ref="presets.bindPresetListHeader" class="mb-2 flex items-center justify-between gap-1.5">
                         <span class="settings-label shrink-0">预设列表</span>
@@ -32,7 +32,7 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                         </button>
                     </div>
                     <div
-                      class="drawer-scroll space-y-1 overflow-y-auto custom-scrollbar"
+                      class="drawer-scroll space-y-1 overflow-y-auto custom-scrollbar max-sm:flex max-sm:gap-1 max-sm:space-y-0 max-sm:overflow-x-auto max-sm:overflow-y-hidden max-sm:pb-1"
                       :style="
                         presets.presetListMaxHeightPx != null
                           ? { maxHeight: `${presets.presetListMaxHeightPx}px` }
@@ -43,7 +43,7 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                             v-for="(presetItem, idx) in presets.globalDraft!.apiPresets"
                             :key="presetItem.id"
                             draggable="true"
-                            class="group relative flex min-h-10 cursor-pointer items-center rounded-lg py-1.5 pl-2 pr-1 text-sm transition-colors"
+                            class="group relative flex min-h-10 cursor-pointer items-center rounded-lg py-1.5 pl-2 pr-1 text-sm transition-colors max-sm:max-w-[10rem] max-sm:shrink-0"
                             :class="[
                               presets.editingPresetId === presetItem.id ? 'bg-brand-a10 text-brand' : 'text-[var(--color-text-secondary)] hover:bg-surface-muted',
                               presets.apiPresetOrderDraggingIdx === idx ? 'opacity-50 ring-1 ring-brand-a50' : '',
@@ -330,7 +330,7 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                             <div class="space-y-2">
                               <label class="settings-label block">仓库路径</label>
                               <input v-model="presets.editingPreset!.ttsQwen3LocalRepoPath" type="text" class="input w-full" placeholder="E:\Qwen3-TTS（Qwen3-TTS 仓库根目录）" />
-                              <p class="settings-hint">指向安装好 Qwen3-TTS 与 its gateway 的仓库目录；托管模式会从这里启动 uvicorn 网关。</p>
+                              <p class="settings-hint">指向安装好 Qwen3-TTS 及其网关的仓库目录；托管模式会从这里启动 uvicorn 网关。</p>
                             </div>
                             <div class="grid gap-3 md:grid-cols-2">
                               <div class="space-y-1">
@@ -481,9 +481,9 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                               <div class="settings-label">添加本地参考音色</div>
                               <input v-model="presets.glmLocalVoiceDraft.voiceId" type="text" class="input w-full" placeholder="音色 ID（唯一标识）" />
                               <input v-model="presets.glmLocalVoiceDraft.name" type="text" class="input w-full" placeholder="音色名称（显示用）" />
-                              <input v-model="presets.glmLocalVoiceDraft.promptAudioPath" type="text" class="input w-full font-mono" placeholder="参考音频路径（wav/flac 绝对路径）" />
+                              <input v-model="presets.glmLocalVoiceDraft.promptAudioPath" type="text" class="input w-full font-mono" placeholder="参考音频路径" />
                               <input v-model="presets.glmLocalVoiceDraft.promptText" type="text" class="input w-full" placeholder="参考音频对应转写文本（推荐填写）" />
-                              <p class="settings-hint">每条音色需要一段参考音频和对应文本。路径为本机文件绝对路径。</p>
+                              <p class="settings-hint">每条音色需要一段参考音频和对应文本。路径为本机 wav/flac 文件的绝对路径。</p>
                               <button
                                 type="button"
                                 class="btn btn-sm btn-primary w-full"
@@ -505,12 +505,12 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                           <template v-else-if="presets.editingPresetIsQwen3Local">
                             <div class="settings-group">
                               <div class="settings-label">添加 Qwen3 音色</div>
-                              <input v-model="presets.qwen3LocalVoiceDraft.voiceId" type="text" class="input w-full font-mono" placeholder="音色 ID（唯一标识；无参考音频时作为 speaker 传给 custom_voice）" />
+                              <input v-model="presets.qwen3LocalVoiceDraft.voiceId" type="text" class="input w-full font-mono" placeholder="音色 ID" />
                               <input v-model="presets.qwen3LocalVoiceDraft.name" type="text" class="input w-full" placeholder="显示名称（可选）" />
-                              <input v-model="presets.qwen3LocalVoiceDraft.promptAudioPath" type="text" class="input w-full font-mono" placeholder="参考音频路径（wav/flac 绝对路径，语音克隆时填写）" />
-                              <input v-model="presets.qwen3LocalVoiceDraft.promptText" type="text" class="input w-full" placeholder="参考音频对应转写文本（语音克隆时推荐填写）" />
-                              <input v-model="presets.qwen3LocalVoiceDraft.instruction" type="text" class="input w-full" placeholder="instruction（可选，仅 custom_voice 模式）" />
-                              <SettingsHint more="参考音频与转写走第二端口上的 Base 网关（/voice_clone）；仅 speaker 走主端口 CustomVoice（/custom_voice）。路径为本机绝对路径。">路径为本机绝对路径。</SettingsHint>
+                              <input v-model="presets.qwen3LocalVoiceDraft.promptAudioPath" type="text" class="input w-full font-mono" placeholder="参考音频路径（克隆时填）" />
+                              <input v-model="presets.qwen3LocalVoiceDraft.promptText" type="text" class="input w-full" placeholder="参考音频转写（克隆时填）" />
+                              <input v-model="presets.qwen3LocalVoiceDraft.instruction" type="text" class="input w-full" placeholder="instruction（可选）" />
+                              <SettingsHint more="音色 ID 是唯一标识，没有参考音频时作为 speaker 传给 custom_voice。语音克隆时填写 wav/flac 文件的绝对路径，并推荐填写转写文本。参考音频与转写走第二端口上的 Base 网关（/voice_clone）；仅 speaker 走主端口 CustomVoice（/custom_voice）。instruction 仅在 custom_voice 模式下生效。">路径为本机绝对路径。</SettingsHint>
                               <button
                                 type="button"
                                 class="btn btn-sm btn-primary w-full"
@@ -531,12 +531,12 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                           <template v-else-if="presets.editingPresetIsOmniVoiceLocal">
                             <div class="settings-group">
                               <div class="settings-label">添加 OmniVoice 音色条目</div>
-                              <input v-model="presets.omniVoiceLocalVoiceDraft.voiceId" type="text" class="input w-full font-mono" placeholder="音色 ID（用于会话里选择）" />
+                              <input v-model="presets.omniVoiceLocalVoiceDraft.voiceId" type="text" class="input w-full font-mono" placeholder="音色 ID" />
                               <input v-model="presets.omniVoiceLocalVoiceDraft.name" type="text" class="input w-full" placeholder="显示名称（可选）" />
-                              <input v-model="presets.omniVoiceLocalVoiceDraft.promptAudioPath" type="text" class="input w-full font-mono" placeholder="参考音频路径（克隆模式，可选）" />
-                              <input v-model="presets.omniVoiceLocalVoiceDraft.promptText" type="text" class="input w-full" placeholder="参考音频转写文本（克隆模式，可选）" />
-                              <input v-model="presets.omniVoiceLocalVoiceDraft.instruction" type="text" class="input w-full" placeholder="instruction / instruct（音色设计模式，可选）" />
-                              <SettingsHint more="优先级为：参考音频可读则走克隆；否则有 instruction 走音色设计；两者都留空时仅按文本自动生成音色。">优先走参考音频克隆，其次 instruction，都空则自动生成。</SettingsHint>
+                              <input v-model="presets.omniVoiceLocalVoiceDraft.promptAudioPath" type="text" class="input w-full font-mono" placeholder="参考音频路径（可选）" />
+                              <input v-model="presets.omniVoiceLocalVoiceDraft.promptText" type="text" class="input w-full" placeholder="参考音频转写（可选）" />
+                              <input v-model="presets.omniVoiceLocalVoiceDraft.instruction" type="text" class="input w-full" placeholder="instruction（可选）" />
+                              <SettingsHint more="音色 ID 用于在会话里选择。优先级为：参考音频可读则走克隆（可附转写文本）；否则有 instruction / instruct 走音色设计；两者都留空时仅按文本自动生成音色。">优先走参考音频克隆，其次 instruction，都空则自动生成。</SettingsHint>
                               <button
                                 type="button"
                                 class="btn btn-sm btn-primary w-full"
@@ -557,7 +557,7 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                           <template v-else-if="presets.editingPresetIsSiliconflow">
                             <div class="settings-group">
                               <div class="settings-label">硅基流动 · 上传参考音频</div>
-                              <SettingsHint more="需提供参考音频文件、与音频一致的转写文本，以及自定义音色名（对应官方 customName）；成功后返回的 uri 将写入音色目录。">需要参考音频、一致的转写文本和自定义音色名。</SettingsHint>
+                              <SettingsHint more="需提供参考音频文件、与音频一致的转写文本，以及自定义音色名（对应官方 customName）；模型如 FunAudioLLM/CosyVoice2-0.5B。成功后返回的 uri 将写入音色列表。">需要参考音频、一致的转写文本和自定义音色名。</SettingsHint>
                               <div class="flex flex-wrap gap-2">
                                 <button type="button" class="btn btn-xs btn-secondary" @click="presets.pickTtsCloneSourceFile">选择参考音频</button>
                                 <span class="settings-hint">{{ presets.ttsCloneSourceFile?.name || '未选择文件' }}</span>
@@ -569,23 +569,20 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                                 :options="presets.ttsSessionModelOptions"
                                 searchable
                                 allow-create
-                                placeholder="TTS 模型（如 FunAudioLLM/CosyVoice2-0.5B）"
+                                placeholder="TTS 模型"
                                 @select="(option) => { presets.ttsCloneDraft.model = option.value }"
                               />
                               <textarea v-model="presets.ttsCloneDraft.previewText" rows="3" class="input textarea w-full resize-y" placeholder="参考音频对应文本（必填）"></textarea>
                               <button type="button" class="btn btn-sm btn-primary w-full" :disabled="presets.ttsCloneLoading" @click="presets.submitTtsClone">{{ presets.ttsCloneLoading ? '上传中...' : '上传并写入音色' }}</button>
                               <audio v-if="presets.ttsClonePreviewUrl" :src="presets.ttsClonePreviewUrl" controls class="w-full"></audio>
                             </div>
-                            <div class="settings-hint">
-                              硅基流动不提供与本应用内 MiniMax「音色设计」等价的云端接口；可使用上方上传或模型预置音色。
-                            </div>
+                            <SettingsHint more="硅基流动不提供与本应用内 MiniMax「音色设计」等价的云端接口。">可使用上方上传或模型预置音色。</SettingsHint>
                           </template>
 
                           <template v-else-if="presets.editingPresetIsOpenrouter">
-                            <div class="settings-hint space-y-2">
-                              <p>OpenRouter TTS 不支持在本面板内上传参考音频：请在下方「音色目录」填写模型文档要求的 <span class="font-mono">voice</span>；上游路由与偏好请在 OpenRouter 网站自行配置。</p>
-                              <p>详见 <a href="https://openrouter.ai/docs" target="_blank" rel="noopener noreferrer" class="text-brand underline">OpenRouter 文档</a>。</p>
-                            </div>
+                            <SettingsHint more="OpenRouter TTS 不支持在本面板内上传参考音频。上游路由与偏好请在 OpenRouter 网站自行配置。">
+                              在上方「音色列表」填写模型要求的 voice，详见 <a href="https://openrouter.ai/docs" target="_blank" rel="noopener noreferrer" class="text-brand underline">OpenRouter 文档</a>。
+                            </SettingsHint>
                           </template>
 
                           <!-- MiniMax / GLM（云端）：手动添加 + 克隆 + 设计 -->
@@ -624,7 +621,7 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                                   <span>音量归一</span>
                                 </button>
                               </div>
-                              <p v-if="presets.editingPresetTtsProvider === 'glm'" class="settings-hint">GLM 复刻会使用上传的源音频作为样本；额外示例音频与降噪/归一化参数不适用。</p>
+                              <p v-if="presets.editingPresetTtsProvider === 'glm'" class="settings-hint">GLM 只用源音频作样本，不用示例音频和降噪、归一。</p>
                               <button type="button" class="btn btn-sm btn-primary w-full" :disabled="presets.ttsCloneLoading" @click="presets.submitTtsClone">{{ presets.ttsCloneLoading ? '复刻中...' : '复刻并试听' }}</button>
                               <audio v-if="presets.ttsClonePreviewUrl" :src="presets.ttsClonePreviewUrl" controls class="w-full"></audio>
                             </div>

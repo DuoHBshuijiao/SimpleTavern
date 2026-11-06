@@ -54,10 +54,31 @@
     -webkit-backdrop-filter: blur(var(--glass-blur-panel));
   }
 
-  /* 设置深链定位高亮（错误卡片「打开预设开关」跳转后短暂闪烁） */
+  /*
+   * 设置深链定位高亮（错误卡片「打开预设开关」跳转后短暂闪烁）。
+   * 字段自身没有内边距，环画在外扩的伪元素上，不贴文字；分组上方的分隔留白不算进环里。
+   */
   .settings-field-focus-ring {
-    border-radius: var(--radius-xl);
+    position: relative;
+  }
+
+  .settings-field-focus-ring::after {
+    content: '';
+    position: absolute;
+    inset: -0.5rem;
+    border-radius: var(--radius-lg);
+    pointer-events: none;
     animation: settings-field-focus-pulse 2.4s ease-out 1;
+  }
+
+  .settings-group + .settings-group.settings-field-focus-ring::after {
+    top: 0.75rem;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .settings-field-focus-ring::after {
+      animation-duration: 1ms;
+    }
   }
 
   @keyframes settings-field-focus-pulse {
