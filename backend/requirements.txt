@@ -2,6 +2,7 @@ fastapi>=0.110
 uvicorn[standard]>=0.27
 httpx>=0.25
 portalocker>=2.8
+pywin32>=226; sys_platform == "win32"
 pydantic>=2.6
 jsonschema>=4.20
 python-multipart>=0.0.6

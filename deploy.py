@@ -5,7 +5,9 @@ SimpleTavern 一键部署脚本
 自动检测部署状态，选择"安装模式"或"启动模式"
 """
 
+import errno
 import os
+import socket
 import sys
 import subprocess
 import platform
@@ -418,19 +420,41 @@ def wait_for_exit():
     else:
         input("按 Enter 键退出...")
 
-def _windows_cmd_k_in_dir(cmd_line: str, cwd: Path) -> subprocess.Popen:
+def _windows_cmd_k_in_dir(cmd_line: str, cwd: Path, env=None) -> subprocess.Popen:
     """
     在 cwd 下用 cmd /k 执行命令行（命令里不要写项目路径，避免空格/括号；目录由 Popen 的 cwd 指定）。
     """
     return subprocess.Popen(
         ["cmd.exe", "/k", cmd_line],
         cwd=cwd,
+        env=env,
         creationflags=subprocess.CREATE_NEW_CONSOLE,
     )
 
 def _bind_host() -> str:
     """发布默认只绑回环；局域网请设置 SIMPLETAVERN_BIND=0.0.0.0。"""
     return os.environ.get("SIMPLETAVERN_BIND", "").strip() or "127.0.0.1"
+
+
+def _available_port(host: str, preferred: int) -> int:
+    windows = platform.system() == "Windows"
+    for port in range(preferred, preferred + 10):
+        try:
+            for family, kind, protocol, _, address in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM):
+                with socket.socket(family, kind, protocol) as listener:
+                    if windows:
+                        listener.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+                    listener.bind(address)
+        except OSError as exc:
+            unavailable = exc.errno in (errno.EACCES, errno.EADDRINUSE)
+            windows_unavailable = getattr(exc, "winerror", None) in (10013, 10048)
+            if not (unavailable or windows_unavailable):
+                raise
+            continue
+        if port != preferred:
+            print_warning(f"端口 {preferred} 无法绑定，改用 {port}。")
+        return port
+    raise OSError(f"{host} 的端口 {preferred}–{preferred + 9} 均无法绑定。")
 
 
 def _windows_npm_cmd_fragment(npm_cmd: str) -> str:
@@ -461,11 +485,16 @@ def _windows_try_backend_cmd_k(venv_python: str, backend_dir: Path, backend_port
 
 def start_services(venv_python, npm_cmd, backend_dir, frontend_dir):
     """启动后端和前端服务"""
-    backend_port = 9091
-    frontend_port = 9081
     bind_host = _bind_host()
+    try:
+        backend_port = _available_port(bind_host, 9091)
+        frontend_port = _available_port(bind_host, 9081)
+    except OSError as exc:
+        print_error(f"无法选择启动端口：{exc}")
+        sys.exit(1)
     backend_url = f"http://127.0.0.1:{backend_port}"
     frontend_url = f"http://127.0.0.1:{frontend_port}"
+    frontend_env = {**os.environ, "SIMPLETAVERN_API_PROXY": backend_url}
     
     # 启动后端
     print_info("启动后端服务...")
@@ -511,14 +540,15 @@ def start_services(venv_python, npm_cmd, backend_dir, frontend_dir):
         # 仅把「npm run …」交给 cmd，项目路径只用 cwd=frontend_dir，避免路径含空格/括号时整行解析失败。
         npm_part = _windows_npm_cmd_fragment(npm_cmd)
         frontend_cmd_line = (
-            f"{npm_part} run preview -- --port {frontend_port} --host {bind_host} || pause"
+            f"{npm_part} run preview -- --port {frontend_port} --strictPort --host {bind_host} || pause"
         )
-        frontend_process = _windows_cmd_k_in_dir(frontend_cmd_line, frontend_dir)
+        frontend_process = _windows_cmd_k_in_dir(frontend_cmd_line, frontend_dir, env=frontend_env)
     else:
-        frontend_cmd = [npm_cmd, "run", "preview", "--", "--port", str(frontend_port), "--host", bind_host]
+        frontend_cmd = [npm_cmd, "run", "preview", "--", "--port", str(frontend_port), "--strictPort", "--host", bind_host]
         frontend_process = subprocess.Popen(
             frontend_cmd,
             cwd=frontend_dir,
+            env=frontend_env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE
         )

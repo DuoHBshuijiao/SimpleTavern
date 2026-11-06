@@ -403,6 +403,8 @@ class SettingsLLM(BaseModel):
         if not isinstance(data, dict):
             return data
         incoming = dict(data)
+        if incoming.get("providerParams") is None:
+            incoming["providerParams"] = {}
         return _migrate_prompt_cache_fields(incoming)
 
 
@@ -498,7 +500,7 @@ class ApiPreset(BaseModel):
         params = incoming.get("providerParams")
         if isinstance(params, dict):
             incoming["providerParams"] = {str(k): str(v) for k, v in params.items() if v is not None}
-        elif params is not None:
+        else:
             incoming["providerParams"] = {}
         preset_kind = incoming.get("presetKind")
         provider = incoming.get("ttsProvider")

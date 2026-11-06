@@ -1335,9 +1335,9 @@ function normalizePresetDraft(preset: ApiPreset): ApiPreset {
       ? (preset.anthropicPromptCache ?? null)
       : normalizeAnthropicPromptCache(preset.anthropicPromptCache),
     promptCache: isTts ? (preset.promptCache ?? null) : normalizePromptCacheConfig(preset.promptCache, preset.anthropicPromptCache),
-    echoReasoning: isTts ? (preset.echoReasoning ?? null) : preset.echoReasoning !== false,
+    echoReasoning: preset.echoReasoning !== false,
     providerId: preset.providerId ?? null,
-    providerParams: preset.providerParams && Object.keys(preset.providerParams).length ? { ...preset.providerParams } : null,
+    providerParams: { ...preset.providerParams },
     authStyle: preset.authStyle ?? null,
     presetKind: isTts ? 'tts' : (preset.presetKind ?? null),
     ttsProvider: isTts ? resolveTtsProvider(preset) : null,
@@ -2053,7 +2053,6 @@ watch(
       s.llm.anthropicPromptCache = normalizeAnthropicPromptCache(s.llm.anthropicPromptCache)
       s.llm.promptCache = normalizePromptCacheConfig(s.llm.promptCache, s.llm.anthropicPromptCache)
       s.llm.echoReasoning = s.llm.echoReasoning !== false
-      if (s.llm.providerParams && !Object.keys(s.llm.providerParams).length) s.llm.providerParams = null
     }
     if (!(REASONING_ECHO_BACK_VALUES as readonly string[]).includes(String((s as Settings).reasoningEchoBack))) {
       ;(s as Settings).reasoningEchoBack = 'preset'
@@ -3425,6 +3424,7 @@ async function saveGlobal() {
   const previousSavedPageBackground = savedPageBackgroundImage.value
   const draft = {
     ...globalDraft.value,
+    llm: { ...globalDraft.value.llm, providerParams: { ...globalDraft.value.llm.providerParams } },
     generationDefaults: { ...globalDraft.value.generationDefaults },
     draftHelpDefaults: { ...ensureDraftHelpDefaults(globalDraft.value.draftHelpDefaults) },
     apiPresets: globalDraft.value.apiPresets.map((preset) => normalizePresetDraft(preset)),
