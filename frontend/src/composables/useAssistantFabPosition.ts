@@ -399,19 +399,21 @@ export function useAssistantFabPosition(
     return false
   }
 
+  /**
+   * 顶栏变高、窗口变小只影响显示位置（fabStyle 里 clampTop），不改 topPx、不写存储，
+   * 否则被搜索面板临时推下去后就回不到用户放的位置了。
+   */
   function onResize() {
     cancelVerticalSeparationAnimation()
     cancelSnapAnimation()
-    topPx.value = clampTop(topPx.value, getMinTop())
-    persist()
+    options?.onLayoutStable?.()
   }
 
   watch(
     () => getMinTop(),
     () => {
       cancelVerticalSeparationAnimation()
-      topPx.value = clampTop(topPx.value, getMinTop())
-      persist()
+      options?.onLayoutStable?.()
     },
   )
 
@@ -419,8 +421,7 @@ export function useAssistantFabPosition(
     () => stackHeight(),
     () => {
       cancelVerticalSeparationAnimation()
-      topPx.value = clampTop(topPx.value, getMinTop())
-      persist()
+      options?.onLayoutStable?.()
     },
   )
 

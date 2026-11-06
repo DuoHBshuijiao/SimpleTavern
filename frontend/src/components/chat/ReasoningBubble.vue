@@ -284,6 +284,8 @@ watch(
 )
 
 onMounted(() => {
+  // 在动画壳首次同步（下一帧）前量好小卡宽度，否则重挂载时会从默认宽度过渡一次
+  measureCollapsedSmallCardWidth()
   if (props.isStreaming) {
     scheduleStreamingFollowScroll()
   }
@@ -349,7 +351,6 @@ onBeforeUnmount(() => {
           <div
             ref="reasoningTextRef"
             class="reasoning-text"
-            :class="props.isStreaming && !String(props.content || '').trim() ? 'reasoning-text--streaming-empty' : ''"
           >
             {{ content }}
           </div>
@@ -380,7 +381,6 @@ onBeforeUnmount(() => {
           >
             <div
               class="reasoning-text"
-              :class="props.isStreaming && !String(props.content || '').trim() ? 'reasoning-text--streaming-empty' : ''"
             >
               {{ content }}
             </div>
@@ -526,9 +526,6 @@ onBeforeUnmount(() => {
 }
 .reasoning-text {
   overflow-wrap: anywhere;
-}
-.reasoning-text--streaming-empty {
-  min-height: 1.25rem;
 }
 .reasoning-mask {
   position: absolute;

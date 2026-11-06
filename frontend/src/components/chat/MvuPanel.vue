@@ -5,6 +5,7 @@
       :class="isOpen
         ? 'translate-x-0 w-[min(360px,calc(100vw-2rem))] opacity-100'
         : 'translate-x-[calc(100%+20px)] w-[min(360px,calc(100vw-2rem))] opacity-0 pointer-events-none'"
+      :inert="!isOpen"
       style="contain: content; will-change: transform, opacity;"
     >
       <!-- 标题栏 -->

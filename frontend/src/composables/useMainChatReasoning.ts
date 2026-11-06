@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import type { Chat } from '../types/models'
 
 export interface UseMainChatReasoningOptions {
@@ -19,6 +19,17 @@ export function useMainChatReasoning(options: UseMainChatReasoningOptions) {
   const reasoningPhaseStartedAt = ref<number | null>(null)
   const chatReasoningElapsedSec = ref<number | null>(null)
 
+  // 思考计时从收到第一段思考内容算起，首包等待不算思考（与后端保存的时长一致）
+  watch(
+    chatReasoningContent,
+    (next, prev) => {
+      if (next && !prev && chatReasoningStreamActive.value) {
+        reasoningPhaseStartedAt.value = Date.now()
+      }
+    },
+    { flush: 'sync' },
+  )
+
   function markReasoningStreamPhaseStart() {
     reasoningPhaseStartedAt.value = Date.now()
     chatReasoningElapsedSec.value = null
@@ -29,21 +40,27 @@ export function useMainChatReasoning(options: UseMainChatReasoningOptions) {
     chatReasoningElapsedSec.value = null
   }
 
-  /** 首条正文 delta：结束思考流式阶段并写入已用时长（秒） */
-  function onAssistantContentDeltaStarted() {
-    if (chatReasoningStreamActive.value && reasoningPhaseStartedAt.value != null) {
+  /** 写入已用时长（秒）；没收到思考内容时不记时长，首包等待不算思考 */
+  function recordReasoningElapsed() {
+    if (
+      chatReasoningStreamActive.value &&
+      reasoningPhaseStartedAt.value != null &&
+      chatReasoningContent.value.trim()
+    ) {
       chatReasoningElapsedSec.value =
         Math.round((Date.now() - reasoningPhaseStartedAt.value) / 100) / 10
     }
+  }
+
+  /** 首条正文 delta：结束思考流式阶段并写入已用时长 */
+  function onAssistantContentDeltaStarted() {
+    recordReasoningElapsed()
     chatReasoningStreamActive.value = false
   }
 
   /** 终止生成前：与首条正文 delta 一致，便于 ReasoningBubble 闭合过渡 */
   function finalizeReasoningElapsedBeforeStop() {
-    if (chatReasoningStreamActive.value && reasoningPhaseStartedAt.value != null) {
-      chatReasoningElapsedSec.value =
-        Math.round((Date.now() - reasoningPhaseStartedAt.value) / 100) / 10
-    }
+    recordReasoningElapsed()
   }
 
   function pushCurrentReasoningToBlocks(finalMessageId?: string | null, localAliasId?: string | null) {

@@ -80,7 +80,7 @@ import { usePageBackground } from '../composables/usePageBackground'
 import { useWebGpuBackground } from '../composables/useWebGpuBackground'
 import { useWebGpuBackgroundRuntime } from '../composables/useWebGpuBackgroundRuntime'
 import { useViewportNarrowPortrait } from '../composables/useViewportNarrowPortrait'
-import { useChatSearch } from '../composables/useChatSearch'
+import { splitSnippetByQuery, useChatSearch } from '../composables/useChatSearch'
 import { useImageStickyBinding } from '../composables/useImageStickyBinding'
 import { useForkLineage } from '../composables/useForkLineage'
 import { useMessageListEnterAnimations } from '../composables/useMessageListEnterAnimations'
@@ -2513,25 +2513,38 @@ function handleRemoveDraftImage(imageId: string) {
  *
  * @returns {Promise<void>} 完成时返回
  */
-async function sendUserMessage() {
+async function sendUserMessage(options?: { retryText?: string }) {
   // 发送前先落盘待持久化的版本切换状态
   await flushPendingGreetingVersion()
 
-  const rawText = draftMessage.value.trim()
-  const pendingDraftImages = [...draftImages.value]
-  const text = replaceInputPlaceholders(rawText)
-  if (!text && pendingDraftImages.length === 0) return
+  const isRetry = options?.retryText !== undefined
+  const rawText = isRetry ? (options?.retryText ?? '') : draftMessage.value.trim()
+  const pendingDraftImages = isRetry ? [] : [...draftImages.value]
+  const text = isRetry ? rawText : replaceInputPlaceholders(rawText)
+  if (!isRetry && !text && pendingDraftImages.length === 0) return
   if (!activeChat.value) return
   if (isGenerating.value) return
-  draftMessage.value = ''
-  clearDraftImages()
+  if (!isRetry) {
+    draftMessage.value = ''
+    clearDraftImages()
+  }
   streamError.value = null
-  
+
   const chatId = activeChat.value.id
   const isGroup = activeChat.value.isGroup
   const now = new Date().toISOString()
   const userRole = group.effectivePureAiMode.value ? ('system' as const) : ('user' as const)
   let uploadedImages: ChatImageAttachment[] = []
+
+  // 末尾已有同一条没回复的消息（比如上次生成失败）：直接重新生成，不再追加一条重复的
+  const tailMessage = activeChat.value.messages[activeChat.value.messages.length - 1]
+  const reuseTailMessage =
+    !isGroup &&
+    pendingDraftImages.length === 0 &&
+    !!tailMessage &&
+    !tailMessage.id.startsWith('local_') &&
+    tailMessage.role === userRole &&
+    (isRetry || tailMessage.content === text)
 
   // 处理暂停状态下的插话
   if (isGroup && group.showContinueButton.value) {
@@ -2655,19 +2668,21 @@ async function sendUserMessage() {
       chatReasoningStreamActive.value = true
       markReasoningStreamPhaseStart()
 
-      armUserMessageEnterAnimation(localUserId)
-      chats.addLocalMessage({
-        version: 1,
-        id: localUserId,
-        role: userRole,
-        content: text,
-        images: uploadedImages,
-        senderPersonaId: userRole === 'user' ? (selectedPersona.value?.id ?? null) : null,
-        senderName: userRole === 'user' ? (selectedPersona.value?.name ?? userName.value) : null,
-        senderAvatar: userRole === 'user' ? (selectedPersona.value?.avatar ?? null) : null,
-        ts: now,
-      })
-      void tryAutoReadUserMessage(localUserId)
+      if (!reuseTailMessage) {
+        armUserMessageEnterAnimation(localUserId)
+        chats.addLocalMessage({
+          version: 1,
+          id: localUserId,
+          role: userRole,
+          content: text,
+          images: uploadedImages,
+          senderPersonaId: userRole === 'user' ? (selectedPersona.value?.id ?? null) : null,
+          senderName: userRole === 'user' ? (selectedPersona.value?.name ?? userName.value) : null,
+          senderAvatar: userRole === 'user' ? (selectedPersona.value?.avatar ?? null) : null,
+          ts: now,
+        })
+        void tryAutoReadUserMessage(localUserId)
+      }
       chats.addLocalMessage({ version: 1, id: localAssistantId, role: 'assistant', content: '', ts: now })
       scrollToBottomAnimated()
 
@@ -2679,6 +2694,7 @@ async function sendUserMessage() {
             {
               chatId,
               userMessage: text,
+              appendUserMessage: !reuseTailMessage,
               userImages: uploadedImages,
               imageFallbackMode: isImageStickyActive(),
               senderPersonaId: selectedPersona.value?.id ?? null,
@@ -2707,6 +2723,7 @@ async function sendUserMessage() {
         }>('/api/generate/stream', {
           chatId,
           userMessage: text,
+          appendUserMessage: !reuseTailMessage,
           userImages: uploadedImages,
           imageFallbackMode: isImageStickyActive(),
           senderPersonaId: selectedPersona.value?.id ?? null,
@@ -4615,7 +4632,12 @@ const editingPersonaAvatarUrl = computed(() => {
                             :class="idx === chatSearchCursor ? 'bg-surface-muted' : 'bg-surface-muted/55'"
                             @click="jumpToSearchResult(idx)"
                           >
-                            {{ hit.snippet }}
+                            <span>
+                              <template v-for="(part, partIdx) in splitSnippetByQuery(hit.snippet, chatSearchQuery)" :key="partIdx">
+                                <mark v-if="part.match" class="chat-search-hit-mark">{{ part.text }}</mark>
+                                <template v-else>{{ part.text }}</template>
+                              </template>
+                            </span>
                           </button>
                         </div>
                       </div>
@@ -4726,6 +4748,7 @@ const editingPersonaAvatarUrl = computed(() => {
             @delete-message="actions.deleteMessage"
             @read-aloud-message="handleReadAloudMessage"
             @rewrite-message="handleRewriteMessage"
+            @retry-user-message="(m) => sendUserMessage({ retryText: m.content })"
             @switch-previous-version="handleSwitchPreviousVersion"
             @switch-next-version="handleSwitchNextVersion"
             @fork-message="onForkMessage"
@@ -4772,7 +4795,7 @@ const editingPersonaAvatarUrl = computed(() => {
             :global-reasoning-effort="settings.settings?.reasoningEffort ?? 'none'"
             :fast-mode="activeChat?.overrides?.params?.fastMode ?? null"
             :get-member-settings="group.getMemberSettings"
-            @send="sendUserMessage"
+            @send="() => sendUserMessage()"
             @primary-action="handlePrimaryAction"
             @pause-group="group.pauseGroupChat"
             @continue-group="continueGroupChat"
@@ -5129,6 +5152,13 @@ const editingPersonaAvatarUrl = computed(() => {
 </template>
 
 <style scoped>
+.chat-search-hit-mark {
+  border-radius: 2px;
+  padding: 0 1px;
+  color: var(--color-text);
+  background-color: var(--color-brand-a30);
+}
+
 .page-background-image {
   width: 100%;
   height: 100%;

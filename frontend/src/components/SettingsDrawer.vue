@@ -4287,7 +4287,7 @@ provide(
 
 <template>
   <div>
-  <div class="drawer-wrapper fixed inset-0 z-drawer flex justify-end" :class="{ 'is-open': show }">
+  <div class="drawer-wrapper fixed inset-0 z-drawer flex justify-end" :class="{ 'is-open': show }" :inert="!show">
     <!-- Backdrop -->
     <div
       class="drawer-backdrop absolute inset-0 bg-overlay"

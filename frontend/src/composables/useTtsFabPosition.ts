@@ -381,17 +381,16 @@ export function useTtsFabPosition(
     return false
   }
 
+  /** 同助手按钮：挤压只影响显示位置（fabStyle 里 clampTop），不改 topPx、不写存储 */
   function onResize() {
     cancelVerticalSeparationAnimation()
     cancelSnapAnimation()
-    topPx.value = clampTop(topPx.value, getMinTop())
-    persist()
+    options?.onLayoutStable?.()
   }
 
   watch(() => getMinTop(), () => {
     cancelVerticalSeparationAnimation()
-    topPx.value = clampTop(topPx.value, getMinTop())
-    persist()
+    options?.onLayoutStable?.()
   })
 
   let raf = 0

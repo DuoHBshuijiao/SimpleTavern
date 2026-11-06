@@ -50,7 +50,7 @@ async function copyMessage() {
 <template>
   <div
     class="fixed right-4 w-[min(560px,calc(100vw-2rem))] pointer-events-auto"
-    :style="{ bottom: `${16 + offsetY}px`, zIndex }"
+    :style="{ top: `${72 + offsetY}px`, zIndex }"
     @mouseenter="emit('pause', item.id)"
     @mouseleave="emit('resume', item.id)"
   >

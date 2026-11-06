@@ -137,6 +137,7 @@ const emit = defineEmits<{
   'delete-message': [m: ChatMessage]
   'read-aloud-message': [m: ChatMessage]
   'rewrite-message': [m: ChatMessage]
+  'retry-user-message': [m: ChatMessage]
   'switch-previous-version': [m: ChatMessage]
   'switch-next-version': [m: ChatMessage]
   'fork-message': [m: ChatMessage]
@@ -452,14 +453,6 @@ function getReasoningForMessage(m: ChatMessage): string | undefined {
   return persisted || undefined
 }
 
-/** 思考内容尚未到达时也挂载 ReasoningBubble，避免首包 reasoning 时整块突然出现 */
-function shouldShowReasoningPlaceholder(m: ChatMessage): boolean {
-  if (m.role !== 'assistant') return false
-  const rid = props.reasoningMessageId
-  if (rid == null || m.id !== rid) return false
-  return !!(props.isGenerating || props.isInterjecting || props.reasoningStreamActive)
-}
-
 function isUserSendEntering(m: ChatMessage): boolean {
   const id = props.entrancingUserMessageId
   if (id == null || m.id !== id) return false
@@ -557,9 +550,21 @@ function messageRowMemoDeps(m: ChatMessage): unknown[] {
     props.getCurrentVersionIndex(m),
     streaming,
     props.reasoningMessageId,
+    // 纯思考阶段正文为空，须单独依赖思考内容，否则气泡不会随流式刷新
+    getReasoningForMessage(m),
+    isMessageReasoningStreaming(m),
+    getReasoningDurationForMessage(m),
     isReasoningExpanded(m.id),
     m.images?.length ?? 0,
+    canRetryUserMessage(m),
   ]
+}
+
+/** 会话末尾是没有回复的用户消息时（生成失败、中途停止、回复被删），可直接重新生成，不必再发一遍 */
+function canRetryUserMessage(m: ChatMessage): boolean {
+  if (props.isGroup || props.isGenerating || props.isInterjecting) return false
+  if (m.role !== 'user' || m.id.startsWith('local_')) return false
+  return props.messages[props.messages.length - 1]?.id === m.id
 }
 
 function shouldRenderMainBubble(m: ChatMessage): boolean {
@@ -1668,7 +1673,7 @@ onBeforeUnmount(() => {
 
           <!-- 思考链气泡：流式未展开默认 100px 限高（streamingWindowHeight），超出内层滚动；结束后收起为「已思考 x.x 秒」小卡片 -->
           <ReasoningBubble
-            v-if="m.role === 'assistant' && (getReasoningForMessage(m) || shouldShowReasoningPlaceholder(m))"
+            v-if="m.role === 'assistant' && getReasoningForMessage(m)"
             class="mb-2"
             :content="getReasoningForMessage(m) || ''"
             :is-streaming="isMessageReasoningStreaming(m)"
@@ -1790,6 +1795,15 @@ onBeforeUnmount(() => {
               <ChevronRight class="w-3 h-3" />
             </button>
           </div>
+
+          <button
+            v-if="canRetryUserMessage(m)"
+            type="button"
+            class="btn btn-xs btn-secondary mt-1"
+            @click="emit('retry-user-message', m)"
+          >
+            重试
+          </button>
 
           <!-- 底部操作栏：鼠标 hover 显示；触控/笔常驻（与侧栏列表一致） -->
           <div

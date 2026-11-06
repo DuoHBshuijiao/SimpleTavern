@@ -1,5 +1,5 @@
 /**
- * 主聊天 / 助手流式错误栈（右下角 ErrorModal）。
+ * 主聊天 / 助手流式错误栈（右上角 ErrorModal，避开输入区和发送按钮）。
  * 与 useNotify 分工：非阻塞业务提示、确认框走全局 AppNotificationHost，本栈保留自动消失与复制。
  */
 import { ref } from 'vue'

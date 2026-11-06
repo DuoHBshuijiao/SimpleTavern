@@ -298,6 +298,7 @@ watch(
   <aside
     class="drawer-surface fixed right-4 top-4 bottom-4 border border-[var(--color-border)] rounded-2xl transition-[transform,opacity,width] duration-300 overflow-hidden flex flex-col z-floating pointer-events-auto"
     :class="isOpen ? 'translate-x-0 w-[min(360px,calc(100vw-2rem))] opacity-100' : 'translate-x-[calc(100%+20px)] w-[min(360px,calc(100vw-2rem))] opacity-0 pointer-events-none'"
+    :inert="!isOpen"
     style="contain: content; will-change: transform, opacity;"
   >
     <!-- 头部 -->

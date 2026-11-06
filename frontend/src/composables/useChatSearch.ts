@@ -8,6 +8,17 @@ export interface ChatSearchHit {
   snippet: string
 }
 
+/** 把摘要按关键词切段（忽略大小写，与后端一致），供模板高亮命中部分 */
+export function splitSnippetByQuery(snippet: string, query: string): Array<{ text: string; match: boolean }> {
+  const q = query.trim()
+  if (!q) return [{ text: snippet, match: false }]
+  const pattern = new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'giu')
+  return snippet
+    .split(pattern)
+    .map((text, index) => ({ text, match: index % 2 === 1 }))
+    .filter((part) => part.text)
+}
+
 export interface UseChatSearchOptions {
   /** 当前会话 getter；为空时搜索直接清空结果 */
   getActiveChat: () => Chat | null | undefined
