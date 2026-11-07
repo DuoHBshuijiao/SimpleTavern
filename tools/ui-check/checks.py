@@ -31,7 +31,8 @@ def switch(label):
 
 
 class Context:
-    def __init__(self, base_url, api_url, cdp_port, shots_dir, fixtures, mock_state):
+    def __init__(self, base_url, api_url, cdp_port, shots_dir, fixtures, mock_state, serve_built):
+        self.serve_built = serve_built
         self.base_url = base_url
         self.api_url = api_url
         self.cdp_port = cdp_port
@@ -639,11 +640,83 @@ async def check_version(ctx):
     await ctx.close(page)
 
 
+BUILT_SCROLLER = "document.querySelector('.drawer-panel .drawer-scroll.p-6')"
+BUILT_LIST = "[...document.querySelectorAll('.drawer-panel .drawer-scroll')].find(e=>e.querySelector(':scope > [draggable=true]'))"
+BUILT_GEOMETRY = f"""(() => {{ const s={BUILT_SCROLLER}, l={BUILT_LIST}; const items=[...l.children].filter(c=>c.getAttribute('draggable')==='true'); const last=items[items.length-1];
+  const sr=s.getBoundingClientRect(), lr=l.getBoundingClientRect(), ir=last.getBoundingClientRect(); const bottom=sr.top+s.clientTop+s.clientHeight;
+  const hit=(y)=>{{const e=document.elementFromPoint(ir.left+ir.width/2,y); return !!e&&(e===last||last.contains(e));}};
+  return {{count:items.length, scrollTop:Math.round(s.scrollTop), overflowX:s.scrollWidth-s.clientWidth, listTop:Math.round(lr.top-sr.top), lastGap:Math.round(bottom-ir.bottom), bottomHit:hit(ir.bottom-2)}}; }})()"""
+
+
+def click_text(root, text):
+    return f"""(() => {{ const b=[...{root}.querySelectorAll('button')].filter(x=>x.offsetParent!==null).find(x=>x.innerText.trim()==={json.dumps(text)}); if(!b) throw new Error('没有按钮 '+{json.dumps(text)}); b.click(); }})()"""
+
+
+async def check_built(ctx):
+    """构建产物：压缩后的 CSS 才是用户看到的，开发服务器测不出模糊失效。这里没有 Vue 实例，只能操作 DOM"""
+    page = await cdp.open_page(ctx.cdp_port, ctx.serve_built(), ctx.shots_dir, 1536, 800)
+    await page.goto("/")
+    panel = "document.querySelector('.drawer-panel')"
+    style = f"""(() => {{ const p=getComputedStyle({panel}), w=getComputedStyle(document.querySelector('.drawer-wrapper')); return {{blur:p.backdropFilter, bg:p.backgroundColor, moving:p.transform!=='matrix(1, 0, 0, 1, 0, 0)', root:+w.opacity, vis:w.visibility}}; }})()"""
+    closed = await page.js(style)
+    ctx.check("关闭时抽屉不可见", closed["vis"] == "hidden", closed)
+    await page.js(click_text("document", "设置"))
+    await asyncio.sleep(0.1)
+    opening = await page.js(style)
+    ctx.check("滑入时外层不淡入，模糊全程有效", opening["moving"] and opening["root"] == 1 and "blur(12px)" in opening["blur"], opening)
+    await asyncio.sleep(1)
+    opened = await page.js(style)
+    ctx.check("构建后抽屉有模糊", "blur(12px)" in opened["blur"], opened)
+    await page.shot("built-drawer")
+
+    await page.js("""(() => { const b=[...document.querySelectorAll('[role=dialog] button')].find(x=>x.innerText.includes('外观与数据')); if(b.getAttribute('aria-expanded')!=='true') b.click(); })()""")
+    await asyncio.sleep(0.5)
+    slider = "[...document.querySelectorAll('input[type=range]')].find(r=>r.closest('.settings-field')?.innerText.includes('透明度'))"
+    await page.js(f"{slider}.scrollIntoView({{block:'center'}})")
+    await asyncio.sleep(0.4)
+    box = await page.js(f"(() => {{ const r={slider}.getBoundingClientRect(); return {{x:r.left,y:r.top+r.height/2,w:r.width,v:+{slider}.value}}; }})()")
+    x = box["x"] + box["w"] * box["v"] / 100
+    await page.mouse("mouseMoved", x, box["y"])
+    await page.mouse("mousePressed", x, box["y"], button="left", clickCount=1)
+    await asyncio.sleep(0.35)
+    dragging = await page.js(style)
+    ctx.check("拖背景滑块时模糊让位", dragging["blur"] == "none" and dragging["bg"] == "rgba(0, 0, 0, 0)", dragging)
+    await page.mouse("mouseReleased", x, box["y"], button="left", clickCount=1)
+    await asyncio.sleep(0.45)
+    ctx.check("松手后模糊恢复", "blur(12px)" in (await page.js(style))["blur"])
+
+    await page.js(click_text(panel, "API 预设"))
+    await asyncio.sleep(0.6)
+    count = (await page.js(BUILT_GEOMETRY))["count"]
+    bad, tops = [], set()
+    for index in range(count):
+        await page.js(f"{BUILT_LIST}.querySelectorAll(':scope > [draggable=true]')[{index}].click()")
+        await asyncio.sleep(0.3)
+        for where in ("0", "Math.min(300,(el.scrollHeight-el.clientHeight)/2)", "el.scrollHeight"):
+            await page.js(f"(() => {{ const el={BUILT_SCROLLER}; el.scrollTop={where}; }})()")
+            await asyncio.sleep(0.12)
+            await page.js(f"{BUILT_LIST}.scrollTop=1e6")
+            await asyncio.sleep(0.08)
+            geometry = await page.js(BUILT_GEOMETRY)
+            tops.add(geometry["listTop"])
+            if geometry["overflowX"] > 0 or geometry["lastGap"] < 0 or not geometry["bottomHit"]:
+                bad.append((index, where[:5], geometry))
+    ctx.check(f"{count} 个预设：右栏任意位置都能滚到最后一项，没有横向溢出", not bad, bad[:3])
+    ctx.check("右栏滚到底时列表不被顶走", len(tops) == 1, sorted(tops))
+    await page.js(f"{BUILT_LIST}.querySelectorAll(':scope > [draggable=true]')[{count - 1}].click()")
+    await asyncio.sleep(0.3)
+    await page.js(f"{BUILT_SCROLLER}.scrollTop=0; {BUILT_LIST}.scrollTop=1e6")
+    await asyncio.sleep(0.3)
+    await page.shot("built-presets")
+    await ctx.close(page)
+
+
 CHECKS = {
     "first_load": check_first_load,
     "entry": check_entry,
     "search": check_search,
     "settings": check_settings,
+    "built": check_built,
     "motion": check_motion,
     "sidebar": check_sidebar,
     "background": check_background,

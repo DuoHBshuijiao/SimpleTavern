@@ -238,6 +238,8 @@ def main():
     parser.add_argument("--back-port", type=int, default=9391)
     parser.add_argument("--mock-port", type=int, default=9399)
     parser.add_argument("--cdp-port", type=int, default=9433)
+    parser.add_argument("--built-port", type=int, default=9382)
+    parser.add_argument("--dist", help="built 检查用这个现成的构建产物，不重新构建（用来做修改前的对照）")
     args = parser.parse_args()
 
     import checks
@@ -250,7 +252,7 @@ def main():
     unknown = [name for name in only if name not in checks.CHECKS]
     if unknown:
         sys.exit(f"没有这些检查：{unknown}")
-    for port in (args.front_port, args.back_port, args.mock_port, args.cdp_port):
+    for port in (args.front_port, args.built_port, args.back_port, args.mock_port, args.cdp_port):
         if not port_free(port):
             sys.exit(f"端口 {port} 已被占用，请换端口或先关闭占用它的程序")
 
@@ -286,9 +288,22 @@ def main():
             stdout=log, stderr=log))
         wait_http(f"http://127.0.0.1:{args.cdp_port}/json/version")
 
+        def serve_built():
+            """构建到临时目录并启动预览，不碰 frontend/dist。"""
+            out_dir = os.path.abspath(args.dist) if args.dist else os.path.join(WORK, "dist")
+            front_env = {**env, "SIMPLETAVERN_API_PROXY": f"http://127.0.0.1:{args.back_port}"}
+            if not args.dist:
+                subprocess.run(["node", vite, "build", "--outDir", out_dir, "--emptyOutDir"], cwd=frontend, env=front_env, stdout=log, stderr=log, check=True)
+            processes.append(subprocess.Popen(
+                ["node", vite, "preview", "--outDir", out_dir, "--port", str(args.built_port), "--strictPort", "--host", "127.0.0.1"],
+                cwd=frontend, env=front_env, stdout=log, stderr=log))
+            url = f"http://127.0.0.1:{args.built_port}"
+            wait_http(url + "/")
+            return url
+
         context = checks.Context(
             base_url=f"http://127.0.0.1:{args.front_port}", api_url=f"http://127.0.0.1:{args.back_port}",
-            cdp_port=args.cdp_port, shots_dir=shots, fixtures=fixtures, mock_state=MockState)
+            cdp_port=args.cdp_port, shots_dir=shots, fixtures=fixtures, mock_state=MockState, serve_built=serve_built)
         failed = asyncio.run(checks.run(context, only))
     finally:
         for process in reversed(processes):

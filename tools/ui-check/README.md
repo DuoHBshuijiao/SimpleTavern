@@ -22,11 +22,23 @@ venv/Scripts/python tools/ui-check/run.py --list
 
 全部通过时退出码为 0，有失败时为 1。
 
+## 开发服务器和构建产物
+
+`built` 检查把前端构建到 `temp/ui-check/dist`，在压缩后的产物上验证，不会碰 `frontend/dist`。其余检查跑在开发服务器上，因为它们要直接操作 Vue 实例。
+
+两者结果可能不同：手写的 `backdrop-filter` 在开发服务器上有效，构建后会失效。模糊和其他受 CSS 压缩影响的效果，要放到 `built` 里测。
+
+要和修改前对照，可以让 `built` 使用现成的构建产物：
+
+```bash
+venv/Scripts/python tools/ui-check/run.py --only built --dist frontend/dist
+```
+
 ## 安全
 
 - 真实 `data/` 只读。运行时复制到 `temp/ui-check/data`，清空密钥，把所有接口地址指向内置的模拟模型，复制后再扫一遍，发现疑似密钥就停止。
 - 不连接任何外部服务，不用真实模型。
-- 默认端口是 9381、9391、9399、9433，和常用的 9081、9091 分开。端口被占用时直接报错，不会关闭别的进程。
+- 默认端口是 9381、9382、9391、9399、9433，和常用的 9081、9091 分开。端口被占用时直接报错，不会关闭别的进程。
 - 截图在 `temp/ui-check/shots`，会包含您的角色和聊天内容。`temp/` 已被 Git 忽略，每次运行都会重建。
 
 ## 前提
@@ -50,4 +62,5 @@ venv/Scripts/python tools/ui-check/run.py --list
 - 判断结果用 `ctx.check(名称, 条件, 详情)`。
 - 新页面用 `await ctx.page()`，它会关掉“未总结消息达到阈值”这类挡操作的提示，用完调用 `await ctx.close(page)`。
 - 动效要按帧量：把 `--transition-normal` 拉长后采样，不要只看最终状态。
+- 构建产物里没有 Vue 实例，`built` 里只能操作 DOM，不能用 `__chat()`、`__drawer()`。
 - 会往沙箱发消息的检查放在后面，发送会改变下次首先加载的会话。
