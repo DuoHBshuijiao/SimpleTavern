@@ -60,7 +60,7 @@ import type {
 } from '../../types/models'
 import { useSettingsStore } from '../../stores'
 import ModernAvatar from '../ModernAvatar.vue'
-import ConfirmPopover from '../ConfirmPopover.vue'
+import InlineConfirmButton from '../common/InlineConfirmButton.vue'
 import SelectDropdownSurface from '../SelectDropdownSurface.vue'
 import ReasoningBubble from './ReasoningBubble.vue'
 import AnimatedClipHeight from './AnimatedClipHeight.vue'
@@ -260,12 +260,6 @@ function rememberMarkdownHtml(key: string, html: string) {
     markdownHtmlCache.delete(oldestKey)
   }
 }
-
-// 删除确认状态
-const deleteConfirm = ref<{
-  message: ChatMessage
-  target: HTMLElement
-} | null>(null)
 
 // 思考气泡：仅点击气泡体展开，仅点击图标收起
 const expandedReasoningMessageId = ref<string | null>(null)
@@ -921,31 +915,6 @@ function getMessageAvatarObjectPosition(m: ChatMessage): string {
   return `${x}% ${y}%`
 }
 
-/**
- * 确认删除消息
- *
- * 弹出确认对话框，确认后触发删除消息事件。
- *
- * @param {ChatMessage} m - 要删除的消息（来自types/models.ts）
- * @param {Event} event - 点击事件
- */
-function confirmDelete(m: ChatMessage, event: Event) {
-  deleteConfirm.value = {
-    message: m,
-    target: event.currentTarget as HTMLElement
-  }
-}
-
-function handleConfirmDelete() {
-  if (deleteConfirm.value) {
-    emit('delete-message', deleteConfirm.value.message)
-    deleteConfirm.value = null
-  }
-}
-
-function cancelDelete() {
-  deleteConfirm.value = null
-}
 
 /**
  * 滚动到底部
@@ -2002,13 +1971,10 @@ onBeforeUnmount(() => {
             >
               编辑
             </button>
-            <button 
-              class="btn btn-xs btn-danger" 
+            <InlineConfirmButton
               :disabled="isGenerating"
-              @click="confirmDelete(m, $event)"
-            >
-              删除
-            </button>
+              @confirm="emit('delete-message', m)"
+            />
           </div>
         </div>
       </div>
@@ -2027,16 +1993,6 @@ onBeforeUnmount(() => {
     </button>
 
     <!-- 删除确认弹窗 -->
-    <ConfirmPopover
-      :show="!!deleteConfirm"
-      :target="deleteConfirm?.target || null"
-      message="确定删除这条消息？"
-      confirm-text="删除"
-      @confirm="handleConfirmDelete"
-      @cancel="cancelDelete"
-      @update:show="(val) => !val && cancelDelete()"
-    />
-
     <Teleport to="body">
       <div class="image-preview-layer">
         <TransitionGroup name="image-preview-fade">

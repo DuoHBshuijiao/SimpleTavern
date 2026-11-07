@@ -4,7 +4,7 @@ import { usePreferHoverChrome } from '../../composables/usePreferHoverChrome'
 import { renderChatMarkdown } from '../../utils/markdownIt'
 import type { AssistantMessage } from '../../composables/useAssistant'
 import type { AssistantAttachment } from '../../types/models'
-import ConfirmPopover from '../ConfirmPopover.vue'
+import InlineConfirmButton from '../common/InlineConfirmButton.vue'
 import AnimatedClipHeight from './AnimatedClipHeight.vue'
 import ReasoningBubble from './ReasoningBubble.vue'
 
@@ -39,41 +39,6 @@ const emit = defineEmits<{
 
 function renderMarkdown(text: string) {
   return renderChatMarkdown(text ?? '')
-}
-
-const confirmState = ref<{
-  show: boolean
-  target: HTMLElement | null
-  title: string
-  message: string
-  confirmText: string
-  onConfirm: () => void
-}>({
-  show: false,
-  target: null,
-  title: '',
-  message: '',
-  confirmText: '确认',
-  onConfirm: () => {},
-})
-
-function closeConfirm() {
-  confirmState.value.show = false
-  confirmState.value.target = null
-}
-
-function confirmDelete(m: AssistantMessage, event: Event) {
-  confirmState.value = {
-    show: true,
-    target: event.currentTarget as HTMLElement,
-    title: '删除消息',
-    message: '确定删除这条消息？',
-    confirmText: '删除',
-    onConfirm: () => {
-      emit('delete-message', m)
-      closeConfirm()
-    },
-  }
 }
 
 const expandedReasoningMessageId = ref<string | null>(null)
@@ -587,13 +552,10 @@ onMounted(() => {
       >
         编辑
       </button>
-      <button
-        class="btn btn-xs btn-danger"
+      <InlineConfirmButton
         :disabled="isGenerating"
-        @click="confirmDelete(message, $event)"
-      >
-        删除
-      </button>
+        @confirm="emit('delete-message', message)"
+      />
     </div>
   </div>
 
@@ -639,17 +601,6 @@ onMounted(() => {
       </AnimatedClipHeight>
     </div>
   </div>
-
-  <ConfirmPopover
-    :show="confirmState.show"
-    :target="confirmState.target"
-    :title="confirmState.title"
-    :message="confirmState.message"
-    :confirm-text="confirmState.confirmText"
-    @confirm="confirmState.onConfirm"
-    @cancel="closeConfirm"
-    @update:show="(value) => !value && closeConfirm()"
-  />
 
   <Teleport to="body">
     <div class="image-preview-layer">
