@@ -833,7 +833,8 @@ watch(
 // 流式输出
 const stream = useStreamOutput(
   { appendLocalMessageContent: chats.appendLocalMessageContent },
-  () => scrollToBottom(true, true),
+  // 不能强制：强制贴底会清掉“用户已滚走”的状态，流式时就没法往回看了
+  () => scrollToBottom(),
 )
 
 const {

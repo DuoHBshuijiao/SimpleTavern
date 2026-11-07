@@ -241,6 +241,12 @@ const LAST_MESSAGE_START_SETTLE_MS = 1200
 let lastMessageStartAlignUntil = 0
 let messageJumpToken = 0
 const MESSAGE_JUMP_SETTLE_FRAMES = 12
+/**
+ * 是否贴在底部：不生成时内容变高（图片晚加载、结束后操作行出现）只有贴着才跟。
+ * 不能现算到底距离：气泡高度是分帧增长的，一帧涨得多就会误判成“已离开底部”。
+ * 所以只由滚动方向改变：向上离开才解除，内容变高不解除。
+ */
+let pinnedToBottom = true
 
 const MARKDOWN_HTML_CACHE_LIMIT = 400
 const markdownHtmlCache = new Map<string, string>()
@@ -989,7 +995,8 @@ function handleListWheel(e: WheelEvent) {
   if (!root || e.currentTarget !== root) return
   cancelPendingBottomSnap()
   stopProgrammaticAlign()
-  if (e.deltaY <= 0) return
+  // 只有向上滚才解除跟底；向下滚是在往底部走
+  if (e.deltaY >= 0) return
   if (isWheelTargetInsideNestedScrollable(e.target, root)) return
   userDismissedAutoFollow.value = true
 }
@@ -1017,6 +1024,7 @@ function alignToBottom(el: HTMLElement, instant: boolean) {
   const target = Math.max(0, el.scrollHeight - el.clientHeight)
   el.scrollTop = target
   syncScrollMetrics(el)
+  pinnedToBottom = true
   if (instant) {
     el.style.scrollBehavior = previousBehavior
   }
@@ -1033,6 +1041,7 @@ function setScrollTopInstant(el: HTMLElement, top: number) {
   el.style.scrollBehavior = 'auto'
   el.scrollTop = Math.max(0, top)
   syncScrollMetrics(el)
+  pinnedToBottom = realDistanceFromBottom.value <= SCROLL_BOTTOM_NEAR_THRESHOLD
   el.style.scrollBehavior = previousBehavior
 }
 
@@ -1326,6 +1335,15 @@ function handleScroll() {
   // 从贴底带外重新滚入带内时恢复跟底；带内向上滚仅置位 dismiss，不会在仍 ≤300px 时被误清除
   if (nowDist <= AUTO_FOLLOW_DISTANCE_THRESHOLD && oldDist > AUTO_FOLLOW_DISTANCE_THRESHOLD) {
     userDismissedAutoFollow.value = false
+  }
+  // 带内向上滚一点再滚回底部，没有跨过上面的带边界，也要恢复跟底。
+  // 必须是在往下走：向上的平滑滚动刚开始时也还在这个距离内
+  if (nowDist <= SCROLL_BOTTOM_NEAR_THRESHOLD && el.scrollTop > oldScrollTop) {
+    userDismissedAutoFollow.value = false
+    pinnedToBottom = true
+  } else if (el.scrollTop < oldScrollTop && nowDist > 1) {
+    // 距离为 0 的上移是内容变短被浏览器夹回来的，不算用户离开
+    pinnedToBottom = false
   }
 }
 
@@ -1671,6 +1689,8 @@ onMounted(() => {
           if (!effectiveCanFollow(e2)) return
           alignToBottom(e2, true)
         })
+      } else if (pinnedToBottom && !holdAtLastMessageStart && !userDismissedAutoFollow.value) {
+        alignToBottom(el, true)
       } else {
         syncScrollMetrics(el)
       }
