@@ -136,7 +136,10 @@ const uiStore = useUiStore()
 const route = useRoute()
 const router = useRouter()
 const { refreshDataAfterImport } = useSettingsImport()
-const pageBackground = usePageBackground(() => settings.settings)
+const pageBackground = usePageBackground(() => {
+  const preview = uiStore.pageBackgroundPreview
+  return settings.settings && preview ? { ...settings.settings, ...preview } : settings.settings
+})
 const webgpuCanvasRef = ref<HTMLCanvasElement | null>(null)
 const { runtimeState: webgpuRuntimeState } = useWebGpuBackgroundRuntime()
 const persistedWebgpuEnabled = computed(() => settings.settings?.webgpuBackgroundEnabled === true)

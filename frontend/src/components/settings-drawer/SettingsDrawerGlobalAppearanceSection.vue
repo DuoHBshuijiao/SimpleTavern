@@ -56,12 +56,29 @@ const emit = defineEmits<{
   'delete-webgpu-preset': []
   'step-font-size': [delta: number]
   'font-file': [event: Event]
+  'background-adjust': [active: boolean]
   backup: [mode: 'basic' | 'with_characters' | 'with_chats']
   'import-file': [event: Event]
   'st-import-file': [event: Event]
   'reset-st-preview': []
   'confirm-st-import': []
 }>()
+
+/** 正在拖的背景滑块：抽屉其余部分让位给背景，只留这一个 */
+const activeBackgroundSlider = ref<'opacity' | 'blur' | null>(null)
+
+function startBackgroundAdjust(slider: 'opacity' | 'blur') {
+  activeBackgroundSlider.value = slider
+  emit('background-adjust', true)
+  const end = () => {
+    window.removeEventListener('pointerup', end)
+    window.removeEventListener('pointercancel', end)
+    activeBackgroundSlider.value = null
+    emit('background-adjust', false)
+  }
+  window.addEventListener('pointerup', end)
+  window.addEventListener('pointercancel', end)
+}
 
 const pageBackgroundInputRef = ref<HTMLInputElement | null>(null)
 const fontInputRef = ref<HTMLInputElement | null>(null)
@@ -125,19 +142,19 @@ function triggerStImport() {
       </div>
       <p v-else class="settings-hint">还未导入页面背景，聊天页仅使用主题底色。</p>
       <div class="grid gap-3 md:grid-cols-2">
-        <label class="settings-field">
+        <label class="settings-field" :class="{ 'settings-slider-active': activeBackgroundSlider === 'opacity' }">
           <span class="settings-field-head">
             <span class="settings-label">透明度</span>
             <span class="settings-hint">{{ pageBackgroundOpacity }}%</span>
           </span>
-          <input v-model="pageBackgroundOpacity" type="range" min="0" max="100" step="1" class="input-range" />
+          <input v-model="pageBackgroundOpacity" type="range" min="0" max="100" step="1" class="input-range" @pointerdown="startBackgroundAdjust('opacity')" />
         </label>
-        <label class="settings-field">
+        <label class="settings-field" :class="{ 'settings-slider-active': activeBackgroundSlider === 'blur' }">
           <span class="settings-field-head">
             <span class="settings-label">模糊</span>
             <span class="settings-hint">{{ pageBackgroundBlur }} px</span>
           </span>
-          <input v-model="pageBackgroundBlur" type="range" min="0" max="64" step="1" class="input-range" />
+          <input v-model="pageBackgroundBlur" type="range" min="0" max="64" step="1" class="input-range" @pointerdown="startBackgroundAdjust('blur')" />
         </label>
       </div>
     </div>

@@ -19,6 +19,8 @@ export const useUiStore = defineStore('ui', {
     requestedSettingsTab: 'global' as SettingsDrawerTab,
     settingsFocusTarget: null as SettingsFocusTarget | null,
     settingsFocusNonce: 0,
+    /** 设置抽屉打开时的背景草稿：页面背景跟随它预览，关闭抽屉后清空，回到已保存的值 */
+    pageBackgroundPreview: null as { pageBackgroundOpacity: number | null; pageBackgroundBlurPx: number | null } | null,
   }),
   actions: {
     requestOpenSettings(tab: SettingsDrawerTab = 'global') {

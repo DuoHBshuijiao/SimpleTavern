@@ -147,7 +147,51 @@
     opacity: 0.5;
   }
 
+  /*
+   * 拖背景滑块时让位：遮罩和抽屉淡出，只留正在拖的滑块，这样看到的就是保存后的真实效果。
+   * 滑块的祖先不能设 opacity（子元素跟着消失），所以祖先只去掉底色和边框，其余元素才淡出。
+   */
+  .is-adjusting-background .drawer-backdrop {
+    opacity: 0 !important;
+  }
+
+  .is-adjusting-background .drawer-panel,
+  .is-adjusting-background .drawer-panel :has(.settings-slider-active) {
+    border-color: transparent !important;
+    background-color: transparent !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  .is-adjusting-background .drawer-panel *:not(:has(.settings-slider-active)):not(.settings-slider-active):not(.settings-slider-active *) {
+    opacity: 0 !important;
+  }
+
+  /* 这时身后是消息和背景图，底色必须不透明，否则数值读不清 */
+  .settings-slider-active {
+    border-radius: var(--radius-lg);
+    background-color: var(--color-surface);
+    box-shadow: 0 0 0 0.5rem var(--color-surface);
+  }
+
+  .is-background-fading .drawer-backdrop,
+  .is-background-fading .drawer-panel,
+  .is-background-fading .drawer-panel * {
+    transition:
+      opacity 120ms ease-out,
+      background-color 120ms ease-out,
+      border-color 120ms ease-out,
+      box-shadow 120ms ease-out !important;
+  }
+
   @media (prefers-reduced-motion: reduce) {
+    .is-background-fading .drawer-backdrop,
+    .is-background-fading .drawer-panel,
+    .is-background-fading .drawer-panel * {
+      transition: none !important;
+    }
+
     .settings-hint-more,
     .settings-switch,
     .settings-switch-knob {

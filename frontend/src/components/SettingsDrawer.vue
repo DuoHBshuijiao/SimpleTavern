@@ -246,6 +246,24 @@ async function applySettingsFocusTarget() {
 }
 // 从关闭状态跳转时，草稿和预设页要等加载完才存在，就绪前不要消费目标
 const settingsDraftReady = ref(false)
+
+/** 拖背景滑块时遮罩和抽屉让位。松手后多留一点时间，让恢复也有淡入 */
+const backgroundAdjusting = ref(false)
+const backgroundFading = ref(false)
+const BACKGROUND_FADE_MS = 160
+let backgroundFadeTimer: ReturnType<typeof setTimeout> | null = null
+function handleBackgroundAdjust(active: boolean) {
+  backgroundAdjusting.value = active
+  if (backgroundFadeTimer) clearTimeout(backgroundFadeTimer)
+  backgroundFadeTimer = null
+  if (active) {
+    backgroundFading.value = true
+    return
+  }
+  backgroundFadeTimer = setTimeout(() => {
+    backgroundFading.value = false
+  }, BACKGROUND_FADE_MS)
+}
 watch(
   () => [uiStore.settingsFocusNonce, props.show, settingsDraftReady.value, preloaded.value] as const,
   ([nonce, show, draftReady, tabsReady]) => {
@@ -281,6 +299,16 @@ const globalAccordionOpen = reactive({
 })
 
 const globalDraft = ref<Settings | null>(null)
+
+/** 页面背景跟随草稿预览；关闭抽屉（取消或保存后）回到已保存的值 */
+watch(
+  () => [props.show, settingsDraftReady.value, globalDraft.value?.pageBackgroundOpacity, globalDraft.value?.pageBackgroundBlurPx] as const,
+  ([show, ready, opacity, blurPx]) => {
+    uiStore.pageBackgroundPreview = show && ready
+      ? { pageBackgroundOpacity: opacity ?? null, pageBackgroundBlurPx: blurPx ?? null }
+      : null
+  },
+)
 /** GET /api/web-search/status 缓存（打开全局设置时刷新） */
 const webSearchRemoteStatus = ref<Record<string, unknown> | null>(null)
 /** 正在刷新用量：不清空已有快照，仅作弱提示与样式 */
@@ -4296,7 +4324,7 @@ provide(
 
 <template>
   <div>
-  <div class="drawer-wrapper fixed inset-0 z-drawer flex justify-end" :class="{ 'is-open': show }" :inert="!show">
+  <div class="drawer-wrapper fixed inset-0 z-drawer flex justify-end" :class="{ 'is-open': show, 'is-adjusting-background': backgroundAdjusting, 'is-background-fading': backgroundFading }" :inert="!show">
     <!-- Backdrop -->
     <div
       class="drawer-backdrop absolute inset-0 bg-overlay"
@@ -4430,6 +4458,7 @@ provide(
                 @run-webgpu-preset="runWebGpuPresetFromList"
                 @delete-webgpu-preset="deleteActiveWebGpuPreset"
                 @step-font-size="stepMessageFontSize"
+                @background-adjust="handleBackgroundAdjust"
                 @font-file="handleFontImport"
                 @backup="downloadSettingsBackup"
                 @import-file="handleImportChange"
