@@ -761,6 +761,4 @@
   background-color: var(--color-reasoning-bubble-bg);
   border: 1px solid var(--color-reasoning-bubble-border);
   color: var(--color-reasoning-bubble-text);
-  backdrop-filter: blur(var(--blur-light));
-  -webkit-backdrop-filter: blur(var(--blur-light));
 }

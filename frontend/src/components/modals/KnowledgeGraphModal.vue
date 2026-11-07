@@ -413,7 +413,7 @@ onUnmounted(() => destroyNetwork())
       class="modal pointer-events-auto"
     >
       <div
-        class="modal-backdrop"
+        class="modal-backdrop backdrop-blur-[var(--glass-blur-soft)]"
         @click="close"
       />
       <div

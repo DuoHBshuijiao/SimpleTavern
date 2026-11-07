@@ -43,7 +43,7 @@ void dialogRef
   <Teleport to="body">
     <Transition name="modal">
       <div v-if="show && draft" class="modal z-[var(--z-popover)]">
-        <div class="modal-backdrop" @click="show = false"></div>
+        <div class="modal-backdrop backdrop-blur-[var(--glass-blur-soft)]" @click="show = false"></div>
         <div
           ref="dialogRef"
           v-bind="dialogAttrs"

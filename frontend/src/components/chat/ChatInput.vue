@@ -1253,8 +1253,6 @@ defineExpose({
   line-height: 1;
   cursor: pointer;
   overflow: hidden;
-  backdrop-filter: blur(var(--blur-light));
-  -webkit-backdrop-filter: blur(var(--blur-light));
   box-shadow: var(--shadow-glass-panel);
   transition:
     background-color 200ms cubic-bezier(0.25, 1, 0.5, 1),

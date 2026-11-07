@@ -49,7 +49,7 @@ const hasWorldbook = () =>
 <template>
   <Transition name="modal">
   <div v-if="show" class="modal">
-    <div class="modal-backdrop" @click="emit('cancel')"></div>
+    <div class="modal-backdrop backdrop-blur-[var(--glass-blur-soft)]" @click="emit('cancel')"></div>
     <div ref="dialogRef" v-bind="dialogAttrs" tabindex="-1" class="modal-content modal-surface chat-modal-width-568-90 min-w-0">
       <div class="modal-header border-b border-[var(--color-border-subtle)]">
         <h3 :id="titleId" class="modal-title text-[var(--color-text)]">检测到 PNG 内嵌角色卡</h3>

@@ -33,7 +33,7 @@ function handleExport(format: 'txt' | 'json' | 'jsonl' | 'character' | 'characte
   <Transition name="modal">
     <div v-if="show" class="modal">
       <!-- 背景模糊须用 Tailwind backdrop-*（见 README / glass.css：手写 backdrop-filter 经 esbuild 压缩可能失效） -->
-      <div class="modal-backdrop" @click="close"></div>
+      <div class="modal-backdrop backdrop-blur-[var(--glass-blur-soft)]" @click="close"></div>
       <div
         ref="dialogRef"
         v-bind="dialogAttrs"
