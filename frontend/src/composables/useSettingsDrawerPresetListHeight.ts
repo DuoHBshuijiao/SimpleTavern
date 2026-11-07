@@ -1,6 +1,5 @@
 import { nextTick, onUnmounted, ref, watch, type Ref } from 'vue'
 
-const PRESET_LIST_SCROLL_GAP_PX = 4
 const PRESET_LIST_MIN_HEIGHT_PX = 120
 
 export interface UseSettingsDrawerPresetListHeightOptions {
@@ -36,8 +35,11 @@ export function useSettingsDrawerPresetListHeight(options: UseSettingsDrawerPres
       presetListMaxHeightPx.value = null
       return
     }
-    const h = scrollRect.bottom - headerRect.bottom - PRESET_LIST_SCROLL_GAP_PX
-    presetListMaxHeightPx.value = Math.max(PRESET_LIST_MIN_HEIGHT_PX, Math.floor(h))
+    // 底边留出滚动区的内边距：超过它，吸附的左栏会被父容器顶走，只有右栏滚到底才看得到最后一项。
+    // clientHeight 不含横向滚动条；列表的顶边还要算上标题的外边距。
+    const contentBottom = scrollRect.top + scroll.clientTop + scroll.clientHeight - parseFloat(getComputedStyle(scroll).paddingBottom)
+    const listTop = headerRect.bottom + parseFloat(getComputedStyle(header).marginBottom)
+    presetListMaxHeightPx.value = Math.max(PRESET_LIST_MIN_HEIGHT_PX, Math.floor(contentBottom - listTop))
   }
 
   function schedulePresetListMaxHeight() {

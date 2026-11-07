@@ -158,7 +158,7 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                              </div>
                             <p v-if="presets.presetRequiresOAuth(presets.editingPreset)" class="settings-hint">开始登录会先保存当前预设，授权凭据独立保存在本机。</p>
                             <div v-if="presets.presetRequiresOAuth(presets.editingPreset)" class="flex flex-wrap items-center gap-2 pt-1">
-                              <span class="settings-hint">
+                              <span class="settings-hint min-w-0 max-w-full break-all">
                                 {{ presets.oauthStatusFor(presets.editingPreset?.id)?.loggedIn ? '已登录' : '需要登录后才能发请求' }}
                                 <span v-if="presets.oauthStatusFor(presets.editingPreset?.id)?.accountId">
                                   · {{ presets.oauthStatusFor(presets.editingPreset?.id)?.accountId }}

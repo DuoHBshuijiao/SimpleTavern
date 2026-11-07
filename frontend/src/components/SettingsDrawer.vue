@@ -4342,6 +4342,7 @@ provide(
       v-bind="drawerA11yAttrs"
       tabindex="-1"
       class="drawer-panel drawer-surface absolute right-4 top-4 bottom-4 w-[min(500px,calc(100vw-2rem))] border border-[var(--color-border)] rounded-2xl flex flex-col shadow-xl"
+      :class="{ 'backdrop-blur-[var(--glass-blur-panel)]': !backgroundAdjusting }"
     >
         <!-- Header -->
         <div class="flex items-center justify-between px-6 py-4 border-b border-[var(--color-border-subtle)] bg-[var(--color-settings-panel-bg)] rounded-t-2xl">
@@ -4610,14 +4611,16 @@ provide(
 </template>
 
 <style scoped>
+/* 外层不能淡入淡出：祖先 opacity 小于 1 时面板的模糊会失效，到最后一帧才突然出现 */
 .drawer-wrapper {
-  opacity: 0;
+  visibility: hidden;
   pointer-events: none;
-  transition: opacity 0.3s ease-out;
+  transition: visibility 0s linear 0.3s;
 }
 .drawer-wrapper.is-open {
-  opacity: 1;
+  visibility: visible;
   pointer-events: auto;
+  transition: visibility 0s;
 }
 .drawer-wrapper .drawer-panel {
   transition: transform 0.3s ease-out;
@@ -4628,6 +4631,7 @@ provide(
 }
 .drawer-wrapper .drawer-backdrop {
   opacity: 0.4;
+  transition: opacity 0.3s ease-out;
 }
 .drawer-wrapper:not(.is-open) .drawer-backdrop {
   opacity: 0;

@@ -136,8 +136,6 @@
     background-image: none;
     border-color: var(--color-glass-border);
     box-shadow: var(--shadow-settings-drawer);
-    backdrop-filter: blur(var(--glass-blur-panel));
-    -webkit-backdrop-filter: blur(var(--glass-blur-panel));
   }
 
   .modal-header {
