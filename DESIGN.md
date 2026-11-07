@@ -231,6 +231,25 @@ Named rules:
 - **Popover / Dropdown:** L6 glass surface; must not be clipped by parent overflow. Prefer teleport/fixed positioning where needed.
 - **Modal motion:** every modal uses `<Transition name="modal">`. It fades the backdrop and the content separately and never the `.modal` root, because `opacity` below 1 on the root disables the blur of everything inside until the last frame, and the blur then pops in.
 - **Layered dismissal:** Escape and Tab belong to the topmost dialog only, through `useDialogBehavior`. One key press closes one layer.
+- **Close icon:** every modal close button uses the `X` icon, not a `×` character.
+
+### Destructive Actions
+
+Deleting a message uses `InlineConfirmButton`: the first click turns the button into "确认？" in place, the second deletes, and it reverts after 3 seconds, on blur, or on Escape. There is no undo: deleting is immediate because message data is used by other flows, so do not add delayed deletion without changing those flows.
+
+### Reading Position
+
+- Entering a chat lands on the start of the last message. If it fits on screen, that is the same as the bottom.
+- While generating, the list follows the bottom until the user scrolls up, and follows again after they return to the bottom.
+- When not generating, content growth is followed only if the list was already pinned to the bottom.
+
+### Chat Reading Settings
+
+Reading font and line height (`readingFont`, `messageLineHeight`) apply only to message bodies through `.message-reading-content`. The interface font stays separate, and code stays monospace. Any hidden copy used to measure message height must carry the same class.
+
+### Background Preview
+
+While the drawer is open, the page background follows the unsaved opacity and blur, and closing without saving restores the saved values. While a background slider is being dragged, the backdrop and drawer fade away and only that slider stays visible, on an opaque fill, so what the user sees is the real result.
 
 ## 6. Do's and Don'ts
 
