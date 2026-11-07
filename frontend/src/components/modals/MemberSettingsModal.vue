@@ -96,6 +96,17 @@ function handleModelSelect(opt: { value: string; presetId?: string }) {
   })
 }
 
+/** 留空恢复默认 100%；0 是有效值，表示这名成员通常不发言 */
+function onProbabilityInput(event: Event) {
+  const raw = (event.target as HTMLInputElement).value
+  if (raw.trim() === '') {
+    updateField('probability', 1)
+    return
+  }
+  const value = parseFloat(raw)
+  if (Number.isFinite(value)) updateField('probability', Math.max(0, Math.min(1, value)))
+}
+
 function clearBoundModel() {
   emit('update:settings', { ...props.settings, model: null, presetId: null })
 }
@@ -250,7 +261,11 @@ function setFast(v: string) {
 
           <div class="settings-group">
             <div class="settings-group-title">发言</div>
-            <SettingsField label="参与概率" hint="设置为 100% 表示每轮必定发言，低于 100% 则按概率随机参与。">
+            <SettingsField
+              label="参与概率"
+              hint="设置为 100% 表示每轮必定发言，低于 100% 则按概率随机参与。"
+              more="0 表示这名成员通常不发言。一轮里所有成员都没被选中时，会随机保留一名。"
+            >
               <div class="flex items-center gap-3">
                 <input
                   type="number"
@@ -259,7 +274,7 @@ function setFast(v: string) {
                   min="0"
                   max="1"
                   step="0.1"
-                  @input="updateField('probability', parseFloat(($event.target as HTMLInputElement).value) || 1)"
+                  @input="onProbabilityInput"
                 />
                 <div class="flex-1">
                   <div class="h-2 bg-[var(--color-surface-muted)] rounded-full overflow-hidden">

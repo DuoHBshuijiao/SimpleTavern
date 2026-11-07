@@ -8,6 +8,7 @@ import LlmPresetNameCombobox from '../LlmPresetNameCombobox.vue'
 import LlmConnectionAdvancedSection from './LlmConnectionAdvancedSection.vue'
 import SettingsField from './SettingsField.vue'
 import SettingsHint from './SettingsHint.vue'
+import SettingsSwitch from './SettingsSwitch.vue'
 import { SETTINGS_DRAWER_PRESETS_KEY } from '../../composables/settingsDrawerPresetsKey'
 
 const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
@@ -306,112 +307,83 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
 
                           <!-- GLM-TTS 本地专属配置 -->
                           <template v-if="presets.editingPresetIsGlmLocal">
-                            <div class="space-y-2">
-                              <label class="settings-label block">仓库路径</label>
-                              <input v-model="presets.editingPreset!.ttsGlmLocalRepoPath" type="text" class="input w-full" placeholder="E:\GLM-TTS（GLM-TTS 仓库根目录）" />
-                              <p class="settings-hint">指向包含 run_api_gpu.ps1 的已就绪 GLM-TTS 目录。</p>
-                            </div>
-                            <div class="flex items-center gap-3">
-                              <div class="flex-1 space-y-1">
-                                <label class="settings-label block">端口</label>
-                                <input v-model.number="presets.editingPreset!.ttsGlmLocalPort" type="number" min="1" max="65535" class="input w-full" placeholder="8088" />
-                              </div>
-                              <div class="flex-1 space-y-1">
-                                <label class="settings-label block">托管启动</label>
-                                <button type="button" class="btn btn-xs w-full" :class="presets.editingPreset!.ttsGlmLocalManaged ? 'btn-primary' : 'btn-secondary'" @click="presets.editingPreset!.ttsGlmLocalManaged = !presets.editingPreset!.ttsGlmLocalManaged">
-                                  {{ presets.editingPreset!.ttsGlmLocalManaged ? '由程序启动' : '手动启动' }}
-                                </button>
-                              </div>
-                            </div>
-                            <SettingsHint more="「由程序启动」会在首次合成前自动运行 run_api_gpu.ps1；「手动启动」需自行启动本地 API。">「由程序启动」会在首次合成前自动运行脚本。</SettingsHint>
+                            <SettingsField label="仓库路径" hint="指向包含 run_api_gpu.ps1 的已就绪 GLM-TTS 目录。">
+                              <input v-model="presets.editingPreset!.ttsGlmLocalRepoPath" type="text" class="input w-full" placeholder="E:\GLM-TTS" />
+                            </SettingsField>
+                            <SettingsField label="端口">
+                              <input v-model.number="presets.editingPreset!.ttsGlmLocalPort" type="number" min="1" max="65535" class="input w-full" placeholder="8088" />
+                            </SettingsField>
+                            <SettingsSwitch
+                              label="由程序启动"
+                              :model-value="!!presets.editingPreset!.ttsGlmLocalManaged"
+                              hint="首次合成前自动运行脚本。"
+                              more="开启后会在首次合成前自动运行 run_api_gpu.ps1；关闭时需自行启动本地 API。"
+                              @update:model-value="presets.editingPreset!.ttsGlmLocalManaged = $event"
+                            />
                           </template>
 
                           <template v-else-if="presets.editingPresetIsQwen3Local">
-                            <div class="space-y-2">
-                              <label class="settings-label block">仓库路径</label>
-                              <input v-model="presets.editingPreset!.ttsQwen3LocalRepoPath" type="text" class="input w-full" placeholder="E:\Qwen3-TTS（Qwen3-TTS 仓库根目录）" />
-                              <p class="settings-hint">指向安装好 Qwen3-TTS 及其网关的仓库目录；托管模式会从这里启动 uvicorn 网关。</p>
-                            </div>
-                            <div class="grid gap-3 md:grid-cols-2">
-                              <div class="space-y-1">
-                                <label class="settings-label block">主端口（CustomVoice 网关）</label>
-                                <input v-model.number="presets.editingPreset!.ttsQwen3LocalPort" type="number" min="1" max="65535" class="input w-full" placeholder="8080" />
-                              </div>
-                              <div class="space-y-1">
-                                <label class="settings-label block">语音克隆端口（Base 网关）</label>
-                                <input
-                                  :value="presets.editingPreset!.ttsQwen3LocalVoiceClonePort ?? ''"
-                                  type="number"
-                                  min="1"
-                                  max="65535"
-                                  class="input w-full"
-                                  placeholder="留空 = 主端口 + 1"
-                                  @input="presets.onQwen3VoiceClonePortInput"
-                                />
-                              </div>
-                            </div>
-                            <div class="grid gap-3 md:grid-cols-2">
-                              <div class="space-y-1">
-                                <label class="settings-label block">托管启动</label>
-                                <button type="button" class="btn btn-xs w-full" :class="presets.editingPreset!.ttsQwen3LocalManaged ? 'btn-primary' : 'btn-secondary'" @click="presets.editingPreset!.ttsQwen3LocalManaged = !presets.editingPreset!.ttsQwen3LocalManaged">
-                                  {{ presets.editingPreset!.ttsQwen3LocalManaged ? '由程序启动' : '手动启动' }}
-                                </button>
-                              </div>
-                              <div class="space-y-1">
-                                <label class="settings-label block">设备</label>
-                                <input v-model="presets.editingPreset!.ttsQwen3LocalDevice" type="text" class="input w-full" placeholder="cuda:0" />
-                              </div>
-                            </div>
-                            <div class="grid gap-3 md:grid-cols-2">
-                              <div class="space-y-1">
-                                <label class="settings-label block">CustomVoice 模型 ID（/custom_voice）</label>
-                                <input v-model="presets.editingPreset!.ttsQwen3LocalModelId" type="text" class="input w-full" placeholder="Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice" />
-                              </div>
-                              <div class="space-y-1">
-                                <label class="settings-label block">Base 模型 ID（/voice_clone）</label>
-                                <input v-model="presets.editingPreset!.ttsQwen3LocalBaseModelId" type="text" class="input w-full" placeholder="Qwen/Qwen3-TTS-12Hz-1.7B-Base" />
-                              </div>
-                            </div>
-                            <div class="space-y-1">
-                              <label class="settings-label block">默认语言</label>
+                            <SettingsField label="仓库路径" hint="指向安装好 Qwen3-TTS 及其网关的仓库目录；托管模式会从这里启动网关。">
+                              <input v-model="presets.editingPreset!.ttsQwen3LocalRepoPath" type="text" class="input w-full" placeholder="E:\Qwen3-TTS" />
+                            </SettingsField>
+                            <SettingsField label="主端口（CustomVoice 网关）">
+                              <input v-model.number="presets.editingPreset!.ttsQwen3LocalPort" type="number" min="1" max="65535" class="input w-full" placeholder="8080" />
+                            </SettingsField>
+                            <SettingsField label="语音克隆端口（Base 网关）">
+                              <input
+                                :value="presets.editingPreset!.ttsQwen3LocalVoiceClonePort ?? ''"
+                                type="number"
+                                min="1"
+                                max="65535"
+                                class="input w-full"
+                                placeholder="留空 = 主端口 + 1"
+                                @input="presets.onQwen3VoiceClonePortInput"
+                              />
+                            </SettingsField>
+                            <SettingsSwitch
+                              label="由程序启动"
+                              :model-value="!!presets.editingPreset!.ttsQwen3LocalManaged"
+                              hint="托管模式会启动两个网关，两个端口必须不同。"
+                              more="托管模式会启动两个 uvicorn：主端口加载 CustomVoice（仅 speaker → /v1/tts/custom_voice）；语音克隆端口加载 Base（参考音频+转写 → /v1/tts/voice_clone）。两端口必须不同；手动启动时需自行各启一个网关并填好 Base URL（主地址对应主端口）。"
+                              @update:model-value="presets.editingPreset!.ttsQwen3LocalManaged = $event"
+                            />
+                            <SettingsField label="设备">
+                              <input v-model="presets.editingPreset!.ttsQwen3LocalDevice" type="text" class="input w-full" placeholder="cuda:0" />
+                            </SettingsField>
+                            <SettingsField label="CustomVoice 模型 ID（/custom_voice）">
+                              <input v-model="presets.editingPreset!.ttsQwen3LocalModelId" type="text" class="input w-full" placeholder="Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice" />
+                            </SettingsField>
+                            <SettingsField label="Base 模型 ID（/voice_clone）">
+                              <input v-model="presets.editingPreset!.ttsQwen3LocalBaseModelId" type="text" class="input w-full" placeholder="Qwen/Qwen3-TTS-12Hz-1.7B-Base" />
+                            </SettingsField>
+                            <SettingsField label="默认语言">
                               <input v-model="presets.editingPreset!.ttsQwen3LocalDefaultLanguage" type="text" class="input w-full" placeholder="Auto" />
-                            </div>
-                            <SettingsHint more="托管模式会启动两个 uvicorn：主端口加载 CustomVoice（仅 speaker → /v1/tts/custom_voice）；语音克隆端口加载 Base（参考音频+转写 → /v1/tts/voice_clone）。两端口必须不同；手动启动时需自行各启一个网关并填好 Base URL（主地址对应主端口）。">托管模式会启动两个网关，两个端口必须不同。</SettingsHint>
+                            </SettingsField>
                           </template>
 
                           <template v-else-if="presets.editingPresetIsOmniVoiceLocal">
-                            <div class="space-y-2">
-                              <label class="settings-label block">仓库路径</label>
-                              <input v-model="presets.editingPreset!.ttsOmniVoiceLocalRepoPath" type="text" class="input w-full" placeholder="E:\OmniVoice（OmniVoice 仓库根目录）" />
-                              <p class="settings-hint">指向安装好 OmniVoice 与其 .venv 的仓库目录；托管模式会从这里启动 uvicorn。</p>
-                            </div>
-                            <div class="grid gap-3 md:grid-cols-2">
-                              <div class="space-y-1">
-                                <label class="settings-label block">端口</label>
-                                <input v-model.number="presets.editingPreset!.ttsOmniVoiceLocalPort" type="number" min="1" max="65535" class="input w-full" placeholder="8089" />
-                              </div>
-                              <div class="space-y-1">
-                                <label class="settings-label block">托管启动</label>
-                                <button type="button" class="btn btn-xs w-full" :class="presets.editingPreset!.ttsOmniVoiceLocalManaged ? 'btn-primary' : 'btn-secondary'" @click="presets.editingPreset!.ttsOmniVoiceLocalManaged = !presets.editingPreset!.ttsOmniVoiceLocalManaged">
-                                  {{ presets.editingPreset!.ttsOmniVoiceLocalManaged ? '由程序启动' : '手动启动' }}
-                                </button>
-                              </div>
-                            </div>
-                            <div class="grid gap-3 md:grid-cols-2">
-                              <div class="space-y-1">
-                                <label class="settings-label block">模型 ID / 路径</label>
-                                <input v-model="presets.editingPreset!.ttsOmniVoiceLocalModelId" type="text" class="input w-full" placeholder="k2-fsa/OmniVoice" />
-                              </div>
-                              <div class="space-y-1">
-                                <label class="settings-label block">设备</label>
-                                <input v-model="presets.editingPreset!.ttsOmniVoiceLocalDevice" type="text" class="input w-full" placeholder="cuda:0（留空则交给 OmniVoice 自动选择）" />
-                              </div>
-                            </div>
-                            <div class="space-y-1">
-                              <label class="settings-label block">默认语言</label>
-                              <input v-model="presets.editingPreset!.ttsOmniVoiceLocalDefaultLanguage" type="text" class="input w-full" placeholder="例如 zh、Chinese、English（可留空）" />
-                            </div>
-                            <SettingsHint more="托管模式会执行 python -m uvicorn omnivoice.api.server:app --host 127.0.0.1 --port <port>，并通过环境变量传入模型与 device；后端调用 JSON 接口 /v1/tts。">托管模式由程序启动 uvicorn 并传入模型与设备。</SettingsHint>
+                            <SettingsField label="仓库路径" hint="指向安装好 OmniVoice 与其 .venv 的仓库目录；托管模式会从这里启动 uvicorn。">
+                              <input v-model="presets.editingPreset!.ttsOmniVoiceLocalRepoPath" type="text" class="input w-full" placeholder="E:\OmniVoice" />
+                            </SettingsField>
+                            <SettingsField label="端口">
+                              <input v-model.number="presets.editingPreset!.ttsOmniVoiceLocalPort" type="number" min="1" max="65535" class="input w-full" placeholder="8089" />
+                            </SettingsField>
+                            <SettingsSwitch
+                              label="由程序启动"
+                              :model-value="!!presets.editingPreset!.ttsOmniVoiceLocalManaged"
+                              hint="托管模式由程序启动 uvicorn 并传入模型与设备。"
+                              more="托管模式会执行 python -m uvicorn omnivoice.api.server:app --host 127.0.0.1 --port <port>，并通过环境变量传入模型与 device；后端调用 JSON 接口 /v1/tts。"
+                              @update:model-value="presets.editingPreset!.ttsOmniVoiceLocalManaged = $event"
+                            />
+                            <SettingsField label="模型 ID / 路径">
+                              <input v-model="presets.editingPreset!.ttsOmniVoiceLocalModelId" type="text" class="input w-full" placeholder="k2-fsa/OmniVoice" />
+                            </SettingsField>
+                            <SettingsField label="设备" hint="留空则交给 OmniVoice 自动选择。">
+                              <input v-model="presets.editingPreset!.ttsOmniVoiceLocalDevice" type="text" class="input w-full" placeholder="cuda:0" />
+                            </SettingsField>
+                            <SettingsField label="默认语言" hint="例如 zh、Chinese、English，可留空。">
+                              <input v-model="presets.editingPreset!.ttsOmniVoiceLocalDefaultLanguage" type="text" class="input w-full" />
+                            </SettingsField>
                           </template>
 
                           <div class="flex items-center justify-between gap-2 flex-wrap">

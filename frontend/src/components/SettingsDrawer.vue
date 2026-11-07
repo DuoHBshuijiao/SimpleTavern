@@ -1391,11 +1391,7 @@ function resetTtsPresetTransientUi() {
   ttsCloneDraft.needVolumeNormalization = false
 }
 
-function applyPresetTtsProvider(
-  preset: ApiPreset,
-  provider: TtsProvider,
-  options?: { notifyOnSwitch?: boolean },
-) {
+function applyPresetTtsProvider(preset: ApiPreset, provider: TtsProvider) {
   const nextProvider: TtsProvider = provider === 'glm'
     ? 'glm'
     : provider === 'glm_local'
@@ -1467,9 +1463,6 @@ function applyPresetTtsProvider(
       preset.models = [seed, ...preset.models]
     }
   }
-  if (options?.notifyOnSwitch !== false) {
-    void notifyMessage('已切换 TTS 提供商，请重新配置音色。')
-  }
 }
 
 function setPresetTtsService(preset: ApiPreset, enabled: boolean) {
@@ -1480,7 +1473,7 @@ function setPresetTtsService(preset: ApiPreset, enabled: boolean) {
     resetTtsPresetTransientUi()
     return
   }
-  applyPresetTtsProvider(preset, resolveTtsProvider(preset), { notifyOnSwitch: false })
+  applyPresetTtsProvider(preset, resolveTtsProvider(preset))
 }
 
 function setPresetTtsProvider(preset: ApiPreset, provider: TtsProvider) {

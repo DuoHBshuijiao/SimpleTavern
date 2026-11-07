@@ -239,7 +239,7 @@ void dialogRef
               />
             </SettingsField>
             <SettingsSwitch
-              label="永远在底部（默认）"
+              label="system 放在最前（默认）"
               :model-value="groupSystemAlwaysAtBottomDraft"
               hint="开启时整段 system 在消息最前。"
               more="开启时整段 system 在消息最前，与旧版一致；关闭后按下方深度将整段 system 插入历史，利于部分 KV 命中。"
@@ -247,8 +247,8 @@ void dialogRef
             />
             <SettingsField
               label="系统提示词注入深度"
-              hint="仅关闭「永远在底部」时生效。"
-              more="整段 system 将插在倒数第 N 条消息（含世界书产生条目）之前；仅关闭「永远在底部」时生效。"
+              hint="仅关闭「system 放在最前」时生效。"
+              more="整段 system 将插在倒数第 N 条消息（含世界书产生条目）之前；仅关闭「system 放在最前」时生效。"
               :class="{ 'opacity-50 pointer-events-none': groupSystemAlwaysAtBottomDraft }"
             >
               <input

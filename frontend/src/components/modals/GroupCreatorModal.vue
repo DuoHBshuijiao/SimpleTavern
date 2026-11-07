@@ -350,7 +350,7 @@ void dialogRef
               @update:model-value="groupPureAiMode = $event"
             />
             <SettingsSwitch
-              label="永远在底部（默认）"
+              label="system 放在最前（默认）"
               :model-value="groupSystemAlwaysAtBottom"
               hint="开启时整段 system 在首条。"
               more="开启时整段 system 在首条，与旧版一致；关闭后可用下方「注入深度」将整段 system 插入历史。"
