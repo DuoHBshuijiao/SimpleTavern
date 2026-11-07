@@ -1168,6 +1168,7 @@ const {
   chatSearchQuery,
   chatSearchLoading,
   chatSearchCompletedQuery,
+  chatSearchTruncated,
   chatSearchCursor,
   chatSearchChipsGridOpen,
   chatSearchChipsCollapsing,
@@ -1192,7 +1193,8 @@ const {
 /** 搜索状态：当前位置和总数，没有结果时说明原因 */
 const chatSearchStatusText = computed(() => {
   const total = chatSearchHitsForNav.value.length
-  if (total) return chatSearchCursor.value < 0 ? `共 ${total} 条` : `${chatSearchCursor.value + 1}/${total}`
+  const totalText = chatSearchTruncated.value ? `${total}+` : `${total}`
+  if (total) return chatSearchCursor.value < 0 ? `共 ${totalText} 条` : `${chatSearchCursor.value + 1}/${totalText}`
   if (chatSearchLoading.value) return '搜索中...'
   const query = chatSearchQuery.value.trim()
   return query && query === chatSearchCompletedQuery.value ? '无结果' : '输入后定位消息'

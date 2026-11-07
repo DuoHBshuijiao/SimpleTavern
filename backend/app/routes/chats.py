@@ -437,6 +437,11 @@ class ChatSearchResponse(BaseModel):
     query: str
     total: int
     hits: list[ChatSearchHit] = Field(default_factory=list)
+    # 命中数超过 CHAT_SEARCH_HIT_LIMIT 时为 True，此时 total 只是上限
+    truncated: bool = False
+
+
+CHAT_SEARCH_HIT_LIMIT = 300
 
 
 @router.get("/chats", response_model=list[Chat])
@@ -981,6 +986,7 @@ def search_chat(chat_id: str, q: str = Query(..., min_length=1)) -> ChatSearchRe
         return ChatSearchResponse(query=q, total=0, hits=[])
     query_lower = query.lower()
     hits: list[ChatSearchHit] = []
+    truncated = False
     for idx, msg in enumerate(chat.messages):
         content = (msg.content or "").strip()
         if not content:
@@ -988,6 +994,9 @@ def search_chat(chat_id: str, q: str = Query(..., min_length=1)) -> ChatSearchRe
         pos = content.lower().find(query_lower)
         if pos < 0:
             continue
+        if len(hits) >= CHAT_SEARCH_HIT_LIMIT:
+            truncated = True
+            break
         start = max(0, pos - 32)
         end = min(len(content), pos + len(query) + 64)
         snippet = content[start:end]
@@ -1000,9 +1009,7 @@ def search_chat(chat_id: str, q: str = Query(..., min_length=1)) -> ChatSearchRe
             messageIndex=idx,
             snippet=snippet,
         ))
-        if len(hits) >= 300:
-            break
-    return ChatSearchResponse(query=query, total=len(hits), hits=hits)
+    return ChatSearchResponse(query=query, total=len(hits), hits=hits, truncated=truncated)
 
 
 @router.put("/chats/{chat_id}", response_model=Chat)

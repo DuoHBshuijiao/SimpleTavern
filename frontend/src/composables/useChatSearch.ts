@@ -80,6 +80,8 @@ export function useChatSearch(options: UseChatSearchOptions) {
   const chatSearchLoading = ref(false)
   /** 最近一次完成搜索的关键词，用来区分“还没搜”和“搜了没结果” */
   const chatSearchCompletedQuery = ref('')
+  /** 命中数超过后端上限，计数要写成 300+ */
+  const chatSearchTruncated = ref(false)
   let chatSearchSeq = 0
   let chatSearchTimer: ReturnType<typeof setTimeout> | null = null
   const chatSearchResults = ref<ChatSearchHit[]>([])
@@ -162,11 +164,12 @@ export function useChatSearch(options: UseChatSearchOptions) {
       chatSearchResults.value = []
       chatSearchCursor.value = -1
       chatSearchCompletedQuery.value = ''
+      chatSearchTruncated.value = false
       return
     }
     chatSearchLoading.value = true
     try {
-      const res = await apiGet<{ query: string; total: number; hits: ChatSearchHit[] }>(
+      const res = await apiGet<{ query: string; total: number; hits: ChatSearchHit[]; truncated?: boolean }>(
         `/api/chats/${encodeURIComponent(chat.id)}/search?q=${encodeURIComponent(q)}`
       )
       // 输入比响应快时，旧响应不能盖掉新结果
@@ -174,6 +177,7 @@ export function useChatSearch(options: UseChatSearchOptions) {
       chatSearchResults.value = Array.isArray(res?.hits) ? res.hits : []
       chatSearchCursor.value = -1
       chatSearchCompletedQuery.value = q
+      chatSearchTruncated.value = res?.truncated === true
     } finally {
       if (seq === chatSearchSeq) chatSearchLoading.value = false
     }
@@ -301,6 +305,7 @@ export function useChatSearch(options: UseChatSearchOptions) {
     showChatSearch.value = false
     chatSearchQuery.value = ''
     chatSearchCompletedQuery.value = ''
+    chatSearchTruncated.value = false
     chatSearchResults.value = []
     chatSearchCursor.value = -1
   }
@@ -321,6 +326,7 @@ export function useChatSearch(options: UseChatSearchOptions) {
     chatSearchQuery,
     chatSearchLoading,
     chatSearchCompletedQuery,
+    chatSearchTruncated,
     chatSearchResults,
     chatSearchCursor,
     chatSearchChipsGridOpen,
