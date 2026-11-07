@@ -111,6 +111,66 @@ export async function applyFont(filename: string | null | undefined) {
   await refreshCustomFontSynthesisFlag(gen)
 }
 
+const READING_STYLE_ID = 'app-reading-style'
+const READING_FONT_FAMILY = 'AppReadingFont'
+let readingApplyGeneration = 0
+
+/** 阅读字体和行高只作用于消息正文。界面字体用 #app * 强制，这里的选择器要比它更具体 */
+function readingStyleText(filename: string | null, lineHeight: number | null, singleWeight: boolean): string {
+  const scope = '#app .message-reading-content'
+  const rules: string[] = []
+  if (lineHeight != null) {
+    rules.push(`${scope} { line-height: ${lineHeight} !important; }`)
+  }
+  if (filename) {
+    const url = `/api/fonts/${encodeURIComponent(filename)}`
+    rules.push(`
+@font-face {
+  font-family: "${READING_FONT_FAMILY}";
+  src: url("${url}") format("truetype"),
+       url("${url}") format("opentype"),
+       url("${url}") format("woff"),
+       url("${url}") format("woff2");
+  font-display: swap;
+}
+${scope}, ${scope} * {
+  font-family: "${READING_FONT_FAMILY}", "${FONT_FAMILY}", var(--font-sans, ui-sans-serif, system-ui, sans-serif) !important;
+}
+${scope} pre, ${scope} code {
+  font-family: var(--font-mono) !important;
+}`)
+    if (singleWeight) rules.push(`${scope} { font-synthesis: weight style; }`)
+  }
+  return rules.join('\n')
+}
+
+/**
+ * 应用阅读字体和行高
+ * @param filename 字体文件名（在 data/fonts 下），null 则跟随界面字体
+ * @param lineHeight 消息行高，null 则用默认
+ */
+export async function applyReadingStyle(filename: string | null | undefined, lineHeight: number | null | undefined) {
+  const gen = ++readingApplyGeneration
+  let el = document.getElementById(READING_STYLE_ID) as HTMLStyleElement | null
+  if (!el) {
+    el = document.createElement('style')
+    el.id = READING_STYLE_ID
+    document.head.appendChild(el)
+  }
+  const font = filename || null
+  const height = lineHeight ?? null
+  el.textContent = readingStyleText(font, height, false)
+  if (!font) return
+  try {
+    await document.fonts.load(`16px "${READING_FONT_FAMILY}"`)
+  } catch {
+    return
+  }
+  if (gen !== readingApplyGeneration) return
+  const singleWeight = Math.round(measureTextWidthPx(READING_FONT_FAMILY, 400) * 100) === Math.round(measureTextWidthPx(READING_FONT_FAMILY, 700) * 100)
+  if (singleWeight) el.textContent = readingStyleText(font, height, true)
+}
+
 /**
  * 在应用内使用：根据设置中的 selectedFont 自动应用字体，并在设置变更时更新。
  */
@@ -120,6 +180,13 @@ export function useAppFont() {
     () => settingsStore.settings?.selectedFont ?? null,
     (v) => {
       void applyFont(v ?? null).catch(() => {})
+    },
+    { immediate: true }
+  )
+  watch(
+    () => [settingsStore.settings?.readingFont ?? null, settingsStore.settings?.messageLineHeight ?? null] as const,
+    ([readingFont, lineHeight]) => {
+      void applyReadingStyle(readingFont, lineHeight).catch(() => {})
     },
     { immediate: true }
   )

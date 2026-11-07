@@ -65,7 +65,7 @@ import {
 } from '../types/models'
 import { ApiError, apiDelete, apiGet, apiPost, apiPostFormData, apiPut } from '../api/http'
 import { downloadUpdate, getManualUpdateCheck, runUpdate } from '../api/update'
-import { useAppFont } from '../composables/useAppFont'
+import { applyReadingStyle, useAppFont } from '../composables/useAppFont'
 import { useViewportNarrowPortrait } from '../composables/useViewportNarrowPortrait'
 import { usePageBackground } from '../composables/usePageBackground'
 import { useSettingsImport } from '../composables/useSettingsImport'
@@ -3315,6 +3315,17 @@ const fontModel = computed({
     if (globalDraft.value) globalDraft.value.selectedFont = v || null
   },
 })
+
+/** 阅读字体和行高同样在抽屉打开时跟随草稿，关闭后回到已保存的值 */
+watch(
+  () => {
+    const source = props.show ? globalDraft.value : settingsStore.settings
+    return [source?.readingFont ?? null, source?.messageLineHeight ?? null] as const
+  },
+  ([readingFont, lineHeight]) => {
+    void applyReadingStyle(readingFont, lineHeight).catch(() => {})
+  },
+)
 
 /**
  * 应用字体：抽屉打开时始终使用草稿中的 selectedFont（不随 tab 切换而变），

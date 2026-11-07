@@ -699,6 +699,8 @@ class Settings(BaseModel):
     )
     userPersonas: list[UserPersona] = Field(default_factory=list)
     selectedPersonaId: str | None = None
+    readingFont: str | None = None  # 消息正文的阅读字体文件名，存于 data/fonts；为空时跟随 selectedFont
+    messageLineHeight: float | None = Field(default=None, ge=1.0, le=3.0)  # 消息正文行高；为空时用默认
     selectedFont: str | None = None  # 当前选中的自定义字体文件名，存于 data/fonts，不随备份导出
     pageBackgroundImage: str | None = None  # 页面背景图文件名，存于 data/page_backgrounds
     pageBackgroundOpacity: float | None = Field(default=None, ge=0.0, le=1.0)  # 背景图透明度；None 表示前端按 1 处理

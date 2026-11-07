@@ -322,6 +322,42 @@ function triggerStImport() {
         </div>
       </div>
       </SettingsField>
+      <SettingsField label="阅读字体" hint="只作用于消息正文，默认跟随界面字体。">
+        <ModernSelect
+          :model-value="draft.readingFont ?? ''"
+          :options="[{ label: '跟随界面字体', value: '' }, ...fontOptions.filter((option) => option.value)]"
+          placement="top"
+          searchable
+          placeholder="跟随界面字体"
+          class="w-full min-w-0"
+          @update:model-value="(value) => { draft.readingFont = value || null }"
+        />
+      </SettingsField>
+      <SettingsField label="消息行高">
+        <template #actions>
+          <span class="flex items-center gap-2">
+            <span class="settings-hint">{{ draft.messageLineHeight == null ? '默认' : draft.messageLineHeight.toFixed(2) }}</span>
+            <button
+              type="button"
+              class="btn btn-xs btn-ghost"
+              :disabled="draft.messageLineHeight == null"
+              @click="draft.messageLineHeight = null"
+            >
+              恢复默认
+            </button>
+          </span>
+        </template>
+        <input
+          :value="draft.messageLineHeight ?? 1.7"
+          type="range"
+          min="1.2"
+          max="2.4"
+          step="0.05"
+          class="input-range"
+          aria-label="消息行高"
+          @input="draft.messageLineHeight = Number(($event.target as HTMLInputElement).value)"
+        />
+      </SettingsField>
     </div>
 
     <div class="settings-group">

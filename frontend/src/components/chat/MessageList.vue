@@ -1851,7 +1851,7 @@ onBeforeUnmount(() => {
             >
               <div class="w-fit max-w-full min-w-0">
                 <div
-                  class="md prose prose-invert prose-sm max-w-none prose-p:my-1 prose-headings:my-2 prose-pre:bg-[var(--color-surface-inset)] prose-pre:border prose-pre:border-[var(--color-border-subtle)]"
+                  class="message-reading-content md prose prose-invert prose-sm max-w-none prose-p:my-1 prose-headings:my-2 prose-pre:bg-[var(--color-surface-inset)] prose-pre:border prose-pre:border-[var(--color-border-subtle)]"
                   :style="messageContentFontSizeStyle"
                   :ref="(el) => setContentRef(m.id, el)"
                 >
@@ -1879,7 +1879,7 @@ onBeforeUnmount(() => {
               <template #measure>
                 <div class="w-fit max-w-full min-w-0">
                   <div
-                    class="md prose prose-invert prose-sm max-w-none prose-p:my-1 prose-headings:my-2 prose-pre:bg-[var(--color-surface-inset)] prose-pre:border prose-pre:border-[var(--color-border-subtle)]"
+                    class="message-reading-content md prose prose-invert prose-sm max-w-none prose-p:my-1 prose-headings:my-2 prose-pre:bg-[var(--color-surface-inset)] prose-pre:border prose-pre:border-[var(--color-border-subtle)]"
                     :style="messageContentFontSizeStyle"
                   >
                     <div class="stream-markdown" v-html="renderMarkdown(m)"></div>

@@ -547,6 +547,10 @@ export interface Settings {
   selectedPersonaId: string | null
   /** 当前选中的自定义字体文件名，存于 data/fonts，不随备份导出 */
   selectedFont?: string | null
+  /** 消息正文的阅读字体文件名，为空时跟随 selectedFont */
+  readingFont?: string | null
+  /** 消息正文行高，为空时用默认 */
+  messageLineHeight?: number | null
   /** 页面背景图文件名，存于 data/page_backgrounds，不随备份导出 */
   pageBackgroundImage?: string | null
   /** 页面背景图透明度，空值表示按 1 处理 */
