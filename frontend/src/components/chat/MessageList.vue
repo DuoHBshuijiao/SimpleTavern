@@ -418,6 +418,22 @@ function normalizeElement(el: unknown): HTMLElement | null {
 /** 每条消息气泡的内容根元素（含 .stream-markdown 子节点），供流式末尾包裹使用 */
 const contentEls = new Map<string, HTMLElement>()
 
+/** 切版本：只让这条气泡的正文按方向滑入，不动整行和列表 */
+function switchVersion(m: ChatMessage, direction: -1 | 1) {
+  if (direction < 0) emit('switch-previous-version', m)
+  else emit('switch-next-version', m)
+  if (prefersReducedMotionForSend()) return
+  nextTick(() => {
+    contentEls.get(m.id)?.animate(
+      [
+        { opacity: 0, transform: `translateX(${direction * 16}px)` },
+        { opacity: 1, transform: 'none' },
+      ],
+      { duration: 180, easing: 'cubic-bezier(0.2, 0, 0, 1)' },
+    )
+  })
+}
+
 function setContentRef(messageId: string, el: unknown) {
   const normalized = normalizeElement(el)
   if (normalized) {
@@ -1911,7 +1927,7 @@ onBeforeUnmount(() => {
             <button 
               class="icon-button text-xs px-2 py-0.5"
               :aria-label="`上一个版本 (${getCurrentVersionIndex(m) + 1}/${getVersionCount(m)})`"
-              @click="emit('switch-previous-version', m)"
+              @click="switchVersion(m, -1)"
             >
               <ChevronLeft class="w-3 h-3" />
             </button>
@@ -1921,7 +1937,7 @@ onBeforeUnmount(() => {
             <button 
               class="icon-button text-xs px-2 py-0.5"
               :aria-label="`下一个版本 (${getCurrentVersionIndex(m) + 1}/${getVersionCount(m)})`"
-              @click="emit('switch-next-version', m)"
+              @click="switchVersion(m, 1)"
             >
               <ChevronRight class="w-3 h-3" />
             </button>
