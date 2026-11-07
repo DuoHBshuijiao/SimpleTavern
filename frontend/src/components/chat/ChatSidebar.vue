@@ -389,9 +389,8 @@ function confirmDelete() {
             <div 
               v-for="p in personas"
               :key="p.id"
-              class="group surface-muted interactive-surface flex items-center gap-3 p-2"
-              :class="selectedPersonaId === p.id ? 'bg-brand-a10 border-l-brand' : 'border-l-transparent hover:bg-surface-muted'"
-              style="border: 1px solid var(--color-border);"
+              class="group settings-item flex cursor-pointer items-center gap-3 p-2"
+              :class="selectedPersonaId === p.id ? 'settings-item--selected' : 'hover:bg-surface-hover'"
               @click="emit('select-persona', p.id)"
             >
               <ModernAvatar :src="p.avatar ? `/api/avatars/${p.avatar}` : null" :name="p.name" :size="36" aspect="1" />
@@ -399,7 +398,7 @@ function confirmDelete() {
                 <div class="text-sm truncate" :class="selectedPersonaId === p.id ? 'text-brand' : 'text-[var(--color-text-secondary)]'">{{ p.name }}</div>
               </div>
               <div
-                class="flex gap-1 transition-opacity ml-auto surface-inset p-0.5"
+                class="flex gap-1 transition-opacity ml-auto rounded-lg bg-[var(--color-surface-inset)] p-0.5"
                 :class="
                   !preferHoverChrome && selectedPersonaId === p.id
                     ? 'opacity-100'
@@ -439,9 +438,8 @@ function confirmDelete() {
             v-for="c in characters"
             :key="c.id"
             :data-character-id="c.id"
-            class="group surface-muted interactive-surface relative flex items-start gap-3 p-3"
-            :class="selectedCharacterId === c.id ? 'surface-selected' : ''"
-            style="border: 1px solid var(--color-border);"
+            class="group settings-item relative flex cursor-pointer items-start gap-3 p-3"
+            :class="selectedCharacterId === c.id ? 'settings-item--selected' : 'hover:bg-surface-hover'"
             @click="emit('update:selectedCharacterId', c.id)"
           >
             <ModernAvatar 
@@ -455,15 +453,15 @@ function confirmDelete() {
               class="shadow-md"
             />
             
-            <div class="flex-1 min-w-0 flex flex-col h-[74px]">
+            <div class="flex-1 min-w-0 flex flex-col">
               <div class="flex justify-between items-start">
                 <div class="text-sm truncate" :class="selectedCharacterId === c.id ? 'text-brand' : 'text-[var(--color-text)]'">{{ c.name }}</div>
               </div>
-              <div class="text-xs text-[var(--color-text-muted)] line-clamp-3 mt-1 leading-relaxed">{{ c.description || '暂无简介' }}</div>
+              <div class="text-xs text-[var(--color-text-muted)] line-clamp-2 mt-1 leading-relaxed">{{ c.description || '暂无简介' }}</div>
             </div>
 
             <div
-              class="absolute top-3 right-2 transition-opacity surface-inset p-0.5 flex gap-1"
+              class="absolute top-3 right-2 transition-opacity rounded-lg bg-[var(--color-surface-inset)] p-0.5 flex gap-1"
               :class="
                 !preferHoverChrome && selectedCharacterId === c.id
                   ? 'opacity-100'
@@ -511,8 +509,8 @@ function confirmDelete() {
             <div 
               v-for="c in groupList"
               :key="c.id"
-              class="group flex items-center justify-between p-2 rounded-lg cursor-pointer text-sm mb-1 transition-colors border border-transparent interactive-surface"
-              :class="activeChatId === c.id ? 'surface-selected bg-[var(--color-purple-bg)] text-[var(--color-purple)] border-[color-mix(in_srgb,var(--color-purple)_35%,transparent)]' : 'text-[var(--color-text-muted)] hover:bg-surface-muted hover:text-[var(--color-text)]'"
+              class="group flex items-center justify-between p-2 rounded-lg cursor-pointer text-sm mb-1 transition-colors"
+              :class="activeChatId === c.id ? 'bg-[var(--color-purple-bg)] text-[var(--color-purple)]' : 'text-[var(--color-text-muted)] hover:bg-surface-muted hover:text-[var(--color-text)]'"
               @click="emit('select-group', c)"
             >
               <div class="flex items-center gap-2 flex-1 min-w-0 pr-2 max-w-[calc(100%-60px)]">
@@ -562,7 +560,7 @@ function confirmDelete() {
               
               <div
                 v-if="editingChatId !== c.id"
-                class="surface-inset flex gap-1 shrink-0 ml-auto transition-opacity"
+                class="rounded-lg bg-[var(--color-surface-inset)] flex gap-1 shrink-0 ml-auto transition-opacity"
                 :class="
                   !preferHoverChrome && activeChatId === c.id
                     ? 'opacity-100'
@@ -594,8 +592,8 @@ function confirmDelete() {
             <div 
               v-for="c in chatList.filter(chat => !chat.isGroup)"
               :key="c.id"
-              class="group flex items-center justify-between p-2 rounded-lg cursor-pointer text-sm mb-1 transition-colors border border-transparent interactive-surface"
-              :class="activeChatId === c.id ? 'surface-selected bg-brand-a10 text-brand border-brand-a40' : 'text-[var(--color-text-muted)] hover:bg-surface-muted hover:text-[var(--color-text)]'"
+              class="group flex items-center justify-between p-2 rounded-lg cursor-pointer text-sm mb-1 transition-colors"
+              :class="activeChatId === c.id ? 'bg-brand-a10 text-brand' : 'text-[var(--color-text-muted)] hover:bg-surface-muted hover:text-[var(--color-text)]'"
               @click="emit('select-chat', c)"
             >
               <div class="flex items-center gap-2 flex-1 min-w-0 pr-2 max-w-[calc(100%-60px)]">
@@ -643,7 +641,7 @@ function confirmDelete() {
               
               <div
                 v-if="editingChatId !== c.id"
-                class="surface-inset flex gap-1 shrink-0 ml-auto transition-opacity"
+                class="rounded-lg bg-[var(--color-surface-inset)] flex gap-1 shrink-0 ml-auto transition-opacity"
                 :class="
                   !preferHoverChrome && activeChatId === c.id
                     ? 'opacity-100'
