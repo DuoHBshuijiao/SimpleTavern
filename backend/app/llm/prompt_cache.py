@@ -21,7 +21,9 @@ from typing import Any
 
 from app.llm.types import (
     ANTHROPIC_MESSAGES_PROTOCOL,
+    BEDROCK_CONVERSE_PROTOCOL,
     GEMINI_GENERATE_CONTENT_PROTOCOL,
+    MISTRAL_CONVERSATIONS_PROTOCOL,
     OPENAI_COMPATIBLE_CHAT_PROTOCOL,
     OPENAI_RESPONSES_PROTOCOL,
 )
@@ -71,6 +73,8 @@ class PromptCachePlan:
     openai_official: bool = False
     adjustments: tuple[dict[str, Any], ...] = ()
     warnings: tuple[dict[str, Any], ...] = ()
+    # T-832：用户要的缓存方式该协议做不到；prepare_llm_request 据此 fast-fail
+    unsupported_reason: str | None = None
 
     @property
     def enabled(self) -> bool:
@@ -93,6 +97,7 @@ class PromptCachePlan:
             "openaiOfficial": self.openai_official,
             "adjustments": [dict(a) for a in self.adjustments],
             "warnings": [dict(w) for w in self.warnings],
+            "unsupportedReason": self.unsupported_reason,
         }
 
     def to_meta(self) -> dict[str, Any]:
@@ -124,6 +129,7 @@ class PromptCachePlan:
             openai_official=bool(raw.get("openaiOfficial", False)),
             adjustments=tuple(raw.get("adjustments") or ()),
             warnings=tuple(raw.get("warnings") or ()),
+            unsupported_reason=raw.get("unsupportedReason"),
         )
 
 
@@ -213,6 +219,72 @@ def resolve_cache_key(
     return key[:128], None
 
 
+def _unsupported_plan(protocol: str, reason: str) -> PromptCachePlan:
+    return PromptCachePlan(
+        protocol=protocol,
+        mode=MODE_OFF,
+        unsupported_reason=reason,
+        adjustments=(_adj("cache_unsupported", reason=reason),),
+    )
+
+
+def _mistral_cache_plan(mode: str) -> PromptCachePlan:
+    """Conversations 请求体没有任何缓存字段（官方 OpenAPI 的 ConversationRequest / CompletionArgs）。"""
+    protocol = MISTRAL_CONVERSATIONS_PROTOCOL
+    if mode == MODE_EXPLICIT:
+        return _unsupported_plan(protocol, "Mistral Conversations 没有显式缓存参数，请把缓存策略改为自动或关闭")
+    if mode == "auto":
+        return PromptCachePlan(
+            protocol=protocol,
+            mode=MODE_OFF,
+            adjustments=(_adj("cache_disabled", reason="Mistral Conversations 没有缓存参数，不发送任何缓存字段"),),
+        )
+    return PromptCachePlan(protocol=protocol, mode=mode)
+
+
+def _bedrock_cache_plan(
+    *,
+    mode: str,
+    ttl_in: Any,
+    breakpoints_in: tuple[str, ...],
+    model: str,
+    family: str,
+) -> PromptCachePlan:
+    """Converse 显式缓存只对 Claude 和 Nova 开放（官方 prompt-caching 页的模型表）。"""
+    protocol = BEDROCK_CONVERSE_PROTOCOL
+    is_nova = "nova" in (model or "").lower()
+    if mode == "auto":
+        # cachePoint 发给不支持的模型会被拒，自动模式不发
+        return PromptCachePlan(
+            protocol=protocol,
+            mode=MODE_BEST_EFFORT,
+            adjustments=(_adj("cache_mode_auto", to=MODE_BEST_EFFORT, reason="自动模式不发送 cachePoint"),),
+        )
+    if mode == MODE_IMPLICIT and family == "anthropic":
+        return _unsupported_plan(protocol, "Bedrock 上的 Claude 只有显式缓存，请把缓存策略改为显式")
+    if mode != MODE_EXPLICIT:
+        return PromptCachePlan(protocol=protocol, mode=mode)
+    if family != "anthropic" and not is_nova:
+        return _unsupported_plan(protocol, f"模型 {model} 不支持 Converse 显式缓存（cachePoint）")
+    breakpoints = tuple(b for b in breakpoints_in if b in {"system", "tools", "history_tail"}) or ("system",)
+    if is_nova and "tools" in breakpoints:
+        return _unsupported_plan(protocol, "Amazon Nova 不能在工具定义上打 cachePoint，请取消工具定义断点")
+    ttl: str | None = None
+    if ttl_in not in (None, ""):
+        ttl = str(ttl_in).lower()
+        if ttl not in ANTHROPIC_TTL_VALUES:
+            return _unsupported_plan(protocol, f"Converse cachePoint 只支持 5m / 1h，不支持 {ttl_in}")
+        if is_nova and ttl == "1h":
+            return _unsupported_plan(protocol, "Amazon Nova 只支持 5 分钟缓存")
+    return PromptCachePlan(
+        protocol=protocol,
+        mode=MODE_EXPLICIT,
+        ttl=ttl,
+        breakpoints=breakpoints,
+        min_tokens=_min_tokens_for(protocol, family, model, dashscope=False),
+    )
+
+
 def build_prompt_cache_plan(
     config: Any,
     *,
@@ -242,6 +314,10 @@ def build_prompt_cache_plan(
 
     if mode == MODE_OFF:
         return PromptCachePlan(protocol=protocol, mode=MODE_OFF, openai_official=is_openai_official)
+    if protocol == MISTRAL_CONVERSATIONS_PROTOCOL:
+        return _mistral_cache_plan(mode)
+    if protocol == BEDROCK_CONVERSE_PROTOCOL:
+        return _bedrock_cache_plan(mode=mode, ttl_in=ttl_in, breakpoints_in=breakpoints_in, model=model, family=family)
 
     # ---- auto：按供应商目录 / 家族推荐 ----
     if mode == "auto":

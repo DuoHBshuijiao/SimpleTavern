@@ -920,3 +920,12 @@ export interface ForkLineageResponse {
   partialSuccess?: boolean
   warnings?: ForkLineageWarning[]
 }
+
+/** T-832：Vertex 上的 Claude 用服务账号鉴权，apiKey 存服务账号 JSON */
+export const VERTEX_SERVICE_ACCOUNT_AUTH_STYLE = 'vertex_service_account'
+
+/** T-832：预设编辑器协议下拉追加的原生协议 */
+export const EXTRA_LLM_PROTOCOL_OPTIONS: Array<{ label: string; value: string }> = [
+  { label: 'AWS Bedrock Converse', value: 'bedrock_converse' },
+  { label: 'Mistral Conversations', value: 'mistral_conversations' },
+]

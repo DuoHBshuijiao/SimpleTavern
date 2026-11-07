@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from app.llm.vertex_auth import redact_settings, restore_settings, settings_need_restore
 from app.schemas import Settings
 from app.storage import load_settings, save_settings
 
@@ -35,9 +36,9 @@ def get_settings() -> Settings:
     获取全局设置
     
     Returns:
-        Settings: 全局设置对象
+        Settings: 全局设置对象（服务账号私钥已隐去）
     """
-    return load_settings()
+    return redact_settings(load_settings())
 
 
 @router.put("/settings", response_model=Settings)
@@ -51,6 +52,9 @@ def put_settings(settings: Settings) -> Settings:
         settings: 新的设置对象
     
     Returns:
-        Settings: 保存后的设置对象
+        Settings: 保存后的设置对象（服务账号私钥已隐去）
     """
-    return save_settings(settings)
+    if settings_need_restore(settings):
+        # 前端拿到的是隐去私钥的文本，写回时从已保存的设置还原
+        restore_settings(settings, load_settings())
+    return redact_settings(save_settings(settings))

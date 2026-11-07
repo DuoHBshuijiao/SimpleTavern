@@ -50,6 +50,7 @@ from app.chat_transcript import (
     build_transcript_rows_from_messages,
     format_chat_as_jsonl_string,
 )
+from app.llm.vertex_auth import redact_settings
 from app.placeholders import replace_placeholders_in_text
 from app.prompt_xml import (
     wrap_acting_as,
@@ -1483,7 +1484,8 @@ def backup_settings(scope: str = Query("basic")) -> Response:
                 if path.is_file() and not path.is_symlink() and path.resolve().is_relative_to(root):
                     zf.write(path, arcname=f"{prefix}/{path.relative_to(directory).as_posix()}")
 
-        zf.writestr("settings.json", json.dumps(settings.model_dump(mode="json"), ensure_ascii=False, indent=2))
+        # 服务账号私钥不进备份；恢复后需要重新粘贴 JSON
+        zf.writestr("settings.json", json.dumps(redact_settings(settings).model_dump(mode="json"), ensure_ascii=False, indent=2))
         for persona in settings.userPersonas:
             if not persona.avatar:
                 continue

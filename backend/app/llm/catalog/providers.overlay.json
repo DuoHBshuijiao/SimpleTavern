@@ -129,7 +129,27 @@
    "cacheStrategy": "implicit",
    "docsUrl": "https://cloud.google.com/vertex-ai/generative-ai/docs/start/express-mode/overview",
    "keywords": ["vertex", "google cloud", "gcp"],
-   "hint": "仅支持 Express 模式 API Key；区域端点 + ADC 服务账号不在本版本范围。"
+   "hint": "仅支持 Express 模式 API Key。要用服务账号调用 Claude，请选「Google Vertex AI（Claude，服务账号）」。"
+  },
+  {
+   "id": "vertex-anthropic",
+   "label": "Google Vertex AI（Claude，服务账号）",
+   "name": "Vertex AI Claude",
+   "region": "global",
+   "group": "global",
+   "baseUrlTemplate": "https://{location}-aiplatform.googleapis.com/v1/projects/{project}/locations/{location}",
+   "placeholders": [
+    {"key": "project", "label": "项目 ID", "hint": "服务账号 JSON 里的 project_id", "example": "my-gcp-project"},
+    {"key": "location", "label": "位置", "hint": "global（推荐）、us、eu 或具体区域；具体区域只提供 Sonnet 4.6 及更早的模型", "example": "global"}
+   ],
+   "authStyle": "vertex_service_account",
+   "defaultProtocol": "anthropic_messages",
+   "supportedProtocols": ["anthropic_messages"],
+   "cacheStrategy": "explicit",
+   "docsUrl": "https://platform.claude.com/docs/en/build-with-claude/claude-models-on-google-cloud/google-managed",
+   "keywords": ["vertex", "google cloud", "gcp", "claude", "anthropic", "服务账号"],
+   "hint": "密钥框粘贴服务账号 JSON 全文，账号需要 Vertex AI User 角色。模型名手动添加，如 claude-sonnet-4-6。",
+   "modelsProviderId": "anthropic"
   },
   {
    "id": "azure-openai-responses",
@@ -183,6 +203,22 @@
    "docsUrl": "https://docs.mistral.ai/",
    "keywords": ["mistral", "codestral"],
    "legacyIds": ["mistral"]
+  },
+  {
+   "id": "mistral-conversations",
+   "label": "Mistral（Conversations 原生）",
+   "name": "Mistral Conversations",
+   "region": "global",
+   "group": "global",
+   "baseUrlTemplate": "https://api.mistral.ai/v1",
+   "authStyle": "bearer",
+   "defaultProtocol": "mistral_conversations",
+   "supportedProtocols": ["mistral_conversations"],
+   "cacheStrategy": "none",
+   "docsUrl": "https://docs.mistral.ai/api/endpoint/beta/conversations",
+   "keywords": ["mistral", "conversations"],
+   "hint": "走 Mistral 的 Conversations 接口，每次发送完整历史，不在 Mistral 保存会话。",
+   "modelsProviderId": "mistral"
   },
   {
    "id": "perplexity",
@@ -395,7 +431,26 @@
    "cacheStrategy": "explicit",
    "docsUrl": "https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-anthropic-claude-messages.html",
    "keywords": ["bedrock", "aws", "amazon"],
-   "hint": "使用 Bedrock API Key（Bearer）；模型 id 需为 Bedrock 形式，如 anthropic.claude-sonnet-4-6。Converse 原生协议不在本版本范围。"
+   "hint": "使用 Bedrock API Key（Bearer）走 InvokeModel；模型 id 需为 Bedrock 形式，如 anthropic.claude-sonnet-4-6。其他模型请选 Converse 条目。"
+  },
+  {
+   "id": "amazon-bedrock-converse",
+   "label": "AWS Bedrock（Converse 原生，Bearer Token）",
+   "name": "AWS Bedrock Converse",
+   "region": "global",
+   "group": "global",
+   "baseUrlTemplate": "https://bedrock-runtime.{region}.amazonaws.com",
+   "placeholders": [
+    {"key": "region", "label": "区域", "hint": "如 us-east-1 / us-west-2", "example": "us-east-1"}
+   ],
+   "authStyle": "bearer",
+   "defaultProtocol": "bedrock_converse",
+   "supportedProtocols": ["bedrock_converse"],
+   "cacheStrategy": "best_effort",
+   "docsUrl": "https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html",
+   "keywords": ["bedrock", "aws", "amazon", "converse", "nova", "llama"],
+   "hint": "使用 Bedrock API Key（Bearer），不支持 AK/SK 签名。模型 id 用 Bedrock 形式，较新的模型要用跨区域推理配置 id，如 us.anthropic.claude-sonnet-4-6。",
+   "modelsProviderId": "amazon-bedrock"
   },
   {
    "id": "aws-bedrock-mantle",

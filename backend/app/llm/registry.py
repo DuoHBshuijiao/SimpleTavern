@@ -11,7 +11,9 @@ _REGISTRY: dict[str, ProviderAdapter] | None = None
 
 def _build_registry() -> dict[str, ProviderAdapter]:
     from app.llm.providers.anthropic_messages import AnthropicMessagesAdapter
+    from app.llm.providers.bedrock_converse import BedrockConverseAdapter
     from app.llm.providers.gemini_generate_content import GeminiGenerateContentAdapter
+    from app.llm.providers.mistral_conversations import MistralConversationsAdapter
     from app.llm.providers.openai_compatible_chat import OpenAICompatibleChatAdapter
     from app.llm.providers.openai_responses import OpenAIResponsesAdapter
 
@@ -19,11 +21,15 @@ def _build_registry() -> dict[str, ProviderAdapter]:
     anthropic_adapter = AnthropicMessagesAdapter()
     gemini_adapter = GeminiGenerateContentAdapter()
     responses_adapter = OpenAIResponsesAdapter()
+    bedrock_adapter = BedrockConverseAdapter()
+    mistral_adapter = MistralConversationsAdapter()
     return {
         openai_adapter.protocol: openai_adapter,
         anthropic_adapter.protocol: anthropic_adapter,
         gemini_adapter.protocol: gemini_adapter,
         responses_adapter.protocol: responses_adapter,
+        bedrock_adapter.protocol: bedrock_adapter,
+        mistral_adapter.protocol: mistral_adapter,
     }
 
 

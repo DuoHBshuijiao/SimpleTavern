@@ -123,6 +123,20 @@ def _host_of(url: str | None) -> str:
         return ""
 
 
+_VERTEX_LOCATION_HOST_RE = re.compile(r"^(https?://)(global|us|eu)-aiplatform\.googleapis\.com", re.IGNORECASE)
+
+
+def _vertex_endpoint_host(url: str) -> str:
+    """Vertex 的全局和多区域端点主机不是 {location}-aiplatform 的形式（Anthropic on Vertex 端点类型表）。"""
+
+    def _sub(match: re.Match[str]) -> str:
+        location = match.group(2).lower()
+        host = "aiplatform.googleapis.com" if location == "global" else f"aiplatform.{location}.rep.googleapis.com"
+        return match.group(1) + host
+
+    return _VERTEX_LOCATION_HOST_RE.sub(_sub, url)
+
+
 @dataclass(frozen=True)
 class ProviderEntry:
     id: str
@@ -173,7 +187,7 @@ class ProviderEntry:
                 return match.group(0)
             return value
 
-        rendered = re.sub(r"\{([a-zA-Z0-9_]+)\}", _sub, template)
+        rendered = _vertex_endpoint_host(re.sub(r"\{([a-zA-Z0-9_]+)\}", _sub, template))
         if missing:
             raise AppError(
                 code="config_missing",
