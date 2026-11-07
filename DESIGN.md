@@ -171,6 +171,8 @@ SimpleTavern uses tonal glass layering as the primary elevation model. Shadows s
 
 **The Scroll Mask Rule.** The message scroller fades out at its top and bottom edges with `mask-image`. A mask, like `opacity` below 1 or `filter` on an ancestor, cuts its descendants off from the page behind, so `backdrop-filter` inside the scroller has no effect. Bubbles therefore have no blur, and blur must not be added to anything inside the scroller. The fade was chosen over blur on purpose.
 
+**The Tailwind Blur Rule.** Apply blur only with Tailwind utilities such as `backdrop-blur-[var(--glass-blur-panel)]`. When hand-written CSS declares `backdrop-filter` with its `-webkit-` pair, the production build keeps only the prefixed one, which Chromium ignores, so the blur works on the dev server and disappears after building. Judge blur on the build, never on the dev server. To turn a blur off, remove the utility class rather than overriding it from hand-written CSS.
+
 **The Background Belongs To The User Rule.** The background image is part of the user's own aesthetic. Do not cover it with blurred bubbles, reading veils, or brightness treatment. Readability over an image is the user's call through the opacity setting: judge the UI at a sensible level (around 30%), never at 100%.
 
 **The No New Light Sources Rule.** Glass implies no light source of its own, so a glow implies one the app does not have. Do not add glowing arcs, light sweeps, colored halos, or accent color with a gradient tail. Before adding any effect, ask whether it reads as light, and start from the plainer version: neutral colors, flat fills, material-like movement. The end-of-generation ring and the colored button shadows predate this rule and stay for now; they are not a precedent.
