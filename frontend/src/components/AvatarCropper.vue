@@ -29,6 +29,7 @@
  *    - 位置：组件层，提供头像裁剪功能
  */
 import { ref, onUnmounted, watch, nextTick } from 'vue'
+import { X } from 'lucide-vue-next'
 import Cropper from 'cropperjs'
 import 'cropperjs/dist/cropper.css'
 import { useDialogBehavior } from '../composables/useDialogBehavior'
@@ -244,7 +245,9 @@ onUnmounted(() => {
       >
         <div class="modal-header">
           <h3 :id="titleId" class="modal-title">设置头像</h3>
-          <button type="button" class="modal-close" aria-label="关闭头像设置弹窗" @click="handleCancel">×</button>
+          <button type="button" class="modal-close" aria-label="关闭头像设置弹窗" @click="handleCancel">
+            <X class="w-5 h-5" />
+          </button>
         </div>
         <div
           class="modal-body transition-colors"

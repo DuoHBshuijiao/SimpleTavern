@@ -203,8 +203,8 @@
     transition: opacity var(--transition-normal);
   }
 
-  .modal-enter-active .modal-content,
-  .modal-leave-active .modal-content {
+  .modal-enter-active > :last-child,
+  .modal-leave-active > :last-child {
     transition: transform var(--transition-normal), opacity var(--transition-normal);
   }
 
@@ -213,8 +213,8 @@
     opacity: 0;
   }
 
-  .modal-enter-from .modal-content,
-  .modal-leave-to .modal-content {
+  .modal-enter-from > :last-child,
+  .modal-leave-to > :last-child {
     transform: scale(0.98) translateY(8px);
   }
 
@@ -296,15 +296,15 @@
     .modal-leave-active,
     .modal-enter-active > *,
     .modal-leave-active > *,
-    .modal-enter-active .modal-content,
-    .modal-leave-active .modal-content,
+    .modal-enter-active > :last-child,
+    .modal-leave-active > :last-child,
     .drawer-right,
     .drawer-left {
       transition-duration: 1ms;
     }
 
-    .modal-enter-from .modal-content,
-    .modal-leave-to .modal-content {
+    .modal-enter-from > :last-child,
+    .modal-leave-to > :last-child {
       transform: none;
     }
   }

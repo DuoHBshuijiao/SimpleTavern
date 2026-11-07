@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { X } from 'lucide-vue-next'
 import { useDialogBehavior } from '../../composables/useDialogBehavior'
 import { dialogAria } from '../../utils/uiPrimitives'
 
@@ -41,7 +42,9 @@ function handleExport(format: 'txt' | 'json' | 'jsonl' | 'character' | 'characte
       >
         <div class="modal-header border-b border-[var(--color-border-subtle)]">
           <h3 :id="titleId" class="modal-title text-[var(--color-text)]">导出</h3>
-          <button type="button" class="modal-close" aria-label="关闭导出弹窗" @click="close">×</button>
+          <button type="button" class="modal-close" aria-label="关闭导出弹窗" @click="close">
+            <X class="w-5 h-5" />
+          </button>
         </div>
         <div class="modal-body">
           <div class="space-y-3" :class="disabled ? 'opacity-50 pointer-events-none' : ''">

@@ -116,7 +116,7 @@ const hitCost = computed(() => Math.round(inputTokens.value * cachedRatio.value 
   <Teleport to="body">
     <Transition name="modal">
       <div v-if="show" class="fixed inset-0 z-[80] flex items-center justify-center p-3 sm:p-6">
-        <div class="absolute inset-0 bg-[color-mix(in_srgb,var(--color-bg)_55%,transparent)] backdrop-blur-md" @click="close" />
+        <div class="absolute inset-0 bg-[color-mix(in_srgb,var(--color-surface)_55%,transparent)] backdrop-blur-md" @click="close" />
         <div
           ref="dialogRef"
           v-bind="dialogAttrs"

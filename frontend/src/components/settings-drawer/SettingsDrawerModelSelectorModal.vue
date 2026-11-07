@@ -17,6 +17,7 @@ const emit = defineEmits<{
 
 <template>
   <Teleport to="body">
+    <Transition name="modal">
     <div v-if="show" class="fixed inset-0 z-[var(--z-popover)] flex items-center justify-center">
       <div
         class="absolute inset-0 bg-overlay-heavy backdrop-blur-[var(--glass-blur-soft)]"
@@ -81,5 +82,6 @@ const emit = defineEmits<{
         </div>
       </div>
     </div>
+    </Transition>
   </Teleport>
 </template>

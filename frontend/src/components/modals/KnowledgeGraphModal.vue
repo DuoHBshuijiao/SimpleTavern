@@ -407,6 +407,7 @@ onUnmounted(() => destroyNetwork())
 
 <template>
   <Teleport to="body">
+    <Transition name="modal">
     <div
       v-if="show"
       class="modal pointer-events-auto"
@@ -619,5 +620,6 @@ onUnmounted(() => destroyNetwork())
         </div>
       </div>
     </div>
+    </Transition>
   </Teleport>
 </template>

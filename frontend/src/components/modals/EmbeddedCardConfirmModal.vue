@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { X } from 'lucide-vue-next'
 import ModernSelect from '../ModernSelect.vue'
 import ThemedCheckbox from '../ThemedCheckbox.vue'
 import { useDialogBehavior } from '../../composables/useDialogBehavior'
@@ -46,12 +47,15 @@ const hasWorldbook = () =>
 </script>
 
 <template>
+  <Transition name="modal">
   <div v-if="show" class="modal">
     <div class="modal-backdrop" @click="emit('cancel')"></div>
     <div ref="dialogRef" v-bind="dialogAttrs" tabindex="-1" class="modal-content modal-surface chat-modal-width-568-90 min-w-0">
       <div class="modal-header border-b border-[var(--color-border-subtle)]">
         <h3 :id="titleId" class="modal-title text-[var(--color-text)]">检测到 PNG 内嵌角色卡</h3>
-        <button type="button" class="modal-close" aria-label="关闭 PNG 内嵌角色卡确认弹窗" @click="emit('cancel')">×</button>
+        <button type="button" class="modal-close" aria-label="关闭 PNG 内嵌角色卡确认弹窗" @click="emit('cancel')">
+          <X class="w-5 h-5" />
+        </button>
       </div>
       <div class="modal-body max-h-[min(70vh,520px)] overflow-y-auto pr-1 space-y-3">
         <div class="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface-muted)] p-4 text-sm text-[var(--color-text-secondary)] space-y-2">
@@ -102,4 +106,5 @@ const hasWorldbook = () =>
       </div>
     </div>
   </div>
+  </Transition>
 </template>
