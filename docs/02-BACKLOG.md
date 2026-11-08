@@ -33,7 +33,7 @@
 - [x] **T-811 P1** Storage/Chats/Fork/Import/Export/Integrity 性能与错误收口
 - [x] **T-812 P1** ChatPage SSE → `useChatGeneration`，统一 meta/usage/done/error
 - [x] **T-813 P1** 数据迁移、隐私、安全与向后兼容
-- [ ] **T-814 P0** 全链路对照 `docs/specs/` 做发布核对（仓库外黑盒；本仓库不跑自动化测试）。精简方案草稿见 `docs/tasks/T-814-v1000-release-acceptance.md`，待作者确认
+- [ ] **T-814 P0** v1.000 发布验收。作者已确认精简清单 `docs/tasks/T-814-v1000-release-acceptance.md`，替代逐项核对，进行中
 
 ### 执行顺序
 
@@ -87,7 +87,7 @@ T-823 贯穿
 
 - [x] **T-830 P0** GitHub Copilot 设备码 / OpenAI Codex 设备码 + PKCE 粘贴；token 落盘与 refresh；登录弹窗
 - [x] **T-831 P0** 群聊成员级 `reasoningEffort` / `fastMode`（generate 合并 + 成员设置 UI）
-- [ ] **T-832 P1** Bedrock Converse / 原生 eventstream、Mistral Conversations、Vertex Anthropic `rawPredict`（可滑动）
+- [x] **T-832 P1** Bedrock Converse / 原生 eventstream、Mistral Conversations、Vertex Anthropic `rawPredict`。2026-11-07 并入 1.0，已实现；黑盒检查在修，Vertex 待作者用真实账号验收，Bedrock 和 Mistral 只有模拟验证
 
 ### v0.820 已滑出
 

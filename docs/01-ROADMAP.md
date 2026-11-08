@@ -1,6 +1,15 @@
 # v0.600 -> v1.000 路线图
 
-仓库内不包含自动化测试。接口与界面规格见 `docs/specs/BACKEND-API.md` 与 `docs/specs/FRONTEND-FEATURES.md`。勿再加入 pytest / Vitest / Playwright。
+不引入测试框架，也不写跟着实现走的单元测试；验证靠 `tools/api-check/` 和 `tools/ui-check/` 的黑盒检查，原则见 `docs/00-INDEX.md`。接口与界面规格见 `docs/specs/BACKEND-API.md` 与 `docs/specs/FRONTEND-FEATURES.md`。
+
+## 当前状态（2026-11-08）
+
+正在做 v1.000 发布验收，按精简清单 [T-814](tasks/T-814-v1000-release-acceptance.md) 执行，作者的决定也写在那里。要点：
+
+- T-832 并入 1.0，这一批合并后冻结新功能，之后只修问题。
+- 版本号验收期间保持 v0.810，作者手测通过后直接改 v1.000。
+- 只支持本机部署；安卓端不计入桌面 1.0。
+- 放到 1.0 之后：Codex 额度显示、插件 SDK、跨设备同步、AWS 签名、局域网登录。
 
 
 ## v0.600 定位
@@ -167,7 +176,7 @@
 |------|------|
 | T-830 OAuth | Copilot 设备码 + Copilot token 换发；Codex 设备码 + PKCE 粘贴；登录弹窗；`authStyle` oauth 发 Bearer；生成/列模型带厂商头 |
 | T-831 成员级 | `GroupMemberSettings.reasoningEffort/fastMode`；成员设置弹窗；群聊 generate / rewrite 合并 |
-| T-832 P1 | Bedrock eventstream / Converse / Mistral Conversations / Vertex `rawPredict`（本版可滑动） |
+| T-832 P1 | Bedrock eventstream / Converse / Mistral Conversations / Vertex `rawPredict`。2026-11-07 作者决定并入 1.0，已实现，见任务卡 |
 
 ### v0.820 边界
 
@@ -178,9 +187,9 @@
 
 ## v0.900+ / v1.000
 
-- 仓库外黑盒测试（规格见 `docs/specs/`）；本仓库不引入 Playwright / pytest / Vitest。
-- 插件化 provider SDK、跨设备统计同步等后续能力。
-- v0.800 未完成项不得仅因版本切换自动顺延，需在发布评审中明确。
+- 黑盒检查依据 `docs/specs/` 和官方文档编写，写检查的一方不看实现；不引入 Playwright / pytest / Vitest。
+- 插件化 provider SDK、跨设备统计同步等后续能力放到 1.0 之后。
+- v0.800 未完成项不得仅因版本切换自动顺延，需在发布评审中明确：T-814 由精简验收清单承接。
 
 ## v1.000 发布定义
 
