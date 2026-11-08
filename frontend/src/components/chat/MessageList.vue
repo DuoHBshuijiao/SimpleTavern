@@ -240,7 +240,8 @@ let holdAtLastMessageStart = false
 const LAST_MESSAGE_START_SETTLE_MS = 1200
 let lastMessageStartAlignUntil = 0
 let messageJumpToken = 0
-const MESSAGE_JUMP_SETTLE_FRAMES = 12
+/** 跳到没渲染过的区域后，目标上方的行高要约 0.7 秒才落定；这段时间每帧重新对齐，用户一滚动就停 */
+const MESSAGE_JUMP_SETTLE_MS = 1200
 /**
  * 是否贴在底部：不生成时内容变高（图片晚加载、结束后操作行出现）只有贴着才跟。
  * 不能现算到底距离：气泡高度是分帧增长的，一帧涨得多就会误判成“已离开底部”。
@@ -1533,12 +1534,11 @@ function scrollToMessage(messageId: string) {
     setScrollTopInstant(el, row ? scrollTopForRow(row) : (prefixHeights.value[idx] ?? 0))
   }
   align()
-  let frames = 0
+  const settleUntil = performance.now() + MESSAGE_JUMP_SETTLE_MS
   const settle = () => {
     if (token !== messageJumpToken || scrollRef.value !== el) return
     align()
-    frames += 1
-    if (frames < MESSAGE_JUMP_SETTLE_FRAMES) requestAnimationFrame(settle)
+    if (performance.now() < settleUntil) requestAnimationFrame(settle)
   }
   requestAnimationFrame(settle)
 }

@@ -117,7 +117,7 @@ import { Users, Settings, MoreHorizontal, Search } from 'lucide-vue-next'
 
 // API
 import { postAndConsumeSse } from '../api/sse'
-import { apiPost, apiGet } from '../api/http'
+import { ApiError, apiPost, apiGet } from '../api/http'
 import { useErrorStack } from '../composables/useErrorStack'
 import { notifyConfirm, notifyMessage } from '../composables/useNotify'
 import { isTtsApiPreset, resolveTtsProvider } from '../utils/apiPresetKind'
@@ -2854,13 +2854,16 @@ async function sendUserMessage(options?: { retryText?: string }) {
   } finally {
     isGenerating.value = false
     group.currentSpeakerIndex.value = -1
-    if (consumeGenerationFinallyFlags(!!streamError.value) === 'persist') {
-      await persistLocalStreamingMessages(chatId)
-    } else {
-      await chats.load(chatId)
-      await afterChatReload(chatId)
-      if (!isGroup && !streamError.value) bumpSidebarForActiveChat()
-    }
+    const persistInstead = consumeGenerationFinallyFlags(!!streamError.value) === 'persist'
+    await settleAfterGeneration(async () => {
+      if (persistInstead) {
+        await persistLocalStreamingMessages(chatId)
+      } else {
+        await chats.load(chatId)
+        await afterChatReload(chatId)
+        if (!isGroup && !streamError.value) bumpSidebarForActiveChat()
+      }
+    })
     await settings.load()
   }
 }
@@ -2898,16 +2901,18 @@ async function continueGroupChat() {
   } finally {
     const persistInstead = consumeGenerationFinallyFlags(!!streamError.value) === 'persist'
     if (persistInstead) {
-      await persistLocalStreamingMessages(chatId)
+      await settleAfterGeneration(() => persistLocalStreamingMessages(chatId))
     }
     if (!group.isPaused.value) {
       isGenerating.value = false
       group.currentSpeakerIndex.value = -1
       group.pendingMembers.value = []
       if (!persistInstead) {
-        await chats.load(chatId)
-        await afterChatReload(chatId)
-        if (!streamError.value) bumpSidebarForActiveChat()
+        await settleAfterGeneration(async () => {
+          await chats.load(chatId)
+          await afterChatReload(chatId)
+          if (!streamError.value) bumpSidebarForActiveChat()
+        })
         await settings.load()
       } else {
         await settings.load()
@@ -2955,13 +2960,15 @@ async function startNextRound() {
     group.currentSpeakerIndex.value = -1
     const persistInstead = consumeGenerationFinallyFlags(!!streamError.value) === 'persist'
     if (persistInstead) {
-      await persistLocalStreamingMessages(chatId)
+      await settleAfterGeneration(() => persistLocalStreamingMessages(chatId))
     }
     if (!group.isPaused.value) {
       if (!persistInstead) {
-        await chats.load(chatId)
-        await afterChatReload(chatId)
-        if (!streamError.value) bumpSidebarForActiveChat()
+        await settleAfterGeneration(async () => {
+          await chats.load(chatId)
+          await afterChatReload(chatId)
+          if (!streamError.value) bumpSidebarForActiveChat()
+        })
       }
       await settings.load()
     }
@@ -3061,17 +3068,20 @@ async function triggerInterject(characterId: string) {
     }
   } finally {
     group.isInterjecting.value = false
-    if (consumeGenerationFinallyFlags(generationHadError) === 'persist') {
-      await persistLocalStreamingMessages(chatId)
-    } else {
-      await chats.load(chatId)
-      await afterChatReload(chatId)
-      const hadSaveSendDefer = !!getSaveSendDeferForChat(chatId)
-      await finalizeSaveSendAfterGeneration(chatId, generationHadError, finalizeDeferredTailDelete)
-      if (!hadSaveSendDefer && !generationHadError) {
-        bumpSidebarForActiveChat()
+    const persistInstead = consumeGenerationFinallyFlags(generationHadError) === 'persist'
+    await settleAfterGeneration(async () => {
+      if (persistInstead) {
+        await persistLocalStreamingMessages(chatId)
+      } else {
+        await chats.load(chatId)
+        await afterChatReload(chatId)
+        const hadSaveSendDefer = !!getSaveSendDeferForChat(chatId)
+        await finalizeSaveSendAfterGeneration(chatId, generationHadError, finalizeDeferredTailDelete)
+        if (!hadSaveSendDefer && !generationHadError) {
+          bumpSidebarForActiveChat()
+        }
       }
-    }
+    })
   }
 }
 
@@ -3104,6 +3114,22 @@ function stopStreaming() {
  * 将当前会话中未持久化的本地流式消息（被截断的内容）保存到后端并重新加载
  * 用于用户点击终止后：打字机缓冲已通过 flushAll 写入本地消息，此处持久化并同步为可编辑的服务器消息
  */
+/**
+ * 生成结束后的回写和重新读取。会话在别处被删掉时，这些请求同样会 404：
+ * 生成本身的错误已经进了错误栈，这里只记一条警告，不再抛成未捕获的异常。其他错误照常抛出。
+ */
+async function settleAfterGeneration(task: () => Promise<unknown>) {
+  try {
+    await task()
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) {
+      console.warn('生成结束后回写会话失败，会话可能已被删除', e)
+      return
+    }
+    throw e
+  }
+}
+
 async function persistLocalStreamingMessages(chatId: string) {
   const chat = activeChat.value
   if (!chat?.messages?.length) return
@@ -3742,12 +3768,15 @@ async function handleRewriteMessage(m: ChatMessage) {
   } finally {
     isGenerating.value = false
     const skippedReload = stopStreamingHold.value
-    if (consumeGenerationFinallyFlags(generationHadError) === 'persist') {
-      await persistLocalStreamingMessages(chatId)
-    } else {
-      await chats.load(chatId)
-      await afterChatReload(chatId)
-    }
+    const persistInstead = consumeGenerationFinallyFlags(generationHadError) === 'persist'
+    await settleAfterGeneration(async () => {
+      if (persistInstead) {
+        await persistLocalStreamingMessages(chatId)
+      } else {
+        await chats.load(chatId)
+        await afterChatReload(chatId)
+      }
+    })
     await settings.load()
 
     // 成功后：后端已将新版本原位写入锚点；前端只 hydrate 并删除尾部
@@ -4401,14 +4430,16 @@ async function handleSaveAndSend() {
   } finally {
     isGenerating.value = false
     group.currentSpeakerIndex.value = -1
-    if (consumeGenerationFinallyFlags(generationHadError) === 'persist') {
-      await persistLocalStreamingMessages(chatId)
-    } else {
-      await chats.load(chatId)
-      await afterChatReload(chatId)
-
-      await finalizeSaveSendAfterGeneration(chatId, generationHadError, finalizeDeferredTailDelete)
-    }
+    const persistInstead = consumeGenerationFinallyFlags(generationHadError) === 'persist'
+    await settleAfterGeneration(async () => {
+      if (persistInstead) {
+        await persistLocalStreamingMessages(chatId)
+      } else {
+        await chats.load(chatId)
+        await afterChatReload(chatId)
+        await finalizeSaveSendAfterGeneration(chatId, generationHadError, finalizeDeferredTailDelete)
+      }
+    })
     await settings.load()
   }
 }
