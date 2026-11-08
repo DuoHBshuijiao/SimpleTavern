@@ -41,6 +41,12 @@
 - 上游返回 200，但没有任何文本、思考或工具调用时，返回 `provider_response_invalid`，不当成成功，不写空的助手消息。适用于所有协议的流式和非流式。
 - 本次请求认证头里的密钥值（`Authorization`、`x-api-key`、`api-key`、`x-goog-api-key`、URL 里的 `key=`，8 个字符以上）会在错误的 `message` 和 `detail`、SSE 错误事件、HTTP 日志的列表和详情里按值打码。这覆盖 Bedrock 的 `ABSK…` Key、Mistral Key 和 Vertex access token。放在请求体里的密钥仍按字段名规则打码。
 
+### 流式错误
+
+- 上游在流里给出错误对象时（OpenAI 兼容的 `data: {"error": {...}}` 或 `event: error`、Responses 的 `error` 和 `response.failed`、Anthropic 和 Gemini 的错误事件），按状态码、`type`、`code` 映射：401、403 或鉴权类为 `provider_auth_failed`，429 或额度、限流类为 `provider_quota_exceeded`，其他为 `upstream_request_failed`（5xx、过载、`server_error` 可重试）。`message` 保留上游原话，照常打码。
+- 连接建立之后中途断开，报 `stream_interrupted`：已收到内容时提示“上游连接在传输中断开，已收到部分内容”，没收到时提示“上游连接在返回内容前断开”，已收到的部分照常保留。一开始就连不上仍是 `upstream_unreachable`。
+- OpenAI 兼容流里的 `event:`、`id:`、`retry:` 字段会被跳过，不再报“未知事件帧”。
+
 ### 当前行为，规格尚未定义
 
 黑盒检查观察到以下行为，记在这里供发布评审决定是否就此定为约定：

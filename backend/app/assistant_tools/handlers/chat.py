@@ -25,6 +25,7 @@ from app.storage import (
     save_chat,
     save_chat_memory,
     save_chat_state_variables,
+    save_worldbook,
 )
 from app.tokenizer_service import trim_dict_messages_to_token_budget
 
@@ -303,7 +304,7 @@ def handle_chat_worldbook_attachment_add(ctx: AssistantToolContext, args: dict[s
     if not wid:
         return R.err(R.VALIDATION_ERROR, "worldbookId required", tool="chat_worldbook_attachment_add")
     try:
-        load_worldbook(wid)
+        book = load_worldbook(wid)
     except FileNotFoundError:
         return R.err(R.NOT_FOUND, "worldbook not found", tool="chat_worldbook_attachment_add")
     if chat.overrides is None:
@@ -325,6 +326,10 @@ def handle_chat_worldbook_attachment_add(ctx: AssistantToolContext, args: dict[s
     chat.overrides.worldBookAttachments = att
     chat.overrides._sync_worldbook_attachments()
     save_chat(chat)
+    # 注入只认世界书一侧的 sessionChatIds（界面挂载时也同时写这里）；只写会话的挂载顺序不会生效
+    if not book.globalActive and chat_id not in (book.sessionChatIds or []):
+        book.sessionChatIds = [*(book.sessionChatIds or []), chat_id]
+        save_worldbook(book)
     return R.ok({"chatId": chat_id, "worldBookAttachments": [a.model_dump(mode="json") for a in att]}, tool="chat_worldbook_attachment_add")
 
 
@@ -346,6 +351,13 @@ def handle_chat_worldbook_attachment_remove(ctx: AssistantToolContext, args: dic
     chat.overrides.worldBookAttachments = att
     chat.overrides._sync_worldbook_attachments()
     save_chat(chat)
+    try:
+        book = load_worldbook(wid)
+    except FileNotFoundError:
+        book = None
+    if book is not None and chat_id in (book.sessionChatIds or []):
+        book.sessionChatIds = [cid for cid in book.sessionChatIds if cid != chat_id]
+        save_worldbook(book)
     return R.ok({"chatId": chat_id, "worldBookAttachments": [a.model_dump(mode="json") for a in att]}, tool="chat_worldbook_attachment_remove")
 
 
