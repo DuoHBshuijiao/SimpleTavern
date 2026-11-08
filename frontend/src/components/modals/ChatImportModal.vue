@@ -437,7 +437,7 @@ async function confirmJanitorImport() {
 <template>
   <Transition name="modal">
     <div v-if="show" class="modal">
-      <!-- 背景模糊须用 Tailwind backdrop-*（见 README / glass.css：手写 backdrop-filter 经 esbuild 压缩可能失效） -->
+      <!-- 背景模糊须用 Tailwind backdrop-*（见 README / glass.css：手写 backdrop-filter 经构建阶段的 CSS 优化后会失效） -->
       <div class="modal-backdrop backdrop-blur-[var(--glass-blur-soft)]" @click="close"></div>
       <div
         ref="dialogRef"

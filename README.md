@@ -227,7 +227,7 @@ npm run build
 | 主题 | 说明 |
 | ---- | ---- |
 | **Tailwind v4 与 `group-hover`** | `group-hover:opacity-*` 等变体位于 CSS Layer 中，**请勿**在 `utilities.css` 等自定义文件中重复定义 `opacity-*` 等工具类，否则会覆盖 Tailwind 的悬停效果。 |
-| **玻璃拟态与构建** | 旧的 `.glass-panel-floating` 等类已弃用，模糊必须使用 Tailwind 的 `backdrop-*` 工具类。手写 CSS 里成对的 `backdrop-filter` 和 `-webkit-backdrop-filter` 经构建压缩后只剩带前缀的一条，Chromium 不认，于是开发服务器上有模糊、构建后没有；压缩还可能破坏多个滤镜函数之间的空格。判断模糊效果要看构建产物。 |
+| **玻璃拟态与构建** | 旧的 `.glass-panel-floating` 等类已弃用，模糊必须使用 Tailwind 的 `backdrop-*` 工具类。手写 CSS 里成对的 `backdrop-filter` 和 `-webkit-backdrop-filter`，经构建阶段 Tailwind 的 CSS 优化（Lightning CSS）后只剩带前缀的一条，Chromium 不认，于是开发服务器上有模糊、构建后没有。关掉压缩也一样，所以不能靠改压缩配置解决。判断模糊效果要看构建产物。 |
 | **MessageList 虚拟滚动** | 2026‑04 曾出现切换会话时滚动位置异常跳转的问题，现已通过默认的 scroll anchoring 和直接的 computed 窗口计算修复。目前原生滚动条与顶栏会有轻微重叠，未来考虑改成独立自绘滚动条。 |
 | **剪贴板本地路径安全** | QQ 等应用粘贴的 HTML 可能包含 `file://` 链接，浏览器无法直接读取。后端剪贴板接口仅允许解析**系统临时目录**下的路径，拒绝访问其他位置，降低任意文件读取风险。 |
 | **SSE 界面响应** | 前端大约每 20 个事件主动让出主线程一次，避免高频率流式输出时界面卡顿。 |

@@ -5295,7 +5295,7 @@ const editingPersonaAvatarUrl = computed(() => {
   background-image: none;
   box-shadow: var(--shadow-glass-popover);
   transform-origin: top right;
-  /* 磨砂用模板上的 glass blur token（避免手写 backdrop-filter 经构建压缩失效，且勿嵌套在父级 backdrop 内） */
+  /* 磨砂用模板上的 glass blur token（避免手写 backdrop-filter 经构建阶段的 CSS 优化后失效，且勿嵌套在父级 backdrop 内） */
 }
 
 /* 与顶栏吸顶 morph（320 / 420 / 520ms）同气质的过渡：分层入场 / 退场 */
