@@ -1,4 +1,4 @@
-> **维护状态**：SimpleTavern 已进入 **v1.0 稳定化阶段**。`v0.600` 是“全局体验一致性与前端系统升级版本”，重点统一按钮、表单、弹窗、抽屉、面板、动效、无障碍和主要工作流稳定性。后续仍会持续接受 bug 修复、数据可靠性、体验一致性、性能优化与文档补强。任务与版本计划见 `docs/00-INDEX.md`。接口与界面规格见 `docs/specs/`。
+> **维护状态**：当前版本 v0.810，正在做 **v1.000 发布验收**，新功能已冻结，只修问题。验收清单见 `docs/tasks/T-814-v1000-release-acceptance.md`，版本计划见 `docs/00-INDEX.md`，接口与界面规格见 `docs/specs/`。
 <div align="center">
 
 <img src="frontend/public/image1.jpeg" alt="SimpleTavern" />
@@ -232,7 +232,10 @@ npm run build
 | **剪贴板本地路径安全** | QQ 等应用粘贴的 HTML 可能包含 `file://` 链接，浏览器无法直接读取。后端剪贴板接口仅允许解析**系统临时目录**下的路径，拒绝访问其他位置，降低任意文件读取风险。 |
 | **SSE 界面响应** | 前端大约每 20 个事件主动让出主线程一次，避免高频率流式输出时界面卡顿。 |
 | **存储并发** | 虽然为单用户设计，但前端并发请求可能导致瞬时并发写入。关键写路径使用文件锁 (`portalocker`) 防止文件撕裂。按 `chatId` 查找会话需扫描角色目录，数据量极大时可能产生额外 I/O。 |
-| **CORS** | 后端默认只放行本机 Origin（9081 / 9181 等），`allow_credentials=False`。局域网访问时设置 `SIMPLETAVERN_CORS_ORIGINS`（逗号分隔）并配合 `SIMPLETAVERN_BIND`。 |
+| **部署边界** | 只支持本机使用。后端没有登录和用户隔离，默认只绑 `127.0.0.1`，CORS 默认只放行本机 Origin（9081 / 9181 等），`allow_credentials=False`。可以用 `SIMPLETAVERN_BIND` 和 `SIMPLETAVERN_CORS_ORIGINS`（逗号分隔）打开局域网访问，但同一网络里的任何人都能读写你的数据和密钥，风险自担；不要暴露到公网。 |
+| **备份里的密钥** | 设置备份里的 API Key 是明文，备份文件要自己保管好。OAuth 令牌不进备份；Vertex 服务账号 JSON 的私钥也不进备份，恢复后要重新粘贴。 |
+| **额外协议的验证程度** | Bedrock Converse 和 Mistral Conversations 按官方文档实现，只在本地模拟服务上验证过，没有用真实账号测过。Vertex 上的 Claude 待作者用真实项目验收。 |
+| **订阅额度** | ChatGPT 官方订阅和 Grok 的额度暂时查不到，界面显示“不支持”并给出用量管理入口，不显示估算的数字。 |
 | **部署脚本（Windows）** | 对命令行引号做了特殊处理，避免嵌套 `cmd` 引号错误。 |
 
 ### 扩展与资源
