@@ -200,6 +200,7 @@ def build_sandbox(source, data_dir, mock_url):
     if len(singles) < 3 or not groups:
         sys.exit(f"检查需要至少 3 个单聊和 1 个群聊，现在只有 {len(singles)} 个单聊、{len(groups)} 个群聊")
     fixtures = {"group": groups[0][2]["id"]}
+    sandbox_now = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(time.time() + 60))
     for name, paragraphs, minimum, (_, path, chat) in zip(("LONG", "MID", "SHORT"), (60, 14, 1), (320, 60, 60), singles):
         extend_messages(chat, minimum)
         last = {"version": 1, "id": uuid.uuid4().hex, "role": "assistant", "ts": chat["messages"][-1].get("ts"),
@@ -212,6 +213,11 @@ def build_sandbox(source, data_dir, mock_url):
         for message in chat["messages"][:-1]:
             if name == "LONG" and str(message.get("content") or "").strip():
                 message["content"] = str(message["content"]) + "\n\n沙箱检索词"
+        if name == "LONG":
+            # 首页打开侧栏第一个角色的最新会话。无头浏览器没有本地使用记录，侧栏按更新时间排，
+            # 所以把长会话和它的角色设为最新，首页才确定是它，不受作者最近新建了什么角色影响
+            chat["updatedAt"] = sandbox_now
+            mark_character_newest(data_dir, chat.get("characterId"), sandbox_now)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(chat, f, ensure_ascii=False, indent=2)
         fixtures[name] = chat["id"]
@@ -225,6 +231,18 @@ def build_sandbox(source, data_dir, mock_url):
                 shutil.copy(candidate, fonts_dir)
                 break
     return fixtures
+
+
+def mark_character_newest(data_dir, character_id, stamp):
+    """沙箱里把这个角色的 updatedAt 设为最新。找不到角色文件就停止，免得首页悄悄变成别的会话。"""
+    path = os.path.join(data_dir, "characters", f"{character_id}.json")
+    if not character_id or not os.path.isfile(path):
+        sys.exit(f"找不到长会话的角色文件：{character_id}")
+    with open(path, encoding="utf-8") as f:
+        card = json.load(f)
+    card["updatedAt"] = stamp
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(card, f, ensure_ascii=False, indent=2)
 
 
 # ---------- 进程 ----------
@@ -305,7 +323,11 @@ def main():
     mock = ThreadingHTTPServer(("127.0.0.1", args.mock_port), MockHandler)
     threading.Thread(target=mock.serve_forever, daemon=True).start()
 
-    env = {**os.environ, "SIMPLETAVERN_DATA_DIR": data_dir, "PYTHONDONTWRITEBYTECODE": "1"}
+    # 后端的出站请求都走代理指向模拟服务，本机地址放行：启动时的更新检查等外网访问会被挡下，不会真的连出去
+    proxy = f"http://127.0.0.1:{args.mock_port}"
+    env = {**os.environ, "SIMPLETAVERN_DATA_DIR": data_dir, "PYTHONDONTWRITEBYTECODE": "1",
+           "HTTP_PROXY": proxy, "HTTPS_PROXY": proxy, "http_proxy": proxy, "https_proxy": proxy,
+           "NO_PROXY": "127.0.0.1,localhost", "no_proxy": "127.0.0.1,localhost"}
     processes = []
     log = open(os.path.join(WORK, "services.log"), "w", encoding="utf-8", errors="replace")
     profile = tempfile.mkdtemp(prefix="ui-check-chrome-")
