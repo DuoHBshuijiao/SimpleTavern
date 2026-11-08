@@ -1,9 +1,12 @@
 """回归检查本体。每个 check_xxx 独立开页面，顺序见文件末尾的 CHECKS。"""
 import asyncio
+import glob
 import json
+import os
 import urllib.request
 
 import cdp
+import dom_checks
 
 C = "__chat().setupState"
 D = "__drawer().setupState"
@@ -31,8 +34,17 @@ def switch(label):
 
 
 class Context:
-    def __init__(self, base_url, api_url, cdp_port, shots_dir, fixtures, mock_state, serve_built):
+    def __init__(self, base_url, api_url, cdp_port, shots_dir, fixtures, mock_state, serve_built, work=None, data_dir=None, log_path=None, real_secrets=(), built_only=False):
         self.serve_built = serve_built
+        self.built_dir = None
+        self.work = work
+        self.data_dir = data_dir
+        self.log_path = log_path
+        self.real_secrets = real_secrets
+        self.built_only = built_only
+        self.dom_results = {}
+        self.secret_ui = {}
+        self.notes = []
         self.base_url = base_url
         self.api_url = api_url
         self.cdp_port = cdp_port
@@ -44,6 +56,11 @@ class Context:
     def check(self, name, ok, detail=""):
         self.results.append((name, bool(ok)))
         print(("  通过  " if ok else "  失败  ") + name + (f"  {str(detail)[:200]}" if not ok or detail == "" else ""))
+
+    def note(self, name, value):
+        """记录测量值，不判断对错。"""
+        self.notes.append((name, value))
+        print(f"  记录  {name}：{json.dumps(value, ensure_ascii=False)}")
 
     def api(self, path):
         return json.load(urllib.request.urlopen(self.api_url + path))
@@ -652,9 +669,93 @@ def click_text(root, text):
     return f"""(() => {{ const b=[...{root}.querySelectorAll('button')].filter(x=>x.offsetParent!==null).find(x=>x.innerText.trim()==={json.dumps(text)}); if(!b) throw new Error('没有按钮 '+{json.dumps(text)}); b.click(); }})()"""
 
 
+def prefixed_blur_rules(css):
+    """找出声明了 -webkit-backdrop-filter、却没有标准 backdrop-filter 的规则。
+
+    Chromium 不认带前缀的写法，这样的规则在构建后没有模糊。按声明的属性名判断，transition 的值里出现这个词不算。
+    """
+    found = []
+    frames = [{"prelude": "", "props": []}]
+    buffer = []
+    quote = None
+    parens = 0
+    i = 0
+
+    def flush_declaration():
+        text = "".join(buffer).strip()
+        buffer.clear()
+        if ":" in text:
+            frames[-1]["props"].append(text.split(":", 1)[0].strip().lower())
+
+    while i < len(css):
+        ch = css[i]
+        if quote:
+            buffer.append(ch)
+            if ch == "\\":
+                buffer.append(css[i + 1:i + 2])
+                i += 1
+            elif ch == quote:
+                quote = None
+        elif css.startswith("/*", i):
+            end = css.find("*/", i + 2)
+            i = len(css) if end < 0 else end + 1
+        elif ch in "\"'":
+            quote = ch
+            buffer.append(ch)
+        elif ch == "(":
+            parens += 1
+            buffer.append(ch)
+        elif ch == ")":
+            parens = max(0, parens - 1)
+            buffer.append(ch)
+        elif parens:
+            buffer.append(ch)
+        elif ch == "{":
+            frames.append({"prelude": "".join(buffer).strip(), "props": []})
+            buffer.clear()
+        elif ch == ";":
+            flush_declaration()
+        elif ch == "}":
+            flush_declaration()
+            frame = frames.pop() if len(frames) > 1 else frames[0]
+            if "-webkit-backdrop-filter" in frame["props"] and "backdrop-filter" not in frame["props"]:
+                found.append(" > ".join(f["prelude"] for f in frames[1:] + [frame]))
+        else:
+            buffer.append(ch)
+        i += 1
+    return found
+
+
+def built_css_files(ctx):
+    return sorted(glob.glob(os.path.join(ctx.built_dir, "assets", "**", "*.css"), recursive=True))
+
+
+def check_prefixed_blur(ctx):
+    samples = (
+        (".a{-webkit-backdrop-filter:blur(2px)}", [".a"]),
+        (".a{-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px)}", []),
+        (".a{backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px)}", []),
+        (".a{transition:-webkit-backdrop-filter .2s,backdrop-filter .2s}", []),
+        ("@media (min-width:1px){.b{-webkit-backdrop-filter:none}}", ["@media (min-width:1px) > .b"]),
+        (""".c{background:url("a;{b.png");color:red;-webkit-backdrop-filter:blur(1px)}.d{color:red}""", [".c"]),
+    )
+    wrong = [(css, prefixed_blur_rules(css)) for css, expected in samples if prefixed_blur_rules(css) != expected]
+    ctx.check("模糊规则扫描器自检", not wrong, wrong)
+    files = built_css_files(ctx)
+    rules = []
+    for path in files:
+        with open(path, encoding="utf-8") as f:
+            rules.extend(prefixed_blur_rules(f.read()))
+    print(f"  记录  {len(files)} 个 CSS 文件里，只带 -webkit- 前缀的模糊规则 {len(rules)} 条")
+    for rule in rules:
+        print(f"    {rule}")
+    ctx.check("构建后没有只带 -webkit- 前缀的模糊规则", files and not rules, f"{len(rules)} 条")
+
+
 async def check_built(ctx):
     """构建产物：压缩后的 CSS 才是用户看到的，开发服务器测不出模糊失效。这里没有 Vue 实例，只能操作 DOM"""
     page = await cdp.open_page(ctx.cdp_port, ctx.serve_built(), ctx.shots_dir, 1536, 800)
+    check_prefixed_blur(ctx)
     await page.goto("/")
     panel = "document.querySelector('.drawer-panel')"
     style = f"""(() => {{ const p=getComputedStyle({panel}), w=getComputedStyle(document.querySelector('.drawer-wrapper')); return {{blur:p.backdropFilter, bg:p.backgroundColor, moving:p.transform!=='matrix(1, 0, 0, 1, 0, 0)', root:+w.opacity, vis:w.visibility}}; }})()"""
@@ -717,6 +818,9 @@ CHECKS = {
     "search": check_search,
     "settings": check_settings,
     "built": check_built,
+    "core": dom_checks.check_core,
+    "modals": dom_checks.check_modals,
+    "dev_built": dom_checks.check_dev_built,
     "motion": check_motion,
     "sidebar": check_sidebar,
     "background": check_background,
@@ -725,6 +829,11 @@ CHECKS = {
     "delete": check_delete,
     "follow": check_follow,
     "version": check_version,
+    "themes": dom_checks.check_themes,
+    "viewports": dom_checks.check_viewports,
+    "long_chat": dom_checks.check_long_chat,
+    "errors": dom_checks.check_errors,
+    "secrets": dom_checks.check_secrets,
 }
 
 
