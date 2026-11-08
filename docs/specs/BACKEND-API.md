@@ -47,15 +47,15 @@
 - 连接建立之后中途断开，报 `stream_interrupted`：已收到内容时提示“上游连接在传输中断开，已收到部分内容”，没收到时提示“上游连接在返回内容前断开”，已收到的部分照常保留。一开始就连不上仍是 `upstream_unreachable`。
 - OpenAI 兼容流里的 `event:`、`id:`、`retry:` 字段会被跳过，不再报“未知事件帧”。
 
-### 当前行为，规格尚未定义
+### 接口约定（2026-11-08 作者确认）
 
-黑盒检查观察到以下行为，记在这里供发布评审决定是否就此定为约定：
+黑盒检查发现以下行为原先没写进规格，作者决定按现状定为 1.0 的约定：
 
-- `PUT` 不存在的角色或世界书会直接创建并返回 200；`PUT` 不存在的会话返回 404。
-- `DELETE` 不存在的角色或会话返回 `{"ok": true}`。
-- 会话只设 `worldBookIds` 和 `worldBookAttachments`、不设 `sessionChatIds` 时，命中关键词也不注入。
+- `PUT` 不存在的角色或世界书会直接创建并返回 200（新建或覆盖）；`PUT` 不存在的会话返回 404。
+- `DELETE` 不存在的角色或会话返回 `{"ok": true}`（幂等）。
 - 会话不存在时，生成接口返回 `not_found`，用量接口返回 `chat_not_found`。
-- basic 范围的设置备份含明文 API Key。
+- 三种范围的设置备份都含各预设的明文 API Key，用来完整恢复；OAuth 令牌和 Vertex 服务账号私钥不进备份。
+- **世界书绑定要写两处：** 世界书一侧的 `sessionChatIds` 决定是否注入，会话一侧的 `worldBookAttachments`（以及同步出的 `worldBookIds`）只决定顺序和深度。只写会话一侧不会注入。界面挂载和助手工具 `chat_worldbook_attachment_add`、`chat_worldbook_attachment_remove` 都会同时写两处（助手工具在 2026-11-08 修复之前只写会话一侧）。两处合一涉及数据迁移，放到 1.0 之后。
 
 ## 2026-10-22 原生联网与订阅接入增补
 

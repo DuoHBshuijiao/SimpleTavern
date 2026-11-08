@@ -38,6 +38,13 @@
 | 9 | 安卓端 | 不计入桌面 1.0，继续走自己的 M2 计划 |
 | 10 | 版本号 | 验收期间保持 v0.810，验收通过后直接改 v1.000，`CHANGELOG` 的 v0.820 并入 |
 | 11 | 偶发的开场白问题 | 只留记录，不改代码 |
+| 12 | 设置备份含明文 API Key（2026-11-08） | 保持现状，README 已写明 |
+| 13 | 5 个主题主按钮白字对比度低于 4.5 | 接受现状，放到 1.1；回归里只记录数值 |
+| 14 | 窄屏选完会话侧栏不收起 | 自动收起，已修 |
+| 15 | 单聊出错后没有直接重试的按钮 | 放到 1.0 之后，写进已知问题 |
+| 16 | `backend/tests` 的 3 个旧文件 | 删掉跟着实现写的 `test_chat_search.py`，留两个守真实缺陷的 |
+| 17 | 规格没写的接口行为（PUT 不存在就新建、DELETE 不存在也成功等） | 按现状写进规格 |
+| 18 | 世界书绑定的两处记录 | 1.0 不动，写进规格；合一放到 1.0 之后 |
 
 ## 二、设置页和模糊
 
@@ -53,21 +60,41 @@
 
 **其余模糊（第一节第 2 项）：** 这 24 条规则手写了 `backdrop-filter`，构建后只剩 Chromium 不认的 `-webkit-` 前缀。
 
-- [ ] `[Claude]` `.modal-backdrop` 改用 Tailwind 工具类，约 21 个弹窗的遮罩有模糊，并在构建产物上验证。
-- [ ] `[Claude]` 其余规则删掉无效声明，构建后的外观不变。
-- [ ] `[自动]` 回归工具加一项：构建后不能有只带 `-webkit-` 前缀的模糊规则。
+- [x] `[Claude]` `.modal-backdrop` 改用 Tailwind 工具类，约 21 个弹窗的遮罩有模糊，并在构建产物上验证。
+- [x] `[Claude]` 其余规则删掉无效声明，构建后的外观不变（修改前后 5 个界面状态像素差为 0）。
+- [x] `[自动]` 回归工具加一项：构建后不能有只带 `-webkit-` 前缀的模糊规则（修改前 24 条，修改后 0 条）。
 - [ ] `[作者]` 开 WebGPU 背景时，打开弹窗没有明显掉帧，弹窗遮罩的观感合适。
 
 ## T-832 额外协议
 
-- [ ] `[Claude]` Bedrock Converse 和 `invoke-with-response-stream` 的 eventstream 解析，用 API Key。
-- [ ] `[Claude]` Mistral Conversations。
-- [ ] `[Claude]` Vertex Anthropic `rawPredict` 和 `streamRawPredict`，用服务账号 JSON。
-- [ ] `[自动]` 依据官方文档写的独立黑盒检查通过，并在 T-832 之前的版本上能失败。
+- [x] `[Claude]` Bedrock Converse 和 `invoke-with-response-stream` 的 eventstream 解析，用 API Key。
+- [x] `[Claude]` Mistral Conversations。
+- [x] `[Claude]` Vertex Anthropic `rawPredict` 和 `streamRawPredict`，用服务账号 JSON。
+- [x] `[自动]` 依据官方文档写的独立黑盒检查通过（t832 171 项通过 169，另 2 项规格未定义），并在 T-832 之前的版本上能失败（当时 153 项失败，原因是协议不支持）。
 - [ ] `[作者]` Vertex 用真实 Google Cloud 项目发一条流式消息，确认文字、用量和错误提示正确。
 - Bedrock 和 Mistral 作者没有账号，只能文档实现加模拟验证，发布说明标注“未真实验证”。
 
-## 待修问题
+## 问题记录
+
+验收期间发现并已修复（都有能失败的对照，详见 `docs/audits/v1000-sandbox-check-2026-11-07.md` 和提交记录）：
+
+- [x] 从没有打开会话的状态进入长会话，先闪一帧结尾。
+- [x] 思考预算不小于 `max_tokens`，按文档真实 API 会拒绝。
+- [x] 上游返回空消息被当成成功。
+- [x] 错误回显和 HTTP 日志里，非 `sk-` 格式的密钥和 Vertex 令牌没有打码。
+- [x] 换 Vertex 令牌失败时，错误分不出是哪一步。
+- [x] 流里的上游错误被换成“缺少 choices”；中途断开被说成“无法连接”。
+- [x] 搜索跳到没渲染过的区域后，目标会漂开。
+- [x] 会话在别处被删后发送，页面抛出未捕获的错误。
+- [x] 助手工具绑定的世界书不生效。
+- [x] 窄屏选完会话侧栏不收起。
+
+已知问题（发布说明要写）：
+
+- 单聊出错后没有直接重试的按钮，要编辑最后一条用户消息再「保存并发送」。
+- 5 个主题的主按钮白字对比度低于 4.5（放到 1.1）。
+- 设置备份含明文 API Key。
+- ChatGPT 和 Grok 订阅额度查不到；Bedrock 和 Mistral 未用真实账号验证；只支持本机部署。
 
 - [ ] **偶发：新建角色显示别的角色的开场白**（作者 2026-11-07 报告，未修，原因未确认）。先进入一个有开场白的角色的新会话，再新建一个不设开场白的角色，点完成后，新角色的头像和昵称配上了上一个角色的开场白。作者随后复测没有再出现。再遇到时记下当时的操作节奏，并刷新页面看是否还在，以区分只是显示错误还是数据写错。疑点（只读代码得出，未复现）：`chats.ts` 的 `loadList` 没有丢弃过期响应，`ChatPage.vue` 切换角色的监听也不判断角色是否又变了；上一个角色的列表如果晚到，可能盖掉新角色的空列表，于是打开旧会话。
 
@@ -77,12 +104,17 @@
 venv/Scripts/python tools/ui-check/run.py
 ```
 
-- [ ] `[自动]` 全部检查通过，包括在构建产物上跑的 `built`。
-- [ ] `[自动]` `vue-tsc -b` 和 `vite build` 通过。
-- [ ] `[自动]` `backend/tests` 全部通过（在 `backend` 目录运行 `python -m unittest discover -s tests`）。
-- [ ] `[自动]` 核心接口的正向和负向黑盒检查通过（角色、会话、设置、备份导入、生成错误）。
-- [ ] `[Claude]` 把现有的滚动、弹窗和设置检查也放到构建产物上核对一次：它们目前跑在开发服务器上。
-- [ ] `[Claude]` 补检查：PNG 内嵌卡导入确认、OAuth 登录弹窗的动效和关闭。
+```bash
+venv/Scripts/python tools/api-check/run.py
+```
+
+- [x] `[自动]` 全部检查通过，包括在构建产物上跑的 `built`。最后一次全量结果见“验收记录”。
+- [x] `[自动]` `vue-tsc -b` 和 `vite build` 通过。
+- [x] `[自动]` `backend/tests` 全部通过（在 `backend` 目录运行 `python -m unittest discover -s tests`）。
+- [x] `[自动]` 核心接口的正向和负向黑盒检查通过（core 73 项通过 67，另 6 项规格未定义，已按作者决定写进规格）。
+- [x] `[Claude]` 进入定位、搜索、原地删除、弹窗动效和 Esc 也在构建产物上用 DOM 驱动跑一遍，和开发服务器的结果逐项一致。
+- [x] `[Claude]` 补检查：PNG 内嵌卡导入确认、OAuth 登录弹窗的动效和关闭。
+- [ ] `[Claude]` 补检查：OAuth 令牌和 Vertex 服务账号私钥不进设置备份。目前只有实现方的自查，没有独立检查。
 
 ## 四、作者手测（分三晚，每晚不超过 12 项）
 
@@ -131,33 +163,33 @@ venv/Scripts/python tools/ui-check/run.py
 
 ## 五、Claude 在沙箱里核对
 
-- [ ] `[Claude]` 7 个主题各看一遍主界面、设置页和弹窗（blue、green、teal、violet、amber、rose、sunset），没有看不清或错色。
-- [ ] `[Claude]` 窗口宽度 1920、1440、1100 和窄屏下，主要页面没有遮挡和横向溢出。
-- [ ] `[Claude]` 长会话：测 320 条以上会话的打开、发送和保存耗时，把数字写进已知限制。
+- [x] `[Claude]` 7 个主题各看一遍主界面、设置页和弹窗（blue、green、teal、violet、amber、rose、sunset），没有看不清或错色。对比度见第一节第 13 项。
+- [x] `[Claude]` 窗口宽度 1920、1440、1100 和 420 下，主要页面没有遮挡和横向溢出（420 宽的侧栏问题已修）。
+- [x] `[Claude]` 长会话：625 条、1.3MB 的会话，打开约 110 到 140ms，发送后用户消息 15 到 30ms 出现，流式期间没有超过 50ms 的帧。软件渲染加模拟模型，只看量级，数字见沙箱核对报告。
 - [ ] `[作者]` 在自己最长的真实会话上看一次卡不卡。
-- [ ] `[Claude]` 抽查错误路径：REST 和 SSE 的错误都带 requestId，并进入前端错误栈。
-- [ ] `[Claude]` 确认日志、导出和 HTTP 日志里没有明文密钥。
+- [x] `[Claude]` 抽查错误路径：REST 和 SSE 的错误都带 requestId，并进入前端错误栈；用户消息不丢。
+- [x] `[Claude]` 确认日志、导出和 HTTP 日志里没有明文密钥（设置备份按决定保留 API Key）。
 
 ## 六、文档和版本
 
-- [ ] `[Claude]` `docs/specs/FRONTEND-FEATURES.md` 同步 10 月 23 日之后的界面改动（阅读字体和行高、原地确认、背景预览等）。
-- [ ] `[Claude]` `docs/specs/BACKEND-API.md` 同步搜索的 `truncated` 和两个新设置字段，并核对接口总数。
-- [ ] `[Claude]` `README.md` 首行和功能说明改成当前状态，写明部署边界和已知限制。
-- [ ] `[Claude]` `CHANGELOG.md` 写 v1.000，并入 v0.820 和 11 月的改动。
-- [ ] `[Claude]` `docs/01-ROADMAP.md`、`docs/02-BACKLOG.md`、`docs/state/CURRENT.md`、`docs/state/LAST_HANDOFF.md` 更新到当前状态。
-- [ ] `[Claude]` `docs/00-INDEX.md` 和路线图的测试政策按第一节第 3 项改写。
+- [x] `[Claude]` `docs/specs/FRONTEND-FEATURES.md` 同步 10 月 23 日之后的界面改动（功能分区已更新；按文件的控件清单没有逐条重新计数，已在文中注明）。
+- [x] `[Claude]` `docs/specs/BACKEND-API.md` 写入 2026-11-07 增补：搜索、新设置字段、T-832、思考预算、空输出、密钥打码、流式错误、接口约定。没有新增路径。
+- [x] `[Claude]` `README.md` 首行和功能说明改成当前状态，写明部署边界和已知限制。
+- [x] `[Claude]` `CHANGELOG.md` 写 v1.000（验收中），发布时并入 v0.820。
+- [x] `[Claude]` `docs/01-ROADMAP.md`、`docs/02-BACKLOG.md`、`docs/state/CURRENT.md`、`docs/state/LAST_HANDOFF.md` 更新到当前状态。
+- [x] `[Claude]` `docs/00-INDEX.md` 和路线图的测试政策按第一节第 3 项改写。
 - [ ] `[Claude]` 手测通过后，`backend/app/version.py` 改为 v1.000。
 
 ## 七、发布动作（每一步由作者确认）
 
-- [ ] `[作者]` 确认已知问题列表（至少包括：订阅额度查询、Bedrock 和 Mistral 未真实验证、只支持本机部署、偶发的开场白问题），做发布评审。
+- [ ] `[作者]` 确认已知问题列表（见“问题记录”，另加偶发的开场白问题），做发布评审。
 - [ ] `[作者]` 推送、打标签 `v1.000`、发布 GitHub Release。应用靠 Release 检查更新。
 - [ ] `[作者]` 从 v0.810 的旧版本走一次应用内更新到 v1.000，数据还在。
 - [ ] `[作者]` 在干净目录按 README 全新安装一次，能启动。
 
 ## 不在 1.0 范围
 
-插件 SDK、跨设备同步、Codex 额度显示、AWS 签名、局域网登录、PWA、多用户、`generate.py` 和 `ChatPage.vue` 的结构拆分、长会话存储改造、新增动效。
+插件 SDK、跨设备同步、Codex 额度显示、AWS 签名、局域网登录、出错后的重试按钮、备份可选是否含密钥、主题按钮对比度、世界书绑定两处记录合一、PWA、多用户、`generate.py` 和 `ChatPage.vue` 的结构拆分、长会话存储改造、新增动效。
 
 ## 验收记录
 

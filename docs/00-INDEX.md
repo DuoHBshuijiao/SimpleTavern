@@ -18,7 +18,7 @@
 - 后端接口规范：`docs/specs/BACKEND-API.md`
 - 前端功能与可见控件：`docs/specs/FRONTEND-FEATURES.md`
 - 产品里的「测模型」「测音色」是连通性探测 API，不是自动化测试。
-- `backend/tests/` 里的 3 个文件是此前写的，去留待作者决定。
+- `backend/tests/` 只留两个守真实缺陷的文件（备份恢复、JanitorAI 空开场白），不再新增。跟着实现写的 `test_chat_search.py` 已于 2026-11-08 删除，搜索由黑盒检查覆盖。
 
 ## 并行沙箱（黑盒点按）
 
