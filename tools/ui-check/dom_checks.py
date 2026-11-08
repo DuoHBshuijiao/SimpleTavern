@@ -551,8 +551,7 @@ async def check_themes(ctx):
             seen[theme] = state["primaryBg"]
             if state["theme"] != theme:
                 bad.append((theme, "data-theme", state["theme"]))
-            if (state["contrast"] or 0) < 4.5:
-                bad.append((theme, "主按钮对比度", state["contrast"]))
+            # 作者决定（2026-11-08）：主按钮白字对比度低于 4.5 的主题接受现状，放到 1.1，这里只记录数值
             ctx.note(f"主题 {theme}", {"主按钮底色": state["primaryBg"][:3], "主按钮对比度": state["contrast"]})
             await page.shot(f"theme-{theme}-main")
             await settings_open(page)
@@ -564,7 +563,7 @@ async def check_themes(ctx):
             await asyncio.sleep(0.8)
             await page.shot(f"theme-{theme}-modal")
             await ctx.close(page)
-        ctx.check("7 个主题的 data-theme 正确，主按钮对比度不低于 4.5", not bad, bad)
+        ctx.check("7 个主题的 data-theme 正确", not bad, bad)
         ctx.check("7 个主题的主色互不相同", len({tuple(x) for x in seen.values()}) == len(THEMES), seen)
     finally:
         update_settings(ctx, themeId=saved.get("themeId"), pageBackgroundOpacity=saved.get("pageBackgroundOpacity"))
@@ -1085,7 +1084,9 @@ async def check_secrets(ctx):
     ctx.check("会话和角色导出没有明文密钥", not plain, plain)
     backups = scan_paths([os.path.join(exports, name) for name in statuses if name.startswith("backup")], exports, ctx.real_secrets)
     show("设置备份", backups)
-    ctx.check("设置备份没有明文密钥", not backups, list(backups)[:6])
+    # 作者决定（2026-11-08）：设置备份保留 API Key 以便完整恢复，README 已写明，这里只记录。
+    # OAuth 令牌和 Vertex 私钥不进备份，目前还没有专门的检查，见验收清单
+    ctx.note("设置备份里含 API Key 的文件（按作者决定保留）", list(backups)[:6])
 
     # 整个沙箱不能有真实密钥原文，否则上面的扫描都不可信
     leftovers = []
