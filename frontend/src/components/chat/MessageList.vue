@@ -1072,6 +1072,17 @@ function alignLastMessageStartAfterLayout() {
   pendingAlignForce = false
   pendingAlignAfterHeightFlush = true
   nextTick(() => {
+    const el = scrollRef.value
+    const last = props.messages[props.messages.length - 1]
+    // 列表刚挂载时 chatId 监听不会触发：同样先按估高跳到底让最后一条进窗口，再赶在绘制前对齐，
+    // 否则要等下一帧才对齐，中间会先闪一帧结尾
+    if (el && last && !rowEls.get(last.id)) {
+      alignToBottom(el, true)
+      syncScrollMetrics(el)
+      nextTick(() => {
+        if (holdAtLastMessageStart && scrollRef.value === el) alignToLastMessageStart(el)
+      })
+    }
     schedulePendingHeightFlush(true)
   })
 }
