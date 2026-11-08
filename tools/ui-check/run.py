@@ -31,10 +31,14 @@ LAST_PARAGRAPH = "他在门口停了一下，回头看了看身后的长廊。�
 
 
 # ---------- 模拟模型 ----------
+STREAM_ERROR_TEXT = "沙箱上游流内错误 QX7-流中报错原文"
+
+
 class MockState:
     tps = 1500
     # None 正常回复；http401、http429、http500 直接返回错误；stream_error 流里报错；stream_reset 流到一半断连接
     fault = None
+    stream_error_text = STREAM_ERROR_TEXT
     seen = []  # 收到过的请求：路径和鉴权头，用来确认密钥探针确实被发了出去
 
 
@@ -95,7 +99,9 @@ class MockHandler(BaseHTTPRequestHandler):
             send({"role": "assistant"})
             if fault == "stream_error":
                 send({"content": "流里出错之前的半句"})
-                self.wfile.write(b'data: {"error": {"message": "\xe6\xa8\xa1\xe6\x8b\x9f\xe6\xb5\x81\xe5\x86\x85\xe9\x94\x99\xe8\xaf\xaf", "code": 500}}\n\n')
+                # OpenAI 兼容服务在流里报错的常见写法；文字是独特的，界面上出现它才说明上游原文传到了用户眼前
+                error = {"error": {"message": STREAM_ERROR_TEXT, "type": "server_error", "code": 500}}
+                self.wfile.write(b"data: " + json.dumps(error, ensure_ascii=False).encode() + b"\n\n")
                 self.wfile.flush()
                 return
             if fault == "stream_reset":
