@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from contextvars import ContextVar
 from typing import Any
 
 import httpx
@@ -25,8 +26,34 @@ _SENSITIVE_TEXT_PATTERNS = (
 )
 
 
+# 本次请求实际发出去的密钥和 token（由 http_log.log_outbound 从鉴权头登记）。
+# 前缀规则认不出所有厂商的格式，所以按值替换；按请求上下文隔离，不跨请求共享。
+_known_secrets: ContextVar[tuple[str, ...]] = ContextVar("known_secrets", default=())
+_MIN_SECRET_CHARS = 8
+
+
+def register_secrets(*values: Any) -> None:
+    """登记要按值打码的密钥。太短的值不登记，免得把普通文字替换掉。"""
+    current = _known_secrets.get()
+    fresh = {
+        v.strip()
+        for v in values
+        if isinstance(v, str) and len(v.strip()) >= _MIN_SECRET_CHARS and v.strip() not in current
+    }
+    if fresh:
+        # 长的先替换，避免短值先命中后长值残留
+        _known_secrets.set(tuple(sorted({*current, *fresh}, key=len, reverse=True)))
+
+
+def redact_known_secrets(text: str) -> str:
+    for secret in _known_secrets.get():
+        if secret in text:
+            text = text.replace(secret, "***")
+    return text
+
+
 def redact_sensitive_text(value: Any, *, max_chars: int = _MAX_DETAIL_CHARS) -> str:
-    text = str(value or "")
+    text = redact_known_secrets(str(value or ""))
     for pattern in _SENSITIVE_TEXT_PATTERNS:
         if pattern.groups >= 2:
             text = pattern.sub(r"\1***", text)

@@ -60,6 +60,7 @@ class ResolvePreviewRequest(BaseModel):
     fastMode: bool = False
     echoReasoning: bool = True
     authStyle: str | None = None
+    maxTokens: int | None = None
 
 
 def _list_models_protocol(req: TestModelsRequest) -> str:
@@ -215,5 +216,6 @@ async def resolve_preview(req: ResolvePreviewRequest) -> dict[str, Any]:
         fast_mode=req.fastMode,
         echo_reasoning=req.echoReasoning,
         auth_style=req.authStyle,
+        max_tokens=req.maxTokens,
     )
     return resolution.to_public_dict()

@@ -33,7 +33,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, AsyncIterator, Iterable, Literal
 
-from app.errors import redact_sensitive_text
+from app.errors import redact_known_secrets, redact_sensitive_text, register_secrets
 from app.request_context import get_request_id
 
 logger = logging.getLogger(__name__)
@@ -122,6 +122,34 @@ _MAX_STRING_LEAF_CHARS = 1_000_000
 
 def _redaction_marker() -> str:
     return "***"
+
+
+def _register_request_secrets(url: str, headers: dict[str, Any] | Iterable[tuple[str, Any]] | None) -> None:
+    """把这次请求的鉴权头和 URL 里的 key 登记下来，之后按值打码（上游错误可能原样回显）。"""
+    values: list[str] = []
+    items = list(headers.items()) if isinstance(headers, dict) else list(headers or [])
+    for k, v in items:
+        if str(k).lower() not in _SENSITIVE_HEADER_KEYS or not isinstance(v, str):
+            continue
+        values.append(v)
+        if v.lower().startswith("bearer "):
+            values.append(v[len("bearer ") :])
+    if isinstance(url, str) and "?" in url:
+        for pair in url.split("?", 1)[1].split("&"):
+            key, _, value = pair.partition("=")
+            if key.lower() in (*_SENSITIVE_BODY_KEYS, "key") and value:
+                values.append(value)
+    register_secrets(*values)
+
+
+def _scrub_known_secrets(value: Any) -> Any:
+    if isinstance(value, str):
+        return redact_known_secrets(value)
+    if isinstance(value, list):
+        return [_scrub_known_secrets(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _scrub_known_secrets(v) for k, v in value.items()}
+    return value
 
 
 def _data_root() -> Path:
@@ -488,6 +516,7 @@ async def log_outbound(
     correlated_request_id = request_id or get_request_id()
     started_at = time.time()
     handle = _RecordHandle(record_id=record_id)
+    _register_request_secrets(url, request_headers)
     try:
         yield handle
     except BaseException as e:
@@ -516,7 +545,7 @@ async def log_outbound(
         }
         if extra:
             record["extra"] = extra
-        await _write_record(record)
+        await _write_record(_scrub_known_secrets(record))
 
 
 def _normalize_response_body(handle: "_RecordHandle") -> Any:
@@ -570,6 +599,7 @@ def log_outbound_sync(
     correlated_request_id = request_id or get_request_id()
     started_at = time.time()
     handle = _RecordHandle(record_id=record_id)
+    _register_request_secrets(url, request_headers)
     err: BaseException | None = None
     try:
         yield handle

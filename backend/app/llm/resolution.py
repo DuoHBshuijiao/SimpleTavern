@@ -88,6 +88,11 @@ _CLAUDE_BETWEEN_TOOLS_RE = re.compile(r"sonnet-5[-.]5", re.IGNORECASE)
 # Claude 5 系默认开自适应，要关必须显式发 disabled；更早的模型省略 thinking 就是关
 _CLAUDE_5_RE = re.compile(r"opus-5|sonnet-5|haiku-5|claude-5", re.IGNORECASE)
 _CLAUDE_BUDGET_BY_EFFORT: dict[str, int] = {"minimal": 1024, "low": 2048, "medium": 4096, "high": 8192, "xhigh": 16384, "max": 16384}
+# 手动思考的硬约束（Anthropic / Bedrock extended thinking 文档）：1024 <= budget_tokens < max_tokens
+_MIN_THINKING_BUDGET = 1024
+# 用户没设最大输出时，在思考预算之外给正文留的空间（与 Anthropic 适配器的默认 max_tokens 相同）
+_THINKING_ANSWER_TOKENS = 4096
+_ANTHROPIC_DEFAULT_MAX_TOKENS = 4096
 # Mistral reasoning_effort 按模型不同（docs.mistral.ai/inference/conversations/reasoning）
 _MISTRAL_SMALL_MEDIUM_RE = re.compile(r"mistral-small-2603|mistral-medium-3-5", re.IGNORECASE)
 _MISTRAL_LARGE_RE = re.compile(r"mistral-large-4", re.IGNORECASE)
@@ -143,6 +148,8 @@ class ProtocolResolution:
     supports_fast_mode: bool = False
     capabilities_source: str = "heuristic"
     cache: PromptCachePlan | None = None
+    # T-832：为满足思考预算约束而抬高后的最大输出；None 表示沿用调用方的值
+    max_tokens: int | None = None
     # T-832：当前组合做不到的能力；prepare_llm_request 据此 fast-fail，预览里只显示
     unsupported_reason: str | None = None
     # 历史思考内容回传（DeepSeek 带 tools 请求强制要求；其余厂商可关）
@@ -179,6 +186,8 @@ class ProtocolResolution:
         }
         if self.unsupported_reason:
             out["unsupportedReason"] = self.unsupported_reason
+        if self.max_tokens is not None:
+            out["maxTokens"] = self.max_tokens
         if self.cache is not None:
             out["cache"] = self.cache.to_meta()
         return out
@@ -456,6 +465,65 @@ def _claude_platform_thinking(model: str, effort: str) -> dict[str, Any]:
     return {"thinking": {"type": "enabled", "budget_tokens": _CLAUDE_BUDGET_BY_EFFORT.get(effort, 4096)}}
 
 
+def _fit_thinking_budget(
+    *,
+    protocol: str,
+    extra: dict[str, Any],
+    max_tokens: int | None,
+) -> tuple[int | None, list[dict[str, Any]], str | None]:
+    """让手动思考预算满足 1024 <= budget_tokens < max_tokens。
+
+    返回 (要改成的 max_tokens 或 None, 调整记录, 做不到时的原因)。
+    - 没设最大输出：抬高最大输出到 预算 + 4096，预算不动。
+    - 设了最大输出：预算夹到 max(1024, min(预算, max_tokens - 1024))，尽量给正文留 1024。
+    - 最大输出 <= 1024：无法满足，fast-fail。
+    """
+    if protocol == ANTHROPIC_MESSAGES_PROTOCOL:
+        holder = extra
+        default_max: int | None = _ANTHROPIC_DEFAULT_MAX_TOKENS
+    elif protocol == BEDROCK_CONVERSE_PROTOCOL and isinstance(extra.get("additionalModelRequestFields"), dict):
+        holder = extra["additionalModelRequestFields"]
+        default_max = None  # Converse 不设 maxTokens 时由模型决定，预算无法保证小于它
+    else:
+        return None, [], None
+    thinking = holder.get("thinking")
+    if not isinstance(thinking, dict) or thinking.get("type") != "enabled":
+        return None, [], None
+    budget = thinking.get("budget_tokens")
+    if not isinstance(budget, int) or isinstance(budget, bool):
+        # 与适配器原先的推导一致：按 reasoning.effort / reasoning_effort 取预算
+        effort_hint = (extra.get("reasoning") or {}).get("effort") if isinstance(extra.get("reasoning"), dict) else None
+        budget = _CLAUDE_BUDGET_BY_EFFORT.get(str(effort_hint or extra.get("reasoning_effort") or "medium"), 4096)
+    budget = max(_MIN_THINKING_BUDGET, int(budget))
+    adjustments: list[dict[str, Any]] = []
+    new_max: int | None = None
+    if max_tokens is None or max_tokens <= 0:
+        limit = default_max
+        if limit is None or budget >= limit:
+            new_max = budget + _THINKING_ANSWER_TOKENS
+            adjustments.append(
+                _adj(
+                    "max_tokens_raised",
+                    **{"from": limit, "to": new_max},
+                    reason=f"思考预算 {budget} 必须小于最大输出，未设置最大输出时抬高到 {new_max}",
+                )
+            )
+    elif max_tokens <= _MIN_THINKING_BUDGET:
+        return None, [], f"最大输出 {max_tokens} 太小：思考预算至少 {_MIN_THINKING_BUDGET} 且必须小于最大输出，请调大最大输出或关闭思考"
+    elif budget >= max_tokens:
+        clamped = max(_MIN_THINKING_BUDGET, min(budget, max_tokens - _MIN_THINKING_BUDGET))
+        adjustments.append(
+            _adj(
+                "thinking_budget_clamped",
+                **{"from": budget, "to": clamped},
+                reason=f"思考预算必须小于最大输出 {max_tokens}，从 {budget} 降到 {clamped}",
+            )
+        )
+        budget = clamped
+    holder["thinking"] = {**thinking, "budget_tokens": budget}
+    return new_max, adjustments, None
+
+
 def build_request_extras(
     *,
     protocol: str,
@@ -702,6 +770,7 @@ def resolve_request(
     catalog: LlmCatalog | None = None,
     echo_reasoning: bool = True,
     echo_reasoning_source: str = "preset",
+    max_tokens: int | None = None,
 ) -> tuple[ProtocolResolution, dict[str, Any], dict[str, str], float | None, float | None]:
     """纯解析（不读 settings）：返回 (resolution, extra_body_without_control, headers, temperature, top_p)。"""
     cat = catalog or get_catalog()
@@ -752,6 +821,11 @@ def resolve_request(
         top_p=top_p,
         auth_style=auth_style,
     )
+    raised_max_tokens, budget_adjustments, budget_reason = _fit_thinking_budget(
+        protocol=effective, extra=extra, max_tokens=max_tokens
+    )
+    if budget_reason and not unsupported_reason:
+        unsupported_reason = budget_reason
 
     cache_plan = build_prompt_cache_plan(
         credentials.prompt_cache,
@@ -771,6 +845,7 @@ def resolve_request(
     if clamp_adj:
         adjustments.append(clamp_adj)
     adjustments.extend(extra_adjustments)
+    adjustments.extend(budget_adjustments)
     adjustments.extend(cache_plan.adjustments)
     if unsupported_reason:
         adjustments.append(_adj("capability_unsupported", reason=unsupported_reason))
@@ -795,6 +870,7 @@ def resolve_request(
         supports_fast_mode=caps.supports_fast_mode,
         capabilities_source=caps.source,
         cache=cache_plan,
+        max_tokens=raised_max_tokens,
         unsupported_reason=unsupported_reason or cache_plan.unsupported_reason,
         echo_reasoning=echo_reasoning,
         echo_reasoning_source=echo_reasoning_source,
@@ -838,6 +914,7 @@ def prepare_llm_request(
         catalog=catalog,
         echo_reasoning=echo,
         echo_reasoning_source=echo_source,
+        max_tokens=max_tokens,
     )
     merged_extra: dict[str, Any] = dict(extra_body or {})
     merged_extra.update(extra)
@@ -855,6 +932,7 @@ def prepare_llm_request(
         auth_style=credentials.auth_style or (entry.auth_style if entry else None),
         protocol_variant="chatgpt_subscription" if credentials.provider_id == "openai-chatgpt" else (entry.protocol_variant if entry else None),
         provider_params=dict(credentials.provider_params) if credentials.provider_params else None,
+        max_tokens=resolution.max_tokens,
     )
     if resolution.thinking_enabled and out_temperature is not None and resolution.effective == ANTHROPIC_MESSAGES_PROTOCOL:
         # Anthropic 开思考时 temperature 必须为 1 / 省略；适配器已处理，这里只为 SSE 一致性
@@ -891,7 +969,7 @@ def prepare_llm_request(
         extra_body=merged_extra,
         temperature=out_temperature,
         top_p=out_top_p,
-        max_tokens=max_tokens,
+        max_tokens=resolution.max_tokens or max_tokens,
         thinking_enabled=resolution.thinking_enabled,
         resolution=resolution,
         credentials=credentials,
@@ -912,6 +990,7 @@ def preview_resolution(
     echo_reasoning: bool = True,
     catalog: LlmCatalog | None = None,
     auth_style: str | None = None,
+    max_tokens: int | None = None,
 ) -> ProtocolResolution:
     """预设编辑器预览：不需要 api_key。"""
     from app.schemas import normalize_reasoning_effort
@@ -943,6 +1022,7 @@ def preview_resolution(
         fast_mode=fast_mode,
         catalog=catalog,
         echo_reasoning=echo_reasoning,
+        max_tokens=max_tokens,
     )
     return resolution
 

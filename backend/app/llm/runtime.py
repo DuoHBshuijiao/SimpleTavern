@@ -35,11 +35,12 @@ def _config(
     remaining, control = pop_control_block(extra_body)
     headers = control.get("extra_headers")
     provider_params = control.get("provider_params")
+    override_max = control.get("max_tokens")
     return GenerationConfig(
         model=model,
         temperature=temperature,
         top_p=top_p,
-        max_tokens=max_tokens,
+        max_tokens=override_max if isinstance(override_max, int) and override_max > 0 else max_tokens,
         tools=tools,
         extra_body=remaining,
         stream=stream,

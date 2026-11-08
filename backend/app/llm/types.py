@@ -200,6 +200,7 @@ def attach_control_block(
     auth_style: str | None = None,
     protocol_variant: str | None = None,
     provider_params: dict[str, str] | None = None,
+    max_tokens: int | None = None,
 ) -> dict[str, Any]:
     """把结构化控制信息挂到 extra_body（``ST_CONTROL_KEY``），runtime 取出填入 GenerationConfig。"""
     out = dict(extra_body or {})
@@ -216,6 +217,9 @@ def attach_control_block(
         block["protocol_variant"] = protocol_variant
     if provider_params:
         block["provider_params"] = dict(provider_params)
+    if max_tokens:
+        # T-832：为满足思考预算 < max_tokens 而抬高的最大输出（见 resolution._fit_thinking_budget）
+        block["max_tokens"] = int(max_tokens)
     if block:
         out[ST_CONTROL_KEY] = block
     return out

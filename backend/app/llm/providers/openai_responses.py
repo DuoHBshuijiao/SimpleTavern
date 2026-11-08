@@ -863,6 +863,13 @@ async def complete_responses(
             usage = decode_usage(_usage_with_service_tier(data))
             usage_dict = usage.to_public_dict() if usage is not None else None
             if as_message:
+                if not text.strip() and not reasoning and not tool_calls:
+                    # 与 OpenAI 兼容路径一致：空消息不能当成功
+                    raise _protocol_error(
+                        code="provider_response_invalid",
+                        message="上游服务返回了空消息",
+                        detail="openai responses: output_text, reasoning summary and tool_calls are empty",
+                    )
                 return ChatCompletionMessage(
                     role="assistant",
                     content=text,
