@@ -670,11 +670,10 @@ async def timed_open(ctx, page, key, runs=5):
     other = "SHORT" if key != "SHORT" else "MID"
     results = []
     for _ in range(runs):
+        # 先切到另一个会话：LONG 可能已经是首页会话，直接点它量不到变化
         await enter_chat_any(ctx, page, other)
-        await page.js(f"""document.querySelector('[data-character-id="{chat['characterId']}"]').click()""")
-        await page.wait_for(item, 10)
-        # 点侧栏角色可能已经自动进入，回到另一个会话的角色时才能量到完整的打开
-        result = await page.js(rf"""new Promise(done => {{ performance.clearResourceTimings(); const t0=performance.now(); const before=(()=>{{ const r=$rows(); return r.length?r[r.length-1].innerText:''; }})(); {item}.click(); let longest=0, prev=t0, shown=null; const tick=()=>{{ const now=performance.now(); longest=Math.max(longest,now-prev); prev=now; const r=$rows(); const last=r[r.length-1]; if(shown===null&&last&&last.innerText!==before){{ const el=$s(); const top=last.getBoundingClientRect().top-el.getBoundingClientRect().top; if(Math.abs(top-parseFloat(getComputedStyle(el).paddingTop))<=2||el.scrollHeight-el.clientHeight-el.scrollTop<=2) shown=now-t0; }} if(shown!==null||now-t0>15000){{ const api=performance.getEntriesByType('resource').find(e=>e.name.endsWith('/api/chats/'+{json.dumps(chat_id)})); done({{shown,longest,api:api?api.duration:null}}); }} else requestAnimationFrame(tick); }}; requestAnimationFrame(tick); }})""")
+        # 从点角色开始计时：点角色可能直接进入它最近的会话；没进入的话再点会话条目，只点一次
+        result = await page.js(rf"""new Promise(done => {{ performance.clearResourceTimings(); const t0=performance.now(); const before=(()=>{{ const r=$rows(); return r.length?r[r.length-1].innerText:''; }})(); document.querySelector('[data-character-id="{chat['characterId']}"]').click(); let clicked=false; const pick=()=>{{ if(clicked) return; const it={item}; if(it&&!it.classList.contains('bg-brand-a10')){{ clicked=true; it.click(); }} }}; let longest=0, prev=t0, shown=null; const tick=()=>{{ pick(); const now=performance.now(); longest=Math.max(longest,now-prev); prev=now; const r=$rows(); const last=r[r.length-1]; if(shown===null&&last&&last.innerText!==before){{ const el=$s(); const top=last.getBoundingClientRect().top-el.getBoundingClientRect().top; if(Math.abs(top-parseFloat(getComputedStyle(el).paddingTop))<=2||el.scrollHeight-el.clientHeight-el.scrollTop<=2) shown=now-t0; }} if(shown!==null||now-t0>15000){{ const api=performance.getEntriesByType('resource').find(e=>e.name.endsWith('/api/chats/'+{json.dumps(chat_id)})); done({{shown,longest,api:api?api.duration:null}}); }} else requestAnimationFrame(tick); }}; requestAnimationFrame(tick); }})""")
         results.append(result)
         await asyncio.sleep(0.6)
     return results
@@ -762,6 +761,11 @@ ERROR_ITEMS = r"""[...document.querySelectorAll('code.font-mono')].filter(c=>c.p
 ERROR_ANY = r"""[...document.querySelectorAll('button[aria-label="关闭错误提示"]')].map(b=>{ const box=b.closest('.surface-panel'); return {title:box?.querySelector('.font-semibold')?.innerText.trim(), message:box?.querySelector('pre')?.innerText.trim(), hasId:box?.innerText.includes('requestId')}; })"""
 
 
+# 断连接时，提示里出现其中任何一个就算说明了“连上后中途断开”
+TRANSPORT_WORDS = ("中断", "断开", "中途", "断流", "意外结束", "提前结束", "未完整", "不完整", "截断", "interrupted", "disconnect", "reset", "aborted", "incomplete")
+STREAM_HALF = {"stream_error": "流里出错之前的半句", "stream_reset": "断流之前的半句"}
+
+
 async def send_in_chat(page, text):
     await page.js(f"""$type($input(), {json.dumps(text)})""")
     await asyncio.sleep(0.2)
@@ -818,6 +822,21 @@ async def check_errors(ctx):
         ctx.check(f"{name}：界面上用户消息还在", await page.js(f"$rows().slice(-3).some(r=>r.innerText.includes({json.dumps(text)}))"))
         tail = [m for m in messages[len(before):]]
         ctx.note(f"错误 {fault} 之后新增的消息", [{"role": m.get("role"), "空": not str(m.get("content") or "").strip()} for m in tail])
+        if fault in STREAM_HALF:
+            panels = " ".join(" ".join(str(x.get(k) or "") for k in ("title", "message")) for x in anything)
+            panels += " " + " ".join(str(x.get("suggestion") or "") for x in items)
+            ctx.check(f"{name}：保留了半句", any(m.get("role") == "assistant" and STREAM_HALF[fault] in str(m.get("content")) for m in tail), [m.get("role") for m in tail])
+            if fault == "stream_error":
+                upstream = state.stream_error_text
+                in_panel = upstream in panels
+                in_page = upstream in visible
+                ctx.note("流内错误：上游原文出现的位置", {"错误栈": in_panel, "页面任意位置": in_page})
+                ctx.check(f"{name}：错误提示里有上游原文", in_panel or in_page, panels[:160])
+            else:
+                words = [w for w in TRANSPORT_WORDS if w in panels.lower()]
+                ctx.note("断连接：命中的关键词", words)
+                ctx.check(f"{name}：提示说明是传输中断", bool(words), panels[:160])
+                ctx.check(f"{name}：提示不说成无法连接", "无法连接" not in panels, panels[:160])
         if request_id:
             hits = 0
             for path in glob.glob(os.path.join(ctx.data_dir, "http_log", "*.jsonl")):
