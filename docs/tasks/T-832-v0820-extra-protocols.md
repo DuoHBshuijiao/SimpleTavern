@@ -1,6 +1,6 @@
 # T-832 v0.820 Bedrock / Mistral / Vertex 原生协议（P1，可滑动）
 
-- status: **implemented，待黑盒验证和作者 Vertex 实测**
+- status: **implemented，独立黑盒检查已通过（2026-11-08，`tools/api-check` t832 171 项通过 169，另 2 项规格未定义），待作者 Vertex 实测**；Bedrock 和 Mistral 只有模拟验证
 - area: `backend/app/llm/providers/`
 - priority: P1
 - depends_on: T-820-A2（Bedrock Anthropic invoke 变体已有；eventstream 仍 fast-fail）

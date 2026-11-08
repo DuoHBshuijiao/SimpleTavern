@@ -1,6 +1,55 @@
 # SimpleTavern 后端 API 规范
 
-新增联网与订阅契约见本文「2026-10-22 原生联网与订阅接入增补」。
+新增联网与订阅契约见本文「2026-10-22 原生联网与订阅接入增补」；v1.000 验收期间的增补见「2026-11-07 增补」。
+
+## 2026-11-07 增补（v1.000 验收）
+
+本节没有新增路径，只补充字段和行为。黑盒检查见 `tools/api-check/`。
+
+### 搜索和设置
+
+- `GET /api/chats/{chat_id}/search` 最多返回 300 条命中，`ChatSearchResponse.truncated` 为 true 表示实际更多。
+- `Settings` 新增 `readingFont`（string | null，消息正文的字体文件名，为空时跟随 `selectedFont`）和 `messageLineHeight`（number | null，范围 1.0 到 3.0，为空时用默认）。
+- 角色的 `description` 是简介，不进入发给模型的提示词；`personality`、`scenario`、`exampleDialogue`、`systemPrompt` 会进入。
+
+### T-832 额外协议
+
+| 场景 | 预设字段 | 上游请求 |
+|---|---|---|
+| Bedrock Converse | `protocol=bedrock_converse`，`apiKey` 作为 `Authorization: Bearer`，`baseUrl` 形如 `https://bedrock-runtime.<region>.amazonaws.com` | `{baseUrl}/model/{modelId}/converse` 和 `/converse-stream`；模型列表走 `bedrock.` 主机的 `/foundation-models` |
+| Mistral Conversations | `protocol=mistral_conversations`，Bearer，`baseUrl` 带不带 `/v1` 都可以 | `/v1/conversations`，`store=false` |
+| Vertex 上的 Claude | `protocol=anthropic_messages`，`authStyle=vertex_service_account`，`apiKey` 是服务账号 JSON，`baseUrl` 形如 `https://<host>/v1/projects/<project>/locations/<location>` | `{baseUrl}/publishers/anthropic/models/{model}:rawPredict` 和 `:streamRawPredict`，请求体带 `anthropic_version`、不带 `model`；没有模型列表，`list` 明确失败 |
+| Bedrock 上的 Claude | `protocol=anthropic_messages`，`providerParams._host` 含 `bedrock-runtime` | 流式 `invoke-with-response-stream` 返回的 eventstream 现在支持，不再 fast-fail |
+
+- **eventstream：** 校验前导和消息的 CRC。CRC 错误、帧截断、异常帧、没有结束事件都转成统一错误，不当成成功。
+- **Vertex 令牌：** 用服务账号签 JWT，向 JSON 里的 `token_uri` 换 access token，按服务账号缓存在内存，距过期 5 分钟内刷新，Vertex 返回 401 时作废。换令牌阶段的任何失败（连接、断连、超时、非 JSON、缺 `access_token`、4xx/5xx、服务账号 JSON 无效），错误消息都以“获取 Vertex 访问令牌失败：”开头。
+- **服务账号私钥：** `GET /api/settings`、`PUT /api/settings` 的响应和 `GET /api/settings/backup` 里，`private_key` 换成占位值；写回时按预设 id、`client_email` 和 `private_key_id` 还原。备份不含私钥，恢复后要重新粘贴，否则使用时报 `config_invalid`。服务账号 JSON 配其他鉴权风格或协议时，在发出请求之前就被拒绝。
+- **不支持时明确失败：** 图片、Fast、不支持的缓存写法和推理档位都返回 `provider_capability_unsupported`，不静默降级。各家的能力矩阵见 `docs/tasks/T-832-v0820-extra-protocols.md`。
+
+### 思考预算
+
+手动思考（`thinking.enabled`，涉及 Anthropic 直连、Vertex、Bedrock invoke，以及 Converse 上的 Claude）必须满足 1024 ≤ `budget_tokens` < `max_tokens`：
+
+- 没设最大输出：预算不变，最大输出抬到预算加 4096，记为 `max_tokens_raised`。
+- 设了最大输出但不大于预算：预算夹紧到 max(1024, min(预算, 最大输出 − 1024))，记为 `thinking_budget_clamped`。
+- 最大输出不超过 1024：两个约束无法同时满足，返回 `provider_capability_unsupported`，不偷偷关掉思考。
+
+调整写入 SSE `meta.protocolResolution.adjustments`，也出现在 `POST /api/llm/resolve-preview` 的结果里（请求可带可选的 `maxTokens`）。
+
+### 空输出和密钥
+
+- 上游返回 200，但没有任何文本、思考或工具调用时，返回 `provider_response_invalid`，不当成成功，不写空的助手消息。适用于所有协议的流式和非流式。
+- 本次请求认证头里的密钥值（`Authorization`、`x-api-key`、`api-key`、`x-goog-api-key`、URL 里的 `key=`，8 个字符以上）会在错误的 `message` 和 `detail`、SSE 错误事件、HTTP 日志的列表和详情里按值打码。这覆盖 Bedrock 的 `ABSK…` Key、Mistral Key 和 Vertex access token。放在请求体里的密钥仍按字段名规则打码。
+
+### 当前行为，规格尚未定义
+
+黑盒检查观察到以下行为，记在这里供发布评审决定是否就此定为约定：
+
+- `PUT` 不存在的角色或世界书会直接创建并返回 200；`PUT` 不存在的会话返回 404。
+- `DELETE` 不存在的角色或会话返回 `{"ok": true}`。
+- 会话只设 `worldBookIds` 和 `worldBookAttachments`、不设 `sessionChatIds` 时，命中关键词也不注入。
+- 会话不存在时，生成接口返回 `not_found`，用量接口返回 `chat_not_found`。
+- basic 范围的设置备份含明文 API Key。
 
 ## 2026-10-22 原生联网与订阅接入增补
 
