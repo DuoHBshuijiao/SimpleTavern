@@ -1,5 +1,5 @@
 ﻿<script setup lang="ts">
-import { inject } from 'vue'
+import { computed, inject } from 'vue'
 import SubscriptionUsagePanel from './SubscriptionUsagePanel.vue'
 import { Eye, EyeOff, Loader2, X } from 'lucide-vue-next'
 import ModernSelect from '../ModernSelect.vue'
@@ -10,8 +10,32 @@ import SettingsField from './SettingsField.vue'
 import SettingsHint from './SettingsHint.vue'
 import SettingsSwitch from './SettingsSwitch.vue'
 import { SETTINGS_DRAWER_PRESETS_KEY } from '../../composables/settingsDrawerPresetsKey'
+import { EXTRA_LLM_PROTOCOL_OPTIONS, VERTEX_SERVICE_ACCOUNT_AUTH_STYLE } from '../../types/models'
 
 const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
+
+/** 协议下拉：在常量表之外追加 T-832 的原生协议，并去掉它们被判成「未知协议」的那一项 */
+function protocolOptions(current?: string | null): Array<{ label: string; value: string }> {
+  const extras = EXTRA_LLM_PROTOCOL_OPTIONS.map((o) => o.value as string)
+  const base: Array<{ label: string; value: string }> = presets.llmProtocolSelectOptions(current)
+  return [...base.filter((o) => !extras.includes(o.value)), ...EXTRA_LLM_PROTOCOL_OPTIONS]
+}
+
+const isVertexPreset = computed(
+  () => !presets.isTtsPreset(presets.editingPreset) && presets.editingPreset?.authStyle === VERTEX_SERVICE_ACCOUNT_AUTH_STYLE,
+)
+const showAuthStyleField = computed(
+  () => !presets.isTtsPreset(presets.editingPreset) && (presets.editingPreset?.protocol === 'anthropic_messages' || isVertexPreset.value),
+)
+const authStyleOptions = computed(() => {
+  const options = [
+    { label: 'API Key（默认）', value: '' },
+    { label: 'Google 服务账号（Vertex）', value: VERTEX_SERVICE_ACCOUNT_AUTH_STYLE as string },
+  ]
+  const current: string = presets.editingPreset?.authStyle || ''
+  if (current && !options.some((o) => o.value === current)) options.push({ label: current, value: current })
+  return options
+})
 </script>
 
 <template>
@@ -132,14 +156,51 @@ const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
                         >
                             <ModernSelect
                               :model-value="presets.editingPreset!.protocol || 'openai_compatible_chat'"
-                              :options="presets.llmProtocolSelectOptions(presets.editingPreset!.protocol)"
+                              :options="protocolOptions(presets.editingPreset!.protocol)"
                               class="w-full"
                               placeholder="选择协议…"
                               @update:model-value="(v) => { if (presets.editingPreset) presets.editingPreset.protocol = String(v) }"
                             />
                         </SettingsField>
 
-                        <div class="settings-field">
+                        <SettingsField v-if="showAuthStyleField" label="鉴权方式" hint="Vertex 上的 Claude 选 Google 服务账号。">
+                            <ModernSelect
+                              :model-value="presets.editingPreset!.authStyle || ''"
+                              :options="authStyleOptions"
+                              placeholder="API Key（默认）"
+                              class="w-full"
+                              @update:model-value="(v) => { if (presets.editingPreset) presets.editingPreset.authStyle = String(v) || null }"
+                            />
+                        </SettingsField>
+
+                        <SettingsField
+                          v-if="isVertexPreset"
+                          label="服务账号 JSON"
+                          hint="粘贴从 Google Cloud 下载的服务账号密钥 JSON 全文。"
+                          more="私钥只保存在本机，用来换取短期 access token。保存后再打开时 private_key 显示为占位内容，不影响使用；要换账号就粘贴新的 JSON。设置备份不含私钥，恢复备份后需要重新粘贴。"
+                        >
+                            <template #actions>
+                              <button
+                                type="button"
+                                class="inline-flex min-h-8 min-w-8 items-center justify-center rounded-md text-[var(--color-text-muted)] touch-manipulation hover:text-[var(--color-text-secondary)]"
+                                :aria-label="presets.editingPresetShowApiKey ? '隐藏服务账号 JSON' : '显示服务账号 JSON'"
+                                @click="presets.editingPresetShowApiKey = !presets.editingPresetShowApiKey"
+                              >
+                                  <component :is="presets.editingPresetShowApiKey ? Eye : EyeOff" class="w-4 h-4" />
+                              </button>
+                            </template>
+                            <textarea
+                              v-model="presets.editingPreset!.apiKey"
+                              rows="8"
+                              class="input textarea w-full resize-y font-mono"
+                              spellcheck="false"
+                              autocomplete="off"
+                              :style="presets.editingPresetShowApiKey ? undefined : '-webkit-text-security: disc'"
+                              placeholder='{ "type": "service_account", "client_email": "...", "private_key": "...", "token_uri": "..." }'
+                            ></textarea>
+                        </SettingsField>
+
+                        <div v-if="!isVertexPreset" class="settings-field">
                             <span v-if="!presets.presetRequiresOAuth(presets.editingPreset)" class="settings-label">API Key</span>
                              <div v-if="!presets.presetRequiresOAuth(presets.editingPreset)" class="relative">
                                 <input

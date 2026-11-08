@@ -9,6 +9,8 @@ Scope:
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 from typing import Any, AsyncIterator
 from urllib.parse import quote, urlsplit, urlunsplit
@@ -16,6 +18,7 @@ from urllib.parse import quote, urlsplit, urlunsplit
 import httpx
 
 from app.errors import AppError, as_app_error
+from app.llm.aws_eventstream import EVENTSTREAM_CONTENT_TYPE, aiter_event_frames, frame_json
 from app.llm.prompt_cache import (
     PromptCachePlan,
     anthropic_mark_tools,
@@ -33,8 +36,10 @@ from app.llm.types import (
     GenerationConfig,
     Usage,
     WireRequest,
+    is_vertex_service_account_style,
     normalize_anthropic_prompt_cache,
 )
+from app.llm.vertex_auth import finish_upstream_error, get_access_token, looks_like_service_account_json
 from app.services.http_client import get_async_http_client
 from app.services.http_log import log_outbound
 
@@ -42,6 +47,7 @@ _PROVIDER = "anthropic"
 _PROTOCOL = ANTHROPIC_MESSAGES_PROTOCOL
 _ANTHROPIC_VERSION = "2023-06-01"
 _BEDROCK_ANTHROPIC_VERSION = "bedrock-2023-05-31"
+_VERTEX_ANTHROPIC_VERSION = "vertex-2023-10-16"
 _DEFAULT_MAX_TOKENS = 4096
 _MAX_ERROR_BODY_CHARS = 12000
 _MESSAGES_SUFFIX = "/messages"
@@ -179,7 +185,50 @@ def _bedrock_invoke_url(base_url: str, model: str, *, stream: bool) -> str:
     return f"{raw}/model/{encoded}/{action}"
 
 
+def _is_vertex(config: GenerationConfig | None) -> bool:
+    return config is not None and is_vertex_service_account_style(getattr(config, "auth_style", None))
+
+
+def _vertex_unsupported(message: str, detail: str, *, suggested_action: str) -> AppError:
+    return AppError(
+        code="provider_capability_unsupported",
+        message=message,
+        detail=detail,
+        source="llm.anthropic_messages",
+        status_code=400,
+        provider=_PROVIDER,
+        protocol=_PROTOCOL,
+        suggested_action=suggested_action,
+    )
+
+
+def _vertex_url(base_url: str, model: str, *, stream: bool) -> str:
+    raw = (base_url or "").strip()
+    if not (raw.startswith("http://") or raw.startswith("https://")):
+        raw = "https://" + raw
+    raw = raw.rstrip("/")
+    if "{" in raw:
+        raise AppError(
+            code="config_missing",
+            message="Vertex 地址还有没填的参数",
+            detail="base URL still contains a placeholder",
+            source="llm.anthropic_messages",
+            status_code=400,
+            provider=_PROVIDER,
+            protocol=_PROTOCOL,
+            suggested_action="在供应商参数里填写项目 ID 和位置",
+        )
+    suffix = "/publishers/anthropic"
+    if raw.lower().endswith(suffix):
+        raw = raw[: -len(suffix)]
+    action = "streamRawPredict" if stream else "rawPredict"
+    encoded = quote(model.strip(), safe=".-_@")
+    return f"{raw}{suffix}/models/{encoded}:{action}"
+
+
 def _request_url(base_url: str, config: GenerationConfig, *, stream: bool) -> str:
+    if _is_vertex(config):
+        return _vertex_url(base_url, config.model, stream=stream)
     if _is_bedrock(config):
         return _bedrock_invoke_url(base_url, config.model, stream=stream)
     return _messages_url(base_url)
@@ -195,6 +244,21 @@ def _auth_headers(api_key: str) -> dict[str, str]:
 def _request_auth_headers(api_key: str, config: GenerationConfig | None = None) -> dict[str, str]:
     from app.llm.types import auth_headers_for_style
 
+    if _is_vertex(config):
+        # access token 要联网换取，由 _vertex_auth_headers 补上
+        return {}
+    if looks_like_service_account_json(api_key):
+        # 只有 TTS 这类不走 prepare_llm_request 的调用会到这里；绝不能把私钥放进请求头
+        raise AppError(
+            code="config_invalid",
+            message="服务账号 JSON 不能当作普通 API Key 使用",
+            detail="api key looks like a Google service account but auth style is not vertex_service_account",
+            source="llm.anthropic_messages",
+            status_code=400,
+            provider=_PROVIDER,
+            protocol=_PROTOCOL,
+            suggested_action="把预设的鉴权方式改为 Google 服务账号",
+        )
     style = (config.auth_style if config else None) or None
     if _is_bedrock(config):
         return auth_headers_for_style(api_key, style or "bearer")
@@ -205,7 +269,29 @@ def _request_auth_headers(api_key: str, config: GenerationConfig | None = None) 
     return headers
 
 
+async def _vertex_auth_headers(api_key: str, config: GenerationConfig) -> dict[str, str]:
+    if not _is_vertex(config):
+        return {}
+    return {"Authorization": f"Bearer {await get_access_token(api_key)}"}
+
+
+def _stream_accept(config: GenerationConfig) -> str:
+    return EVENTSTREAM_CONTENT_TYPE if _is_bedrock(config) and not _is_vertex(config) else "text/event-stream"
+
+
 def _apply_bedrock_payload(payload: dict[str, Any], config: GenerationConfig) -> dict[str, Any]:
+    if _is_vertex(config):
+        for tool in payload.get("tools") or []:
+            if isinstance(tool, dict) and str(tool.get("type") or "").startswith("web_fetch"):
+                raise _vertex_unsupported(
+                    "Google 托管的 Vertex Claude 不支持网页抓取工具",
+                    f"tool type={tool.get('type')}",
+                    suggested_action="在预设的联网高级设置里关闭「允许网页抓取」",
+                )
+        out = dict(payload)
+        out.pop("model", None)
+        out["anthropic_version"] = _VERTEX_ANTHROPIC_VERSION
+        return out
     if not _is_bedrock(config):
         return payload
     out = dict(payload)
@@ -567,6 +653,11 @@ def _sanitize_extra_body(extra_body: dict[str, Any] | None) -> tuple[dict[str, A
         # T-822：Opus 4.6+ / Sonnet 4.6+ 自适应思考，深度由 output_config.effort 控制
         thinking_enabled = True
         out["thinking"] = {"type": "adaptive"}
+        if isinstance(thinking.get("display"), str):
+            out["thinking"]["display"] = thinking["display"]
+    elif isinstance(thinking, dict) and thinking.get("type") == "between_tools":
+        # Sonnet 5.5 没有 disabled，这是它最低的思考设置
+        out["thinking"] = {"type": "between_tools"}
     elif isinstance(thinking, dict) and thinking.get("type") == "disabled":
         thinking_enabled = False
         # T-824：显式发送 disabled——DeepSeek 等 Anthropic 兼容端点默认开启思考，省略不等于关闭
@@ -854,6 +945,7 @@ async def _complete_anthropic_once(
         "Accept": "application/json",
         "Content-Type": "application/json",
         **_request_auth_headers(api_key, config),
+        **await _vertex_auth_headers(api_key, config),
         **_extra_headers(config),
     }
     payload = _apply_bedrock_payload(
@@ -909,7 +1001,7 @@ async def _complete_anthropic_once(
     except AppError:
         raise
     except Exception as exc:
-        raise as_app_error(
+        error = as_app_error(
             exc,
             source="llm.anthropic_messages",
             default_code="provider_request_failed",
@@ -917,7 +1009,79 @@ async def _complete_anthropic_once(
             default_status_code=502,
             provider=_PROVIDER,
             protocol=_PROTOCOL,
-        ) from exc
+        )
+        raise (finish_upstream_error(error, api_key) if _is_vertex(config) else error) from exc
+
+
+async def _iter_sse_events(response: httpx.Response) -> AsyncIterator[tuple[str, dict[str, Any], str]]:
+    """SSE 文本流 → (事件名, 事件对象, 原始 JSON 文本)。"""
+    event_name = ""
+    async for line in response.aiter_lines():
+        if line is None:
+            continue
+        if not line:
+            event_name = ""
+            continue
+        if line.startswith(":"):
+            continue
+        if line.startswith("event:"):
+            event_name = line[len("event:") :].strip()
+            continue
+        if not line.startswith("data:"):
+            raise _protocol_error(
+                code="stream_event_invalid",
+                message="上游流包含未知事件帧",
+                detail=f"unexpected SSE line: {line[:200]}",
+            )
+        data_str = line[len("data:") :].strip()
+        if not data_str:
+            continue
+        try:
+            data = json.loads(data_str)
+        except json.JSONDecodeError as exc:
+            raise _protocol_error(
+                code="stream_event_invalid",
+                message="上游流包含无法解析的 JSON",
+                detail=str(exc),
+            ) from exc
+        if not isinstance(data, dict):
+            raise _protocol_error(
+                code="stream_event_invalid",
+                message="上游流事件不是对象",
+                detail=f"got {type(data).__name__}",
+            )
+        yield event_name, data, data_str
+
+
+async def _iter_bedrock_events(response: httpx.Response) -> AsyncIterator[tuple[str, dict[str, Any], str]]:
+    """invoke-with-response-stream：chunk 帧的 ``bytes`` 字段是 base64 编码的 Anthropic 事件 JSON。"""
+    common = {"source": "llm.anthropic_messages.stream", "provider": _PROVIDER, "protocol": _PROTOCOL}
+    async for frame in aiter_event_frames(response, **common):
+        if frame.event_type != "chunk":
+            continue
+        encoded = frame_json(frame, **common).get("bytes")
+        if not isinstance(encoded, str):
+            raise _protocol_error(
+                code="stream_event_invalid",
+                message="Bedrock 流事件缺少内容",
+                detail="chunk frame has no bytes field",
+            )
+        try:
+            data_str = base64.b64decode(encoded, validate=True).decode("utf-8")
+            data = json.loads(data_str)
+        except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise _protocol_error(
+                code="stream_event_invalid",
+                message="Bedrock 流事件无法解析",
+                detail=str(exc),
+            ) from exc
+        if not isinstance(data, dict):
+            raise _protocol_error(
+                code="stream_event_invalid",
+                message="上游流事件不是对象",
+                detail=f"got {type(data).__name__}",
+            )
+        yield "", data, data_str
 
 
 async def _stream_anthropic_once(
@@ -929,9 +1093,10 @@ async def _stream_anthropic_once(
 ) -> AsyncIterator[StreamChunk]:
     url = _request_url(base_url, config, stream=True)
     headers = {
-        "Accept": "text/event-stream",
+        "Accept": _stream_accept(config),
         "Content-Type": "application/json",
         **_request_auth_headers(api_key, config),
+        **await _vertex_auth_headers(api_key, config),
         **_extra_headers(config),
     }
     payload = _apply_bedrock_payload(
@@ -973,52 +1138,12 @@ async def _stream_anthropic_once(
             client = get_async_http_client()
             async with client.stream("POST", url, headers=headers, json=payload, timeout=None) as r:
                 _log.set_response(status=r.status_code, headers=dict(r.headers))
-                ctype = (r.headers.get("content-type") or "").lower()
-                if _is_bedrock(config) and "eventstream" in ctype:
-                    raise _protocol_error(
-                        code="provider_capability_unsupported",
-                        message="AWS Bedrock 原生流式返回 eventstream，当前版本请关闭流式传输",
-                        detail="bedrock invoke-with-response-stream uses application/vnd.amazon.eventstream",
-                        status_code=400,
-                    )
                 await _raise_stream_http_error(r)
-
-                event_name = ""
-                async for line in r.aiter_lines():
-                    if line is None:
-                        continue
-                    if not line:
-                        event_name = ""
-                        continue
-                    if line.startswith(":"):
-                        continue
-                    if line.startswith("event:"):
-                        event_name = line[len("event:") :].strip()
-                        continue
-                    if not line.startswith("data:"):
-                        raise _protocol_error(
-                            code="stream_event_invalid",
-                            message="上游流包含未知事件帧",
-                            detail=f"unexpected SSE line: {line[:200]}",
-                        )
-                    data_str = line[len("data:") :].strip()
-                    if not data_str:
-                        continue
-                    try:
-                        data = json.loads(data_str)
-                    except json.JSONDecodeError as exc:
-                        raise _protocol_error(
-                            code="stream_event_invalid",
-                            message="上游流包含无法解析的 JSON",
-                            detail=str(exc),
-                        ) from exc
-                    if not isinstance(data, dict):
-                        raise _protocol_error(
-                            code="stream_event_invalid",
-                            message="上游流事件不是对象",
-                            detail=f"got {type(data).__name__}",
-                        )
-
+                ctype = (r.headers.get("content-type") or "").lower()
+                # Bedrock 官方流一律是 eventstream；只有代理转成 SSE 时才走文本解析
+                use_eventstream = _is_bedrock(config) and not _is_vertex(config) and "text/event-stream" not in ctype
+                events = _iter_bedrock_events(r) if use_eventstream else _iter_sse_events(r)
+                async for event_name, data, data_str in events:
                     etype = event_name or str(data.get("type") or "")
                     if etype == "message_start":
                         # message_start.usage 携带 input / cache_read / cache_creation；message_delta 只补 output_tokens
@@ -1159,7 +1284,7 @@ async def _stream_anthropic_once(
     except AppError:
         raise
     except Exception as exc:
-        raise as_app_error(
+        error = as_app_error(
             exc,
             source="llm.anthropic_messages.stream",
             default_code="provider_request_failed",
@@ -1167,7 +1292,8 @@ async def _stream_anthropic_once(
             default_status_code=502,
             provider=_PROVIDER,
             protocol=_PROTOCOL,
-        ) from exc
+        )
+        raise (finish_upstream_error(error, api_key) if _is_vertex(config) else error) from exc
 
 
 def _native_source_links(blocks: list[dict[str, Any]]) -> str:
@@ -1279,7 +1405,7 @@ class AnthropicMessagesAdapter:
         self.validate_config(base_url=base_url, api_key=api_key)
         url = _request_url(base_url, config, stream=bool(config.stream))
         headers = {
-            "Accept": "application/json" if not config.stream else "text/event-stream",
+            "Accept": "application/json" if not config.stream else _stream_accept(config),
             "Content-Type": "application/json",
             **_request_auth_headers(api_key, config),
             **_extra_headers(config),
@@ -1301,8 +1427,33 @@ class AnthropicMessagesAdapter:
         )
         return WireRequest(method="POST", url=url, headers=headers, json_body=payload)
 
-    async def list_models(self, *, base_url: str, api_key: str) -> list[str]:
+    async def list_models(
+        self,
+        *,
+        base_url: str,
+        api_key: str,
+        extra_headers: dict[str, str] | None = None,
+        auth_style: str | None = None,
+    ) -> list[str]:
         self.validate_config(base_url=base_url, api_key=api_key)
+        if is_vertex_service_account_style(auth_style):
+            raise _vertex_unsupported(
+                "Google 托管的 Vertex Claude 没有模型列表接口",
+                "Models API is not available on Claude Models on Google Cloud (Google managed)",
+                suggested_action="手动添加模型名，如 claude-sonnet-4-6",
+            )
+        if looks_like_service_account_json(api_key):
+            # 这条路径用 x-api-key 发密钥，服务账号 JSON 不能走到这里
+            raise AppError(
+                code="config_invalid",
+                message="服务账号 JSON 不能当作普通 API Key 使用",
+                detail="api key looks like a Google service account but auth style is not vertex_service_account",
+                source="llm.anthropic_messages",
+                status_code=400,
+                provider=_PROVIDER,
+                protocol=_PROTOCOL,
+                suggested_action="把预设的鉴权方式改为 Google 服务账号",
+            )
         return await list_models_anthropic(base_url=base_url, api_key=api_key)
 
     async def complete(

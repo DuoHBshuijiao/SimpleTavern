@@ -16,18 +16,23 @@ from typing import Any
 
 from app.llm.types import (
     ANTHROPIC_PROMPT_CACHE_OFF,
+    ANTHROPIC_MESSAGES_PROTOCOL,
     OPENAI_COMPATIBLE_CHAT_PROTOCOL,
+    PROTOCOL_AUTO,
+    VERTEX_SERVICE_ACCOUNT_AUTH_STYLE,
+    is_vertex_service_account_style,
     normalize_anthropic_prompt_cache,
     normalize_auth_style,
     normalize_protocol_id,
 )
+from app.llm.vertex_auth import looks_like_service_account_json
 from app.schemas import ApiPreset, PromptCacheConfig, Settings
 
 
 @dataclass(frozen=True)
 class LlmPresetCredentials:
     base_url: str
-    api_key: str
+    api_key: str = field(repr=False)
     preset_id: str | None
     source: str
     protocol: str = OPENAI_COMPATIBLE_CHAT_PROTOCOL
@@ -71,6 +76,21 @@ def _prompt_cache_of(obj: Any) -> PromptCacheConfig:
     return prompt_cache_from_legacy(getattr(obj, "anthropicPromptCache", None))
 
 
+def _check_service_account_usage(*, api_key: str, auth_style: str | None, protocol: str, name: str) -> None:
+    """服务账号 JSON 只能走 Vertex Anthropic；其它组合在这里拦下，绝不当普通密钥发出去。"""
+    if is_vertex_service_account_style(auth_style):
+        if protocol not in {ANTHROPIC_MESSAGES_PROTOCOL, PROTOCOL_AUTO}:
+            raise LlmPresetResolveError(
+                "VERTEX_PROTOCOL_MISMATCH",
+                f"{name}使用 Google 服务账号鉴权，协议必须是 Anthropic Messages。",
+            )
+    elif looks_like_service_account_json(api_key):
+        raise LlmPresetResolveError(
+            "SERVICE_ACCOUNT_AUTH_STYLE_REQUIRED",
+            f"{name}的密钥是 Google 服务账号 JSON，请把鉴权方式改为 Google 服务账号。",
+        )
+
+
 def _credential_from_preset(preset: ApiPreset, *, source: str) -> LlmPresetCredentials:
     if not is_llm_api_preset(preset):
         raise LlmPresetResolveError(
@@ -82,6 +102,14 @@ def _credential_from_preset(preset: ApiPreset, *, source: str) -> LlmPresetCrede
     requires_oauth = str(getattr(preset, "authStyle", "") or "").startswith("oauth")
     if not (preset.apiKey or "").strip() and not requires_oauth:
         raise LlmPresetResolveError("MISSING_API_KEY", f"API 预设「{preset.name}」缺少 API Key。")
+    protocol = normalize_protocol_id(getattr(preset, "protocol", None))
+    provider_id = getattr(preset, "providerId", None) or None
+    auth_style = normalize_auth_style(getattr(preset, "authStyle", None))
+    if not auth_style and provider_id == "vertex-anthropic":
+        auth_style = VERTEX_SERVICE_ACCOUNT_AUTH_STYLE
+    _check_service_account_usage(
+        api_key=preset.apiKey or "", auth_style=auth_style, protocol=protocol, name=f"API 预设「{preset.name}」"
+    )
     from app.llm.oauth.apply import apply_stored_oauth
 
     return apply_stored_oauth(
@@ -90,14 +118,14 @@ def _credential_from_preset(preset: ApiPreset, *, source: str) -> LlmPresetCrede
             api_key=(preset.apiKey or "").strip(),
             preset_id=preset.id,
             source=source,
-            protocol=normalize_protocol_id(getattr(preset, "protocol", None)),
+            protocol=protocol,
             anthropic_prompt_cache=normalize_anthropic_prompt_cache(
                 getattr(preset, "anthropicPromptCache", None)
             ),
             prompt_cache=_prompt_cache_of(preset),
-            provider_id=(getattr(preset, "providerId", None) or None),
+            provider_id=provider_id,
             provider_params=dict(getattr(preset, "providerParams", None) or {}),
-            auth_style=normalize_auth_style(getattr(preset, "authStyle", None)),
+            auth_style=auth_style,
             preset_name=preset.name,
             echo_reasoning=bool(getattr(preset, "echoReasoning", True)),
         )
@@ -109,6 +137,12 @@ def _credential_from_global(settings: Settings) -> LlmPresetCredentials | None:
     api_key = (settings.llm.apiKey or "").strip()
     if not _has_credentials(base_url, api_key):
         return None
+    _check_service_account_usage(
+        api_key=api_key,
+        auth_style=normalize_auth_style(getattr(settings.llm, "authStyle", None)),
+        protocol=normalize_protocol_id(getattr(settings.llm, "protocol", None)),
+        name="全局连接",
+    )
     return LlmPresetCredentials(
         base_url=base_url,
         api_key=api_key,

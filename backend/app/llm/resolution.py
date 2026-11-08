@@ -32,12 +32,16 @@ from app.llm.preset_resolve import LlmPresetCredentials, resolve_llm_preset_cred
 from app.llm.prompt_cache import PromptCachePlan, build_prompt_cache_plan, is_openai_official_host
 from app.llm.types import (
     ANTHROPIC_MESSAGES_PROTOCOL,
+    BEDROCK_CONVERSE_PROTOCOL,
     GEMINI_GENERATE_CONTENT_PROTOCOL,
+    MISTRAL_CONVERSATIONS_PROTOCOL,
     OPENAI_COMPATIBLE_CHAT_PROTOCOL,
     OPENAI_RESPONSES_PROTOCOL,
     PROTOCOL_AUTO,
     attach_control_block,
     is_auto_protocol,
+    is_vertex_service_account_style,
+    normalize_auth_style,
     normalize_protocol_id,
     provider_id_for_protocol,
 )
@@ -50,6 +54,8 @@ PROTOCOL_LABELS: dict[str, str] = {
     OPENAI_RESPONSES_PROTOCOL: "OpenAI Responses",
     ANTHROPIC_MESSAGES_PROTOCOL: "Anthropic Messages",
     GEMINI_GENERATE_CONTENT_PROTOCOL: "Gemini generateContent",
+    BEDROCK_CONVERSE_PROTOCOL: "AWS Bedrock Converse",
+    MISTRAL_CONVERSATIONS_PROTOCOL: "Mistral Conversations",
     PROTOCOL_AUTO: "自动（按模型识别）",
 }
 
@@ -75,6 +81,17 @@ _GEMINI_LEVEL_RE = re.compile(r"gemini-([3-9]|\d{2})", re.IGNORECASE)
 _GEMINI_PRO_RE = re.compile(r"gemini-[\d.]+-pro", re.IGNORECASE)
 _GEMINI_25_BUDGET: dict[str, int] = {"minimal": 512, "low": 1024, "medium": 8192, "high": 24576}
 _GEMINI_3_LEVEL_MAP: dict[str, str] = {"minimal": "minimal", "low": "low", "medium": "medium", "high": "high"}
+# Claude 思考开关按模型不同（Bedrock adaptive thinking 文档的 Thinking configuration by model 表）。
+# 这几款没有任何办法关闭思考：省略 thinking 就是自适应，发 disabled 返回 400。
+_CLAUDE_CANNOT_DISABLE_RE = re.compile(r"opus-5[-.]5|fable|mythos", re.IGNORECASE)
+_CLAUDE_BETWEEN_TOOLS_RE = re.compile(r"sonnet-5[-.]5", re.IGNORECASE)
+# Claude 5 系默认开自适应，要关必须显式发 disabled；更早的模型省略 thinking 就是关
+_CLAUDE_5_RE = re.compile(r"opus-5|sonnet-5|haiku-5|claude-5", re.IGNORECASE)
+_CLAUDE_BUDGET_BY_EFFORT: dict[str, int] = {"minimal": 1024, "low": 2048, "medium": 4096, "high": 8192, "xhigh": 16384, "max": 16384}
+# Mistral reasoning_effort 按模型不同（docs.mistral.ai/inference/conversations/reasoning）
+_MISTRAL_SMALL_MEDIUM_RE = re.compile(r"mistral-small-2603|mistral-medium-3-5", re.IGNORECASE)
+_MISTRAL_LARGE_RE = re.compile(r"mistral-large-4", re.IGNORECASE)
+_MISTRAL_GLM_RE = re.compile(r"glm-5-3", re.IGNORECASE)
 
 
 def protocol_label(protocol: str | None) -> str:
@@ -126,6 +143,8 @@ class ProtocolResolution:
     supports_fast_mode: bool = False
     capabilities_source: str = "heuristic"
     cache: PromptCachePlan | None = None
+    # T-832：当前组合做不到的能力；prepare_llm_request 据此 fast-fail，预览里只显示
+    unsupported_reason: str | None = None
     # 历史思考内容回传（DeepSeek 带 tools 请求强制要求；其余厂商可关）
     echo_reasoning: bool = True
     echo_reasoning_source: str = "preset"  # global_on / global_off / preset
@@ -158,6 +177,8 @@ class ProtocolResolution:
             "adjustments": [dict(a) for a in self.adjustments],
             "reasons": list(self.reasons),
         }
+        if self.unsupported_reason:
+            out["unsupportedReason"] = self.unsupported_reason
         if self.cache is not None:
             out["cache"] = self.cache.to_meta()
         return out
@@ -166,7 +187,7 @@ class ProtocolResolution:
 @dataclass(frozen=True)
 class PreparedLlmRequest:
     base_url: str
-    api_key: str
+    api_key: str = field(repr=False)
     protocol: str
     model: str
     extra_body: dict[str, Any]
@@ -326,9 +347,24 @@ def resolve_protocol(
 # ---------------------------------------------------------------------------
 
 
-def available_efforts(caps: ModelCapabilities, *, protocol: str) -> tuple[str, ...]:
-    """模型可用档位（含 none 的判定）。"""
+def _mistral_efforts(caps: ModelCapabilities) -> tuple[str, ...]:
+    model = caps.model_id
+    if _MISTRAL_SMALL_MEDIUM_RE.search(model):
+        return ("none", "high")
+    if _MISTRAL_LARGE_RE.search(model):
+        return ("none", "low", "medium", "high")
+    if _MISTRAL_GLM_RE.search(model):
+        return ("none", "low", "high", "max")
+    return ("none", "low", "medium", "high") if caps.reasoning else ("none",)
+
+
+def available_efforts(caps: ModelCapabilities, *, protocol: str, vertex_claude: bool = False) -> tuple[str, ...]:
+    """模型可用档位（含 none 的判定）。``("none",)`` 表示该组合没有任何思考参数可用。"""
     family = caps.family
+    if protocol == MISTRAL_CONVERSATIONS_PROTOCOL:
+        return _mistral_efforts(caps)
+    if protocol == BEDROCK_CONVERSE_PROTOCOL and family != FAMILY_ANTHROPIC:
+        return ("none",)
     if _DEEPSEEK_MODEL_RE.search(caps.model_id):
         return _DEEPSEEK_EFFORTS
     efforts = tuple(e for e in caps.efforts if e in _EFFORT_INDEX)
@@ -353,6 +389,9 @@ def available_efforts(caps: ModelCapabilities, *, protocol: str) -> tuple[str, .
             none_ok = (not caps.reasoning) or bool(re.search(r"gpt-5\.[1-9]|gpt-5\.\d{2}|gpt-[6-9]", caps.model_id, re.IGNORECASE))
         else:
             none_ok = True  # 中国厂商 / 通用：thinking.type=disabled / enable_thinking=false
+    if (protocol == BEDROCK_CONVERSE_PROTOCOL or vertex_claude) and _CLAUDE_CANNOT_DISABLE_RE.search(caps.model_id):
+        none_ok = False
+        efforts = tuple(e for e in efforts if e != "none")
     ordered = sorted({*efforts, *(("none",) if none_ok else ())}, key=lambda e: _EFFORT_INDEX[e])
     return tuple(ordered)
 
@@ -403,6 +442,20 @@ def _shared_reasoning_keys(effort: str) -> dict[str, Any]:
     return out
 
 
+def _claude_platform_thinking(model: str, effort: str) -> dict[str, Any]:
+    """Bedrock Converse 和 Vertex 上 Claude 的思考写法，按官方模型表逐款决定。"""
+    if effort == "none":
+        if _CLAUDE_BETWEEN_TOOLS_RE.search(model):
+            return {"thinking": {"type": "between_tools"}}
+        if _CLAUDE_5_RE.search(model) and not _CLAUDE_CANNOT_DISABLE_RE.search(model):
+            return {"thinking": {"type": "disabled"}}
+        return {}
+    if _ANTHROPIC_ADAPTIVE_RE.search(model):
+        # Claude 5 起 display 默认 omitted，不显式要求就拿不到思考文本
+        return {"thinking": {"type": "adaptive", "display": "summarized"}, "output_config": {"effort": effort}}
+    return {"thinking": {"type": "enabled", "budget_tokens": _CLAUDE_BUDGET_BY_EFFORT.get(effort, 4096)}}
+
+
 def build_request_extras(
     *,
     protocol: str,
@@ -414,6 +467,7 @@ def build_request_extras(
     entry: ProviderEntry | None,
     temperature: float | None,
     top_p: float | None,
+    auth_style: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, str], float | None, float | None, bool, tuple[dict[str, Any], ...]]:
     """返回 (extra_body, extra_headers, temperature, top_p, fast_applied, adjustments)。"""
     family = caps.family
@@ -425,9 +479,22 @@ def build_request_extras(
     enabled = effort != "none"
 
     is_deepseek = bool(_DEEPSEEK_MODEL_RE.search(model)) or host == _DEEPSEEK_HOST
+    vertex_claude = protocol == ANTHROPIC_MESSAGES_PROTOCOL and is_vertex_service_account_style(auth_style)
 
     # ---- 推理写法 ----
-    if protocol == ANTHROPIC_MESSAGES_PROTOCOL:
+    if vertex_claude:
+        extra.update(_claude_platform_thinking(model, effort))
+    elif protocol == BEDROCK_CONVERSE_PROTOCOL:
+        if family == FAMILY_ANTHROPIC:
+            fields = _claude_platform_thinking(model, effort)
+            if fields:
+                extra["additionalModelRequestFields"] = fields
+    elif protocol == MISTRAL_CONVERSATIONS_PROTOCOL:
+        if enabled:
+            extra["reasoning_effort"] = effort
+        elif _MISTRAL_SMALL_MEDIUM_RE.search(model):
+            extra["reasoning_effort"] = "none"
+    elif protocol == ANTHROPIC_MESSAGES_PROTOCOL:
         if not enabled:
             extra["thinking"] = {"type": "disabled"}
         elif is_deepseek:
@@ -485,6 +552,8 @@ def build_request_extras(
         fast_body = caps.fast_mode_body
         if not caps.supports_fast_mode or not fast_body:
             adjustments.append(_adj("fast_mode_unsupported", reason=f"模型 {model} 未声明 Fast / Priority 档位，已忽略"))
+        elif vertex_claude:
+            adjustments.append(_adj("fast_mode_unsupported", reason="Google 托管的 Vertex Claude 没有 Fast 档位"))
         elif protocol == ANTHROPIC_MESSAGES_PROTOCOL:
             extra["speed"] = "fast"
             headers["anthropic-beta"] = "fast-mode-2026-02-01"
@@ -512,6 +581,9 @@ def build_request_extras(
         out_temperature, out_top_p = None, None
     if protocol == OPENAI_COMPATIBLE_CHAT_PROTOCOL and openai_official and caps.reasoning and (temperature is not None or top_p is not None):
         adjustments.append(_adj("sampling_dropped", reason="OpenAI 推理模型不接受 temperature / top_p"))
+        out_temperature, out_top_p = None, None
+    if protocol == BEDROCK_CONVERSE_PROTOCOL and family == FAMILY_ANTHROPIC and enabled and (out_temperature is not None or out_top_p is not None):
+        adjustments.append(_adj("sampling_dropped", reason="Claude 开启思考时不接受 temperature / top_p"))
         out_temperature, out_top_p = None, None
 
     return extra, headers, out_temperature, out_top_p, fast_applied, tuple(adjustments)
@@ -643,16 +715,30 @@ def resolve_request(
         except Exception:  # noqa: BLE001
             base_url = credentials.base_url
 
+    auth_style = credentials.auth_style or (entry.auth_style if entry is not None else None)
+    vertex_auth = is_vertex_service_account_style(auth_style)
+    # 服务账号 JSON 只能发给 Vertex Anthropic，自动协议在这里定死，不按模型家族切换
+    requested_protocol = ANTHROPIC_MESSAGES_PROTOCOL if vertex_auth and is_auto_protocol(credentials.protocol) else credentials.protocol
     effective, base_url, proto_adjustments, reasons = resolve_protocol(
-        credentials.protocol,
+        requested_protocol,
         model=model,
         base_url=base_url,
         entry=entry,
         provider_params=credentials.provider_params,
     )
     caps = cat.model_capabilities(model, provider_id=entry.id if entry else None, base_url=base_url)
-    efforts = available_efforts(caps, protocol=effective)
+    vertex_claude = vertex_auth and effective == ANTHROPIC_MESSAGES_PROTOCOL
+    efforts = available_efforts(caps, protocol=effective, vertex_claude=vertex_claude)
     effort, clamp_adj = clamp_reasoning_effort(requested_effort, efforts)
+    unsupported_reason: str | None = None
+    if vertex_auth and effective != ANTHROPIC_MESSAGES_PROTOCOL:
+        unsupported_reason = "Google 服务账号鉴权只能配合 Anthropic Messages 协议"
+    elif (
+        effective in {BEDROCK_CONVERSE_PROTOCOL, MISTRAL_CONVERSATIONS_PROTOCOL}
+        and requested_effort != "none"
+        and efforts == ("none",)
+    ):
+        unsupported_reason = f"模型 {model} 在 {protocol_label(effective)} 上没有思考深度参数，请把思考深度设为关闭"
 
     extra, headers, out_temperature, out_top_p, fast_applied, extra_adjustments = build_request_extras(
         protocol=effective,
@@ -664,6 +750,7 @@ def resolve_request(
         entry=entry,
         temperature=temperature,
         top_p=top_p,
+        auth_style=auth_style,
     )
 
     cache_plan = build_prompt_cache_plan(
@@ -685,6 +772,8 @@ def resolve_request(
         adjustments.append(clamp_adj)
     adjustments.extend(extra_adjustments)
     adjustments.extend(cache_plan.adjustments)
+    if unsupported_reason:
+        adjustments.append(_adj("capability_unsupported", reason=unsupported_reason))
     reasons = tuple(reasons) + tuple(_vendor_notices(model, base_url))
     if not echo_reasoning and _is_deepseek(model, base_url):
         reasons = reasons + ("已关闭思考内容回传：DeepSeek 带 tools 的请求会要求 reasoning_content，可能返回 400",)
@@ -706,6 +795,7 @@ def resolve_request(
         supports_fast_mode=caps.supports_fast_mode,
         capabilities_source=caps.source,
         cache=cache_plan,
+        unsupported_reason=unsupported_reason or cache_plan.unsupported_reason,
         echo_reasoning=echo_reasoning,
         echo_reasoning_source=echo_reasoning_source,
         adjustments=tuple(adjustments),
@@ -769,9 +859,20 @@ def prepare_llm_request(
     if resolution.thinking_enabled and out_temperature is not None and resolution.effective == ANTHROPIC_MESSAGES_PROTOCOL:
         # Anthropic 开思考时 temperature 必须为 1 / 省略；适配器已处理，这里只为 SSE 一致性
         pass
-    if resolution.fast_mode_requested and not resolution.fast_mode:
-        from app.errors import AppError
+    from app.errors import AppError
 
+    if resolution.unsupported_reason:
+        raise AppError(
+            code="provider_capability_unsupported",
+            message=resolution.unsupported_reason,
+            detail=f"model={model}; protocol={resolution.effective}",
+            source="llm.resolution",
+            status_code=400,
+            suggested_action="调整预设的协议、思考深度或缓存策略后重试",
+            provider=resolution.provider_id,
+            protocol=resolution.effective,
+        )
+    if resolution.fast_mode_requested and not resolution.fast_mode:
         raise AppError(
             code="provider_capability_unsupported",
             message="当前模型或供应商不支持 Fast 模式",
@@ -810,6 +911,7 @@ def preview_resolution(
     fast_mode: bool = False,
     echo_reasoning: bool = True,
     catalog: LlmCatalog | None = None,
+    auth_style: str | None = None,
 ) -> ProtocolResolution:
     """预设编辑器预览：不需要 api_key。"""
     from app.schemas import normalize_reasoning_effort
@@ -830,7 +932,7 @@ def preview_resolution(
         prompt_cache=prompt_cache,
         provider_id=provider_id,
         provider_params=dict(provider_params or {}),
-        auth_style=None,
+        auth_style=normalize_auth_style(auth_style),
         preset_name=None,
         echo_reasoning=echo_reasoning,
     )

@@ -98,6 +98,10 @@ _SENSITIVE_BODY_KEYS = (
     "code",
     "secret",
     "authorization",
+    "assertion",
+    "private_key",
+    "privatekey",
+    "private_key_id",
 )
 # 文件相关字段（出现即视为文件内容，走 headPreview 截断）
 _FILE_FIELD_KEYS = (

@@ -21,11 +21,14 @@ from app.llm.registry import get_adapter
 from app.llm.resolution import preview_resolution, resolve_protocol
 from app.llm.runtime import list_models
 from app.llm.types import (
+    ANTHROPIC_MESSAGES_PROTOCOL,
     OPENAI_COMPATIBLE_CHAT_PROTOCOL,
     PROTOCOL_AUTO,
+    is_vertex_service_account_style,
     normalize_protocol_id,
     provider_id_for_protocol,
 )
+from app.llm.vertex_auth import looks_like_service_account_json
 from app.storage import load_settings
 
 
@@ -56,6 +59,7 @@ class ResolvePreviewRequest(BaseModel):
     reasoningEffort: str | None = None
     fastMode: bool = False
     echoReasoning: bool = True
+    authStyle: str | None = None
 
 
 def _list_models_protocol(req: TestModelsRequest) -> str:
@@ -108,6 +112,7 @@ async def get_models() -> list[str]:
         base_url=settings.llm.baseUrl,
         api_key=settings.llm.apiKey,
         protocol=protocol,
+        auth_style=getattr(settings.llm, "authStyle", None),
     )
     return _require_models(models, source="llm.models", protocol=protocol)
 
@@ -152,6 +157,17 @@ async def test_models(req: TestModelsRequest) -> list[str]:
         )
     )
     get_adapter(protocol)
+    vertex_style = is_vertex_service_account_style(auth_style)
+    if (vertex_style and protocol != ANTHROPIC_MESSAGES_PROTOCOL) or (not vertex_style and looks_like_service_account_json(api_key)):
+        # 服务账号 JSON 不能当普通密钥发给上游
+        raise AppError(
+            code="config_invalid",
+            message="服务账号 JSON 只能配合 Google 服务账号鉴权和 Anthropic Messages 协议",
+            source="llm.test_models",
+            status_code=400,
+            protocol=protocol,
+            suggested_action="把鉴权方式改为 Google 服务账号，协议改为 Anthropic Messages",
+        )
     if provider_id and provider_params:
         entry = get_catalog().find_provider(provider_id)
         if entry is not None and entry.requires_placeholders:
@@ -198,5 +214,6 @@ async def resolve_preview(req: ResolvePreviewRequest) -> dict[str, Any]:
         reasoning_effort=req.reasoningEffort,
         fast_mode=req.fastMode,
         echo_reasoning=req.echoReasoning,
+        auth_style=req.authStyle,
     )
     return resolution.to_public_dict()

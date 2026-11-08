@@ -37,6 +37,7 @@ export interface LlmConnectionLike {
   protocol?: string | null
   providerId?: string | null
   providerParams?: Record<string, string> | null
+  authStyle?: string | null
   promptCache?: PromptCacheConfig | null
   echoReasoning?: boolean | null
   anthropicPromptCache?: string | null
@@ -114,6 +115,7 @@ function cacheModeDisabledReason(mode: PromptCacheMode): string | null {
   if (mode === 'off' || mode === 'auto') return null
   if (strategy.value === 'none') return '目录标明该供应商不提供 prompt cache'
   if (mode === 'explicit') {
+    if (proto.value === 'mistral_conversations') return 'Mistral Conversations 没有显式缓存参数'
     if (strategy.value === 'implicit' && proto.value !== 'gemini_generate_content' && proto.value !== 'auto' && proto.value !== 'anthropic_messages' && proto.value !== 'openai_responses') {
       return '该供应商以自动前缀缓存为主，没有显式断点 API'
     }
@@ -131,7 +133,7 @@ function ttlDisabledReason(value: string): string | null {
   if (!value) return null
   if (strategy.value === 'none') return '该供应商不提供 prompt cache'
   if (value === '5m' || value === '1h') {
-    if (proto.value !== 'anthropic_messages' && proto.value !== 'auto') return '仅 Anthropic Messages 使用 5m / 1h'
+    if (proto.value !== 'anthropic_messages' && proto.value !== 'bedrock_converse' && proto.value !== 'auto') return '仅 Anthropic Messages / Bedrock Converse 使用 5m / 1h'
   }
   if (value === '30m' || value === '24h') {
     if (proto.value !== 'openai_responses' && proto.value !== 'openai_compatible_chat' && proto.value !== 'auto') {
@@ -157,7 +159,7 @@ const ttlOptions = computed(() => {
       hint: reason || undefined,
     })
   }
-  if (p === 'anthropic_messages' || p === 'auto') {
+  if (p === 'anthropic_messages' || p === 'bedrock_converse' || p === 'auto') {
     push('5 分钟（Anthropic 默认）', '5m')
     push('1 小时（Anthropic 长缓存）', '1h')
   }
@@ -209,6 +211,7 @@ const breakpointsDisabledReason = computed(() => {
   if (cache.value.mode !== 'explicit' && cache.value.mode !== 'auto') return '仅显式 / 自动模式会打断点'
   if (proto.value === 'openai_compatible_chat') return 'Chat Completions 没有内容块断点'
   if (proto.value === 'gemini_generate_content') return 'Gemini 显式缓存走 cachedContents，不在消息上打断点'
+  if (proto.value === 'mistral_conversations') return 'Mistral Conversations 没有缓存断点'
   return null
 })
 const markersDisabledReason = computed(() => {
@@ -271,6 +274,7 @@ const { preview, loading, error } = useProtocolPreview(
       protocol: props.connection.protocol ?? null,
       providerId: props.connection.providerId ?? null,
       providerParams: props.connection.providerParams ?? null,
+      ...({ authStyle: props.connection.authStyle ?? null } as object),
       promptCache: cache.value,
       reasoningEffort: props.reasoningEffort ?? 'none',
       fastMode: false,

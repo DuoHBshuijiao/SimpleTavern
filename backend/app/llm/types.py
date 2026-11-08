@@ -10,6 +10,8 @@ ProtocolId = Literal[
     "openai_responses",
     "anthropic_messages",
     "gemini_generate_content",
+    "bedrock_converse",
+    "mistral_conversations",
 ]
 
 OPENAI_COMPATIBLE_PROVIDER = "openai_compatible"
@@ -17,6 +19,8 @@ OPENAI_COMPATIBLE_CHAT_PROTOCOL: ProtocolId = "openai_compatible_chat"
 OPENAI_RESPONSES_PROTOCOL: ProtocolId = "openai_responses"
 ANTHROPIC_MESSAGES_PROTOCOL: ProtocolId = "anthropic_messages"
 GEMINI_GENERATE_CONTENT_PROTOCOL: ProtocolId = "gemini_generate_content"
+BEDROCK_CONVERSE_PROTOCOL: ProtocolId = "bedrock_converse"
+MISTRAL_CONVERSATIONS_PROTOCOL: ProtocolId = "mistral_conversations"
 
 AnthropicPromptCache = Literal["off", "5m", "1h"]
 ANTHROPIC_PROMPT_CACHE_OFF: AnthropicPromptCache = "off"
@@ -34,14 +38,20 @@ _KNOWN_PROTOCOLS: frozenset[str] = frozenset(
         OPENAI_RESPONSES_PROTOCOL,
         ANTHROPIC_MESSAGES_PROTOCOL,
         GEMINI_GENERATE_CONTENT_PROTOCOL,
+        BEDROCK_CONVERSE_PROTOCOL,
+        MISTRAL_CONVERSATIONS_PROTOCOL,
     }
 )
 
 # T-820-A2：鉴权风格
-AuthStyle = Literal["bearer", "x-api-key", "api-key", "x-goog-api-key", "query_key", "oauth_device", "oauth_pkce"]
+AuthStyle = Literal[
+    "bearer", "x-api-key", "api-key", "x-goog-api-key", "query_key", "oauth_device", "oauth_pkce", "vertex_service_account"
+]
 AUTH_STYLE_DEFAULT: AuthStyle = "bearer"
+# T-832：apiKey 存服务账号 JSON，由 llm.vertex_auth 换成 access token，绝不能当普通密钥发出去
+VERTEX_SERVICE_ACCOUNT_AUTH_STYLE: AuthStyle = "vertex_service_account"
 _KNOWN_AUTH_STYLES: frozenset[str] = frozenset(
-    {"bearer", "x-api-key", "api-key", "x-goog-api-key", "query_key", "oauth_device", "oauth_pkce"}
+    {"bearer", "x-api-key", "api-key", "x-goog-api-key", "query_key", "oauth_device", "oauth_pkce", "vertex_service_account"}
 )
 
 
@@ -50,9 +60,13 @@ def normalize_auth_style(raw: Any, *, default: str | None = None) -> str | None:
     key = str(raw or "").strip().lower().replace("_", "-") if raw is not None else ""
     if not key:
         return default
-    if key in {"oauth-device", "oauth-pkce", "query-key"}:
+    if key in {"oauth-device", "oauth-pkce", "query-key", "vertex-service-account"}:
         key = key.replace("-", "_")
     return key
+
+
+def is_vertex_service_account_style(raw: Any) -> bool:
+    return normalize_auth_style(raw) == VERTEX_SERVICE_ACCOUNT_AUTH_STYLE
 
 
 def is_known_auth_style(raw: Any) -> bool:
@@ -71,7 +85,7 @@ def auth_headers_for_style(api_key: str, auth_style: str | None) -> dict[str, st
         return {"api-key": key}
     if style == "x-goog-api-key":
         return {"x-goog-api-key": key}
-    if style == "query_key":
+    if style in {"query_key", VERTEX_SERVICE_ACCOUNT_AUTH_STYLE}:
         return {}
     # oauth_device / oauth_pkce：已换发的 access token 走 Bearer（T-830）
     return {"Authorization": f"Bearer {key}"}
@@ -112,6 +126,9 @@ _PROTOCOL_PROVIDERS: dict[str, str] = {
     OPENAI_RESPONSES_PROTOCOL: "openai",
     ANTHROPIC_MESSAGES_PROTOCOL: "anthropic",
     GEMINI_GENERATE_CONTENT_PROTOCOL: "gemini",
+    # 与模型目录的供应商 id 一致，定价规则才能匹配
+    BEDROCK_CONVERSE_PROTOCOL: "amazon-bedrock",
+    MISTRAL_CONVERSATIONS_PROTOCOL: "mistral",
 }
 
 
