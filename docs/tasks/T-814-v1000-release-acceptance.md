@@ -195,4 +195,4 @@ venv/Scripts/python tools/api-check/run.py
 
 | 日期 | 提交 | 范围 | 结果 | 问题和未覆盖项 |
 |---|---|---|---|---|
-| | | | | |
+| 2026-11-08 | `4df8972` | 自动和沙箱核对：`api-check` 全部、`ui-check` 全部、`vue-tsc -b`、`backend/tests` | `api-check` 0 失败（selftest 39、baseline 16、core 67 加 6 项记录、t832 169 加 2 项记录）；`ui-check` 342 项 0 失败；`backend/tests` 8 项通过；沙箱没有外网访问 | core 的 6 项记录已按作者决定写进规格。未覆盖：真实上游、真实 GPU、真机字体、作者最长的真实会话、真实 OAuth 授权、OAuth 令牌和 Vertex 私钥不进备份的独立检查 |
