@@ -67,6 +67,7 @@ class MockUpstream:
         self.api_key = None
         self.service_account = None
         self.public_key = None
+        self.accounts = {}
         self.expect_model = None
         self.issued_tokens = []
         self.proxy_attempts = []
@@ -97,6 +98,9 @@ class MockUpstream:
             self.last_assertion = None
             self.tool_used = None
             self.tool_reasoning_sent = False
+
+    def register_account(self, info, public_key):
+        self.accounts[info["client_email"]] = (info, public_key)
 
     def calls(self, *routes):
         return [r for r in self.requests if r.route in routes]
@@ -535,7 +539,14 @@ class _UpstreamHandler(BaseHTTPRequestHandler):
         return self._json(200, {"access_token": token, "token_type": "Bearer", "expires_in": 3600, "scope": CLOUD_SCOPE})
 
     def verify_assertion(self, assertion):
-        return verify_service_account_jwt(assertion, self.upstream.service_account, self.upstream.public_key, self.upstream.token_uri)
+        """按 JWT 的 iss 找登记过的服务账号；没登记的落到默认账号，由 iss 检查报出来。"""
+        mock = self.upstream
+        try:
+            issuer = jwt.decode(assertion, options={"verify_signature": False}).get("iss")
+        except jwt.PyJWTError:
+            issuer = None
+        info, public_key = mock.accounts.get(issuer, (mock.service_account, mock.public_key))
+        return verify_service_account_jwt(assertion, info, public_key, mock.token_uri)
 
     # ----- Bedrock -----
     def _bedrock(self, record, model, operation):

@@ -267,7 +267,8 @@ class Env:
 
     def ensure_character(self):
         if not self.character_id:
-            body = {"name": "检查用角色", "description": "SYSMARKER-角色设定", "personality": "安静", "scenario": "长廊", "firstMessage": ""}
+            # description 在界面上是“简介 · 不参与对话”，不发给模型；标记放在会进入系统提示的 personality
+            body = {"name": "检查用角色", "description": "简介，不参与对话", "personality": "SYSMARKER-角色设定", "scenario": "长廊", "firstMessage": ""}
             self.character_id = self.api.json_ok("POST", "/api/characters", json=body)["id"]
         return self.character_id
 
