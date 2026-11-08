@@ -613,14 +613,14 @@ async def check_viewports(ctx):
         size = f"{width}x{height}"
         page = await open_app(ctx, url, width, height)
         await enter_chat_any(ctx, page, "LONG")
+        if width < 768:
+            # 作者决定（2026-11-08）：窄屏在侧栏选完会话后自动收起侧栏，等收起和顶栏动画走完再量
+            await asyncio.sleep(1.6)
+            collapsed = await page.js("""!!document.querySelector('[aria-label="切换侧边栏"]')?.className.includes('left-0')""")
+            if not collapsed:
+                problems.append({"窗口": size, "页面": "主界面", "说明": "窄屏选完会话后侧栏没有自动收起"})
         await viewport_measure(page, "主界面", size, MAIN_CONTROLS, problems)
         await page.shot(f"viewport-{width}-main")
-        if width < 768:
-            # 窄屏选完会话侧栏不会自己收起，再量一次收起后的样子
-            await page.js("""document.querySelector('[aria-label="切换侧边栏"]').click()""")
-            await asyncio.sleep(1.6)
-            await viewport_measure(page, "主界面（收起侧栏）", size, MAIN_CONTROLS, problems)
-            await page.shot(f"viewport-{width}-main-collapsed")
         await page.js("[...document.querySelectorAll('.header-action-chip')][0].click()")
         await asyncio.sleep(0.8)
         await viewport_measure(page, "会话搜索", size, None, problems)

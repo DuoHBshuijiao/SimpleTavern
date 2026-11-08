@@ -3848,6 +3848,12 @@ function cancelEditTitle() {
 async function createChat() {
   if (!selectedCharacterId.value) return
   await chats.create(selectedCharacterId.value)
+  collapseSidebarOnNarrow()
+}
+
+/** 窄屏下侧栏展开时会把聊天区推出窗口，选好或新建会话后收起，免得输入框和发送按钮看不见 */
+function collapseSidebarOnNarrow() {
+  if (isNarrowPortrait.value && !sidebarCollapsed.value) sidebarCollapsed.value = true
 }
 
 /**
@@ -3959,6 +3965,7 @@ async function onSelectForkChild(chatId: string) {
 async function selectChat(chat: Chat) {
   await chats.load(chat.id)
   await afterChatReload(chat.id)
+  collapseSidebarOnNarrow()
 }
 
 async function restoreSettingsDrawerChat(chatId: string) {
