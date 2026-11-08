@@ -45,7 +45,7 @@ function effortValue(): string {
 <template>
   <Transition name="modal">
     <div v-if="show" class="modal">
-      <div class="modal-backdrop" @click="emit('cancel')"></div>
+      <div class="modal-backdrop backdrop-blur-[var(--glass-blur-soft)]" @click="emit('cancel')"></div>
       <div ref="dialogRef" v-bind="dialogAttrs" tabindex="-1" class="modal-content modal-surface chat-modal-width-520-92">
         <div class="modal-header">
           <h3 :id="titleId" class="modal-title">聊天助手设置</h3>

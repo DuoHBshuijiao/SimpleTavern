@@ -161,7 +161,7 @@ function setFast(v: string) {
 <template>
   <Transition name="modal">
     <div v-if="show && memberId" class="modal">
-      <div class="modal-backdrop" @click="close"></div>
+      <div class="modal-backdrop backdrop-blur-[var(--glass-blur-soft)]" @click="close"></div>
       <div ref="dialogRef" v-bind="dialogAttrs" tabindex="-1" class="modal-content modal-surface chat-modal-width-500-90">
         <div class="modal-header">
           <h3 :id="titleId" class="modal-title">成员设置</h3>

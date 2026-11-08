@@ -236,7 +236,7 @@ onUnmounted(() => {
 <template>
   <Transition name="modal">
     <div v-if="show" class="modal">
-      <div class="modal-backdrop" @click="handleCancel"></div>
+      <div class="modal-backdrop backdrop-blur-[var(--glass-blur-soft)]" @click="handleCancel"></div>
       <div
         ref="dialogRef"
         v-bind="dialogAttrs"

@@ -40,8 +40,6 @@
     border: 1px solid var(--color-glass-border-soft);
     border-radius: var(--radius-2xl);
     box-shadow: var(--shadow-glass-soft);
-    backdrop-filter: blur(var(--glass-blur-soft));
-    -webkit-backdrop-filter: blur(var(--glass-blur-soft));
   }
 
   .surface-panel {
@@ -50,8 +48,6 @@
     border: 1px solid var(--color-glass-border);
     border-radius: var(--radius-2xl);
     box-shadow: var(--shadow-glass-panel);
-    backdrop-filter: blur(var(--glass-blur-panel));
-    -webkit-backdrop-filter: blur(var(--glass-blur-panel));
   }
 
   /*
@@ -200,8 +196,6 @@
     border: 1px solid var(--color-glass-border);
     border-radius: var(--radius-xl);
     padding: var(--spacing-md);
-    backdrop-filter: blur(var(--glass-blur-panel));
-    -webkit-backdrop-filter: blur(var(--glass-blur-panel));
   }
 
   .panel-inset {
