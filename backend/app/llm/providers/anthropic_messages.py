@@ -1296,6 +1296,15 @@ async def _stream_anthropic_once(
         raise (finish_upstream_error(error, api_key) if _is_vertex(config) else error) from exc
 
 
+def _empty_output_error(detail: str) -> AppError:
+    # 与 OpenAI 兼容路径一致：上游 200 但没有正文、思考和工具调用，不能当成功
+    return _protocol_error(
+        code="provider_response_invalid",
+        message="上游服务返回了空消息",
+        detail=detail,
+    )
+
+
 def _native_source_links(blocks: list[dict[str, Any]]) -> str:
     links: dict[str, str] = {}
     for block in blocks:
@@ -1327,6 +1336,8 @@ async def complete_anthropic(*, base_url: str, api_key: str, messages: list[dict
         blocks.extend(result.provider_content or [])
         usage = merge_public_usage(usage, result.usage)
         if result.stop_reason != "pause_turn":
+            if not "".join(texts).strip() and not "".join(reasoning).strip() and not result.tool_calls:
+                raise _empty_output_error(f"anthropic messages: content, thinking and tool_use are empty; stop_reason={result.stop_reason}")
             text = "".join(texts) + _native_source_links(blocks)
             if as_message:
                 return ChatCompletionMessage(role="assistant", content=text, reasoning_content="".join(reasoning) or None,
@@ -1342,10 +1353,12 @@ async def stream_anthropic(*, base_url: str, api_key: str, messages: list[dict[s
     transcript = list(messages)
     blocks: list[dict[str, Any]] = []
     usage = None
+    produced = False
     for _ in range(8):
         terminal = None
         async for chunk in _stream_anthropic_once(base_url=base_url, api_key=api_key, messages=transcript, config=config):
             if chunk.kind != "finish":
+                produced = produced or bool(chunk.text)
                 yield chunk
             else:
                 terminal = chunk
@@ -1354,6 +1367,8 @@ async def stream_anthropic(*, base_url: str, api_key: str, messages: list[dict[s
         blocks.extend(terminal.provider_content or [])
         usage = merge_public_usage(usage, terminal.usage)
         if terminal.stop_reason != "pause_turn":
+            if not produced and not terminal.tool_calls:
+                raise _empty_output_error(f"anthropic stream: no text, thinking or tool_use; stop_reason={terminal.stop_reason}")
             links = _native_source_links(blocks)
             if links:
                 yield StreamChunk(kind="content", text=links)

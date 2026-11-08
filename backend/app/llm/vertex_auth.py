@@ -34,6 +34,9 @@ _MAX_ERROR_DETAIL_CHARS = 500
 # 读设置 / 备份时替换 private_key 的占位值；不含任何密钥信息。
 REDACTED_PRIVATE_KEY = "__simpletavern_private_key_hidden__"
 
+# 令牌交换阶段的所有错误都以这句开头，用户才分得清是换 token 失败还是 Vertex 本身连不上
+_TOKEN_STAGE = "获取 Vertex 访问令牌失败"
+
 _PEM_RE = re.compile(r"-----BEGIN[^-]*-----.*?(-----END[^-]*-----|$)", re.DOTALL)
 _JWT_RE = re.compile(r"\beyJ[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*")
 _GOOGLE_TOKEN_RE = re.compile(r"\bya29\.[A-Za-z0-9._-]+")
@@ -55,7 +58,7 @@ def scrub_secrets(text: Any) -> str:
 def _config_error(detail: str) -> AppError:
     return AppError(
         code="config_invalid",
-        message="服务账号 JSON 无效",
+        message=f"{_TOKEN_STAGE}：服务账号 JSON 无效",
         detail=detail,
         source=_SOURCE,
         status_code=400,
@@ -139,7 +142,7 @@ def _token_error(response: httpx.Response) -> AppError:
     if status == 429:
         return AppError(
             code="provider_quota_exceeded",
-            message="换取 Google access token 时被限流",
+            message=f"{_TOKEN_STAGE}：令牌服务限流（HTTP 429）",
             status_code=429,
             retryable=True,
             suggested_action="稍后重试",
@@ -148,7 +151,7 @@ def _token_error(response: httpx.Response) -> AppError:
     if status >= 500:
         return AppError(
             code="upstream_request_failed",
-            message="Google 令牌服务暂时不可用",
+            message=f"{_TOKEN_STAGE}：令牌服务暂时不可用（HTTP {status}）",
             status_code=502,
             retryable=True,
             suggested_action="稍后重试，并检查网络或上游服务状态",
@@ -156,7 +159,7 @@ def _token_error(response: httpx.Response) -> AppError:
         )
     return AppError(
         code="provider_auth_failed",
-        message="服务账号换取 access token 失败",
+        message=f"{_TOKEN_STAGE}：令牌服务拒绝了服务账号（HTTP {status}）",
         status_code=403 if status == 403 else 401,
         suggested_action="检查服务账号密钥是否被停用或删除、本机时间是否准确，以及账号是否有 Vertex AI 权限",
         **common,
@@ -191,20 +194,37 @@ async def _exchange_token(account: ServiceAccount) -> tuple[str, float]:
     except AppError:
         raise
     except Exception as exc:
-        raise as_app_error(
+        # 连接失败、断连、超时：保留原始原因和错误码，消息里点明是换 token 阶段
+        error = as_app_error(
             exc,
             source=_SOURCE,
             default_code="provider_request_failed",
-            default_message="换取 Google access token 失败",
+            default_message="请求令牌服务失败",
             default_status_code=502,
             provider=_PROVIDER,
             protocol=ANTHROPIC_MESSAGES_PROTOCOL,
-        ) from exc
-    token = body.get("access_token") if isinstance(body, dict) else None
+        )
+        reason = scrub_secrets(error.detail or error.message)[:_MAX_ERROR_DETAIL_CHARS]
+        error.message = f"{_TOKEN_STAGE}：{error.message}"
+        error.detail = f"token_uri request failed: {reason}"
+        error.suggested_action = "检查网络能否访问服务账号 JSON 里的 token_uri，然后重试"
+        raise error from None
+    if not isinstance(body, dict):
+        raise AppError(
+            code="provider_response_invalid",
+            message=f"{_TOKEN_STAGE}：令牌服务返回的不是 JSON",
+            detail="token response is not a JSON object",
+            source=_SOURCE,
+            status_code=502,
+            provider=_PROVIDER,
+            protocol=ANTHROPIC_MESSAGES_PROTOCOL,
+            suggested_action="检查服务账号 JSON 中的 token_uri",
+        )
+    token = body.get("access_token")
     if not isinstance(token, str) or not token.strip():
         raise AppError(
             code="provider_response_invalid",
-            message="令牌服务没有返回 access token",
+            message=f"{_TOKEN_STAGE}：令牌服务没有返回 access token",
             detail="token response has no access_token",
             source=_SOURCE,
             status_code=502,
