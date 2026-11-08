@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import socket
+import struct
 import subprocess
 import sys
 import tempfile
@@ -32,6 +33,9 @@ LAST_PARAGRAPH = "他在门口停了一下，回头看了看身后的长廊。�
 # ---------- 模拟模型 ----------
 class MockState:
     tps = 1500
+    # None 正常回复；http401、http429、http500 直接返回错误；stream_error 流里报错；stream_reset 流到一半断连接
+    fault = None
+    seen = []  # 收到过的请求：路径和鉴权头，用来确认密钥探针确实被发了出去
 
 
 REASONING = "先判断语气，回答不宜太长，但要留一个钩子让对话继续。先写动作，再写一句话，最后用环境收尾。" * 6
@@ -59,6 +63,19 @@ class MockHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         request = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+        auth = self.headers.get("Authorization") or self.headers.get("x-api-key") or ""
+        MockState.seen.append({"path": self.path, "auth": auth})
+        fault = MockState.fault
+        if fault in ("http401", "http429", "http500"):
+            # 有些上游会把收到的密钥写回错误信息，这里故意回显，看它会不会进界面和日志
+            echoed = auth.replace("Bearer ", "")
+            data = json.dumps({"error": {"message": f"模拟上游错误，收到的密钥是 {echoed}", "type": "mock"}}, ensure_ascii=False).encode()
+            self.send_response(int(fault[4:]))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         if not request.get("stream"):
             self._json({"id": "mock", "object": "chat.completion", "model": "mock", "choices": [
                 {"index": 0, "message": {"role": "assistant", "content": REPLY[:40]}, "finish_reason": "stop"}],
@@ -76,6 +93,18 @@ class MockHandler(BaseHTTPRequestHandler):
 
         try:
             send({"role": "assistant"})
+            if fault == "stream_error":
+                send({"content": "流里出错之前的半句"})
+                self.wfile.write(b'data: {"error": {"message": "\xe6\xa8\xa1\xe6\x8b\x9f\xe6\xb5\x81\xe5\x86\x85\xe9\x94\x99\xe8\xaf\xaf", "code": 500}}\n\n')
+                self.wfile.flush()
+                return
+            if fault == "stream_reset":
+                send({"content": "断流之前的半句"})
+                time.sleep(0.5)
+                self.connection.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+                self.close_connection = True
+                self.connection.close()
+                return
             for field, text in (("reasoning_content", REASONING), ("content", REPLY)):
                 for i in range(0, len(text), step):
                     send({field: text[i:i + step]})
@@ -88,10 +117,16 @@ class MockHandler(BaseHTTPRequestHandler):
 
 
 # ---------- 沙箱 ----------
+REAL_SECRETS = set()
+
+
 def scrub(node, mock_url, counters, rewrite_urls):
     if isinstance(node, dict):
         for key, value in list(node.items()):
             if SECRET_KEY.search(key) and not NOT_SECRET_KEY.search(key) and isinstance(value, str) and value:
+                if len(value) >= 12:
+                    # 只留在内存里，用来确认真实密钥没有进沙箱和日志，绝不打印或写盘
+                    REAL_SECRETS.add(value)
                 node[key] = "sandbox-dummy"
                 counters["keys"] += 1
             elif rewrite_urls and key in URL_KEYS and isinstance(value, str) and value.startswith("http"):
@@ -171,6 +206,8 @@ def build_sandbox(source, data_dir, mock_url):
                 "characterId": chat["messages"][-1].get("characterId"),
                 "content": f"【最后一条开头 {name}】\n\n" + "\n\n".join(f"{i + 1}. {LAST_PARAGRAPH}" for i in range(paragraphs)) + "\n\n【最后一条结尾】"}
         chat["messages"].append({k: v for k, v in last.items() if v is not None})
+        # 构建产物上只能点侧栏，标题要唯一才找得到
+        chat["title"] = f"沙箱 {name}"
         # 让搜索词命中足够多的消息，超过后端上限
         for message in chat["messages"][:-1]:
             if name == "LONG" and str(message.get("content") or "").strip():
@@ -240,6 +277,7 @@ def main():
     parser.add_argument("--cdp-port", type=int, default=9433)
     parser.add_argument("--built-port", type=int, default=9382)
     parser.add_argument("--dist", help="built 检查用这个现成的构建产物，不重新构建（用来做修改前的对照）")
+    parser.add_argument("--built-only", action="store_true", help="core 和 modals 只跑构建产物，不跑开发服务器（做对照时用）")
     args = parser.parse_args()
 
     import checks
@@ -288,9 +326,14 @@ def main():
             stdout=log, stderr=log))
         wait_http(f"http://127.0.0.1:{args.cdp_port}/json/version")
 
+        built_url = []
+
         def serve_built():
-            """构建到临时目录并启动预览，不碰 frontend/dist。"""
+            """构建到临时目录并启动预览，不碰 frontend/dist。多项检查共用一次构建。"""
+            if built_url:
+                return built_url[0]
             out_dir = os.path.abspath(args.dist) if args.dist else os.path.join(WORK, "dist")
+            context.built_dir = out_dir
             front_env = {**env, "SIMPLETAVERN_API_PROXY": f"http://127.0.0.1:{args.back_port}"}
             if not args.dist:
                 subprocess.run(["node", vite, "build", "--outDir", out_dir, "--emptyOutDir"], cwd=frontend, env=front_env, stdout=log, stderr=log, check=True)
@@ -299,11 +342,13 @@ def main():
                 cwd=frontend, env=front_env, stdout=log, stderr=log))
             url = f"http://127.0.0.1:{args.built_port}"
             wait_http(url + "/")
+            built_url.append(url)
             return url
 
         context = checks.Context(
             base_url=f"http://127.0.0.1:{args.front_port}", api_url=f"http://127.0.0.1:{args.back_port}",
-            cdp_port=args.cdp_port, shots_dir=shots, fixtures=fixtures, mock_state=MockState, serve_built=serve_built)
+            cdp_port=args.cdp_port, shots_dir=shots, fixtures=fixtures, mock_state=MockState, serve_built=serve_built,
+            work=WORK, data_dir=data_dir, log_path=log.name, real_secrets=REAL_SECRETS, built_only=args.built_only)
         failed = asyncio.run(checks.run(context, only))
     finally:
         for process in reversed(processes):

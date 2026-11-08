@@ -99,9 +99,14 @@ class Page:
             f.write(base64.b64decode(data["data"]))
         return path
 
-    async def key(self, key, vk):
+    async def key(self, key, vk, modifiers=0):
         for kind in ("keyDown", "keyUp"):
-            await self.send("Input.dispatchKeyEvent", type=kind, key=key, code=key, windowsVirtualKeyCode=vk)
+            await self.send("Input.dispatchKeyEvent", type=kind, key=key, code=key, windowsVirtualKeyCode=vk, modifiers=modifiers)
+
+    async def set_file(self, selector, path):
+        """给文件输入框选文件，和用户在系统对话框里选一样会触发 change。selector 是一段取到元素的 JS。"""
+        found = await self.send("Runtime.evaluate", expression=selector)
+        await self.send("DOM.setFileInputFiles", files=[path], objectId=found["result"]["objectId"])
 
     async def wheel(self, delta_y, x=800, y=400):
         await self.send("Input.dispatchMouseEvent", type="mouseWheel", x=x, y=y, deltaX=0, deltaY=delta_y)
