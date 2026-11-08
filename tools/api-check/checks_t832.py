@@ -525,11 +525,13 @@ def mistral_store_note(env):
 # ---------- Vertex 专有 ----------
 def vertex_jwt_exchange(env):
     fam = FAMILIES[2]
-    chat_id = prepare(env, fam)
+    sa_json, _pem = fresh_account(env)
+    chat_id = prepare(env, fam, api_key=sa_json)
     result = env.generate(chat_id, USER_TEXT)
     assert_success(env, fam, chat_id, result, True)
     mock = env.mock
-    ensure(mock.token_requests, "应向 token_uri 换 token")
+    equal(len(mock.token_requests), 1, "新服务账号第一次生成应换一次 token")
+    ensure(mock.issued_tokens, "token 端点应已发出 token")
     ensure(mock.issued_tokens, "token 端点应已发出 token")
     auth = mock.calls("vertex")[0].headers.get("Authorization")
     equal(auth, f"Bearer {mock.issued_tokens[-1]}", "Vertex 请求的 Authorization")
@@ -537,13 +539,30 @@ def vertex_jwt_exchange(env):
 
 def vertex_token_reuse_note(env):
     fam = FAMILIES[2]
-    chat_id = prepare(env, fam)
+    sa_json, _pem = fresh_account(env)
+    chat_id = prepare(env, fam, api_key=sa_json)
     first = env.generate(chat_id, USER_TEXT)
     assert_success(env, fam, chat_id, first, True)
-    count_after_first = len(env.mock.token_requests)
+    equal(len(env.mock.token_requests), 1, "新服务账号第一次生成应换一次 token")
+    first_token = env.mock.calls("vertex")[0].headers.get("Authorization")
     second = env.generate(chat_id, "接着说。")
-    assert_reached(env, fam, second, True)
-    unspecified(f"两次生成共换 token {len(env.mock.token_requests)} 次，第一次之后 {count_after_first} 次（Google 文档说 token 可复用到过期，但没有要求必须缓存）")
+    ensure(second.succeeded, second.summary())
+    calls = env.mock.calls("vertex")
+    ensure(len(calls) >= 2, f"第二次生成应到 Vertex：{second.summary()}")
+    again = len(env.mock.token_requests) - 1
+    same = calls[-1].headers.get("Authorization") == first_token
+    unspecified(f"同一服务账号第二次生成{'没有再换' if again == 0 else f'又换了 {again} 次'} token，{'复用' if same else '没有复用'}了第一次的 access token（Google 文档说 token 可复用到过期，没有要求必须缓存）")
+
+
+def fresh_account(env):
+    """全新的服务账号：不同的 client_email 和私钥。产品按账号缓存 token，用新账号才保证会去 token 端点。"""
+    import secrets as _secrets_module
+    key = fixtures.generate_rsa_private_key()
+    pem = fixtures.private_key_pem(key)
+    info = fixtures.service_account_info(pem, env.mock.token_uri)
+    info["client_email"] = f"check-{_secrets_module.token_hex(6)}@p.iam.gserviceaccount.com"
+    env.mock.register_account(info, fixtures.public_key_pem(key))
+    return json.dumps(info), pem
 
 
 def _sa_variant(env, mutate):
@@ -581,10 +600,11 @@ def sa_invalid_check(make_key, words=ACCOUNT_WORDS, may_hit_token=False):
 def token_fault_check(fault):
     def run(env):
         fam = FAMILIES[2]
-        chat_id = prepare(env, fam, token_fault=fault)
+        sa_json, pem = fresh_account(env)
+        chat_id = prepare(env, fam, api_key=sa_json, token_fault=fault)
         env.api.json_ok("DELETE", "/api/http-log")
         result = env.generate(chat_id, USER_TEXT, deadline=45.0)
-        ensure(env.mock.token_requests, f"应先请求 token 端点。上游收到：{env.mock.requests}；后端：{result.summary()}")
+        ensure(env.mock.token_requests, f"新服务账号应先请求 token 端点。上游收到：{env.mock.requests}；后端：{result.summary()}")
         ensure(not env.mock.calls("vertex"), "token 失败时不该继续调 Vertex")
         ensure(not env.mock.violations, f"JWT 不符合文档：{env.mock.violations[:2]}")
         ensure(not result.hung and not result.transport_error, result.summary())
@@ -598,8 +618,18 @@ def token_fault_check(fault):
         messages = env.read_chat(chat_id)["messages"]
         ensure(any(m["role"] == "user" and m["content"] == USER_TEXT for m in messages), "失败后用户消息不能丢")
         if fault == "invalid_grant_echo":
-            assert_no_secrets(env, fam, chat_id, result, require_log=False)
+            assert_no_secrets(env, fam, chat_id, result, require_log=False, extra=fixtures.private_key_fragments(pem))
     return run
+
+
+def token_fresh_ok(env):
+    """和 token 故障用例同样的新账号流程，但 token 端点正常：必须成功。证明故障用例的失败来自 token 端点。"""
+    fam = FAMILIES[2]
+    sa_json, _pem = fresh_account(env)
+    chat_id = prepare(env, fam, api_key=sa_json)
+    result = env.generate(chat_id, USER_TEXT, deadline=45.0)
+    equal(len(env.mock.token_requests), 1, "新服务账号应换一次 token")
+    assert_success(env, fam, chat_id, result, True)
 
 
 def no_external_network(env):
@@ -660,6 +690,7 @@ add_check("t832.vertex.sa.bad_private_key", "私钥解析失败时明确报错�
           sa_invalid_check(lambda env: _sa_variant(env, lambda info: info.update(private_key="-----BEGIN PRIVATE KEY-----\nbm90LWEta2V5\n-----END PRIVATE KEY-----\n"))))
 add_check("t832.vertex.sa.wrong_type", "type 不是 service_account 时明确报错",
           sa_invalid_check(lambda env: _sa_variant(env, lambda info: info.update(type="authorized_user"))))
+add_check("t832.vertex.token.fresh_account_ok", "新服务账号、token 端点正常时生成成功（token 故障用例的对照）", token_fresh_ok)
 for _fault in ("invalid_grant", "http_500", "not_json", "no_access_token", "drop", "invalid_grant_echo"):
     add_check(f"t832.vertex.token.{_fault}", f"token 端点故障 {_fault} 时明确报错，不调 Vertex", token_fault_check(_fault))
 add_check("t832.no_external_network", "这一组运行期间没有发往外网模型服务的请求", no_external_network)
