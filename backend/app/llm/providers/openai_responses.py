@@ -17,6 +17,7 @@ from urllib.parse import urlsplit, urlunsplit
 import httpx
 
 from app.errors import AppError, as_app_error
+from app.llm.stream_errors import guarded_lines, upstream_stream_error
 from app.llm.prompt_cache import (
     PromptCachePlan,
     openai_responses_cache_fields,
@@ -960,7 +961,13 @@ async def stream_responses(
                 await _raise_stream_http_error(r)
 
                 event_name = ""
-                async for line in r.aiter_lines():
+                async for line in guarded_lines(
+                    r,
+                    partial=lambda: bool(aggregated_content or aggregated_reasoning or tool_calls_by_item),
+                    source="llm.openai_responses.stream",
+                    provider=_PROVIDER,
+                    protocol=_PROTOCOL,
+                ):
                     if line is None:
                         continue
                     if not line:
@@ -1018,16 +1025,19 @@ async def stream_responses(
                         continue
                     if etype == "error" or data.get("type") == "error":
                         err = data.get("error") if isinstance(data.get("error"), dict) else data
-                        msg = ""
-                        if isinstance(err, dict):
-                            msg = str(err.get("message") or err.get("code") or "")
-                        raise _protocol_error(
-                            code="provider_request_failed",
-                            message="OpenAI Responses 流式返回错误",
-                            detail=msg or data_str[:500],
-                            retryable=True,
+                        raise upstream_stream_error(
+                            err, source="llm.openai_responses.stream", provider=_PROVIDER, protocol=_PROTOCOL
                         )
-                    if etype in {"response.failed", "response.incomplete", "response.cancelled"}:
+                    if etype == "response.failed":
+                        response = data.get("response") if isinstance(data.get("response"), dict) else {}
+                        error = response.get("error") if isinstance(response.get("error"), dict) else {}
+                        raise upstream_stream_error(
+                            error or {"message": "response.failed"},
+                            source="llm.openai_responses.stream",
+                            provider=_PROVIDER,
+                            protocol=_PROTOCOL,
+                        )
+                    if etype in {"response.incomplete", "response.cancelled"}:
                         response = data.get("response") if isinstance(data.get("response"), dict) else {}
                         error = response.get("error") if isinstance(response.get("error"), dict) else {}
                         raise _protocol_error(code=str(error.get("code") or "provider_response_incomplete"),

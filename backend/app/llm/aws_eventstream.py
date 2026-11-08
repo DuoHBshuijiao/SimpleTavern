@@ -14,7 +14,7 @@ import json
 import struct
 import zlib
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Callable
 
 import httpx
 
@@ -242,8 +242,11 @@ async def aiter_event_frames(
     source: str,
     provider: str,
     protocol: str,
+    partial: Callable[[], bool] | None = None,
 ) -> AsyncIterator[EventStreamFrame]:
     """读响应体并产出帧；异常帧、畸形帧、断流都抛 AppError。"""
+    from app.llm.stream_errors import stream_interrupted_error
+
     decoder = EventStreamDecoder()
     common = {"source": source, "provider": provider, "protocol": protocol}
     stream = response.aiter_bytes()
@@ -255,7 +258,7 @@ async def aiter_event_frames(
         except httpx.TimeoutException:
             raise
         except httpx.TransportError as exc:
-            raise _incomplete_stream_error(f"connection lost: {exc}", **common) from exc
+            raise stream_interrupted_error(exc, partial=bool(partial and partial()), **common) from exc
         try:
             frames = decoder.feed(chunk)
         except EventStreamError as exc:

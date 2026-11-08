@@ -24,6 +24,7 @@ from app.llm.providers.openai_compatible_chat import (
     _raise_http_error,
     _raise_stream_http_error,
 )
+from app.llm.stream_errors import stream_interrupted_error
 from app.llm.types import (
     MISTRAL_CONVERSATIONS_PROTOCOL,
     GenerationConfig,
@@ -481,7 +482,7 @@ def _stream_error_event(data: dict[str, Any]) -> AppError:
     )
 
 
-async def _iter_events(response: httpx.Response) -> AsyncIterator[dict[str, Any]]:
+async def _iter_events(response: httpx.Response, partial: Any) -> AsyncIterator[dict[str, Any]]:
     lines = response.aiter_lines()
     while True:
         try:
@@ -491,11 +492,8 @@ async def _iter_events(response: httpx.Response) -> AsyncIterator[dict[str, Any]
         except httpx.TimeoutException:
             raise
         except httpx.TransportError as exc:
-            raise _error(
-                code="stream_incomplete",
-                message="Mistral 响应流提前中断",
-                detail=f"connection lost: {exc}",
-                retryable=True,
+            raise stream_interrupted_error(
+                exc, partial=bool(partial()), source=f"{_SOURCE}.stream", provider=_PROVIDER, protocol=_PROTOCOL
             ) from exc
         if not line or not line.startswith("data:"):
             continue
@@ -545,7 +543,7 @@ async def _stream(
             async with client.stream("POST", url, headers=headers, json=payload, timeout=None) as r:
                 _log.set_response(status=r.status_code, headers=dict(r.headers))
                 await _raise_stream_http_error(r)
-                async for data in _iter_events(r):
+                async for data in _iter_events(r, lambda: bool(aggregated_text or aggregated_reasoning or tools)):
                     event = data.get("type")
                     if event == "message.output.delta":
                         text, thinking = _split_content(data.get("content"))

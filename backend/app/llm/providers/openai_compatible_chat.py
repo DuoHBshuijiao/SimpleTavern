@@ -17,6 +17,7 @@ from app.services.http_client import get_async_http_client
 import httpx
 
 from app.errors import AppError, as_app_error
+from app.llm.stream_errors import guarded_lines, upstream_stream_error
 from app.services.http_log import log_outbound
 
 # 上游 4xx/5xx 响应体最大展示长度（避免日志/UI 被巨页吞没）
@@ -798,11 +799,20 @@ async def stream_chat_completions(
         async with client.stream("POST", url, headers=headers, json=payload, timeout=None) as r:
             _log.set_response(status=r.status_code, headers=dict(r.headers))
             await _raise_stream_http_error(r)
-            async for line in r.aiter_lines():
+            async for line in guarded_lines(
+                r,
+                partial=lambda: bool(aggregated_content or aggregated_reasoning or tool_calls_by_index),
+                source="llm.openai_compat.stream",
+                provider=_OPENAI_COMPAT_PROVIDER,
+                protocol=_OPENAI_COMPAT_PROTOCOL,
+            ):
                 if not line:
                     continue
                 if line.startswith(":"):
                     # SSE comment / keepalive 帧无业务语义，可安全跳过。
+                    continue
+                if line.startswith(("event:", "id:", "retry:")):
+                    # SSE 标准字段；Chat Completions 不靠事件名区分，错误靠 data 里的 error 对象识别
                     continue
                 if not line.startswith("data:"):
                     raise _protocol_error(
@@ -835,6 +845,14 @@ async def stream_chat_completions(
                         detail=f"expected object, got {type(obj).__name__}",
                     )
 
+                if obj.get("error"):
+                    # 流中错误帧 {"error": {"message", "type", "code"}}：保留上游原话，不当成缺 choices 的解析错误
+                    raise upstream_stream_error(
+                        obj["error"],
+                        source="llm.openai_compat.stream",
+                        provider=_OPENAI_COMPAT_PROVIDER,
+                        protocol=_OPENAI_COMPAT_PROTOCOL,
+                    )
                 if isinstance(obj.get("usage"), dict):
                     # usage 可能随最后一帧或独立帧到达；记录最后一次（stream_options.include_usage / DeepSeek 默认带）
                     terminal_usage = _usage_with_tier(obj)

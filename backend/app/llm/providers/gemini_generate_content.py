@@ -15,6 +15,7 @@ from urllib.parse import urlsplit, urlunsplit, urlencode, parse_qsl
 import httpx
 
 from app.errors import AppError, as_app_error
+from app.llm.stream_errors import guarded_lines, upstream_stream_error
 from app.llm.gemini_cache_store import attach_explicit_cache, forget_cached_name
 from app.llm.prompt_cache import PromptCachePlan
 from app.llm.providers.openai_compatible_chat import (
@@ -993,7 +994,13 @@ async def stream_gemini(
                         retried_cache = True
                         continue
                     await _raise_stream_http_error(r)
-                    async for line in r.aiter_lines():
+                    async for line in guarded_lines(
+                        r,
+                        partial=lambda: bool(aggregated_content or aggregated_reasoning),
+                        source="llm.gemini_generate_content.stream",
+                        provider=_PROVIDER,
+                        protocol=_PROTOCOL,
+                    ):
                         if not line:
                             continue
                         if line.startswith(":"):
@@ -1027,12 +1034,11 @@ async def stream_gemini(
                                 detail=f"got {type(data).__name__}",
                             )
                         if isinstance(data.get("error"), dict):
-                            err = data["error"]
-                            raise _protocol_error(
-                                code="provider_request_failed",
-                                message="Gemini 流式返回错误",
-                                detail=str(err.get("message") or err),
-                                retryable=True,
+                            raise upstream_stream_error(
+                                data["error"],
+                                source="llm.gemini_generate_content.stream",
+                                provider=_PROVIDER,
+                                protocol=_PROTOCOL,
                             )
                         usage = data.get("usageMetadata")
                         if isinstance(usage, dict):

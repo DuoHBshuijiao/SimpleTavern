@@ -621,7 +621,9 @@ async def _stream(
             async with client.stream("POST", url, headers=headers, json=payload, timeout=None) as r:
                 _log.set_response(status=r.status_code, headers=dict(r.headers))
                 await _raise_stream_http_error(r)
-                async for frame in aiter_event_frames(r, **common):
+                async for frame in aiter_event_frames(
+                    r, partial=lambda: bool(aggregated_text or aggregated_reasoning or tools), **common
+                ):
                     event = frame.event_type
                     if event not in {"contentBlockStart", "contentBlockDelta", "contentBlockStop", "messageStop", "metadata"}:
                         continue

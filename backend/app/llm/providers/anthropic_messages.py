@@ -12,13 +12,14 @@ from __future__ import annotations
 import base64
 import binascii
 import json
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Callable
 from urllib.parse import quote, urlsplit, urlunsplit
 
 import httpx
 
 from app.errors import AppError, as_app_error
 from app.llm.aws_eventstream import EVENTSTREAM_CONTENT_TYPE, aiter_event_frames, frame_json
+from app.llm.stream_errors import guarded_lines, upstream_stream_error
 from app.llm.prompt_cache import (
     PromptCachePlan,
     anthropic_mark_tools,
@@ -1013,10 +1014,14 @@ async def _complete_anthropic_once(
         raise (finish_upstream_error(error, api_key) if _is_vertex(config) else error) from exc
 
 
-async def _iter_sse_events(response: httpx.Response) -> AsyncIterator[tuple[str, dict[str, Any], str]]:
+async def _iter_sse_events(
+    response: httpx.Response, partial: Callable[[], bool]
+) -> AsyncIterator[tuple[str, dict[str, Any], str]]:
     """SSE 文本流 → (事件名, 事件对象, 原始 JSON 文本)。"""
     event_name = ""
-    async for line in response.aiter_lines():
+    async for line in guarded_lines(
+        response, partial=partial, source="llm.anthropic_messages.stream", provider=_PROVIDER, protocol=_PROTOCOL
+    ):
         if line is None:
             continue
         if not line:
@@ -1053,10 +1058,12 @@ async def _iter_sse_events(response: httpx.Response) -> AsyncIterator[tuple[str,
         yield event_name, data, data_str
 
 
-async def _iter_bedrock_events(response: httpx.Response) -> AsyncIterator[tuple[str, dict[str, Any], str]]:
+async def _iter_bedrock_events(
+    response: httpx.Response, partial: Callable[[], bool]
+) -> AsyncIterator[tuple[str, dict[str, Any], str]]:
     """invoke-with-response-stream：chunk 帧的 ``bytes`` 字段是 base64 编码的 Anthropic 事件 JSON。"""
     common = {"source": "llm.anthropic_messages.stream", "provider": _PROVIDER, "protocol": _PROTOCOL}
-    async for frame in aiter_event_frames(response, **common):
+    async for frame in aiter_event_frames(response, partial=partial, **common):
         if frame.event_type != "chunk":
             continue
         encoded = frame_json(frame, **common).get("bytes")
@@ -1142,7 +1149,8 @@ async def _stream_anthropic_once(
                 ctype = (r.headers.get("content-type") or "").lower()
                 # Bedrock 官方流一律是 eventstream；只有代理转成 SSE 时才走文本解析
                 use_eventstream = _is_bedrock(config) and not _is_vertex(config) and "text/event-stream" not in ctype
-                events = _iter_bedrock_events(r) if use_eventstream else _iter_sse_events(r)
+                partial = lambda: bool(aggregated_content or aggregated_reasoning or pending_tools)  # noqa: E731
+                events = _iter_bedrock_events(r, partial) if use_eventstream else _iter_sse_events(r, partial)
                 async for event_name, data, data_str in events:
                     etype = event_name or str(data.get("type") or "")
                     if etype == "message_start":
@@ -1166,15 +1174,10 @@ async def _stream_anthropic_once(
                     if etype == "ping":
                         continue
                     if etype == "error":
+                        # {"type":"error","error":{"type":"overloaded_error","message":...}}：保留上游原话并按 type 映射
                         err = data.get("error") if isinstance(data.get("error"), dict) else data
-                        msg = ""
-                        if isinstance(err, dict):
-                            msg = str(err.get("message") or err.get("type") or "")
-                        raise _protocol_error(
-                            code="provider_request_failed",
-                            message="Anthropic 流式返回错误",
-                            detail=msg or data_str[:500],
-                            retryable=True,
+                        raise upstream_stream_error(
+                            err, source="llm.anthropic_messages.stream", provider=_PROVIDER, protocol=_PROTOCOL
                         )
                     if etype == "content_block_start":
                         block = data.get("content_block")
