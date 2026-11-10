@@ -188,7 +188,7 @@ function setFast(v: string) {
 
           <div class="settings-group">
             <div class="settings-group-title">模型</div>
-            <SettingsField label="绑定模型" hint="为该成员绑定专属模型，留空则使用全局设置。">
+            <SettingsField label="绑定模型">
               <template #actions>
                 <button
                   type="button"
@@ -237,8 +237,7 @@ function setFast(v: string) {
             </SettingsField>
             <SettingsField
               label="思考深度"
-              hint="留空沿用会话或全局默认深度。"
-              more="none 会真正关闭思考。留空则沿用本会话面板或全局默认深度。"
+              more="留空沿用会话或全局默认；none 会真正关闭思考。"
             >
               <ModernSelect
                 :model-value="effortValue()"
@@ -263,8 +262,7 @@ function setFast(v: string) {
             <div class="settings-group-title">发言</div>
             <SettingsField
               label="参与概率"
-              hint="设置为 100% 表示每轮必定发言，低于 100% 则按概率随机参与。"
-              more="0 表示这名成员通常不发言。一轮里所有成员都没被选中时，会随机保留一名。"
+              more="100% 每轮必定发言，低于 100% 按概率参与，0 通常不发言。一轮里没人被选中时，会随机保留一名。"
             >
               <div class="flex items-center gap-3">
                 <input
@@ -290,10 +288,7 @@ function setFast(v: string) {
           </div>
 
           <div class="settings-group">
-            <div class="settings-group-title">system prompt 插入字段</div>
-            <SettingsHint more="关闭后，该成员对应字段将不会被注入到本轮/后续的 system prompt（用于避免多人共享世界观时的重复设定）。">
-              关闭后该字段不再注入 system prompt。
-            </SettingsHint>
+            <SettingsHint title="system prompt 插入字段" more="关闭后，这名成员对应的字段不再注入 system prompt，可以避免多人共享世界观时重复设定。" />
             <SettingsSwitch
               label="插入 Personality"
               :model-value="settings.includePersonality !== false"

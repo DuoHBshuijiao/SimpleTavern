@@ -346,14 +346,13 @@ void dialogRef
             <SettingsSwitch
               label="纯 AI 模式"
               :model-value="groupPureAiMode"
-              hint="不注入 Persona，用户发言将以 system 影响世界。"
+              more="不注入 Persona，用户发言以 system 身份影响世界。"
               @update:model-value="groupPureAiMode = $event"
             />
             <SettingsSwitch
               label="system 放在最前（默认）"
               :model-value="groupSystemAlwaysAtBottom"
-              hint="开启时整段 system 在首条。"
-              more="开启时整段 system 在首条，与旧版一致；关闭后可用下方「注入深度」将整段 system 插入历史。"
+              more="关闭后，用下方「注入深度」把整段 system 插进历史消息里。"
               @update:model-value="groupSystemAlwaysAtBottom = $event"
             />
             <SettingsField label="系统提示词注入深度" :class="{ 'opacity-50 pointer-events-none': groupSystemAlwaysAtBottom }">
@@ -372,7 +371,6 @@ void dialogRef
             <SettingsSwitch
               label="启用某角色的 First Message 作为开场"
               :model-value="groupFirstMessageEnabled"
-              hint="创建后会在聊天窗口内直接插入该角色的首句（会写入聊天记录）。"
               @update:model-value="groupFirstMessageEnabled = $event"
             />
             <SettingsField v-if="groupFirstMessageEnabled" label="选择角色">
@@ -392,7 +390,6 @@ void dialogRef
             <SettingsSwitch
               label="启用群聊 MVU"
               :model-value="groupMvuEnabled"
-              hint="状态栏 / 指令 / 正则队列。"
               @update:model-value="groupMvuEnabled = $event"
             />
             <template v-if="groupMvuEnabled">

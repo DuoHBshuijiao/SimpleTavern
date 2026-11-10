@@ -229,7 +229,7 @@ void dialogRef
         <div class="modal-body">
           <div class="settings-group">
             <div class="settings-group-title">发言与系统提示词</div>
-            <SettingsField label="发言延迟 (ms)" hint="角色连续发言之间的间隔时间。">
+            <SettingsField label="发言延迟 (ms)">
               <input
                 v-model.number="groupDelayDraft"
                 type="number"
@@ -241,14 +241,12 @@ void dialogRef
             <SettingsSwitch
               label="system 放在最前（默认）"
               :model-value="groupSystemAlwaysAtBottomDraft"
-              hint="开启时整段 system 在消息最前。"
-              more="开启时整段 system 在消息最前，与旧版一致；关闭后按下方深度将整段 system 插入历史，利于部分 KV 命中。"
+              more="关闭后按下方深度把整段 system 插进历史消息，有利于部分缓存命中。"
               @update:model-value="groupSystemAlwaysAtBottomDraft = $event"
             />
             <SettingsField
               label="系统提示词注入深度"
-              hint="仅关闭「system 放在最前」时生效。"
-              more="整段 system 将插在倒数第 N 条消息（含世界书产生条目）之前；仅关闭「system 放在最前」时生效。"
+              more="整段 system 插在倒数第 N 条消息之前。只在关闭「system 放在最前」时生效。"
               :class="{ 'opacity-50 pointer-events-none': groupSystemAlwaysAtBottomDraft }"
             >
               <input
@@ -266,8 +264,7 @@ void dialogRef
             <SettingsSwitch
               label="启用群聊 MVU"
               :model-value="groupMvuEnabledDraft"
-              hint="由锚定成员的状态栏与 MVU 模式驱动。"
-              more="启用后由锚定成员的状态栏与 MVU 模式（指令 / 正则）驱动；与会话设置抽屉写入同一套 overrides。"
+              more="由锚定成员的状态栏和 MVU 模式驱动，和会话设置里是同一份配置。"
               @update:model-value="groupMvuEnabledDraft = $event"
             />
             <template v-if="groupMvuEnabledDraft">
@@ -306,7 +303,7 @@ void dialogRef
 
           <div class="settings-group">
             <div class="settings-group-title">成员与发言顺序</div>
-            <SettingsHint>拖动成员卡片可更改在“自动发言”模式下的发言顺序。</SettingsHint>
+            <SettingsHint>拖动卡片调整自动发言的顺序。</SettingsHint>
             <div class="flex flex-col gap-2">
               <div
                 v-for="(id, idx) in memberIdsDraft"

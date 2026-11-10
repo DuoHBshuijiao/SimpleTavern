@@ -154,7 +154,8 @@ API 预设：列表、新建/复制/删除、名称 combobox（供应商目录�
 - **button** `清空`
 - **button** `展开供应商列表`
 - **input[type=text]** `搜索供应商`
-- **button** `无缓存 登录 需参数 （地址由参数生成）` （v-for=preset in group.items）
+- **button** 供应商项，三行：厂商名（右侧可带 `登录` 或 `需参数`）、协议和缓存方式标签、地址（无固定地址时显示 `地址由参数生成`）（v-for=preset in group.items）
+- 面板 Teleport 到 `body`，不窄于 380px，右边对齐输入框；Esc 只关面板。分组顺序：中国厂商、国际厂商、模型托管平台、聚合网关、需要登录。
 
 ### `components/ModernSelect.vue`
 

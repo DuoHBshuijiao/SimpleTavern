@@ -4395,7 +4395,6 @@ provide(
           <div v-if="preloaded" v-show="tab === 'global'" class="space-y-6">
             <div v-if="!globalDraft" class="text-center text-[var(--color-text-muted)] py-8">加载中...</div>
             <div v-else class="space-y-4">
-              <p class="settings-hint">全局默认值。配置了 API 预设时，建议优先用预设管理不同服务商。</p>
 
               <SettingsDrawerGlobalConnectionSection
                 v-if="globalDraft"

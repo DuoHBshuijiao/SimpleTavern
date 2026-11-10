@@ -139,7 +139,7 @@ const authStyleOptions = computed(() => {
                           />
                         </SettingsField>
 
-                        <SettingsField label="API 基础地址" :hint="presets.editingPresetBaseUrlHint">
+                        <SettingsField label="API 基础地址" :more="presets.editingPresetBaseUrlHint">
                             <input
                                 v-model="presets.editingPreset!.baseUrl"
                                 type="text"
@@ -151,8 +151,7 @@ const authStyleOptions = computed(() => {
                         <SettingsField
                           v-if="!presets.isTtsPreset(presets.editingPreset)"
                           label="LLM 协议"
-                          hint="「自动」按模型名选原生协议。"
-                          more="「自动」会按模型名选原生协议（Claude → Anthropic Messages、Gemini → generateContent…），选择结果在下方预览与聊天 meta 中可见；固定某协议则不再自动切换。未知/未实现协议会明确失败（不静默回退）。"
+                          more="「自动」按模型名选原生协议（Claude → Anthropic Messages、Gemini → generateContent…），结果在下方预览里能看到。固定某个协议后不再自动切换。"
                         >
                             <ModernSelect
                               :model-value="presets.editingPreset!.protocol || 'openai_compatible_chat'"
@@ -163,7 +162,7 @@ const authStyleOptions = computed(() => {
                             />
                         </SettingsField>
 
-                        <SettingsField v-if="showAuthStyleField" label="鉴权方式" hint="Vertex 上的 Claude 选 Google 服务账号。">
+                        <SettingsField v-if="showAuthStyleField" label="鉴权方式" more="Vertex 上的 Claude 选 Google 服务账号。">
                             <ModernSelect
                               :model-value="presets.editingPreset!.authStyle || ''"
                               :options="authStyleOptions"
@@ -176,8 +175,7 @@ const authStyleOptions = computed(() => {
                         <SettingsField
                           v-if="isVertexPreset"
                           label="服务账号 JSON"
-                          hint="粘贴从 Google Cloud 下载的服务账号密钥 JSON 全文。"
-                          more="私钥只保存在本机，用来换取短期 access token。保存后再打开时 private_key 显示为占位内容，不影响使用；要换账号就粘贴新的 JSON。设置备份不含私钥，恢复备份后需要重新粘贴。"
+                          more="粘贴从 Google Cloud 下载的服务账号密钥 JSON 全文。私钥只保存在本机，用来换取短期 access token。保存后再打开时 private_key 显示为占位内容，不影响使用；要换账号就粘贴新的 JSON。设置备份不含私钥，恢复备份后需要重新粘贴。"
                         >
                             <template #actions>
                               <button
@@ -217,7 +215,6 @@ const authStyleOptions = computed(() => {
                                     <component :is="presets.editingPresetShowApiKey ? Eye : EyeOff" class="w-4 h-4" />
                                 </button>
                              </div>
-                            <p v-if="presets.presetRequiresOAuth(presets.editingPreset)" class="settings-hint">开始登录会先保存当前预设，授权凭据独立保存在本机。</p>
                             <div v-if="presets.presetRequiresOAuth(presets.editingPreset)" class="flex flex-wrap items-center gap-2 pt-1">
                               <span class="settings-hint min-w-0 max-w-full break-all">
                                 {{ presets.oauthStatusFor(presets.editingPreset?.id)?.loggedIn ? '已登录' : '需要登录后才能发请求' }}
@@ -362,13 +359,10 @@ const authStyleOptions = computed(() => {
                         />
 
                         <div v-if="presets.isTtsPreset(presets.editingPreset)" class="settings-group">
-                          <p class="settings-hint">
-                            当前提供商：{{ presets.formatTtsProviderLabel(presets.editingPresetTtsProvider) }}
-                          </p>
 
                           <!-- GLM-TTS 本地专属配置 -->
                           <template v-if="presets.editingPresetIsGlmLocal">
-                            <SettingsField label="仓库路径" hint="指向包含 run_api_gpu.ps1 的已就绪 GLM-TTS 目录。">
+                            <SettingsField label="仓库路径" more="指向包含 run_api_gpu.ps1 的已就绪 GLM-TTS 目录。">
                               <input v-model="presets.editingPreset!.ttsGlmLocalRepoPath" type="text" class="input w-full" placeholder="E:\GLM-TTS" />
                             </SettingsField>
                             <SettingsField label="端口">
@@ -377,14 +371,13 @@ const authStyleOptions = computed(() => {
                             <SettingsSwitch
                               label="由程序启动"
                               :model-value="!!presets.editingPreset!.ttsGlmLocalManaged"
-                              hint="首次合成前自动运行脚本。"
                               more="开启后会在首次合成前自动运行 run_api_gpu.ps1；关闭时需自行启动本地 API。"
                               @update:model-value="presets.editingPreset!.ttsGlmLocalManaged = $event"
                             />
                           </template>
 
                           <template v-else-if="presets.editingPresetIsQwen3Local">
-                            <SettingsField label="仓库路径" hint="指向安装好 Qwen3-TTS 及其网关的仓库目录；托管模式会从这里启动网关。">
+                            <SettingsField label="仓库路径" more="指向安装好 Qwen3-TTS 及其网关的仓库目录；托管模式会从这里启动网关。">
                               <input v-model="presets.editingPreset!.ttsQwen3LocalRepoPath" type="text" class="input w-full" placeholder="E:\Qwen3-TTS" />
                             </SettingsField>
                             <SettingsField label="主端口（CustomVoice 网关）">
@@ -404,7 +397,7 @@ const authStyleOptions = computed(() => {
                             <SettingsSwitch
                               label="由程序启动"
                               :model-value="!!presets.editingPreset!.ttsQwen3LocalManaged"
-                              hint="托管模式会启动两个网关，两个端口必须不同。"
+                              hint="两个端口必须不同。"
                               more="托管模式会启动两个 uvicorn：主端口加载 CustomVoice（仅 speaker → /v1/tts/custom_voice）；语音克隆端口加载 Base（参考音频+转写 → /v1/tts/voice_clone）。两端口必须不同；手动启动时需自行各启一个网关并填好 Base URL（主地址对应主端口）。"
                               @update:model-value="presets.editingPreset!.ttsQwen3LocalManaged = $event"
                             />
@@ -423,7 +416,7 @@ const authStyleOptions = computed(() => {
                           </template>
 
                           <template v-else-if="presets.editingPresetIsOmniVoiceLocal">
-                            <SettingsField label="仓库路径" hint="指向安装好 OmniVoice 与其 .venv 的仓库目录；托管模式会从这里启动 uvicorn。">
+                            <SettingsField label="仓库路径" more="指向安装好 OmniVoice 与其 .venv 的仓库目录；托管模式会从这里启动 uvicorn。">
                               <input v-model="presets.editingPreset!.ttsOmniVoiceLocalRepoPath" type="text" class="input w-full" placeholder="E:\OmniVoice" />
                             </SettingsField>
                             <SettingsField label="端口">
@@ -432,17 +425,16 @@ const authStyleOptions = computed(() => {
                             <SettingsSwitch
                               label="由程序启动"
                               :model-value="!!presets.editingPreset!.ttsOmniVoiceLocalManaged"
-                              hint="托管模式由程序启动 uvicorn 并传入模型与设备。"
                               more="托管模式会执行 python -m uvicorn omnivoice.api.server:app --host 127.0.0.1 --port <port>，并通过环境变量传入模型与 device；后端调用 JSON 接口 /v1/tts。"
                               @update:model-value="presets.editingPreset!.ttsOmniVoiceLocalManaged = $event"
                             />
                             <SettingsField label="模型 ID / 路径">
                               <input v-model="presets.editingPreset!.ttsOmniVoiceLocalModelId" type="text" class="input w-full" placeholder="k2-fsa/OmniVoice" />
                             </SettingsField>
-                            <SettingsField label="设备" hint="留空则交给 OmniVoice 自动选择。">
+                            <SettingsField label="设备" more="留空则交给 OmniVoice 自动选择。">
                               <input v-model="presets.editingPreset!.ttsOmniVoiceLocalDevice" type="text" class="input w-full" placeholder="cuda:0" />
                             </SettingsField>
-                            <SettingsField label="默认语言" hint="例如 zh、Chinese、English，可留空。">
+                            <SettingsField label="默认语言" more="例如 zh、Chinese、English，可留空。">
                               <input v-model="presets.editingPreset!.ttsOmniVoiceLocalDefaultLanguage" type="text" class="input w-full" />
                             </SettingsField>
                           </template>

@@ -38,7 +38,6 @@ const mvuOpen = ref(false)
         <div class="settings-group">
           <SettingsField
             label="会话系统提示"
-            hint="追加：接在全局后面；覆盖：非空时跳过全局。"
             more="追加全局会保留全局系统提示并在后面附加本会话内容；覆盖全局会在本会话提示非空时跳过全局系统提示。"
           >
             <template #actions>
@@ -121,7 +120,6 @@ const mvuOpen = ref(false)
           ></textarea>
           <SettingsField
             label="每隔几条消息自动总结"
-            hint="静默关闭时，到阈值会先询问。"
             more="关闭「静默总结」时，达到阈值会先询问；若拒绝则下次在 n×2、n×3… 条时再问。达到条件时若主聊仍在生成回复，会等生成结束后再判断。"
           >
             <template #actions>
@@ -192,7 +190,7 @@ const mvuOpen = ref(false)
         <div class="settings-group">
           <div class="settings-group-title">上下文</div>
           <div class="grid grid-cols-2 gap-4">
-            <SettingsField label="上下文长度">
+            <SettingsField label="上下文长度" more="角色卡、用户信息和系统提示词不计入这个长度。">
               <input
                 v-model.number="chat.chatDraft.params.context_size"
                 type="number"
@@ -201,7 +199,7 @@ const mvuOpen = ref(false)
                 class="input w-full"
               />
             </SettingsField>
-            <SettingsField label="草稿助手条数限制">
+            <SettingsField label="草稿助手条数限制" more="优先用当前会话的限制，其次用全局的；都留空就按上下文长度处理。">
               <input
                 :value="chat.chatDraft.draftHelp?.context_message_limit ?? ''"
                 type="text"
@@ -213,9 +211,6 @@ const mvuOpen = ref(false)
               />
             </SettingsField>
           </div>
-          <SettingsHint more="实际上下文总限制长度为该「上下文长度」限制加上角色卡、用户信息、自定义系统提示词。草稿助手优先使用当前会话的条数限制，其次全局，最后回退到现有上下文逻辑。">
-            角色卡、用户信息和系统提示词不计入上下文长度。
-          </SettingsHint>
         </div>
       </SettingsDrawerGlobalAccordion>
 
@@ -224,7 +219,6 @@ const mvuOpen = ref(false)
           <SettingsSwitch
             :model-value="chat.chatDraft?.groupMvuEnabled === true"
             label="启用群聊 MVU"
-            hint="与「群聊设置」弹窗写入同一字段。"
             @update:model-value="(v) => { if (chat.chatDraft) chat.chatDraft.groupMvuEnabled = v }"
           />
           <template v-if="chat.chatDraft?.groupMvuEnabled === true">
@@ -250,10 +244,7 @@ const mvuOpen = ref(false)
         </div>
 
         <div class="settings-group">
-          <div class="settings-group-title">MVU 模式覆盖</div>
-          <SettingsHint more="只覆盖当前会话的 MVU 模式、指令、正则规则与初始状态栏。MVU 所用模型在全局「连接与默认模型」中配置。">
-            只影响当前会话；所用模型在全局设置里配置。
-          </SettingsHint>
+          <SettingsHint title="MVU 模式覆盖" more="只覆盖当前会话的 MVU 模式、指令、正则规则和初始状态栏。MVU 所用模型在全局「连接与默认模型」里配置。" />
           <MvuCapabilityEditor
             :mvu-mode="chat.chatDraft.mvuMode ?? null"
             :mvu-directive="chat.chatDraft.mvuDirective ?? ''"

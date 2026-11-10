@@ -38,9 +38,8 @@ const autoReadSlideIndex = computed(() => {
         :disabled="!chat.globalDraft.ttsEnabled || chat.ttsSessionModelOptions.length === 0"
         @select="chat.updateChatTtsModel"
       />
-      <p class="settings-hint">
-        选模型后自动关联 TTS 服务。
-        <span v-if="chat.selectedChatTtsPreset">当前预设：{{ chat.selectedChatTtsPreset.name }} · {{ chat.formatTtsProviderLabel(chat.selectedChatTtsProvider) }}</span>
+      <p v-if="chat.selectedChatTtsPreset" class="settings-hint">
+        <span>当前预设：{{ chat.selectedChatTtsPreset.name }} · {{ chat.formatTtsProviderLabel(chat.selectedChatTtsProvider) }}</span>
       </p>
       <p v-if="chat.ttsSessionModelOptions.length === 0" class="settings-hint">
         还没有可用的 TTS 模型。请先在 API 预设中把目标预设标记为 TTS 服务并获取模型列表。

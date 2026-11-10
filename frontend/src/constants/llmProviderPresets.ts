@@ -17,7 +17,7 @@ export interface LlmProviderPreset {
   // ---- T-820：来自 /api/llm/catalog 的扩展字段（静态兜底表没有） ----
   /** 名录厂商 id；写入 ApiPreset.providerId */
   providerId?: string
-  /** 分组：global / cn / gateway / oauth */
+  /** 分组：global / cn / hosting / gateway / oauth */
   group?: string
   /** 默认协议（可为 auto） */
   defaultProtocol?: string
@@ -35,11 +35,12 @@ export interface LlmProviderPreset {
 export const LLM_PROVIDER_GROUP_LABELS: Record<string, string> = {
   global: '国际厂商',
   cn: '中国厂商',
+  hosting: '模型托管平台',
   gateway: '聚合网关',
   oauth: '需要登录（OAuth）',
 }
 
-export const LLM_PROVIDER_GROUP_ORDER = ['cn', 'global', 'gateway', 'oauth']
+export const LLM_PROVIDER_GROUP_ORDER = ['cn', 'global', 'hosting', 'gateway', 'oauth']
 
 export const LLM_CACHE_STRATEGY_LABELS: Record<string, string> = {
   explicit: '显式缓存',
@@ -72,7 +73,7 @@ export function catalogProviderToPreset(p: LlmCatalogProvider): LlmProviderPrese
   }
 }
 
-/** 名录列表分组排序：中国厂商 → 国际 → 网关 → OAuth；组内保持名录顺序 */
+/** 名录列表分组排序：中国厂商 → 国际 → 托管平台 → 网关 → OAuth；组内保持名录顺序 */
 export function groupProviderPresets(list: LlmProviderPreset[]): Array<{ group: string; label: string; items: LlmProviderPreset[] }> {
   const buckets = new Map<string, LlmProviderPreset[]>()
   for (const p of list) {

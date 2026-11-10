@@ -43,7 +43,6 @@ const emit = defineEmits<{
           检查更新
         </button>
       </div>
-      <p class="settings-hint">HTTP 请求记录保留最近 30 分钟的云端请求。</p>
       <p v-if="checkUpdateMessage" class="settings-hint">{{ checkUpdateMessage }}</p>
       <a
         href="https://github.com/DuoHBshuijiao/SimpleTavern/releases"

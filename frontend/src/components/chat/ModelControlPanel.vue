@@ -472,10 +472,7 @@ function toggleOpen() {
           </p>
           <p v-else-if="effortClampNote" class="mt-1.5 text-2xs leading-4 text-[var(--color-warning-text,var(--color-warning))]">
             {{ effortClampNote }}
-          </p>
-          <p v-else-if="effectiveEffort === 'none'" class="mt-1.5 text-2xs leading-4 text-[var(--color-text-muted)]">
-            关闭：OpenAI reasoning.effort=none / Anthropic 不发 thinking / Gemini thinkingBudget=0 / 国内厂商 thinking.type=disabled
-          </p>
+          </p>
         </section>
 
         <!-- Fast 模式 -->

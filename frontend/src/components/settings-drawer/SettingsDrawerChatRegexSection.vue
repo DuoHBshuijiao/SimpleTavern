@@ -14,7 +14,7 @@ const chat = inject(SETTINGS_DRAWER_CHAT_KEY)!
   <div class="settings-group">
     <SettingsHint more="规则定义全局共享；本会话仅保存启用状态。assistant 与 user 正文均参与扫描。">规则全局共享，启用状态按会话保存。</SettingsHint>
     <div class="grid grid-cols-2 gap-3">
-      <SettingsField label="默认扫描深度" hint="最近 assistant 条数">
+      <SettingsField label="默认扫描深度" more="扫描最近多少条 assistant 消息。">
         <input
           v-model.number="chat.chatDraft.contentRegexScanDepthDefault"
           type="number"

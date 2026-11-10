@@ -353,7 +353,7 @@ const webSearchSourceOptions = [
       </SettingsField>
     </div>
     <p class="settings-hint">
-      地址模板：<code class="font-mono">{{ catalogProvider?.baseUrlTemplate }}</code>；保存后由后端按参数生成，缺参会明确报错。
+      地址模板：<code class="font-mono">{{ catalogProvider?.baseUrlTemplate }}</code>
     </p>
   </section>
   <p v-else-if="catalogProvider?.hint" class="settings-group settings-hint">
@@ -388,7 +388,7 @@ const webSearchSourceOptions = [
         <SettingsField label="缓存 TTL">
           <ModernSelect :model-value="ttlValue" :options="ttlOptions" class="w-full" placeholder="供应商默认" @update:model-value="(v) => { if (!ttlDisabledReason(String(v))) (ttlValue = String(v)) }" />
         </SettingsField>
-        <SettingsField label="缓存键" hint="OpenAI prompt_cache_key" :more="cacheKeyDisabledReason || undefined">
+        <SettingsField label="缓存键" :hint="cacheKeyDisabledReason || undefined" more="对应 OpenAI 的 prompt_cache_key。">
           <ModernSelect
             :model-value="cache.cacheKey || 'per_chat'"
             :options="cacheKeyOptions"
@@ -402,7 +402,8 @@ const webSearchSourceOptions = [
       <SettingsField
         v-if="showExplicitControls"
         label="显式断点位置"
-        :hint="breakpointsDisabledReason || 'Anthropic cache_control / GPT-5.6+ prompt_cache_breakpoint'"
+        :hint="breakpointsDisabledReason || undefined"
+        more="对应 Anthropic 的 cache_control 和 GPT-5.6+ 的 prompt_cache_breakpoint。"
       >
         <div class="flex flex-col gap-1" :class="breakpointsDisabledReason ? 'pointer-events-none opacity-60' : ''">
           <button
@@ -423,7 +424,8 @@ const webSearchSourceOptions = [
         label="在消息上打显式缓存标记"
         :model-value="!!cache.explicitMarkers"
         :disabled="Boolean(markersDisabledReason)"
-        :hint="markersDisabledReason || '百炼 DashScope 等中国厂商需要。'"
+        :hint="markersDisabledReason || undefined"
+        more="百炼 DashScope 等中国厂商需要。"
         @update:model-value="(v) => (cache = { ...cache, explicitMarkers: v })"
       />
     </template>

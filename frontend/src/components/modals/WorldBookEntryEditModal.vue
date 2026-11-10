@@ -112,8 +112,7 @@ void dialogRef
               <SettingsSwitch
                 label="启用"
                 :model-value="draft.enabled"
-                hint="扫描深度与插入深度按每本书单独设置。"
-                more="扫描深度与插入深度在「当前会话 → 世界书顺序」中按每本书单独设置，不再保存在条目内。"
+                more="扫描深度和插入深度在「当前会话 → 世界书顺序」里按每本书设置，不保存在条目里。"
                 @update:model-value="draft.enabled = $event"
               />
               <SettingsField label="正则表达式">
@@ -139,7 +138,6 @@ void dialogRef
                 <div class="settings-group-title">试匹配</div>
                 <button type="button" class="btn btn-xs btn-secondary" @click="tryMatch">试匹配</button>
               </div>
-              <SettingsHint more="可选。浏览器 RegExp 与 Python re 仍可能有细微差异。">支持直接粘贴 /pattern/iu。</SettingsHint>
               <textarea v-model="testText" rows="2" class="input textarea w-full text-sm" placeholder="测试文本" />
               <div v-if="testResult" class="settings-readout break-words">{{ testResult }}</div>
             </div>

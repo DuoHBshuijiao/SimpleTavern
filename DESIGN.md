@@ -211,12 +211,18 @@ Settings tabs and form modals share one fixed structure, defined at the top of `
 
 - **Panel** (`SettingsDrawerGlobalAccordion`, or the modal itself): the only layer with a border.
 - **Group** (`.settings-group`, `.settings-group-title`): a small title and a divider between groups, no box.
-- **Field** (`SettingsField`, `SettingsSwitch`): label, control, hint. No border or background of its own.
+- **Field** (`SettingsField`, `SettingsSwitch`): label, control, and at most one line of hint. No border or background of its own.
 - **Read-only info** (`.settings-readout`) and **list items** (`.settings-item`): a faint fill, no border.
 
 Named rules:
 
-**The One Sentence Hint Rule.** A hint is one short sentence through `SettingsHint` or the `hint` prop. Longer explanations go behind the ⓘ through `more`. Do not delete an explanation to make room, and do not write hints by hand.
+**The Hint Rarity Rule.** Explanatory small text has three tiers, and the default is to write none.
+
+- **None:** when the label, the control, and its placeholder already say what the setting does. This is most settings.
+- **Behind the ⓘ** (`more`): anything that needs explaining. With no `hint`, the ⓘ sits next to the label (`SettingsField`) or the group title (`<SettingsHint title="…" more="…" />`) and the text opens under it.
+- **Always visible** (`hint`, or the `SettingsHint` slot): only what causes an error, costs money, or cannot be undone if missed, such as billing multipliers, irreversible actions, a required prerequisite, or a format the control rejects. One short sentence.
+
+Live state (login status, linked preset, usage counts) and empty states are not hints and stay visible. Do not write hints by hand; use these components.
 
 **The Switch Rule.** A boolean setting is a `SettingsSwitch`. The switch itself shows its state, so do not add "on" or "off" text. Checkboxes stay only for compact multi-selection inside a list item.
 
@@ -230,7 +236,7 @@ Named rules:
 
 - **Modal:** L5 glass surface with strong border, modal shadow, and modal blur.
 - **Drawer:** settings/dock surface with panel blur and clear border separation.
-- **Popover / Dropdown:** L6 glass surface; must not be clipped by parent overflow. Prefer teleport/fixed positioning where needed.
+- **Popover / Dropdown:** L6 glass surface; must not be clipped by parent overflow. A blurred popover must be teleported to `body` with fixed positioning: inside the settings drawer or a modal, the parent's own `backdrop-filter` makes a nested one do nothing.
 - **Modal motion:** every modal uses `<Transition name="modal">`. It fades the backdrop and the content separately and never the `.modal` root, because `opacity` below 1 on the root disables the blur of everything inside until the last frame, and the blur then pops in.
 - **Layered dismissal:** Escape and Tab belong to the topmost dialog only, through `useDialogBehavior`. One key press closes one layer.
 - **Close icon:** every modal close button uses the `X` icon, not a `×` character.

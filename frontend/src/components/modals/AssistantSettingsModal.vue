@@ -68,8 +68,7 @@ function effortValue(): string {
             </SettingsField>
             <SettingsField
               label="思考深度"
-              hint="留空沿用全局默认深度。"
-              more="none 会真正关闭思考。留空则沿用全局设置里的默认深度。"
+              more="留空沿用全局默认；none 会真正关闭思考。"
             >
               <ModernSelect
                 :model-value="effortValue()"
@@ -83,7 +82,6 @@ function effortValue(): string {
               label="Fast 模式"
               :model-value="!!settings.fastMode"
               hint="约 2× 计费。"
-              more="不支持的模型会在发送时明确报错。"
               @update:model-value="(v) => { settings.fastMode = v ? true : null }"
             />
           </div>
@@ -92,8 +90,7 @@ function effortValue(): string {
             <div class="settings-group-title">上下文与读取</div>
             <SettingsField
               label="上下文长度"
-              hint="填 0 或留空表示未启用。"
-              more="实际上下文总限制长度为该「上下文长度」限制加上角色卡、用户信息、自定义系统提示词。"
+              more="填 0 或留空表示不限制。角色卡、用户信息和系统提示词不计入这个长度。"
             >
               <input
                 v-model.number="settings.context_size"
@@ -105,8 +102,7 @@ function effortValue(): string {
             </SettingsField>
             <SettingsField
               label="助手读取消息条数上限"
-              hint="留空表示不额外限制。"
-              more="限制「读取会话」工具返回的最大消息条数。"
+              more="限制「读取会话」工具返回的消息条数，留空不额外限制。"
             >
               <input
                 v-model.number="settings.tool_read_max_messages"
@@ -118,8 +114,7 @@ function effortValue(): string {
             </SettingsField>
             <SettingsField
               label="助手读取消息 token 上限（估算）"
-              hint="留空表示不启用。"
-              more="对返回的消息列表做 token 估算裁剪（保留最新）。"
+              more="按 token 估算裁剪读到的消息，保留最新的；留空不启用。"
             >
               <input
                 v-model.number="settings.tool_read_max_tokens"
@@ -133,7 +128,7 @@ function effortValue(): string {
 
           <div class="settings-group">
             <div class="settings-group-title">工具调用</div>
-            <SettingsField label="最大工具轮次" hint="限制单次助手请求可进入多少轮 tool_calls。">
+            <SettingsField label="最大工具轮次" more="单次请求里，助手最多连续调用工具的轮数。">
               <input
                 v-model.number="settings.maxToolTurns"
                 type="number"
@@ -142,7 +137,7 @@ function effortValue(): string {
                 placeholder="默认 8"
               />
             </SettingsField>
-            <SettingsField label="单轮工具数上限" hint="超出部分会写入「超出限制」占位结果并跳过执行。">
+            <SettingsField label="单轮工具数上限" more="超出的工具调用会被跳过，并返回「超出限制」。">
               <input
                 v-model.number="settings.maxToolsPerTurn"
                 type="number"
@@ -155,19 +150,16 @@ function effortValue(): string {
 
           <div class="settings-group">
             <div class="settings-group-title">工具权限</div>
-            <SettingsHint>与侧栏消息列表底部的权限按钮同步，变更后立即写入本机偏好。</SettingsHint>
             <SettingsSwitch
               label="允许网络搜索"
               :model-value="allowWebSearch"
-              hint="MVU Agent 不会挂载此工具。"
-              more="开启后聊天助手与工具区助手可调用全局设置里的 Tavily / 博查 / Brave 搜索；MVU Agent 不会挂载此工具。"
+              more="聊天助手和工具区助手可以用全局设置里的搜索服务；MVU Agent 不会用。"
               @update:model-value="emit('update:allowWebSearch', $event)"
             />
             <SettingsSwitch
               label="允许记忆写入"
               :model-value="allowWriteMemory"
-              hint="仅作用于聊天助手。"
-              more="开启后助手可在当前聊天会话中追加或覆盖长期记忆；仅作用于「聊天助手」，工作区助手不可用。"
+              more="助手可以追加或覆盖当前会话的长期记忆。只对聊天助手生效，工作区助手不可用。"
               @update:model-value="emit('update:allowWriteMemory', $event)"
             />
             <SettingsSwitch

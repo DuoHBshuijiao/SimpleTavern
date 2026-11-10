@@ -22,7 +22,7 @@
 
 ## 数据模型
 
-`LlmProviderCatalogEntry`：`id, label, name, region: cn|global, group: cn|global|gateway|oauth, baseUrlTemplate, placeholders[]{key,label,hint,example}, authStyle, defaultProtocol, supportedProtocols[], cacheStrategy: explicit|implicit|best_effort|none, docsUrl, keywords[], requiresOAuth, legacyIds[]`。
+`LlmProviderCatalogEntry`：`id, label, name, region: cn|global, group: cn|global|hosting|gateway|oauth, baseUrlTemplate, placeholders[]{key,label,hint,example}, authStyle, defaultProtocol, supportedProtocols[], cacheStrategy: explicit|implicit|best_effort|none, docsUrl, keywords[], requiresOAuth, legacyIds[]`。
 
 `ApiPreset` 新字段（前后端同步，`extra="allow"` 兼容旧数据）：`providerId?`、`providerParams?: Record<string,string>`（region / resource / account_id / gateway_id / location / project / api_version）、`authStyle?`。
 

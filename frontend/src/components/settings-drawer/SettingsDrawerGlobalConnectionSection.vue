@@ -35,7 +35,7 @@ const emit = defineEmits<{
       <SettingsSwitch
         v-model="draft.pureAiMode"
         label="纯 AI 模式"
-        hint="不注入用户 Persona，用户发言以「系统」角色影响世界。"
+        more="不注入用户 Persona，用户发言以「系统」角色影响世界。"
       />
     </div>
 
@@ -43,8 +43,7 @@ const emit = defineEmits<{
       <div class="settings-group-title">思考</div>
       <SettingsField
         label="思考模式"
-        hint="选「无」则关闭思考。"
-        more="其他档位会开启思考并请求更高推理深度。聊天面板可按会话覆盖。"
+        more="选「无」关闭思考，其他档位请求更高的推理深度。聊天面板可以按会话覆盖。"
       >
         <ModernSelect
           v-model="draft.reasoningEffort"
@@ -73,7 +72,6 @@ const emit = defineEmits<{
       <div class="settings-group-title">默认连接</div>
       <SettingsField
         label="API 基础地址"
-        hint="填 Base 或完整 chat/completions 地址都可以。"
         more="支持 Base（如 https://api.openai.com 或 …/v1）或完整 chat/completions 地址；末尾有无 / 均可。"
       >
         <input
@@ -85,8 +83,7 @@ const emit = defineEmits<{
       </SettingsField>
       <SettingsField
         label="LLM 协议"
-        hint="仅在未匹配到 API 预设时生效。"
-        more="选「自动」会按模型家族切换原生协议，结果可在下方预览看到。"
+        more="只在没有匹配到 API 预设时生效。选「自动」会按模型家族切换原生协议，结果在下方预览里能看到。"
       >
         <ModernSelect
           :model-value="draft.llm.protocol || 'openai_compatible_chat'"
@@ -123,8 +120,7 @@ const emit = defineEmits<{
       </SettingsField>
       <SettingsField
         label="MVU Agent 模型"
-        hint="MVU 后台与 SillyTavern directive 导入共用。"
-        more="MVU 后台与 SillyTavern directive 导入兼容共用此模型；无需进入会话即可配置。"
+        more="MVU 后台和 SillyTavern directive 导入共用这个模型。"
       >
         <ModernSelect
           :model-value="draft.mvuModel ?? ''"

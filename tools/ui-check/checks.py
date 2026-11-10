@@ -752,6 +752,63 @@ def check_prefixed_blur(ctx):
     ctx.check("构建后没有只带 -webkit- 前缀的模糊规则", files and not rules, f"{len(rules)} 条")
 
 
+COMBO_TOGGLE = "document.querySelector('[aria-label=\"展开供应商列表\"]')"
+COMBO_PANEL = "document.querySelector('[aria-label=\"搜索供应商\"]')?.closest('.rounded-xl')"
+COMBO_STATE = f"""(() => {{
+  const panel = {COMBO_PANEL};
+  if (!panel) return {{open: false}};
+  const nested = [];
+  for (let a = panel.parentElement; a; a = a.parentElement) {{
+    const c = getComputedStyle(a);
+    if (c.backdropFilter !== 'none' || c.maskImage !== 'none' || +c.opacity < 1 || c.filter !== 'none') nested.push(a.className.toString().slice(0, 40));
+  }}
+  const items = [...panel.querySelectorAll('button')].filter(b => b.querySelector('.truncate'));
+  const rows = items.map(b => {{
+    const name = b.querySelector('.truncate');
+    const kids = [...b.children].map(c => Math.round(c.getBoundingClientRect().top));
+    return {{text: name.textContent.trim(), w: Math.round(name.getBoundingClientRect().width), lines: new Set(kids).size, over: b.scrollWidth - b.clientWidth}};
+  }});
+  const r = panel.getBoundingClientRect();
+  return {{open: true, blur: getComputedStyle(panel).backdropFilter, nested, count: rows.length,
+    hidden: rows.filter(x => x.w < 24).map(x => x.text).slice(0, 5),
+    notThree: rows.filter(x => x.lines !== 3).map(x => x.text).slice(0, 5),
+    over: rows.filter(x => x.over > 0).map(x => x.text).slice(0, 5),
+    inView: r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth}};
+}})()"""
+
+
+async def check_preset_combobox(ctx, page, count):
+    """预设名称下拉：在抽屉里嵌套的 backdrop-filter 不生效，所以面板必须在抽屉之外；每项三行，厂商名不能被标签挤没"""
+    found = False
+    for index in range(count):
+        await page.js(f"{BUILT_LIST}.querySelectorAll(':scope > [draggable=true]')[{index}].click()")
+        await asyncio.sleep(0.3)
+        if await page.js(f"!!{COMBO_TOGGLE}"):
+            found = True
+            break
+    ctx.check("有带供应商下拉的预设", found)
+    if not found:
+        return
+    await page.js(f"{BUILT_SCROLLER}.scrollTop=0")
+    await page.js(f"{COMBO_TOGGLE}.click()")
+    await asyncio.sleep(0.5)
+    state = await page.js(COMBO_STATE)
+    ctx.check("供应商下拉打开", state.get("open"), state)
+    if not state.get("open"):
+        return
+    ctx.check("下拉面板有模糊，且外层没有会让它失效的效果", "blur(" in state["blur"] and not state["nested"], {"blur": state["blur"], "nested": state["nested"]})
+    ctx.check(f"{state['count']} 个供应商的名字都显示出来", state["count"] > 20 and not state["hidden"], state["hidden"])
+    ctx.check("每项是三行：名字、协议和缓存、地址", not state["notThree"], state["notThree"])
+    ctx.check("下拉项没有横向溢出，面板在视口内", not state["over"] and state["inView"], state)
+    await page.shot("built-preset-combobox")
+    await page.js("document.querySelector('[aria-label=\"搜索供应商\"]').focus()")
+    await page.key("Escape", 27)
+    await asyncio.sleep(0.4)
+    after = await page.js(f"({{combo: !!{COMBO_PANEL}, drawer: getComputedStyle(document.querySelector('.drawer-wrapper')).visibility}})")
+    ctx.check("Esc 只关下拉，不关设置", not after["combo"] and after["drawer"] == "visible", after)
+
+
+
 async def check_built(ctx):
     """构建产物：压缩后的 CSS 才是用户看到的，开发服务器测不出模糊失效。这里没有 Vue 实例，只能操作 DOM"""
     page = await cdp.open_page(ctx.cdp_port, ctx.serve_built(), ctx.shots_dir, 1536, 800)
@@ -809,6 +866,7 @@ async def check_built(ctx):
     await page.js(f"{BUILT_SCROLLER}.scrollTop=0; {BUILT_LIST}.scrollTop=1e6")
     await asyncio.sleep(0.3)
     await page.shot("built-presets")
+    await check_preset_combobox(ctx, page, count)
     await ctx.close(page)
 
 

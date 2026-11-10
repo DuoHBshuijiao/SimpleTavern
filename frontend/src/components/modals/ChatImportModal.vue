@@ -517,7 +517,6 @@ async function confirmJanitorImport() {
               />
               <SettingsField
                 label="MVU 模式"
-                hint="Tavern Helper JS 不会执行。"
                 more="Regex 模式会尝试转换可表达的 regex_scripts；指令模式会把完整 ST 卡上下文交给 MVU Agent，生成 MVU 指令与初始状态表，Tavern Helper JS 不会执行。"
               >
                 <ModernSelect

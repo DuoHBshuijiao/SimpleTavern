@@ -105,10 +105,7 @@ function triggerStImport() {
 <template>
   <SettingsDrawerGlobalAccordion v-model:open="open" title="外观与数据">
     <div class="settings-group">
-      <div class="settings-group-title">页面背景</div>
-      <SettingsHint more="图片只叠在主题底色之上；调低透明度时，底部纯色玻璃底会继续透出。100% 为完整显示图片。模糊仅作用于图片层，不会影响主题底色与界面内容。">
-        图片叠在主题底色之上，调低透明度可透出底色。
-      </SettingsHint>
+      <SettingsHint title="页面背景" more="图片叠在主题底色之上，调低透明度会透出底色，100% 为完整显示图片。模糊只作用于图片层。" />
       <div class="flex flex-wrap gap-2">
         <button type="button" class="btn btn-sm btn-secondary" @click="triggerPageBackgroundImport">导入图片</button>
         <button
@@ -258,7 +255,7 @@ function triggerStImport() {
 
     <div class="settings-group">
       <div class="settings-group-title">界面与字体</div>
-      <SettingsField label="界面色系" hint="暗色玻璃底，仅强调色随主题变化。" more="未设置时默认为雾玫瑰。">
+      <SettingsField label="界面色系">
         <ModernSelect
           v-model="draft.themeId"
           :options="[...THEME_OPTIONS]"
@@ -322,7 +319,7 @@ function triggerStImport() {
         </div>
       </div>
       </SettingsField>
-      <SettingsField label="阅读字体" hint="只作用于消息正文，默认跟随界面字体。">
+      <SettingsField label="阅读字体" more="只作用于消息正文，默认跟随界面字体。">
         <ModernSelect
           :model-value="draft.readingFont ?? ''"
           :options="[{ label: '跟随界面字体', value: '' }, ...fontOptions.filter((option) => option.value)]"

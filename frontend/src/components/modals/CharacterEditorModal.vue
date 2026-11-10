@@ -133,7 +133,7 @@ void dialogRef
                     <button type="button" class="btn btn-sm btn-secondary" @click="emit('open-avatar-cropper')">更换头像</button>
                   </div>
                   <div class="flex min-w-0 flex-1 flex-col gap-4">
-                    <SettingsField label="名称" hint="参与对话。">
+                    <SettingsField label="名称">
                       <input v-model="character.name" class="input w-full" placeholder="角色名称" />
                     </SettingsField>
                     <SettingsField label="简介" hint="不参与对话。">
@@ -145,7 +145,6 @@ void dialogRef
 
               <div class="settings-group">
                 <div class="settings-group-title">角色设定</div>
-                <SettingsHint>本组都参与对话。</SettingsHint>
                 <SettingsField label="Personality（性格/外貌）">
                   <textarea v-model="character.personality" class="input textarea h-32 w-full" placeholder="详细设定..."></textarea>
                 </SettingsField>
@@ -159,14 +158,12 @@ void dialogRef
 
               <div class="settings-group">
                 <div class="settings-group-title">开场与示例</div>
-                <SettingsHint>本组都参与对话。</SettingsHint>
-                <SettingsField label="首句" hint="支持 {{user}} 占位符。">
+                <SettingsField label="首句" more="支持 {{user}} 占位符。">
                   <textarea v-model="character.firstMessage" class="input textarea h-24 w-full" placeholder="开场白..."></textarea>
                 </SettingsField>
                 <SettingsField
                   label="额外首句"
-                  hint="支持 {{user}} 占位符。只有「已保存」的条目会进入开场变体。"
-                  more="对号：追加为草稿并保留输入；加号：追加为「已保存」并清空输入。仅「已保存」的额外首句会进入单聊开场变体；草稿仅本地编辑用。下方列出全部条目（含「（空）」），均可删除。保存角色时会去掉空文本；占位符替换后为空也不会写入变体。"
+                  more="支持 {{user}} 占位符。对号存为草稿并保留输入，加号存为「已保存」并清空输入。只有「已保存」的条目会进入开场变体；保存角色时空文本会被去掉。"
                 >
                   <div class="overflow-x-auto custom-scrollbar pb-1">
                     <div class="flex w-full min-w-0 min-h-[6.5rem] flex-nowrap items-stretch gap-2">
@@ -262,10 +259,7 @@ void dialogRef
               </div>
 
               <div class="settings-group">
-                <div class="settings-group-title">绑定世界书</div>
-                <SettingsHint more="「角色+世界书」ZIP 导出用此顺序。与「设置 → 当前会话」中的会话世界书顺序独立；保存后写入角色卡上的绑定列表，供含世界书 ZIP 等使用。">
-                  随角色保存，与会话世界书顺序独立。
-                </SettingsHint>
+                <SettingsHint title="绑定世界书" more="随角色保存，和「设置 → 当前会话」里的会话世界书顺序互相独立。「角色+世界书」ZIP 导出用这里的顺序。" />
                 <div class="flex flex-wrap items-center gap-2">
                   <ModernSelect
                     v-model="addCharacterEditorWbId"

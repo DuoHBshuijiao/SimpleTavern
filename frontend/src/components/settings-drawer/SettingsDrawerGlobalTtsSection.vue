@@ -39,7 +39,6 @@ function formatBytes(bytes: number): string {
         :model-value="!!draft.ttsEnabled"
         label="启用文字转语音"
         hint="需在 API 预设中至少配置一个 TTS 服务预设。"
-        more="开启后可在聊天界面使用语音合成功能。支持的 TTS 服务包括 MiniMax、GLM TTS、OpenRouter TTS、硅基流动等。"
         @update:model-value="emit('toggle-enabled')"
       />
 

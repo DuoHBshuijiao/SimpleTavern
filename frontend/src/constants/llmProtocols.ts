@@ -33,6 +33,8 @@ export const LLM_PROTOCOL_SHORT_LABELS: Record<string, string> = {
   anthropic_messages: 'Anthropic',
   gemini_generate_content: 'Gemini',
   openai_responses: 'Responses',
+  bedrock_converse: 'Bedrock Converse',
+  mistral_conversations: 'Mistral Conversations',
 }
 
 /** 仅空/非法类型回落到默认；未知非空协议原样保留。 */

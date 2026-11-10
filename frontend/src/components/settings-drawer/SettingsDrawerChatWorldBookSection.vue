@@ -32,9 +32,6 @@ const open = ref(true)
       <button type="button" class="btn btn-xs btn-secondary" @click="chat.cancelWorldBookCreate">取消</button>
     </div>
   </div>
-  <SettingsHint more="全局激活的世界书会自动对当前会话生效；你也可以把世界书仅绑定到当前会话。会话内顺序用于预算淘汰优先级（靠后更先被丢弃）。">
-    全局激活的世界书自动生效，也可以只绑定到当前会话。
-  </SettingsHint>
   <div class="flex items-center gap-2">
     <ModernSelect
       v-model="chat.addWorldBookId"

@@ -27,7 +27,6 @@ const emit = defineEmits<{
         <SettingsSwitch
           :model-value="!!draft.prompts.globalPrefillEnabled"
           label="预填内容"
-          hint="关闭时保留文案，但不生效。"
           @update:model-value="(v) => { draft.prompts.globalPrefillEnabled = v }"
         />
         <textarea
@@ -80,7 +79,7 @@ const emit = defineEmits<{
     <div class="settings-group">
       <div class="settings-group-title">上下文</div>
       <div class="grid grid-cols-2 gap-4">
-        <SettingsField label="上下文长度">
+        <SettingsField label="上下文长度" more="角色卡、用户信息和系统提示词不计入这个长度。">
           <input
             v-model.number="draft.generationDefaults.context_size"
             type="number"
@@ -89,7 +88,7 @@ const emit = defineEmits<{
             class="input w-full"
           />
         </SettingsField>
-        <SettingsField label="草稿助手条数限制">
+        <SettingsField label="草稿助手条数限制" more="只统计最近的消息条数；留空就按上下文长度处理。">
           <input
             :value="draft.draftHelpDefaults?.context_message_limit ?? ''"
             type="text"
@@ -101,9 +100,6 @@ const emit = defineEmits<{
           />
         </SettingsField>
       </div>
-      <SettingsHint more="实际上下文总限制长度为该「上下文长度」限制加上角色卡、用户信息、自定义系统提示词。草稿助手条数限制只统计最近消息条数，留空则回退到现有上下文逻辑。">
-        角色卡、用户信息和系统提示词不计入上下文长度。
-      </SettingsHint>
     </div>
   </SettingsDrawerGlobalAccordion>
 </template>

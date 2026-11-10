@@ -109,7 +109,6 @@ void modeSelectValue
   <div class="flex flex-col gap-4">
     <SettingsField
       label="MVU 模式"
-      hint="决定如何从回复中得到状态变更。"
       more="正则模式使用正文正则提取状态变更；指令模式保存给后续 MVU 流程读取的自然语言规则。"
     >
       <ModernSelect
