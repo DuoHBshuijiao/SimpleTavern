@@ -129,7 +129,7 @@
    "cacheStrategy": "implicit",
    "docsUrl": "https://cloud.google.com/vertex-ai/generative-ai/docs/start/express-mode/overview",
    "keywords": ["vertex", "google cloud", "gcp"],
-   "hint": "仅支持 Express 模式 API Key。要用服务账号调用 Claude，请选「Google Vertex AI（Claude，服务账号）」。"
+   "hint": "仅支持 Express 模式 API Key。要用服务账号，请选「Google Vertex AI（Gemini，服务账号）」或「Google Vertex AI（Claude，服务账号）」。"
   },
   {
    "id": "vertex-anthropic",
@@ -148,8 +148,38 @@
    "cacheStrategy": "explicit",
    "docsUrl": "https://platform.claude.com/docs/en/build-with-claude/claude-models-on-google-cloud/google-managed",
    "keywords": ["vertex", "google cloud", "gcp", "claude", "anthropic", "服务账号"],
-   "hint": "密钥框粘贴服务账号 JSON 全文，账号需要 Vertex AI User 角色。模型名手动添加，如 claude-sonnet-4-6。",
+   "hint": "导入服务账号 JSON，账号需要 Vertex AI User 角色。模型名手动添加，如 claude-sonnet-4-6。",
    "modelsProviderId": "anthropic"
+  },
+  {
+   "id": "vertex-gemini",
+   "label": "Google Vertex AI（Gemini，服务账号）",
+   "name": "Vertex AI Gemini",
+   "region": "global",
+   "group": "global",
+   "baseUrlTemplate": "https://{location}-aiplatform.googleapis.com/v1/projects/{project}/locations/{location}/publishers/google",
+   "placeholders": [
+    {
+     "key": "project",
+     "label": "项目 ID",
+     "hint": "服务账号 JSON 里的 project_id",
+     "example": "my-gcp-project"
+    },
+    {
+     "key": "location",
+     "label": "位置",
+     "hint": "global 或具体区域，如 asia-southeast1",
+     "example": "global"
+    }
+   ],
+   "authStyle": "vertex_service_account",
+   "defaultProtocol": "gemini_generate_content",
+   "supportedProtocols": ["gemini_generate_content"],
+   "cacheStrategy": "implicit",
+   "docsUrl": "https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/inference",
+   "keywords": ["vertex", "google cloud", "gcp", "gemini", "服务账号"],
+   "hint": "导入服务账号 JSON，账号需要 Vertex AI User 角色。模型名手动添加。只用隐式缓存，不支持显式缓存。",
+   "modelsProviderId": "google"
   },
   {
    "id": "azure-openai-responses",

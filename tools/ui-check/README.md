@@ -24,7 +24,7 @@ venv/Scripts/python tools/ui-check/run.py --list
 
 ## 开发服务器和构建产物
 
-前端只构建一次，放到 `temp/ui-check/dist`，不会碰 `frontend/dist`。各检查跑在哪里：
+前端只构建一次，放到 `temp/ui-check/dist`，不会碰 `frontend/dist`。构建前先跑 `vue-tsc -b`，和 `npm run build` 一致；类型检查不过就直接报错退出。各检查跑在哪里：
 
 | 检查 | 环境 | 说明 |
 |---|---|---|

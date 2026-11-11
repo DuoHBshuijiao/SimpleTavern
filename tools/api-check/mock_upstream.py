@@ -11,7 +11,7 @@ import re
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, unquote, urlsplit
+from urllib.parse import parse_qs, parse_qsl, unquote, urlsplit
 
 import eventstream as es
 import jwt
@@ -387,6 +387,11 @@ class _UpstreamHandler(BaseHTTPRequestHandler):
                 record.route = "vertex"
                 record.operation = match.group(2)
                 return self._vertex(record, unquote(match.group(1)), match.group(2) == "streamRawPredict")
+            match = re.fullmatch(r"/v1/projects/p/locations/([a-z0-9-]+)/publishers/google/models/([^/:]+):(generateContent|streamGenerateContent)", path)
+            if match:
+                record.route = "vertex_gemini"
+                record.operation = match.group(3)
+                return self._vertex_gemini(record, unquote(match.group(2)), match.group(3) == "streamGenerateContent")
             if path == "/v1/messages":
                 record.route = "anthropic"
                 return self._plain_anthropic(record)
@@ -867,6 +872,63 @@ class _UpstreamHandler(BaseHTTPRequestHandler):
         if status:
             return self._vertex_http_error(status)
         return self._anthropic_sse(record) if stream else self._anthropic_once(record)
+
+    # ----- Vertex 上的 Gemini -----
+    # 依据：Vertex AI 的 generateContent / streamGenerateContent REST 参考。
+    # 端点 projects/{p}/locations/{l}/publishers/google/models/{m}:{action}，鉴权是 OAuth access token（Bearer），
+    # 流式用 ?alt=sse，每个事件是一行 data: <GenerateContentResponse>。
+    def _vertex_gemini(self, record, model, stream):
+        mock = self.upstream
+        problems = self._check_no_key_material(record)
+        query = dict(parse_qsl(urlsplit(self.path).query, keep_blank_values=True))
+        if record.method != "POST":
+            problems.append("必须是 POST")
+        if mock.expect_model and model != mock.expect_model:
+            problems.append(f"模型应为 {mock.expect_model}：{model}")
+        if any(name.lower() == "x-goog-api-key" for name in record.headers):
+            problems.append("服务账号鉴权不能带 x-goog-api-key")
+        if "key" in query:
+            problems.append("服务账号鉴权不能在地址里带 key 参数")
+        if stream and query.get("alt") != "sse":
+            problems.append(f"流式必须带 alt=sse：{query}")
+        token = _bearer(record.headers)
+        if token not in mock.issued_tokens:
+            mock.violations.append(f"{record.path}: Authorization 必须是 Bearer <token 端点发的 access token>")
+            return self._json(401, {"error": {"code": 401, "message": "Request had invalid authentication credentials.", "status": "UNAUTHENTICATED"}})
+        body = record.json
+        if not isinstance(body, dict):
+            problems.append("请求体不是合法 JSON 对象")
+        else:
+            contents = body.get("contents")
+            if not isinstance(contents, list) or not contents:
+                problems.append("contents 必须是非空数组")
+            else:
+                for index, item in enumerate(contents):
+                    if not isinstance(item, dict) or item.get("role") not in ("user", "model"):
+                        problems.append(f"contents[{index}].role 只能是 user 或 model：{item.get('role') if isinstance(item, dict) else item!r}")
+                    elif not isinstance(item.get("parts"), list) or not item["parts"]:
+                        problems.append(f"contents[{index}].parts 必须是非空数组")
+                if isinstance(contents[-1], dict) and contents[-1].get("role") != "user":
+                    problems.append("最后一条 contents 应是 user")
+            system = body.get("systemInstruction")
+            if system is not None and (not isinstance(system, dict) or not isinstance(system.get("parts"), list)):
+                problems.append("systemInstruction 必须是带 parts 的对象")
+            if "cachedContent" in body:
+                problems.append("这条路不支持 cachedContent")
+        if problems:
+            return self._reject(record, problems, "google")
+        status = self._http_error_status()
+        if status:
+            names = {401: "UNAUTHENTICATED", 403: "PERMISSION_DENIED", 429: "RESOURCE_EXHAUSTED", 500: "INTERNAL", 503: "UNAVAILABLE"}
+            return self._json(status, {"error": {"code": status, "message": f"mock{self._echo_suffix()}", "status": names.get(status, "UNKNOWN")}})
+        usage = {"promptTokenCount": USAGE["input"], "candidatesTokenCount": USAGE["output"], "totalTokenCount": USAGE["total"]}
+        if not stream:
+            return self._json(200, {"candidates": [{"content": {"role": "model", "parts": [{"text": REPLY}]}, "finishReason": "STOP"}], "usageMetadata": usage, "modelVersion": model})
+        events = [{"candidates": [{"content": {"role": "model", "parts": [{"text": chunk}]}}], "modelVersion": model} for chunk in REPLY_CHUNKS[:-1]]
+        events.append({"candidates": [{"content": {"role": "model", "parts": [{"text": REPLY_CHUNKS[-1]}]}, "finishReason": "STOP"}], "usageMetadata": usage, "modelVersion": model})
+        self._start_stream("text/event-stream")
+        self._send_sse_sharded([f"data: {json.dumps(e, ensure_ascii=False)}\n\n".encode("utf-8") for e in events])
+        self._finish_chunks()
 
     def _plain_anthropic(self, record):
         """现有的 anthropic_messages 协议，只做对照。"""

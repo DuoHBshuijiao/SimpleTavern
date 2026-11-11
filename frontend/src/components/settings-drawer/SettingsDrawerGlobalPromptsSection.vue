@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import SettingsDrawerGlobalAccordion from './SettingsDrawerGlobalAccordion.vue'
 import SettingsField from './SettingsField.vue'
-import SettingsHint from './SettingsHint.vue'
 import SettingsSwitch from './SettingsSwitch.vue'
 import type { Settings } from '../../types/models'
 

@@ -18,6 +18,7 @@ import SettingsSwitch from './SettingsSwitch.vue'
 import ModernSelect from '../ModernSelect.vue'
 import ThemedCheckbox from '../ThemedCheckbox.vue'
 import type { LlmCatalogProvider } from '../../api/llm'
+import { VERTEX_SERVICE_ACCOUNT_AUTH_STYLE } from '../../types/models'
 import { useProtocolPreview, describeAdjustment, PROMPT_CACHE_MODE_LABELS } from '../../composables/useProtocolPreview'
 import {
   PROMPT_CACHE_BREAKPOINTS,
@@ -235,7 +236,12 @@ function setSearchEnabled(enabled: boolean) {
   props.connection.webSearchSearchEnabled = enabled
   if (linkedWeb.value) props.connection.webSearchFetchEnabled = enabled
 }
-const placeholders = computed(() => props.catalogProvider?.placeholders ?? [])
+/** 服务账号鉴权时，项目 ID 和位置和账号信息一起显示在 VertexServiceAccountFields 里，这里不重复 */
+const placeholders = computed(() => {
+  const list = props.catalogProvider?.placeholders ?? []
+  if (props.connection.authStyle !== VERTEX_SERVICE_ACCOUNT_AUTH_STYLE) return list
+  return list.filter((ph) => ph.key !== 'project' && ph.key !== 'location')
+})
 function paramValue(key: string): string {
   return props.connection.providerParams?.[key] ?? ''
 }

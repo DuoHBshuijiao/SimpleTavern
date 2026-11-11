@@ -870,12 +870,280 @@ async def check_built(ctx):
     await ctx.close(page)
 
 
+HINT_TOGGLES = "[...document.querySelectorAll('.drawer-panel .settings-hint-toggle')].filter(b => b.offsetParent)"
+OPEN_ACCORDIONS = """(() => {
+  let n = 0;
+  for (let round = 0; round < 4; round++) {
+    const closed = [...document.querySelectorAll('.drawer-panel button[aria-expanded=false]')].filter(b => b.offsetParent && !b.classList.contains('settings-hint-toggle') && !b.getAttribute('aria-label')?.includes('供应商'));
+    if (!closed.length) break;
+    closed.forEach(b => { b.click(); n++; });
+  }
+  return n;
+})()"""
+HINT_PROBE = """(async () => {
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  const panel = document.querySelector('.drawer-panel');
+  const toggles = %s;
+  const bad = [];
+  for (const b of toggles) {
+    const host = b.closest('.settings-field, .settings-hint') || b.parentElement.parentElement;
+    const more = host.querySelector('.settings-hint-more');
+    const name = (b.getAttribute('aria-label') || '') + '|' + (host.innerText || '').trim().slice(0, 16);
+    if (!more) { bad.push(['没有展开区', name]); continue; }
+    const before = more.getBoundingClientRect().height;
+    b.click();
+    await wait(380);
+    const r = more.getBoundingClientRect();
+    const text = more.innerText.trim();
+    const pr = panel.getBoundingClientRect();
+    if (before > 1) bad.push(['收起时就有高度', name, before]);
+    if (r.height < 12 || text.length < 4) bad.push(['点开后没有内容', name, r.height, text]);
+    if (r.right > pr.right + 1 || r.left < pr.left - 1 || more.scrollWidth > more.clientWidth + 1) bad.push(['展开后横向出界', name]);
+    if (b.getAttribute('aria-expanded') !== 'true') bad.push(['aria-expanded 没变', name]);
+    b.click();
+    await wait(380);
+    if (more.getBoundingClientRect().height > 1) bad.push(['再点收不回去', name]);
+  }
+  return {count: toggles.length, bad};
+})()""" % HINT_TOGGLES
+
+
+async def check_drawer_details(ctx):
+    """设置抽屉的细节（构建产物）：每个 ⓘ 都能点开和收回；供应商下拉在窄屏、选中、滚动、关抽屉时的行为"""
+    for width, height in ((1536, 800), (420, 800)):
+        page = await cdp.open_page(ctx.cdp_port, ctx.serve_built(), ctx.shots_dir, width, height)
+        await page.goto("/")
+        if width < 768:
+            # 窄屏下侧栏盖住主区，先收起才点得到设置
+            await page.js("document.querySelector('[aria-label*=\"收起\"]')?.click()")
+            await asyncio.sleep(0.4)
+        await page.js(click_text("document", "设置"))
+        await asyncio.sleep(1)
+        panel = "document.querySelector('.drawer-panel')"
+        total = 0
+        for tab in ("全局设置", "API 预设", "当前会话"):
+            await page.js(click_text(panel, tab))
+            await asyncio.sleep(0.5)
+            await page.js(OPEN_ACCORDIONS)
+            await asyncio.sleep(0.6)
+            result = await page.js(HINT_PROBE)
+            total += result["count"]
+            ctx.check(f"{width} 宽「{tab}」：{result['count']} 个 ⓘ 都能点开、有内容、不出界、能收回", not result["bad"], result["bad"][:4])
+            overflow = await page.js(f"(() => {{ const el=document.querySelector('.drawer-panel .drawer-scroll.p-6') || {panel}; return el.scrollWidth - el.clientWidth; }})()")
+            ctx.check(f"{width} 宽「{tab}」：没有横向滚动", overflow <= 1, overflow)
+        ctx.check(f"{width} 宽：三个标签页一共找到的 ⓘ 不少于 10 个", total >= 10, total)
+
+        await page.js(click_text(panel, "API 预设"))
+        await asyncio.sleep(0.5)
+        count = await page.js(f"{BUILT_LIST}.querySelectorAll(':scope > [draggable=true]').length")
+        found = False
+        for index in range(count):
+            await page.js(f"{BUILT_LIST}.querySelectorAll(':scope > [draggable=true]')[{index}].click()")
+            await asyncio.sleep(0.3)
+            if await page.js(f"!!{COMBO_TOGGLE}"):
+                found = True
+                break
+        if not found:
+            ctx.check(f"{width} 宽：有带供应商下拉的预设", False)
+            await ctx.close(page)
+            continue
+        await page.js(f"{COMBO_TOGGLE}.scrollIntoView({{block:'center'}})")
+        await asyncio.sleep(0.3)
+        await page.js(f"{COMBO_TOGGLE}.click()")
+        await asyncio.sleep(0.5)
+        state = await page.js(COMBO_STATE)
+        ctx.check(f"{width} 宽：下拉在视口内、三行、名字都在、不溢出", state.get("open") and state["inView"] and not state["hidden"] and not state["notThree"] and not state["over"], state)
+        await page.shot(f"combobox-{width}")
+
+        geometry = "(() => { const p=%s.getBoundingClientRect(), i=%s.closest('.relative').getBoundingClientRect(); return {gapBelow: Math.round(p.top - i.bottom), gapAbove: Math.round(i.top - p.bottom), right: Math.round(p.right - i.right), wide: p.width > i.width + 1, inView: p.left >= 0 && p.right <= innerWidth}; })()" % (COMBO_PANEL, COMBO_TOGGLE)
+        before = await page.js(geometry)
+        await page.js(f"(() => {{ const el={BUILT_SCROLLER}; el.scrollTop += 40; }})()")
+        await asyncio.sleep(0.3)
+        after = await page.js(geometry)
+        # 输入框比面板最小宽度窄时，面板会比输入框宽，这时只要求留在视口内
+        attached = lambda g: (g["gapBelow"] == 6 or g["gapAbove"] == 6) and g["inView"] and (abs(g["right"]) <= 1 or g["wide"])
+        ctx.check(f"{width} 宽：下拉贴着输入框，抽屉滚动后仍然贴着", attached(before) and attached(after), {"before": before, "after": after})
+
+        fields = "(() => { const f=[...document.querySelectorAll('.drawer-panel .settings-field')].filter(x=>x.offsetParent); const v=l=>f.find(x=>x.querySelector('.settings-label')?.innerText.trim().startsWith(l))?.querySelector('input')?.value; return {name: v('预设名称'), url: v('API 基础地址')}; })()"
+        target = await page.js(f"(() => {{ const b=[...{COMBO_PANEL}.querySelectorAll('button')].find(x=>x.innerText.includes('DeepInfra')); b.scrollIntoView({{block:'center'}}); const r=b.getBoundingClientRect(); return {{x:r.left+r.width/2, y:r.top+r.height/2}}; }})()")
+        await asyncio.sleep(0.2)
+        target = await page.js(f"(() => {{ const b=[...{COMBO_PANEL}.querySelectorAll('button')].find(x=>x.innerText.includes('DeepInfra')); const r=b.getBoundingClientRect(); return {{x:r.left+r.width/2, y:r.top+r.height/2}}; }})()")
+        await page.mouse("mouseMoved", target["x"], target["y"])
+        await page.mouse("mousePressed", target["x"], target["y"], button="left", clickCount=1)
+        await page.mouse("mouseReleased", target["x"], target["y"], button="left", clickCount=1)
+        await asyncio.sleep(0.5)
+        chosen = await page.js(fields)
+        ctx.check(f"{width} 宽：用鼠标选 DeepInfra 后名称和地址都填上，下拉关闭",
+                  chosen["name"] == "DeepInfra" and chosen["url"] == "https://api.deepinfra.com/v1/openai" and not await page.js(f"!!{COMBO_PANEL}"), chosen)
+
+        await page.js(f"{COMBO_TOGGLE}.click()")
+        await asyncio.sleep(0.4)
+        await page.js("(() => { const i=document.querySelector('[aria-label=\"搜索供应商\"]'); i.focus(); })()")
+        for ch in "qianfan":
+            await page.send("Input.dispatchKeyEvent", type="char", text=ch)
+        await asyncio.sleep(0.3)
+        filtered = await page.js(COMBO_STATE)
+        ctx.check(f"{width} 宽：在下拉里打字能筛选（qianfan 只剩 1 项），按键没有被全局快捷键吃掉", filtered.get("count") == 1, filtered.get("count"))
+        await page.key("Tab", 9)
+        await asyncio.sleep(0.1)
+        focused = await page.js(f"({{inPanel: !!{COMBO_PANEL}?.contains(document.activeElement), tag: document.activeElement?.tagName, text: (document.activeElement?.innerText || '').slice(0, 12)}})")
+        ctx.check(f"{width} 宽：Tab 后焦点落在下拉里的筛选结果上", focused["inPanel"] and focused["tag"] == "BUTTON", focused)
+        # 按钮靠 keypress 触发点击，只发 keyDown 不算数
+        await page.send("Input.dispatchKeyEvent", type="keyDown", key="Enter", code="Enter", windowsVirtualKeyCode=13, text=chr(13))
+        await page.send("Input.dispatchKeyEvent", type="keyUp", key="Enter", code="Enter", windowsVirtualKeyCode=13)
+        await asyncio.sleep(0.5)
+        keyboard = await page.js(fields)
+        ctx.check(f"{width} 宽：Tab 到筛选结果按回车能选中", keyboard["url"] == "https://qianfan.baidubce.com/v2", keyboard)
+
+        if width >= 768:
+            # 手填官方地址、不从下拉选：仍然是 API Key 预设，不能被当成要登录的订阅预设
+            await page.js("(() => { const b=[...document.querySelectorAll('.drawer-panel button')].filter(x=>x.offsetParent).find(x=>x.innerText.includes('新建')); if(!b) throw new Error('没有新建按钮'); b.click(); })()")
+            await asyncio.sleep(0.5)
+            url_input = "[...document.querySelectorAll('.drawer-panel .settings-field')].filter(x=>x.offsetParent).find(x=>x.querySelector('.settings-label')?.innerText.trim().startsWith('API 基础地址')).querySelector('input')"
+            key_state = "(() => { const f=[...document.querySelectorAll('.drawer-panel .settings-field')].filter(x=>x.offsetParent); return {key: f.some(x=>x.querySelector('.settings-label')?.innerText.trim()==='API Key' && x.querySelector('input')), login: [...document.querySelectorAll('.drawer-panel button')].some(b=>b.offsetParent && /登录/.test(b.innerText))}; })()"
+            wrong = []
+            for typed in ("https://api.openai.com/v1", "https://api.x.ai/v1"):
+                await page.js(set_input(url_input, typed))
+                await asyncio.sleep(0.4)
+                got = await page.js(key_state)
+                if not got["key"] or got["login"]:
+                    wrong.append((typed, got))
+            ctx.check("手填 OpenAI / xAI 官方地址的预设显示 API Key 输入框，不显示登录", not wrong, wrong)
+            await page.js(set_input(url_input, "https://example.invalid/v1"))
+            await asyncio.sleep(0.3)
+            ctx.check("对照：其他地址显示 API Key 输入框", (await page.js(key_state))["key"])
+
+        await page.js(f"{COMBO_TOGGLE}.click()")
+        await asyncio.sleep(0.4)
+        close = await page.js("(() => { const b=document.querySelector('.drawer-panel .icon-button'); const r=b.getBoundingClientRect(); return {x:r.left+r.width/2, y:r.top+r.height/2}; })()")
+        await page.mouse("mouseMoved", close["x"], close["y"])
+        await page.mouse("mousePressed", close["x"], close["y"], button="left", clickCount=1)
+        await page.mouse("mouseReleased", close["x"], close["y"], button="left", clickCount=1)
+        await asyncio.sleep(0.8)
+        leftover = await page.js(f"({{combo: !!{COMBO_PANEL}, body: document.querySelectorAll('body > .preset-combobox-panel').length}})")
+        ctx.check(f"{width} 宽：点抽屉的关闭按钮时，下拉不会留在页面上", not leftover["combo"] and leftover["body"] == 0, leftover)
+        await ctx.close(page)
+
+
+VERTEX_FAKE_KEY_BODY = "UiCheckFakePrivateKeyBody0123456789abcdefghijklmnopqrstuvwxyzABCDEF"
+VERTEX_FAKE_ACCOUNT = json.dumps({
+    "type": "service_account",
+    "project_id": "ui-check-project",
+    "private_key_id": "0123456789abcdef0123456789abcdef01234567",
+    "private_key": "-----BEGIN PRIVATE KEY-----\n" + VERTEX_FAKE_KEY_BODY + "\n-----END PRIVATE KEY-----\n",
+    "client_email": "ui-check@ui-check-project.iam.gserviceaccount.com",
+    "client_id": "100000000000000000000",
+    "token_uri": "https://oauth2.googleapis.com/token",
+})
+VERTEX_BOX = "document.querySelector('.drawer-panel [data-vertex-service-account]')"
+VERTEX_STATE = f"""(() => {{
+  const box = {VERTEX_BOX};
+  if (!box) return {{present: false}};
+  const value = label => box.querySelector(`input[aria-label="${{label}}"]`)?.value ?? null;
+  const fields = [...document.querySelectorAll('.drawer-panel .settings-field')].filter(x => x.offsetParent);
+  const labels = fields.map(x => x.querySelector('.settings-label')?.innerText.trim()).filter(Boolean);
+  return {{present: true, importing: !!box.querySelector('textarea[aria-label="粘贴服务账号 JSON"]'),
+    email: value('服务账号邮箱'), key: value('私钥'), project: value('项目 ID'), location: value('位置'),
+    error: box.querySelector('[role=alert]')?.innerText.trim() || '',
+    apiKeyField: labels.includes('API Key'), duplicated: labels.filter(l => l.startsWith('项目 ID') || l.startsWith('位置')).length,
+    text: box.innerText}};
+}})()"""
+
+
+async def check_vertex_account(ctx):
+    """Vertex 服务账号预设（构建产物）：导入 JSON 后拆成邮箱、私钥、项目 ID、位置；位置由用户填；保存后私钥不回到前端"""
+    page = await cdp.open_page(ctx.cdp_port, ctx.serve_built(), ctx.shots_dir, 1536, 900)
+    await page.goto("/")
+    await page.js(click_text("document", "设置"))
+    await asyncio.sleep(1)
+    panel = "document.querySelector('.drawer-panel')"
+    await page.js(click_text(panel, "API 预设"))
+    await asyncio.sleep(0.5)
+    await page.js("(() => { const b=[...document.querySelectorAll('.drawer-panel button')].filter(x=>x.offsetParent).find(x=>x.innerText.includes('新建')); b.click(); })()")
+    await asyncio.sleep(0.5)
+    await page.js(f"{COMBO_TOGGLE}.click()")
+    await asyncio.sleep(0.4)
+    picked = await page.js(f"(() => {{ const b=[...{COMBO_PANEL}.querySelectorAll('button')].find(x=>x.innerText.includes('Gemini，服务账号')); if(!b) return false; b.click(); return true; }})()")
+    ctx.check("供应商下拉里有「Google Vertex AI（Gemini，服务账号）」", picked)
+    if not picked:
+        await ctx.close(page)
+        return
+    await asyncio.sleep(0.5)
+    state = await page.js(VERTEX_STATE)
+    ctx.check("选中后显示导入界面，不显示 API Key 输入框", state.get("present") and state["importing"] and not state["apiKeyField"], state)
+
+    paste = f"{VERTEX_BOX}.querySelector('textarea')"
+    await page.js(set_input(paste, '{"type": "authorized_user", "client_id": "x"}'))
+    await page.js(f"{paste}.dispatchEvent(new FocusEvent('blur'))")
+    await asyncio.sleep(0.3)
+    bad = await page.js(VERTEX_STATE)
+    ctx.check("对照：粘贴不是服务账号的 JSON 时报错，不导入", bad["importing"] and "service_account" in bad["error"] and bad["email"] is None, bad)
+
+    await page.js(set_input(paste, VERTEX_FAKE_ACCOUNT))
+    await asyncio.sleep(0.4)
+    loaded = await page.js(VERTEX_STATE)
+    ctx.check("导入后显示邮箱、私钥状态、项目 ID、位置四项",
+              not loaded["importing"] and loaded["email"] == "ui-check@ui-check-project.iam.gserviceaccount.com" and "已导入" in (loaded["key"] or "")
+              and loaded["project"] == "ui-check-project" and loaded["location"] == "", loaded)
+    ctx.check("私钥正文不显示在界面上", VERTEX_FAKE_KEY_BODY not in loaded["text"] and VERTEX_FAKE_KEY_BODY not in (loaded["key"] or ""))
+    ctx.check("位置没填时提示必填", "必填" in loaded["text"], loaded["text"][-80:])
+    ctx.check("项目 ID 和位置只出现一次（高级区不重复显示）", loaded["duplicated"] == 2, loaded["duplicated"])
+
+    await page.js(set_input(f"{VERTEX_BOX}.querySelector('input[aria-label=\"位置\"]')", "asia-southeast1"))
+    await asyncio.sleep(0.3)
+    filled = await page.js(VERTEX_STATE)
+    ctx.check("填了位置后必填提示消失", filled["location"] == "asia-southeast1" and "必填" not in filled["text"], filled["text"][-80:])
+    await page.shot("vertex-account")
+
+    await page.js(click_text(panel, "保存设置"))
+    await asyncio.sleep(1.5)
+    saved = await page.js("""(async () => {
+      const raw = await (await fetch('/api/settings')).text();
+      const preset = JSON.parse(raw).apiPresets.find(p => p.providerId === 'vertex-gemini');
+      return {raw, preset};
+    })()""")
+    preset = saved["preset"] or {}
+    ctx.check("保存后的预设：服务账号鉴权、Gemini 协议、项目和位置都在",
+              preset.get("authStyle") == "vertex_service_account" and preset.get("protocol") == "gemini_generate_content"
+              and (preset.get("providerParams") or {}) == {"project": "ui-check-project", "location": "asia-southeast1"},
+              {k: preset.get(k) for k in ("authStyle", "protocol", "providerParams", "baseUrl")})
+    ctx.check("设置接口返回的内容里没有私钥正文，邮箱还在", VERTEX_FAKE_KEY_BODY not in saved["raw"] and "ui-check@ui-check-project" in saved["raw"])
+
+    await page.goto("/")
+    await page.js(click_text("document", "设置"))
+    await asyncio.sleep(1)
+    await page.js(click_text(panel, "API 预设"))
+    await asyncio.sleep(0.5)
+    count = await page.js(f"{BUILT_LIST}.querySelectorAll(':scope > [draggable=true]').length")
+    reopened = {}
+    for index in range(count - 1, -1, -1):
+        await page.js(f"{BUILT_LIST}.querySelectorAll(':scope > [draggable=true]')[{index}].click()")
+        await asyncio.sleep(0.3)
+        reopened = await page.js(VERTEX_STATE)
+        if reopened.get("present"):
+            break
+    ctx.check("刷新后再打开：四项还在，私钥显示为已保存",
+              reopened.get("present") and not reopened["importing"] and reopened["email"] == "ui-check@ui-check-project.iam.gserviceaccount.com"
+              and "已保存" in (reopened["key"] or "") and reopened["project"] == "ui-check-project" and reopened["location"] == "asia-southeast1", reopened)
+
+    await page.js(f"[...{VERTEX_BOX}.querySelectorAll('button')].find(b=>b.innerText.includes('更换')).click()")
+    await asyncio.sleep(0.3)
+    replacing = await page.js(VERTEX_STATE)
+    await page.js(f"[...{VERTEX_BOX}.querySelectorAll('button')].find(b=>b.innerText.includes('取消')).click()")
+    await asyncio.sleep(0.3)
+    back = await page.js(VERTEX_STATE)
+    ctx.check("点「更换」进入导入界面，取消后原账号还在", replacing["importing"] and not back["importing"] and back["email"] == reopened.get("email"), {"replacing": replacing.get("importing"), "back": back.get("email")})
+    await ctx.close(page)
+
+
 CHECKS = {
     "first_load": check_first_load,
     "entry": check_entry,
     "search": check_search,
     "settings": check_settings,
     "built": check_built,
+    "drawer": check_drawer_details,
+    "vertex": check_vertex_account,
     "core": dom_checks.check_core,
     "modals": dom_checks.check_modals,
     "dev_built": dom_checks.check_dev_built,

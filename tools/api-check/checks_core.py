@@ -821,6 +821,17 @@ def _(env):
     assert_rest_error(env.api.get("/api/http-log/no-such-record"), 404, NOT_FOUND + ("http_log_not_found", "record_not_found"))
 
 
+@check("core.catalog.manual_url_not_oauth", "手填官方地址、不带 providerId 时，按 API Key 厂商解析，不能落到同地址的登录订阅条目上")
+def _(env):
+    for base_url, expected in (("https://api.openai.com/v1", "openai"), ("https://api.x.ai/v1", "xai")):
+        r = env.api.post("/api/llm/resolve-preview", json={"baseUrl": base_url, "model": "some-model", "protocol": "openai_responses"})
+        ensure(r.status_code == 200, f"{base_url}: {r.status_code} {r.text[:200]}")
+        ensure(r.json().get("providerId") == expected, f"{base_url} 解析成了 {r.json().get('providerId')!r}，应为 {expected!r}")
+    # 只有登录条目用的地址，仍然要认得出来
+    r = env.api.post("/api/llm/resolve-preview", json={"baseUrl": "https://chatgpt.com/backend-api/codex", "model": "some-model", "protocol": "openai_responses"})
+    ensure(r.status_code == 200 and r.json().get("providerId") == "openai-codex", f"codex 地址解析成了 {r.json().get('providerId')!r}")
+
+
 @check("core.no_external_network", "核心检查期间后端没有访问外网模型服务")
 def _(env):
     hosts = [h for h in env.mock.proxy_attempts if any(word in h for word in ("amazonaws", "googleapis", "mistral", "anthropic", "openai"))]

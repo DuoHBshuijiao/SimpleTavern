@@ -5,6 +5,7 @@ import { Eye, EyeOff, Loader2, X } from 'lucide-vue-next'
 import ModernSelect from '../ModernSelect.vue'
 import ThemedCheckbox from '../ThemedCheckbox.vue'
 import LlmPresetNameCombobox from '../LlmPresetNameCombobox.vue'
+import VertexServiceAccountFields from './VertexServiceAccountFields.vue'
 import LlmConnectionAdvancedSection from './LlmConnectionAdvancedSection.vue'
 import SettingsField from './SettingsField.vue'
 import SettingsHint from './SettingsHint.vue'
@@ -25,7 +26,7 @@ const isVertexPreset = computed(
   () => !presets.isTtsPreset(presets.editingPreset) && presets.editingPreset?.authStyle === VERTEX_SERVICE_ACCOUNT_AUTH_STYLE,
 )
 const showAuthStyleField = computed(
-  () => !presets.isTtsPreset(presets.editingPreset) && (presets.editingPreset?.protocol === 'anthropic_messages' || isVertexPreset.value),
+  () => !presets.isTtsPreset(presets.editingPreset) && (['anthropic_messages', 'gemini_generate_content'].includes(presets.editingPreset?.protocol ?? '') || isVertexPreset.value),
 )
 const authStyleOptions = computed(() => {
   const options = [
@@ -162,7 +163,7 @@ const authStyleOptions = computed(() => {
                             />
                         </SettingsField>
 
-                        <SettingsField v-if="showAuthStyleField" label="鉴权方式" more="Vertex 上的 Claude 选 Google 服务账号。">
+                        <SettingsField v-if="showAuthStyleField" label="鉴权方式" more="用服务账号调用 Vertex 上的 Claude 或 Gemini 时，选 Google 服务账号。">
                             <ModernSelect
                               :model-value="presets.editingPreset!.authStyle || ''"
                               :options="authStyleOptions"
@@ -172,31 +173,7 @@ const authStyleOptions = computed(() => {
                             />
                         </SettingsField>
 
-                        <SettingsField
-                          v-if="isVertexPreset"
-                          label="服务账号 JSON"
-                          more="粘贴从 Google Cloud 下载的服务账号密钥 JSON 全文。私钥只保存在本机，用来换取短期 access token。保存后再打开时 private_key 显示为占位内容，不影响使用；要换账号就粘贴新的 JSON。设置备份不含私钥，恢复备份后需要重新粘贴。"
-                        >
-                            <template #actions>
-                              <button
-                                type="button"
-                                class="inline-flex min-h-8 min-w-8 items-center justify-center rounded-md text-[var(--color-text-muted)] touch-manipulation hover:text-[var(--color-text-secondary)]"
-                                :aria-label="presets.editingPresetShowApiKey ? '隐藏服务账号 JSON' : '显示服务账号 JSON'"
-                                @click="presets.editingPresetShowApiKey = !presets.editingPresetShowApiKey"
-                              >
-                                  <component :is="presets.editingPresetShowApiKey ? Eye : EyeOff" class="w-4 h-4" />
-                              </button>
-                            </template>
-                            <textarea
-                              v-model="presets.editingPreset!.apiKey"
-                              rows="8"
-                              class="input textarea w-full resize-y font-mono"
-                              spellcheck="false"
-                              autocomplete="off"
-                              :style="presets.editingPresetShowApiKey ? undefined : '-webkit-text-security: disc'"
-                              placeholder='{ "type": "service_account", "client_email": "...", "private_key": "...", "token_uri": "..." }'
-                            ></textarea>
-                        </SettingsField>
+                        <VertexServiceAccountFields v-if="isVertexPreset" :connection="presets.editingPreset!" />
 
                         <div v-if="!isVertexPreset" class="settings-field">
                             <span v-if="!presets.presetRequiresOAuth(presets.editingPreset)" class="settings-label">API Key</span>

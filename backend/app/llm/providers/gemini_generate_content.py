@@ -32,6 +32,8 @@ from app.llm.types import (
     append_query_key,
     auth_headers_for_style,
 )
+from app.llm.types import is_vertex_service_account_style
+from app.llm.vertex_auth import finish_upstream_error, get_access_token, looks_like_service_account_json
 from app.services.http_client import get_async_http_client
 from app.services.http_log import log_outbound
 
@@ -198,13 +200,56 @@ def _models_list_url(base_url: str) -> str:
     return f"{_api_root(base_url)}/models"
 
 
+def _is_vertex_account(auth_style: str | None) -> bool:
+    """Vertex 上的 Gemini：apiKey 是服务账号 JSON，要先换成 access token。"""
+    return is_vertex_service_account_style(auth_style)
+
+
 def _auth_headers(api_key: str, auth_style: str | None = None) -> dict[str, str]:
+    if _is_vertex_account(auth_style):
+        # access token 要联网换取，由 _vertex_auth_headers 补上
+        return {}
+    if looks_like_service_account_json(api_key):
+        # 绝不能把私钥当 API Key 放进请求头或地址
+        raise AppError(
+            code="config_invalid",
+            message="服务账号 JSON 不能当作普通 API Key 使用",
+            detail="api key looks like a Google service account but auth style is not vertex_service_account",
+            source="llm.gemini_generate_content",
+            status_code=400,
+            provider=_PROVIDER,
+            protocol=_PROTOCOL,
+            suggested_action="把预设的鉴权方式改为 Google 服务账号",
+        )
     # Gemini 原生默认是 x-goog-api-key；query_key 不放头。
     return auth_headers_for_style(api_key, auth_style or "x-goog-api-key")
 
 
+async def _vertex_auth_headers(api_key: str, auth_style: str | None) -> dict[str, str]:
+    if not _is_vertex_account(auth_style):
+        return {}
+    return {"Authorization": f"Bearer {await get_access_token(api_key)}"}
+
+
+def _finish_error(error: AppError, api_key: str, auth_style: str | None) -> AppError:
+    return finish_upstream_error(error, api_key) if _is_vertex_account(auth_style) else error
+
+
 def _request_url(base_url: str, *, model: str, stream: bool, api_key: str, auth_style: str | None) -> str:
     url = _model_action_url(base_url, model=model, stream=stream)
+    if _is_vertex_account(auth_style):
+        if "{" in url:
+            raise AppError(
+                code="config_missing",
+                message="Vertex 地址还有没填的参数",
+                detail="base URL still contains a placeholder",
+                source="llm.gemini_generate_content",
+                status_code=400,
+                provider=_PROVIDER,
+                protocol=_PROTOCOL,
+                suggested_action="在预设里填写项目 ID 和位置",
+            )
+        return url
     return append_query_key(url, api_key, auth_style or "x-goog-api-key")
 
 
@@ -849,6 +894,9 @@ async def _payload_with_explicit_cache(
     api_key: str,
 ) -> dict[str, Any]:
     payload = _payload_from_config(messages=messages, config=config)
+    if _is_vertex_account(config.auth_style):
+        # Vertex 的 cachedContents 挂在 projects/…/locations/… 下，和这里的地址、鉴权都不同；只用隐式缓存
+        return payload
     plan = PromptCachePlan.from_dict(config.prompt_cache)
     return await attach_explicit_cache(
         payload,
@@ -874,6 +922,7 @@ async def complete_gemini(
         "Accept": "application/json",
         "Content-Type": "application/json",
         **_auth_headers(api_key, config.auth_style),
+        **await _vertex_auth_headers(api_key, config.auth_style),
         **_extra_headers(config),
     }
     payload = await _payload_with_explicit_cache(
@@ -929,10 +978,10 @@ async def complete_gemini(
                     detail="gemini generateContent: empty text and thought parts",
                 )
             return ChatCompletionResult(text=text, usage=usage_dict)
-    except AppError:
-        raise
+    except AppError as error:
+        raise _finish_error(error, api_key, config.auth_style)
     except Exception as exc:
-        raise as_app_error(
+        raise _finish_error(as_app_error(
             exc,
             source="llm.gemini_generate_content",
             default_code="provider_request_failed",
@@ -940,7 +989,7 @@ async def complete_gemini(
             default_status_code=502,
             provider=_PROVIDER,
             protocol=_PROTOCOL,
-        ) from exc
+        ), api_key, config.auth_style) from exc
 
 
 async def stream_gemini(
@@ -955,6 +1004,7 @@ async def stream_gemini(
         "Accept": "text/event-stream",
         "Content-Type": "application/json",
         **_auth_headers(api_key, config.auth_style),
+        **await _vertex_auth_headers(api_key, config.auth_style),
         **_extra_headers(config),
     }
     payload = await _payload_with_explicit_cache(
@@ -1081,10 +1131,10 @@ async def stream_gemini(
                 tool_calls=finish_tool_calls,
                 usage=usage.to_public_dict() if usage is not None else None,
             )
-    except AppError:
-        raise
+    except AppError as error:
+        raise _finish_error(error, api_key, config.auth_style)
     except Exception as exc:
-        raise as_app_error(
+        raise _finish_error(as_app_error(
             exc,
             source="llm.gemini_generate_content.stream",
             default_code="provider_request_failed",
@@ -1092,7 +1142,7 @@ async def stream_gemini(
             default_status_code=502,
             provider=_PROVIDER,
             protocol=_PROTOCOL,
-        ) from exc
+        ), api_key, config.auth_style) from exc
 
 
 class GeminiGenerateContentAdapter:

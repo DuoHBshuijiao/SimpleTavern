@@ -680,6 +680,43 @@ add_check("t832.mistral.base_url_v1", "目录模板的 baseUrl 带 /v1 时不会
 add_check("t832.mistral.store_note", "记录 store 字段取值", mistral_store_note)
 add_check("t832.vertex.jwt_exchange", "用服务账号 JWT 换 token，并用它调用 Vertex；JWT 的签名和声明都通过校验", vertex_jwt_exchange)
 add_check("t832.vertex.token_reuse_note", "记录是否复用 token", vertex_token_reuse_note)
+def vertex_backup_check(env):
+    """服务账号私钥不进设置备份和设置响应。先用一个普通预设的 Key 证明扫描看得到备份内容。"""
+    import io
+    import zipfile
+
+    fam = FAMILIES[2]
+    sa_json, pem = fresh_account(env)
+    prepare(env, fam, api_key=sa_json)
+    marker = "backup-scan-control-key-7f3a"
+    env.put_preset({"id": "backup-scan-control", "name": "扫描对照", "baseUrl": "http://127.0.0.1:1", "apiKey": marker, "models": ["m"], "protocol": "openai_compatible_chat"})
+    # 只认私钥正文的中间一段：头尾标记是公开格式，占位内容里出现不算泄露
+    # 取 PEM 里同一行内的一段，这样不管换行怎么转义都能原样匹配
+    body = pem.splitlines()[3][4:52]
+    ensure(len(body) >= 40 and body in sa_json, "夹具：私钥正文片段应该出现在发出去的服务账号 JSON 里")
+
+    def scan(blob, where):
+        text = blob.decode("utf-8", "replace")
+        ensure(body not in text, f"{where} 里有服务账号私钥正文")
+        return marker in text
+
+    settings_raw = env.api.get("/api/settings").content
+    scan(settings_raw, "GET /api/settings")
+    seen_control = False
+    for scope in ("basic", "with_characters", "with_chats"):
+        response = env.api.get("/api/settings/backup", params={"scope": scope})
+        equal(response.status_code, 200, f"备份 {scope} 的状态")
+        archive = zipfile.ZipFile(io.BytesIO(response.content))
+        names = archive.namelist()
+        ensure(names, f"备份 {scope} 是空的")
+        for name in names:
+            if scan(archive.read(name), f"备份 {scope} 的 {name}"):
+                seen_control = True
+    # 对照：普通 Key 按作者决定留在备份里，扫得到它，说明上面的“没扫到私钥”不是因为没读到内容
+    ensure(seen_control, "对照失败：备份里没扫到普通预设的 Key，扫描可能没读到设置内容")
+
+
+add_check("t832.vertex.sa.backup", "Vertex 服务账号私钥不进设置响应和三种设置备份（规格：T-832 密钥）", vertex_backup_check)
 add_check("t832.vertex.sa.not_json", "服务账号不是 JSON 时明确报错", sa_invalid_check(lambda env: "{not json, \"private_key\": \"-----BEGIN PRIVATE KEY-----abc"))
 add_check("t832.vertex.sa.json_array", "服务账号 JSON 不是对象时明确报错", sa_invalid_check(lambda env: "[1, 2]"))
 add_check("t832.vertex.sa.empty", "服务账号为空时明确报错", sa_invalid_check(lambda env: ""))
@@ -693,4 +730,123 @@ add_check("t832.vertex.sa.wrong_type", "type 不是 service_account 时明确报
 add_check("t832.vertex.token.fresh_account_ok", "新服务账号、token 端点正常时生成成功（token 故障用例的对照）", token_fresh_ok)
 for _fault in ("invalid_grant", "http_500", "not_json", "no_access_token", "drop", "invalid_grant_echo"):
     add_check(f"t832.vertex.token.{_fault}", f"token 端点故障 {_fault} 时明确报错，不调 Vertex", token_fault_check(_fault))
+# ---------- Vertex 上的 Gemini（服务账号）----------
+VG_MODEL = "gemini-2.5-pro"
+VG_BASE = "/v1/projects/p/locations/asia-southeast1/publishers/google"
+
+
+def _vg_prepare(env, stream=True, fault="ok", api_key=None, protocol="gemini_generate_content", auth_style="vertex_service_account", base=None, **mock_options):
+    preset = {"id": "check-vertex-gemini", "name": "检查 vertex gemini", "baseUrl": base or (env.mock.url + VG_BASE),
+              "apiKey": env.fixtures["sa_json"] if api_key is None else api_key, "models": [VG_MODEL], "protocol": protocol,
+              "promptCache": {"mode": "off"}}
+    if auth_style:
+        preset["authStyle"] = auth_style
+    env.put_preset(preset)
+    env.set_stream(stream)
+    env.mock.reset(fault=fault, **mock_options)
+    env.mock.api_key = None
+    env.mock.expect_model = VG_MODEL
+    return env.new_chat("check-vertex-gemini", VG_MODEL, reasoning="none", max_tokens=ROOMY_MAX_TOKENS)
+
+
+def _vg_reached(env, result, operation):
+    calls = env.mock.calls("vertex_gemini")
+    ensure(calls, f"请求没有到达 Vertex Gemini 的模拟上游。后端：{result.summary()}；上游收到：{env.mock.requests or '无'}；违规：{env.mock.violations[:2]}")
+    ensure(not env.mock.violations, f"模拟上游判定请求不符合文档：{env.mock.violations[:3]}")
+    equal(calls[0].operation, operation, "上游操作")
+    ensure(not env.mock.proxy_attempts, f"不该访问外网：{env.mock.proxy_attempts}")
+    return calls
+
+
+def vg_stream(env):
+    chat_id = _vg_prepare(env)
+    result = env.generate(chat_id, USER_TEXT)
+    _vg_reached(env, result, "streamGenerateContent")
+    ensure(result.succeeded and result.is_sse, result.summary())
+    ensure(len(result.of("delta")) >= 2, f"应是真流式，多个 delta，实际 {len(result.of('delta'))} 个")
+    equal(result.text, REPLY, "delta 拼接结果")
+    last = env.read_chat(chat_id)["messages"][-1]
+    equal(last["content"], REPLY, "助手消息落盘")
+    equal(last.get("generationMetadata", {}).get("protocol"), "gemini_generate_content", "消息 generationMetadata.protocol")
+    _assert_usage(last.get("usage"), "消息 usage")
+
+
+def vg_once(env):
+    chat_id = _vg_prepare(env, stream=False)
+    result = env.generate(chat_id, USER_TEXT)
+    _vg_reached(env, result, "generateContent")
+    ensure(result.succeeded and not result.is_sse, result.summary())
+    last = env.read_chat(chat_id)["messages"][-1]
+    equal(last["content"], REPLY, "助手消息落盘")
+    _assert_usage(last.get("usage"), "消息 usage")
+
+
+def vg_auto_protocol(env):
+    """名录条目 vertex-gemini + 自动协议：按条目定成 Gemini，不能落到 Anthropic 或 OpenAI 兼容。"""
+    preset = {"id": "check-vertex-gemini", "name": "检查 vertex gemini", "baseUrl": env.mock.url + VG_BASE, "providerId": "vertex-gemini",
+              "apiKey": env.fixtures["sa_json"], "models": [VG_MODEL], "protocol": "auto", "promptCache": {"mode": "off"}}
+    env.put_preset(preset)
+    env.set_stream(True)
+    env.mock.reset()
+    env.mock.api_key = None
+    env.mock.expect_model = VG_MODEL
+    chat_id = env.new_chat("check-vertex-gemini", VG_MODEL, reasoning="none", max_tokens=ROOMY_MAX_TOKENS)
+    result = env.generate(chat_id, USER_TEXT)
+    _vg_reached(env, result, "streamGenerateContent")
+    equal(result.text, REPLY, "delta 拼接结果")
+
+
+def vg_http_error(status):
+    def run(env):
+        chat_id = _vg_prepare(env, fault=f"http_{status}_echo", echo_secret=True)
+        result = env.generate(chat_id, USER_TEXT, deadline=30.0)
+        ensure(env.mock.calls("vertex_gemini"), f"请求应到达上游：{result.summary()}")
+        ensure(not result.succeeded and not result.hung, f"上游 {status} 不能当成成功：{result.summary()}")
+        error = result.error
+        ensure(error, f"应有错误信封：{result.summary()}")
+        for key in ("code", "message", "requestId"):
+            ensure(isinstance(error.get(key), str) and error[key], f"错误缺少 {key}：{str(error)[:300]}")
+        scan = result.raw.decode("utf-8", "replace")
+        for token in env.mock.issued_tokens:
+            ensure(token not in scan, "错误响应里不能带 access token")
+        ensure(env.fixtures["pem"].splitlines()[3][4:52] not in scan, "错误响应里不能带私钥")
+    return run
+
+
+def vg_refused(label, **options):
+    """这些组合必须在发请求之前拦下：服务账号 JSON 绝不能当普通密钥发出去。"""
+    def run(env):
+        chat_id = _vg_prepare(env, **options)
+        env.api.json_ok("DELETE", "/api/http-log")
+        result = env.generate(chat_id, USER_TEXT, deadline=30.0)
+        upstream = [r for r in env.mock.requests if r.route != "token"]
+        ensure(not upstream, f"{label}：不该有请求到达上游：{[(r.route, r.path) for r in upstream]}")
+        ensure(not env.mock.proxy_attempts, f"不该访问外网：{env.mock.proxy_attempts}")
+        ensure(not result.succeeded and not result.hung, f"{label}：不能当成成功：{result.summary()}")
+        ensure(result.error and result.error.get("message"), f"{label}：应有明确的错误：{result.summary()}")
+        ensure("-----begin" not in json.dumps(result.error, ensure_ascii=False).lower(), "错误里不能带私钥")
+    return run
+
+
+def vg_models_list(env):
+    response = env.api.post("/api/llm/test-models", json={"baseUrl": env.mock.url + VG_BASE, "apiKey": env.fixtures["sa_json"],
+                                                           "protocol": "gemini_generate_content", "authStyle": "vertex_service_account"})
+    env_requests = [r for r in env.mock.requests if r.route == "vertex_gemini"]
+    ensure(response.status_code == 400, f"拉模型列表应明确说不支持，实际 {response.status_code} {response.text[:200]}")
+    body = response.json()
+    error = body.get("error") if isinstance(body.get("error"), dict) else body
+    ensure("手动" in json.dumps(error, ensure_ascii=False), f"错误应提示手动添加模型名：{json.dumps(error, ensure_ascii=False)[:300]}")
+    ensure(not env_requests, "不支持时不该请求上游")
+
+
+add_check("t832.vertex_gemini.stream", "Vertex 上的 Gemini：服务账号换 token 后流式生成，文字、用量、落盘正确（依据：Vertex AI streamGenerateContent 参考）", vg_stream)
+add_check("t832.vertex_gemini.once", "Vertex 上的 Gemini：非流式生成", vg_once)
+add_check("t832.vertex_gemini.auto_protocol", "名录条目 vertex-gemini 配自动协议时走 Gemini", vg_auto_protocol)
+add_check("t832.vertex_gemini.http_401", "上游 401 并回显凭据时，错误明确且不带 token 和私钥", vg_http_error(401))
+add_check("t832.vertex_gemini.http_500", "上游 500 时错误明确", vg_http_error(500))
+add_check("t832.vertex_gemini.refuse_plain_key", "服务账号 JSON 配 Gemini 但鉴权方式不是服务账号：拦下，不发请求", vg_refused("鉴权方式缺失", auth_style=None))
+add_check("t832.vertex_gemini.refuse_openai", "服务账号鉴权配 OpenAI 兼容协议：拦下，不发请求", vg_refused("协议不符", protocol="openai_compatible_chat"))
+add_check("t832.vertex_gemini.refuse_placeholder", "地址里还有没填的 {location} 时拦下，不发请求",
+          vg_refused("占位符没填", base="https://{location}-aiplatform.googleapis.com/v1/projects/{project}/locations/{location}/publishers/google"))
+add_check("t832.vertex_gemini.models_list", "拉模型列表明确说不支持并提示手动添加，不请求上游", vg_models_list)
 add_check("t832.no_external_network", "这一组运行期间没有发往外网模型服务的请求", no_external_network)

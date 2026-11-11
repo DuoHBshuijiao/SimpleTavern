@@ -786,8 +786,17 @@ def resolve_request(
 
     auth_style = credentials.auth_style or (entry.auth_style if entry is not None else None)
     vertex_auth = is_vertex_service_account_style(auth_style)
-    # 服务账号 JSON 只能发给 Vertex Anthropic，自动协议在这里定死，不按模型家族切换
-    requested_protocol = ANTHROPIC_MESSAGES_PROTOCOL if vertex_auth and is_auto_protocol(credentials.protocol) else credentials.protocol
+    # 服务账号 JSON 只能发给 Vertex 上的 Claude 或 Gemini，自动协议在这里定死：按名录条目的默认协议，
+    # 没有条目时看模型名，不走通用的按家族切换（那会切到 OpenAI 兼容等不认服务账号的协议）
+    requested_protocol = credentials.protocol
+    if vertex_auth and is_auto_protocol(credentials.protocol):
+        entry_default = entry.default_protocol if entry is not None else None
+        if entry_default in {ANTHROPIC_MESSAGES_PROTOCOL, GEMINI_GENERATE_CONTENT_PROTOCOL}:
+            requested_protocol = entry_default
+        elif cat.model_capabilities(model, provider_id=None, base_url=base_url).family == "gemini":
+            requested_protocol = GEMINI_GENERATE_CONTENT_PROTOCOL
+        else:
+            requested_protocol = ANTHROPIC_MESSAGES_PROTOCOL
     effective, base_url, proto_adjustments, reasons = resolve_protocol(
         requested_protocol,
         model=model,
@@ -800,8 +809,8 @@ def resolve_request(
     efforts = available_efforts(caps, protocol=effective, vertex_claude=vertex_claude)
     effort, clamp_adj = clamp_reasoning_effort(requested_effort, efforts)
     unsupported_reason: str | None = None
-    if vertex_auth and effective != ANTHROPIC_MESSAGES_PROTOCOL:
-        unsupported_reason = "Google 服务账号鉴权只能配合 Anthropic Messages 协议"
+    if vertex_auth and effective not in {ANTHROPIC_MESSAGES_PROTOCOL, GEMINI_GENERATE_CONTENT_PROTOCOL}:
+        unsupported_reason = "Google 服务账号鉴权只能配合 Anthropic Messages 或 Gemini generateContent 协议"
     elif (
         effective in {BEDROCK_CONVERSE_PROTOCOL, MISTRAL_CONVERSATIONS_PROTOCOL}
         and requested_effort != "none"

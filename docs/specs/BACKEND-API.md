@@ -19,6 +19,7 @@
 | Bedrock Converse | `protocol=bedrock_converse`，`apiKey` 作为 `Authorization: Bearer`，`baseUrl` 形如 `https://bedrock-runtime.<region>.amazonaws.com` | `{baseUrl}/model/{modelId}/converse` 和 `/converse-stream`；模型列表走 `bedrock.` 主机的 `/foundation-models` |
 | Mistral Conversations | `protocol=mistral_conversations`，Bearer，`baseUrl` 带不带 `/v1` 都可以 | `/v1/conversations`，`store=false` |
 | Vertex 上的 Claude | `protocol=anthropic_messages`，`authStyle=vertex_service_account`，`apiKey` 是服务账号 JSON，`baseUrl` 形如 `https://<host>/v1/projects/<project>/locations/<location>` | `{baseUrl}/publishers/anthropic/models/{model}:rawPredict` 和 `:streamRawPredict`，请求体带 `anthropic_version`、不带 `model`；没有模型列表，`list` 明确失败 |
+| Vertex 上的 Gemini | `protocol=gemini_generate_content`，`authStyle=vertex_service_account`，`apiKey` 是服务账号 JSON，`baseUrl` 形如 `https://<host>/v1/projects/<project>/locations/<location>/publishers/google`（名录条目 `vertex-gemini`，`providerParams` 的 `project`、`location` 填进模板；`location=global` 时主机是 `aiplatform.googleapis.com`）。请求发到 `<baseUrl>/models/<model>:generateContent` 或 `:streamGenerateContent?alt=sse`，带 `Authorization: Bearer <access token>`，不带 `x-goog-api-key` 和 `key` 参数。只用隐式缓存，不建 `cachedContents`。`POST /api/llm/test-models` 返回 400 `provider_capability_unsupported`，模型名手动添加。协议为 `auto` 时按名录条目定为 Gemini。 |
 | Bedrock 上的 Claude | `protocol=anthropic_messages`，`providerParams._host` 含 `bedrock-runtime` | 流式 `invoke-with-response-stream` 返回的 eventstream 现在支持，不再 fast-fail |
 
 - **eventstream：** 校验前导和消息的 CRC。CRC 错误、帧截断、异常帧、没有结束事件都转成统一错误，不当成成功。

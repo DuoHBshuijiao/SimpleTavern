@@ -22,6 +22,7 @@ from app.llm.resolution import preview_resolution, resolve_protocol
 from app.llm.runtime import list_models
 from app.llm.types import (
     ANTHROPIC_MESSAGES_PROTOCOL,
+    GEMINI_GENERATE_CONTENT_PROTOCOL,
     OPENAI_COMPATIBLE_CHAT_PROTOCOL,
     PROTOCOL_AUTO,
     is_vertex_service_account_style,
@@ -159,15 +160,25 @@ async def test_models(req: TestModelsRequest) -> list[str]:
     )
     get_adapter(protocol)
     vertex_style = is_vertex_service_account_style(auth_style)
+    if vertex_style and protocol == GEMINI_GENERATE_CONTENT_PROTOCOL:
+        raise AppError(
+            code="provider_capability_unsupported",
+            message="Vertex 上的 Gemini 暂不支持拉取模型列表",
+            detail="model listing is not implemented for Gemini on Vertex AI with a service account",
+            source="llm.test_models",
+            status_code=400,
+            protocol=protocol,
+            suggested_action="手动添加模型名，如 gemini-2.5-pro",
+        )
     if (vertex_style and protocol != ANTHROPIC_MESSAGES_PROTOCOL) or (not vertex_style and looks_like_service_account_json(api_key)):
         # 服务账号 JSON 不能当普通密钥发给上游
         raise AppError(
             code="config_invalid",
-            message="服务账号 JSON 只能配合 Google 服务账号鉴权和 Anthropic Messages 协议",
+            message="服务账号 JSON 只能配合 Google 服务账号鉴权，协议是 Anthropic Messages 或 Gemini generateContent",
             source="llm.test_models",
             status_code=400,
             protocol=protocol,
-            suggested_action="把鉴权方式改为 Google 服务账号，协议改为 Anthropic Messages",
+            suggested_action="把鉴权方式改为 Google 服务账号，协议改为 Anthropic Messages 或 Gemini generateContent",
         )
     if provider_id and provider_params:
         entry = get_catalog().find_provider(provider_id)

@@ -467,16 +467,19 @@ class LlmCatalog:
         if not raw.startswith(("http://", "https://")):
             raw = "https://" + raw
         path = urlsplit(raw).path.rstrip("/").lower()
-        best: tuple[int, ProviderEntry] | None = None
+        # 同一个地址既有 API Key 条目又有登录订阅条目时（api.openai.com、api.x.ai），只凭地址必须落到
+        # API Key 条目上：订阅条目会改写请求并让界面隐藏 Key 输入框，它们只能靠 providerId 选中。
+        best: tuple[tuple[int, bool], ProviderEntry] | None = None
         host_only: ProviderEntry | None = None
         for host_re, path_re, tpl_len, entry in self._host_index:
             if not host_re.match(host):
                 continue
             if path_re.match(path):
                 # 同 host 不同 path（如 AI Studio 原生 vs /openai）：更长的模板 path 更具体
-                if best is None or tpl_len > best[0]:
-                    best = (tpl_len, entry)
-            elif host_only is None:
+                rank = (tpl_len, not entry.requires_oauth)
+                if best is None or rank > best[0]:
+                    best = (rank, entry)
+            elif host_only is None or (host_only.requires_oauth and not entry.requires_oauth):
                 host_only = entry
         if best is not None:
             return best[1]

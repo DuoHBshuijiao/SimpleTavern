@@ -364,6 +364,11 @@ def main():
             context.built_dir = out_dir
             front_env = {**env, "SIMPLETAVERN_API_PROXY": f"http://127.0.0.1:{args.back_port}"}
             if not args.dist:
+                # 和 npm run build 一样先做类型检查：只跑 vite build 发现不了未使用的导入这类会让真实构建失败的错误
+                tsc = os.path.join(frontend, "node_modules", "vue-tsc", "bin", "vue-tsc.js")
+                typed = subprocess.run(["node", tsc, "-b"], cwd=frontend, env=front_env, capture_output=True, text=True, encoding="utf-8", errors="replace")
+                if typed.returncode != 0:
+                    raise SystemExit("类型检查失败，npm run build 会失败：\n" + (typed.stdout + typed.stderr)[-3000:])
                 subprocess.run(["node", vite, "build", "--outDir", out_dir, "--emptyOutDir"], cwd=frontend, env=front_env, stdout=log, stderr=log, check=True)
             processes.append(subprocess.Popen(
                 ["node", vite, "preview", "--outDir", out_dir, "--port", str(args.built_port), "--strictPort", "--host", "127.0.0.1"],

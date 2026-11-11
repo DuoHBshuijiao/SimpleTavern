@@ -45,6 +45,7 @@ Bedrock eventstream 的 fast-fail 已移除。
 - 备份不含私钥，恢复后要重新粘贴，否则使用时报 `config_invalid`。
 - token 交换的请求体和响应体不进 HTTP 日志，只记状态码。token 只在内存里缓存，距过期 5 分钟内刷新，Vertex 返回 401 时作废。
 - 服务账号 JSON 配其他鉴权或协议时在 `preset_resolve` 和 `/api/llm/test-models` 直接拒绝，不会当普通密钥发出去。
+- 2026-11-11 追加（作者要求，冻结期内）：服务账号鉴权也支持 Gemini generateContent，名录条目 `vertex-gemini`。Gemini 适配器在这条路上换 token、发 Bearer，不走显式缓存，不支持拉模型列表。前端把服务账号 JSON 的输入框换成导入界面，导入后拆成邮箱、私钥状态、项目 ID、位置四项，位置必须由用户填；Claude 和 Gemini 两个 Vertex 条目共用。
 
 ### 已知限制
 

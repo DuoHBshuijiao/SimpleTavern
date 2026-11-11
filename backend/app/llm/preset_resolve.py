@@ -17,6 +17,7 @@ from typing import Any
 from app.llm.types import (
     ANTHROPIC_PROMPT_CACHE_OFF,
     ANTHROPIC_MESSAGES_PROTOCOL,
+    GEMINI_GENERATE_CONTENT_PROTOCOL,
     OPENAI_COMPATIBLE_CHAT_PROTOCOL,
     PROTOCOL_AUTO,
     VERTEX_SERVICE_ACCOUNT_AUTH_STYLE,
@@ -77,12 +78,12 @@ def _prompt_cache_of(obj: Any) -> PromptCacheConfig:
 
 
 def _check_service_account_usage(*, api_key: str, auth_style: str | None, protocol: str, name: str) -> None:
-    """服务账号 JSON 只能走 Vertex Anthropic；其它组合在这里拦下，绝不当普通密钥发出去。"""
+    """服务账号 JSON 只能走 Vertex 上的 Claude 或 Gemini；其它组合在这里拦下，绝不当普通密钥发出去。"""
     if is_vertex_service_account_style(auth_style):
-        if protocol not in {ANTHROPIC_MESSAGES_PROTOCOL, PROTOCOL_AUTO}:
+        if protocol not in {ANTHROPIC_MESSAGES_PROTOCOL, GEMINI_GENERATE_CONTENT_PROTOCOL, PROTOCOL_AUTO}:
             raise LlmPresetResolveError(
                 "VERTEX_PROTOCOL_MISMATCH",
-                f"{name}使用 Google 服务账号鉴权，协议必须是 Anthropic Messages。",
+                f"{name}使用 Google 服务账号鉴权，协议必须是 Anthropic Messages 或 Gemini generateContent。",
             )
     elif looks_like_service_account_json(api_key):
         raise LlmPresetResolveError(
@@ -105,7 +106,7 @@ def _credential_from_preset(preset: ApiPreset, *, source: str) -> LlmPresetCrede
     protocol = normalize_protocol_id(getattr(preset, "protocol", None))
     provider_id = getattr(preset, "providerId", None) or None
     auth_style = normalize_auth_style(getattr(preset, "authStyle", None))
-    if not auth_style and provider_id == "vertex-anthropic":
+    if not auth_style and provider_id in {"vertex-anthropic", "vertex-gemini"}:
         auth_style = VERTEX_SERVICE_ACCOUNT_AUTH_STYLE
     _check_service_account_usage(
         api_key=preset.apiKey or "", auth_style=auth_style, protocol=protocol, name=f"API 预设「{preset.name}」"

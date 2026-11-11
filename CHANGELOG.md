@@ -7,7 +7,7 @@
 ### 新协议（T-832）
 
 - Bedrock Converse（API Key）、Mistral Conversations、Vertex 上的 Claude（服务账号 JSON）。Bedrock 上的 Claude 支持流式 eventstream。
-- 服务账号私钥不在设置响应和备份里出现。Bedrock 和 Mistral 只在模拟服务上验证过。
+- 服务账号私钥不在设置响应和备份里出现。Bedrock、Mistral 和 Vertex 上的 Claude 只在模拟服务上验证过。
 
 ### 生成和错误
 
@@ -18,11 +18,18 @@
 - 上游在流里返回的错误保留原话并按类型映射；连接建立后中途断开报“传输中断”，不再说成连不上。
 - 助手工具给会话绑定的世界书现在会生效，原来只写了会话一侧。
 
+### Vertex 上的 Gemini
+
+- 服务账号鉴权支持 Gemini：供应商下拉选「Google Vertex AI（Gemini，服务账号）」。只在模拟服务上验证过。
+- 服务账号不再粘贴进一个大文本框：导入 JSON 文件或粘贴后，拆成邮箱、私钥状态、项目 ID、位置四项。位置要自己填。Vertex 上的 Claude 用同一个界面。
+- 这条路不支持拉模型列表和显式缓存，模型名手动添加。
+
 ### 设置页
 
 - 供应商下拉重做：每项三行（厂商名、协议和缓存方式、地址），厂商名不再被标签挤没；面板移到抽屉之外，背景模糊生效；Esc 只关下拉。
 - 供应商名录新增 21 家：Meta（来自本机 Pi 1.5.0），以及 OpenRouter 名录里有公开 OpenAI 兼容接口的 DeepInfra、Novita、Nebius、SambaNova、Chutes、Featherless、Parasail、Friendli、Venice、Mancer、Infermatic、Inference.net、NextBit、Cohere、AI21、Inception、Upstage、阶跃星辰、百度千帆。地址都做过无密钥探测，没有用真实账号发过请求。
 - 下拉新增「模型托管平台」分组，Fireworks、Groq、Cerebras、Together、Baseten、NVIDIA 移到这一组。
+- 手填 OpenAI 或 xAI 官方地址的预设不再被当成登录订阅预设：API Key 输入框恢复显示，Responses 请求不再被去掉温度和最大输出。
 - 小字说明精简：能从标签和控件看懂的不再写说明；需要解释的收进标签旁的 ⓘ；只有计费、不可逆、必填前提这类才常驻。
 
 ### 聊天界面

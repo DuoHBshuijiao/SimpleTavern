@@ -5,7 +5,7 @@
 - 在做 v1.000 发布验收，清单是 `docs/tasks/T-814-v1000-release-acceptance.md`。新功能已冻结，只修问题。全部提交在本地 master，没有推送（推送由作者决定）。
 - 这一批：T-832（Bedrock Converse、Mistral Conversations、Vertex 上的 Claude，eventstream 解析），模糊改用 Tailwind 工具类，验收中找到的 10 个缺陷都已修复并做了对照，清单的“问题记录”里有列表。
 - 验证方式改为两套黑盒检查：`tools/api-check/`（接口，依据官方文档和规格）、`tools/ui-check/`（界面，构建产物和开发服务器各跑）。实现和验证分开写，每项检查都有能失败的对照。全量结果在清单的“验收记录”里。
-- 测不到的：真实上游（Bedrock 和 Mistral 没有账号）、真实 GPU 下模糊和 WebGPU 的开销、真机字体、作者最长的真实会话、真实 OAuth 授权流程。
+- 测不到的：真实上游（Bedrock 和 Mistral 没有账号，Vertex 上的 Claude 作者没有开通）、真实 GPU 下模糊和 WebGPU 的开销、真机字体、作者最长的真实会话、真实 OAuth 授权流程。
 - 下一步：作者手测三晚和 Vertex 实测；发现的问题按“修复、对照、重跑两套检查”处理。手测通过后改 `version.py` 为 v1.000，发布动作每一步由作者确认。
 - 注意：模糊只能用 Tailwind `backdrop-*` 工具类，手写 `backdrop-filter` 构建后会失效（DESIGN.md 的 The Tailwind Blur Rule）；回归沙箱从真实 `data/` 只读复制并清空密钥，作者实例在 9081/9091。
 

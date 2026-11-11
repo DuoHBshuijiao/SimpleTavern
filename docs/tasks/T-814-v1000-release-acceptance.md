@@ -76,7 +76,9 @@
 - [x] `[Claude]` Mistral Conversations。
 - [x] `[Claude]` Vertex Anthropic `rawPredict` 和 `streamRawPredict`，用服务账号 JSON。
 - [x] `[自动]` 依据官方文档写的独立黑盒检查通过（t832 171 项通过 169，另 2 项规格未定义），并在 T-832 之前的版本上能失败（当时 153 项失败，原因是协议不支持）。
-- [ ] `[作者]` Vertex 用真实 Google Cloud 项目发一条流式消息，确认文字、用量和错误提示正确。
+- [x] `[Claude]` Vertex 上的 Gemini（服务账号）：换 token、流式和非流式、错误不带凭据、错配时不发请求（`t832.vertex_gemini.*` 9 项，改动前的后端 6 项失败）；导入界面（`ui-check` 的 `vertex` 13 项）。作者 2026-11-11 要求在冻结期内加入。
+- [ ] `[作者]` Vertex 上的 Gemini 用真实服务账号发一条流式消息。作者在别的工具里用同一份凭据调通过，SimpleTavern 这条路还没有用真实账号验证。
+- [ ] `[作者]` Vertex 上的 Claude 用真实 Google Cloud 项目发一条流式消息。**测不了**（2026-11-11）：Claude 在 Vertex 上要单独申请开通，作者没有申请；作者的服务账号凭据只在别的工具里配过 Vertex 上的 Gemini，没有在 SimpleTavern 里用过。SimpleTavern 的服务账号鉴权只支持 Claude，Vertex 上的 Gemini 只支持 Express API Key。这条路只在模拟服务上验证过，发布说明里和 Bedrock、Mistral 写在一起。
 - Bedrock 和 Mistral 作者没有账号，只能文档实现加模拟验证，发布说明标注“未真实验证”。
 
 ## 问题记录
@@ -93,13 +95,14 @@
 - [x] 会话在别处被删后发送，页面抛出未捕获的错误。
 - [x] 助手工具绑定的世界书不生效。
 - [x] 窄屏选完会话侧栏不收起。
+- [x] 手填 `https://api.openai.com/v1` 或 `https://api.x.ai/v1`、不从下拉选厂商的预设，被当成同地址的登录订阅条目：界面不显示 API Key 输入框只显示登录；后端按订阅变体处理 Responses 请求，去掉 `temperature`、`top_p`、`max_output_tokens`。2026-11-11 复查时发现，订阅条目加入名录时就有。现在只凭地址匹配时优先 API Key 条目，订阅条目靠 `providerId` 选中。对照：修复前 `core.catalog.manual_url_not_oauth` 和界面检查都失败。
 
 已知问题（发布说明要写）：
 
 - 单聊出错后没有直接重试的按钮，要编辑最后一条用户消息再「保存并发送」。
 - 5 个主题的主按钮白字对比度低于 4.5（放到 1.1）。
 - 设置备份含明文 API Key。
-- ChatGPT 和 Grok 订阅额度查不到；Bedrock 和 Mistral 未用真实账号验证；只支持本机部署。
+- ChatGPT 和 Grok 订阅额度查不到；Bedrock、Mistral 和 Vertex 上的 Claude 未用真实账号验证；只支持本机部署。
 
 - [ ] **偶发：新建角色显示别的角色的开场白**（作者 2026-11-07 报告，未修，原因未确认）。先进入一个有开场白的角色的新会话，再新建一个不设开场白的角色，点完成后，新角色的头像和昵称配上了上一个角色的开场白。作者随后复测没有再出现。再遇到时记下当时的操作节奏，并刷新页面看是否还在，以区分只是显示错误还是数据写错。疑点（只读代码得出，未复现）：`chats.ts` 的 `loadList` 没有丢弃过期响应，`ChatPage.vue` 切换角色的监听也不判断角色是否又变了；上一个角色的列表如果晚到，可能盖掉新角色的空列表，于是打开旧会话。
 
@@ -119,7 +122,8 @@ venv/Scripts/python tools/api-check/run.py
 - [x] `[自动]` 核心接口的正向和负向黑盒检查通过（core 73 项通过 67，另 6 项规格未定义，已按作者决定写进规格）。
 - [x] `[Claude]` 进入定位、搜索、原地删除、弹窗动效和 Esc 也在构建产物上用 DOM 驱动跑一遍，和开发服务器的结果逐项一致。
 - [x] `[Claude]` 补检查：PNG 内嵌卡导入确认、OAuth 登录弹窗的动效和关闭。
-- [ ] `[Claude]` 补检查：OAuth 令牌和 Vertex 服务账号私钥不进设置备份。目前只有实现方的自查，没有独立检查。
+- [x] `[Claude]` 补检查：Vertex 服务账号私钥不进设置响应和三种设置备份（`t832.vertex.sa.backup`，带一个普通 Key 作扫描对照）。
+- [ ] `[Claude]` 补检查：OAuth 令牌不进设置备份。要先在沙箱里造出已登录状态，还没做。
 
 ## 四、作者手测（分三晚，每晚不超过 12 项）
 
@@ -202,3 +206,6 @@ venv/Scripts/python tools/api-check/run.py
 |---|---|---|---|---|
 | 2026-11-08 | `4df8972` | 自动和沙箱核对：`api-check` 全部、`ui-check` 全部、`vue-tsc -b`、`backend/tests` | `api-check` 0 失败（selftest 39、baseline 16、core 67 加 6 项记录、t832 169 加 2 项记录）；`ui-check` 342 项 0 失败；`backend/tests` 8 项通过；沙箱没有外网访问 | core 的 6 项记录已按作者决定写进规格。未覆盖：真实上游、真实 GPU、真机字体、作者最长的真实会话、真实 OAuth 授权、OAuth 令牌和 Vertex 私钥不进备份的独立检查 |
 | 2026-11-10 | 未提交 | 供应商下拉、名录、小字说明改动后的全量自动检查 | `api-check` 0 失败（数字同上一行）；`ui-check` 349 项 0 失败（新增 7 项下拉检查）；`vue-tsc` 通过；`backend/tests` 8 项通过 | 新增厂商只探测了端点存在，未用真实密钥；Kimi Coding 在 Pi 里已改用 OpenAI 兼容地址 `/coding/v1`，本名录仍是 Anthropic 格式，未改；说明文字的取舍等作者过目 |
+| 2026-11-11 | 未提交 | 复查上一批改动，新增 `drawer` 检查（ⓘ 展开、下拉在窄屏和键盘下的行为、手填官方地址） | `ui-check` 381 项 0 失败；`api-check` 0 失败（core 68 加 6 项记录、t832 170 加 2 项记录，各新增 1 项）；`vue-tsc` 通过；`backend/tests` 8 项通过 | 弹窗里的 ⓘ 没有逐个点开检查，只查了设置抽屉三个标签页共 32 个；作者现有预设的匹配结果没有核对（不读真实 data）；作者说的 Vertex 上 Gemini 正常是在别的工具里，不算 SimpleTavern 的验收；Vertex 上的 Claude 作者没有开通，测不了。这一行的 `vue-tsc` 用的是 `--noEmit`，在本项目里不检查任何文件，实际 `npm run build` 当时是失败的（3 处未使用的导入），见下一行 |
+| 2026-11-11 | 未提交 | 修构建失败 | `vue-tsc -b` 和 `vite build` 通过；`ui-check` 的构建步骤改为先跑 `vue-tsc -b`，对照：放回一处未使用的导入后检查直接报错 | 上一批提交 `c53c8d4` 已推送，它的 `npm run build` 是失败的，修复在本批 |
+| 2026-11-11 | 未提交 | Vertex 上的 Gemini（服务账号）和导入界面，连同之前未提交的修复一起全量检查 | `ui-check` 394 项 0 失败；`api-check` 0 失败（core 68 加 6 项记录、t832 179 加 2 项记录）；`vue-tsc -b` 和 `vite build` 通过；`backend/tests` 8 项通过 | 模拟上游是实现方按 Vertex 文档写的，实现和验证没有分开；没有用真实服务账号验证；地址用的是文档里的区域主机 `{location}-aiplatform.googleapis.com`，作者在别的工具里用的是不带区域的主机；Gemini 在这条路上的思考、工具调用、联网没有单独检查，沿用 AI Studio 那条路的实现 |

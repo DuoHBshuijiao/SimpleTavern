@@ -1282,7 +1282,10 @@ function catalogProviderFor(conn: { baseUrl?: string | null; providerId?: string
     if (!tpl) continue
     const host = tpl.replace(/^https?:\/\//, '').split('/')[0] ?? ''
     if (!host || host.includes('{')) continue
-    if (url.includes(host) && (!best || tpl.length > (best.baseUrlTemplate?.length ?? 0))) best = x
+    if (!url.includes(host)) continue
+    const bestLen = best?.baseUrlTemplate?.length ?? 0
+    // 同一地址既有 API Key 条目又有登录订阅条目时，只凭地址要落到 API Key 条目上（和后端 find_provider_by_base_url 一致）
+    if (!best || tpl.length > bestLen || (tpl.length === bestLen && best.requiresOAuth && !x.requiresOAuth)) best = x
   }
   return best
 }

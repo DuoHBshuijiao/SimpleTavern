@@ -157,6 +157,13 @@ API 预设：列表、新建/复制/删除、名称 combobox（供应商目录�
 - **button** 供应商项，三行：厂商名（右侧可带 `登录` 或 `需参数`）、协议和缓存方式标签、地址（无固定地址时显示 `地址由参数生成`）（v-for=preset in group.items）
 - 面板 Teleport 到 `body`，不窄于 380px，右边对齐输入框；Esc 只关面板。分组顺序：中国厂商、国际厂商、模型托管平台、聚合网关、需要登录。
 
+### `components/settings-drawer/VertexServiceAccountFields.vue`
+
+鉴权方式是 Google 服务账号时，代替 API Key 输入框。
+
+- 没有账号或点了「更换」：**button** `导入 JSON 文件`，**textarea** `粘贴服务账号 JSON`（粘贴完整 JSON 立即导入）。不是服务账号、缺字段、私钥已被隐去时显示错误，不导入。更换时 **button** `取消` 回到原账号。
+- 有账号：**input[readonly]** `服务账号邮箱`，**input[readonly]** `私钥`（只显示「已导入」或「已保存」和密钥 ID 前 8 位，不显示正文），**input** `项目 ID`（默认取 JSON 的 `project_id`，可改），**input** `位置`（JSON 里没有，必填，空着时提示）。项目 ID 和位置只在地址模板含对应占位符时显示，写入 `providerParams`；高级区不再重复显示这两项。
+
 ### `components/ModernSelect.vue`
 
 - **[click:div]** `打开选项列表`
