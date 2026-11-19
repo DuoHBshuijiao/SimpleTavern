@@ -1,4 +1,4 @@
-import { computed, nextTick, onBeforeUnmount, ref, watch, type Ref } from 'vue'
+import { nextTick, onBeforeUnmount, ref, watch, type Ref } from 'vue'
 import { apiGet } from '../api/http'
 import type { Chat } from '../types/models'
 
@@ -6,17 +6,17 @@ export interface ChatSearchHit {
   messageId: string
   messageIndex: number
   snippet: string
+  matchStart: number
+  matchEnd: number
 }
 
-/** 把摘要按关键词切段（忽略大小写，与后端一致），供模板高亮命中部分 */
-export function splitSnippetByQuery(snippet: string, query: string): Array<{ text: string; match: boolean }> {
-  const q = query.trim()
-  if (!q) return [{ text: snippet, match: false }]
-  const pattern = new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'giu')
-  return snippet
-    .split(pattern)
-    .map((text, index) => ({ text, match: index % 2 === 1 }))
-    .filter((part) => part.text)
+export function splitSearchSnippet(hit: ChatSearchHit): Array<{ text: string; match: boolean }> {
+  const chars = Array.from(hit.snippet)
+  return [
+    { text: chars.slice(0, hit.matchStart).join(''), match: false },
+    { text: chars.slice(hit.matchStart, hit.matchEnd).join(''), match: true },
+    { text: chars.slice(hit.matchEnd).join(''), match: false },
+  ].filter((part) => part.text)
 }
 
 export interface UseChatSearchOptions {
@@ -28,6 +28,7 @@ export interface UseChatSearchOptions {
   chatSearchInputRef: Ref<HTMLInputElement | null>
   /** 打开搜索栏前的副作用（如关闭顶栏“更多”菜单） */
   beforeOpen?: () => void
+  beforeSearch?: () => Promise<void>
 }
 
 /**
@@ -78,11 +79,12 @@ export function useChatSearch(options: UseChatSearchOptions) {
   }
   const chatSearchQuery = ref('')
   const chatSearchLoading = ref(false)
+  const chatSearchError = ref('')
   /** 最近一次完成搜索的关键词，用来区分“还没搜”和“搜了没结果” */
   const chatSearchCompletedQuery = ref('')
   /** 命中数超过后端上限，计数要写成 300+ */
   const chatSearchTruncated = ref(false)
-  let chatSearchSeq = 0
+  let searchController: AbortController | null = null
   let chatSearchTimer: ReturnType<typeof setTimeout> | null = null
   const chatSearchResults = ref<ChatSearchHit[]>([])
   /** 当前高亮的搜索结果 chip；-1 表示未选中（搜索成功后不再默认选中首条） */
@@ -120,7 +122,7 @@ export function useChatSearch(options: UseChatSearchOptions) {
         nextTick(() => {
           requestAnimationFrame(() => {
             requestAnimationFrame(() => {
-              chatSearchChipsGridOpen.value = true
+              if (chatSearchResults.value.length) chatSearchChipsGridOpen.value = true
             })
           })
         })
@@ -150,47 +152,69 @@ export function useChatSearch(options: UseChatSearchOptions) {
     }
   }
 
-  const chatSearchHitsForNav = computed(() =>
-    chatSearchResults.value.length > 0 ? chatSearchResults.value : chatSearchChipsDisplayHits.value
-  )
+  const chatSearchHitsForNav = chatSearchResults
 
   watch(chatSearchResults, () => syncChatSearchChipsRow(), { deep: true })
 
+  function cancelSearch() {
+    if (chatSearchTimer) clearTimeout(chatSearchTimer)
+    chatSearchTimer = null
+    searchController?.abort()
+    searchController = null
+    chatSearchLoading.value = false
+  }
+
+  function clearSearchResults() {
+    chatSearchResults.value = []
+    chatSearchCursor.value = -1
+    chatSearchCompletedQuery.value = ''
+    chatSearchTruncated.value = false
+    chatSearchError.value = ''
+    clearChatSearchChipsExpandState()
+  }
+
   async function runChatSearch() {
-    const chat = getActiveChat()
+    cancelSearch()
+    const chatId = getActiveChat()?.id
     const q = chatSearchQuery.value.trim()
-    const seq = ++chatSearchSeq
-    if (!chat || !q) {
-      chatSearchResults.value = []
-      chatSearchCursor.value = -1
-      chatSearchCompletedQuery.value = ''
-      chatSearchTruncated.value = false
+    if (!chatId || !q) {
+      clearSearchResults()
       return
     }
+    const controller = new AbortController()
+    searchController = controller
+    chatSearchError.value = ''
     chatSearchLoading.value = true
     try {
+      await options.beforeSearch?.()
+      if (controller.signal.aborted) return
       const res = await apiGet<{ query: string; total: number; hits: ChatSearchHit[]; truncated?: boolean }>(
-        `/api/chats/${encodeURIComponent(chat.id)}/search?q=${encodeURIComponent(q)}`
+        `/api/chats/${encodeURIComponent(chatId)}/search?q=${encodeURIComponent(q)}`,
+        controller.signal,
       )
-      // 输入比响应快时，旧响应不能盖掉新结果
-      if (seq !== chatSearchSeq) return
+      if (searchController !== controller || getActiveChat()?.id !== chatId) return
       chatSearchResults.value = Array.isArray(res?.hits) ? res.hits : []
       chatSearchCursor.value = -1
       chatSearchCompletedQuery.value = q
       chatSearchTruncated.value = res?.truncated === true
+    } catch (error) {
+      if (searchController !== controller) return
+      clearSearchResults()
+      chatSearchError.value = error instanceof Error ? error.message : String(error)
     } finally {
-      if (seq === chatSearchSeq) chatSearchLoading.value = false
+      if (searchController === controller) {
+        searchController = null
+        chatSearchLoading.value = false
+      }
     }
   }
 
-  /** 回车：结果已就绪就跳下一个（Shift 上一个），关键词刚改过就先搜完再跳 */
   async function handleChatSearchEnter(backward = false) {
     const q = chatSearchQuery.value.trim()
-    if (!q) return
-    if (q !== chatSearchCompletedQuery.value) {
-      if (chatSearchTimer) clearTimeout(chatSearchTimer)
-      await runChatSearch()
-    }
+    const chatId = getActiveChat()?.id
+    if (!q || !chatId) return
+    if (q !== chatSearchCompletedQuery.value) await runChatSearch()
+    if (getActiveChat()?.id !== chatId || chatSearchCompletedQuery.value !== q) return
     if (backward) goToPrevSearchResult()
     else goToNextSearchResult()
   }
@@ -263,6 +287,10 @@ export function useChatSearch(options: UseChatSearchOptions) {
 
   function closeChatSearchBar() {
     if (!showChatSearch.value) return
+    cancelSearch()
+    chatSearchInputRef.value?.blur()
+    chatSearchQuery.value = ''
+    clearSearchResults()
     clearChatSearchPanelAnimTimers()
     holdSearchChipUntilSearchPanelClosed.value = true
     if (prefersReducedMotion()) {
@@ -288,30 +316,38 @@ export function useChatSearch(options: UseChatSearchOptions) {
     chatSearchCloseTimers = [tExpand, tDone]
   }
 
-  watch(chatSearchQuery, () => {
-    if (!showChatSearch.value || !chatSearchContentRevealed.value) return
-    if (chatSearchTimer) clearTimeout(chatSearchTimer)
-    chatSearchTimer = setTimeout(() => {
-      void runChatSearch()
-    }, 180)
+  function scheduleSearch() {
+    cancelSearch()
+    clearSearchResults()
+    if (!showChatSearch.value || !chatSearchQuery.value.trim()) return
+    chatSearchTimer = setTimeout(() => { void runChatSearch() }, 180)
+  }
+
+  watch(chatSearchQuery, scheduleSearch, { flush: 'sync' })
+  watch(() => getActiveChat()?.id, () => resetChatSearchForChatSwitch(), { flush: 'sync' })
+  watch(() => showChatSearch.value && chatSearchQuery.value.trim()
+    ? getActiveChat()?.messages.map(({ id, content }) => [id, content])
+    : undefined,
+  (current, previous) => {
+    if (!previous || !current) return
+    if (current.length !== previous.length || current.some(([id, content], index) =>
+      previous[index]?.[0] !== id || previous[index]?.[1] !== content)) scheduleSearch()
   })
 
   /** 切换会话时自动关闭搜索面板并重置搜索状态 */
   function resetChatSearchForChatSwitch() {
+    cancelSearch()
     clearChatSearchAnimTimers()
     holdSearchChipUntilSearchPanelClosed.value = false
     chatSearchExpandOpen.value = false
     chatSearchContentRevealed.value = false
     showChatSearch.value = false
     chatSearchQuery.value = ''
-    chatSearchCompletedQuery.value = ''
-    chatSearchTruncated.value = false
-    chatSearchResults.value = []
-    chatSearchCursor.value = -1
+    clearSearchResults()
   }
 
   onBeforeUnmount(() => {
-    if (chatSearchTimer) clearTimeout(chatSearchTimer)
+    cancelSearch()
     clearChatSearchAnimTimers()
   })
 
@@ -325,6 +361,7 @@ export function useChatSearch(options: UseChatSearchOptions) {
     SEARCH_EXPAND_COLLAPSE_MS,
     chatSearchQuery,
     chatSearchLoading,
+    chatSearchError,
     chatSearchCompletedQuery,
     chatSearchTruncated,
     chatSearchResults,

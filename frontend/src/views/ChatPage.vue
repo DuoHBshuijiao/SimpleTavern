@@ -80,7 +80,7 @@ import { usePageBackground } from '../composables/usePageBackground'
 import { useWebGpuBackground } from '../composables/useWebGpuBackground'
 import { useWebGpuBackgroundRuntime } from '../composables/useWebGpuBackgroundRuntime'
 import { useViewportNarrowPortrait } from '../composables/useViewportNarrowPortrait'
-import { splitSnippetByQuery, useChatSearch } from '../composables/useChatSearch'
+import { splitSearchSnippet, useChatSearch } from '../composables/useChatSearch'
 import { useImageStickyBinding } from '../composables/useImageStickyBinding'
 import { useForkLineage } from '../composables/useForkLineage'
 import { useMessageListEnterAnimations } from '../composables/useMessageListEnterAnimations'
@@ -1190,6 +1190,7 @@ const {
   SEARCH_EXPAND_COLLAPSE_MS,
   chatSearchQuery,
   chatSearchLoading,
+  chatSearchError,
   chatSearchCompletedQuery,
   chatSearchTruncated,
   chatSearchCursor,
@@ -1208,6 +1209,7 @@ const {
   getActiveChat: () => activeChat.value,
   jumpToMessage,
   chatSearchInputRef,
+  beforeSearch: () => flushPendingGreetingVersion(true),
   beforeOpen: () => {
     showHeaderMoreMenu.value = false
   },
@@ -1218,6 +1220,7 @@ const chatSearchStatusText = computed(() => {
   const total = chatSearchHitsForNav.value.length
   const totalText = chatSearchTruncated.value ? `${total}+` : `${total}`
   if (total) return chatSearchCursor.value < 0 ? `共 ${totalText} 条` : `${chatSearchCursor.value + 1}/${totalText}`
+  if (chatSearchError.value) return '搜索失败，按回车重试'
   if (chatSearchLoading.value) return '搜索中...'
   const query = chatSearchQuery.value.trim()
   return query && query === chatSearchCompletedQuery.value ? '无结果' : '输入后定位消息'
@@ -4784,14 +4787,14 @@ const editingPersonaAvatarUrl = computed(() => {
                     class="chat-header-search-reveal-layer"
                     :class="{ 'chat-header-search-reveal-layer--visible': chatSearchContentRevealed }"
                   >
-                    <div class="chat-header-search-panel-inner flex items-center gap-3 py-1.5">
+                    <div class="chat-header-search-panel-inner flex flex-wrap items-center gap-2 py-1.5">
                       <div class="flex shrink-0 items-center gap-2 border-r border-[var(--color-border-subtle)] pr-3">
                         <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-surface-muted/80 text-[var(--color-text-secondary)]">
                           <Search class="w-4 h-4" />
                         </span>
                         <div class="leading-tight">
                           <div class="text-xs text-[var(--color-text-secondary)]">会话搜索</div>
-                          <div class="text-2xs text-[var(--color-text-muted)]">
+                          <div class="text-2xs text-[var(--color-text-muted)]" role="status" :title="chatSearchError">
                             {{ chatSearchStatusText }}
                           </div>
                         </div>
@@ -4800,7 +4803,10 @@ const editingPersonaAvatarUrl = computed(() => {
                       <input
                         ref="chatSearchInputRef"
                         v-model="chatSearchQuery"
-                        class="min-w-0 flex-1 bg-transparent text-sm outline-none"
+                        type="search"
+                        autocomplete="off"
+                        name="conversation-search"
+                        class="min-w-0 grow basis-32 bg-transparent text-sm outline-none"
                         placeholder="搜索当前会话"
                         aria-label="搜索当前会话"
                         @keydown.enter.exact.prevent="handleChatSearchEnter(false)"
@@ -4836,7 +4842,7 @@ const editingPersonaAvatarUrl = computed(() => {
                             @click="jumpToSearchResult(idx)"
                           >
                             <span>
-                              <template v-for="(part, partIdx) in splitSnippetByQuery(hit.snippet, chatSearchQuery)" :key="partIdx">
+                              <template v-for="(part, partIdx) in splitSearchSnippet(hit)" :key="partIdx">
                                 <mark v-if="part.match" class="chat-search-hit-mark">{{ part.text }}</mark>
                                 <template v-else>{{ part.text }}</template>
                               </template>

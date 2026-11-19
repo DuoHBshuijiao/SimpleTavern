@@ -433,6 +433,8 @@ class ChatSearchHit(BaseModel):
     messageId: str
     messageIndex: int
     snippet: str
+    matchStart: int
+    matchEnd: int
 
 
 class ChatSearchResponse(BaseModel):
@@ -986,30 +988,36 @@ def search_chat(chat_id: str, q: str = Query(..., min_length=1)) -> ChatSearchRe
     query = q.strip()
     if not query:
         return ChatSearchResponse(query=q, total=0, hits=[])
-    query_lower = query.lower()
+    folded_query = query.casefold()
     hits: list[ChatSearchHit] = []
     truncated = False
     for idx, msg in enumerate(chat.messages):
         content = (msg.content or "").strip()
         if not content:
             continue
-        pos = content.lower().find(query_lower)
+        folded_content = content.casefold()
+        pos = folded_content.find(folded_query)
         if pos < 0:
             continue
         if len(hits) >= CHAT_SEARCH_HIT_LIMIT:
             truncated = True
             break
-        start = max(0, pos - 32)
-        end = min(len(content), pos + len(query) + 64)
-        snippet = content[start:end]
-        if start > 0:
-            snippet = "..." + snippet
-        if end < len(content):
-            snippet = snippet + "..."
+        match_start = pos
+        match_end = pos + len(folded_query)
+        if len(folded_content) != len(content):
+            offsets = [index for index, char in enumerate(content) for _ in char.casefold()]
+            match_start = offsets[match_start]
+            match_end = offsets[match_end - 1] + 1
+        start = max(0, match_start - 32)
+        end = min(len(content), match_end + 64)
+        prefix = "..." if start > 0 else ""
+        suffix = "..." if end < len(content) else ""
         hits.append(ChatSearchHit(
             messageId=msg.id,
             messageIndex=idx,
-            snippet=snippet,
+            snippet=prefix + content[start:end] + suffix,
+            matchStart=match_start - start + len(prefix),
+            matchEnd=match_end - start + len(prefix),
         ))
     return ChatSearchResponse(query=query, total=len(hits), hits=hits, truncated=truncated)
 
