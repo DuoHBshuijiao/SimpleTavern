@@ -1,4 +1,5 @@
 ﻿<script setup lang="ts">
+import { keepPreviewCloseVisible as vKeepPreviewCloseVisible } from '../../utils/imagePreviewViewport'
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { usePreferHoverChrome } from '../../composables/usePreferHoverChrome'
 import { renderChatMarkdown } from '../../utils/markdownIt'
@@ -210,6 +211,7 @@ function closeTopImagePreviewFromEscape(event: KeyboardEvent) {
 function getPreviewDialogStyle(preview: ImagePreviewWindow) {
   return {
     zIndex: preview.zIndex,
+    '--preview-control-scale': String(1 / preview.scale),
     transform: `translate(-50%, -50%) translate(${preview.position.x}px, ${preview.position.y}px) scale(${preview.scale})`,
   }
 }
@@ -608,6 +610,7 @@ onMounted(() => {
         <div
           v-for="preview in imagePreviews"
           :key="preview.id"
+          v-keep-preview-close-visible="preview"
           class="image-preview-modal"
           role="dialog"
           aria-modal="false"
@@ -661,6 +664,8 @@ onMounted(() => {
 }
 
 .image-preview-close {
+  transform: scale(var(--preview-control-scale, 1));
+  transform-origin: top right;
   position: absolute;
   top: 8px;
   right: 8px;
