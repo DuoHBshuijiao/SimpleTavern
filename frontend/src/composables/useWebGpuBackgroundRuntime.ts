@@ -7,6 +7,7 @@ export interface WebGpuRuntimeState {
   hasOverride: boolean
   enabled: boolean
   activePresetId: string | null
+  shaderFilename: string | null
   nonce: number
 }
 
@@ -14,6 +15,7 @@ const runtimeState = reactive<WebGpuRuntimeState>({
   hasOverride: false,
   enabled: false,
   activePresetId: null,
+  shaderFilename: null,
   nonce: 0,
 })
 
@@ -45,6 +47,7 @@ function loadRuntimeIfNeeded() {
     const parsed = JSON.parse(raw) as Partial<WebGpuRuntimeState>
     runtimeState.hasOverride = true
     runtimeState.enabled = parsed.enabled === true
+    runtimeState.shaderFilename = typeof parsed.shaderFilename === 'string' ? parsed.shaderFilename : null
     runtimeState.activePresetId =
       typeof parsed.activePresetId === 'string' && parsed.activePresetId.trim()
         ? parsed.activePresetId.trim()
@@ -60,6 +63,7 @@ function persistRuntime() {
     JSON.stringify({
       enabled: runtimeState.enabled,
       activePresetId: runtimeState.activePresetId,
+      shaderFilename: runtimeState.shaderFilename,
     }),
   )
 }
@@ -67,10 +71,11 @@ function persistRuntime() {
 export function useWebGpuBackgroundRuntime() {
   loadRuntimeIfNeeded()
 
-  function setRuntime(next: { enabled: boolean; activePresetId: string | null }) {
+  function setRuntime(next: { enabled: boolean; activePresetId: string | null; shaderFilename: string }) {
     runtimeState.hasOverride = true
     runtimeState.enabled = next.enabled
     runtimeState.activePresetId = next.activePresetId
+    runtimeState.shaderFilename = next.shaderFilename
     runtimeState.nonce += 1
     persistRuntime()
   }
@@ -79,6 +84,7 @@ export function useWebGpuBackgroundRuntime() {
     runtimeState.hasOverride = false
     runtimeState.enabled = false
     runtimeState.activePresetId = null
+    runtimeState.shaderFilename = null
     runtimeState.nonce += 1
     safeWriteSessionStorage(RUNTIME_STORAGE_KEY, null)
   }

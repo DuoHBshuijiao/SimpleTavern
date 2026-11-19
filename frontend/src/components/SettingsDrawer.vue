@@ -202,7 +202,8 @@ const webgpuPresetEditorSource = ref('')
 const webgpuPresetSourceDirty = ref(false)
 const webgpuPresetCompileDiagnostics = ref<WgslDiagnostic[]>([])
 const webgpuPresetCompileMessage = ref<string | null>(null)
-const webgpuPresetCompiledHash = ref<string | null>(null)
+const webgpuLoadedPresetId = ref<string | null>(null)
+let webgpuSourceRequest = 0
 const webgpuPresetCompileBusy = ref(false)
 const webgpuPresetSaveBusy = ref(false)
 const webgpuPresetCreateBusy = ref(false)
@@ -1564,13 +1565,13 @@ const webgpuTargetFpsModel = computed({
   },
 })
 
-const webgpuCanRunFromEditor = computed(() => {
-  const preset = activeWebgpuPreset.value
-  if (!preset) return false
-  if (webgpuPresetSourceDirty.value) return false
-  if (webgpuPresetCompileBusy.value) return false
-  return webgpuPresetCompiledHash.value === buildSourceHash(preset.wgslFile, webgpuPresetEditorSource.value)
-})
+const webgpuEditorReady = computed(() =>
+  !!activeWebgpuPreset.value && webgpuLoadedPresetId.value === activeWebgpuPreset.value.id,
+)
+const webgpuCanRunFromEditor = computed(() =>
+  webgpuEditorReady.value && !webgpuPresetSourceDirty.value &&
+  !webgpuPresetCompileBusy.value && !webgpuPresetSaveBusy.value,
+)
 
 function ensureWebgpuSettingsShape(target: Settings) {
   if (target.webgpuBackgroundEnabled === undefined) target.webgpuBackgroundEnabled = false
@@ -1588,10 +1589,6 @@ function ensureWebgpuSettingsShape(target: Settings) {
     if (!exists) target.webgpuBackgroundActivePresetId = null
   }
   target.webgpuBackgroundTargetFps = normalizeWebgpuTargetFpsValue(target.webgpuBackgroundTargetFps ?? null)
-}
-
-function buildSourceHash(filename: string, source: string): string {
-  return `${filename}:${source.length}:${source.slice(0, 32)}:${source.slice(-32)}`
 }
 
 function clearWebgpuCompileUi() {
@@ -1614,53 +1611,41 @@ async function ensureWebGpuAvailability() {
 }
 
 async function loadWebGpuPresetSource(presetId: string | null) {
-  if (!presetId) {
-    webgpuPresetEditorSource.value = ''
-    webgpuPresetSourceDirty.value = false
-    clearWebgpuCompileUi()
-    webgpuPresetCompiledHash.value = null
-    return
-  }
+  const request = ++webgpuSourceRequest
+  webgpuLoadedPresetId.value = null
+  webgpuPresetEditorSource.value = ''
+  webgpuPresetSourceDirty.value = false
+  clearWebgpuCompileUi()
   const preset = webgpuPresets.value.find((item) => item.id === presetId)
   if (!preset) return
+
   const cached = readWebGpuDraftSource(preset.id)
-  if (cached != null) {
-    const normalized = normalizeWgslSource(cached)
-    if (normalized !== cached) {
-      writeWebGpuDraftSource(preset.id, normalized)
-    }
-    webgpuPresetEditorSource.value = normalized
-    webgpuPresetSourceDirty.value = true
-    clearWebgpuCompileUi()
-    webgpuPresetCompiledHash.value = null
-    return
-  }
   try {
-    const response = await fetch(`/api/shader-presets/${encodeURIComponent(preset.wgslFile)}`, {
-      method: 'GET',
-      headers: { Accept: 'text/plain' },
-    })
-    if (!response.ok) throw new Error(await response.text())
-    const source = normalizeWgslSource(await response.text())
-    webgpuPresetEditorSource.value = source
-    webgpuPresetSourceDirty.value = false
-    clearWebgpuCompileUi()
-    webgpuPresetCompiledHash.value = null
+    let source = cached
+    if (source == null) {
+      const response = await fetch(`/api/shader-presets/${encodeURIComponent(preset.wgslFile)}`, {
+        cache: 'no-store',
+        headers: { Accept: 'text/plain' },
+      })
+      if (!response.ok) throw new Error(await response.text())
+      source = await response.text()
+    }
+    if (request !== webgpuSourceRequest || activeWebgpuPresetId.value !== presetId) return
+    webgpuPresetEditorSource.value = normalizeWgslSource(source)
+    webgpuPresetSourceDirty.value = cached != null
+    webgpuLoadedPresetId.value = preset.id
   } catch (error) {
-    webgpuPresetEditorSource.value = ''
-    webgpuPresetSourceDirty.value = false
-    webgpuPresetCompileDiagnostics.value = []
+    if (request !== webgpuSourceRequest || activeWebgpuPresetId.value !== presetId) return
     webgpuPresetCompileMessage.value = error instanceof Error ? error.message : String(error)
   }
 }
 
 function onWebGpuEditorInput(value: string) {
-  webgpuPresetEditorSource.value = value
   const preset = activeWebgpuPreset.value
-  if (!preset) return
+  if (!preset || !webgpuEditorReady.value || webgpuPresetSaveBusy.value) return
+  webgpuPresetEditorSource.value = value
   webgpuPresetSourceDirty.value = true
   clearWebgpuCompileUi()
-  webgpuPresetCompiledHash.value = null
   writeWebGpuDraftSource(preset.id, value)
 }
 
@@ -1687,23 +1672,22 @@ function openWebGpuShaderEditorForPreset(presetId: string) {
 
 async function saveWebGpuPresetSource() {
   const preset = activeWebgpuPreset.value
-  if (!preset) return
+  if (!preset || !webgpuEditorReady.value || webgpuPresetSaveBusy.value) return
+  const request = webgpuSourceRequest
+  const normalized = normalizeWgslSource(webgpuPresetEditorSource.value)
   webgpuPresetSaveBusy.value = true
   try {
-    const normalized = normalizeWgslSource(webgpuPresetEditorSource.value)
     const response = await fetch(`/api/shader-presets/${encodeURIComponent(preset.wgslFile)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ source: normalized }),
     })
     if (!response.ok) throw new Error(await response.text())
-    if (response.status !== 204) {
-      await response.json().catch(() => null)
-    }
-    webgpuPresetEditorSource.value = normalized
-    webgpuPresetSourceDirty.value = false
     writeWebGpuDraftSource(preset.id, null)
-    webgpuPresetCompiledHash.value = null
+    if (request === webgpuSourceRequest && activeWebgpuPreset.value?.id === preset.id) {
+      webgpuPresetEditorSource.value = normalized
+      webgpuPresetSourceDirty.value = false
+    }
     await notifyMessage('WGSL 已保存。')
   } catch (error) {
     await notifyMessage('保存 WGSL 失败：' + String(error))
@@ -1714,66 +1698,55 @@ async function saveWebGpuPresetSource() {
 
 async function compileWebGpuPreset() {
   const preset = activeWebgpuPreset.value
-  if (!preset) return
-  await ensureWebGpuAvailability()
-  if (webgpuAvailability.value !== 'available') {
-    clearWebgpuCompileUi()
-    webgpuPresetCompileMessage.value =
-      webgpuLastProbeMessage.value ?? getWebGpuUnavailableMessage('unknown')
-    return
-  }
+  if (!preset || !webgpuEditorReady.value || webgpuPresetCompileBusy.value) return
+  const request = webgpuSourceRequest
+  const original = webgpuPresetEditorSource.value
+  const stillEditingSource = () => request === webgpuSourceRequest &&
+    preset.id === activeWebgpuPreset.value?.id && original === webgpuPresetEditorSource.value
   webgpuPresetCompileBusy.value = true
   clearWebgpuCompileUi()
+  let device: GPUDevice | undefined
   try {
-    const gpu = navigator.gpu
-    if (!gpu) throw new Error('WebGPU unavailable')
-    const adapter = await gpu.requestAdapter()
+    await ensureWebGpuAvailability()
+    if (!stillEditingSource()) return
+    if (webgpuAvailability.value !== 'available') {
+      throw new Error(webgpuLastProbeMessage.value ?? getWebGpuUnavailableMessage('unknown'))
+    }
+    const adapter = await navigator.gpu?.requestAdapter()
     if (!adapter) throw new Error('WebGPU adapter unavailable')
-    const device = await adapter.requestDevice()
-    const code = normalizeWgslSource(webgpuPresetEditorSource.value)
+    device = await adapter.requestDevice()
+    const code = normalizeWgslSource(original)
     const module = device.createShaderModule({ code })
     const info = await module.getCompilationInfo()
-    const all = compilationMessagesToDiagnostics(info.messages)
-    const errors = filterDiagnosticsBySeverity(all, 'error')
-    if (errors.length > 0) {
-      webgpuPresetCompileDiagnostics.value = all
-      webgpuPresetCompiledHash.value = null
+    if (!stillEditingSource()) return
+    const diagnostics = compilationMessagesToDiagnostics(info.messages)
+    if (filterDiagnosticsBySeverity(diagnostics, 'error').length > 0) {
+      webgpuPresetCompileDiagnostics.value = diagnostics
       return
     }
-    webgpuPresetEditorSource.value = code
-    if (webgpuPresetSourceDirty.value) {
-      writeWebGpuDraftSource(preset.id, code)
-    }
-    webgpuPresetCompiledHash.value = buildSourceHash(preset.wgslFile, code)
-    await notifyMessage('编译通过，可在编辑窗口内点击「运行（仅本次）」应用。')
+    await notifyMessage('编译通过。保存后即可在主界面运行。')
   } catch (error) {
-    webgpuPresetCompiledHash.value = null
-    webgpuPresetCompileDiagnostics.value = []
-    webgpuPresetCompileMessage.value = error instanceof Error ? error.message : String(error)
+    if (stillEditingSource()) {
+      webgpuPresetCompileMessage.value = error instanceof Error ? error.message : String(error)
+    }
   } finally {
+    device?.destroy()
     webgpuPresetCompileBusy.value = false
   }
 }
 
-function runWebGpuPresetInRuntime() {
-  const preset = activeWebgpuPreset.value
-  if (!preset || !webgpuCanRunFromEditor.value) return
-  setWebGpuRuntime({
-    enabled: globalDraft.value?.webgpuBackgroundEnabled === true,
-    activePresetId: preset.id,
-  })
-  void notifyMessage('已应用到主界面（仅运行态，未写入后端）。')
-}
-
-/** 预设列表：将当前活动预设的已保存 WGSL 应用到主界面（不依赖编辑器内先编译） */
 function runWebGpuPresetFromList() {
   const preset = activeWebgpuPreset.value
-  if (!preset) return
-  setWebGpuRuntime({
-    enabled: globalDraft.value?.webgpuBackgroundEnabled === true,
-    activePresetId: preset.id,
-  })
-  void notifyMessage('已应用到主界面（仅运行态，未写入后端）。')
+  if (!preset || webgpuPresetSaveBusy.value) return
+  if (globalDraft.value?.webgpuBackgroundEnabled !== true) {
+    void notifyMessage('请先启用 WebGPU 背景。')
+    return
+  }
+  setWebGpuRuntime({ enabled: true, activePresetId: preset.id, shaderFilename: preset.wgslFile })
+}
+
+function runWebGpuPresetInRuntime() {
+  if (webgpuCanRunFromEditor.value) runWebGpuPresetFromList()
 }
 
 /** 同步原始字符串；不在每次 input 时 trim 或回填默认名，否则会打断中文输入法且无法清空 */
@@ -4608,7 +4581,7 @@ provide(
     :model-value="webgpuPresetEditorSource"
     :preset-id="activeWebgpuPreset?.id ?? null"
     :preset-name="activeWebgpuPreset?.name ?? ''"
-    :disabled="!activeWebgpuPreset"
+    :disabled="!webgpuEditorReady || webgpuPresetSaveBusy"
     :adapter-status="webgpuAvailability"
     :has-runtime-override="webgpuRuntimeState.hasOverride"
     :source-dirty="webgpuPresetSourceDirty"

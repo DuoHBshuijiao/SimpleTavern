@@ -23,6 +23,7 @@ export interface WebGpuBackgroundOptions {
   canvasRef: Ref<HTMLCanvasElement | null>
   enabled: Ref<boolean>
   shaderFilename: Ref<string | null>
+  revision: Ref<number>
   headerMorphPhase: Ref<HeaderMorphPhase>
   /** 目标帧率（与设置中的白名单一致），实际受显示器刷新率约束 */
   targetFps: Ref<number>
@@ -40,8 +41,6 @@ export interface WebGpuBackgroundOptions {
 const UNIFORM_FLOAT_COUNT = 14
 const UNIFORM_BYTE_SIZE = UNIFORM_FLOAT_COUNT * 4
 const hiddenTabFrameIntervalMs = 1000
-/** 等待 canvas 挂载的最大帧数（约 2s @60fps） */
-const maxCanvasWaitFrames = 120
 
 function preferredCanvasFormat(): string {
   return navigator.gpu?.getPreferredCanvasFormat() || 'bgra8unorm'
@@ -53,7 +52,6 @@ export function useWebGpuBackground(options: WebGpuBackgroundOptions) {
   const compileError = ref<string | null>(null)
   const runtimeError = ref<string | null>(null)
 
-  let adapter: GPUAdapter | null = null
   let device: GPUDevice | null = null
   let context: GPUCanvasContext | null = null
   let pipeline: GPURenderPipeline | null = null
@@ -62,13 +60,14 @@ export function useWebGpuBackground(options: WebGpuBackgroundOptions) {
   let uniformBindGroupLayout: ReturnType<GPUDevice['createBindGroupLayout']> | null = null
   let webGpuBgPipelineLayout: ReturnType<GPUDevice['createPipelineLayout']> | null = null
   let uniformBuffer: GPUBuffer | null = null
-  let shaderModule: GPUShaderModule | null = null
-  let currentShaderFilename: string | null = null
+  let activeRun: AbortController | null = null
 
   let animationFrameId = 0
   let lostHandler: ((event: GPUUncapturedErrorEvent) => void) | null = null
   let lastFrameMs = 0
   let frameCounter = 0
+  let nextFrameMs = 0
+  let framePeriodMs = 0
   let unavailableNotified = false
   /** ensureDevice 最后一次失败原因（供回调使用，避免启发式误判） */
   let lastEnsureFailureReason: WebGpuUnavailableReason = 'unknown'
@@ -102,7 +101,6 @@ export function useWebGpuBackground(options: WebGpuBackgroundOptions) {
       device.removeEventListener('uncapturederror', lostHandler as EventListener)
     }
     lostHandler = null
-    shaderModule = null
     bindGroup = null
     pipeline = null
     uniformBindGroupLayout = null
@@ -119,9 +117,8 @@ export function useWebGpuBackground(options: WebGpuBackgroundOptions) {
       }
     }
     device = null
-    adapter = null
+    context?.unconfigure?.()
     context = null
-    currentShaderFilename = null
     immersiveBlendSmooth = 0
   }
 
@@ -160,23 +157,7 @@ export function useWebGpuBackground(options: WebGpuBackgroundOptions) {
     }
   }
 
-  /**
-   * 等待 Vue 挂载与 v-if 渲染后的 canvas ref（不触发 onUnavailable）。
-   */
-  async function waitForCanvas(): Promise<HTMLCanvasElement | null> {
-    for (let i = 0; i < maxCanvasWaitFrames; i++) {
-      const el = options.canvasRef.value
-      if (el) return el
-      await new Promise<void>((resolve) => {
-        requestAnimationFrame(() => resolve())
-      })
-    }
-    return options.canvasRef.value
-  }
-
-  async function ensureDevice(): Promise<boolean> {
-    if (device && context) return true
-
+  async function ensureDevice(canvas: HTMLCanvasElement, signal: AbortSignal): Promise<boolean> {
     if (typeof window !== 'undefined' && !window.isSecureContext) {
       lastEnsureFailureReason = 'insecure_context'
       isSupported.value = false
@@ -190,42 +171,33 @@ export function useWebGpuBackground(options: WebGpuBackgroundOptions) {
       return false
     }
 
-    const canvas = await waitForCanvas()
-    if (!canvas) {
-      lastEnsureFailureReason = 'canvas_timeout'
-      isSupported.value = false
-      return false
-    }
-
-    adapter = await gpu.requestAdapter()
+    const adapter = await gpu.requestAdapter()
+    if (signal.aborted) return false
     if (!adapter) {
       lastEnsureFailureReason = 'adapter_null'
-      isSupported.value = false
       return false
     }
 
+    let requestedDevice: GPUDevice
     try {
-      device = await adapter.requestDevice()
+      requestedDevice = await adapter.requestDevice()
     } catch {
       lastEnsureFailureReason = 'device_failed'
-      isSupported.value = false
-      adapter = null
+      return false
+    }
+    if (signal.aborted) {
+      requestedDevice.destroy()
       return false
     }
 
-    context = canvas.getContext('webgpu')
-    if (!context) {
+    const requestedContext = canvas.getContext('webgpu')
+    if (!requestedContext) {
       lastEnsureFailureReason = 'context_null'
-      isSupported.value = false
-      try {
-        device.destroy()
-      } catch {
-        // ignore
-      }
-      device = null
-      adapter = null
+      requestedDevice.destroy()
       return false
     }
+    device = requestedDevice
+    context = requestedContext
     context.configure({
       device,
       format: preferredCanvasFormat(),
@@ -252,16 +224,22 @@ export function useWebGpuBackground(options: WebGpuBackgroundOptions) {
       bindGroupLayouts: [uniformBindGroupLayout],
     })
     lostHandler = (event: GPUUncapturedErrorEvent) => {
-      runtimeError.value = event.error?.message || 'WebGPU runtime error'
+      if (!signal.aborted) failRuntime(event.error?.message || 'WebGPU 运行出错')
     }
+    void device.lost?.then((info: { message?: string }) => {
+      if (!signal.aborted && device === requestedDevice) {
+        failRuntime(info.message || 'WebGPU 设备已丢失，请重新运行预设')
+      }
+    })
     device.addEventListener('uncapturederror', lostHandler as EventListener)
     isSupported.value = true
     return true
   }
 
-  async function fetchShaderSource(filename: string): Promise<string> {
+  async function fetchShaderSource(filename: string, signal: AbortSignal): Promise<string> {
     const res = await fetch(`/api/shader-presets/${encodeURIComponent(filename)}`, {
-      method: 'GET',
+      cache: 'no-store',
+      signal,
       headers: { Accept: 'text/plain' },
     })
     if (!res.ok) {
@@ -270,14 +248,15 @@ export function useWebGpuBackground(options: WebGpuBackgroundOptions) {
     return await res.text()
   }
 
-  async function buildPipeline(shaderFilename: string) {
-    if (!device || !uniformBuffer || !uniformBindGroupLayout || !webGpuBgPipelineLayout) return
-    const source = normalizeWgslSource(await fetchShaderSource(shaderFilename))
-    shaderModule = device.createShaderModule({
+  async function buildPipeline(shaderFilename: string, signal: AbortSignal) {
+    const source = normalizeWgslSource(await fetchShaderSource(shaderFilename, signal))
+    if (signal.aborted) return
+    const shaderModule = device.createShaderModule({
       code: source,
       label: `webgpu-bg-${shaderFilename}`,
     })
     const info = await shaderModule.getCompilationInfo()
+    if (signal.aborted) return
     const errors = info.messages.filter(
       (item: WgslCompilationMessageLike) => item.type === 'error',
     )
@@ -301,20 +280,19 @@ export function useWebGpuBackground(options: WebGpuBackgroundOptions) {
       layout: uniformBindGroupLayout,
       entries: [{ binding: 0, resource: { buffer: uniformBuffer } }],
     })
-    currentShaderFilename = shaderFilename
   }
 
   function drawFrame(nowMs: number) {
-    if (!device || !context || !uniformBuffer) return
+    if (!device || !context || !uniformBuffer || !pipeline || !bindGroup) return
     animationFrameId = requestAnimationFrame(drawFrame)
-    if (document.hidden && lastFrameMs > 0 && nowMs - lastFrameMs < hiddenTabFrameIntervalMs) {
-      return
+    const period = document.hidden ? hiddenTabFrameIntervalMs : 1000 / Math.max(1, options.targetFps.value)
+    if (period !== framePeriodMs) {
+      framePeriodMs = period
+      nextFrameMs = lastFrameMs > 0 ? lastFrameMs + period : nowMs
     }
-    const fps = Math.max(1, options.targetFps.value)
-    const minFrameMs = 1000 / fps
-    if (lastFrameMs > 0 && nowMs - lastFrameMs < minFrameMs - 0.25) {
-      return
-    }
+    if (nowMs + 0.25 < nextFrameMs) return
+    const periodsElapsed = Math.max(1, Math.floor((nowMs + 0.25 - nextFrameMs) / period) + 1)
+    nextFrameMs += periodsElapsed * period
     const deltaMs = lastFrameMs > 0 ? nowMs - lastFrameMs : 16.67
     lastFrameMs = nowMs
     frameCounter += 1
@@ -351,101 +329,95 @@ export function useWebGpuBackground(options: WebGpuBackgroundOptions) {
     uniformFloats[11] = lastMouseNormY
     uniformFloats[12] = immersiveBlendSmooth
     uniformFloats[13] = 0 // WGSL struct 末尾对齐，与 minBindingSize 一致
-    device.queue.writeBuffer(uniformBuffer, 0, uniformFloats)
-
-    const encoder = device.createCommandEncoder({ label: 'webgpu-background-pass' })
-    const texture = context.getCurrentTexture()
-    const pass = encoder.beginRenderPass({
-      colorAttachments: [
-        {
-          view: texture.createView(),
+    try {
+      device.queue.writeBuffer(uniformBuffer, 0, uniformFloats)
+      const encoder = device.createCommandEncoder({ label: 'webgpu-background-pass' })
+      const pass = encoder.beginRenderPass({
+        colorAttachments: [{
+          view: context.getCurrentTexture().createView(),
           clearValue: { r: 0, g: 0, b: 0, a: 1 },
           loadOp: 'clear',
           storeOp: 'store',
-        },
-      ],
-    })
-    if (pipeline && bindGroup) {
+        }],
+      })
       pass.setPipeline(pipeline)
       pass.setBindGroup(0, bindGroup)
       pass.draw(3, 1, 0, 0)
+      pass.end()
+      device.queue.submit([encoder.finish()])
+      isRunning.value = true
+    } catch (error) {
+      failRuntime(error instanceof Error ? error.message : String(error))
     }
-    pass.end()
-    device.queue.submit([encoder.finish()])
   }
 
-  async function startIfNeeded() {
-    const enabled = options.enabled.value
-    const shaderFilename = options.shaderFilename.value
-    if (!enabled) {
-      clearGpuState()
-      compileError.value = null
-      runtimeError.value = null
-      unavailableNotified = false
-      isSupported.value = null
-      return
-    }
-    const ready = await ensureDevice()
-    if (!ready) {
-      const reason = lastEnsureFailureReason
-      const message = getWebGpuUnavailableMessage(reason)
-      if (!unavailableNotified) {
-        unavailableNotified = true
-        options.onUnavailable?.({ reason, message })
+  function stopRun() {
+    activeRun?.abort()
+    activeRun = null
+    clearGpuState()
+  }
+
+  function failRuntime(message: string) {
+    stopRun()
+    runtimeError.value = message
+  }
+
+  async function startRun(canvas: HTMLCanvasElement, shaderFilename: string, signal: AbortSignal) {
+    try {
+      if (!(await ensureDevice(canvas, signal))) {
+        if (signal.aborted) return
+        isSupported.value = false
+        const reason = lastEnsureFailureReason
+        const message = getWebGpuUnavailableMessage(reason)
+        runtimeError.value = message
+        if (!unavailableNotified) {
+          unavailableNotified = true
+          options.onUnavailable?.({ reason, message })
+        }
+        return
       }
-      clearGpuState()
-      return
-    }
-    runtimeError.value = null
-    if (shaderFilename && shaderFilename !== currentShaderFilename) {
-      try {
-        await buildPipeline(shaderFilename)
-        compileError.value = null
-      } catch (error) {
-        pipeline = null
-        bindGroup = null
-        compileError.value = error instanceof Error ? error.message : String(error)
-      }
-    } else if (!shaderFilename) {
-      pipeline = null
-      bindGroup = null
-      currentShaderFilename = null
-      compileError.value = null
-    }
-    if (!animationFrameId) {
+      if (signal.aborted) return
+      await buildPipeline(shaderFilename, signal)
+      if (signal.aborted) return
       lastFrameMs = 0
+      nextFrameMs = 0
+      framePeriodMs = 0
       frameCounter = 0
       lastMouseNormX = 0.5
       lastMouseNormY = 0.5
       immersiveBlendSmooth = immersive01.value
       attachPointerTracking()
       animationFrameId = requestAnimationFrame(drawFrame)
-      isRunning.value = true
+    } catch (error) {
+      if (signal.aborted) return
+      stopRun()
+      compileError.value = error instanceof Error ? error.message : String(error)
     }
   }
 
   watch(
-    () => [
-      options.enabled.value,
-      options.shaderFilename.value,
-      options.canvasRef.value,
-      options.headerMorphPhase.value,
-      options.targetFps.value,
-    ],
-    () => {
-      void startIfNeeded()
+    [options.enabled, options.shaderFilename, options.canvasRef, options.revision],
+    ([enabled, shaderFilename, canvas]) => {
+      stopRun()
+      compileError.value = null
+      runtimeError.value = null
+      isSupported.value = null
+      if (!enabled) {
+        unavailableNotified = false
+        return
+      }
+      if (canvas && shaderFilename) {
+        activeRun = new AbortController()
+        void startRun(canvas, shaderFilename, activeRun.signal)
+      }
     },
-    { immediate: true },
+    { immediate: true, flush: 'post' },
   )
 
-  onMounted(() => {
-    void startIfNeeded()
-    window.addEventListener('resize', resizeCanvas)
-  })
-
+  onMounted(() => window.addEventListener('resize', resizeCanvas))
   onBeforeUnmount(() => {
     window.removeEventListener('resize', resizeCanvas)
-    clearGpuState()
+    stopRun()
   })
 
   return {

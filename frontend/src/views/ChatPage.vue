@@ -159,6 +159,7 @@ const effectiveWebgpuActivePresetId = computed(() =>
     : persistedWebgpuActivePresetId.value,
 )
 const effectiveWebgpuShaderFilename = computed(() => {
+  if (webgpuRuntimeState.hasOverride && webgpuRuntimeState.shaderFilename) return webgpuRuntimeState.shaderFilename
   const presets = settings.settings?.webgpuBackgroundPresets || []
   const activeId = effectiveWebgpuActivePresetId.value
   if (!activeId) return null
@@ -289,6 +290,7 @@ const webgpuBackground = useWebGpuBackground({
   canvasRef: webgpuCanvasRef,
   enabled: effectiveWebgpuEnabled,
   shaderFilename: effectiveWebgpuShaderFilename,
+  revision: computed(() => webgpuRuntimeState.nonce),
   headerMorphPhase,
   targetFps: persistedWebgpuTargetFps,
   onUnavailable: (detail) => {
@@ -305,9 +307,16 @@ watch(effectiveWebgpuEnabled, (on) => {
 
 /** WebGPU 已确认可用且可绘制时，隐藏图片层避免叠在错误层上 */
 const webgpuPaintVisible = computed(
-  () => effectiveWebgpuEnabled.value && webgpuBackground.isSupported.value === true,
+  () => effectiveWebgpuEnabled.value && webgpuBackground.isRunning.value,
 )
 const showImageLayer = computed(() => pageBackground.hasImage.value && !webgpuPaintVisible.value)
+const webgpuFailure = computed(() => webgpuBackground.compileError.value || webgpuBackground.runtimeError.value)
+watch(webgpuFailure, (message) => {
+  if (message && webgpuBackground.isSupported.value !== false) {
+    void notifyMessage(message, { title: 'WebGPU 背景无法运行' })
+  }
+})
+
 
 const editingChatId = ref<string | null>(null)
 const editingTitle = ref('')
@@ -4594,6 +4603,7 @@ const editingPersonaAvatarUrl = computed(() => {
     <canvas
       v-if="effectiveWebgpuEnabled"
       ref="webgpuCanvasRef"
+      :style="{ visibility: webgpuPaintVisible ? 'visible' : 'hidden' }"
       class="pointer-events-none absolute inset-0 z-[1] h-full w-full"
       aria-hidden="true"
     ></canvas>
