@@ -767,8 +767,9 @@ STREAM_HALF = {"stream_error": "流里出错之前的半句", "stream_reset": "�
 
 async def send_in_chat(page, text):
     await page.js(f"""$type($input(), {json.dumps(text)})""")
-    await asyncio.sleep(0.2)
-    await page.js("[...document.querySelectorAll('button')].find(b=>b.innerText.trim()==='发送'&&b.offsetParent!==null).click()")
+    send_button = """document.querySelector('.chat-action-button--morph[aria-label="发送"]:enabled')"""
+    await page.wait_for(send_button)
+    await page.js(send_button + ".click()")
 
 
 async def check_errors(ctx):

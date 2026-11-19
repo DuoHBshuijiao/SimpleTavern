@@ -838,7 +838,7 @@ defineExpose({
               </button>
             </div>
           </div>
-          <div class="flex min-w-0 shrink items-center gap-3">
+          <div class="flex min-w-0 shrink flex-wrap items-center gap-2">
           <div class="flex items-center gap-0 shrink-0">
           <div ref="draftHelperMenuAnchorRef" class="relative">
             <button
@@ -953,7 +953,7 @@ defineExpose({
             @change="handleImageInputChange"
           />
           <p v-if="isGenerating && webToolStatus" role="status" class="text-xs text-[var(--color-text-secondary)]">{{ webToolStatus }}</p>
-          <div class="min-w-0 max-w-[240px] shrink flex-1">
+          <div class="min-w-0 max-w-[240px] grow basis-28">
           <ModelControlPanel
             :current-model="currentModel"
             :current-preset-id="currentPresetId ?? null"
@@ -962,15 +962,16 @@ defineExpose({
             :global-reasoning-effort="globalReasoningEffort"
             :fast-mode="fastMode"
             placement="top"
-            class="min-w-[7rem] w-full max-w-[240px]"
+            class="min-w-0 w-full max-w-[240px]"
             @select-model="emit('select-model', $event)"
             @update:reasoning-effort="emit('update:reasoningEffort', $event)"
             @update:fast-mode="emit('update:fastMode', $event)"
           />
           </div>
           <button
-            class="chat-action-button chat-action-button--morph shadow-lg active:scale-95"
+            class="chat-action-button chat-action-button--morph ml-auto shrink-0 shadow-lg active:scale-95"
             :class="[primaryActionClass, primaryActionDisabled ? 'opacity-50 cursor-not-allowed' : 'hover:shadow-brand hover:-translate-y-0.5']"
+            :aria-label="primaryActionLabel"
             :disabled="primaryActionDisabled"
             @click="emit('primary-action')"
           >

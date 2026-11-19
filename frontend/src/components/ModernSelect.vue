@@ -90,7 +90,7 @@ const emit = defineEmits<{
 const isOpen = ref(false)
 const searchQuery = ref('')
 const containerRef = ref<HTMLElement | null>(null)
-const triggerRef = ref<HTMLElement | null>(null)
+const triggerRef = ref<HTMLButtonElement | null>(null)
 const dropdownRef = ref<HTMLElement | null>(null)
 const inputRef = ref<HTMLInputElement | null>(null)
 const dropdownStyle = ref<Record<string, string>>({})
@@ -268,6 +268,14 @@ function scheduleUpdateDropdownPosition() {
   })
 }
 
+function handleOpenDropdownEscape(event: KeyboardEvent) {
+  if (!isOpen.value || event.key !== 'Escape') return
+  event.preventDefault()
+  event.stopImmediatePropagation()
+  close()
+  triggerRef.value?.focus()
+}
+
 function attachDropdownPositionListeners() {
   removePositionListeners?.()
   const schedule = () => scheduleUpdateDropdownPosition()
@@ -276,6 +284,7 @@ function attachDropdownPositionListeners() {
   const onWinResize = () => schedule()
 
   document.addEventListener('scroll', onScroll, true)
+  document.addEventListener('keydown', handleOpenDropdownEscape, true)
   window.addEventListener('resize', onWinResize)
 
   let ro: ResizeObserver | undefined
@@ -295,6 +304,7 @@ function attachDropdownPositionListeners() {
 
   removePositionListeners = () => {
     document.removeEventListener('scroll', onScroll, true)
+    document.removeEventListener('keydown', handleOpenDropdownEscape, true)
     window.removeEventListener('resize', onWinResize)
     ro?.disconnect()
     if (vv) {
@@ -308,7 +318,7 @@ function attachDropdownPositionListeners() {
 watch(isOpen, (open) => {
   if (open) {
     nextTick(() => {
-      attachDropdownPositionListeners()
+      if (isOpen.value) attachDropdownPositionListeners()
     })
   } else {
     removePositionListeners?.()
@@ -420,26 +430,29 @@ onUnmounted(() => {
        触发区内标签用 min-w-0 以利 truncate；若在 shrink-to-fit 链路里塌缩，由调用方外包 min-w-*（见会话设置群聊 MVU）。 -->
   <div ref="containerRef" class="relative group w-full">
     <!-- Trigger -->
-    <div
+    <button
       ref="triggerRef"
-      class="flex items-center justify-between w-full bg-surface-muted border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm text-[var(--color-text)] transition-[background-color,border-color,box-shadow] cursor-pointer shadow-sm"
+      type="button"
+      :disabled="disabled"
+      :aria-expanded="isOpen"
+      class="flex items-center justify-between w-full bg-surface-muted border border-[var(--color-border)] rounded-lg px-3 py-2 text-left text-sm text-[var(--color-text)] transition-[background-color,border-color,box-shadow] cursor-pointer shadow-sm"
       :class="[
         disabled ? 'opacity-50 cursor-not-allowed' : 'hover:bg-surface-hover hover:border-brand-a30',
         isOpen ? '!border-brand-a50 ring-1 ring-brand-a20' : ''
       ]"
       @click="toggle"
     >
-      <div
+      <span
         class="min-w-0 flex-1 truncate select-none"
         :class="modelValue == null || modelValue === '' ? 'text-[var(--color-text-muted)]' : ''"
       >
         {{ selectedLabel || placeholder }}
-      </div>
-        <div class="flex shrink-0 items-center gap-2 ml-2 text-[var(--color-text-muted)]">
-         <Loader2 v-if="loading" class="animate-spin text-brand w-3 h-3" />
-         <ChevronDown v-else class="w-3 h-3 transition-transform duration-200" :class="isOpen ? 'rotate-180' : ''" />
-      </div>
-    </div>
+      </span>
+      <span class="flex shrink-0 items-center gap-2 ml-2 text-[var(--color-text-muted)]">
+        <Loader2 v-if="loading" class="animate-spin text-brand w-3 h-3" />
+        <ChevronDown v-else class="w-3 h-3 transition-transform duration-200" :class="isOpen ? 'rotate-180' : ''" />
+      </span>
+    </button>
 
     <!-- Dropdown Menu（Teleport 到 body 避免被父级 overflow-hidden 裁剪） -->
     <Teleport to="body">

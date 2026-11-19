@@ -4437,7 +4437,7 @@ provide(
             <div v-else class="space-y-4">
 
               <SettingsDrawerGlobalConnectionSection
-                v-if="globalDraft"
+                v-if="show && globalDraft"
                 v-model:open="globalAccordionOpen.connection"
                 v-model:show-api-key="showApiKey"
                 :draft="globalDraft"
@@ -4448,7 +4448,7 @@ provide(
               />
 
               <SettingsDrawerGlobalWebSearchSection
-                v-if="globalDraft"
+                v-if="show && globalDraft"
                 v-model:open="globalAccordionOpen.webSearch"
                 :draft="globalDraft"
                 :remote-status="webSearchRemoteStatus"
@@ -4534,7 +4534,7 @@ provide(
             </div>
           </div>
 
-          <SettingsDrawerPresetsTab v-if="preloaded" v-show="tab === 'presets'" />
+          <SettingsDrawerPresetsTab v-if="show && preloaded && tab === 'presets'" />
 
           <SettingsDrawerChatTab v-if="chatTabEverOpened" v-show="tab === 'chat'" />
         </div>
