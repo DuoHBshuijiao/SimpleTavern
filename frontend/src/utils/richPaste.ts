@@ -1,9 +1,10 @@
-import { apiPost } from '../api/http'
-
 export type RichPasteResolution = {
   text: string
   files: File[]
+  requiresFileSelection?: boolean
 }
+
+export const FILE_ONLY_PASTE_MESSAGE = '剪贴板只提供了图片的本机路径。请用附件按钮选择该图片。'
 
 function extractFilesFromClipboard(clipboardData: DataTransfer): File[] {
   const files: File[] = []
@@ -16,13 +17,12 @@ function extractFilesFromClipboard(clipboardData: DataTransfer): File[] {
   return Array.from(clipboardData.files || [])
 }
 
-function extractImageFilesFromHtml(html: string): File[] {
+function extractEmbeddedImages(sources: string[]): File[] {
   const files: File[] = []
-  const dataUrlRe = /<img[^>]+src\s*=\s*["'](data:image\/(\w+);base64,([^"']+))["']/gi
-  let match: RegExpExecArray | null
-  while ((match = dataUrlRe.exec(html)) !== null) {
-    const mimeSubtype = match[2]
-    const base64 = match[3]
+  for (const source of sources) {
+    const match = /^data:image\/(\w+);base64,(.+)$/is.exec(source)
+    const mimeSubtype = match?.[1]
+    const base64 = match?.[2]
     if (!mimeSubtype || !base64) continue
     const subtype = mimeSubtype.toLowerCase()
     const mimeType = `image/${subtype}`
@@ -40,62 +40,26 @@ function extractImageFilesFromHtml(html: string): File[] {
   return files
 }
 
-function stripHtmlToText(html: string): string {
-  const doc = new DOMParser().parseFromString(html, 'text/html')
-  return (doc.body?.textContent ?? '').trim()
-}
-
-function base64ToFile(base64: string, mimeType: string, name: string): File {
-  const binary = atob(base64)
-  const bytes = new Uint8Array(binary.length)
-  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
-  return new File([bytes], name || 'pasted.png', { type: mimeType })
-}
-
-export async function resolveRichPaste(clipboardData: DataTransfer | null): Promise<RichPasteResolution | null> {
+export function resolveRichPaste(clipboardData: DataTransfer | null): RichPasteResolution | null {
   if (!clipboardData) return null
 
   const filesFromClipboard = extractFilesFromClipboard(clipboardData)
   const plainText = clipboardData.getData('text/plain')
   const htmlText = clipboardData.getData('text/html')
-  const hasHtml = Boolean(htmlText)
-
-  if (filesFromClipboard.length > 0 && !hasHtml) {
+  if (!htmlText) {
     return {
       text: plainText,
       files: filesFromClipboard,
     }
   }
 
-  if (!hasHtml) {
-    return {
-      text: plainText,
-      files: filesFromClipboard,
-    }
-  }
-
-  const hasFileUrls = /file:\/\//i.test(htmlText)
-  if (hasFileUrls) {
-    try {
-      const res = await apiPost<{ text: string; images: { base64: string; mimeType: string; name: string }[] }>(
-        '/api/clipboard/resolve-rich-paste',
-        { text: plainText, html: htmlText },
-      )
-      const files = [
-        ...filesFromClipboard,
-        ...(res.images || []).map((image) => base64ToFile(image.base64, image.mimeType, image.name)),
-      ]
-      return {
-        text: res.text || plainText || stripHtmlToText(htmlText),
-        files,
-      }
-    } catch {
-      // 回退到本地解析
-    }
-  }
-
+  const template = document.createElement('template')
+  template.innerHTML = htmlText
+  const sources = Array.from(template.content.querySelectorAll('img[src]'), (image) => image.getAttribute('src') || '')
+  const files = [...filesFromClipboard, ...extractEmbeddedImages(sources)]
   return {
-    text: plainText || stripHtmlToText(htmlText),
-    files: [...filesFromClipboard, ...extractImageFilesFromHtml(htmlText)],
+    text: plainText || (template.content.textContent ?? '').trim(),
+    files,
+    requiresFileSelection: files.length === 0 && sources.some((source) => /^file:\/\//i.test(source)),
   }
 }

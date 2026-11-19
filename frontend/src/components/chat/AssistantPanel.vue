@@ -49,7 +49,8 @@ import AssistantThread from './AssistantThread.vue'
 import ConfirmPopover from '../../components/ConfirmPopover.vue'
 import { Globe, Sparkles, MoreHorizontal, X } from 'lucide-vue-next'
 import { ref, watch, nextTick } from 'vue'
-import { resolveRichPaste } from '../../utils/richPaste'
+import { notifyMessage } from '../../composables/useNotify'
+import { FILE_ONLY_PASTE_MESSAGE, resolveRichPaste } from '../../utils/richPaste'
 
 interface ModelOption {
   label: string
@@ -169,10 +170,11 @@ function insertTextAtCursor(text: string) {
   }, 0)
 }
 
-async function handlePaste(e: ClipboardEvent) {
-  const resolved = await resolveRichPaste(e.clipboardData)
+function handlePaste(e: ClipboardEvent) {
+  const resolved = resolveRichPaste(e.clipboardData)
   if (!resolved) return
-  if (resolved.files.length > 0 || resolved.text) {
+  if (resolved.requiresFileSelection) void notifyMessage(FILE_ONLY_PASTE_MESSAGE)
+  if (resolved.files.length > 0 || resolved.text || resolved.requiresFileSelection) {
     e.preventDefault()
   }
   if (resolved.files.length > 0) {

@@ -66,7 +66,7 @@ import type { CharacterCard, GeminiSearchMode, GroupMemberSettings } from '../..
 import { isTtsApiPreset } from '../../utils/apiPresetKind'
 import { useSettingsStore } from '../../stores'
 import { validateFilesForTarget } from '../../utils/attachmentPolicy'
-import { resolveRichPaste } from '../../utils/richPaste'
+import { FILE_ONLY_PASTE_MESSAGE, resolveRichPaste } from '../../utils/richPaste'
 import ModernAvatar from '../ModernAvatar.vue'
 import ModelControlPanel from './ModelControlPanel.vue'
 import SelectDropdownSurface from '../SelectDropdownSurface.vue'
@@ -499,9 +499,10 @@ function insertTextAtCursor(text: string) {
  * 解析逻辑已抽到 shared richPaste util；主聊天这里额外套一层图片白名单。
  */
 async function handlePaste(e: ClipboardEvent) {
-  const resolved = await resolveRichPaste(e.clipboardData)
+  const resolved = resolveRichPaste(e.clipboardData)
   if (!resolved) return
-  if (resolved.files.length > 0 || resolved.text) {
+  if (resolved.requiresFileSelection) void notifyMessage(FILE_ONLY_PASTE_MESSAGE)
+  if (resolved.files.length > 0 || resolved.text || resolved.requiresFileSelection) {
     e.preventDefault()
   }
   if (resolved.files.length > 0) {

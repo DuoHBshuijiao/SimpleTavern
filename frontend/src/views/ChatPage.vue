@@ -122,7 +122,7 @@ import { useErrorStack } from '../composables/useErrorStack'
 import { notifyConfirm, notifyMessage } from '../composables/useNotify'
 import { isTtsApiPreset, resolveTtsProvider } from '../utils/apiPresetKind'
 import { validateFilesForTarget } from '../utils/attachmentPolicy'
-import { resolveRichPaste } from '../utils/richPaste'
+import { FILE_ONLY_PASTE_MESSAGE, resolveRichPaste } from '../utils/richPaste'
 import { formatApiError } from '../utils/worldBookValidation'
 import { resolveBumpCharacterId } from '../utils/characterSidebarBump'
 import { isChatMvuRuntimeEnabled } from '../utils/groupMvu'
@@ -1447,9 +1447,10 @@ function insertWorkspaceAssistantTextAtCursor(text: string) {
 }
 
 async function handleWorkspaceAssistantPaste(event: ClipboardEvent) {
-  const resolved = await resolveRichPaste(event.clipboardData)
+  const resolved = resolveRichPaste(event.clipboardData)
   if (!resolved) return
-  if (resolved.files.length > 0 || resolved.text) {
+  if (resolved.requiresFileSelection) void notifyMessage(FILE_ONLY_PASTE_MESSAGE)
+  if (resolved.files.length > 0 || resolved.text || resolved.requiresFileSelection) {
     event.preventDefault()
   }
   if (resolved.files.length > 0) {
