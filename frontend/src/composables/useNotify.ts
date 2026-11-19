@@ -23,7 +23,16 @@ type NotifyConfirmItem = {
   resolve: (value: boolean) => void
 }
 
-export type NotifyItem = NotifyAlertItem | NotifyConfirmItem
+type NotifyChoiceItem = {
+  kind: 'choice'
+  id: string
+  title?: string
+  message: string
+  choices: { value: string; label: string; variant?: NotifyConfirmVariant }[]
+  resolve: (value: string | null) => void
+}
+
+export type NotifyItem = NotifyAlertItem | NotifyConfirmItem | NotifyChoiceItem
 
 const queue = ref<NotifyItem[]>([])
 
@@ -77,6 +86,12 @@ export function useNotify() {
   }
 }
 
+export function notifyChoice(options: Pick<NotifyChoiceItem, 'title' | 'message' | 'choices'>): Promise<string | null> {
+  return new Promise((resolve) => {
+    queue.value = [...queue.value, { ...options, kind: 'choice', id: nextId(), resolve }]
+  })
+}
+
 /** 仅供 AppNotificationHost 使用 */
 export function useNotifyHost() {
   return {
@@ -99,6 +114,12 @@ export function useNotifyHost() {
       if (!first || first.kind !== 'confirm') return
       queue.value = queue.value.slice(1)
       first.resolve(false)
+    },
+    choose(value: string | null) {
+      const first = queue.value[0]
+      if (!first || first.kind !== 'choice') return
+      queue.value = queue.value.slice(1)
+      first.resolve(value)
     },
   }
 }

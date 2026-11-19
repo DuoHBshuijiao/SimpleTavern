@@ -36,7 +36,7 @@ import zipfile
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote, urlparse
-from typing import Any
+from typing import Annotated, Any, Literal
 from uuid import uuid4
 from urllib.error import HTTPError, URLError
 from urllib.request import Request as UrllibRequest, urlopen
@@ -66,16 +66,20 @@ from app.services.st_mvu_compat import (
     validate_st_mvu_regex_compat_result,
 )
 from app.services.st_mvu_import_agent import run_st_mvu_import_agent
+from app.services.sillytavern_worldbook import build_worldbook
 from app.storage import (
     avatar_path,
     ai_workspace_dir,
     assistant_chat_path,
     assistant_settings_path,
     avatars_dir,
+    character_lifecycle_lock,
     characters_dir,
     chat_folder,
+    chat_write_lock,
     chats_dir,
     get_usage_dir,
+    iter_chat_record_paths,
     list_characters,
     load_character,
     load_chat,
@@ -1114,37 +1118,88 @@ def _warning_text(item: str | dict[str, Any]) -> str:
     return str(item)
 
 
+ChatImportConflict = Literal["error", "copy", "replace"]
+
+
+def _find_imported_chat(chat_id: str) -> Chat | None:
+    if not is_safe_storage_id(chat_id):
+        raise HTTPException(status_code=400, detail="会话 id 含有非法路径字符")
+    try:
+        return load_chat(chat_id)
+    except FileNotFoundError:
+        return None
+
+
+def _chat_import_conflict(title: str, *, archive: bool = False) -> HTTPException:
+    return HTTPException(status_code=409, detail={
+        "code": "backup_chat_conflict" if archive else "chat_import_conflict",
+        "message": f"本机已存在会话「{title}」。覆盖会用导入文件替换该会话。",
+    })
+
+
+def _save_imported_chat(chat: Chat, conflict: ChatImportConflict, *, allow_copy: bool = True) -> dict[str, Any]:
+    if not is_safe_storage_id(chat.id):
+        raise HTTPException(status_code=400, detail="会话 id 含有非法路径字符")
+    if conflict == "copy":
+        if not allow_copy:
+            raise HTTPException(status_code=400, detail="此格式只支持确认覆盖或取消")
+        chat.id = uuid4().hex
+    with chat_write_lock(chat.id):
+        existing = _find_imported_chat(chat.id)
+        if existing is not None:
+            if conflict != "replace":
+                raise _chat_import_conflict(existing.title, archive=not allow_copy)
+            if existing.characterId != chat.characterId:
+                raise HTTPException(status_code=409, detail="会话已属于另一个角色，请导入为副本。")
+        save_chat(chat)
+    return {"imported": ["chat"], "chatIds": [chat.id]}
+
+
 def _build_chat_from_transcript_rows(
     *,
     chat_id: str | None,
     title: str,
     is_group: bool,
     participants: list[str],
-    rows: list[tuple[str, str, str]],
+    rows: list[tuple[str, str, str, str | None]],
     settings: Settings,
+    character_id: str | None = None,
+    exported_member_ids: list[str] | None = None,
+    target_character_id: str | None = None,
 ) -> tuple[Chat, list[dict[str, Any]]]:
     """
     由「会话头参与者名 + (role, name, content) 行」构建 Chat，与 JSONL 导入同源。
     """
-    name_to_char_id: dict[str, str] = {}
-    for card in list_characters():
+    cards = {card.id: card for card in list_characters()}
+    ids_by_name: dict[str, list[str]] = {}
+    for card in cards.values():
         if card.name and card.id:
-            name_to_char_id[card.name] = card.id
+            ids_by_name.setdefault(card.name, []).append(card.id)
 
-    primary_char_id: str | None = None
-    member_ids: list[str] = []
-    if participants:
-        for pname in participants:
-            cid = name_to_char_id.get(pname)
-            if cid:
-                member_ids.append(cid)
-        if member_ids:
-            primary_char_id = member_ids[0]
+    original = _find_imported_chat(chat_id) if chat_id else None
+    primary_char_id = character_id if character_id in cards else None
+    if primary_char_id is None and original and original.characterId in cards:
+        primary_char_id = original.characterId
+
+    def by_name(name: str) -> str | None:
+        matches = ids_by_name.get(name, [])
+        if len(matches) == 1:
+            return matches[0]
+        if target_character_id in matches:
+            return target_character_id
+        return None
+
+    named_ids = [cid for name in participants if (cid := by_name(name))]
+    member_ids = [cid for cid in (exported_member_ids or []) if cid in cards]
+    if not member_ids and original and original.isGroup:
+        member_ids = [cid for cid in original.memberIds if cid in cards]
+    member_ids = list(dict.fromkeys([*member_ids, *named_ids]))
+    primary_char_id = primary_char_id or (member_ids[0] if member_ids else None)
 
     if not primary_char_id:
         raise HTTPException(
             status_code=400,
-            detail=f"none of the participants {participants!r} matched a local character card",
+            detail="找不到唯一的本机角色。请先选中对应的角色，再导入会话。",
         )
 
     name_to_persona: dict[str, Any] = {}
@@ -1154,7 +1209,7 @@ def _build_chat_from_transcript_rows(
 
     warnings: list[dict[str, Any]] = []
     messages: list[ChatMessage] = []
-    for i, (role, name, content) in enumerate(rows, start=1):
+    for i, (role, name, content, speaker_id) in enumerate(rows, start=1):
         if role not in ("user", "assistant", "system"):
             warnings.append(
                 _import_warning(
@@ -1167,8 +1222,8 @@ def _build_chat_from_transcript_rows(
             continue
         msg_kwargs: dict[str, Any] = {"role": role, "content": content}
         if role == "assistant":
-            cid = name_to_char_id.get(name) if name else None
-            msg_kwargs["characterId"] = cid or (primary_char_id if not is_group else None)
+            cid = speaker_id if speaker_id in member_ids else by_name(name)
+            msg_kwargs["characterId"] = (cid if cid in member_ids else None) if is_group else primary_char_id
             msg_kwargs["senderName"] = name or None
         elif role == "user":
             persona = name_to_persona.get(name) if name else None
@@ -1196,10 +1251,14 @@ def _build_chat_from_transcript_rows(
         characterId=primary_char_id,
         title=title or "导入会话",
         isGroup=is_group,
-        memberIds=member_ids if is_group else [],
+        memberIds=list(dict.fromkeys([*member_ids, primary_char_id])) if is_group else [],
         messages=messages,
     )
     return chat, warnings
+
+
+def _transcript_block_lines(text: str) -> list[str]:
+    return ["\\" + line if line.strip() == ">>>" or line.startswith("\\") else line for line in text.split("\n")]
 
 
 def _export_chat_text(chat: Chat, system_prompt: str, settings: Settings) -> str:
@@ -1211,24 +1270,28 @@ def _export_chat_text(chat: Chat, system_prompt: str, settings: Settings) -> str
     participants = hdr.get("participants") or []
     lines: list[str] = [
         "SimpleTavern Chat Export",
-        "Version: 2",
+        "Version: 3",
         f"ChatId: {hdr['chatId']}",
-        f"Title: {hdr['title']}",
+        f"CharacterId: {hdr['characterId']}",
+        f"MemberIds: {','.join(hdr['memberIds'])}",
+        f"TitleJson: {json.dumps(hdr['title'], ensure_ascii=False)}",
         f"IsGroup: {'true' if hdr['isGroup'] else 'false'}",
-        f"Participants: {','.join(participants)}",
+        f"ParticipantsJson: {json.dumps(participants, ensure_ascii=False)}",
         "SystemPrompt:",
         "<<<",
     ]
-    lines.extend(system_prompt.splitlines() or [""])
+    lines.extend(_transcript_block_lines(system_prompt))
     lines.extend([">>>", ""])
-    for row in build_transcript_rows_from_messages(chat.messages, settings):
+    for row in build_transcript_rows_from_messages(chat.messages, settings, include_character_id=chat.isGroup):
         lines.append("[Message]")
         lines.append(f"role={row['role']}")
         if row.get("name"):
-            lines.append(f"name={row['name']}")
+            lines.append(f"nameJson={json.dumps(row['name'], ensure_ascii=False)}")
+        if row.get("characterId"):
+            lines.append(f"characterId={row['characterId']}")
         lines.append("content:")
         lines.append("<<<")
-        lines.extend((row["content"] or "").splitlines() or [""])
+        lines.extend(_transcript_block_lines(row["content"]))
         lines.append(">>>")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
@@ -1245,7 +1308,9 @@ def _export_chat_jsonl(chat: Chat, settings: Settings) -> str:
     return format_chat_as_jsonl_string(chat, settings)
 
 
-def _import_from_jsonl(text: str) -> dict[str, Any]:
+def _import_from_jsonl(
+    text: str, *, conflict: ChatImportConflict = "error", target_character_id: str | None = None,
+) -> dict[str, Any]:
     """
     从精简 JSONL 格式导入聊天会话。
 
@@ -1267,7 +1332,7 @@ def _import_from_jsonl(text: str) -> dict[str, Any]:
     participants: list[str] = header.get("participants") or []
     is_group: bool = bool(header.get("isGroup", False))
     settings = load_settings()
-    rows: list[tuple[str, str, str]] = []
+    rows: list[tuple[str, str, str, str | None]] = []
     warnings: list[dict[str, Any]] = []
     for i, ln in enumerate(raw_lines[1:], start=2):
         try:
@@ -1291,9 +1356,10 @@ def _import_from_jsonl(text: str) -> dict[str, Any]:
             )
             continue
         role = str(obj.get("role", ""))
-        name: str = obj.get("name") or ""
-        content: str = obj.get("content") or ""
-        rows.append((role, name, content))
+        name = obj.get("name") if isinstance(obj.get("name"), str) else ""
+        content = obj.get("content") or ""
+        speaker = obj.get("characterId") if isinstance(obj.get("characterId"), str) else None
+        rows.append((role, name, content, speaker))
 
     chat, map_warnings = _build_chat_from_transcript_rows(
         chat_id=header.get("chatId"),
@@ -1302,11 +1368,13 @@ def _import_from_jsonl(text: str) -> dict[str, Any]:
         participants=participants,
         rows=rows,
         settings=settings,
+        character_id=header.get("characterId"),
+        exported_member_ids=header.get("memberIds"),
+        target_character_id=target_character_id,
     )
     warnings.extend(map_warnings)
-    save_chat(chat)
     return {
-        "imported": ["chat"],
+        **_save_imported_chat(chat, conflict),
         "partialSuccess": bool(warnings),
         "warnings": warnings,
     }
@@ -1403,7 +1471,6 @@ def export_character(
     export_warnings: list[dict[str, Any]] = []
     exported_worldbook_ids: list[str] = []
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr(f"characters/{card.id}.json", json.dumps(card.model_dump(mode="json"), ensure_ascii=False, indent=2))
         for worldbook_id in attached_ids:
             try:
                 book = load_worldbook(worldbook_id)
@@ -1430,6 +1497,9 @@ def export_character(
                 continue
             zf.writestr(f"worldbooks/{book.id}.json", json.dumps(book.model_dump(mode="json"), ensure_ascii=False, indent=2))
             exported_worldbook_ids.append(book.id)
+        exported_card = card.model_dump(mode="json")
+        exported_card["attachedWorldBookIds"] = exported_worldbook_ids
+        zf.writestr(f"characters/{card.id}.json", json.dumps(exported_card, ensure_ascii=False, indent=2))
         zf.writestr(
             "manifest.json",
             json.dumps(
@@ -1447,11 +1517,11 @@ def export_character(
             ),
         )
     buffer.seek(0)
-    return Response(
-        content=buffer.read(),
-        media_type="application/zip",
-        headers={"Content-Disposition": _content_disposition(f"{safe_name}.zip")},
-    )
+    headers = {"Content-Disposition": _content_disposition(f"{safe_name}.zip")}
+    if export_warnings:
+        headers["X-ST-Export-Missing"] = str(sum(warning["reason"] == "not_found" for warning in export_warnings))
+        headers["X-ST-Export-Global"] = str(sum(warning["reason"] == "global_active" for warning in export_warnings))
+    return Response(content=buffer.read(), media_type="application/zip", headers=headers)
 
 
 @router.get("/settings/backup")
@@ -1565,30 +1635,39 @@ def _parse_character_text(content: str) -> CharacterCard:
     return card
 
 
-def _parse_chat_text(content: str) -> tuple[Chat, list[dict[str, Any]]]:
+def _parse_chat_text(content: str, *, target_character_id: str | None = None) -> tuple[Chat, list[dict[str, Any]]]:
     """
     解析 SimpleTavern Chat Export 文本。
 
     - Version 2：头部含 Participants（角色显示名），消息为 role/name/content；按名匹配本地角色卡与 persona（与 JSONL 同源）。
     - Version 1 或未标 Version：保留 CharacterId、MemberIds 等，消息为旧版 k=v 字段。
     """
-    lines = content.splitlines()
+    lines = content.split("\n")
     idx = 0
     header: dict[str, Any] = {}
     messages: list[ChatMessage] = []
-    transcript_rows: list[tuple[str, str, str]] = []
+    transcript_rows: list[tuple[str, str, str, str | None]] = []
     system_prompt = ""
 
     def read_block(start_index: int) -> tuple[str, int]:
         if start_index >= len(lines) or lines[start_index].strip() != "<<<":
             return "", start_index
         buf: list[str] = []
+        escaped_format = header.get("Version") == "3"
         i = start_index + 1
         while i < len(lines):
-            if lines[i].strip() == ">>>":
-                return "\n".join(buf).strip(), i + 1
-            buf.append(lines[i])
+            line = lines[i]
+            if line.strip() == ">>>":
+                text = "\n".join(buf)
+                return (text if escaped_format else text.strip()), i + 1
+            if escaped_format and line.startswith("\\"):
+                line = line[1:]
+            elif not escaped_format:
+                line = line.removesuffix("\r")
+            buf.append(line)
             i += 1
+        if escaped_format:
+            raise HTTPException(status_code=400, detail="聊天文本缺少正文结束标记")
         return "\n".join(buf).strip(), i
 
     while idx < len(lines):
@@ -1610,34 +1689,39 @@ def _parse_chat_text(content: str) -> tuple[Chat, list[dict[str, Any]]]:
                     k, v = msg_line.split("=", 1)
                     msg_data[k.strip()] = v.strip()
                 idx += 1
-            if header.get("Version") == "2":
+            if header.get("Version") in {"2", "3"}:
                 transcript_rows.append(
                     (
                         msg_data.get("role", ""),
-                        msg_data.get("name", ""),
+                        json.loads(msg_data["nameJson"]) if "nameJson" in msg_data else msg_data.get("name", ""),
                         msg_data.get("content", ""),
+                        msg_data.get("characterId"),
                     )
                 )
             else:
                 messages.append(ChatMessage.model_validate(msg_data))
-            idx += 1
             continue
         if ":" in line:
             k, v = line.split(":", 1)
             header[k.strip()] = v.strip()
         idx += 1
 
-    if header.get("Version") == "2":
+    if header.get("Version") in {"2", "3"}:
         participants_str = header.get("Participants") or ""
-        participants = [p.strip() for p in participants_str.split(",") if p.strip()]
+        participants = json.loads(header["ParticipantsJson"]) if "ParticipantsJson" in header else [
+            p.strip() for p in participants_str.split(",") if p.strip()
+        ]
         settings = load_settings()
         chat, warnings = _build_chat_from_transcript_rows(
             chat_id=header.get("ChatId"),
-            title=header.get("Title") or "新对话",
+            title=json.loads(header["TitleJson"]) if "TitleJson" in header else header.get("Title") or "新对话",
             is_group=header.get("IsGroup", "false").lower() == "true",
             participants=participants,
             rows=transcript_rows,
             settings=settings,
+            character_id=header.get("CharacterId"),
+            exported_member_ids=(header.get("MemberIds") or "").split(","),
+            target_character_id=target_character_id,
         )
         return chat, warnings
 
@@ -1782,54 +1866,6 @@ def _build_extra_first_entries(raw_data: dict[str, Any]) -> list[dict[str, Any]]
     return entries
 
 
-def _st_entry_regex(raw_entry: dict[str, Any]) -> str:
-    if bool(raw_entry.get("constant")):
-        return ".*"
-    keys_raw = raw_entry.get("keys")
-    keys: list[str] = []
-    if isinstance(keys_raw, list):
-        for item in keys_raw:
-            s = str(item or "").strip()
-            if s:
-                keys.append(s)
-    if not keys:
-        return ""
-    if bool(raw_entry.get("use_regex")):
-        return "|".join(keys)
-    return "|".join(re.escape(k) for k in keys)
-
-
-def _build_worldbook_from_st(card_name: str, raw_data: dict[str, Any]) -> WorldBook | None:
-    character_book = raw_data.get("character_book")
-    if not isinstance(character_book, dict):
-        return None
-    entries_raw = character_book.get("entries")
-    if not isinstance(entries_raw, list) or not entries_raw:
-        return None
-    entries: list[dict[str, Any]] = []
-    for idx, raw in enumerate(entries_raw):
-        if not isinstance(raw, dict):
-            continue
-        content = str(raw.get("content") or "").strip()
-        title = str(raw.get("comment") or "").strip()
-        enabled = bool(raw.get("enabled", True))
-        try:
-            order_index = int(raw.get("insertion_order", idx))
-        except Exception:
-            order_index = idx
-        entries.append({
-            "title": title or f"条目 {idx + 1}",
-            "content": content,
-            "enabled": enabled,
-            "orderIndex": order_index,
-            "regex": _st_entry_regex(raw),
-        })
-    if not entries:
-        return None
-    wb_name = _coalesce_st_text(character_book.get("name"), f"{card_name or '角色'} 世界书")
-    return WorldBook(name=wb_name, entries=entries)
-
-
 def _merged_st_card_data(raw: dict[str, Any]) -> dict[str, Any]:
     data = raw.get("data") if isinstance(raw.get("data"), dict) else {}
     merged = dict(raw)
@@ -1924,7 +1960,7 @@ def _build_sillytavern_preview(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _map_st_to_character_and_worldbook(raw: dict[str, Any]) -> tuple[CharacterCard, WorldBook | None]:
+def _map_st_to_character_and_worldbook(raw: dict[str, Any], warnings: list[str]) -> tuple[CharacterCard, WorldBook | None]:
     merged = _merged_st_card_data(raw)
     description = _coalesce_st_text(merged.get("description"))
     personality = _coalesce_st_text(merged.get("personality"))
@@ -1941,7 +1977,7 @@ def _map_st_to_character_and_worldbook(raw: dict[str, Any]) -> tuple[CharacterCa
         systemPrompt=_coalesce_st_text(merged.get("system_prompt"), merged.get("systemPrompt")),
         extraFirstMessageEntries=_build_extra_first_entries(merged),
     )
-    worldbook = _build_worldbook_from_st(card.name, merged)
+    worldbook = build_worldbook(card.name, merged, warnings)
     return card, worldbook
 
 
@@ -1955,10 +1991,10 @@ async def _materialize_sillytavern_card(
     """
     将 ST 原始 dict 映射为 CharacterCard / WorldBook，并按选项应用 MVU 兼容（仅内存，不写库）。
     """
-    card, worldbook = _map_st_to_character_and_worldbook(raw)
+    warnings: list[str] = []
+    card, worldbook = _map_st_to_character_and_worldbook(raw, warnings)
     if isinstance(avatar_filename, str) and avatar_filename.strip():
         card.avatar = avatar_filename.strip()
-    warnings: list[str] = []
     if enable_mvu_compatibility:
         card.mvuEnabled = True
         card.mvuMode = mvu_mode
@@ -2076,7 +2112,7 @@ async def _import_sillytavern_card(
     return out
 
 
-async def _import_from_json(raw: Any) -> dict[str, Any]:
+async def _import_from_json(raw: Any, *, conflict: ChatImportConflict = "error") -> dict[str, Any]:
     """
     从JSON数据导入
     
@@ -2116,9 +2152,7 @@ async def _import_from_json(raw: Any) -> dict[str, Any]:
         raw.pop("systemPrompt", None)
         raw.pop("lastSpeakerCharacterId", None)
         chat = Chat.model_validate(raw)
-        save_chat(chat)
-        imported.append("chat")
-        return {"imported": imported, "warnings": warnings}
+        return {**_save_imported_chat(chat, conflict, allow_copy=False), "warnings": warnings}
 
     raise HTTPException(status_code=400, detail="unrecognized json format")
 
@@ -2173,7 +2207,7 @@ def _merge_usage_shard(base: Path, rel: str, data: bytes) -> bool:
     return True
 
 
-def _import_from_zip(payload: bytes) -> dict[str, Any]:
+def _import_from_zip(payload: bytes, *, conflict: ChatImportConflict = "replace") -> dict[str, Any]:
     """
     从ZIP文件导入
     
@@ -2189,10 +2223,60 @@ def _import_from_zip(payload: bytes) -> dict[str, Any]:
     imported: list[str] = []
     warnings: list[str] = []
     worldbook_id_map: dict[str, str] = {}
-    existing_worldbook_ids = {p.stem for p in worldbooks_dir().glob("*.json")}
     # ZIP 里的会话目录 (角色, 会话) → 导入后的会话文件夹，用来放该会话的其余文件。
     chat_folders: dict[tuple[str, str], Path] = {}
     with zipfile.ZipFile(io.BytesIO(payload)) as zf:
+        names = zf.namelist()
+        incoming_chats: dict[tuple[str, str], Chat] = {}
+        seen_chat_ids: set[str] = set()
+        existing_owners = {chat_id: owner for owner, chat_id, _ in iter_chat_record_paths()}
+        for name in names:
+            parts = name.split("/")
+            if len(parts) != 4 or parts[0] != "chats" or parts[-1] != "chat.json":
+                continue
+            raw = json.loads(zf.read(name))
+            raw.pop("systemPrompt", None)
+            raw.pop("lastSpeakerCharacterId", None)
+            raw["id"] = str(raw.get("id") or parts[2]).strip()
+            raw["characterId"] = str(raw.get("characterId") or parts[1]).strip()
+            if not is_safe_storage_id(raw["id"]) or not is_safe_storage_id(raw["characterId"]):
+                warnings.append(f"{name}: 跳过非法会话路径")
+                continue
+            chat = Chat.model_validate(raw)
+            if chat.id in seen_chat_ids or existing_owners.get(chat.id, chat.characterId) != chat.characterId:
+                raise HTTPException(status_code=409, detail="备份内的会话 ID 与另一个角色的会话冲突")
+            if chat.id in existing_owners and conflict != "replace":
+                raise _chat_import_conflict(chat.title, archive=True)
+            seen_chat_ids.add(chat.id)
+            incoming_chats[(parts[1], parts[2])] = chat
+
+        incoming_books: list[WorldBook] = []
+        for name in names:
+            if not name.startswith("worldbooks/") or not name.endswith(".json"):
+                continue
+            raw = json.loads(zf.read(name))
+            original_id = str(raw.get("id") or name.rsplit("/", 1)[-1][:-5]).strip()
+            raw["id"] = original_id
+            if not is_safe_storage_id(original_id):
+                raw["id"] = uuid4().hex
+                warnings.append(f"{name}: 世界书 id 含非法路径字符，已改写为新 id")
+            book = WorldBook.model_validate(raw)
+            worldbook_id_map[original_id] = book.id
+            try:
+                existing = load_worldbook(book.id)
+            except FileNotFoundError:
+                existing = None
+            if existing:
+                ignore_timestamps = {"createdAt", "updatedAt"}
+                if book.model_dump(exclude=ignore_timestamps) == existing.model_dump(exclude=ignore_timestamps):
+                    continue
+                if conflict != "replace":
+                    raise HTTPException(status_code=409, detail={
+                        "code": "backup_chat_conflict",
+                        "message": f"本机世界书「{existing.name}」与备份内容不同。覆盖会替换本机的版本。",
+                    })
+            incoming_books.append(book)
+
         if "settings.json" in zf.namelist():
             raw_settings = json.loads(zf.read("settings.json").decode("utf-8"))
             settings = Settings.model_validate(raw_settings)
@@ -2212,29 +2296,10 @@ def _import_from_zip(payload: bytes) -> dict[str, Any]:
             except Exception:
                 warnings.append(f"{name}: 跳过非法头像文件名")
                 continue
-        for name in zf.namelist():
-            if name.startswith("worldbooks/") and name.endswith(".json"):
-                raw = json.loads(zf.read(name).decode("utf-8"))
-                original_id = str(raw.get("id") or "").strip()
-                if not original_id:
-                    original_id = name.split("/")[-1].replace(".json", "")
-                    raw["id"] = original_id
-                target_id = original_id
-                if not is_safe_storage_id(original_id):
-                    target_id = uuid4().hex
-                    raw["id"] = target_id
-                    worldbook_id_map[original_id] = target_id
-                    warnings.append(f"{name}: 世界书 id 含非法路径字符，已改写为新 id")
-                elif target_id in existing_worldbook_ids:
-                    target_id = uuid4().hex
-                    raw["id"] = target_id
-                    worldbook_id_map[original_id] = target_id
-                else:
-                    worldbook_id_map[original_id] = original_id
-                parsed_book = save_worldbook(WorldBook.model_validate(raw))
-                existing_worldbook_ids.add(parsed_book.id)
-                if "worldbook" not in imported:
-                    imported.append("worldbook")
+        for book in incoming_books:
+            save_worldbook(book)
+        if worldbook_id_map:
+            imported.append("worldbook")
         for name in zf.namelist():
             if name.startswith("characters/") and name.endswith(".json"):
                 raw = json.loads(zf.read(name).decode("utf-8"))
@@ -2249,29 +2314,13 @@ def _import_from_zip(payload: bytes) -> dict[str, Any]:
                 save_character(card)
                 if "character" not in imported:
                     imported.append("character")
-        for name in zf.namelist():
-            # 只处理聊天记录文件 chat.json
-            if not name.startswith("chats/") or not name.endswith("/chat.json"):
-                continue
-            parts = name.split("/")
-            # 路径格式: chats/{character_id}/{chat_id}/chat.json
-            if len(parts) != 4:
-                continue
-            character_id_from_path = parts[1]
-            raw = json.loads(zf.read(name).decode("utf-8"))
-            raw.pop("systemPrompt", None)
-            raw.pop("lastSpeakerCharacterId", None)
-            # 若 JSON 中缺少 characterId（历史/导出兼容），从路径补全
-            if not raw.get("characterId"):
-                raw["characterId"] = character_id_from_path
-            chat_id = str(raw.get("id") or parts[2] or "").strip()
-            character_id = str(raw.get("characterId") or "").strip()
-            if not is_safe_storage_id(chat_id) or not is_safe_storage_id(character_id):
-                warnings.append(f"{name}: 跳过非法会话路径")
-                continue
-            chat = Chat.model_validate(raw)
-            save_chat(chat)
-            chat_folders[(parts[1], parts[2])] = chat_folder(chat.characterId, chat.id)
+        for source, chat in incoming_chats.items():
+            for attachment in chat.overrides.worldBookAttachments:
+                attachment.worldBookId = worldbook_id_map.get(attachment.worldBookId, attachment.worldBookId)
+            chat.overrides._sync_worldbook_attachments()
+            chat.overrides.worldBookGlobalExclusions = [worldbook_id_map.get(wid, wid) for wid in chat.overrides.worldBookGlobalExclusions]
+            _save_imported_chat(chat, conflict, allow_copy=False)
+            chat_folders[source] = chat_folder(chat.characterId, chat.id)
             if "chat" not in imported:
                 imported.append("chat")
         # 恢复长期记忆：处理 zip 中的 chat_memory.json（与 load_chat_memory 格式兼容）
@@ -2347,7 +2396,7 @@ def _import_from_zip(payload: bytes) -> dict[str, Any]:
             from app.services.usage_ledger import rebuild_index
 
             rebuild_index()
-    return {"imported": imported, "warnings": warnings}
+    return {"imported": imported, "warnings": warnings, "chatIds": [chat.id for chat in incoming_chats.values()]}
 
 
 @router.post("/import/janitor/pending")
@@ -2628,7 +2677,11 @@ async def import_janitor_character_html(request: Request, file: UploadFile | Non
 
 
 @router.post("/import")
-async def import_data(file: UploadFile = File(...)) -> dict:
+async def import_data(
+    file: UploadFile = File(...),
+    chatConflict: Annotated[ChatImportConflict, Query()] = "error",
+    targetCharacterId: Annotated[str | None, Query()] = None,
+) -> dict:
     """
     导入数据
     
@@ -2654,7 +2707,7 @@ async def import_data(file: UploadFile = File(...)) -> dict:
     filename = (file.filename or "").lower()
     try:
         if payload[:4] == b"PK\x03\x04":
-            result = _import_from_zip(payload)
+            result = _import_from_zip(payload, conflict=chatConflict)
             return {"ok": True, **result}
         if payload[:8] == PNG_SIGNATURE:
             st_raw, png_warnings = _extract_st_json_from_png(payload)
@@ -2669,19 +2722,18 @@ async def import_data(file: UploadFile = File(...)) -> dict:
                 "partialSuccess": bool(warnings),
             }
         if filename.endswith(".jsonl") or (file.content_type and "jsonl" in file.content_type):
-            result = _import_from_jsonl(payload.decode("utf-8"))
+            result = _import_from_jsonl(payload.decode("utf-8-sig"), conflict=chatConflict, target_character_id=targetCharacterId)
             return {"ok": True, **result}
         if filename.endswith(".json") or (file.content_type and "json" in file.content_type):
             raw = json.loads(payload.decode("utf-8"))
-            result = await _import_from_json(raw)
+            result = await _import_from_json(raw, conflict=chatConflict)
             return {"ok": True, **result}
         text = payload.decode("utf-8")
         if "SimpleTavern Chat Export" in text or "[Message]" in text:
-            chat, warnings = _parse_chat_text(text)
-            save_chat(chat)
+            chat, warnings = _parse_chat_text(text, target_character_id=targetCharacterId)
             return {
                 "ok": True,
-                "imported": ["chat"],
+                **_save_imported_chat(chat, chatConflict),
                 "partialSuccess": bool(warnings),
                 "warnings": warnings,
             }

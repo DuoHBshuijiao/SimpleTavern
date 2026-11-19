@@ -4191,7 +4191,12 @@ async function handleImportChange(e: Event) {
     }
     try {
       const result = await importSettingsFile(file)
+      if (!result) return
       await refreshDataAfterImport()
+      if (result.imported?.includes('settings')) {
+        await loadGlobalDraft()
+        cleanGlobalDraftSnapshot.value = currentGlobalDraftSnapshot()
+      }
       await notifyMessage(formatImportResultMessage(result))
     } catch (err) {
       await notifyMessage(err instanceof Error ? err.message : String(err))
@@ -4203,7 +4208,12 @@ async function handleImportChange(e: Event) {
 
   try {
     const result = await importSettingsFile(file)
+    if (!result) return
     await refreshDataAfterImport()
+    if (result.imported?.includes('settings')) {
+      await loadGlobalDraft()
+      cleanGlobalDraftSnapshot.value = currentGlobalDraftSnapshot()
+    }
     await notifyMessage(formatImportResultMessage(result))
   } catch (err) {
     await notifyMessage(err instanceof Error ? err.message : String(err))

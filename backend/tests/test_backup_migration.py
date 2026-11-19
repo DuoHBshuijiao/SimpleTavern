@@ -8,7 +8,8 @@ import zipfile
 
 from fastapi import HTTPException
 from app.routes import import_export
-from app.schemas import Settings
+from app.schemas import CharacterCard, Chat, ChatMessage, ChatOverrides, Settings, WorldBook
+from app.storage import load_character, load_chat, save_character, save_chat, save_worldbook, worldbooks_dir
 
 
 class BackupMigrationTest(unittest.TestCase):
@@ -105,6 +106,56 @@ class BackupMigrationTest(unittest.TestCase):
         with self.assertRaises(HTTPException) as error:
             self.archive("unknown")
         self.assertEqual(400, error.exception.status_code)
+
+    def test_importing_same_worldbook_backup_reuses_existing_id(self):
+        book = save_worldbook(WorldBook(id="lore", name="Lore"))
+        card = save_character(CharacterCard(id="hero", name="Hero", attachedWorldBookIds=[book.id]))
+        payload = import_export.backup_settings("with_characters").body
+        for _ in range(2):
+            result = import_export._import_from_zip(payload, conflict="error")
+            self.assertIn("worldbook", result["imported"])
+        self.assertEqual([book.id], [path.stem for path in worldbooks_dir().glob("*.json")])
+        self.assertEqual(load_character(card.id).attachedWorldBookIds, [book.id])
+
+    def test_transcript_copy_keeps_original_memory_and_the_correct_same_name_character(self):
+        owner = save_character(CharacterCard(id="a-twin", name="Twin"))
+        save_character(CharacterCard(id="b-twin", name="Twin"))
+        original_content = "Question\n>>>\n\\continued\n  Last line  \n"
+        original = save_chat(Chat(
+            id="transcript-chat", characterId=owner.id,
+            overrides=ChatOverrides(longTermMemory="Keep my memory"),
+            messages=[ChatMessage(role="assistant", content=original_content)],
+        ))
+        archive = import_export._export_chat_jsonl(original, Settings())
+        with self.assertRaises(HTTPException) as conflict:
+            import_export._import_from_jsonl(archive)
+        self.assertEqual(conflict.exception.status_code, 409)
+        result = import_export._import_from_jsonl(archive, conflict="copy")
+        copy_id, = result["chatIds"]
+        self.assertNotEqual(copy_id, original.id)
+        self.assertEqual(load_chat(copy_id).characterId, owner.id)
+        self.assertEqual(load_chat(original.id).overrides.longTermMemory, "Keep my memory")
+
+        text = import_export._export_chat_text(original, "Prompt", Settings())
+        parsed, warnings = import_export._parse_chat_text(text)
+        self.assertEqual(warnings, [])
+        self.assertEqual(parsed.characterId, owner.id)
+        self.assertEqual(parsed.messages[0].content, original_content)
+
+    def test_backup_detects_conflicts_before_overwriting_settings_or_chats(self):
+        original = save_chat(Chat(id="conflict", characterId="hero", title="Original"))
+        payload = io.BytesIO()
+        with zipfile.ZipFile(payload, "w") as archive:
+            archive.writestr("settings.json", '{}')
+            archive.writestr("chats/hero/conflict/chat.json", '{"id":"conflict","title":"New"}')
+        with self.assertRaises(HTTPException) as error:
+            import_export._import_from_zip(payload.getvalue(), conflict="error")
+        self.assertEqual(error.exception.status_code, 409)
+        self.assertEqual(load_chat(original.id).title, "Original")
+        self.assertFalse((self.root / "settings.json").exists())
+        result = import_export._import_from_zip(payload.getvalue(), conflict="replace")
+        self.assertEqual(result["chatIds"], [original.id])
+        self.assertEqual(load_chat(original.id).title, "New")
 
 
 if __name__ == "__main__":

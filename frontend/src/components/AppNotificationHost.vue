@@ -3,8 +3,9 @@
  * 全局通知宿主：Teleport 到 body，与 useNotify 共用队列。
  * 流式错误仍由 ChatPage 的 useErrorStack + ErrorModal 处理（方案 A）。
  */
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useNotifyHost } from '../composables/useNotify'
+import { useDialogBehavior } from '../composables/useDialogBehavior'
 import { useSettingsStore } from '../stores'
 import { normalizeThemeId } from '../types/models'
 
@@ -12,7 +13,7 @@ const settingsStore = useSettingsStore()
 /** Teleport 到 body 后与 #app 同级，显式绑定 data-theme，保证语义色与 App 根一致 */
 const appThemeId = computed(() => normalizeThemeId(settingsStore.settings?.themeId))
 
-const { current, dismissAlert, confirmYes, confirmNo } = useNotifyHost()
+const { current, dismissAlert, confirmYes, confirmNo, choose } = useNotifyHost()
 const primaryButtonRef = ref<HTMLButtonElement | null>(null)
 
 const headerTitle = computed(() => {
@@ -26,21 +27,12 @@ function onBackdropClick() {
   const c = current.value
   if (!c) return
   if (c.kind === 'alert') dismissAlert()
+  else if (c.kind === 'choice') choose(null)
   else confirmNo()
 }
 
-function closeCurrentFromKeyboard() {
-  const c = current.value
-  if (!c) return
-  if (c.kind === 'alert') dismissAlert()
-  else confirmNo()
-}
-
-function handleKeydown(event: KeyboardEvent) {
-  if (!current.value || event.key !== 'Escape') return
-  event.preventDefault()
-  closeCurrentFromKeyboard()
-}
+const { dialogRef } = useDialogBehavior(() => Boolean(current.value), onBackdropClick, { autoFocus: false })
+void dialogRef
 
 watch(current, async (item) => {
   if (!item) return
@@ -48,13 +40,6 @@ watch(current, async (item) => {
   primaryButtonRef.value?.focus()
 })
 
-onMounted(() => {
-  window.addEventListener('keydown', handleKeydown)
-})
-
-onUnmounted(() => {
-  window.removeEventListener('keydown', handleKeydown)
-})
 </script>
 
 <template>
@@ -70,6 +55,7 @@ onUnmounted(() => {
         @click="onBackdropClick"
       />
       <div
+        ref="dialogRef"
         class="app-notify-panel relative mt-[min(15vh,6rem)] w-[min(560px,calc(100vw-2rem))] max-h-[min(70vh,520px)] flex flex-col rounded-2xl border border-[var(--color-border)] overflow-hidden"
         role="dialog"
         aria-modal="true"
@@ -94,6 +80,22 @@ onUnmounted(() => {
           class="px-4 py-3 flex justify-end gap-2 border-t border-[var(--color-border-subtle)] shrink-0"
         >
           <button ref="primaryButtonRef" type="button" class="btn btn-sm btn-primary" @click="dismissAlert">确定</button>
+        </div>
+        <div
+          v-else-if="current.kind === 'choice'"
+          class="px-4 py-3 flex flex-wrap justify-end gap-2 border-t border-[var(--color-border-subtle)] shrink-0"
+        >
+          <button ref="primaryButtonRef" type="button" class="btn btn-sm btn-secondary" @click="choose(null)">取消</button>
+          <button
+            v-for="option in current.choices"
+            :key="option.value"
+            type="button"
+            class="btn btn-sm"
+            :class="option.variant === 'danger' ? 'btn-danger' : 'btn-primary'"
+            @click="choose(option.value)"
+          >
+            {{ option.label }}
+          </button>
         </div>
         <div
           v-else

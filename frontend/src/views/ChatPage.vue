@@ -230,6 +230,23 @@ const isWorkspaceAssistantDragOver = ref(false)
 const showSettings = ref(false)
 const showGroupSettings = ref(false)
 const showExportModal = ref(false)
+const exporting = ref(false)
+
+async function handleChatExport(format: 'txt' | 'json' | 'jsonl' | 'character' | 'character_with_worldbooks') {
+  if (exporting.value) return
+  exporting.value = true
+  try {
+    const downloaded = format === 'character' || format === 'character_with_worldbooks'
+      ? await actions.exportCharacter(format === 'character_with_worldbooks')
+      : await actions.exportChat(format)
+    if (downloaded) showExportModal.value = false
+  } catch (error) {
+    await notifyMessage(error instanceof Error ? error.message : String(error), { title: '导出失败' })
+  } finally {
+    exporting.value = false
+  }
+}
+
 const showImportModal = ref(false)
 /** 与 sessionStorage 同步，避免扩展跳转或仅带 janitorCharImport 的 URL 时丢失聊天暂存 id */
 const JANITOR_CHAT_PENDING_STORAGE_KEY = 'simpletavern:janitorChatPendingId'
@@ -5230,12 +5247,8 @@ const editingPersonaAvatarUrl = computed(() => {
     <ChatExportModal
       v-model:show="showExportModal"
       :disabled="!activeChat"
-      @export="(format) => {
-        if (format === 'character') actions.exportCharacter(false)
-        else if (format === 'character_with_worldbooks') actions.exportCharacter(true)
-        else actions.exportChat(format)
-        showExportModal = false
-      }"
+      :busy="exporting"
+      @export="handleChatExport"
     />
 
     <ChatImportModal

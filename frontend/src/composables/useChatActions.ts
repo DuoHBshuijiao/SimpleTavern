@@ -38,7 +38,8 @@
  *    - 位置：Composables层，提供聊天操作逻辑
  */
 import { ref, computed } from 'vue'
-import { notifyMessage } from './useNotify'
+import { notifyConfirm, notifyMessage } from './useNotify'
+import { responseToApiError } from '../api/http'
 import type { Ref, ComputedRef } from 'vue'
 import { useCharacterSidebarRecencyStore } from '../stores/characterSidebarRecency'
 import { resolveBumpCharacterId } from '../utils/characterSidebarBump'
@@ -689,47 +690,49 @@ export function useChatActions(deps: ChatActionsDeps) {
    * @param {'txt' | 'json'} format - 导出格式
    * @returns {Promise<void>} 完成时返回
    */
-  async function exportChat(format: 'txt' | 'json' | 'jsonl') {
-    if (!activeChat.value) return
-    const r = await fetch(`/api/chats/${activeChat.value.id}/export?format=${format}`)
-    if (!r.ok) {
-      await notifyMessage(await r.text())
-      return
-    }
-    const blob = await r.blob()
-    const url = URL.createObjectURL(blob)
+  async function downloadExport(response: Response, fallback: string) {
+    const url = URL.createObjectURL(await response.blob())
     const link = document.createElement('a')
     link.href = url
-    const fallback = `${activeChat.value.title || '聊天记录'}.${format}`
-    link.download = getDownloadFilename(r.headers.get('Content-Disposition'), fallback)
+    link.download = getDownloadFilename(response.headers.get('Content-Disposition'), fallback)
     document.body.appendChild(link)
     link.click()
-    document.body.removeChild(link)
-    URL.revokeObjectURL(url)
+    link.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 0)
   }
 
-  async function exportCharacter(includeWorldBooks: boolean) {
-    const characterId = activeChat.value?.characterId || editingCharacter.value?.id
-    if (!characterId) return
-    const r = await fetch(`/api/characters/${characterId}/export?include_world_books=${includeWorldBooks ? 'true' : 'false'}`)
-    if (!r.ok) {
-      await notifyMessage(await r.text())
-      return
+  async function exportChat(format: 'txt' | 'json' | 'jsonl') {
+    const chat = activeChat.value
+    if (!chat) return false
+    const response = await fetch(`/api/chats/${encodeURIComponent(chat.id)}/export?format=${format}`)
+    if (!response.ok) throw await responseToApiError(response)
+    await downloadExport(response, `${chat.title || '聊天记录'}.${format}`)
+    return true
+  }
+
+  async function exportCharacter(includeWorldBooks: boolean, characterId = activeChat.value?.characterId) {
+    if (!characterId) return false
+    const response = await fetch(`/api/characters/${encodeURIComponent(characterId)}/export?include_world_books=${includeWorldBooks}`)
+    if (!response.ok) throw await responseToApiError(response)
+    const missing = Number(response.headers.get('X-ST-Export-Missing') || 0)
+    const global = Number(response.headers.get('X-ST-Export-Global') || 0)
+    if (missing || global) {
+      const reasons = [
+        missing ? `${missing} 本关联世界书已丢失。` : '',
+        global ? `${global} 本全局世界书不包含在角色包中。` : '',
+      ].join('')
+      if (!(await notifyConfirm({ title: '确认下载角色包', message: `${reasons}是否下载现有内容？` }))) return false
     }
-    const blob = await r.blob()
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    const fallback = includeWorldBooks ? 'character-with-worldbooks.zip' : 'character.json'
-    link.download = getDownloadFilename(r.headers.get('Content-Disposition'), fallback)
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    URL.revokeObjectURL(url)
+    await downloadExport(response, includeWorldBooks ? 'character-with-worldbooks.zip' : 'character.json')
+    return true
   }
 
   async function exportCharacterCard() {
-    await exportCharacter(false)
+    try {
+      await exportCharacter(false, editingCharacter.value?.id)
+    } catch (error) {
+      await notifyMessage(error instanceof Error ? error.message : String(error), { title: '角色导出失败' })
+    }
   }
 
   // ========== 成员设置编辑 ==========

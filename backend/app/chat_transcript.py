@@ -55,6 +55,8 @@ def build_jsonl_header_dict(chat: Chat) -> dict[str, Any]:
         "type": "simpletavern_chat_jsonl",
         "version": 1,
         "chatId": chat.id,
+        "characterId": chat.characterId,
+        "memberIds": list(chat.memberIds),
         "title": chat.title,
         "isGroup": chat.isGroup,
         "participants": participants,
@@ -62,7 +64,9 @@ def build_jsonl_header_dict(chat: Chat) -> dict[str, Any]:
     }
 
 
-def build_transcript_rows_from_messages(messages: list[ChatMessage], settings: Settings) -> list[dict[str, str]]:
+def build_transcript_rows_from_messages(
+    messages: list[ChatMessage], settings: Settings, *, include_character_id: bool = False,
+) -> list[dict[str, str]]:
     """
     将消息序列转为与 JSONL 第 2 行起相同语义的行列表（每行 role/name/content）。
     跳过 tool 与 toolTrace；内联图替换为 [image]。
@@ -76,7 +80,10 @@ def build_transcript_rows_from_messages(messages: list[ChatMessage], settings: S
             continue
         name = resolve_message_sender_name(m, settings)
         content = _DATA_IMAGE_B64_RE.sub("[image]", m.content or "")
-        rows.append({"role": m.role, "name": name, "content": content})
+        row = {"role": m.role, "name": name, "content": content}
+        if include_character_id and m.role == "assistant" and m.characterId:
+            row["characterId"] = m.characterId
+        rows.append(row)
     return rows
 
 
@@ -94,6 +101,6 @@ def slice_messages_since_memory_marker(messages: list[ChatMessage]) -> list[Chat
 def format_chat_as_jsonl_string(chat: Chat, settings: Settings) -> str:
     """供 HTTP 导出：完整 NDJSON 文本（头行 + 消息行）。"""
     lines: list[str] = [json.dumps(build_jsonl_header_dict(chat), ensure_ascii=False)]
-    for row in build_transcript_rows_from_messages(chat.messages, settings):
+    for row in build_transcript_rows_from_messages(chat.messages, settings, include_character_id=chat.isGroup):
         lines.append(json.dumps(row, ensure_ascii=False))
     return "\n".join(lines) + "\n"

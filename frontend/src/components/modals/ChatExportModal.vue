@@ -6,6 +6,7 @@ import { dialogAria } from '../../utils/uiPrimitives'
 const props = defineProps<{
   show: boolean
   disabled?: boolean
+  busy?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -24,7 +25,7 @@ const { dialogRef } = useDialogBehavior(() => props.show, close)
 void dialogRef
 
 function handleExport(format: 'txt' | 'json' | 'jsonl' | 'character' | 'character_with_worldbooks') {
-  if (props.disabled) return
+  if (props.disabled || props.busy) return
   emit('export', format)
 }
 </script>
@@ -47,9 +48,9 @@ function handleExport(format: 'txt' | 'json' | 'jsonl' | 'character' | 'characte
           </button>
         </div>
         <div class="modal-body">
-          <div class="space-y-3" :class="disabled ? 'opacity-50 pointer-events-none' : ''">
+          <div class="space-y-3" :class="disabled || busy ? 'opacity-50 pointer-events-none' : ''">
             <div class="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface-muted)] p-4 text-sm text-[var(--color-text-muted)]">
-              选择导出格式
+              {{ busy ? '正在准备导出…' : '选择导出格式' }}
             </div>
             <button
               class="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-overlay)] px-4 py-3 text-left text-[var(--color-text)] transition-colors hover:bg-[var(--color-surface-hover)]"

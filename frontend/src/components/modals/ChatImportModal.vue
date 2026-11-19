@@ -271,6 +271,7 @@ async function handleImportChange(e: Event) {
     }
     try {
       const result = await importSettingsFile(file)
+      if (!result) return
       await refreshDataAfterImport()
       await notifyMessage(formatImportResultMessage(result))
     } catch (err) {
@@ -283,6 +284,7 @@ async function handleImportChange(e: Event) {
 
   try {
     const result = await importSettingsFile(file)
+    if (!result) return
     await refreshDataAfterImport()
     await notifyMessage(formatImportResultMessage(result))
   } catch (err) {

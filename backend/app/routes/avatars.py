@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import base64
 import json
-import re
 from typing import Any
 from uuid import uuid4
 
@@ -34,6 +33,7 @@ from pydantic import BaseModel
 
 from app.errors import AppError
 from app.schemas import CharacterCard, WorldBook
+from app.services.sillytavern_worldbook import build_worldbook
 from app.storage import avatar_path, avatars_dir, delete_avatar, save_avatar
 
 router = APIRouter(tags=["avatars"])
@@ -152,51 +152,6 @@ def _build_extra_first_entries(raw_data: dict[str, Any]) -> list[dict[str, Any]]
     return out
 
 
-def _st_entry_regex(raw_entry: dict[str, Any]) -> str:
-    if bool(raw_entry.get("constant")):
-        return ".*"
-    keys_raw = raw_entry.get("keys")
-    keys: list[str] = []
-    if isinstance(keys_raw, list):
-        for item in keys_raw:
-            s = str(item or "").strip()
-            if s:
-                keys.append(s)
-    if not keys:
-        return ""
-    if bool(raw_entry.get("use_regex")):
-        return "|".join(keys)
-    return "|".join(re.escape(k) for k in keys)
-
-
-def _build_worldbook_from_st(card_name: str, raw_data: dict[str, Any]) -> WorldBook | None:
-    character_book = raw_data.get("character_book")
-    if not isinstance(character_book, dict):
-        return None
-    entries_raw = character_book.get("entries")
-    if not isinstance(entries_raw, list) or not entries_raw:
-        return None
-    entries: list[dict[str, Any]] = []
-    for idx, raw in enumerate(entries_raw):
-        if not isinstance(raw, dict):
-            continue
-        try:
-            order_index = int(raw.get("insertion_order", idx))
-        except Exception:
-            order_index = idx
-        entries.append({
-            "title": str(raw.get("comment") or "").strip() or f"条目 {idx + 1}",
-            "content": str(raw.get("content") or "").strip(),
-            "enabled": bool(raw.get("enabled", True)),
-            "orderIndex": order_index,
-            "regex": _st_entry_regex(raw),
-        })
-    if not entries:
-        return None
-    wb_name = _coalesce_st_text(character_book.get("name"), f"{card_name or '角色'} 世界书")
-    return WorldBook(name=wb_name, entries=entries)
-
-
 def _map_st_to_character_and_worldbook(raw: dict[str, Any]) -> tuple[CharacterCard, WorldBook | None]:
     data = raw.get("data") if isinstance(raw.get("data"), dict) else {}
     merged = dict(raw)
@@ -217,7 +172,7 @@ def _map_st_to_character_and_worldbook(raw: dict[str, Any]) -> tuple[CharacterCa
         systemPrompt=_coalesce_st_text(merged.get("system_prompt"), merged.get("systemPrompt")),
         extraFirstMessageEntries=_build_extra_first_entries(merged),
     )
-    worldbook = _build_worldbook_from_st(card.name, merged)
+    worldbook = build_worldbook(card.name, merged)
     return card, worldbook
 
 

@@ -1,5 +1,7 @@
 import { useCharactersStore, useChatsStore, useSettingsStore } from '../stores'
 import type { MvuMode } from '../types/models'
+import { ApiError, responseToApiError } from '../api/http'
+import { notifyChoice } from './useNotify'
 
 export type ImportWarningItem = string | { code?: string; message?: string }
 
@@ -16,6 +18,7 @@ export interface SillyTavernMvuCompatResult {
 export interface SettingsImportResult {
   ok?: boolean
   imported?: string[]
+  chatIds?: string[]
   partialSuccess?: boolean
   warnings?: ImportWarningItem[]
   mvuCompat?: SillyTavernMvuCompatResult
@@ -112,14 +115,37 @@ export function useSettingsImport() {
   const chatsStore = useChatsStore()
   const charactersStore = useCharactersStore()
 
-  async function importSettingsFile(file: File): Promise<SettingsImportResult> {
-    const fd = new FormData()
-    fd.append('file', file)
-    const r = await fetch('/api/import', { method: 'POST', body: fd })
-    if (!r.ok) {
-      throw new Error(await r.text())
+  async function importSettingsFile(file: File): Promise<SettingsImportResult | null> {
+    const query = new URLSearchParams()
+    if (chatsStore.characterId) query.set('targetCharacterId', chatsStore.characterId)
+
+    async function upload(): Promise<SettingsImportResult> {
+      const fd = new FormData()
+      fd.append('file', file)
+      const response = await fetch(`/api/import?${query}`, { method: 'POST', body: fd })
+      if (!response.ok) throw await responseToApiError(response)
+      return await response.json() as SettingsImportResult
     }
-    return (await r.json()) as SettingsImportResult
+
+    let result: SettingsImportResult
+    try {
+      result = await upload()
+    } catch (error) {
+      if (!(error instanceof ApiError) || (error.code !== 'chat_import_conflict' && error.code !== 'backup_chat_conflict')) throw error
+      const choices = [{ value: 'replace', label: '覆盖本机数据', variant: 'danger' as const }]
+      const canCopy = error.code === 'chat_import_conflict'
+      const choice = await notifyChoice({
+        title: '导入冲突',
+        message: canCopy ? `${error.message}\n导入副本会保留现有会话及其记忆、附件和设置。` : error.message,
+        choices: canCopy ? [{ value: 'copy', label: '导入副本' }, ...choices] : choices,
+      })
+      if (!choice) return null
+      query.set('chatConflict', choice)
+      result = await upload()
+    }
+    const activeId = chatsStore.activeChatId
+    if (activeId && result.chatIds?.includes(activeId)) await chatsStore.refresh(activeId)
+    return result
   }
 
   async function previewSillyTavernImport(file: File): Promise<SillyTavernPreviewResult> {
@@ -127,7 +153,7 @@ export function useSettingsImport() {
     fd.append('file', file)
     const r = await fetch('/api/import/sillytavern/preview', { method: 'POST', body: fd })
     if (!r.ok) {
-      throw new Error(await r.text())
+      throw await responseToApiError(r)
     }
     return (await r.json()) as SillyTavernPreviewResult
   }
@@ -139,7 +165,7 @@ export function useSettingsImport() {
       body: JSON.stringify(options),
     })
     if (!r.ok) {
-      throw new Error(await r.text())
+      throw await responseToApiError(r)
     }
     return (await r.json()) as SillyTavernConfirmResult
   }
@@ -156,7 +182,7 @@ export function useSettingsImport() {
       }),
     })
     if (!r.ok) {
-      throw new Error(await r.text())
+      throw await responseToApiError(r)
     }
     return (await r.json()) as SillyTavernMaterializeResult
   }
