@@ -43,8 +43,10 @@ import re
 import shutil
 import threading
 import time
+from contextlib import ExitStack
 from dataclasses import dataclass
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable
 from uuid import uuid4
@@ -73,6 +75,15 @@ from app.services.cleanup_log import log_cleanup_failure
 
 
 logger = logging.getLogger(__name__)
+
+_settings_write_lock = threading.RLock()
+character_lifecycle_lock = threading.RLock()
+_chat_write_locks = tuple(threading.RLock() for _ in range(64))
+
+
+def chat_write_lock(chat_id: str) -> threading.RLock:
+    """Serialize a session's read-modify-write operations in the local backend."""
+    return _chat_write_locks[hash(chat_id) % len(_chat_write_locks)]
 
 
 def _repo_root() -> Path:
@@ -583,14 +594,17 @@ def write_json(path: Path, obj: Any) -> None:
         path: JSON文件路径
         obj: 要写入的对象（会被序列化为JSON）
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = Path(str(path) + ".tmp")
     with _lock_for(path):
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(obj, f, ensure_ascii=False, indent=2)
-        _chmod_owner_rw(tmp_path)
-        os.replace(tmp_path, path)
-        _chmod_owner_rw(path)
+        _write_json_locked(path, obj)
+
+
+def _write_json_locked(path: Path, obj: Any) -> None:
+    tmp_path = Path(str(path) + ".tmp")
+    with tmp_path.open("w", encoding="utf-8") as stream:
+        json.dump(obj, stream, ensure_ascii=False, indent=2)
+    _chmod_owner_rw(tmp_path)
+    os.replace(tmp_path, path)
+    _chmod_owner_rw(path)
 
 
 _jsonl_unique_cache: dict[str, tuple[int, int, set[Any]]] = {}
@@ -672,6 +686,11 @@ def load_settings() -> Settings:
     Returns:
         Settings: 设置对象
     """
+    with _settings_write_lock:
+        return _load_settings_locked()
+
+
+def _load_settings_locked() -> Settings:
     raw = read_json(_settings_path())
     needs_migration = False
     if isinstance(raw, dict):
@@ -714,20 +733,59 @@ def save_settings(settings: Settings) -> Settings:
     Returns:
         Settings: 保存后的设置对象
     """
-    prune_webgpu_shader_presets(settings)
-    settings.updatedAt = datetime.now().astimezone().isoformat()
-    if getattr(settings, "worldBookEntryScanDepthDefault", None) is None:
-        settings.worldBookEntryScanDepthDefault = 2
-    write_json(_settings_path(), settings.model_dump(mode="json"))
-    try:
-        from app.llm.oauth.store import prune_oauth_tokens
+    with _settings_write_lock:
+        prune_webgpu_shader_presets(settings)
+        settings.updatedAt = datetime.now().astimezone().isoformat()
+        if getattr(settings, "worldBookEntryScanDepthDefault", None) is None:
+            settings.worldBookEntryScanDepthDefault = 2
+        write_json(_settings_path(), settings.model_dump(mode="json"))
+        try:
+            from app.llm.oauth.store import prune_oauth_tokens
 
-        prune_oauth_tokens({p.id for p in (settings.apiPresets or []) if getattr(p, "id", None)})
-    except Exception:
-        import logging
-
-        logging.getLogger(__name__).exception("prune oauth tokens failed")
+            prune_oauth_tokens({p.id for p in (settings.apiPresets or []) if getattr(p, "id", None)})
+        except Exception:
+            logger.exception("prune oauth tokens failed")
     return settings
+
+
+def remember_used_model(model: str) -> None:
+    """Update model history without applying settings side effects such as OAuth cleanup."""
+    path = _settings_path()
+    with _settings_write_lock, _lock_for(path):
+        with path.open(encoding="utf-8") as stream:
+            payload = json.load(stream)
+        llm = payload.setdefault("llm", {})
+        used_models = llm.get("usedModels") or []
+        if model in used_models:
+            return
+        llm["usedModels"] = [model, *used_models][:20]
+        payload["updatedAt"] = _now_iso()
+        _write_json_locked(path, payload)
+
+
+def save_client_settings(settings: Settings) -> Settings:
+    """Merge server-managed history into an older draft submitted by the UI."""
+    from app.llm.vertex_auth import restore_settings, settings_need_restore
+
+    def configured_models(config: Settings) -> set[str]:
+        models = {config.llm.defaultModel, *config.llm.modelCandidates}
+        for preset in config.apiPresets:
+            models.update(preset.models)
+        return models
+
+    with _settings_write_lock:
+        try:
+            current = load_settings()
+        except FileNotFoundError:
+            current = None
+        if current is not None:
+            if settings_need_restore(settings):
+                restore_settings(settings, current)
+            if settings.updatedAt != current.updatedAt:
+                removed_models = configured_models(current) - configured_models(settings)
+                history = dict.fromkeys([*current.llm.usedModels, *settings.llm.usedModels])
+                settings.llm.usedModels = [model for model in history if model not in removed_models][:20]
+        return save_settings(settings)
 
 
 def settings_path() -> Path:
@@ -1217,13 +1275,14 @@ def delete_character(character_id: str, delete_related_chats: bool = True) -> No
         character_id: 角色ID
         delete_related_chats: 是否同时删除关联的聊天会话，默认为True
     """
-    p = character_path(character_id)
-    if p.exists():
-        with _lock_for(p):
-            p.unlink(missing_ok=True)
-    
-    if delete_related_chats:
-        delete_chats_by_character(character_id)
+    with character_lifecycle_lock:
+        p = character_path(character_id)
+        if p.exists():
+            with _lock_for(p):
+                p.unlink(missing_ok=True)
+
+        if delete_related_chats:
+            delete_chats_by_character(character_id)
 
 
 def chat_dir(character_id: str) -> Path:
@@ -1786,14 +1845,41 @@ def save_chat(chat: Chat) -> Chat:
     Returns:
         Chat: 保存后的聊天对象
     """
+    with chat_write_lock(chat.id):
+        return _save_chat_locked(chat, update_memory=True)
+
+
+def save_chat_record(chat: Chat) -> Chat:
+    """Persist an edit made under chat_write_lock without rewriting the memory sidecar."""
+    return _save_chat_locked(chat, update_memory=False)
+
+
+def append_chat_message(chat_id: str, message: ChatMessage) -> Chat:
+    with chat_write_lock(chat_id):
+        chat = load_chat(chat_id)
+        if message.role in ("user", "system"):
+            # Lock the selected greeting or reply variant when the user continues the conversation.
+            for current in chat.messages:
+                if current.role == "assistant":
+                    current.greetingVariants = None
+                    current.greetingVariantIndex = None
+                    current.greetingVariantReasoningContents = None
+                    current.greetingVariantReasoningDurations = None
+        chat.messages.append(message)
+        chat.updatedAt = _now_iso()
+        return save_chat_record(chat)
+
+
+def _save_chat_locked(chat: Chat, *, update_memory: bool) -> Chat:
     from app.group_mvu import maybe_migrate_legacy_group_mvu_on_save
 
     maybe_migrate_legacy_group_mvu_on_save(chat)
-    memory = getattr(chat.overrides, "longTermMemory", None)
-    if memory is not None and memory.strip():
-        save_chat_memory(chat.characterId, chat.id, memory)
-    else:
-        delete_chat_memory(chat.characterId, chat.id)
+    if update_memory:
+        memory = getattr(chat.overrides, "longTermMemory", None)
+        if memory is not None and memory.strip():
+            save_chat_memory(chat.characterId, chat.id, memory)
+        else:
+            delete_chat_memory(chat.characterId, chat.id)
 
     p = chat_record_path(chat.characterId, chat.id)
     legacy = legacy_chat_path(chat.characterId, chat.id)
@@ -1923,11 +2009,12 @@ def load_chat_state_variables(chat_id: str) -> StateVariables | None:
 
 def save_chat_state_variables(chat_id: str, state: StateVariables) -> Chat:
     """原子写入 stateVariables，版本递增，更新时间戳。"""
-    chat = load_chat(chat_id)
-    state.version = (state.version or 0) + 1
-    state.updatedAt = datetime.now().astimezone().isoformat()
-    chat.stateVariables = state
-    return save_chat(chat)
+    with chat_write_lock(chat_id):
+        chat = load_chat(chat_id)
+        state.version = (state.version or 0) + 1
+        state.updatedAt = datetime.now().astimezone().isoformat()
+        chat.stateVariables = state
+        return save_chat_record(chat)
 
 
 def _lock_file_path(target: Path) -> Path:
@@ -1963,25 +2050,26 @@ def delete_chat(chat_id: str) -> None:
     Args:
         chat_id: 聊天会话ID
     """
-    found = _find_chat_path_by_id(chat_id)
-    if found is None:
-        return
-    p, character_id = found
-    with _lock_for(p):
-        p.unlink(missing_ok=True)
-    _lock_file_path(p).unlink(missing_ok=True)
-    delete_chat_memory(character_id, chat_id)
     from app.chat_path_index import remove_chat_path
     from app.fork_index import remove_chat_fork_index
 
-    remove_chat_path(chat_id)
-    remove_chat_fork_index(chat_id)
-    chat_dir_path = chat_folder(character_id, chat_id)
-    if chat_dir_path.exists():
-        _rmtree_best_effort(
-            chat_dir_path,
-            source="storage.delete_chat.directory",
-        )
+    with chat_write_lock(chat_id):
+        found = _find_chat_path_by_id(chat_id)
+        if found is None:
+            return
+        p, character_id = found
+        with _lock_for(p):
+            p.unlink(missing_ok=True)
+        _lock_file_path(p).unlink(missing_ok=True)
+        delete_chat_memory(character_id, chat_id)
+        remove_chat_path(chat_id)
+        remove_chat_fork_index(chat_id)
+        chat_dir_path = chat_folder(character_id, chat_id)
+        if chat_dir_path.exists():
+            _rmtree_best_effort(
+                chat_dir_path,
+                source="storage.delete_chat.directory",
+            )
 
 
 def delete_chats_by_character(character_id: str) -> None:
@@ -1996,32 +2084,12 @@ def delete_chats_by_character(character_id: str) -> None:
     char_chat_dir = chat_dir(character_id)
     if not char_chat_dir.exists():
         return
-    for entry in char_chat_dir.iterdir():
-        if entry.is_dir():
-            for p in sorted(entry.rglob("*"), key=lambda x: len(str(x)), reverse=True):
-                try:
-                    if p.is_file():
-                        with _lock_for(p):
-                            p.unlink(missing_ok=True)
-                    elif p.is_dir():
-                        p.rmdir()
-                except Exception as exc:
-                    log_cleanup_failure(
-                        source="storage.delete_chats_by_character.entry",
-                        exc=exc,
-                        path=p,
-                    )
-        elif entry.is_file() and entry.suffix.lower() == ".json":
-            with _lock_for(entry):
-                entry.unlink(missing_ok=True)
-    try:
-        char_chat_dir.rmdir()
-    except OSError as exc:
-        log_cleanup_failure(
-            source="storage.delete_chats_by_character.directory",
-            exc=exc,
-            path=char_chat_dir,
-        )
+    # Coordinate with session writes while deleting the tree, including any existing lock sidecars.
+    with ExitStack() as locks:
+        for lock in _chat_write_locks:
+            locks.enter_context(lock)
+        if char_chat_dir.exists():
+            _rmtree_best_effort(char_chat_dir, source="storage.delete_chats_by_character.directory")
     try:
         from app.chat_path_index import remove_chats_for_character
 
