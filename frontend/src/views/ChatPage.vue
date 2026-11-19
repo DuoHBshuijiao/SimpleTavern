@@ -1771,7 +1771,12 @@ const effectiveContentRegexRules = computed(() => {
       seen.add(r.id)
     }
   }
-  return rules.sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.id.localeCompare(b.id))
+  const overrides = activeChat.value?.overrides
+  return rules.map((rule) => ({
+    ...rule,
+    enabled: overrides?.contentRegexEnabledByRuleId?.[rule.id] ?? rule.enabled,
+    order: overrides?.contentRegexOrderByRuleId?.[rule.id] ?? rule.order,
+  })).sort((a, b) => a.order - b.order || a.id.localeCompare(b.id))
 })
 
 /**

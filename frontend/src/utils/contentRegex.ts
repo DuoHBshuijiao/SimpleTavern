@@ -5,8 +5,6 @@
  */
 import type { ChatContentRegexRule } from '../types/models'
 
-const RULE_TIMEOUT_MS = 150
-
 interface CompiledRule {
   regex: RegExp
   action: string
@@ -57,7 +55,8 @@ function splitRegexLiteral(raw: string): { body: string; flags: string } | null 
 function withRuntimeFlags(flags: string, matchMode: string): string {
   const out = new Set<string>(['m', 's'])
   for (const flag of flags) out.add(flag)
-  if ((matchMode || 'global') === 'global') out.add('g')
+  if (matchMode === 'first') out.delete('g')
+  else out.add('g')
   return [...out].join('')
 }
 
@@ -117,18 +116,10 @@ export function applyContentRegexDisplay(
     const compiled = compileRule(rule)
     if (!compiled) continue
 
-    const { regex, matchMode } = compiled
+    const { regex } = compiled
     const replacement = replacementFor(rule.action || 'remove', compiled.replacement)
-    const start = performance.now()
     try {
-      if (matchMode === 'first') {
-        regex.lastIndex = 0
-        working = working.replace(regex, replacement)
-      } else {
-        if (performance.now() - start > RULE_TIMEOUT_MS) continue
-        regex.lastIndex = 0
-        working = working.replace(regex, replacement)
-      }
+      working = working.replace(regex, replacement)
     } catch {
       continue
     }

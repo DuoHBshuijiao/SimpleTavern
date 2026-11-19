@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-import concurrent.futures
 import re
+import time
 from dataclasses import dataclass
 from typing import Literal
 
-from app.regex_compat import compile_user_regex
+import regex
+
+from app.regex_compat import compile_timed_user_regex
 from app.schemas import ChatContentRegexRule
 
-_REGEX_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 _RULE_TIMEOUT_SECONDS = 0.15
 
 
@@ -65,7 +66,7 @@ class ContentRegexApplyResult:
     errors: list[dict[str, str]]
 
 
-def _pick_extracted_text(rule: ChatContentRegexRule, match: re.Match[str]) -> str:
+def _pick_extracted_text(rule: ChatContentRegexRule, match: regex.Match) -> str:
     if (rule.extractSource or "whole_match") == "whole_match":
         return match.group(0) or ""
     group_index = rule.extractGroupIndex if rule.extractGroupIndex is not None else 1
@@ -75,14 +76,14 @@ def _pick_extracted_text(rule: ChatContentRegexRule, match: re.Match[str]) -> st
         return ""
 
 
-def _collect_matches(compiled: re.Pattern[str], text: str, mode: Literal["global", "first"]) -> list[re.Match[str]]:
+def _collect_matches(compiled: regex.Pattern, text: str, mode: Literal["global", "first"], timeout: float) -> list[regex.Match]:
     if mode == "first":
-        first = compiled.search(text)
+        first = compiled.search(text, timeout=timeout, concurrent=True)
         return [first] if first is not None else []
-    return list(compiled.finditer(text))
+    return list(compiled.finditer(text, timeout=timeout, concurrent=True))
 
 
-def _apply_one(rule: ChatContentRegexRule, persisted_text: str, display_text: str) -> RuleRunResult:
+def _apply_one(rule: ChatContentRegexRule, persisted_text: str, display_text: str, timeout: float) -> RuleRunResult:
     pattern = (rule.pattern or "").strip()
     if not pattern:
         return RuleRunResult(
@@ -90,7 +91,14 @@ def _apply_one(rule: ChatContentRegexRule, persisted_text: str, display_text: st
             display_text=display_text,
             extracted_items=[],
         )
-    compiled = compile_user_regex(pattern, re.MULTILINE | re.DOTALL)
+    deadline = time.monotonic() + timeout
+    compiled = compile_timed_user_regex(pattern, re.MULTILINE | re.DOTALL)
+
+    def remaining() -> float:
+        return max(0.0, deadline - time.monotonic())
+
+    def substitute(replacement: str, text: str) -> str:
+        return compiled.sub(replacement, text, count=count, timeout=remaining(), concurrent=True)
     count = 0 if (rule.matchMode or "global") == "global" else 1
     action = rule.action or "remove"
     next_persisted = persisted_text
@@ -98,7 +106,7 @@ def _apply_one(rule: ChatContentRegexRule, persisted_text: str, display_text: st
     extracted_items: list[dict[str, str]] = []
 
     if action in ("extract", "extract_and_replace"):
-        matches = _collect_matches(compiled, persisted_text, rule.matchMode or "global")
+        matches = _collect_matches(compiled, persisted_text, rule.matchMode or "global", remaining())
         for m in matches:
             extracted_text = _pick_extracted_text(rule, m)
             if not extracted_text:
@@ -116,15 +124,15 @@ def _apply_one(rule: ChatContentRegexRule, persisted_text: str, display_text: st
             )
 
     if action == "remove":
-        next_persisted = compiled.sub("", persisted_text, count=count)
-        next_display = compiled.sub("", display_text, count=count)
+        next_persisted = substitute("", persisted_text)
+        next_display = next_persisted if display_text == persisted_text else substitute("", display_text)
     elif action == "replace":
         replacement = normalize_replacement_syntax(rule.replacement)
-        next_persisted = compiled.sub(replacement, persisted_text, count=count)
-        next_display = compiled.sub(replacement, display_text, count=count)
+        next_persisted = substitute(replacement, persisted_text)
+        next_display = next_persisted if display_text == persisted_text else substitute(replacement, display_text)
     elif action == "extract_and_replace":
         replacement = normalize_replacement_syntax(rule.replacement)
-        next_display = compiled.sub(replacement, display_text, count=count)
+        next_display = substitute(replacement, display_text)
 
     return RuleRunResult(
         persisted_text=next_persisted,
@@ -148,14 +156,13 @@ def apply_content_regex_pipeline(
         key=lambda r: (int(r.order), str(r.id)),
     )
     for rule in ordered:
-        future = _REGEX_EXECUTOR.submit(_apply_one, rule, persisted_working, display_working)
         try:
-            result = future.result(timeout=max(0.01, float(timeout_seconds)))
+            result = _apply_one(rule, persisted_working, display_working, max(0.01, float(timeout_seconds)))
             persisted_working = result.persisted_text
             display_working = result.display_text
             if result.extracted_items:
                 extracted_items.extend(result.extracted_items)
-        except concurrent.futures.TimeoutError:
+        except TimeoutError:
             errors.append(
                 {
                     "ruleId": str(rule.id),
@@ -166,7 +173,7 @@ def apply_content_regex_pipeline(
                     "replacement": rule.replacement or "",
                 }
             )
-        except re.error as e:
+        except regex.error as e:
             errors.append(
                 {
                     "ruleId": str(rule.id),

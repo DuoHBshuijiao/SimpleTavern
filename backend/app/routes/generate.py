@@ -28,10 +28,11 @@ import time
 from datetime import datetime
 from typing import Any, AsyncIterator
 
+import regex
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from app.content_regex_scanner import ensure_content_regex_scanner_started
 from app.errors import AppError, app_error_response, as_app_error
 from app.llm.preset_resolve import LlmPresetResolveError
 from app.llm.resolution import PreparedLlmRequest, prepare_llm_request
@@ -50,8 +51,9 @@ from app.prompt_xml import (
     wrap_interject_hint,
     wrap_user_name,
 )
-from app.regex_compat import compile_user_regex
+from app.regex_compat import compile_timed_user_regex
 from app.schemas import (
+    Chat,
     ChatMessage,
     DraftHelpConversationMessage,
     DraftHelpRequest,
@@ -76,7 +78,6 @@ from app.tokenizer_service import (
 
 
 router = APIRouter(tags=["generate"])
-ensure_content_regex_scanner_started()
 
 
 def pick_reasoning_and_fast(
@@ -847,9 +848,10 @@ def _runtime_scan_insert_for_book(
 
 
 def _worldbook_regex_warning(book: Any, entry: Any, pattern: str, exc: Exception) -> dict[str, Any]:
+    timed_out = isinstance(exc, TimeoutError)
     return {
-        "code": "worldbook_regex_invalid",
-        "message": "世界书条目正则无效，已跳过该条目",
+        "code": "worldbook_regex_timeout" if timed_out else "worldbook_regex_invalid",
+        "message": "世界书条目正则匹配超时，已跳过该条目" if timed_out else "世界书条目正则无效，已跳过该条目",
         "worldBookId": getattr(book, "id", None),
         "entryId": getattr(entry, "id", None),
         "pattern": pattern[:200],
@@ -866,8 +868,8 @@ def collect_worldbook_regex_warnings(book: Any, warnings_out: list[dict[str, Any
         if not pattern:
             continue
         try:
-            compile_user_regex(pattern, re.MULTILINE)
-        except re.error as exc:
+            compile_timed_user_regex(pattern, re.MULTILINE)
+        except regex.error as exc:
             warnings_out.append(_worldbook_regex_warning(book, entry, pattern, exc))
 
 
@@ -879,25 +881,24 @@ def match_worldbook_entries(
     warnings_out: list[dict[str, Any]] | None = None,
 ) -> list[Any]:
     entries = sorted(list(getattr(book, "entries", []) or []), key=lambda e: int(getattr(e, "orderIndex", 0)))
+    if effective_scan <= 0:
+        if warnings_out is not None:
+            collect_worldbook_regex_warnings(book, warnings_out)
+        return [entry for entry in entries if getattr(entry, "enabled", True)]
+
+    scope = conversation[-effective_scan:]
+    scan_text = "\n".join(_extract_text_content(m.get("content")) for m in scope)
     matched: list[Any] = []
     for entry in entries:
         if not bool(getattr(entry, "enabled", True)):
             continue
-        if effective_scan <= 0:
-            matched.append(entry)
-            continue
-        n = int(effective_scan)
-        if n < 0:
-            continue
-        scope = conversation[-n:] if n > 0 else []
-        scan_text = "\n".join(_extract_text_content(m.get("content")) for m in scope)
         pattern = (getattr(entry, "regex", "") or "").strip()
         if not pattern:
             continue
         try:
-            if compile_user_regex(pattern, re.MULTILINE).search(scan_text):
+            if compile_timed_user_regex(pattern, re.MULTILINE).search(scan_text, timeout=0.15, concurrent=True):
                 matched.append(entry)
-        except re.error as exc:
+        except (regex.error, TimeoutError) as exc:
             if warnings_out is not None:
                 warnings_out.append(_worldbook_regex_warning(book, entry, pattern, exc))
             continue
@@ -1006,7 +1007,8 @@ def prepare_conversation_with_worldbooks(
     t0 = time.perf_counter()
     for book in selected_books:
         eff_scan, ins_dep = _runtime_scan_insert_for_book(book.id, chat, settings, runtime_map=runtime_map)
-        entries = match_worldbook_entries(book, base_conversation, eff_scan)
+        match_warnings: list[dict[str, Any]] = []
+        entries = match_worldbook_entries(book, base_conversation, eff_scan, warnings_out=match_warnings)
         profile["counters"]["matchPass1"] += 1
         injections = build_worldbook_injections(book, entries, len(base_conversation), ins_dep)
         token_count = count_tokens_for_messages([item["message"] for item in injections]) if injections else 0
@@ -1019,6 +1021,7 @@ def prepare_conversation_with_worldbooks(
             "tokens": token_count,
             "eff_scan": eff_scan,
             "ins_dep": ins_dep,
+            "warnings": match_warnings,
         }
         worldbook_tokens_total += token_count
     profile["segmentsMs"]["worldbookMatch1"] = round((time.perf_counter() - t0) * 1000, 3)
@@ -1053,7 +1056,7 @@ def prepare_conversation_with_worldbooks(
         ins_dep = int(meta.get("ins_dep") or 5)
         if _scan_scope_equivalent(base_conversation, conversation, eff_scan):
             entries = list(meta.get("entries") or [])
-            collect_worldbook_regex_warnings(book, warnings)
+            warnings.extend(meta.get("warnings") or [])
             profile["counters"]["matchReused"] += 1
         else:
             entries = match_worldbook_entries(

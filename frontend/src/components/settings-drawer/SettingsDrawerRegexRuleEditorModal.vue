@@ -5,17 +5,10 @@ import ThemedRadioTags from '../ThemedRadioTags.vue'
 import SettingsField from './SettingsField.vue'
 import { useDialogBehavior } from '../../composables/useDialogBehavior'
 import { dialogAria } from '../../utils/uiPrimitives'
+import type { ContentRegexPreview } from '../../api/contentRegex'
 import type { ChatContentRegexRule } from '../../types/models'
 
 export type RegexTrialSourceMode = 'manual' | 'latest_assistant'
-
-export interface RegexTrialResultView {
-  beforeText: string
-  afterText: string
-  displayText: string
-  changed: boolean
-  extractedItems: Array<{ value: string; matchedText: string; ruleId: string }>
-}
 
 const show = defineModel<boolean>('show', { required: true })
 const draft = defineModel<ChatContentRegexRule | null>('draft', { required: true })
@@ -23,7 +16,9 @@ const trialSourceMode = defineModel<RegexTrialSourceMode>('trialSourceMode', { d
 const trialManualText = defineModel<string>('trialManualText', { default: '' })
 
 defineProps<{
-  trialResult: RegexTrialResultView | null
+  trialResult: ContentRegexPreview | null
+  trialError: string
+  busy: boolean
   trialSourceOptions: ReadonlyArray<{ label: string; value: RegexTrialSourceMode }>
 }>()
 
@@ -142,7 +137,7 @@ void dialogRef
             <div class="settings-group">
               <div class="settings-field-head">
                 <div class="settings-group-title">试运行</div>
-                <button type="button" class="btn btn-xs btn-secondary" @click="emit('run-trial')">试运行</button>
+                <button type="button" class="btn btn-xs btn-secondary" :disabled="busy" @click="emit('run-trial')">试运行</button>
               </div>
               <ThemedRadioTags
                 v-model="trialSourceMode"
@@ -157,6 +152,7 @@ void dialogRef
                 class="input textarea w-full resize-y"
                 placeholder="输入测试文本（最多 10000 字符）"
               />
+              <p v-if="trialError" role="alert" class="whitespace-pre-wrap text-xs text-[var(--color-error-text)]">{{ trialError }}</p>
               <template v-if="trialResult">
                 <SettingsField label="处理前">
                   <pre class="settings-readout whitespace-pre-wrap break-words">{{ trialResult.beforeText }}</pre>
@@ -175,7 +171,7 @@ void dialogRef
           </div>
           <div class="modal-footer shrink-0">
             <button type="button" class="btn btn-secondary" @click="show = false">取消</button>
-            <button type="button" class="btn btn-primary" @click="emit('save')">保存</button>
+            <button type="button" class="btn btn-primary" :disabled="busy" @click="emit('save')">保存</button>
           </div>
         </div>
       </div>

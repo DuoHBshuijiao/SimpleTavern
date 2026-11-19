@@ -46,9 +46,10 @@ import re
 from typing import Any, Literal, TypedDict
 from uuid import uuid4
 
+import regex
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.regex_compat import compile_user_regex
+from app.regex_compat import compile_timed_user_regex
 
 
 ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]
@@ -901,16 +902,7 @@ class ChatContentRegexRule(BaseModel):
     extractGroupIndex: int | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
-    def _validate_regex_if_enabled(self):
-        if not self.enabled:
-            return self
-        pattern = (self.pattern or "").strip()
-        if not pattern:
-            return self
-        try:
-            compile_user_regex(pattern)
-        except re.error as e:
-            raise ValueError(f"invalid regex: {e}") from e
+    def _default_extract_group(self):
         if self.extractSource == "capture_group" and self.extractGroupIndex is None:
             self.extractGroupIndex = 1
         return self
@@ -991,8 +983,8 @@ class WorldBookEntry(BaseModel):
         if not pattern:
             return self
         try:
-            compile_user_regex(pattern)
-        except re.error as e:
+            compile_timed_user_regex(pattern)
+        except regex.error as e:
             raise ValueError(f"invalid regex: {e}") from e
         return self
 
@@ -1207,6 +1199,7 @@ class ChatOverrides(BaseModel):
     contentRegexScanDepthDefault: int = Field(default=50, ge=1)
     contentRegexRules: list[ChatContentRegexRule] = Field(default_factory=list)
     contentRegexEnabledByRuleId: dict[str, bool] = Field(default_factory=dict)
+    contentRegexOrderByRuleId: dict[str, int] = Field(default_factory=dict)
     params: GenerationParams = Field(default_factory=GenerationParams)
     draftHelp: DraftHelpSettings = Field(default_factory=DraftHelpSettings)
     tts: "TtsSessionConfig | None" = Field(default=None, description="会话级 TTS 配置")

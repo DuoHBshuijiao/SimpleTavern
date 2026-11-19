@@ -62,7 +62,9 @@ def get_content_regex_scanner_health() -> dict:
 def _resolve_effective_rules(chat: Any, settings: Any) -> list[Any]:
     global_rules = list(getattr(settings, "contentRegexRuleLibrary", None) or [])
     legacy_rules = list(getattr(getattr(chat, "overrides", None), "contentRegexRules", None) or [])
-    enabled_map = dict(getattr(getattr(chat, "overrides", None), "contentRegexEnabledByRuleId", None) or {})
+    overrides = getattr(chat, "overrides", None)
+    enabled_map = getattr(overrides, "contentRegexEnabledByRuleId", None) or {}
+    order_map = getattr(overrides, "contentRegexOrderByRuleId", None) or {}
     # 合并全局规则库与会话级角色规则，同 ID 以全局为准
     seen_ids: set[str] = set()
     merged: list[Any] = []
@@ -79,8 +81,8 @@ def _resolve_effective_rules(chat: Any, settings: Any) -> list[Any]:
     for r in source_rules:
         cp = r.model_copy(deep=True)
         rid = str(getattr(cp, "id", ""))
-        if rid and rid in enabled_map:
-            cp.enabled = bool(enabled_map[rid])
+        cp.enabled = enabled_map.get(rid, cp.enabled)
+        cp.order = order_map.get(rid, cp.order)
         out.append(cp)
     return out
 

@@ -21,10 +21,13 @@
 from __future__ import annotations
 
 from fastapi import APIRouter
+from pydantic import BaseModel, Field
 
-from app.llm.vertex_auth import redact_settings, restore_settings, settings_need_restore
-from app.schemas import Settings
-from app.storage import load_settings, save_settings
+from app.content_regex import apply_content_regex_pipeline
+
+from app.llm.vertex_auth import redact_settings
+from app.schemas import ChatContentRegexRule, Settings
+from app.storage import load_settings, save_client_settings
 
 
 router = APIRouter(tags=["settings"])
@@ -54,7 +57,22 @@ def put_settings(settings: Settings) -> Settings:
     Returns:
         Settings: 保存后的设置对象（服务账号私钥已隐去）
     """
-    if settings_need_restore(settings):
-        # 前端拿到的是隐去私钥的文本，写回时从已保存的设置还原
-        restore_settings(settings, load_settings())
-    return redact_settings(save_settings(settings))
+    return redact_settings(save_client_settings(settings))
+
+
+class ContentRegexPreviewRequest(BaseModel):
+    text: str = Field(default="", max_length=10_000)
+    rules: list[ChatContentRegexRule] = Field(max_length=100)
+
+
+@router.post("/settings/content-regex/preview")
+def preview_content_regex(req: ContentRegexPreviewRequest) -> dict:
+    result = apply_content_regex_pipeline(req.text, req.rules)
+    return {
+        "beforeText": req.text,
+        "afterText": result.persisted_text,
+        "displayText": result.display_text,
+        "changed": result.persisted_text != req.text or result.display_text != req.text,
+        "extractedItems": result.extracted_items,
+        "errors": result.errors,
+    }

@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import re
 
+import regex
+
 _SAFE_LITERAL_FLAG_MAP: dict[str, int] = {
     "i": re.IGNORECASE,
     "m": re.MULTILINE,
@@ -64,3 +66,16 @@ def compile_user_regex(raw: str, base_flags: int = 0) -> re.Pattern[str]:
         return re.compile((raw or "").strip(), base_flags)
     pattern, literal_flags = parsed
     return re.compile(pattern, base_flags | literal_flags)
+
+
+def compile_timed_user_regex(raw: str, base_flags: int = 0) -> regex.Pattern:
+    pattern, literal = split_regex_literal(raw) or ((raw or "").strip(), 0)
+    flags = regex.VERSION0
+    for python_flag, timed_flag in (
+        (re.IGNORECASE, regex.IGNORECASE),
+        (re.MULTILINE, regex.MULTILINE),
+        (re.DOTALL, regex.DOTALL),
+    ):
+        if (base_flags | literal) & python_flag:
+            flags |= timed_flag
+    return regex.compile(pattern, flags)

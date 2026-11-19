@@ -46,7 +46,6 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from app.attachment_policy import ASSISTANT_IMAGE_ATTACHMENT_MAX_BYTES, is_image_mime_type
-from app.content_regex_scanner import ensure_content_regex_scanner_started
 from app.placeholders import replace_placeholders_in_text
 from app.group_mvu import (
     apply_character_mvu_snapshot_to_group_chat,
@@ -88,7 +87,6 @@ from app.storage import (
 )
 
 router = APIRouter(tags=["chats"])
-ensure_content_regex_scanner_started()
 
 
 def _now_iso() -> str:
@@ -366,6 +364,8 @@ def _merge_overrides(existing: Chat, incoming: UpdateChatRequest) -> None:
         existing.overrides.contentRegexEnabledByRuleId = {
             str(k): bool(v) for k, v in (getattr(ov, "contentRegexEnabledByRuleId", {}) or {}).items()
         }
+    if "contentRegexOrderByRuleId" in ov.model_fields_set:
+        existing.overrides.contentRegexOrderByRuleId = dict(ov.contentRegexOrderByRuleId or {})
     if hasattr(ov, "draftHelp"):
         if existing.overrides.draftHelp is None:
             existing.overrides.draftHelp = ov.draftHelp

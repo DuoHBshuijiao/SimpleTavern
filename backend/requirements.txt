@@ -8,3 +8,4 @@ jsonschema>=4.20
 python-multipart>=0.0.6
 tokenizers>=0.15
 PyJWT[crypto]>=2.10
+regex>=2024.11.6

@@ -254,6 +254,7 @@ export interface ChatOverrides {
   contentRegexRules?: ChatContentRegexRule[]
   /** 会话级规则启用开关（key=全局规则 id），用于各会话独立启停 */
   contentRegexEnabledByRuleId?: Record<string, boolean>
+  contentRegexOrderByRuleId?: Record<string, number>
   params: GenerationParams
   draftHelp?: DraftHelpSettings
   memberSettings?: Record<string, GroupMemberSettings>

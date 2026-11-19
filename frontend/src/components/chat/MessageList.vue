@@ -65,7 +65,7 @@ import SelectDropdownSurface from '../SelectDropdownSurface.vue'
 import ReasoningBubble from './ReasoningBubble.vue'
 import AnimatedClipHeight from './AnimatedClipHeight.vue'
 import { renderChatMarkdown, renderChatMarkdownStreaming } from '../../utils/markdownIt'
-import { applyContentRegexDisplay } from '../../utils/contentRegex'
+import { useContentRegexDisplay } from '../../composables/useContentRegexDisplay'
 import { usePreferHoverChrome } from '../../composables/usePreferHoverChrome'
 import { Settings, ChevronLeft, ChevronRight, ChevronDown, X } from 'lucide-vue-next'
 
@@ -539,19 +539,12 @@ function messageFastMissBadge(m: ChatMessage): string | null {
  * 渲染 Markdown；当前正在流式输出的那条助手消息走「补虚闭合」版本，
  * 其它消息用稳定版本，避免为非流式消息付出不必要的补齐成本 / 潜在误判。
  */
+const displayWithContentRegex = useContentRegexDisplay(() => props.contentRegexRules)
+
 function getDisplayText(m: ChatMessage): string {
   const raw = props.getDisplayContent(m)
   if (!raw) return raw
-  return applyContentRegexDisplay(raw, props.contentRegexRules)
-}
-
-function markdownCacheKey(m: ChatMessage): string {
-  const text = getDisplayText(m)
-  const versionIdx = props.getCurrentVersionIndex(m)
-  const rulesKey = (props.contentRegexRules ?? [])
-    .map((r) => `${r.id}:${r.enabled}:${r.pattern}`)
-    .join('|')
-  return `${m.id}|v${versionIdx}|${text.length}|${text.slice(0, 80)}|${rulesKey}`
+  return displayWithContentRegex(m.id, raw)
 }
 
 function renderMarkdown(m: ChatMessage) {
@@ -559,7 +552,7 @@ function renderMarkdown(m: ChatMessage) {
   const isStreaming =
     (props.isGenerating || props.isInterjecting) && m.id === props.reasoningMessageId
   if (isStreaming) return renderChatMarkdownStreaming(text)
-  const key = markdownCacheKey(m)
+  const key = text
   const cached = markdownHtmlCache.get(key)
   if (cached != null) {
     rememberMarkdownHtml(key, cached)

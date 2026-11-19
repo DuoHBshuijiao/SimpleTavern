@@ -10,6 +10,8 @@
  *  - 角色编辑（allowInherit=false，mvuMode 必为 'regex' | 'directive'）
  *  - 群聊创建弹窗 / 群聊设置弹窗 / 会话设置抽屉（allowInherit=true）
  */
+import { ref, watch } from 'vue'
+import { previewContentRegex } from '../../api/contentRegex'
 import InitialStateEditor from './InitialStateEditor.vue'
 import ModernSelect from '../ModernSelect.vue'
 import SettingsField from '../settings-drawer/SettingsField.vue'
@@ -45,7 +47,29 @@ const modeOptions = [
   { label: '指令模式', value: 'directive' },
 ]
 
-const modeSelectValue = (() => '')
+const errorsByRule = ref<Record<string, string>>({})
+
+watch(() => props.contentRegexRules, (rules, _previous, onCleanup) => {
+  const controller = new AbortController()
+  const timer = setTimeout(async () => {
+    try {
+      const results = await Promise.all(Array.from({ length: Math.ceil(rules.length / 100) }, (_, index) =>
+        previewContentRegex('', rules.slice(index * 100, (index + 1) * 100).map((rule) => ({ ...rule, enabled: true })), controller.signal),
+      ))
+      if (!controller.signal.aborted) {
+        errorsByRule.value = Object.fromEntries(results.flatMap((result) =>
+          result.errors.map((error) => [error.ruleId, `${error.ruleName}：${error.error}`]),
+        ))
+      }
+    } catch {
+      // Saving the card remains available when validation is temporarily unavailable.
+    }
+  }, 200)
+  onCleanup(() => {
+    clearTimeout(timer)
+    controller.abort()
+  })
+}, { immediate: true })
 
 function onModeChange(v: string) {
   if (v === 'regex' || v === 'directive') {
@@ -102,7 +126,6 @@ function onTablesUpdate(v: StatusTableDef[]) {
   emit('update:initialStateTables', v)
 }
 
-void modeSelectValue
 </script>
 
 <template>
@@ -128,7 +151,7 @@ void modeSelectValue
       ></textarea>
     </SettingsField>
 
-    <SettingsField v-else-if="props.mvuMode === 'regex'" label="正文正则规则">
+    <SettingsField label="正文正则规则" more="规则启用时会处理正文。正则模式还可提取状态变更。">
       <template #actions>
         <button type="button" class="btn btn-xs btn-secondary" @click="addRule">新建规则</button>
       </template>
@@ -165,6 +188,7 @@ void modeSelectValue
               placeholder="pattern"
               @input="updateRule(idx, { pattern: ($event.target as HTMLTextAreaElement).value })"
             ></textarea>
+            <p v-if="errorsByRule[rule.id]" role="alert" class="text-xs text-[var(--color-error-text)]">{{ errorsByRule[rule.id] }}</p>
           </SettingsField>
           <div class="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(8rem,1fr))]">
             <SettingsField label="处理动作">

@@ -100,7 +100,7 @@ import { getWebGpuUnavailableMessage, probeWebGpuAdapter } from '../utils/webgpu
 import type { WebGpuUnavailableReason } from '../utils/webgpuProbe'
 import { concatEnabledWorldBookContents, countTokensForText } from '../utils/tokenEstimate'
 import { normalizeWgslSource } from '../utils/normalizeWgslSource'
-import { applyContentRegexDisplay } from '../utils/contentRegex'
+import { previewContentRegex, type ContentRegexPreview } from '../api/contentRegex'
 import {
   compilationMessagesToDiagnostics,
   filterDiagnosticsBySeverity,
@@ -324,7 +324,6 @@ const restoringChatId = ref<string | null>(null)
 let chatSwitchConfirmSeq = 0
 const savedThemePreviewId = ref(normalizeThemeId(null))
 const regexEditorOpen = ref(false)
-const regexEditorIndex = ref<number | null>(null)
 const regexEditorDraft = ref<ChatContentRegexRule | null>(null)
 const chatRegexAccordionOpen = ref(false)
 const regexTrialSourceMode = ref<'manual' | 'latest_assistant'>('manual')
@@ -405,13 +404,10 @@ async function refreshWebSearchRemoteStatus(): Promise<void> {
   }
 }
 
-const regexTrialResult = ref<{
-  beforeText: string
-  afterText: string
-  displayText: string
-  changed: boolean
-  extractedItems: Array<{ value: string; matchedText: string; ruleId: string }>
-} | null>(null)
+const regexTrialResult = ref<ContentRegexPreview | null>(null)
+const regexTrialError = ref('')
+const regexTrialBusy = ref(false)
+let regexTrialRequest = 0
 
 const showApiKey = ref(false)
 const editingPresetId = ref<string | null>(null)
@@ -1079,6 +1075,7 @@ function ensureOverrides(v?: Partial<ChatOverrides> | null): ChatOverrides {
         : 50,
     contentRegexRules: normalizeRegexRules(v?.contentRegexRules as Array<Partial<ChatContentRegexRule> | null>),
     contentRegexEnabledByRuleId: { ...(v?.contentRegexEnabledByRuleId || {}) },
+    contentRegexOrderByRuleId: { ...(v?.contentRegexOrderByRuleId || {}) },
     params: {
       model: v?.params?.model ?? null,
       temperature: v?.params?.temperature ?? null,
@@ -3516,6 +3513,10 @@ async function saveGlobal() {
  * @returns {Promise<void>} 完成时返回
  */
 /** Context Size：0、NaN、undefined 视为“未启用”即 null */
+function normalizeOptionalNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
 function normalizeContextSize(v: number | null | undefined): number | null {
   if (v == null || Number.isNaN(v) || v < 1) return null
   return v
@@ -3543,6 +3544,7 @@ interface ComparableChatOverrides {
   contentRegexScanDepthDefault: number
   contentRegexRules: ChatContentRegexRule[]
   contentRegexEnabledByRuleId: Record<string, boolean>
+  contentRegexOrderByRuleId: Record<string, number>
   params: {
     model: string | null
     temperature: number | null
@@ -3598,11 +3600,12 @@ function normalizeComparableChatOverrides(source?: Partial<ChatOverrides> | null
         : 50,
     contentRegexRules: normalizeRegexRules(overrides.contentRegexRules),
     contentRegexEnabledByRuleId: { ...(overrides.contentRegexEnabledByRuleId || {}) },
+    contentRegexOrderByRuleId: { ...(overrides.contentRegexOrderByRuleId || {}) },
     params: {
       model: overrides.params.model ?? null,
-      temperature: overrides.params.temperature ?? null,
-      top_p: overrides.params.top_p ?? null,
-      max_tokens: overrides.params.max_tokens ?? null,
+      temperature: normalizeOptionalNumber(overrides.params.temperature),
+      top_p: normalizeOptionalNumber(overrides.params.top_p),
+      max_tokens: normalizeOptionalNumber(overrides.params.max_tokens),
       context_size: normalizeContextSize(overrides.params.context_size),
     },
     draftHelp: {
@@ -3671,6 +3674,7 @@ function applyNormalizedComparableToDraft(source: ComparableChatOverrides) {
   chatDraft.value.contentRegexScanDepthDefault = source.contentRegexScanDepthDefault
   chatDraft.value.contentRegexRules = source.contentRegexRules.map((rule) => ({ ...rule }))
   chatDraft.value.contentRegexEnabledByRuleId = { ...source.contentRegexEnabledByRuleId }
+  chatDraft.value.contentRegexOrderByRuleId = { ...source.contentRegexOrderByRuleId }
   chatDraft.value.params = { ...source.params }
   chatDraft.value.draftHelp = { ...source.draftHelp }
   // 与 ensureOverrides 一致：Comparable 里「全默认」时 tts 为 null，但会话草稿必须始终持有 TtsSessionConfig，避免模板访问 chatDraft.tts.model 崩溃。
@@ -3778,19 +3782,27 @@ const contentRegexRulesSorted = computed(() => {
     }
   }
 
-  return rules.sort((a, b) => (a.order - b.order) || a.id.localeCompare(b.id))
+  const order = chatDraft.value?.contentRegexOrderByRuleId
+  return rules.sort((a, b) => (order?.[a.id] ?? a.order) - (order?.[b.id] ?? b.order) || a.id.localeCompare(b.id))
 })
+
+function setSessionRegexOrder(rules: ChatContentRegexRule[]) {
+  if (!chatDraft.value) return
+  chatDraft.value.contentRegexOrderByRuleId = Object.fromEntries(rules.map((rule, index) => [rule.id, index]))
+}
 
 function openRegexRuleEditor(index: number | null = null) {
   if (!globalDraft.value) return
-  regexEditorIndex.value = index
   if (index == null) {
     regexEditorDraft.value = normalizeRegexRule({ order: contentRegexRulesSorted.value.length }, contentRegexRulesSorted.value.length)
   } else {
     const found = contentRegexRulesSorted.value[index]
     regexEditorDraft.value = normalizeRegexRule(found, index)
   }
+  ++regexTrialRequest
   regexTrialResult.value = null
+  regexTrialError.value = ''
+  regexTrialBusy.value = false
   regexEditorOpen.value = true
 }
 
@@ -3805,7 +3817,11 @@ async function removeRegexRule(index: number) {
     variant: 'danger',
   })
   if (!ok) return
-  globalDraft.value.contentRegexRuleLibrary = list.filter((_, i) => i !== index).map((rule, i) => ({ ...rule, order: i }))
+  if (target._origin === 'character' && chatDraft.value) {
+    chatDraft.value.contentRegexRules = (chatDraft.value.contentRegexRules ?? []).filter((rule) => rule.id !== target.id)
+  } else {
+    globalDraft.value.contentRegexRuleLibrary = (globalDraft.value.contentRegexRuleLibrary ?? []).filter((rule) => rule.id !== target.id)
+  }
 }
 
 function moveRegexRule(index: number, direction: -1 | 1) {
@@ -3819,46 +3835,27 @@ function moveRegexRule(index: number, direction: -1 | 1) {
   if (!currentRule || !targetRule) return
   next[index] = targetRule
   next[target] = currentRule
-  globalDraft.value.contentRegexRuleLibrary = next.map((rule, i) => ({ ...rule, order: i }))
+  setSessionRegexOrder(next)
 }
 
 function toggleAllRegexRules(enabled: boolean) {
   if (!chatDraft.value) return
   const map = { ...(chatDraft.value.contentRegexEnabledByRuleId || {}) }
-  const chatList = chatDraft.value.contentRegexRules || []
-  for (const item of contentRegexRulesSorted.value) {
-    if ((item as any)._origin === 'character') {
-      const found = chatList.find((r) => r.id === item.id)
-      if (found) found.enabled = enabled
-    } else {
-      map[item.id] = enabled
-    }
-  }
+  for (const item of contentRegexRulesSorted.value) map[item.id] = enabled
   chatDraft.value.contentRegexEnabledByRuleId = map
 }
 
 function setRegexRuleEnabled(index: number, enabled: boolean) {
   const item = contentRegexRulesSorted.value[index]
   if (!item) return
-  if ((item as any)._origin === 'character') {
-    if (chatDraft.value) {
-      const chatList = chatDraft.value.contentRegexRules || []
-      const found = chatList.find((r) => r.id === item.id)
-      if (found) found.enabled = enabled
-    }
-    return
-  }
   if (!chatDraft.value) return
   const map = { ...(chatDraft.value.contentRegexEnabledByRuleId || {}) }
   map[item.id] = enabled
   chatDraft.value.contentRegexEnabledByRuleId = map
 }
 
-function isRegexRuleEnabled(rule: ChatContentRegexRule & { _origin?: string }): boolean {
-  if ((rule as any)._origin === 'character') return rule.enabled !== false
-  const map = chatDraft.value?.contentRegexEnabledByRuleId || {}
-  if (Object.prototype.hasOwnProperty.call(map, rule.id)) return !!map[rule.id]
-  return false
+function isRegexRuleEnabled(rule: ChatContentRegexRule): boolean {
+  return chatDraft.value?.contentRegexEnabledByRuleId?.[rule.id] ?? rule.enabled !== false
 }
 
 function regexActionLabel(action?: string | null): string {
@@ -3888,28 +3885,52 @@ function handleRegexRuleDragOver(e: DragEvent, index: number) {
   const [moving] = list.splice(regexDragIndex, 1)
   if (!moving) return
   list.splice(index, 0, moving)
-  globalDraft.value.contentRegexRuleLibrary = list.map((rule, i) => ({ ...rule, order: i }))
+  setSessionRegexOrder(list)
   regexDragIndex = index
 }
 function handleRegexRuleDragEnd() {
   regexDragIndex = -1
 }
 
-function saveRegexRuleEditor() {
-  if (!globalDraft.value || !regexEditorDraft.value) return
+async function saveRegexRuleEditor() {
+  if (!globalDraft.value || !regexEditorDraft.value || regexTrialBusy.value) return
   const normalized = normalizeRegexRule(regexEditorDraft.value, regexEditorDraft.value.order)
-  const list = [...contentRegexRulesSorted.value]
-  if (regexEditorIndex.value == null) {
-    list.push(normalized)
+  const target = contentRegexRulesSorted.value.find((rule) => rule.id === normalized.id)
+  if (!(await runRulePreview('', normalized))) return
+  if (!globalDraft.value || !regexEditorOpen.value) return
+  if (target?._origin === 'character' && chatDraft.value) {
+    const rules = chatDraft.value.contentRegexRules ?? []
+    chatDraft.value.contentRegexRules = rules.map((rule) => rule.id === target.id ? normalized : rule)
   } else {
-    list[regexEditorIndex.value] = normalized
+    const rules = globalDraft.value.contentRegexRuleLibrary ?? []
+    globalDraft.value.contentRegexRuleLibrary = target
+      ? rules.map((rule) => rule.id === target.id ? normalized : rule)
+      : [...rules, normalized]
   }
-  globalDraft.value.contentRegexRuleLibrary = list.map((rule, i) => ({ ...normalizeRegexRule(rule, i), order: i }))
   regexEditorOpen.value = false
 }
 
+async function runRulePreview(text: string, rule: ChatContentRegexRule, showResult = false): Promise<boolean> {
+  const request = ++regexTrialRequest
+  regexTrialBusy.value = true
+  regexTrialError.value = ''
+  if (showResult) regexTrialResult.value = null
+  try {
+    const result = await previewContentRegex(text, [{ ...rule, enabled: true }])
+    if (request !== regexTrialRequest || !regexEditorOpen.value) return false
+    if (showResult) regexTrialResult.value = result
+    regexTrialError.value = result.errors.map((error) => `${error.ruleName}：${error.error}`).join('\n')
+    return !result.errors.length
+  } catch (error) {
+    if (request === regexTrialRequest) regexTrialError.value = error instanceof Error ? error.message : String(error)
+    return false
+  } finally {
+    if (request === regexTrialRequest) regexTrialBusy.value = false
+  }
+}
+
 function runRegexRuleTrial() {
-  if (!regexEditorDraft.value) return
+  if (!regexEditorDraft.value || regexTrialBusy.value) return
   const sourceMode = regexTrialSourceMode.value
   let before = ''
   if (sourceMode === 'latest_assistant') {
@@ -3929,16 +3950,7 @@ function runRegexRuleTrial() {
   if (before.length > 10000) before = before.slice(0, 10000)
 
   const rule = normalizeRegexRule(regexEditorDraft.value, regexEditorDraft.value.order)
-  const displayText = applyContentRegexDisplay(before, [rule])
-  const changed = displayText !== before
-
-  regexTrialResult.value = {
-    beforeText: before,
-    afterText: displayText,
-    displayText,
-    changed,
-    extractedItems: [],
-  }
+  void runRulePreview(before, rule, true)
 }
 
 /**
@@ -3994,17 +4006,6 @@ async function saveChatOverrides() {
 
   if (!shouldSaveOverrides) {
     return
-  }
-
-  // 将全局规则库中所有规则的启用状态显式写入 contentRegexEnabledByRuleId
-  if (globalDraft.value?.contentRegexRuleLibrary) {
-    const map = { ...(chatDraft.value.contentRegexEnabledByRuleId || {}) }
-    for (const rule of globalDraft.value.contentRegexRuleLibrary) {
-      if (!Object.prototype.hasOwnProperty.call(map, rule.id)) {
-        map[rule.id] = isRegexRuleEnabled(rule)
-      }
-    }
-    chatDraft.value.contentRegexEnabledByRuleId = map
   }
 
   await chatsStore.updateOverrides(chat.id, chatDraft.value, { skipLoadList: true })
@@ -4528,6 +4529,8 @@ provide(
     v-model:trial-source-mode="regexTrialSourceMode"
     v-model:trial-manual-text="regexTrialManualText"
     :trial-result="regexTrialResult"
+    :trial-error="regexTrialError"
+    :busy="regexTrialBusy"
     :trial-source-options="regexTrialSourceOptions"
     @save="saveRegexRuleEditor"
     @run-trial="runRegexRuleTrial"

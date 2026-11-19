@@ -34,6 +34,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.content_regex_scanner import ensure_content_regex_scanner_started
 from app.errors import install_error_handlers
 from app.request_context import REQUEST_ID_HEADER, RequestIdMiddleware
 from app.routes.avatars import router as avatars_router
@@ -99,6 +100,7 @@ async def lifespan(app: FastAPI):
     关闭时无额外清理（yield 之后可添加 shutdown 逻辑）。
     """
     ensure_data_initialized()
+    ensure_content_regex_scanner_started()
     warmup_tokenizer()
     await startup_http_clients()
     fork_index_task = asyncio.create_task(_warm_fork_index())
