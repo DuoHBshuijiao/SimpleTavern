@@ -551,6 +551,8 @@ export function useChatActions(deps: ChatActionsDeps) {
       return
     }
     
+    const chatId = activeChat.value?.id
+    const shouldUpdateChat = activeChat.value?.userPersonaId !== id
     const currentSettings = settingsStore.settings
     if (currentSettings) {
       // 使用双重类型断言，因为我们知道 currentSettings 是完整的 Settings 对象
@@ -559,8 +561,8 @@ export function useChatActions(deps: ChatActionsDeps) {
         selectedPersonaId: id,
       } as unknown as Settings)
     }
-    if (activeChat.value && activeChat.value.userPersonaId !== id) {
-      await chatsStore.updateUserPersonaId(activeChat.value.id, id)
+    if (chatId && shouldUpdateChat) {
+      await chatsStore.updateUserPersonaId(chatId, id)
     }
   }
 
@@ -592,7 +594,9 @@ export function useChatActions(deps: ChatActionsDeps) {
     await settingsStore.save({
       ...currentSettings,
       userPersonas: personas,
-      selectedPersonaId: personas[0]?.id ?? null,
+      selectedPersonaId: currentSettings.selectedPersonaId === id
+        ? personas[0]?.id ?? null
+        : currentSettings.selectedPersonaId,
     } as unknown as Settings)
   }
 
@@ -636,7 +640,7 @@ export function useChatActions(deps: ChatActionsDeps) {
     const targets = (activeChat.value.messages || []).filter(m =>
       m.role === 'user' &&
       !String(m.id).startsWith('local_') &&
-      (!m.senderName || !m.senderAvatar || !m.senderPersonaId)
+      !m.senderName && !m.senderPersonaId && !m.senderAvatar
     )
 
     for (const m of targets) {

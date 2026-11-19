@@ -570,6 +570,11 @@ function messageRowMemoDeps(m: ChatMessage): unknown[] {
     m.id,
     getDisplayText(m),
     props.getCurrentVersionIndex(m),
+    m.usage?.finishReason,
+    getMessageLabel(m),
+    getMessageAvatar(m),
+    getOutgoingFork(m),
+    forkListMessageId.value === m.id,
     streaming,
     props.reasoningMessageId,
     // 纯思考阶段正文为空，须单独依赖思考内容，否则气泡不会随流式刷新
@@ -871,7 +876,11 @@ function getUserPersonaFromSettings(id: string | null | undefined): UserPersona 
  * @returns {string} 消息标签
  */
 function getMessageLabel(m: ChatMessage): string {
-  if (m.role === 'user') return (m.senderName || props.userName)
+  if (m.role === 'user') {
+    if (m.senderName) return m.senderName
+    if (m.senderPersonaId) return getUserPersonaFromSettings(m.senderPersonaId)?.name || '你'
+    return m.senderAvatar ? '你' : props.userName
+  }
   if (m.role === 'assistant') {
     if (m.characterId) {
       const char = getCharacterById(m.characterId)
@@ -886,7 +895,7 @@ function getMessageLabel(m: ChatMessage): string {
  * 获取消息头像
  *
  * 根据消息角色和内容返回头像URL。
- * 用户消息：有 senderPersonaId 时优先用设置里该身份的当前头像，否则用消息快照 senderAvatar，再否则当前选中身份头像。
+ * 用户消息优先显示发送者当前头像或快照头像；只有未保存发送者的旧消息沿用会话头像。
  * 助手消息优先使用角色头像。
  *
  * @param {ChatMessage} m - 消息对象（来自types/models.ts）
@@ -899,7 +908,7 @@ function getMessageAvatar(m: ChatMessage): string | null {
       if (live?.avatar) return `/api/avatars/${live.avatar}`
     }
     if (m.senderAvatar) return `/api/avatars/${m.senderAvatar}`
-    return props.userAvatarUrl
+    return m.senderPersonaId || m.senderName ? null : props.userAvatarUrl
   }
   if (m.role === 'assistant') {
     if (m.characterId) {
@@ -1907,10 +1916,13 @@ onBeforeUnmount(() => {
               </template>
             </AnimatedClipHeight>
             <div
-              v-if="m.role === 'assistant' && (messageCacheBadge(m) || messageFastMissBadge(m))"
+              v-if="m.role === 'assistant' && (messageCacheBadge(m) || messageFastMissBadge(m) || m.usage?.finishReason === 'length')"
               class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 px-1 text-[10px] leading-none text-[var(--color-text-muted)]"
             >
               <span v-if="messageCacheBadge(m)">{{ messageCacheBadge(m) }}</span>
+              <span v-if="m.usage?.finishReason === 'length'" class="text-[var(--color-warning-text,var(--color-warning))]">
+                已达到输出长度上限
+              </span>
               <span
                 v-if="messageFastMissBadge(m)"
                 class="text-[var(--color-warning-text,var(--color-warning))]"
