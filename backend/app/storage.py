@@ -1219,16 +1219,13 @@ def load_worldbook(worldbook_id: str) -> WorldBook:
 
 def save_worldbook(book: WorldBook) -> WorldBook:
     """
-    保存世界书并维护互斥字段约束
+    保存世界书，保留全局启用前的会话绑定。
     """
     now = datetime.now().astimezone().isoformat()
     if not getattr(book, "createdAt", None):
         book.createdAt = now
     book.updatedAt = now
-    if bool(book.globalActive):
-        book.sessionChatIds = []
-    else:
-        book.sessionChatIds = list(dict.fromkeys([cid for cid in (book.sessionChatIds or []) if cid]))
+    book.sessionChatIds = list(dict.fromkeys(cid for cid in book.sessionChatIds if cid))
     data = book.model_dump(mode="json")
     for e in data.get("entries") or []:
         if isinstance(e, dict):
@@ -1246,6 +1243,32 @@ def save_worldbook(book: WorldBook) -> WorldBook:
     except Exception as exc:
         logger.warning("worldbook_index upsert failed for %s: %s", book.id, exc)
     return book
+
+
+def update_worldbook_fork_binding(book_id: str, source_id: str, fork_id: str, *, add: bool) -> bool:
+    """复制或撤回会话绑定，只修改最新磁盘文件中的绑定字段。"""
+    path = worldbook_path(book_id)
+    with _lock_for(path):
+        try:
+            with path.open(encoding="utf-8") as stream:
+                data = json.load(stream)
+        except FileNotFoundError:
+            return False
+        sessions = data.get("sessionChatIds") or []
+        if add:
+            if source_id not in sessions or fork_id in sessions:
+                return False
+            sessions = [*sessions, fork_id]
+        else:
+            if fork_id not in sessions:
+                return False
+            sessions = [chat_id for chat_id in sessions if chat_id != fork_id]
+        data["sessionChatIds"] = sessions
+        _write_json_locked(path, data)
+
+    from app.worldbook_index import upsert_worldbook_activation
+    upsert_worldbook_activation(book_id, global_active=bool(data.get("globalActive")), session_chat_ids=sessions)
+    return True
 
 
 def delete_worldbook(worldbook_id: str) -> None:
@@ -2147,171 +2170,61 @@ class ForkChatSummary:
     forkedFromMessageIndex: int | None = None
 
 
-@dataclass(frozen=True)
-class ChatListMeta:
-    """侧栏列表用的轻量会话元数据（不加载 messages）。"""
-    id: str
-    characterId: str
-    title: str
-    createdAt: str
+@dataclass(frozen=True, kw_only=True)
+class ChatListMeta(ForkChatSummary):
     updatedAt: str
     isGroup: bool
     memberIds: tuple[str, ...]
-    forkedFromChatId: str | None
-    forkedFromMessageId: str | None
-    forkedFromMessageIndex: int | None = None
     userPersonaId: str | None = None
 
 
-_RE_JSON_STRING = r'"((?:\\.|[^"\\])*)"'
-_RE_CHAT_ID = re.compile(r'"id"\s*:\s*' + _RE_JSON_STRING)
-_RE_CHAT_TITLE = re.compile(r'"title"\s*:\s*' + _RE_JSON_STRING)
-_RE_CHAT_CREATED = re.compile(r'"createdAt"\s*:\s*' + _RE_JSON_STRING)
-_RE_FORK_PARENT = re.compile(r'"forkedFromChatId"\s*:\s*"([^"\\]+)"')
-_RE_FORK_PARENT_NULL = re.compile(r'"forkedFromChatId"\s*:\s*null')
-_RE_FORK_MSG = re.compile(r'"forkedFromMessageId"\s*:\s*"([^"\\]+)"')
-_RE_FORK_MSG_NULL = re.compile(r'"forkedFromMessageId"\s*:\s*null')
-_RE_FORK_IDX = re.compile(r'"forkedFromMessageIndex"\s*:\s*(\d+)')
-_RE_UPDATED_AT = re.compile(r'"updatedAt"\s*:\s*' + _RE_JSON_STRING)
-_RE_IS_GROUP = re.compile(r'"isGroup"\s*:\s*(true|false)')
-_RE_USER_PERSONA_ID = re.compile(r'"userPersonaId"\s*:\s*' + _RE_JSON_STRING)
-_RE_USER_PERSONA_ID_NULL = re.compile(r'"userPersonaId"\s*:\s*null')
-_RE_MEMBER_IDS = re.compile(r'"memberIds"\s*:\s*\[(.*?)\]', re.DOTALL)
-_RE_MEMBER_ID_HEX = re.compile(r'"([0-9a-f]{32})"')
-
-
-def _unescape_json_string(raw: str) -> str:
-    try:
-        return json.loads(f'"{raw}"')
-    except Exception:
-        return raw.replace("\\\"", '"').replace("\\\\", "\\")
-
-
-def _match_json_string(m: re.Match[str] | None) -> str | None:
-    if m is None:
-        return None
-    if m.lastindex and m.lastindex >= 1:
-        g1 = m.group(1)
-        if g1 is not None:
-            return _unescape_json_string(g1)
-    return None
-
-
 def read_chat_fork_meta(path: Path) -> ForkChatSummary | None:
-    """
-    读取 chat.json 分叉相关元数据：头尾切片 + 正则，不解析 messages。
-    """
-    try:
-        size = path.stat().st_size
-        with open(path, "r", encoding="utf-8") as f:
-            head = f.read(4096)
-        with open(path, "rb") as f:
-            if size > 2048:
-                f.seek(max(0, size - 2048))
-            tail = f.read().decode("utf-8", errors="ignore")
-    except OSError as exc:
-        _report_runtime_integrity_failure(
-            path,
-            kind=_chat_integrity_kind(path),
-            exc=exc,
-        )
-        return None
-
-    fallback_chat_id = path.parent.name if path.name == CHAT_RECORD_FILENAME else path.stem
-    chat_id = _match_json_string(_RE_CHAT_ID.search(head)) or fallback_chat_id
-    if not chat_id:
-        return None
-    title = (_match_json_string(_RE_CHAT_TITLE.search(head)) or "").strip() or "新对话"
-    created_at = _match_json_string(_RE_CHAT_CREATED.search(head)) or ""
-
-    fork_parent: str | None = None
-    if not _RE_FORK_PARENT_NULL.search(tail):
-        pm = _RE_FORK_PARENT.search(tail)
-        if pm:
-            fork_parent = pm.group(1)
-    fork_msg: str | None = None
-    if not _RE_FORK_MSG_NULL.search(tail):
-        mm = _RE_FORK_MSG.search(tail)
-        if mm:
-            fork_msg = mm.group(1)
-    idx_m = _RE_FORK_IDX.search(tail)
-    fork_idx: int | None = int(idx_m.group(1)) if idx_m else None
-
-    return ForkChatSummary(
-        id=chat_id,
-        characterId=path.parent.parent.name if path.parent.parent.name else "",
-        title=title,
-        createdAt=created_at,
-        forkedFromChatId=fork_parent,
-        forkedFromMessageId=fork_msg,
-        forkedFromMessageIndex=fork_idx,
-    )
-
-
-def _parse_member_ids_from_chunk(chunk: str) -> tuple[str, ...]:
-    m = _RE_MEMBER_IDS.search(chunk)
-    if not m:
-        return ()
-    return tuple(_RE_MEMBER_ID_HEX.findall(m.group(1)))
-
-
-def _parse_is_group(chunk: str) -> bool:
-    m = _RE_IS_GROUP.search(chunk)
-    return m is not None and m.group(1) == "true"
-
-
-def _parse_user_persona_id(chunk: str) -> str | None:
-    if _RE_USER_PERSONA_ID_NULL.search(chunk):
-        return None
-    m = _RE_USER_PERSONA_ID.search(chunk)
-    return _match_json_string(m)
+    return read_chat_list_meta(path)
 
 
 def read_chat_list_meta(path: Path) -> ChatListMeta | None:
-    """
-    读取 chat.json 侧栏列表元数据：头尾切片 + 正则，不解析 messages。
-    memberIds / isGroup / updatedAt 多在文件尾部（messages 之后）。
-    """
-    fork = read_chat_fork_meta(path)
-    if fork is None:
-        return None
     try:
-        size = path.stat().st_size
-        with open(path, "r", encoding="utf-8") as f:
-            head = f.read(4096)
-        with open(path, "rb") as f:
-            tail_size = min(size, 16384)
-            if size > tail_size:
-                f.seek(size - tail_size)
-            tail = f.read().decode("utf-8", errors="ignore")
-    except OSError as exc:
-        _report_runtime_integrity_failure(
-            path,
-            kind=_chat_integrity_kind(path),
-            exc=exc,
-        )
+        stat = path.stat()
+        return _read_chat_list_meta(path, stat.st_mtime_ns, stat.st_size)
+    except FileNotFoundError:
+        return None
+    except (OSError, AppError, ValueError) as exc:
+        _report_runtime_integrity_failure(path, kind=_chat_integrity_kind(path), exc=exc)
         return None
 
-    combined = head + tail
-    updated_at = _match_json_string(_RE_UPDATED_AT.search(tail)) or _match_json_string(
-        _RE_UPDATED_AT.search(head)
-    ) or fork.createdAt
-    is_group = _parse_is_group(head) or _parse_is_group(tail)
-    member_ids = _parse_member_ids_from_chunk(combined) or _parse_member_ids_from_chunk(tail)
-    user_persona_id = _parse_user_persona_id(tail) or _parse_user_persona_id(combined)
 
+@lru_cache(maxsize=2048)
+def _read_chat_list_meta(path: Path, mtime_ns: int, size: int) -> ChatListMeta:
+    # File size and modification time invalidate this cache after a record is replaced.
+    # Only the top-level metadata is retained, including for older records.
+    raw = read_json(path, shared=True)
+    if not isinstance(raw, dict):
+        raise ValueError("chat record must be a JSON object")
+
+    folder_layout = path.name == CHAT_RECORD_FILENAME
+    fallback_chat_id = path.parent.name if folder_layout else path.stem
+    character_id = path.parent.parent.name if folder_layout else path.parent.name
+
+    def field(name: str) -> str | None:
+        value = raw.get(name)
+        return value if isinstance(value, str) and value else None
+
+    updated_at = field("updatedAt")
+    created_at = field("createdAt") or updated_at or datetime.fromtimestamp(mtime_ns / 1_000_000_000).astimezone().isoformat()
+    index = raw.get("forkedFromMessageIndex")
+    members = raw.get("memberIds")
     return ChatListMeta(
-        id=fork.id,
-        characterId=fork.characterId,
-        title=fork.title,
-        createdAt=fork.createdAt,
-        updatedAt=updated_at or fork.createdAt,
-        isGroup=is_group,
-        memberIds=member_ids,
-        forkedFromChatId=fork.forkedFromChatId,
-        forkedFromMessageId=fork.forkedFromMessageId,
-        forkedFromMessageIndex=fork.forkedFromMessageIndex,
-        userPersonaId=user_persona_id,
+        id=field("id") or fallback_chat_id,
+        characterId=character_id,
+        title=(field("title") or "").strip() or "\u65b0\u5bf9\u8bdd",
+        createdAt=created_at,
+        updatedAt=updated_at or created_at,
+        isGroup=raw.get("isGroup") is True,
+        memberIds=tuple(member for member in members if isinstance(member, str)) if isinstance(members, list) else (),
+        forkedFromChatId=field("forkedFromChatId"),
+        forkedFromMessageId=field("forkedFromMessageId"),
+        forkedFromMessageIndex=index if type(index) is int else None,
+        userPersonaId=field("userPersonaId"),
     )
 
 

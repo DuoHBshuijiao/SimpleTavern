@@ -15,7 +15,7 @@ export interface UseForkLineageOptions {
 /**
  * 会话分叉血缘（fork lineage）的加载、缓存、防抖与切会话清理。提炼自 ChatPage.vue，行为不变。
  *
- * 普通会话不主动拉 lineage；仅对带 `forkedFromChatId` 的会话在加载后防抖请求，并带 30s 缓存。
+ * 每个会话都可能是分叉来源，加载后防抖查询其血缘。
  */
 export function useForkLineage(options: UseForkLineageOptions) {
   const { getActiveChat, fetchForkLineage, onWarning, onError } = options
@@ -46,12 +46,13 @@ export function useForkLineage(options: UseForkLineageOptions) {
         value: lineage,
         expiresAt: Date.now() + FORK_LINEAGE_CACHE_TTL_MS,
       })
+      if (forkLineageAbort !== ac || getActiveChat()?.id !== chatId) return
       forkLineage.value = lineage
       for (const warning of lineage.warnings ?? []) {
         onWarning?.(warning)
       }
     } catch (e: unknown) {
-      if (e instanceof DOMException && e.name === 'AbortError') return
+      if (ac.signal.aborted || forkLineageAbort !== ac || getActiveChat()?.id !== chatId) return
       forkLineage.value = null
       onError?.(e)
     } finally {
@@ -86,17 +87,7 @@ export function useForkLineage(options: UseForkLineageOptions) {
     cancelPendingForkLineage()
 
     const cached = forkLineageCache.get(chatId)
-    if (cached && cached.expiresAt > Date.now()) {
-      forkLineage.value = cached.value
-      return
-    }
-
-    // 普通会话不主动拉 lineage，避免切换任意会话都产生慢请求。
-    if (!chat.forkedFromChatId) {
-      forkLineage.value = null
-      return
-    }
-
+    forkLineage.value = cached && cached.expiresAt > Date.now() ? cached.value : null
     scheduleRefreshForkLineage(chatId)
   }
 

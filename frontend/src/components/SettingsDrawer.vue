@@ -832,9 +832,12 @@ function isChatDraftDirty(): boolean {
   return currentChatDraftSnapshot() !== cleanChatDraftSnapshot.value
 }
 
+const worldBookScopeChanges = ref<Record<string, { globalActive?: boolean; detachChatId?: string }>>({})
+
 const hasUnsavedChanges = computed(() => {
   if (!props.show) return false
   return currentGlobalDraftSnapshot() !== cleanGlobalDraftSnapshot.value || isChatDraftDirty()
+    || Object.keys(worldBookScopeChanges.value).length > 0
 })
 
 async function close() {
@@ -943,6 +946,7 @@ async function handleSaveAll() {
   suppressTokenEstimates.value = true
   try {
     await saveGlobal()
+    await saveWorldBookScopeChanges()
     await saveChatOverrides()
     await saveChatStateVariables()
     markDraftsClean()
@@ -1979,7 +1983,8 @@ async function refreshWorldbookTokenTotals() {
 
 async function loadWorldBooks(options?: { refreshTokenTotals?: boolean }) {
   try {
-    worldbooks.value = await apiGet<WorldBook[]>('/api/worldbooks')
+    const persisted = await apiGet<WorldBook[]>('/api/worldbooks')
+    worldbooks.value = persisted.map(applyWorldBookScopeChange)
   } catch {
     worldbooks.value = []
   }
@@ -2041,74 +2046,83 @@ function cancelWorldBookCreate() {
   worldBookNewNameDraft.value = ''
 }
 
+async function loadGlobalDraft() {
+  if (!settingsStore.settings) await settingsStore.load()
+  const s = clone(settingsStore.settings!)
+  savedThemePreviewId.value = normalizeThemeId((s as Settings).themeId)
+  if (s.streamEnabled === undefined) s.streamEnabled = true
+  if ((s as Settings).pureAiMode === undefined) (s as Settings).pureAiMode = false
+  ;(s as Settings).reasoningEffort = normalizeReasoningEffort(
+    (s as Settings).reasoningEffort,
+    (s as Settings).thinkingMode,
+  )
+  if ((s as Settings).themeId === undefined || (s as Settings).themeId === null) {
+    (s as Settings).themeId = 'rose'
+  } else {
+    ;(s as Settings).themeId = normalizeThemeId((s as Settings).themeId as string)
+  }
+  if (!s.apiPresets) s.apiPresets = []
+  if (!(s as Settings).contentRegexRuleLibrary) (s as Settings).contentRegexRuleLibrary = []
+  s.apiPresets = s.apiPresets.map((preset) => normalizePresetDraft(preset))
+  if (!s.llm) {
+    s.llm = {
+      baseUrl: 'https://api.openai.com',
+      apiKey: '',
+      defaultModel: '',
+      modelCandidates: [],
+      usedModels: [],
+      protocol: DEFAULT_LLM_PROTOCOL,
+      anthropicPromptCache: DEFAULT_ANTHROPIC_PROMPT_CACHE,
+      promptCache: defaultPromptCacheConfig(),
+      echoReasoning: true,
+    }
+  } else {
+    s.llm.protocol = normalizeLlmProtocol(s.llm.protocol)
+    s.llm.anthropicPromptCache = normalizeAnthropicPromptCache(s.llm.anthropicPromptCache)
+    s.llm.promptCache = normalizePromptCacheConfig(s.llm.promptCache, s.llm.anthropicPromptCache)
+    s.llm.echoReasoning = s.llm.echoReasoning !== false
+  }
+  if (!(REASONING_ECHO_BACK_VALUES as readonly string[]).includes(String((s as Settings).reasoningEchoBack))) {
+    ;(s as Settings).reasoningEchoBack = 'preset'
+  }
+  void ensureLlmCatalog()
+  if (!(s as Settings).draftHelpDefaults) (s as Settings).draftHelpDefaults = ensureDraftHelpDefaults()
+  if (s.selectedFont === undefined) (s as Settings).selectedFont = null
+  if ((s as Settings).pageBackgroundImage === undefined) (s as Settings).pageBackgroundImage = null
+  if ((s as Settings).pageBackgroundOpacity === undefined) (s as Settings).pageBackgroundOpacity = null
+  if ((s as Settings).pageBackgroundBlurPx === undefined) (s as Settings).pageBackgroundBlurPx = null
+  ensureWebgpuSettingsShape(s as Settings)
+  if ((s as Settings).messageFontSize === undefined) (s as Settings).messageFontSize = null
+  if (!s.prompts) {
+    s.prompts = { globalSystem: '', globalPrefill: '', globalPrefillEnabled: true }
+  } else {
+    if (s.prompts.globalSystem === undefined) s.prompts.globalSystem = ''
+    if (s.prompts.globalPrefill === undefined) s.prompts.globalPrefill = ''
+    if (s.prompts.globalPrefillEnabled === undefined) s.prompts.globalPrefillEnabled = true
+  }
+
+  pendingPageBackgroundUploads.clear()
+  markSavedPageBackground((s as Settings).pageBackgroundImage ?? null)
+  ensureWebSearchSettingsShape(s as Settings)
+  globalDraft.value = s
+  settingsDraftReady.value = true
+  setDocumentTheme(normalizeThemeId((s as Settings).themeId))
+  await loadWebGpuPresetSource((s as Settings).webgpuBackgroundActivePresetId ?? null)
+  if (!s.apiPresets.some((preset) => preset.id === editingPresetId.value)) {
+    editingPresetId.value = s.apiPresets[0]?.id ?? null
+  }
+  return s
+}
+
 watch(
   () => props.show,
   async (open) => {
     if (!open) {
       settingsDraftReady.value = false
+      worldBookScopeChanges.value = {}
       return
     }
-    if (!settingsStore.settings) await settingsStore.load()
-    const s = clone(settingsStore.settings!)
-    savedThemePreviewId.value = normalizeThemeId((s as Settings).themeId)
-    if (s.streamEnabled === undefined) s.streamEnabled = true
-    if ((s as Settings).pureAiMode === undefined) (s as Settings).pureAiMode = false
-    ;(s as Settings).reasoningEffort = normalizeReasoningEffort(
-      (s as Settings).reasoningEffort,
-      (s as Settings).thinkingMode,
-    )
-    if ((s as Settings).themeId === undefined || (s as Settings).themeId === null) {
-      (s as Settings).themeId = 'rose'
-    } else {
-      ;(s as Settings).themeId = normalizeThemeId((s as Settings).themeId as string)
-    }
-    if (!s.apiPresets) s.apiPresets = []
-    if (!(s as Settings).contentRegexRuleLibrary) (s as Settings).contentRegexRuleLibrary = []
-    s.apiPresets = s.apiPresets.map((preset) => normalizePresetDraft(preset))
-    if (!s.llm) {
-      s.llm = {
-        baseUrl: 'https://api.openai.com',
-        apiKey: '',
-        defaultModel: '',
-        modelCandidates: [],
-        usedModels: [],
-        protocol: DEFAULT_LLM_PROTOCOL,
-        anthropicPromptCache: DEFAULT_ANTHROPIC_PROMPT_CACHE,
-        promptCache: defaultPromptCacheConfig(),
-        echoReasoning: true,
-      }
-    } else {
-      s.llm.protocol = normalizeLlmProtocol(s.llm.protocol)
-      s.llm.anthropicPromptCache = normalizeAnthropicPromptCache(s.llm.anthropicPromptCache)
-      s.llm.promptCache = normalizePromptCacheConfig(s.llm.promptCache, s.llm.anthropicPromptCache)
-      s.llm.echoReasoning = s.llm.echoReasoning !== false
-    }
-    if (!(REASONING_ECHO_BACK_VALUES as readonly string[]).includes(String((s as Settings).reasoningEchoBack))) {
-      ;(s as Settings).reasoningEchoBack = 'preset'
-    }
-    void ensureLlmCatalog()
-    if (!(s as Settings).draftHelpDefaults) (s as Settings).draftHelpDefaults = ensureDraftHelpDefaults()
-    if (s.selectedFont === undefined) (s as Settings).selectedFont = null
-    if ((s as Settings).pageBackgroundImage === undefined) (s as Settings).pageBackgroundImage = null
-    if ((s as Settings).pageBackgroundOpacity === undefined) (s as Settings).pageBackgroundOpacity = null
-    if ((s as Settings).pageBackgroundBlurPx === undefined) (s as Settings).pageBackgroundBlurPx = null
-    ensureWebgpuSettingsShape(s as Settings)
-    if ((s as Settings).messageFontSize === undefined) (s as Settings).messageFontSize = null
-    if (!s.prompts) {
-      s.prompts = { globalSystem: '', globalPrefill: '', globalPrefillEnabled: true }
-    } else {
-      if (s.prompts.globalSystem === undefined) s.prompts.globalSystem = ''
-      if (s.prompts.globalPrefill === undefined) s.prompts.globalPrefill = ''
-      if (s.prompts.globalPrefillEnabled === undefined) s.prompts.globalPrefillEnabled = true
-    }
-
-    pendingPageBackgroundUploads.clear()
-    markSavedPageBackground((s as Settings).pageBackgroundImage ?? null)
-    ensureWebSearchSettingsShape(s as Settings)
-    globalDraft.value = s
-    settingsDraftReady.value = true
-    setDocumentTheme(normalizeThemeId((s as Settings).themeId))
-    await loadWebGpuPresetSource((s as Settings).webgpuBackgroundActivePresetId ?? null)
+    const s = await loadGlobalDraft()
     chatDraft.value = ensureOverrides(props.chat ? clone(props.chat.overrides) : undefined)
     chatStateTablesDraft.value = cloneStateTables(props.chat?.stateVariables?.tables)
     if (s.ttsEnabled) void fetchTtsCacheStats()
@@ -2125,10 +2139,6 @@ watch(
       mergeGlobalWorldBooksIntoDraft()
     }
     markDraftsClean()
-
-    if (s.apiPresets.length > 0 && !editingPresetId.value) {
-        editingPresetId.value = s.apiPresets[0]?.id ?? null
-    }
 
     memoryTokenEstimate.value = null
     chatTokenEstimate.value = null
@@ -2474,37 +2484,46 @@ function toggleAllWorldBooksSection() {
   if (!allWorldBooksSectionOpen.value) allWorldBooksListExpanded.value = false
 }
 
-async function setWorldBookGlobalActive(book: WorldBook, active: boolean) {
-  const payload: WorldBook = {
+function applyWorldBookScopeChange(book: WorldBook): WorldBook {
+  const change = worldBookScopeChanges.value[book.id]
+  if (!change) return book
+  return {
     ...book,
-    globalActive: active,
-    sessionChatIds: active ? [] : [...(book.sessionChatIds || [])],
-  }
-  await apiPut<WorldBook>(`/api/worldbooks/${book.id}`, payload)
-  await loadWorldBooks()
-  if (!chatDraft.value) return
-  if (active) {
-    chatDraft.value.worldBookGlobalExclusions = (chatDraft.value.worldBookGlobalExclusions || []).filter(
-      (id) => id !== book.id,
-    )
-    mergeGlobalWorldBooksIntoDraft()
-  } else {
-    chatDraft.value.worldBookGlobalExclusions = (chatDraft.value.worldBookGlobalExclusions || []).filter(
-      (id) => id !== book.id,
-    )
+    globalActive: change.globalActive ?? book.globalActive,
+    sessionChatIds: book.sessionChatIds.filter((id) => id !== change.detachChatId),
   }
 }
 
-async function detachWorldBookFromCurrentChat(book: WorldBook) {
+async function saveWorldBookScopeChanges() {
+  const ids = Object.keys(worldBookScopeChanges.value)
+  for (const id of ids) {
+    const path = `/api/worldbooks/${encodeURIComponent(id)}`
+    const latest = await apiGet<WorldBook>(path)
+    await apiPut<WorldBook>(path, applyWorldBookScopeChange(latest))
+    delete worldBookScopeChanges.value[id]
+  }
+  if (ids.length) await loadWorldBooks()
+}
+
+function setWorldBookGlobalActive(book: WorldBook, active: boolean) {
+  worldBookScopeChanges.value[book.id] = { ...worldBookScopeChanges.value[book.id], globalActive: active }
+  worldbooks.value = worldbooks.value.map(applyWorldBookScopeChange)
+  if (!chatDraft.value) return
+  chatDraft.value.worldBookGlobalExclusions = (chatDraft.value.worldBookGlobalExclusions || []).filter(
+    (id) => id !== book.id,
+  )
+  if (active) {
+    mergeGlobalWorldBooksIntoDraft()
+  } else if (props.chat?.id && !book.sessionChatIds.includes(props.chat.id)) {
+    removeWorldBookFromOrder(book.id)
+  }
+}
+
+function detachWorldBookFromCurrentChat(book: WorldBook) {
   if (!props.chat?.id) return
   const chatId = props.chat.id
-  const payload: WorldBook = {
-    ...book,
-    globalActive: false,
-    sessionChatIds: (book.sessionChatIds || []).filter((id) => id !== chatId),
-  }
-  await apiPut<WorldBook>(`/api/worldbooks/${book.id}`, payload)
-  await loadWorldBooks()
+  worldBookScopeChanges.value[book.id] = { globalActive: false, detachChatId: chatId }
+  worldbooks.value = worldbooks.value.map(applyWorldBookScopeChange)
   removeWorldBookFromOrder(book.id)
 }
 

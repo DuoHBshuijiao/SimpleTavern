@@ -86,6 +86,7 @@ from app.storage import (
     mark_last_message_memory_updated,
     save_chat,
     save_chat_image,
+    update_worldbook_fork_binding,
 )
 
 router = APIRouter(tags=["chats"])
@@ -911,6 +912,9 @@ def _fork_chat(source: Chat, fork_at_message_id: str, new_chat_name: str | None)
     new_chat.forkedFromMessageIndex = fork_idx + 1
     new_chat.stateVariables = None
 
+    from app.worldbook_index import list_active_worldbook_ids
+
+    bound_worldbooks: list[str] = []
     try:
         save_chat(new_chat)
         copy_chat_images_for_promote(
@@ -920,7 +924,15 @@ def _fork_chat(source: Chat, fork_at_message_id: str, new_chat_name: str | None)
             new_chat.characterId,
             new_chat.id,
         )
+        for book_id in list_active_worldbook_ids(source.id):
+            if update_worldbook_fork_binding(book_id, source.id, new_chat.id, add=True):
+                bound_worldbooks.append(book_id)
     except Exception:
+        for book_id in bound_worldbooks:
+            try:
+                update_worldbook_fork_binding(book_id, source.id, new_chat.id, add=False)
+            except Exception as cleanup_exc:
+                log_cleanup_failure(source="chats.fork.worldbook_rollback", exc=cleanup_exc)
         try:
             delete_chat(new_chat.id)
         except Exception as cleanup_exc:

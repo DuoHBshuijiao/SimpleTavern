@@ -30,7 +30,7 @@ from app.storage import (
     write_json,
 )
 
-_INDEX_VERSION = 1
+_INDEX_VERSION = 2
 _index_lock = threading.RLock()
 _deferred_warnings: list[ForkLineageWarning] = []
 _index_dirty = False
@@ -123,11 +123,6 @@ def _load_or_rebuild_index_unlocked() -> dict[str, Any]:
             source="fork_index.load",
             exc=exc,
             path=_fork_index_path(),
-        )
-        _record_warning(
-            exc.code,
-            "分叉索引损坏，已从会话文件重建" if exc.code == "fork_index_corrupt" else "分叉索引读取失败，已尝试重建",
-            "如该提示重复出现，请运行数据完整性巡检并检查 data/fork_index.json",
         )
         rebuild_fork_index()
         return _load_index_unlocked()
@@ -395,7 +390,7 @@ def rebuild_fork_index(character_ids: set[str] | None = None) -> None:
                             "chatId": summary.id,
                             "title": summary.title,
                             "createdAt": summary.createdAt,
-                                "anchorMessageIndex": anchor_idx,
+                            "anchorMessageIndex": anchor_idx,
                         },
                     )
 
@@ -411,6 +406,9 @@ def rebuild_fork_index(character_ids: set[str] | None = None) -> None:
         data["warnings"] = [
             warning.model_dump(mode="json")
             for warning in _deferred_warnings
+            if warning.code not in {
+                "fork_index_corrupt", "fork_index_read_failed", "fork_index_sync_failed", "fork_index_delete_failed",
+            }
         ]
         _save_index_unlocked(data)
         _deferred_warnings.clear()
