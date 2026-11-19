@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Awaitable
 from typing import Any
 
 from fastapi import APIRouter
@@ -11,6 +13,12 @@ from app.services.web_search import fetch_bocha_remaining, fetch_tavily_usage
 from app.storage import load_settings
 
 router = APIRouter()
+
+async def _quota_status(provider: str, request: Awaitable[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
+    try:
+        return provider, await request
+    except Exception:
+        return provider, {"ok": False, "message": f"{provider} 额度暂时无法查询"}
 
 
 @router.get("/web-search/status")
@@ -29,10 +37,12 @@ async def web_search_status() -> JSONResponse:
     }
     if not ws:
         return JSONResponse(out)
+    requests = []
     if ws.tavily and (ws.tavily.apiKey or "").strip():
-        out["tavily"] = await fetch_tavily_usage(ws.tavily.apiKey)
+        requests.append(_quota_status("tavily", fetch_tavily_usage(ws.tavily.apiKey)))
     if ws.bocha and (ws.bocha.apiKey or "").strip():
-        out["bocha"] = await fetch_bocha_remaining(ws.bocha.apiKey, ws.bocha.baseUrl if ws.bocha else None)
+        requests.append(_quota_status("bocha", fetch_bocha_remaining(ws.bocha.apiKey, ws.bocha.baseUrl)))
+    out.update(await asyncio.gather(*requests))
     brave = getattr(ws, "brave", None)
     if brave and (brave.apiKey or "").strip():
         out["brave"] = {

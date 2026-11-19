@@ -23,6 +23,7 @@ const props = defineProps<{
   draft: Settings
   remoteStatus: Record<string, unknown> | null
   remoteStatusFetching: boolean
+  remoteStatusError: boolean
 }>()
 
 const open = defineModel<boolean>('open', { required: true })
@@ -145,7 +146,10 @@ watch(
             <span>用量 / 余额</span>
             <span v-if="remoteStatusFetching" class="font-normal text-[var(--color-text-muted)]">刷新中…</span>
           </div>
-          <WebSearchQuotaSummary :status="remoteStatus" :provider="draft.webSearch.provider" />
+          <p v-if="remoteStatusError" role="status" class="text-[var(--color-warning-text,var(--color-warning))]">
+            刷新失败，当前额度不可用。
+          </p>
+          <WebSearchQuotaSummary v-else :status="remoteStatus" :provider="draft.webSearch.provider" />
         </div>
       </template>
     </div>

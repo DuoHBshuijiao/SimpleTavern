@@ -313,6 +313,7 @@ watch(
 const webSearchRemoteStatus = ref<Record<string, unknown> | null>(null)
 /** 正在刷新用量：不清空已有快照，仅作弱提示与样式 */
 const webSearchRemoteStatusFetching = ref(false)
+const webSearchRemoteStatusError = ref(false)
 const webSearchStatusFetchSeq = ref(0)
 const chatDraft = ref<ChatOverrides | null>(null)
 /** 会话设置抽屉里编辑的初始状态栏（顶层 chat.stateVariables.tables） */
@@ -396,9 +397,10 @@ async function refreshWebSearchRemoteStatus(): Promise<void> {
       if (seq !== webSearchStatusFetchSeq.value) return
     }
     webSearchRemoteStatus.value = data
+    webSearchRemoteStatusError.value = false
   } catch {
     if (seq !== webSearchStatusFetchSeq.value) return
-    /* 保留 webSearchRemoteStatus，避免抽屉打开时一闪清空 */
+    webSearchRemoteStatusError.value = true
   } finally {
     if (seq === webSearchStatusFetchSeq.value) webSearchRemoteStatusFetching.value = false
   }
@@ -3486,9 +3488,13 @@ async function saveGlobal() {
     ...globalDraft.value,
     llm: { ...globalDraft.value.llm, providerParams: { ...globalDraft.value.llm.providerParams } },
     generationDefaults: { ...globalDraft.value.generationDefaults },
+    webSearch: globalDraft.value.webSearch ? { ...globalDraft.value.webSearch } : undefined,
     draftHelpDefaults: { ...ensureDraftHelpDefaults(globalDraft.value.draftHelpDefaults) },
     apiPresets: globalDraft.value.apiPresets.map((preset) => normalizePresetDraft(preset)),
   }
+  draft.generationDefaults.temperature = normalizeOptionalNumber(draft.generationDefaults.temperature)
+  draft.generationDefaults.top_p = normalizeOptionalNumber(draft.generationDefaults.top_p)
+  draft.generationDefaults.max_tokens = normalizeOptionalNumber(draft.generationDefaults.max_tokens)
   draft.generationDefaults.context_size = normalizeContextSize(draft.generationDefaults.context_size)
   draft.draftHelpDefaults.context_message_limit = normalizePositiveInteger(draft.draftHelpDefaults.context_message_limit)
   draft.pageBackgroundImage = draft.pageBackgroundImage ?? null
@@ -3500,6 +3506,20 @@ async function saveGlobal() {
     : Math.max(0, Math.min(64, draft.pageBackgroundBlurPx))
   ensureWebgpuSettingsShape(draft)
   ensureWebSearchSettingsShape(draft)
+  if (draft.webSearch?.tavily) {
+    draft.webSearch.tavily = {
+      ...draft.webSearch.tavily,
+      max_results: normalizeOptionalNumber(draft.webSearch.tavily.max_results),
+      chunks_per_source: normalizeOptionalNumber(draft.webSearch.tavily.chunks_per_source),
+    }
+  }
+  if (draft.webSearch?.bocha) {
+    draft.webSearch.bocha = { ...draft.webSearch.bocha, count: normalizeOptionalNumber(draft.webSearch.bocha.count) }
+  }
+  if (draft.webSearch?.brave) {
+    draft.webSearch.brave = { ...draft.webSearch.brave, count: normalizeOptionalNumber(draft.webSearch.brave.count) }
+  }
+  draft.ttsAudioCacheLimitMb = normalizeOptionalNumber(draft.ttsAudioCacheLimitMb) ?? 200
   draft.webgpuBackgroundEnabled = draft.webgpuBackgroundEnabled === true
   draft.webgpuBackgroundActivePresetId = draft.webgpuBackgroundActivePresetId ?? null
   await settingsStore.save(draft)
@@ -4436,6 +4456,7 @@ provide(
                 :draft="globalDraft"
                 :remote-status="webSearchRemoteStatus"
                 :remote-status-fetching="webSearchRemoteStatusFetching"
+                :remote-status-error="webSearchRemoteStatusError"
               />
 
               <SettingsDrawerGlobalPromptsSection
