@@ -756,7 +756,70 @@
   --color-reasoning-bubble-text: var(--app-color-text-muted);
 }
 
-/* 思考链气泡：暗底、浅透明、backdrop 模糊（背景/边/字见 --color-reasoning-bubble-*，模糊见 --blur-light） */
+/* 亮色共享中性表面，色系负责操作、选中与焦点。 */
+:root[data-color-scheme="light"] {
+  --native-color-scheme: light;
+  --light-accent: #234e91;
+  --app-color-primary: var(--light-accent);
+  --app-color-primary-hover: color-mix(in srgb, var(--light-accent) 85%, #17121b);
+  --app-color-brand-dark: var(--app-color-primary-hover);
+  --app-color-brand-light: var(--light-accent);
+  --app-color-surface: color-mix(in srgb, #faf8f8 97%, var(--light-accent));
+  --app-color-surface-soft: color-mix(in srgb, #faf8f8 95%, var(--light-accent));
+  --app-color-surface-elevated: #fffdfe;
+  --app-dark-lighter: color-mix(in srgb, #fffdfe 94%, var(--light-accent));
+  --app-color-text: #251e29;
+  --app-color-text-muted: #554c5a;
+  --app-color-border: #756978;
+  --app-color-border-subtle: rgb(64 46 68 / 18%);
+  --app-color-border-strong: #67576b;
+  --app-surface-muted: color-mix(in srgb, var(--app-color-surface) 94%, var(--light-accent));
+  --app-surface-overlay: color-mix(in srgb, var(--app-color-surface) 93%, #514358);
+  --app-surface-hover: color-mix(in srgb, var(--app-color-surface) 88%, var(--light-accent));
+  --app-overlay: rgb(36 27 39 / 32%);
+  --app-overlay-heavy: rgb(36 27 39 / 50%);
+  --app-track: #887b8d;
+  --app-track-hover: #726478;
+  --app-color-success: #235e46;
+  --app-color-success-bg: #e2efe7;
+  --app-color-success-text: #204c3a;
+  --app-color-warning: #80501b;
+  --app-color-warning-bg: #f7ecd9;
+  --app-color-warning-text: #653b13;
+  --app-color-error: #a12f42;
+  --app-color-error-bg: #f8e5e8;
+  --app-color-error-text: #862438;
+  --app-color-info: var(--light-accent);
+  --app-color-info-bg: color-mix(in srgb, #fffdfe 88%, var(--light-accent));
+  --app-color-info-text: var(--light-accent);
+  --app-color-purple: #644291;
+  --app-color-purple-bg: #efe7f6;
+  --app-color-purple-text: #55337d;
+  --app-color-assistant: #784359;
+  --app-color-assistant-bg: #f3e7ed;
+  --app-shadow-light: 0 1px 3px rgb(38 25 43 / 14%);
+  --app-shadow-heavy: 0 8px 32px rgb(38 25 43 / 19%);
+  --app-shadow-brand: 0 6px 16px rgb(38 25 43 / 17%);
+  --color-primary-action: var(--app-color-primary);
+  --color-primary-action-hover: var(--app-color-primary-hover);
+  --color-primary-action-active: color-mix(in srgb, var(--light-accent) 72%, #17121b);
+  --color-glass-l1: color-mix(in srgb, var(--app-color-surface) 92%, transparent);
+  --color-glass-l2: color-mix(in srgb, var(--app-color-surface-soft) 90%, transparent);
+  --color-glass-l3: color-mix(in srgb, var(--app-color-surface-soft) 96%, transparent);
+  --color-glass-l4: color-mix(in srgb, var(--app-color-surface-elevated) 96%, transparent);
+  --color-glass-l5: var(--app-color-surface-elevated);
+  --color-focus-ring: var(--app-color-primary);
+  --color-reasoning-bubble-bg: var(--app-color-surface-soft);
+  --color-user-message-bg: color-mix(in srgb, var(--app-color-surface-elevated) 89%, var(--light-accent));
+}
+
+:root[data-color-scheme="light"][data-theme="green"] { --light-accent: #2b5846; }
+:root[data-color-scheme="light"][data-theme="teal"] { --light-accent: #205a65; }
+:root[data-color-scheme="light"][data-theme="violet"] { --light-accent: #4c448c; }
+:root[data-color-scheme="light"][data-theme="amber"] { --light-accent: #744c20; }
+:root[data-color-scheme="light"][data-theme="rose"] { --light-accent: #774159; }
+:root[data-color-scheme="light"][data-theme="sunset"] { --light-accent: #62417b; }
+
 .reasoning-bubble-surface {
   background-color: var(--color-reasoning-bubble-bg);
   border: 1px solid var(--color-reasoning-bubble-border);

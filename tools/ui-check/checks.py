@@ -7,6 +7,7 @@ import urllib.request
 
 import cdp
 import dom_checks
+from appearance_checks import check_appearance_modes
 
 C = "__chat().setupState"
 D = "__drawer().setupState"
@@ -1156,6 +1157,7 @@ CHECKS = {
     "follow": check_follow,
     "version": check_version,
     "themes": dom_checks.check_themes,
+    "appearance_modes": check_appearance_modes,
     "viewports": dom_checks.check_viewports,
     "long_chat": dom_checks.check_long_chat,
     "errors": dom_checks.check_errors,

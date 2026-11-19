@@ -327,6 +327,12 @@ const webgpuPaintVisible = computed(
   () => effectiveWebgpuEnabled.value && webgpuBackground.isRunning.value,
 )
 const showImageLayer = computed(() => pageBackground.hasImage.value && !webgpuPaintVisible.value)
+watch(
+  () => showImageLayer.value && pageBackground.opacity.value > 0 ? pageBackground.imageUrl.value : null,
+  (url) => { uiStore.visiblePageBackgroundUrl = url },
+  { immediate: true },
+)
+onBeforeUnmount(() => { uiStore.visiblePageBackgroundUrl = null })
 const webgpuFailure = computed(() => webgpuBackground.compileError.value || webgpuBackground.runtimeError.value)
 watch(webgpuFailure, (message) => {
   if (message && webgpuBackground.isSupported.value !== false) {

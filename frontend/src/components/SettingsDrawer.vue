@@ -301,6 +301,13 @@ const globalAccordionOpen = reactive({
 
 const globalDraft = ref<Settings | null>(null)
 
+watch(
+  () => props.show && settingsDraftReady.value && globalDraft.value
+    ? { themeId: normalizeThemeId(globalDraft.value.themeId), themeMode: globalDraft.value.themeMode ?? 'dark' }
+    : null,
+  (preview) => { uiStore.appearancePreview = preview },
+)
+
 /** 页面背景跟随草稿预览；关闭抽屉（取消或保存后）回到已保存的值 */
 watch(
   () => [props.show, settingsDraftReady.value, globalDraft.value?.pageBackgroundOpacity, globalDraft.value?.pageBackgroundBlurPx] as const,
@@ -324,7 +331,6 @@ const cleanChatDraftSnapshot = ref('')
 const isSaving = ref(false)
 const restoringChatId = ref<string | null>(null)
 let chatSwitchConfirmSeq = 0
-const savedThemePreviewId = ref(normalizeThemeId(null))
 const regexEditorOpen = ref(false)
 const regexEditorDraft = ref<ChatContentRegexRule | null>(null)
 const chatRegexAccordionOpen = ref(false)
@@ -798,19 +804,6 @@ function closeWithoutConfirm() {
   emit('update:show', false)
 }
 
-function setDocumentTheme(themeId: string) {
-  if (typeof document === 'undefined') return
-  const normalized = normalizeThemeId(themeId)
-  document.documentElement.setAttribute('data-theme', normalized)
-  document.body.setAttribute('data-theme', normalized)
-  const appRoot = document.querySelector<HTMLElement>('#app > [data-theme]')
-  appRoot?.setAttribute('data-theme', normalized)
-}
-
-function restoreSavedThemePreview() {
-  setDocumentTheme(savedThemePreviewId.value)
-}
-
 function stableDraftString(value: unknown): string {
   return JSON.stringify(value ?? null)
 }
@@ -953,8 +946,6 @@ async function handleSaveAll() {
     await saveChatOverrides()
     await saveChatStateVariables()
     markDraftsClean()
-    savedThemePreviewId.value = normalizeThemeId(settingsStore.settings?.themeId ?? globalDraft.value?.themeId)
-    setDocumentTheme(savedThemePreviewId.value)
     closeWithoutConfirm()
   } catch (error) {
     await notifyMessage(formatSaveError('保存设置失败', error))
@@ -2038,18 +2029,14 @@ function cancelWorldBookCreate() {
 async function loadGlobalDraft() {
   if (!settingsStore.settings) await settingsStore.load()
   const s = clone(settingsStore.settings!)
-  savedThemePreviewId.value = normalizeThemeId((s as Settings).themeId)
   if (s.streamEnabled === undefined) s.streamEnabled = true
   if ((s as Settings).pureAiMode === undefined) (s as Settings).pureAiMode = false
   ;(s as Settings).reasoningEffort = normalizeReasoningEffort(
     (s as Settings).reasoningEffort,
     (s as Settings).thinkingMode,
   )
-  if ((s as Settings).themeId === undefined || (s as Settings).themeId === null) {
-    (s as Settings).themeId = 'rose'
-  } else {
-    ;(s as Settings).themeId = normalizeThemeId((s as Settings).themeId as string)
-  }
+  s.themeId = normalizeThemeId(s.themeId)
+  s.themeMode ??= 'dark'
   if (!s.apiPresets) s.apiPresets = []
   if (!(s as Settings).contentRegexRuleLibrary) (s as Settings).contentRegexRuleLibrary = []
   s.apiPresets = s.apiPresets.map((preset) => normalizePresetDraft(preset))
@@ -2095,7 +2082,6 @@ async function loadGlobalDraft() {
   ensureWebSearchSettingsShape(s as Settings)
   globalDraft.value = s
   settingsDraftReady.value = true
-  setDocumentTheme(normalizeThemeId((s as Settings).themeId))
   await loadWebGpuPresetSource((s as Settings).webgpuBackgroundActivePresetId ?? null)
   if (!s.apiPresets.some((preset) => preset.id === editingPresetId.value)) {
     editingPresetId.value = s.apiPresets[0]?.id ?? null
@@ -2140,20 +2126,6 @@ watch(
   },
 )
 
-watch(
-  () => globalDraft.value?.themeId,
-  (themeId) => {
-    if (!props.show || themeId === undefined) return
-    setDocumentTheme(normalizeThemeId(themeId))
-  },
-)
-
-watch(
-  () => props.show,
-  (open) => {
-    if (!open) restoreSavedThemePreview()
-  },
-)
 
 watch(
   () => [props.show, tab.value] as const,
@@ -3296,6 +3268,8 @@ function openKnowledgeGraphFromChatTab() {
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleDrawerKeydown)
+  uiStore.appearancePreview = null
+  uiStore.pageBackgroundPreview = null
 })
 
 /**

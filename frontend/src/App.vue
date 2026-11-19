@@ -27,35 +27,18 @@
  */
 
 import { RouterView } from 'vue-router'
-import { computed, onUnmounted, watch } from 'vue'
 import AppNotificationHost from './components/AppNotificationHost.vue'
 import StartupIntegrityWatcher from './components/StartupIntegrityWatcher.vue'
 import StartupUpdateCard from './components/StartupUpdateCard.vue'
 import { useAppFont } from './composables/useAppFont'
-import { useSettingsStore } from './stores'
-import { normalizeThemeId } from './types/models'
+import { useAppearance } from './composables/useAppearance'
 
 useAppFont()
-const settingsStore = useSettingsStore()
-const appThemeId = computed(() => normalizeThemeId(settingsStore.settings?.themeId))
-
-watch(
-  appThemeId,
-  (themeId) => {
-    document.documentElement.setAttribute('data-theme', themeId)
-    document.body.setAttribute('data-theme', themeId)
-  },
-  { immediate: true },
-)
-
-onUnmounted(() => {
-  document.documentElement.removeAttribute('data-theme')
-  document.body.removeAttribute('data-theme')
-})
+useAppearance()
 </script>
 
 <template>
-  <div :data-theme="appThemeId">
+  <div>
     <!-- 路由视图容器：根据路由配置渲染对应的页面组件 -->
     <RouterView />
     <StartupIntegrityWatcher />

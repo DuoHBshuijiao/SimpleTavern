@@ -9,11 +9,11 @@
 | 选项 | 生效规则 |
 | --- | --- |
 | 跟随系统 | 使用 `prefers-color-scheme`，系统模式变化时更新 |
-| 跟随背景亮度 | 使用实际显示的静态图片。偏暗用暗色，偏亮用亮色。无有效图片、图片完全透明或 WebGPU 正在显示时建议跟随系统 |
+| 跟随背景亮度 | 使用主界面实际显示的静态图片。L* 达到 58 时使用亮色。中间亮度、无有效图片、图片完全透明、页面背景不可见或 WebGPU 正在绘制时使用暗色 |
 | 固定亮色 | 使用亮色 |
 | 固定暗色 | 使用暗色 |
 
-图片解码后，建议在浏览器离屏画布中等比例缩至最长边 64 像素。将 sRGB 转为线性相对亮度，再换算为感知明度 L*。以 alpha 加权的两端各 10% 截尾均值代表整图明度，降低透明区域、少量高光和暗角的影响。可从 L* ≤42 判暗、≥58 判亮开始校准。中间区间首次跟随系统，同一图片重新采样时可保留上一次的明确判定。透明度太低以致图片不可见时回退系统，亮度分数本身使用图片像素。动画图片首版取默认图或首帧。算法本地运行，无需上传壁纸。 [相对亮度定义](https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html#dfn-relative-luminance) · [Canvas 图片处理规则](https://html.spec.whatwg.org/multipage/canvas.html#drawing-images)
+图片解码后，在浏览器离屏画布中等比例缩至最长边 64 像素。将 sRGB 转为线性相对亮度，再换算为感知明度 L*。以 alpha 加权的两端各 10% 截尾均值代表整图明度，降低透明区域、少量高光和暗角的影响。L* ≥ 58 使用亮色，其余使用暗色。亮度分数使用图片像素，背景滑块为零时使用暗色。算法在浏览器本地运行。 [相对亮度定义](https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html#dfn-relative-luminance) · [Canvas 图片处理规则](https://html.spec.whatwg.org/multipage/canvas.html#drawing-images)
 
 亮度结论可按背景资源及版本缓存。图片解码结束后重新核对当前图片、模式和预览状态，避免快速换图或取消设置后被旧结果覆盖。判定依据是主页面实际采用的静态背景，包含 WebGPU 临时运行对该背景显示状态的影响。若设置草稿能改变全页实际背景，退出或取消时需同步恢复外观。 [背景加载](../../frontend/src/composables/usePageBackground.ts) · [页面的 WebGPU 背景状态](../../frontend/src/views/ChatPage.vue#L276)
 

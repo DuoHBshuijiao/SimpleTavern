@@ -692,6 +692,7 @@ class Settings(BaseModel):
     prompts: SettingsPrompts = Field(default_factory=SettingsPrompts)
     streamEnabled: bool = True
     themeId: str | None = None
+    themeMode: Literal["system", "background", "light", "dark"] = "dark"
     pureAiMode: bool = False
     reasoningEffort: ReasoningEffort = "none"  # 统一思考档位，none 时关闭，其余档位开启
     reasoningEchoBack: ReasoningEchoBack = Field(

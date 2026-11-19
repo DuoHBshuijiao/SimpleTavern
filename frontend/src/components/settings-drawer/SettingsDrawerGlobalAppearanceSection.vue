@@ -255,6 +255,14 @@ function triggerStImport() {
 
     <div class="settings-group">
       <div class="settings-group-title">界面与字体</div>
+      <SettingsField label="外观模式" more="跟随背景亮度时，偏亮的静态图片使用亮色。背景不可判定或正在显示 WebGPU 时使用暗色。">
+        <select v-model="draft.themeMode" class="input w-full" aria-label="外观模式">
+          <option value="system">跟随系统</option>
+          <option value="background">跟随背景亮度</option>
+          <option value="light">固定亮色</option>
+          <option value="dark">固定暗色</option>
+        </select>
+      </SettingsField>
       <SettingsField label="界面色系">
         <ModernSelect
           v-model="draft.themeId"

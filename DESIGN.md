@@ -95,7 +95,7 @@ The design language is mature multi-layer glass. Depth is conveyed with transluc
 
 **Key Characteristics:**
 
-- Restrained dark product UI with one theme accent at a time.
+- Restrained light and dark product UI with one theme accent at a time.
 - Layered glass depth from page canvas to popover, with clearer and brighter surfaces as interaction depth increases.
 - Compact but readable controls for settings-heavy workflows.
 - Familiar product interaction patterns: buttons, fields, drawers, modals, popovers, and confirmations behave consistently.
@@ -103,6 +103,8 @@ The design language is mature multi-layer glass. Depth is conveyed with transluc
 ## 2. Colors
 
 The palette is a restrained dark glass system with theme-driven accents. The default character is Rose Mist: muted rose interaction color over a deep violet-black canvas.
+
+The same seven accent families are available in light mode. Light glass uses pale solid-color layers and dark text, with enough surface coverage to read chat bubbles, controls, and dialogs over a wallpaper. The root color scheme also sets the native controls and applies to overlays rendered outside the app container.
 
 ### Primary
 

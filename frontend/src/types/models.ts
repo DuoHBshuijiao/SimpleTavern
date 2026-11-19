@@ -441,9 +441,10 @@ export interface ApiPreset {
  *    - createdAt: 创建时间（ISO格式）
  *    - updatedAt: 更新时间（ISO格式）
  */
-/** 界面色系：统一保持暗色玻璃底，仅替换柔和强调色 */
+/** 界面色系与明暗模式独立保存。 */
 export const THEME_IDS = ['blue', 'green', 'teal', 'violet', 'amber', 'rose', 'sunset'] as const
 export type ThemeId = (typeof THEME_IDS)[number]
+export type ThemeMode = 'system' | 'background' | 'light' | 'dark'
 
 export const THEME_OPTIONS: Array<{ label: string; value: ThemeId }> = [
   { label: '雾玫瑰', value: 'rose' },
@@ -512,6 +513,7 @@ export interface Settings {
   version: number
   /** 主题色系，空值或非法值时前端兜底为 rose（雾玫瑰） */
   themeId?: ThemeId | string | null
+  themeMode?: ThemeMode
   llm: {
     baseUrl: string
     apiKey: string

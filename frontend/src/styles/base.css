@@ -37,7 +37,7 @@
     line-height: 1.5;
     font-weight: 400;
 
-    color-scheme: dark;
+    color-scheme: var(--native-color-scheme, dark);
     color: var(--color-text-primary);
     background-color: var(--color-dark-bg);
 
@@ -111,7 +111,7 @@
   /* ========== 选中文本样式 ========== */
   ::selection {
     background-color: var(--color-brand);
-    color: white;
+    color: var(--color-on-brand);
   }
 
   /* ========== 焦点样式 ========== */

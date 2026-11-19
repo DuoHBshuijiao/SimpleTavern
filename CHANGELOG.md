@@ -4,6 +4,10 @@
 
 运行版本仍为 v0.810。作者手测通过后改为 v1.000，下面的 v0.820 一并并入。验收清单见 `docs/tasks/T-814-v1000-release-acceptance.md`。
 
+### 外观与朗读
+
+- 七个色系均支持亮色和暗色。「设置 → 外观与数据」可选跟随系统、跟随静态背景亮度、固定亮色或固定暗色。旧设置和旧备份默认暗色。
+
 ### 新协议（T-832）
 
 - Bedrock Converse（API Key）、Mistral Conversations、Vertex 上的 Claude（服务账号 JSON）。Bedrock 上的 Claude 支持流式 eventstream。
