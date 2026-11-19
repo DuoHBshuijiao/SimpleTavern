@@ -3,6 +3,7 @@ import argparse
 import asyncio
 import copy
 import glob
+import io
 import json
 import os
 import re
@@ -16,6 +17,7 @@ import threading
 import time
 import urllib.request
 import uuid
+import wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -40,6 +42,8 @@ class MockState:
     fault = None
     stream_error_text = STREAM_ERROR_TEXT
     seen = []  # 收到过的请求：路径和鉴权头，用来确认密钥探针确实被发了出去
+    tts_calls = []
+    tts_url = ""
 
 
 REASONING = "先判断语气，回答不宜太长，但要留一个钩子让对话继续。先写动作，再写一句话，最后用环境收尾。" * 6
@@ -69,6 +73,19 @@ class MockHandler(BaseHTTPRequestHandler):
         request = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
         auth = self.headers.get("Authorization") or self.headers.get("x-api-key") or ""
         MockState.seen.append({"path": self.path, "auth": auth})
+        if self.path == "/v1/tools/tts":
+            MockState.tts_calls.append(request)
+            buffer = io.BytesIO()
+            with wave.open(buffer, "wb") as wav:
+                wav.setparams((1, 2, 24000, 0, "NONE", "not compressed"))
+                wav.writeframes(bytes(4800))
+            audio = buffer.getvalue()
+            self.send_response(200)
+            self.send_header("Content-Type", "audio/wav")
+            self.send_header("Content-Length", str(len(audio)))
+            self.end_headers()
+            self.wfile.write(audio)
+            return
         fault = MockState.fault
         if fault in ("http401", "http429", "http500"):
             # 有些上游会把收到的密钥写回错误信息，这里故意回显，看它会不会进界面和日志
@@ -324,6 +341,7 @@ def main():
     os.makedirs(shots)
     data_dir = os.path.join(WORK, "data")
     mock_url = f"http://127.0.0.1:{args.mock_port}/v1"
+    MockState.tts_url = mock_url
     fixtures = build_sandbox(args.source, data_dir, mock_url)
 
     mock = ThreadingHTTPServer(("127.0.0.1", args.mock_port), MockHandler)

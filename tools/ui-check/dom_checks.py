@@ -716,9 +716,14 @@ async def check_long_chat(ctx):
     await page.shot("long-send")
 
     # 保存：界面上编辑倒数第二条再点仅保存，量保存接口和弹窗收起
+    # 先重载落盘的消息，避免生成后的临时行还在时点到不可编辑的条目。
+    await goto_app(page)
+    await enter_chat_any(ctx, page, "LONG")
+    edit = "(() => { const row=$rows().at(-2); const button=row&&$btn(row,'编辑'); return button&&!button.disabled ? button : null; })()"
     saves = []
     for index in range(3):
-        await page.js("(() => { const r=$rows(); const row=r[r.length-2]; $click(row, '编辑'); })()")
+        await page.wait_for(edit, 10)
+        await page.js(edit + ".click()")
         await page.wait_for("$modal('编辑消息')", 5)
         await asyncio.sleep(0.5)
         await page.js(f"""$type($modal('编辑消息').querySelector('textarea'), {json.dumps(f"沙箱保存探针 {index}")})""")

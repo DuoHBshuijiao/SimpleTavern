@@ -54,7 +54,7 @@ from app.regex_compat import compile_timed_user_regex
 
 ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]
 REASONING_EFFORT_ORDER: tuple[str, ...] = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
-TtsProvider = Literal["minimax", "glm", "glm_local", "qwen3_local", "omnivoice_local", "openrouter", "siliconflow"]
+TtsProvider = Literal["minimax", "glm", "glm_local", "qwen3_local", "omnivoice_local", "openrouter", "siliconflow", "deepseek"]
 
 ReasoningEchoBack = Literal["on", "off", "preset"]
 PromptCacheMode = Literal["auto", "off", "implicit", "explicit", "best_effort"]

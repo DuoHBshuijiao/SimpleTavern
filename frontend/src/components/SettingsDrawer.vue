@@ -91,7 +91,7 @@ import SettingsDrawerGlobalAppSection from './settings-drawer/SettingsDrawerGlob
 import SettingsDrawerPresetsTab from './settings-drawer/SettingsDrawerPresetsTab.vue'
 import OAuthLoginModal from './settings-drawer/OAuthLoginModal.vue'
 import SettingsDrawerChatTab from './settings-drawer/SettingsDrawerChatTab.vue'
-import { isTtsApiPreset, resolveTtsProvider } from '../utils/apiPresetKind'
+import { DEEPSEEK_TTS_BASE_URL, DEEPSEEK_TTS_VOICES, isTtsApiPreset, resolveTtsProvider } from '../utils/apiPresetKind'
 import { normalizeVoiceCatalog } from '../utils/voiceCatalog'
 import { useSettingsDrawerPresetListHeight } from '../composables/useSettingsDrawerPresetListHeight'
 import { SETTINGS_DRAWER_PRESETS_KEY } from '../composables/settingsDrawerPresetsKey'
@@ -687,6 +687,7 @@ const TTS_AUTO_READ_OPTIONS: Array<{ label: string; value: AutoReadScope }> = [
 ]
 
 const TTS_PROVIDER_OPTIONS: Array<{ label: string; value: TtsProvider }> = [
+  { label: 'DeepSeek TTS', value: 'deepseek' },
   { label: 'MiniMax（兼容）', value: 'minimax' },
   { label: 'GLM TTS（智谱）', value: 'glm' },
   { label: 'GLM-TTS（本地）', value: 'glm_local' },
@@ -698,6 +699,8 @@ const TTS_PROVIDER_OPTIONS: Array<{ label: string; value: TtsProvider }> = [
 
 function formatTtsProviderLabel(provider: TtsProvider): string {
   switch (provider) {
+    case 'deepseek':
+      return 'DeepSeek TTS'
     case 'glm_local':
       return 'GLM-TTS（本地）'
     case 'qwen3_local':
@@ -1173,6 +1176,14 @@ function updateChatTtsModel(option: { value: string; presetId?: string | null })
   tts.presetId = option.presetId ?? tts.presetId ?? null
 }
 
+function updateChatTtsPreset(presetId: string) {
+  const tts = ensureChatTtsConfig()
+  const preset = ttsPresets.value.find((item) => item.id === presetId)
+  if (!tts || !preset) return
+  tts.presetId = preset.id
+  tts.model = resolveTtsProvider(preset) === 'deepseek' ? null : preset.models?.[0] ?? null
+}
+
 function updateChatTtsPreprocessEnabled(enabled: boolean) {
   const tts = ensureChatTtsConfig()
   if (!tts) return
@@ -1374,13 +1385,13 @@ function normalizePresetDraft(preset: ApiPreset): ApiPreset {
     authStyle: preset.authStyle ?? null,
     presetKind: isTts ? 'tts' : (preset.presetKind ?? null),
     ttsProvider: provider,
-    voiceCatalog: normalizeVoiceCatalog(preset.voiceCatalog),
+    voiceCatalog: provider === 'deepseek' ? [...DEEPSEEK_TTS_VOICES] : normalizeVoiceCatalog(preset.voiceCatalog),
   }
 }
 
 function cloudTtsBaseUrl(baseUrl: string, provider: TtsProvider | null): string {
-  const defaults = { minimax: 'https://api.minimaxi.com', glm: 'https://open.bigmodel.cn/api' }
-  if (provider !== 'minimax' && provider !== 'glm') return baseUrl
+  const defaults = { minimax: 'https://api.minimaxi.com', glm: 'https://open.bigmodel.cn/api', deepseek: DEEPSEEK_TTS_BASE_URL }
+  if (provider !== 'minimax' && provider !== 'glm' && provider !== 'deepseek') return baseUrl
   const value = baseUrl?.trim() || ''
   return !value || /^(?:https?:\/\/)?api\.openai\.com(?:\/.*)?$/i.test(value) ? defaults[provider] : value
 }
@@ -1399,22 +1410,21 @@ function resetTtsPresetTransientUi() {
 }
 
 function applyPresetTtsProvider(preset: ApiPreset, provider: TtsProvider) {
-  const nextProvider: TtsProvider = provider === 'glm'
-    ? 'glm'
-    : provider === 'glm_local'
-      ? 'glm_local'
-      : provider === 'qwen3_local'
-        ? 'qwen3_local'
-        : provider === 'omnivoice_local'
-          ? 'omnivoice_local'
-          : provider === 'openrouter'
-            ? 'openrouter'
-            : provider === 'siliconflow'
-              ? 'siliconflow'
-            : 'minimax'
+  const nextProvider = resolveTtsProvider({ ttsProvider: provider })
   const previousProvider = resolveTtsProvider(preset)
   preset.presetKind = 'tts'
   preset.ttsProvider = nextProvider
+  if (previousProvider !== nextProvider && (previousProvider === 'deepseek' || nextProvider === 'deepseek')) {
+    preset.baseUrl = ''
+    preset.apiKey = ''
+    preset.models = []
+  }
+  if (nextProvider === 'deepseek') {
+    preset.baseUrl = cloudTtsBaseUrl(preset.baseUrl, nextProvider)
+    preset.voiceCatalog = [...DEEPSEEK_TTS_VOICES]
+    if (previousProvider !== nextProvider) resetTtsPresetTransientUi()
+    return
+  }
   if (nextProvider === 'minimax' || nextProvider === 'glm') {
     const previousDefault = cloudTtsBaseUrl('', previousProvider)
     const raw = previousProvider !== nextProvider && preset.baseUrl === previousDefault ? '' : preset.baseUrl
@@ -2566,12 +2576,19 @@ const editingPresetIsOmniVoiceLocal = computed(() => editingPresetTtsProvider.va
 const editingPresetIsSiliconflow = computed(() => editingPresetTtsProvider.value === 'siliconflow')
 
 const editingPresetIsOpenrouter = computed(() => editingPresetTtsProvider.value === 'openrouter')
+const editingPresetIsDeepSeek = computed(() => editingPresetTtsProvider.value === 'deepseek')
+const canPreviewDeepSeekVoice = computed(() => {
+  const draft = editingPreset.value
+  const saved = settingsStore.settings?.apiPresets.find((preset) => preset.id === draft?.id)
+  return !!draft && saved?.ttsProvider === 'deepseek' && !!saved.apiKey?.trim()
+    && saved.apiKey === draft.apiKey && cloudTtsBaseUrl(saved.baseUrl, 'deepseek') === draft.baseUrl
+})
 
 const editingPresetSupportsVoiceDesign = computed(() => editingPresetTtsProvider.value === 'minimax')
 
 const editingPresetSupportsPromptAudio = computed(() => editingPresetTtsProvider.value === 'minimax')
 
-const editingPresetSupportsVoiceFetch = computed(() => !['glm_local', 'qwen3_local', 'omnivoice_local'].includes(editingPresetTtsProvider.value))
+const editingPresetSupportsVoiceFetch = computed(() => !['glm_local', 'qwen3_local', 'omnivoice_local', 'deepseek'].includes(editingPresetTtsProvider.value))
 
 const editingPresetBaseUrlPlaceholder = computed(() => {
   if (!editingPreset.value) return 'https://api.openai.com 或 …/v1/chat/completions'
@@ -2581,6 +2598,7 @@ const editingPresetBaseUrlPlaceholder = computed(() => {
   if (editingPresetTtsProvider.value === 'omnivoice_local') return 'http://127.0.0.1:8089'
   if (editingPresetTtsProvider.value === 'openrouter') return 'https://openrouter.ai/api/v1'
   if (editingPresetTtsProvider.value === 'siliconflow') return 'https://api.siliconflow.cn/v1'
+  if (editingPresetIsDeepSeek.value) return DEEPSEEK_TTS_BASE_URL
   return editingPresetTtsProvider.value === 'glm'
     ? 'https://open.bigmodel.cn/api 或 …/api/paas/v4/audio/speech'
     : 'https://api.minimaxi.com 或 MiniMax TTS 完整接口地址'
@@ -2605,6 +2623,9 @@ const editingPresetBaseUrlHint = computed(() => {
   }
   if (editingPresetTtsProvider.value === 'siliconflow') {
     return '填写硅基流动 OpenAI 兼容根路径，通常为 https://api.siliconflow.cn/v1。'
+  }
+  if (editingPresetIsDeepSeek.value) {
+    return '默认使用 DeepSeek 官方地址。也可以填写含 /v1 的地址或完整的 /v1/tools/tts 地址。'
   }
   return editingPresetTtsProvider.value === 'glm'
     ? 'GLM TTS 推荐填写 https://open.bigmodel.cn/api，也兼容完整 /api/paas/v4/... 接口地址。'
@@ -2699,9 +2720,12 @@ function createPreset() {
   editingPresetId.value = newPreset.id
 }
 
+const ttsPresets = computed(() => (globalDraft.value?.apiPresets || []).filter(isTtsPreset))
+const ttsPresetOptions = computed(() => ttsPresets.value.map((preset) => ({ label: preset.name, value: preset.id })))
+
 const ttsSessionModelOptions = computed(() => {
-  return (globalDraft.value?.apiPresets || [])
-    .filter((preset) => isTtsPreset(preset) && (preset.models?.length || 0) > 0)
+  return ttsPresets.value
+    .filter((preset) => resolveTtsProvider(preset) !== 'deepseek' && (preset.models?.length || 0) > 0)
     .map((preset) => ({
       label: preset.name,
       options: (preset.models || []).map((modelName) => ({
@@ -2727,17 +2751,17 @@ const ttsPreprocessModelOptions = computed(() => {
 
 const selectedChatTtsPreset = computed(() => {
   const presetId = chatDraft.value?.tts?.presetId
-  if (!presetId) return null
-  return globalDraft.value?.apiPresets.find((preset) => preset.id === presetId) || null
+  return ttsPresets.value.find((preset) => preset.id === presetId) ?? ttsPresets.value[0] ?? null
 })
 
 const selectedChatTtsProvider = computed<TtsProvider>(() => resolveTtsProvider(selectedChatTtsPreset.value))
 
 const availableTtsVoices = computed(() => {
   const selectedPreset = selectedChatTtsPreset.value
+  if (selectedChatTtsProvider.value === 'deepseek') return DEEPSEEK_TTS_VOICES
   if (selectedPreset?.voiceCatalog?.length) return selectedPreset.voiceCatalog
   const merged = (globalDraft.value?.apiPresets || [])
-    .filter((preset) => isTtsPreset(preset))
+    .filter((preset) => isTtsPreset(preset) && resolveTtsProvider(preset) !== 'deepseek')
     .flatMap((preset) => preset.voiceCatalog || [])
   return normalizeVoiceCatalog(merged)
 })
@@ -3203,6 +3227,8 @@ provide(
     editingPresetIsOmniVoiceLocal,
     editingPresetIsSiliconflow,
     editingPresetIsOpenrouter,
+    editingPresetIsDeepSeek,
+    canPreviewDeepSeekVoice,
     editingPresetSupportsVoiceDesign,
     editingPresetSupportsPromptAudio,
     editingPresetSupportsVoiceFetch,
@@ -4317,12 +4343,14 @@ provide(
     moveWorldBookOrder,
     clearWorldBookSessionActivationById,
     TTS_AUTO_READ_OPTIONS,
+    ttsPresetOptions,
     ttsSessionModelOptions,
     ttsPreprocessModelOptions,
     selectedChatTtsPreset,
     selectedChatTtsProvider,
     formatTtsProviderLabel,
     updateChatTtsModel,
+    updateChatTtsPreset,
     updateChatTtsAutoReadScope,
     updateChatTtsReadGapSeconds,
     updateChatTtsPreprocessEnabled,

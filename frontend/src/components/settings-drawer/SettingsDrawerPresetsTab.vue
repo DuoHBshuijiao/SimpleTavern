@@ -1,5 +1,5 @@
 ﻿<script setup lang="ts">
-import { computed, inject } from 'vue'
+import { computed, inject, onBeforeUnmount, ref, watch } from 'vue'
 import SubscriptionUsagePanel from './SubscriptionUsagePanel.vue'
 import { Eye, EyeOff, Loader2, X } from 'lucide-vue-next'
 import ModernSelect from '../ModernSelect.vue'
@@ -12,8 +12,52 @@ import SettingsHint from './SettingsHint.vue'
 import SettingsSwitch from './SettingsSwitch.vue'
 import { SETTINGS_DRAWER_PRESETS_KEY } from '../../composables/settingsDrawerPresetsKey'
 import { EXTRA_LLM_PROTOCOL_OPTIONS, VERTEX_SERVICE_ACCOUNT_AUTH_STYLE } from '../../types/models'
+import { apiPost } from '../../api/http'
+import { notifyMessage } from '../../composables/useNotify'
+import { DEEPSEEK_TTS_VOICES } from '../../utils/apiPresetKind'
 
 const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
+
+const previewUrl = ref<string | null>(null)
+const previewBusy = ref(false)
+let previewController: AbortController | null = null
+
+function resetVoicePreview() {
+  previewController?.abort()
+  previewController = null
+  previewBusy.value = false
+  previewUrl.value = null
+}
+
+watch(() => [presets.editingPreset?.id, presets.canPreviewDeepSeekVoice], resetVoicePreview)
+onBeforeUnmount(resetVoicePreview)
+
+async function previewDeepSeekVoice(voiceId: string) {
+  if (!presets.canPreviewDeepSeekVoice || previewBusy.value) return
+  const controller = new AbortController()
+  previewController = controller
+  previewBusy.value = true
+  previewUrl.value = null
+  try {
+    const result = await apiPost<{ assetId: string }>('/api/tts/synthesize', {
+      preset_id: presets.editingPreset.id,
+      voice_id: voiceId,
+      text: '你好，这是一段简短的朗读试听。',
+    }, controller.signal)
+    if (!controller.signal.aborted) {
+      previewUrl.value = '/api/tts/audio/' + encodeURIComponent(result.assetId)
+    }
+  } catch (error) {
+    if (!controller.signal.aborted) {
+      void notifyMessage(error instanceof Error ? error.message : String(error), { title: '试听失败' })
+    }
+  } finally {
+    if (previewController === controller) {
+      previewController = null
+      previewBusy.value = false
+    }
+  }
+}
 
 /** 协议下拉：在常量表之外追加 T-832 的原生协议，并去掉它们被判成「未知协议」的那一项 */
 function protocolOptions(current?: string | null): Array<{ label: string; value: string }> {
@@ -229,7 +273,7 @@ const authStyleOptions = computed(() => {
                         />
                       </div>
 
-                        <div class="settings-group">
+                        <div v-if="!presets.editingPresetIsDeepSeek" class="settings-group">
                              <div class="settings-field-head">
                                  <div class="settings-group-title">模型列表</div>
                                  <button 
@@ -335,7 +379,22 @@ const authStyleOptions = computed(() => {
                           @open-cache-guide="presets.openCacheGuide"
                         />
 
-                        <div v-if="presets.isTtsPreset(presets.editingPreset)" class="settings-group">
+                        <div v-if="presets.editingPresetIsDeepSeek" class="settings-group">
+                          <div class="settings-group-title">内置音色</div>
+                          <div v-for="voice in DEEPSEEK_TTS_VOICES" :key="voice.voiceId" class="settings-item flex items-center justify-between gap-2">
+                            <span>{{ voice.name }}</span>
+                            <button
+                              type="button"
+                              class="btn btn-xs btn-secondary"
+                              :aria-label="'试听' + voice.name"
+                              :disabled="previewBusy || !presets.canPreviewDeepSeekVoice"
+                              @click="previewDeepSeekVoice(voice.voiceId)"
+                            >试听</button>
+                          </div>
+                          <SettingsHint v-if="!presets.canPreviewDeepSeekVoice">填写 API Key 并保存设置后可试听。</SettingsHint>
+                          <audio v-if="previewUrl" :src="previewUrl" controls autoplay class="w-full" aria-label="音色试听" />
+                        </div>
+                        <div v-else-if="presets.isTtsPreset(presets.editingPreset)" class="settings-group">
 
                           <!-- GLM-TTS 本地专属配置 -->
                           <template v-if="presets.editingPresetIsGlmLocal">

@@ -107,6 +107,7 @@ def main():
     import checks_baseline  # noqa: F401
     import checks_core  # noqa: F401
     import checks_t832  # noqa: F401
+    import checks_deepseek_tts  # noqa: F401
     import fixtures
     from harness import CHECKS, Api, Env, run_checks
     from mock_upstream import MockUpstream

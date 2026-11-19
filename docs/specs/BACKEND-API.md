@@ -1539,7 +1539,9 @@ Content-Type: `multipart/form-data`
 
 #### `POST /api/tts/synthesize`
 
-合成语音，可绑定消息；返回音频资源 id。
+合成语音并返回音频资源 ID，可绑定消息。
+
+当 TTS 预设的 `ttsProvider` 为 `deepseek` 时，选择 `stella`（海星）或 `tide`（暗潮），使用 `stream: false`。上游整段 WAV 收完且通过校验后，返回 `assetId`、`format`、`sampleRate` 和 `sizeBytes`。以供应商、预设、服务地址、音色和实际朗读稿区分缓存。空白、无效音色、超过 10,000 计费字符（汉字计两字符）或超过 64 KiB 的 UTF-8 JSON 请求返回 422。审核拒绝、并发限流、服务繁忙和超时分别返回 400、429、503、504。断流或不完整音频返回 502。
 
 **请求体**
 
@@ -1569,7 +1571,7 @@ Content-Type: `application/json`
 
 #### `GET /api/tts/audio/{asset_id}`
 
-通过 UUID 获取已缓存的音频文件。
+通过音频资源 ID 获取已缓存的音频文件。DeepSeek 返回 `audio/wav`。
 
 **参数**
 
@@ -1582,7 +1584,7 @@ Content-Type: `application/json`
 
 #### `POST /api/tts/voices`
 
-查询可用音色列表。
+查询可用音色列表。可传 `preset_id` 选择预设，省略时用第一个 TTS 预设。DeepSeek 音色为内置目录，查询无需 API Key。
 
 **请求体**
 
@@ -2308,6 +2310,7 @@ AI助手流式请求模型
 - `message_id`: (string) **必填**。Message Id
 - `asset_id`: (string) **必填**。Asset Id
 - `spoken_text`: (string | null)。Spoken Text
+- `content_text`: (string | null)。DeepSeek 补绑时可传原始消息文本，用于跳过已被编辑的消息。
 
 ### `Body_clone_voice_api_tts_clone_post`
 
@@ -2450,7 +2453,7 @@ AI助手流式请求模型
 - `reasoningDurationSec`: (number | null)。推理/思考耗时（秒，浮点，前端展示为一位小数）；流式路径取首到末 reasoning chunk 的墙钟时间差
 - `usage`: (object | null)。本轮归一化用量（T-821）：inputTokens/outputTokens/cacheRead/cacheWrite 等 camelCase 字段
 - `generationMetadata`: (object | null)。本轮生成溯源（T-807/T-808）：requestId、provider、protocol、模型、usage、cost（source=provider|estimated|unknown，未知不填 0）、耗时；不含密钥或完整请求体
-- `ttsAudioAssetId`: (string | null)。已合成的 TTS 音频文件 UUID（对应 data/tts_cache/{uuid}.mp3）
+- `ttsAudioAssetId`: (string | null)。已合成的 TTS 音频资源 ID。文件扩展名取决于供应商，DeepSeek 使用 WAV。
 - `ttsAudioSourceText`: (string | null)。实际送入 TTS 合成的文本（含后处理/翻译后的朗读稿）
 - `mvuProcessed`: (boolean) 默认 false。MVU 已消费标记：该消息的提取数据已被 MVU Agent 处理；同一会话内最多一条消息持有此标记
 
@@ -2855,6 +2858,7 @@ T-822：预设编辑器 / 聊天面板预览「这次会怎么发」——不需
 - `prompts`: (SettingsPrompts)
 - `streamEnabled`: (boolean) 默认 true。Streamenabled
 - `themeId`: (string | null)。Themeid
+- `themeMode`: `system`、`background`、`light` 或 `dark`。缺省为 `dark`，与色系独立。
 - `pureAiMode`: (boolean) 默认 false。Pureaimode
 - `reasoningEffort`: (string) 枚举: "none", "minimal", "low", "medium", "high", "xhigh", "max" 默认 "none"。Reasoningeffort
 - `reasoningEchoBack`: (string) 枚举: "on", "off", "preset" 默认 "preset"。历史思考内容回传：on 总是回传 / off 从不回传 / preset 按 API 预设（或全局连接）开关
@@ -2981,7 +2985,7 @@ MVU 状态表格行。
 ### `SynthesizeReq`
 
 - `text`: (string) **必填**。Text
-- `content_text`: (string | null)。Content Text
+- `content_text`: (string | null)。预处理前的消息文本。DeepSeek 绑定时可用它检查目标消息有没有被编辑。
 - `voice_id`: (string) **必填**。Voice Id
 - `model`: (string) 默认 "speech-2.8-hd"。Model
 - `speed`: (number) 默认 1.0 范围 0.5–2.0。Speed
@@ -3114,6 +3118,7 @@ MVU 状态表格行。
 ### `VoicesReq`
 
 - `voice_type`: (string) 默认 "all"。Voice Type
+- `preset_id`: (string | null)。指定使用的 TTS 预设。
 
 ### `WebGpuBackgroundPreset`
 

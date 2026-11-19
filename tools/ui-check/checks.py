@@ -8,6 +8,7 @@ import urllib.request
 import cdp
 import dom_checks
 from appearance_checks import check_appearance_modes
+from deepseek_tts_checks import check_deepseek_tts
 
 C = "__chat().setupState"
 D = "__drawer().setupState"
@@ -1158,6 +1159,7 @@ CHECKS = {
     "version": check_version,
     "themes": dom_checks.check_themes,
     "appearance_modes": check_appearance_modes,
+    "deepseek_tts": check_deepseek_tts,
     "viewports": dom_checks.check_viewports,
     "long_chat": dom_checks.check_long_chat,
     "errors": dom_checks.check_errors,

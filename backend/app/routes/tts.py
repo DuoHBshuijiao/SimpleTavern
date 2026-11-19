@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
+import unicodedata
 from datetime import datetime
 from typing import Any, Literal, get_args
 from urllib.parse import urlparse, urlunparse
@@ -22,6 +24,7 @@ from pydantic import BaseModel, Field
 import json
 
 from app.assistant import load_tts_post_process_prompt
+from app.errors import AppError
 from app.llm.preset_resolve import (
     LlmPresetResolveError,
     is_llm_api_preset,
@@ -29,11 +32,13 @@ from app.llm.preset_resolve import (
 )
 from app.llm.runtime import chat_completions
 from app.llm.types import attach_protocol_extra_body, normalize_protocol_id
-from app.schemas import Settings, TtsProvider
+from app.schemas import ApiPreset, Settings, TtsProvider
 from app.services import glm_local_tts_process
 from app.services import omnivoice_local_tts_process
 from app.services import qwen3_local_tts_process
+from app.services.request_cancellation import ClientDisconnected, until_client_disconnect
 from app.services.tts_cache import tts_cache_patrol
+from app.services.tts_deepseek import DEEPSEEK_VOICES, DeepSeekTtsPlatform, complete_deepseek_wav
 from app.services.tts_platform import (
     GLM_TTS_MAX_TEXT_LENGTH,
     GlmLocalTtsPlatform,
@@ -120,6 +125,8 @@ def _resolve_tts_provider(raw: str | None) -> TtsProvider:
         return "openrouter"
     if normalized == "siliconflow":
         return "siliconflow"
+    if normalized == "deepseek":
+        return "deepseek"
     raise HTTPException(status_code=400, detail=f"不支持的 TTS provider: {raw}")
 
 
@@ -150,6 +157,8 @@ def _build_platform(
     voice_catalog: list[dict[str, Any]] | None = None,
     voice_clone_base_url: str | None = None,
 ) -> TtsPlatform:
+    if provider == "deepseek":
+        return DeepSeekTtsPlatform(api_key=api_key, base_url=base_url)
     base_url = _tts_base_url(base_url)
     if provider == "glm_local":
         return GlmLocalTtsPlatform(
@@ -188,6 +197,8 @@ def _get_platform(settings: Settings, preset_id: str | None = None) -> TtsPlatfo
     """根据当前设置构建 TTS 平台实例。"""
     matched = _resolve_tts_preset(settings, preset_id)
     provider = _resolve_tts_provider(matched.ttsProvider)
+    if provider == "deepseek":
+        return _deepseek_platform(matched)
     if provider not in {"glm_local", "qwen3_local", "omnivoice_local"} and not matched.apiKey:
         raise HTTPException(status_code=400, detail="TTS 预设缺少 API Key")
     voice_catalog = [v.model_dump(mode="json") for v in matched.voiceCatalog] if provider in {"glm_local", "qwen3_local", "omnivoice_local"} else None
@@ -215,6 +226,14 @@ def _get_platform(settings: Settings, preset_id: str | None = None) -> TtsPlatfo
         voice_catalog=voice_catalog,
         voice_clone_base_url=vc_url,
     )
+
+
+def _deepseek_platform(preset: ApiPreset) -> DeepSeekTtsPlatform:
+    api_key = (preset.apiKey or "").strip()
+    if not api_key:
+        raise HTTPException(status_code=400, detail="DeepSeek TTS 预设缺少 API Key")
+    base_url = preset.baseUrl if preset.baseUrl != "https://api.openai.com" else ""
+    return DeepSeekTtsPlatform(api_key=api_key, base_url=base_url)
 
 
 def _tts_base_url(value: str) -> str:
@@ -287,6 +306,7 @@ def _write_asset_id_to_message(
     asset_id: str,
     *,
     spoken_text: str | None = None,
+    expected_text: str | None = None,
 ) -> None:
     """将合成后的音频 UUID 回写到消息，便于后续复用缓存。"""
     if not chat_id or not message_id:
@@ -303,6 +323,8 @@ def _write_asset_id_to_message(
         for index, message in enumerate(chat.messages):
             if message.id != message_id:
                 continue
+            if expected_text is not None and _normalized_tts_source(message.content) != _normalized_tts_source(expected_text):
+                return
             payload = message.model_dump(mode="json")
             payload["ttsAudioAssetId"] = asset_id
             if spoken_text is not None:
@@ -321,14 +343,23 @@ def _write_asset_id_to_message(
 AudioFormat = Literal["mp3", "wav", "opus", "pcm", "flac", "aac"]
 
 
-def _store_cached_audio(audio_bytes: bytes, audio_format: str) -> str:
+def _normalized_tts_source(text: str) -> str:
+    return unicodedata.normalize("NFKC", text.replace("\r\n", "\n").replace("\r", "\n").strip())
+
+
+def _store_cached_audio(audio_bytes: bytes, audio_format: str, asset_id: str | None = None) -> str:
     if audio_format not in get_args(AudioFormat):
         raise HTTPException(status_code=502, detail="上游返回了不支持的音频格式")
-    asset_id = uuid4().hex
+    asset_id = asset_id or uuid4().hex
     cache_dir = get_tts_cache_dir()
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_path = cache_dir / f"{asset_id}.{audio_format}"
-    cache_path.write_bytes(audio_bytes)
+    staged = cache_dir / f".{uuid4().hex}.tmp"
+    try:
+        staged.write_bytes(audio_bytes)
+        os.replace(staged, cache_path)
+    finally:
+        staged.unlink(missing_ok=True)
     return asset_id
 
 
@@ -429,8 +460,8 @@ def _parse_preprocess_json_payload(raw: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 class SynthesizeReq(BaseModel):
-    text: str = Field(..., min_length=1, max_length=10000)
-    content_text: str | None = Field(default=None, min_length=1, max_length=10000)
+    text: str = Field(..., min_length=1)
+    content_text: str | None = Field(default=None, min_length=1)
     voice_id: str = Field(..., min_length=1)
     model: str = "speech-2.8-hd"
     speed: float = Field(default=1.0, ge=0.5, le=2.0)
@@ -447,6 +478,7 @@ class SynthesizeReq(BaseModel):
 
 class VoicesReq(BaseModel):
     voice_type: str = "all"
+    preset_id: str | None = None
 
 
 class TestVoicesReq(BaseModel):
@@ -547,12 +579,57 @@ async def _synthesize_until_disconnect_or_cancel(
     return synth_task.result()
 
 
+_DEEPSEEK_ASSET_LOCKS = tuple(asyncio.Lock() for _ in range(64))
+
+
+async def _synthesize_deepseek(request: Request, req: SynthesizeReq, preset: ApiPreset):
+    if req.stream:
+        raise HTTPException(status_code=422, detail="DeepSeek 朗读使用整段合成，请关闭流式返回。")
+    platform = _deepseek_platform(preset)
+    synthesis = SynthesisRequest(text=req.text, voice_id=req.voice_id, audio_format="wav")
+    asset_id = platform.cache_asset_id(preset.id, synthesis)
+    path = get_tts_cache_dir() / f"{asset_id}.wav"
+
+    async def read_or_synthesize() -> SynthesisResult:
+        async with _DEEPSEEK_ASSET_LOCKS[hash(asset_id) % len(_DEEPSEEK_ASSET_LOCKS)]:
+            try:
+                wav = await asyncio.to_thread(path.read_bytes)
+            except FileNotFoundError:
+                wav = None
+            if wav is not None:
+                try:
+                    return complete_deepseek_wav(bytearray(wav))
+                except AppError:
+                    # A damaged file cannot keep a valid preset from synthesizing again.
+                    pass
+            result = await platform.synthesize(synthesis)
+            _store_cached_audio(result.audio_bytes, result.format, asset_id)
+            return result
+
+    try:
+        result = await until_client_disconnect(request, read_or_synthesize())
+    except ClientDisconnected:
+        return Response(status_code=499)
+
+    mid = (req.message_id or "").strip()
+    if mid and not mid.startswith("local_"):
+        _write_asset_id_to_message(req.chat_id, mid, asset_id, spoken_text=req.text, expected_text=req.content_text)
+    return {
+        "assetId": asset_id, "format": result.format, "sampleRate": result.sample_rate,
+        "sizeBytes": len(result.audio_bytes), "warnings": [], "partialSuccess": False,
+    }
+
+
 @router.post("/synthesize")
 async def synthesize(request: Request, req: SynthesizeReq):
     """合成语音（非流式/流式）。"""
     settings = _require_tts_enabled()
     matched_preset = _resolve_tts_preset(settings, req.preset_id)
     provider = _resolve_tts_provider(matched_preset.ttsProvider)
+    if provider == "deepseek":
+        return await _synthesize_deepseek(request, req, matched_preset)
+    if max(len(req.text), len(req.content_text or "")) > 10_000:
+        raise HTTPException(status_code=422, detail="TTS 单次最多支持 10,000 个字符，请缩短文本后重试。")
     if provider == "glm" and len(req.text) > GLM_TTS_MAX_TEXT_LENGTH:
         raise HTTPException(status_code=422, detail=f"GLM 朗读每次最多支持 {GLM_TTS_MAX_TEXT_LENGTH} 个字符，请缩短文本后重试")
 
@@ -712,6 +789,7 @@ class BindMessageReq(BaseModel):
     message_id: str = Field(..., min_length=1)
     asset_id: str = Field(..., min_length=1)
     spoken_text: str | None = None
+    content_text: str | None = None
 
 
 @router.post("/bind-message")
@@ -721,11 +799,15 @@ def bind_tts_asset_to_message(req: BindMessageReq):
     # 校验 asset_id 格式
     if not req.asset_id.isalnum() or len(req.asset_id) > 64:
         raise HTTPException(status_code=400, detail="Invalid asset ID")
+    deepseek = re.fullmatch(r"ds[0-9a-f]{62}", req.asset_id) is not None
+    if deepseek and not (get_tts_cache_dir() / f"{req.asset_id}.wav").is_file():
+        raise HTTPException(status_code=404, detail="Audio not found")
     _write_asset_id_to_message(
         req.chat_id,
         req.message_id,
         req.asset_id,
         spoken_text=req.spoken_text,
+        expected_text=req.content_text if deepseek else None,
     )
     return {"ok": True}
 
@@ -751,7 +833,10 @@ def get_audio(asset_id: str):
 async def list_voices(req: VoicesReq):
     """查询可用音色列表。"""
     settings = _require_tts_enabled()
-    platform = _get_platform(settings)
+    preset = _resolve_tts_preset(settings, req.preset_id)
+    if preset.ttsProvider == "deepseek":
+        return _deepseek_voice_catalog(req.voice_type)
+    platform = _get_platform(settings, req.preset_id)
     try:
         detailed = await platform.list_voices_detailed(req.voice_type)
         return {
@@ -769,11 +854,24 @@ async def list_voices(req: VoicesReq):
         await platform.close()
 
 
+def _deepseek_voice_catalog(voice_type: str) -> dict:
+    return {
+        "voices": [
+            {"voiceId": v.voice_id, "name": v.name, "voiceType": v.voice_type}
+            for v in DEEPSEEK_VOICES
+        ] if voice_type in {"all", "system"} else [],
+        "warnings": [],
+        "partialSuccess": False,
+    }
+
+
 @router.post("/test-voices")
 async def test_voices(req: TestVoicesReq):
     """使用临时 API 配置查询可用音色，供预设编辑器使用。"""
     _require_tts_enabled()
     resolved_provider = _resolve_tts_provider(req.provider)
+    if resolved_provider == "deepseek":
+        return _deepseek_voice_catalog(req.voice_type)
     if resolved_provider == "glm_local":
         return {"voices": [], "hint": "GLM-TTS（本地）无远程音色列表，请在预设中手动添加参考音色。"}
     if resolved_provider == "qwen3_local":
@@ -1003,6 +1101,7 @@ async def preprocess_text(req: PreprocessReq):
     )
 
     provider = _resolve_tts_provider(req.provider)
+    inject_emotion_tags = req.inject_emotion_tags and provider != "deepseek"
     lang_hint = (req.target_language or "").strip()
     system_prompt = (
         load_tts_post_process_prompt()
@@ -1012,7 +1111,7 @@ async def preprocess_text(req: PreprocessReq):
         )
         .replace(
             "{{EMOTION_TAGS_DIRECTIVE}}",
-            EMOTION_TAGS_DIRECTIVE if req.inject_emotion_tags else "Do not insert any emotion tags.",
+            EMOTION_TAGS_DIRECTIVE if inject_emotion_tags else "Do not insert any emotion tags.",
         )
     )
 
@@ -1020,7 +1119,7 @@ async def preprocess_text(req: PreprocessReq):
         {
             "language": lang_hint,
             "raw_text": text,
-            "inject_emotion_tags": bool(req.inject_emotion_tags),
+            "inject_emotion_tags": inject_emotion_tags,
         },
         ensure_ascii=False,
     )

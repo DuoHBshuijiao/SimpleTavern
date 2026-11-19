@@ -120,7 +120,7 @@ import { postAndConsumeSse } from '../api/sse'
 import { ApiError, apiPost, apiGet } from '../api/http'
 import { useErrorStack } from '../composables/useErrorStack'
 import { notifyConfirm, notifyMessage } from '../composables/useNotify'
-import { isTtsApiPreset, resolveTtsProvider } from '../utils/apiPresetKind'
+import { DEEPSEEK_TTS_VOICES, isTtsApiPreset, resolveTtsProvider } from '../utils/apiPresetKind'
 import { validateFilesForTarget } from '../utils/attachmentPolicy'
 import { FILE_ONLY_PASTE_MESSAGE, resolveRichPaste } from '../utils/richPaste'
 import { formatApiError } from '../utils/worldBookValidation'
@@ -556,10 +556,11 @@ function resolveTtsPreset(tts: TtsSessionConfig): ApiPreset | null {
   return getTtsPresets()[0] || null
 }
 
-function resolveTtsModel(tts: TtsSessionConfig, preset: ApiPreset | null): string {
+function resolveTtsModel(tts: TtsSessionConfig, preset: ApiPreset | null): string | undefined {
+  const provider = resolveTtsProvider(preset)
+  if (provider === 'deepseek') return undefined
   if (tts.model?.trim()) return tts.model.trim()
   if (preset?.models?.[0]?.trim()) return preset.models[0]!.trim()
-  const provider = resolveTtsProvider(preset)
   if (provider === 'glm' || provider === 'glm_local') return 'glm-tts'
   if (provider === 'qwen3_local') return 'qwen3-tts'
   if (provider === 'omnivoice_local') return 'omnivoice-tts'
@@ -580,9 +581,10 @@ function resolveTtsVoiceId(message: ChatMessage, tts: TtsSessionConfig): string 
   return null
 }
 
-function rememberTtsAsset(messageId: string, assetId: string, spokenText: string, contentFingerprint?: string) {
+function rememberTtsAsset(messageId: string, assetId: string, spokenText: string, originalText: string, contentFingerprint?: string) {
   const message = activeChat.value?.messages.find((item) => item.id === messageId)
-  if (message) {
+  if (message && (!isDeepSeekTtsAsset(assetId)
+    || normalizeTtsCompareText(versions.value.getDisplayContent(message)) === normalizeTtsCompareText(originalText))) {
     message.ttsAudioAssetId = assetId
     message.ttsAudioSourceText = spokenText
   }
@@ -609,6 +611,10 @@ function normalizeTtsCompareText(s: string): string {
   return s.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim().normalize('NFKC')
 }
 
+function isDeepSeekTtsAsset(assetId: string): boolean {
+  return /^ds[0-9a-f]{62}$/.test(assetId)
+}
+
 function invalidateTtsCacheIfTextChanged(
   message: ChatMessage | null | undefined,
   previousText: string,
@@ -625,7 +631,7 @@ function invalidateTtsCacheIfTextChanged(
  */
 function canReuseTtsCache(message: ChatMessage, originalText: string): boolean {
   const assetId = message.ttsAudioAssetId?.trim()
-  if (!assetId) return false
+  if (!assetId || isDeepSeekTtsAsset(assetId)) return false
   const currentContent = normalizeTtsCompareText(originalText)
   if (normalizeTtsCompareText(message.content || '') === currentContent) return true
   const rawCached = message.ttsAudioSourceText
@@ -642,12 +648,13 @@ async function preprocessMessageForTts(text: string, tts: TtsSessionConfig): Pro
   const raw = text.trim()
   if (!raw || !tts.preprocessEnabled || !tts.preprocessModel?.trim()) return raw
   const preset = resolveTtsPreset(tts)
+  const provider = resolveTtsProvider(preset)
   const response = await apiPost<{ processedText: string }>('/api/tts/preprocess', {
     text: raw,
     model: tts.preprocessModel,
     preset_id: tts.preprocessPresetId ?? null,
-    provider: resolveTtsProvider(preset),
-    inject_emotion_tags: tts.injectEmotionTags === true,
+    provider,
+    inject_emotion_tags: provider !== 'deepseek' && tts.injectEmotionTags === true,
     target_language: tts.preprocessTargetLanguage?.trim() || null,
   })
   return response.processedText?.trim() || raw
@@ -665,11 +672,16 @@ async function enqueueMessageReadAloud(message: ChatMessage, mode: 'manual' | 'a
 
   const tts = normalizeTtsSessionConfig(chat.overrides?.tts)
   const preset = resolveTtsPreset(tts)
+  const provider = resolveTtsProvider(preset)
   const voiceId = resolveTtsVoiceId(live, tts)
   if (!voiceId) {
     if (mode === 'manual') {
       await notifyMessage(live.role === 'assistant' ? '当前角色未配置音色。' : '当前用户身份未配置音色。')
     }
+    return false
+  }
+  if (provider === 'deepseek' && !DEEPSEEK_TTS_VOICES.some((voice) => voice.voiceId === voiceId)) {
+    if (mode === 'manual') await notifyMessage('请在本会话的文字转语音设置中选择海星或暗潮。')
     return false
   }
 
@@ -704,7 +716,7 @@ async function enqueueMessageReadAloud(message: ChatMessage, mode: 'manual' | 'a
     const previewLabel =
       chars.length > 8 ? `${chars.slice(0, 8).join('')}...` : chars.join('')
 
-    const existingAssetId = canReuseTtsCache(live, originalText)
+    const existingAssetId = provider !== 'deepseek' && canReuseTtsCache(live, originalText)
       ? (live.ttsAudioAssetId?.trim() ?? undefined)
       : undefined
 
@@ -768,7 +780,7 @@ async function enqueueMessageReadAloud(message: ChatMessage, mode: 'manual' | 'a
       gapSeconds: tts.readGapSeconds ?? 0,
       enqueueMode: mode === 'manual' ? 'manual' : 'auto',
       manualPlacement: mode === 'manual' ? 'second' : 'tail',
-      onReady: (assetId) => rememberTtsAsset(live.id, assetId, spokenText, autoReadFingerprint ?? undefined),
+      onReady: (assetId) => rememberTtsAsset(live.id, assetId, spokenText, originalText, autoReadFingerprint ?? undefined),
       onSynthesizeError: (e) => {
         if (autoReadFingerprint) {
           getTtsAutoReadFingerprintSet(chat.id).delete(autoReadFingerprint)
@@ -912,6 +924,7 @@ async function flushPendingTtsBinds() {
       message_id: message.id,
       asset_id: pending.assetId,
       spoken_text: pending.spokenText,
+      content_text: displayText,
     }).catch((e) => {
       console.warn('[TTS] bind-message failed', e)
     })

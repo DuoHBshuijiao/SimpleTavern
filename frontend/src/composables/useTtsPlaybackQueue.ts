@@ -222,7 +222,7 @@ export function useTtsPlaybackQueue() {
           text,
           content_text: opts?.contentText ?? text,
           voice_id: voiceId,
-          model: opts?.model ?? 'speech-2.8-hd',
+          model: opts?.model,
           stream: false,
           message_id: item.messageId,
           chat_id: opts?.chatId ?? null,

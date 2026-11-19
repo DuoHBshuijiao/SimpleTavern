@@ -6,10 +6,12 @@
 - 一次只服务一个场景，由检查在发请求前用 reset() 设定。
 """
 import base64
+import io
 import json
 import re
 import threading
 import time
+import wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, parse_qsl, unquote, urlsplit
 
@@ -398,6 +400,9 @@ class _UpstreamHandler(BaseHTTPRequestHandler):
             if path == "/v1/chat/completions":
                 record.route = "openai"
                 return self._openai(record)
+            if path == "/v1/tools/tts":
+                record.route = "deepseek_tts"
+                return self._deepseek_tts(record)
             if path.rstrip("/").endswith("/models"):
                 record.route = "models"
                 return self._json(200, {"object": "list", "data": [{"id": "mock", "object": "model"}]})
@@ -407,6 +412,40 @@ class _UpstreamHandler(BaseHTTPRequestHandler):
             self.close_connection = True
 
     # ----- 响应工具 -----
+    def _deepseek_tts(self, record):
+        body = record.json or {}
+        if record.method != "POST" or record.headers.get("Authorization") != f"Bearer {self.upstream.api_key}":
+            return self._json(401, {"error": {"message": "Missing or unexpected bearer key"}})
+        if set(body) != {"text", "voice_id", "format", "filter_markdown"} or body["format"] != "wav" or body["filter_markdown"] is not True:
+            return self._json(400, {"error": {"message": "Unexpected synthesis fields"}})
+
+        fault = self.upstream.fault
+        statuses = {"tts_reject": (400, "Content Exists Risk"), "tts_busy": (503, "Service busy"),
+                    "tts_rate": (429, "Too many concurrent requests"), "tts_timeout": (504, "Synthesis timeout")}
+        if fault in statuses:
+            status, message = statuses[fault]
+            return self._json(status, {"error": {"message": message}})
+
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as wav:
+            wav.setparams((1, 2, 24000, 0, "NONE", "not compressed"))
+            wav.writeframes((b"\x10\x01" if body["voice_id"] == "stella" else b"\x20\x02") * 240)
+        audio = buf.getvalue()
+        if fault == "tts_truncated":
+            audio = audio[:-2]
+        elif fault == "tts_empty":
+            audio = b""
+        elif fault == "tts_unknown_size":
+            audio = audio[:4] + b"\xff" * 4 + audio[8:40] + b"\xff" * 4 + audio[44:]
+        self._start_stream("audio/wav")
+        self._chunk(audio[:19])
+        if fault == "tts_disconnect":
+            return self._drop()
+        if fault == "tts_slow":
+            time.sleep(1.2)
+        self._chunk(audio[19:])
+        self._finish_chunks()
+
     def _json(self, status, body, headers=()):
         data = json.dumps(body, ensure_ascii=False).encode("utf-8") if not isinstance(body, bytes) else body
         self.send_response(status)

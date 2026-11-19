@@ -299,7 +299,7 @@ export type KnowledgeGraphInjectPosition =
 export type KnowledgeGraphBeforeLastRole = 'assistant' | 'system' | 'user'
 
 export type AutoReadScope = 'off' | 'assistant_only' | 'user_only' | 'all'
-export type TtsProvider = 'minimax' | 'glm' | 'glm_local' | 'qwen3_local' | 'omnivoice_local' | 'openrouter' | 'siliconflow'
+export type TtsProvider = 'minimax' | 'glm' | 'glm_local' | 'qwen3_local' | 'omnivoice_local' | 'openrouter' | 'siliconflow' | 'deepseek'
 
 export interface ApiPresetVoice {
   voiceId: string
