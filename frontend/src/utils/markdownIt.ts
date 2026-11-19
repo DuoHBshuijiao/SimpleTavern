@@ -22,6 +22,15 @@ const md = new MarkdownIt({
 md.use(footnote)
 md.use(mathIslandPlugin)
 
+md.renderer.rules.link_open = (tokens, index, options, _environment, renderer) => {
+  const link = tokens[index]!
+  if (!link.attrGet('href')?.startsWith('#')) {
+    link.attrSet('target', '_blank')
+    link.attrSet('rel', 'noopener noreferrer')
+  }
+  return renderer.renderToken(tokens, index, options)
+}
+
 /** 聊天区 / 助手区 / 更新说明等共用渲染（含脚注与 KaTeX） */
 export function renderChatMarkdown(text: string): string {
   return md.render(normalizeMarkdownInput(text))
