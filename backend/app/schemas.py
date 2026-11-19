@@ -1043,6 +1043,7 @@ class ChatMessage(BaseModel):
     id: str = Field(default_factory=lambda: uuid4().hex)
     role: ChatRole
     content: str
+    responsesReasoning: list[dict[str, Any]] | None = None
     anthropicContent: list[dict[str, Any]] | None = Field(default=None, description="Anthropic 服务端工具/引用/签名块；跨客户端工具续轮原样回传")
     images: list["ChatImageAttachment"] = Field(default_factory=list)
     attachments: list["AssistantAttachment"] = Field(default_factory=list)

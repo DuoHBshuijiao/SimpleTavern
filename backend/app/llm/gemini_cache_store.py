@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from datetime import datetime, timezone
@@ -20,19 +21,20 @@ from app.llm.prompt_cache import PromptCachePlan, gemini_cache_ttl_seconds
 from app.llm.types import append_query_key, auth_headers_for_style
 from app.services.http_client import get_async_http_client
 from app.services.http_log import log_outbound
-from app.storage import _data_dir
+from app.storage import _data_dir, write_json
 
 _INDEX_NAME = "llm_cache_index.json"
 _PROVIDER = "gemini"
+_creation_locks = tuple(asyncio.Lock() for _ in range(32))
 
 
 def _index_path() -> Path:
     return _data_dir() / _INDEX_NAME
 
 
-def fingerprint(*, model: str, system_instruction: Any, tools: Any) -> str:
+def fingerprint(*, model: str, system_instruction: Any, tools: Any, account: str = "") -> str:
     blob = json.dumps(
-        {"model": model, "system": system_instruction, "tools": tools},
+        {"model": model, "system": system_instruction, "tools": tools, "account": account},
         ensure_ascii=False,
         sort_keys=True,
         default=str,
@@ -51,15 +53,22 @@ def _load_index() -> dict[str, Any]:
     if not isinstance(raw, dict):
         return {"entries": {}}
     entries = raw.get("entries")
-    if not isinstance(entries, dict):
-        raw["entries"] = {}
+    raw["entries"] = {key: item for key, item in entries.items() if _cache_is_current(item)} if isinstance(entries, dict) else {}
     return raw
 
 
+def _cache_is_current(item: Any) -> bool:
+    if not isinstance(item, dict):
+        return False
+    try:
+        created = datetime.fromisoformat(item["createdAt"])
+        return (datetime.now(timezone.utc) - created).total_seconds() < int(item["ttlSeconds"])
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
 def _save_index(index: dict[str, Any]) -> None:
-    path = _index_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_json(_index_path(), index)
 
 
 def lookup(fp: str) -> str | None:
@@ -69,8 +78,6 @@ def lookup(fp: str) -> str | None:
         name = item.get("name")
         if isinstance(name, str) and name.strip():
             return name.strip()
-    if isinstance(item, str) and item.strip():
-        return item.strip()
     return None
 
 
@@ -190,20 +197,22 @@ async def attach_explicit_cache(
     tools = payload.get("tools")
     if system is None and tools is None:
         return payload
-    fp = fingerprint(model=model, system_instruction=system, tools=tools)
-    name = lookup(fp)
-    if name is None:
-        name = await create_cached_content(
-            api_root=api_root,
-            api_key=api_key,
-            model=model,
-            system_instruction=system,
-            tools=tools,
-            ttl_seconds=ttl,
-            extra_headers=extra_headers,
-            auth_style=auth_style,
-        )
-        remember(fp, name, model=model, ttl_seconds=ttl)
+    account = hashlib.sha256(f"{api_root}\0{auth_style}\0{api_key}".encode()).hexdigest()
+    fp = fingerprint(model=model, system_instruction=system, tools=tools, account=account)
+    async with _creation_locks[int(fp, 16) % len(_creation_locks)]:
+        name = lookup(fp)
+        if name is None:
+            name = await create_cached_content(
+                api_root=api_root,
+                api_key=api_key,
+                model=model,
+                system_instruction=system,
+                tools=tools,
+                ttl_seconds=ttl,
+                extra_headers=extra_headers,
+                auth_style=auth_style,
+            )
+            remember(fp, name, model=model, ttl_seconds=ttl)
     out = dict(payload)
     out["cachedContent"] = name
     # 已缓存的稳定前缀不再随 generateContent 重复计费写入

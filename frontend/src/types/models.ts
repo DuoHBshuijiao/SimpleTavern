@@ -696,6 +696,7 @@ export interface ChatMessage {
     cacheWriteInputTokens?: number | null
     reasoningTokens?: number | null
     serviceTier?: string | null
+    finishReason?: string | null
     /** 本轮请求了 Fast；若 serviceTier 仍是 default 则前端提示「Fast 未生效」 */
     fastRequested?: boolean | null
   } | null

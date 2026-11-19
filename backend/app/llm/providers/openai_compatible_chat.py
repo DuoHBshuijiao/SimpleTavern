@@ -446,6 +446,17 @@ def _message_content_to_text(content: Any) -> str:
     return ""
 
 
+def _wire_chat_message(message: dict[str, Any]) -> dict[str, Any]:
+    wire = {key: value for key, value in message.items() if not key.startswith("_")}
+    if isinstance(wire.get("tool_calls"), list):
+        wire["tool_calls"] = [
+            {key: value for key, value in call.items() if not key.startswith("_")}
+            if isinstance(call, dict) else call
+            for call in wire["tool_calls"]
+        ]
+    return wire
+
+
 def _build_payload(
     *,
     model: str,
@@ -475,7 +486,7 @@ def _build_payload(
     """
     payload: dict[str, Any] = {
         "model": model,
-        "messages": messages,
+        "messages": [_wire_chat_message(message) for message in messages],
         "stream": stream,
     }
     if temperature is not None:
@@ -853,18 +864,28 @@ async def stream_chat_completions(
                         provider=_OPENAI_COMPAT_PROVIDER,
                         protocol=_OPENAI_COMPAT_PROTOCOL,
                     )
-                if isinstance(obj.get("usage"), dict):
+                usage = obj.get("usage")
+                if isinstance(usage, dict):
                     # usage 可能随最后一帧或独立帧到达；记录最后一次（stream_options.include_usage / DeepSeek 默认带）
                     terminal_usage = _usage_with_tier(obj)
                 choices = obj.get("choices")
-                if not choices:
-                    # OpenAI-compatible 服务可在独立帧中只返回 usage。
-                    if obj.get("usage") is not None:
+                if "choices" not in obj and isinstance(usage, dict):
+                    # 部分兼容服务省去独立用量帧的 choices 字段。
+                    continue
+                if choices == []:
+                    # Azure 在正文前用空 choices 发送提示词过滤结果。
+                    prompt_metadata = (obj.get("prompt_filter_results"), obj.get("prompt_annotations"))
+                    if isinstance(usage, dict) or (
+                        usage is None and any(
+                            isinstance(results, list) and all(isinstance(result, dict) for result in results)
+                            for results in prompt_metadata
+                        )
+                    ):
                         continue
                     raise _protocol_error(
                         code="stream_event_invalid",
-                        message="上游流事件缺少 choices",
-                        detail="SSE event contains neither choices nor usage",
+                        message="上游流的空 choices 事件没有可识别的元数据",
+                        detail="empty choices without usage or prompt filtering annotations",
                     )
                 if not isinstance(choices, list) or not isinstance(choices[0], dict):
                     raise _protocol_error(

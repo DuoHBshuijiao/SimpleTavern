@@ -249,10 +249,35 @@ def _assistant_messages_to_openai(messages: list[ChatMessage]) -> list[dict[str,
     """
     out: list[dict[str, Any]] = []
     _LEGACY_TOOL_TRACE_MAX = 2000
-    for m in messages:
-        if m.role == "assistant" and m.anthropicContent:
-            out.append({"role": "assistant", "content": m.content or "", "tool_calls": m.tool_calls,
-                        "_anthropic_content": m.anthropicContent})
+    pending_tool_ids: set[str] = set()
+    for index, m in enumerate(messages):
+        calls = m.tool_calls or []
+        if m.role != "tool":
+            pending_tool_ids = set()
+        if m.role == "assistant" and calls:
+            for offset in range(index + 1, len(messages)):
+                result = messages[offset]
+                if result.role != "tool":
+                    break
+                if result.tool_call_id:
+                    pending_tool_ids.add(result.tool_call_id)
+            calls = [call for call in calls if call.get("id") in pending_tool_ids]
+            pending_tool_ids = {call["id"] for call in calls}
+        if m.role == "assistant" and (m.anthropicContent or m.responsesReasoning or calls):
+            entry: dict[str, Any] = {"role": "assistant", "content": m.content or ""}
+            if calls:
+                entry["tool_calls"] = calls
+            rc = _reasoning_from_msg(m)
+            if rc:
+                entry["reasoning_content"] = rc
+            if m.anthropicContent:
+                entry["_anthropic_content"] = [
+                    block for block in m.anthropicContent
+                    if block.get("type") != "tool_use" or block.get("id") in pending_tool_ids
+                ]
+            if m.responsesReasoning:
+                entry["_responses_reasoning"] = m.responsesReasoning
+            out.append(entry)
             continue
         if m.role == "reasoning":
             rc = (m.content or "").strip()
@@ -262,7 +287,8 @@ def _assistant_messages_to_openai(messages: list[ChatMessage]) -> list[dict[str,
 
         if m.role == "tool":
             tid = (getattr(m, "tool_call_id", None) or "").strip()
-            if tid:
+            if tid and tid in pending_tool_ids:
+                pending_tool_ids.remove(tid)
                 out.append(
                     {
                         "role": "tool",
@@ -270,23 +296,11 @@ def _assistant_messages_to_openai(messages: list[ChatMessage]) -> list[dict[str,
                         "content": m.content or "",
                     }
                 )
-            else:
+            elif not tid:
                 raw = (m.content or "").strip()
                 if raw:
                     text = raw if len(raw) <= _LEGACY_TOOL_TRACE_MAX else raw[:_LEGACY_TOOL_TRACE_MAX] + "…"
                     out.append({"role": "system", "content": f"[tool message missing tool_call_id] {text}"})
-            continue
-
-        if m.role == "assistant" and getattr(m, "tool_calls", None):
-            d: dict[str, Any] = {
-                "role": "assistant",
-                "content": m.content or "",
-                "tool_calls": m.tool_calls,
-            }
-            rc = _reasoning_from_msg(m)
-            if rc:
-                d["reasoning_content"] = rc
-            out.append(d)
             continue
 
         if getattr(m, "toolTrace", False) and not getattr(m, "toolRecord", None):

@@ -189,11 +189,18 @@ const BREAKPOINT_LABELS: Record<PromptCacheBreakpoint, string> = {
   tools: '工具定义',
   history_tail: '历史尾部（滚动前缀：多轮对话命中率更高）',
 }
+const responsesCache = computed(() => proto.value === 'openai_responses' ||
+  (proto.value === 'auto' && preview.value?.effective === 'openai_responses'))
+
+function unavailableBreakpoint(bp: PromptCacheBreakpoint): boolean {
+  return bp === 'system' || responsesCache.value || Boolean(breakpointsDisabledReason.value)
+}
+
 function hasBreakpoint(bp: PromptCacheBreakpoint) {
   return (cache.value.breakpoints ?? ['system']).includes(bp)
 }
 function toggleBreakpoint(bp: PromptCacheBreakpoint) {
-  if (bp === 'system') return
+  if (unavailableBreakpoint(bp)) return
   const cur = new Set(cache.value.breakpoints ?? ['system'])
   if (cur.has(bp)) cur.delete(bp)
   else cur.add(bp)
@@ -409,20 +416,23 @@ const webSearchSourceOptions = [
         v-if="showExplicitControls"
         label="显式断点位置"
         :hint="breakpointsDisabledReason || undefined"
-        more="对应 Anthropic 的 cache_control 和 GPT-5.6+ 的 prompt_cache_breakpoint。"
+        :more="responsesCache ? 'Responses 当前适配器仅支持 System 断点。' : '对应 Anthropic 的 cache_control 和 GPT-5.6+ 的 prompt_cache_breakpoint。'"
       >
         <div class="flex flex-col gap-1" :class="breakpointsDisabledReason ? 'pointer-events-none opacity-60' : ''">
-          <button
+          <label
             v-for="bp in PROMPT_CACHE_BREAKPOINTS"
             :key="bp"
-            type="button"
             class="inline-flex items-center gap-2 text-left text-xs text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text)]"
-            :class="bp === 'system' ? 'cursor-default opacity-80' : ''"
-            @click="toggleBreakpoint(bp)"
+            :class="unavailableBreakpoint(bp) ? 'opacity-60' : 'cursor-pointer'"
           >
-            <ThemedCheckbox :checked="hasBreakpoint(bp)" />
+            <ThemedCheckbox
+              :aria-label="BREAKPOINT_LABELS[bp]"
+              :checked="bp === 'system' || (!responsesCache && hasBreakpoint(bp))"
+              :disabled="unavailableBreakpoint(bp)"
+              @update:checked="toggleBreakpoint(bp)"
+            />
             <span>{{ BREAKPOINT_LABELS[bp] }}</span>
-          </button>
+          </label>
         </div>
       </SettingsField>
 

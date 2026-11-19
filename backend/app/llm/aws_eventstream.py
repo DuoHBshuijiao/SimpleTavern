@@ -14,7 +14,7 @@ import json
 import struct
 import zlib
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Callable
+from typing import Iterator, Any, AsyncIterator, Callable
 
 import httpx
 
@@ -130,13 +130,12 @@ class EventStreamDecoder:
         return bool(self._buffer)
 
     def feed(self, chunk: bytes) -> list[EventStreamFrame]:
+        return list(self.iter_feed(chunk))
+
+    def iter_feed(self, chunk: bytes) -> Iterator[EventStreamFrame]:
         self._buffer.extend(chunk)
-        frames: list[EventStreamFrame] = []
-        while True:
-            frame = self._next_frame()
-            if frame is None:
-                return frames
-            frames.append(frame)
+        while (frame := self._next_frame()) is not None:
+            yield frame
 
     def _next_frame(self) -> EventStreamFrame | None:
         buffer = self._buffer
@@ -260,13 +259,12 @@ async def aiter_event_frames(
         except httpx.TransportError as exc:
             raise stream_interrupted_error(exc, partial=bool(partial and partial()), **common) from exc
         try:
-            frames = decoder.feed(chunk)
+            for frame in decoder.iter_feed(chunk):
+                if frame.is_failure:
+                    raise frame_failure_error(frame, **common)
+                yield frame
         except EventStreamError as exc:
             raise _invalid_stream_error(str(exc), **common) from exc
-        for frame in frames:
-            if frame.is_failure:
-                raise frame_failure_error(frame, **common)
-            yield frame
     if decoder.has_partial_frame:
         raise _incomplete_stream_error("stream ended inside a frame", **common)
 

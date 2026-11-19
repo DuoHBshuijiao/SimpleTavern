@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from app.errors import AppError, as_app_error
+from app.llm.message_order import split_leading_system_messages
 from app.llm.providers.openai_compatible_chat import (
     STREAM_TEXT_CHUNK_SIZE,
     ChatCompletionMessage,
@@ -150,18 +151,15 @@ def _arguments_text(raw: Any) -> str:
 
 def _convert_messages(messages: list[dict[str, Any]]) -> tuple[str | None, list[dict[str, Any]]]:
     """OpenAI 形状消息 → (instructions, inputs 条目)。"""
-    instructions: list[str] = []
+    leading, messages = split_leading_system_messages(messages)
+    instructions = [text for item in leading if (text := _content_to_text(item.get("content")).strip())]
     entries: list[dict[str, Any]] = []
     pending_reasoning = ""
     for msg in messages:
         if not isinstance(msg, dict):
             continue
         role = str(msg.get("role") or "").strip()
-        if role == "system":
-            text = _content_to_text(msg.get("content")).strip()
-            if text:
-                instructions.append(text)
-        elif role == "user":
+        if role in {"user", "system"}:
             pending_reasoning = ""
             text = _content_to_text(msg.get("content"))
             if text.strip():
@@ -221,7 +219,11 @@ def _convert_messages(messages: list[dict[str, Any]]) -> tuple[str | None, list[
             status_code=400,
         )
     last = entries[-1]
-    if last["type"] == "message.output" and isinstance(last["content"], str):
+    if (
+        messages[-1].get("_assistant_prefill")
+        and last["type"] == "message.output"
+        and isinstance(last["content"], str)
+    ):
         # 末尾的 assistant 是续写前缀
         entries[-1] = {"type": "message.input", "role": "assistant", "content": last["content"], "prefix": True}
     return ("\n\n".join(instructions) if instructions else None), entries

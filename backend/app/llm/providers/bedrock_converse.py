@@ -19,6 +19,7 @@ from urllib.parse import quote, urlsplit, urlunsplit
 import httpx
 
 from app.errors import AppError, as_app_error
+from app.llm.message_order import split_leading_system_messages
 from app.llm.aws_eventstream import (
     EVENTSTREAM_CONTENT_TYPE,
     aiter_event_frames,
@@ -216,7 +217,8 @@ def _assistant_blocks(msg: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _convert_messages(messages: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """OpenAI 形状消息 → (system 块, Converse messages)。同角色相邻消息合并，首条必须是 user。"""
-    system: list[dict[str, Any]] = []
+    instructions, messages = split_leading_system_messages(messages)
+    system = [{"text": text} for item in instructions if (text := _content_to_text(item.get("content")).strip())]
     converted: list[dict[str, Any]] = []
 
     def push(role: str, blocks: list[dict[str, Any]]) -> None:
@@ -231,11 +233,7 @@ def _convert_messages(messages: list[dict[str, Any]]) -> tuple[list[dict[str, An
         if not isinstance(msg, dict):
             continue
         role = str(msg.get("role") or "").strip()
-        if role == "system":
-            text = _content_to_text(msg.get("content")).strip()
-            if text:
-                system.append({"text": text})
-        elif role == "tool":
+        if role == "tool":
             text = _content_to_text(msg.get("content"))
             push(
                 "user",
@@ -250,7 +248,7 @@ def _convert_messages(messages: list[dict[str, Any]]) -> tuple[list[dict[str, An
             )
         elif role == "assistant":
             push("assistant", _assistant_blocks(msg))
-        elif role == "user":
+        elif role in {"user", "system"}:
             text = _content_to_text(msg.get("content"))
             if text.strip():
                 push("user", [{"text": text}])

@@ -12,11 +12,12 @@ from __future__ import annotations
 
 import json
 from typing import Any, AsyncIterator
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import httpx
 
 from app.errors import AppError, as_app_error
+from app.llm.message_order import split_leading_system_messages
 from app.llm.stream_errors import guarded_lines, upstream_stream_error
 from app.llm.prompt_cache import (
     PromptCachePlan,
@@ -382,8 +383,27 @@ def _function_call_to_chat_tool_call(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _input_content(content: Any) -> str | list[dict[str, Any]]:
+    if not isinstance(content, list):
+        return _content_to_text(content)
+    parts: list[dict[str, Any]] = []
+    for item in content:
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") in {"text", "input_text"} and isinstance(item.get("text"), str):
+            parts.append({"type": "input_text", "text": item["text"]})
+        if item.get("type") in {"image_url", "input_image"}:
+            image = item.get("image_url")
+            url = image.get("url") if isinstance(image, dict) else image
+            detail = image.get("detail") if isinstance(image, dict) else item.get("detail")
+            if isinstance(url, str) and url:
+                parts.append({"type": "input_image", "image_url": url, "detail": detail or "auto"})
+    return parts if parts else _content_to_text(content)
+
+
 def _convert_input(messages: list[dict[str, Any]]) -> tuple[str | None, list[dict[str, Any]]]:
-    instructions_parts: list[str] = []
+    instructions, messages = split_leading_system_messages(messages)
+    instructions_parts = [text for item in instructions if (text := _content_to_text(item.get("content")).strip())]
     items: list[dict[str, Any]] = []
 
     for msg in messages:
@@ -391,12 +411,6 @@ def _convert_input(messages: list[dict[str, Any]]) -> tuple[str | None, list[dic
             continue
         role = (msg.get("role") or "").strip()
         content = msg.get("content")
-
-        if role == "system":
-            text = _content_to_text(content).strip()
-            if text:
-                instructions_parts.append(text)
-            continue
 
         if role == "tool":
             call_id = msg.get("tool_call_id")
@@ -417,6 +431,9 @@ def _convert_input(messages: list[dict[str, Any]]) -> tuple[str | None, list[dic
             continue
 
         if role == "assistant":
+            reasoning_items = msg.get("_responses_reasoning")
+            if isinstance(reasoning_items, list):
+                items.extend(item for item in reasoning_items if isinstance(item, dict) and item.get("type") == "reasoning")
             tool_calls = msg.get("tool_calls")
             text = _content_to_text(content)
             if isinstance(tool_calls, list) and tool_calls:
@@ -445,17 +462,21 @@ def _convert_input(messages: list[dict[str, Any]]) -> tuple[str | None, list[dic
                         }
                     )
                 continue
-            items.append({"role": "assistant", "content": text})
+            if text:
+                items.append({"role": "assistant", "content": text})
             continue
 
-        if role not in {"user", "developer"}:
+        if role not in {"user", "developer", "system"}:
             raise _protocol_error(
                 code="provider_request_invalid",
                 message="消息角色不被 OpenAI Responses 支持",
                 detail=f"unsupported role={role!r}",
                 status_code=400,
             )
-        items.append({"role": role, "content": _content_to_text(content)})
+        parts = _input_content(content)
+        if role != "user" and isinstance(parts, list) and any(part["type"] == "input_image" for part in parts):
+            role = "user"
+        items.append({"role": role, "content": parts})
 
     instructions = "\n\n".join(instructions_parts) if instructions_parts else None
     return instructions, items
@@ -589,6 +610,17 @@ def _build_payload(
     if "reasoning" in extra and temperature is not None and extra["reasoning"].get("effort") != "none":
         payload.pop("temperature", None)
     payload.update(extra)
+    if converted_tools or payload.get("reasoning"):
+        include = payload.get("include")
+        include = [item for item in include if isinstance(item, str)] if isinstance(include, list) else []
+        if "reasoning.encrypted_content" not in include:
+            include.append("reasoning.encrypted_content")
+        if (
+            any(tool.get("type") in _WEB_SEARCH_TOOL_TYPES for tool in converted_tools or [])
+            and "web_search_call.action.sources" not in include
+        ):
+            include.append("web_search_call.action.sources")
+        payload["include"] = include
     for key in [k for k, v in payload.items() if v is None]:
         payload.pop(key, None)
     if protocol_variant == "chatgpt_subscription":
@@ -630,24 +662,45 @@ def _decode_json_object(response: httpx.Response, *, context: str) -> dict[str, 
     return data
 
 
-def _web_citation_footer(items: list[dict[str, Any]]) -> str:
-    """Keep the provider's actual citations clickable in saved plain-text transcripts."""
-    from urllib.parse import quote
-    sources: dict[str, str] = {}
+def _collect_web_sources(items: list[dict[str, Any]], sources: dict[str, str]) -> None:
     for item in items:
-        blocks = item.get("content") if item.get("type") == "message" else []
-        for block in blocks or []:
-            if not isinstance(block, dict):
+        if not isinstance(item, dict):
+            continue
+        links = []
+        if item.get("type") == "web_search_call":
+            action = item.get("action")
+            if isinstance(action, dict) and isinstance(action.get("sources"), list):
+                links.extend(action["sources"])
+        elif item.get("type") == "message":
+            for block in item.get("content") or []:
+                if isinstance(block, dict) and isinstance(block.get("annotations"), list):
+                    links.extend(
+                        annotation for annotation in block["annotations"]
+                        if isinstance(annotation, dict) and annotation.get("type") == "url_citation"
+                    )
+        for link in links:
+            url = link.get("url") if isinstance(link, dict) else None
+            if not isinstance(url, str):
                 continue
-            for annotation in block.get("annotations") or []:
-                if not isinstance(annotation, dict) or annotation.get("type") != "url_citation":
-                    continue
-                url = str(annotation.get("url") or "")
-                if urlsplit(url).scheme not in {"http", "https"}:
-                    continue
-                title = str(annotation.get("title") or url).replace("[", "(").replace("]", ")").replace("\n", " ")
+            try:
+                parsed = urlsplit(url)
+            except ValueError:
+                continue
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                continue
+            title = link.get("title")
+            if isinstance(title, str) and title.strip():
                 sources[url] = title
-    links = ["- [" + title + "](<" + quote(url, safe=":/?#[]@!$&'*+,;=%~-._") + ">)" for url, title in sources.items()]
+            else:
+                sources.setdefault(url, url)
+
+
+def _web_source_footer(sources: dict[str, str]) -> str:
+    links = []
+    for url, title in sources.items():
+        label = " ".join(title.splitlines()).replace("[", "(").replace("]", ")")
+        destination = quote(url, safe=":/?#[]@!$&'*+,;=%~-._")
+        links.append(f"- [{label}](<{destination}>)")
     return "\n\n来源：\n" + "\n".join(links) if links else ""
 
 
@@ -684,6 +737,8 @@ def _extract_output(data: dict[str, Any]) -> tuple[str, str | None, list[dict[st
                             continue
                         if part.get("type") in {"output_text", "text"} and isinstance(part.get("text"), str):
                             texts.append(part["text"])
+                        elif part.get("type") == "refusal" and isinstance(part.get("refusal"), str):
+                            texts.append(part["refusal"])
                 continue
     text = "".join(texts)
     if not text and isinstance(convenience, str):
@@ -817,7 +872,7 @@ async def complete_responses(
     as_message: bool = False,
 ) -> ChatCompletionResult | ChatCompletionMessage:
     if config.protocol_variant == "chatgpt_subscription":
-        text, reasoning, calls, usage = [], [], None, None
+        text, reasoning, calls, usage, provider_content = [], [], None, None, None
         async for chunk in stream_responses(base_url=base_url, api_key=api_key, messages=messages, config=config):
             if chunk.kind == "content":
                 text.append(chunk.text)
@@ -825,9 +880,11 @@ async def complete_responses(
                 reasoning.append(chunk.text)
             elif chunk.kind == "finish":
                 calls, usage = chunk.tool_calls, chunk.usage
+                provider_content = chunk.provider_content
         if as_message:
             return ChatCompletionMessage(role="assistant", content="".join(text),
-                reasoning_content="".join(reasoning) or None, tool_calls=calls, usage=usage)
+                reasoning_content="".join(reasoning) or None, tool_calls=calls, usage=usage,
+                provider_content=provider_content)
         return ChatCompletionResult(text="".join(text), usage=usage)
     url = _request_url(base_url, api_key, config)
     headers = _request_headers(api_key, config, accept="application/json")
@@ -860,9 +917,16 @@ async def complete_responses(
             data = _decode_json_object(r, context="openai responses")
             _log.set_response(body=data)
             text, reasoning, tool_calls = _extract_output(data)
-            text += _web_citation_footer(data.get("output") or [])
+            sources: dict[str, str] = {}
+            _collect_web_sources(data.get("output") or [], sources)
+            footer = _web_source_footer(sources)
             usage = decode_usage(_usage_with_service_tier(data))
-            usage_dict = usage.to_public_dict() if usage is not None else None
+            usage_dict = usage.to_public_dict() if usage is not None else {}
+            incomplete = data.get("incomplete_details")
+            if data.get("status") == "incomplete" and isinstance(incomplete, dict) and incomplete.get("reason") == "max_output_tokens":
+                usage_dict["finishReason"] = "length"
+                tool_calls = None
+            usage_dict = usage_dict or None
             if as_message:
                 if not text.strip() and not reasoning and not tool_calls:
                     # 与 OpenAI 兼容路径一致：空消息不能当成功
@@ -873,10 +937,14 @@ async def complete_responses(
                     )
                 return ChatCompletionMessage(
                     role="assistant",
-                    content=text,
+                    content=text + footer,
                     reasoning_content=reasoning,
                     tool_calls=tool_calls,
                     usage=usage_dict,
+                    provider_content=[
+                        item for item in data.get("output") or []
+                        if isinstance(item, dict) and item.get("type") == "reasoning"
+                    ] or None,
                 )
             if not text.strip() and not reasoning and not tool_calls:
                 raise _protocol_error(
@@ -884,7 +952,7 @@ async def complete_responses(
                     message="上游服务未返回有效文本",
                     detail="openai responses: empty output_text, reasoning summary, and tool_calls",
                 )
-            return ChatCompletionResult(text=text, usage=usage_dict)
+            return ChatCompletionResult(text=text + footer, usage=usage_dict)
     except AppError:
         raise
     except Exception as exc:
@@ -939,7 +1007,10 @@ async def stream_responses(
     saw_output = False
     terminal_usage: dict[str, Any] | None = None
     completed = False
+    truncated = False
     provider_items: dict[str, dict[str, Any]] = {}
+    web_sources: dict[str, str] = {}
+    saw_refusal = False
 
     try:
         async with log_outbound(
@@ -1012,8 +1083,9 @@ async def stream_responses(
                         # output_item.done may carry final function_call; sync if present.
                         if etype == "response.output_item.done":
                             item = data.get("item")
-                            if isinstance(item, dict) and item.get("type") in {"web_search_call", "message"}:
+                            if isinstance(item, dict) and item.get("type") in {"web_search_call", "message", "reasoning"}:
                                 provider_items[str(item.get("id") or data.get("output_index"))] = item
+                                _collect_web_sources([item], web_sources)
                             if isinstance(item, dict) and item.get("type") == "function_call":
                                 item_id = item.get("id")
                                 key = item_id if isinstance(item_id, str) and item_id else f"idx-{data.get('output_index')}"
@@ -1040,9 +1112,12 @@ async def stream_responses(
                     if etype in {"response.incomplete", "response.cancelled"}:
                         response = data.get("response") if isinstance(data.get("response"), dict) else {}
                         error = response.get("error") if isinstance(response.get("error"), dict) else {}
-                        raise _protocol_error(code=str(error.get("code") or "provider_response_incomplete"),
-                            message="OpenAI Responses 请求未成功完成", detail=str(error.get("message") or response.get("incomplete_details") or etype),
-                            retryable=False)
+                        incomplete = response.get("incomplete_details")
+                        truncated = etype == "response.incomplete" and isinstance(incomplete, dict) and incomplete.get("reason") == "max_output_tokens"
+                        if not truncated:
+                            raise _protocol_error(code=str(error.get("code") or "provider_response_incomplete"),
+                                message="OpenAI Responses 请求未成功完成", detail=str(error.get("message") or incomplete or etype),
+                                retryable=False)
                     if etype.startswith("response.web_search_call") or etype in _WEB_SEARCH_STREAM_EVENT_TYPES:
                         continue
                     if etype in _BUILTIN_STREAM_EVENT_TYPES:
@@ -1084,11 +1159,15 @@ async def stream_responses(
                             tool_calls_by_item[key]["function"]["arguments"] = arguments
                             saw_output = True
                         continue
-                    if etype == "response.output_text.delta":
-                        delta = data.get("delta")
+                    if etype in {"response.output_text.delta", "response.refusal.delta", "response.refusal.done"}:
+                        refusal_event = etype.startswith("response.refusal.")
+                        if etype == "response.refusal.done" and saw_refusal:
+                            continue
+                        delta = data.get("refusal" if etype.endswith(".done") else "delta")
                         if isinstance(delta, str) and delta:
                             saw_output = True
                             aggregated_content.append(delta)
+                            saw_refusal |= refusal_event
                             for piece in _iter_text_chunks(delta):
                                 yield StreamChunk(kind="content", text=piece)
                         continue
@@ -1100,13 +1179,26 @@ async def stream_responses(
                             for piece in _iter_text_chunks(delta):
                                 yield StreamChunk(kind="reasoning", text=piece)
                         continue
-                    if etype == "response.completed":
+                    if etype == "response.completed" or (etype == "response.incomplete" and truncated):
                         completed = True
                         resp = data.get("response")
                         if isinstance(resp, dict):
-                            for idx, item in enumerate(resp.get("output") or []):
-                                if isinstance(item, dict) and item.get("type") in {"web_search_call", "message"}:
+                            output = resp.get("output") or []
+                            _collect_web_sources(output, web_sources)
+                            for idx, item in enumerate(output):
+                                if isinstance(item, dict) and item.get("type") in {"web_search_call", "message", "reasoning"}:
                                     provider_items[str(item.get("id") or idx)] = item
+                        if isinstance(resp, dict) and not saw_refusal:
+                            for item in resp.get("output") or []:
+                                if not isinstance(item, dict) or item.get("type") != "message":
+                                    continue
+                                for part in item.get("content") or []:
+                                    text = part.get("refusal") if isinstance(part, dict) and part.get("type") == "refusal" else None
+                                    if isinstance(text, str) and text:
+                                        saw_output = saw_refusal = True
+                                        aggregated_content.append(text)
+                                        for piece in _iter_text_chunks(text):
+                                            yield StreamChunk(kind="content", text=piece)
                         if isinstance(resp, dict) and isinstance(resp.get("usage"), dict):
                             terminal_usage = _usage_with_service_tier(resp)
                         elif isinstance(data.get("usage"), dict):
@@ -1114,9 +1206,12 @@ async def stream_responses(
                         continue
 
             sorted_tool_calls = (
-                [tool_calls_by_item[k] for k in tool_call_order] if tool_call_order else None
+                [tool_calls_by_item[k] for k in tool_call_order] if tool_call_order and not truncated else None
             )
             usage = decode_usage(terminal_usage)
+            usage_dict = usage.to_public_dict() if usage is not None else {}
+            if truncated:
+                usage_dict["finishReason"] = "length"
             body: dict[str, Any] = {
                 "_aggregated": True,
                 "content": "".join(aggregated_content),
@@ -1136,14 +1231,15 @@ async def stream_responses(
                     message="上游流未返回任何文本",
                     detail="openai responses stream produced no output_text/reasoning/function_call",
                 )
-            footer = _web_citation_footer(list(provider_items.values()))
+            footer = _web_source_footer(web_sources)
             if footer:
                 yield StreamChunk(kind="content", text=footer)
             yield StreamChunk(
                 kind="finish",
                 tool_calls=sorted_tool_calls,
-                usage=usage.to_public_dict() if usage is not None else None,
+                usage=usage_dict or None,
                 provider_content=list(provider_items.values()) or None,
+                stop_reason="length" if truncated else None,
             )
     except AppError:
         raise

@@ -12,7 +12,7 @@ from uuid import uuid4
 
 from app.errors import AppError
 from app.llm.runtime import chat_completions_message, stream_chat_completions
-from app.llm.types import OPENAI_COMPATIBLE_CHAT_PROTOCOL, provider_id_for_protocol
+from app.llm.types import ANTHROPIC_MESSAGES_PROTOCOL, OPENAI_COMPATIBLE_CHAT_PROTOCOL, OPENAI_RESPONSES_PROTOCOL, provider_id_for_protocol
 from app.schemas import Settings
 from app.services.native_web import WebPlan, execute_web_tool, web_tool_content
 from app.services.web_search import (
@@ -197,6 +197,7 @@ async def iter_web_search_stream_events(
         round_content: list[str] = []
         round_reasoning_chunks: list[str] = []
         finish_tc = None
+        provider_content = None
 
         async for chunk in stream_chat_completions(
             base_url=base_url,
@@ -223,6 +224,7 @@ async def iter_web_search_stream_events(
                 yield {"type": "delta", "text": chunk.text}
             elif chunk.kind == "finish":
                 finish_tc = chunk.tool_calls
+                provider_content = chunk.provider_content
                 if isinstance(chunk.usage, dict):
                     merged_usage = merge_public_usage(merged_usage, chunk.usage)
 
@@ -237,6 +239,10 @@ async def iter_web_search_stream_events(
                 rc_round = "".join(round_reasoning_chunks).strip()
                 if rc_round:
                     asst["reasoning_content"] = rc_round
+                if protocol == ANTHROPIC_MESSAGES_PROTOCOL and provider_content:
+                    asst["_anthropic_content"] = provider_content
+                if protocol == OPENAI_RESPONSES_PROTOCOL and provider_content:
+                    asst["_responses_reasoning"] = [item for item in provider_content if item.get("type") == "reasoning"]
                 msgs.append(asst)
                 for tc in norm:
                     if web_plan:
@@ -336,6 +342,10 @@ async def nonstream_web_search_rounds(
                 }
                 if isinstance(rc, str) and rc.strip():
                     asst["reasoning_content"] = rc
+                if protocol == ANTHROPIC_MESSAGES_PROTOCOL and resp.provider_content:
+                    asst["_anthropic_content"] = resp.provider_content
+                if protocol == OPENAI_RESPONSES_PROTOCOL and resp.provider_content:
+                    asst["_responses_reasoning"] = [item for item in resp.provider_content if item.get("type") == "reasoning"]
                 msgs.append(asst)
                 for tc in norm:
                     if web_plan:

@@ -39,7 +39,7 @@ def resolve_inject_depth(chat: Any) -> int:
     if ov is None:
         return 5
     try:
-        return max(0, int(getattr(ov, "knowledgeGraphInjectDepth", 5) or 5))
+        return max(0, int(getattr(ov, "knowledgeGraphInjectDepth", 5)))
     except (TypeError, ValueError):
         return 5
 
@@ -89,8 +89,11 @@ def _prepend_to_message_content(msg: dict, block: str) -> bool:
     return True
 
 
-def _insert_system_message(messages: list[dict], index: int, block: str) -> None:
-    messages.insert(index, {"role": "system", "content": block.strip()})
+def _insert_system_message(messages: list[dict], index: int, block: str, *, in_conversation: bool = False) -> None:
+    message = {"role": "system", "content": block.strip()}
+    if in_conversation:
+        message["_system_turn"] = True
+    messages.insert(index, message)
 
 
 def apply_knowledge_graph_injection(
@@ -132,14 +135,14 @@ def apply_knowledge_graph_injection(
         tail = messages[start:]
         depth = resolve_inject_depth(chat)
         insert_at = start + max(0, len(tail) - depth)
-        _insert_system_message(messages, insert_at, block)
+        _insert_system_message(messages, insert_at, block, in_conversation=True)
         return True
 
     if position == "before_last":
         role = resolve_before_last_role(chat)
         for i in range(len(messages) - 1, -1, -1):
             if messages[i].get("role") == role:
-                _insert_system_message(messages, i, block)
+                _insert_system_message(messages, i, block, in_conversation=True)
                 return True
         return False
 

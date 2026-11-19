@@ -18,7 +18,7 @@ from typing import Any, Iterator
 from uuid import uuid4
 
 from app.errors import AppError, redact_sensitive_text
-from app.services.pricing import estimate_cost_from_usage, merge_cost
+from app.services.pricing import estimate_cost_from_usage, input_includes_cache_read, merge_cost
 from app.storage import append_jsonl_object, get_usage_dir, read_json, write_json
 
 
@@ -73,6 +73,8 @@ def usage_tokens_view(usage: dict[str, Any] | None) -> dict[str, Any] | None:
     tier = usage.get("serviceTier") or usage.get("service_tier")
     if tier:
         out["serviceTier"] = tier
+    if usage.get("finishReason") == "length":
+        out["finishReason"] = "length"
     if usage.get("fastRequested") is True:
         out["fastRequested"] = True
     return out or None
@@ -199,6 +201,7 @@ def build_generation_metadata(
     estimated = estimate_cost_from_usage(
         tokens,
         provider=provider,
+        protocol=protocol,
         resolved_model=resolved_model,
         requested_model=requested_model,
     )
@@ -480,6 +483,7 @@ def summarize_ledger_events(events: list[dict[str, Any]]) -> dict[str, Any]:
     total_input = 0.0
     total_output = 0.0
     total_cache_read = 0.0
+    total_cache_input = 0.0
     total_cache_write = 0.0
     request_count = 0
     completed = 0
@@ -507,6 +511,10 @@ def summarize_ledger_events(events: list[dict[str, Any]]) -> dict[str, Any]:
         out = _num(usage.get("outputTokens"))
         cread = _num(usage.get("cacheReadInputTokens"))
         cwrite = _num(usage.get("cacheWriteInputTokens"))
+        if input_includes_cache_read(event.get("protocol")):
+            total_cache_input += max(inp or 0.0, cread or 0.0)
+        else:
+            total_cache_input += (inp or 0.0) + (cread or 0.0)
         if inp is not None:
             total_input += inp
         if out is not None:
@@ -550,9 +558,8 @@ def summarize_ledger_events(events: list[dict[str, Any]]) -> dict[str, Any]:
     ttfts.sort()
     durations.sort()
     cache_hit_rate = None
-    denom = total_input + total_cache_read
-    if denom > 0 and total_cache_read > 0:
-        cache_hit_rate = total_cache_read / denom
+    if total_cache_input > 0 and total_cache_read > 0:
+        cache_hit_rate = total_cache_read / total_cache_input
 
     return {
         "requestCount": request_count,

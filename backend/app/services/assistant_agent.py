@@ -14,7 +14,7 @@ from app.assistant_tools.executor import build_openai_tools_list, execute_tool
 from app.assistant_tools import result as tool_result
 from app.errors import AppError, as_app_error
 from app.llm.runtime import chat_completions_message, stream_chat_completions
-from app.llm.types import ANTHROPIC_MESSAGES_PROTOCOL, OPENAI_COMPATIBLE_CHAT_PROTOCOL, provider_id_for_protocol
+from app.llm.types import ANTHROPIC_MESSAGES_PROTOCOL, OPENAI_COMPATIBLE_CHAT_PROTOCOL, OPENAI_RESPONSES_PROTOCOL, provider_id_for_protocol
 from app.schemas import AssistantChat, ChatMessage
 from app.services.native_web import WebPlan, execute_web_tool
 
@@ -77,6 +77,12 @@ class AssistantAgentRunContext:
             tools = [t for t in tools if (t.get("function") or {}).get("name") not in {"web_search", "web_fetch"}]
             tools.extend(self.web_plan.tools)
         return tools
+
+
+def _responses_reasoning(protocol: str, content: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
+    if protocol != OPENAI_RESPONSES_PROTOCOL:
+        return None
+    return [item for item in (content or []) if item.get("type") == "reasoning"] or None
 
 
 def normalize_tool_calls_ids(tool_calls: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
@@ -230,6 +236,9 @@ class AssistantAgentService:
                     llm_assistant_msg["reasoning_content"] = resp.reasoning_content
                 if resp.provider_content and self._ctx.protocol == ANTHROPIC_MESSAGES_PROTOCOL:
                     llm_assistant_msg["_anthropic_content"] = resp.provider_content
+                responses_reasoning = _responses_reasoning(self._ctx.protocol, resp.provider_content)
+                if responses_reasoning:
+                    llm_assistant_msg["_responses_reasoning"] = responses_reasoning
                 if tool_calls_for_llm is not None:
                     llm_assistant_msg["tool_calls"] = tool_calls_for_llm
                 current_messages.append(llm_assistant_msg)
@@ -248,6 +257,7 @@ class AssistantAgentService:
                         role=resp.role or "assistant",
                         content=resp.content or "",
                         anthropicContent=resp.provider_content if self._ctx.protocol == ANTHROPIC_MESSAGES_PROTOCOL else None,
+                        responsesReasoning=responses_reasoning,
                         reasoningContent=None,
                     )
                     self._append_message(assistant_msg)
@@ -277,6 +287,7 @@ class AssistantAgentService:
                         content=resp.content or "",
                         tool_calls=list(tool_calls_for_llm or []),
                         anthropicContent=resp.provider_content if self._ctx.protocol == ANTHROPIC_MESSAGES_PROTOCOL else None,
+                        responsesReasoning=responses_reasoning,
                         reasoningContent=None,
                     )
                 )
@@ -345,6 +356,9 @@ class AssistantAgentService:
                         tool_calls_from_stream = chunk.tool_calls
                         if chunk.provider_content and self._ctx.protocol == ANTHROPIC_MESSAGES_PROTOCOL:
                             llm_assistant_msg["_anthropic_content"] = chunk.provider_content
+                        responses_reasoning = _responses_reasoning(self._ctx.protocol, chunk.provider_content)
+                        if responses_reasoning:
+                            llm_assistant_msg["_responses_reasoning"] = responses_reasoning
 
                 reasoning_duration_sec: float | None = None
                 if reasoning_phase_started is not None:
@@ -374,6 +388,7 @@ class AssistantAgentService:
                         role="assistant",
                         content=final_content,
                         anthropicContent=llm_assistant_msg.get("_anthropic_content"),
+                        responsesReasoning=llm_assistant_msg.get("_responses_reasoning"),
                         reasoningContent=None,
                     )
                     self._append_message(assistant_msg)
@@ -386,6 +401,7 @@ class AssistantAgentService:
                         content=final_content or "",
                         tool_calls=list(normalized_stream),
                         anthropicContent=llm_assistant_msg.get("_anthropic_content"),
+                        responsesReasoning=llm_assistant_msg.get("_responses_reasoning"),
                         reasoningContent=None,
                     )
                 )

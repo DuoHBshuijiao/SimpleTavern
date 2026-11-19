@@ -18,6 +18,7 @@ from urllib.parse import quote, urlsplit, urlunsplit
 import httpx
 
 from app.errors import AppError, as_app_error
+from app.llm.message_order import split_leading_system_messages
 from app.llm.aws_eventstream import EVENTSTREAM_CONTENT_TYPE, aiter_event_frames, frame_json
 from app.llm.stream_errors import guarded_lines, upstream_stream_error
 from app.llm.prompt_cache import (
@@ -531,7 +532,8 @@ def _assistant_tool_use_blocks(msg: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _convert_messages(messages: list[dict[str, Any]]) -> tuple[str | None, list[dict[str, Any]]]:
-    system_parts: list[str] = []
+    instructions, messages = split_leading_system_messages(messages)
+    system_parts = [text for item in instructions if (text := _content_to_text(item.get("content")).strip())]
     converted: list[dict[str, Any]] = []
     i = 0
     n = len(messages)
@@ -545,11 +547,7 @@ def _convert_messages(messages: list[dict[str, Any]]) -> tuple[str | None, list[
         content = msg.get("content")
 
         if role == "system":
-            text = _content_to_text(content).strip()
-            if text:
-                system_parts.append(text)
-            i += 1
-            continue
+            role = "user"  # Preserve the turn's position on both old and new Messages models.
 
         if role == "tool":
             # Consecutive role=tool → single user message with tool_result blocks.
@@ -1319,9 +1317,12 @@ def _native_source_links(blocks: list[dict[str, Any]]) -> str:
                 continue
             url = item.get("url")
             if isinstance(url, str) and url.startswith(("https://", "http://")) and not any(c in url for c in "<>\n\r"):
-                title = str(item.get("title") or "来源").replace("[", "").replace("]", "")[:120]
-                links[url] = title
-    return "\n\n来源：" + " · ".join(f"[{title}](<{url}>)" for url, title in list(links.items())[:20]) if links else ""
+                title = item.get("title")
+                if isinstance(title, str) and title.strip():
+                    links[url] = " ".join(title.splitlines()).replace("[", "").replace("]", "")[:120]
+                else:
+                    links.setdefault(url, "来源")
+    return "\n\n来源：" + " · ".join(f"[{title}](<{url}>)" for url, title in links.items()) if links else ""
 
 
 async def complete_anthropic(*, base_url: str, api_key: str, messages: list[dict[str, Any]],

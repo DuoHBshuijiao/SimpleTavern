@@ -18,6 +18,7 @@ from typing import Any
 
 from app.errors import AppError
 from app.llm.catalog.catalog import get_catalog
+from app.llm.types import GEMINI_GENERATE_CONTENT_PROTOCOL, OPENAI_COMPATIBLE_CHAT_PROTOCOL, OPENAI_RESPONSES_PROTOCOL
 from app.storage import get_pricing_rules_path, read_json, write_json
 
 
@@ -387,12 +388,17 @@ def resolve_pricing_rule(
     )
 
 
+def input_includes_cache_read(protocol: str | None) -> bool:
+    return protocol in {OPENAI_COMPATIBLE_CHAT_PROTOCOL, OPENAI_RESPONSES_PROTOCOL, GEMINI_GENERATE_CONTENT_PROTOCOL}
+
+
 def estimate_cost_from_usage(
     usage: dict[str, Any] | None,
     *,
     provider: str | None,
     resolved_model: str | None,
     requested_model: str | None,
+    protocol: str | None = None,
 ) -> dict[str, Any] | None:
     """按本地价格表估算；无法可靠计算时返回 None（由调用方标 unknown）。"""
     if not isinstance(usage, dict) or not usage:
@@ -424,6 +430,8 @@ def estimate_cost_from_usage(
     }
     if all(v is None for v in rates.values()):
         return None
+    if rates["cacheRead"] is not None and input_includes_cache_read(protocol):
+        input_tokens = max(0.0, input_tokens - cache_read)
     amount = 0.0
     used_any = False
     if rates["input"] is not None:

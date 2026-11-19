@@ -9,12 +9,15 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any, AsyncIterator
-from urllib.parse import urlsplit, urlunsplit, urlencode, parse_qsl
+from uuid import uuid4
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 import httpx
 
 from app.errors import AppError, as_app_error
+from app.llm.message_order import split_leading_system_messages
 from app.llm.stream_errors import guarded_lines, upstream_stream_error
 from app.llm.gemini_cache_store import attach_explicit_cache, forget_cached_name
 from app.llm.prompt_cache import PromptCachePlan
@@ -468,6 +471,7 @@ def _assistant_tool_call_parts(
     tool_calls: Any,
     *,
     id_to_name: dict[str, str],
+    upstream_ids: dict[str, str],
     msg_index: int,
 ) -> list[dict[str, Any]]:
     if not isinstance(tool_calls, list):
@@ -494,7 +498,15 @@ def _assistant_tool_call_parts(
             fn.get("arguments"),
             detail=f"messages[{msg_index}].tool_calls[{tc_idx}].function.arguments",
         )
-        parts.append({"functionCall": {"name": name, "args": args}})
+        call: dict[str, Any] = {"name": name, "args": args}
+        upstream_id = tc.get("_gemini_id")
+        if tc_id and isinstance(upstream_id, str) and upstream_id:
+            upstream_ids[tc_id] = upstream_id
+            call["id"] = upstream_id
+        part = {"functionCall": call}
+        if isinstance(tc.get("_gemini_thought_signature"), str):
+            part["thoughtSignature"] = tc["_gemini_thought_signature"]
+        parts.append(part)
     return parts
 
 
@@ -524,9 +536,11 @@ def _resolve_tool_message_name(
 
 
 def _convert_messages(messages: list[dict[str, Any]]) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
-    system_parts: list[str] = []
+    instructions, messages = split_leading_system_messages(messages)
+    system_parts = [text for item in instructions if (text := _content_to_text(item.get("content")).strip())]
     contents: list[dict[str, Any]] = []
     id_to_name: dict[str, str] = {}
+    upstream_ids: dict[str, str] = {}
 
     for idx, msg in enumerate(messages):
         if not isinstance(msg, dict):
@@ -534,29 +548,23 @@ def _convert_messages(messages: list[dict[str, Any]]) -> tuple[dict[str, Any] | 
         role = (msg.get("role") or "").strip()
         content = msg.get("content")
         if role == "system":
-            text = _content_to_text(content).strip()
-            if text:
-                system_parts.append(text)
-            continue
+            role = "user"
 
         if role == "tool":
             gem_role = "user"
             tool_name = _resolve_tool_message_name(msg, id_to_name=id_to_name, msg_index=idx)
-            parts = [
-                {
-                    "functionResponse": {
-                        "name": tool_name,
-                        "response": _tool_response_object(content),
-                    }
-                }
-            ]
+            response = {"name": tool_name, "response": _tool_response_object(content)}
+            upstream_id = upstream_ids.get(msg.get("tool_call_id"))
+            if upstream_id:
+                response["id"] = upstream_id
+            parts = [{"functionResponse": response}]
         elif role in {"assistant", "model"}:
             gem_role = "model"
             parts = _nonempty_text_parts(content)
             tool_calls = msg.get("tool_calls")
             if tool_calls:
                 parts.extend(
-                    _assistant_tool_call_parts(tool_calls, id_to_name=id_to_name, msg_index=idx)
+                    _assistant_tool_call_parts(tool_calls, id_to_name=id_to_name, upstream_ids=upstream_ids, msg_index=idx)
                 )
             if not parts:
                 parts = [{"text": ""}]
@@ -623,6 +631,7 @@ def _build_payload(
     extra_body: dict[str, Any] | None,
     tools: list[dict[str, Any]] | None = None,
     tool_choice: Any | None = None,
+    stream: bool = False,
 ) -> dict[str, Any]:
     system_instruction, contents = _convert_messages(messages)
     if not contents:
@@ -665,6 +674,12 @@ def _build_payload(
         payload["toolConfig"] = _map_tool_choice_to_gemini(resolved_choice)
 
     if extra_body:
+        tool_config = extra_body.get("toolConfig", extra_body.get("tool_config"))
+        function_config = tool_config.get("functionCallingConfig", tool_config.get("function_calling_config")) if isinstance(tool_config, dict) else None
+        if stream and isinstance(function_config, dict):
+            stream_arguments = function_config.get("streamFunctionCallArguments", function_config.get("stream_function_call_arguments"))
+            if isinstance(stream_arguments, bool):
+                payload.setdefault("toolConfig", {}).setdefault("functionCallingConfig", {})["streamFunctionCallArguments"] = stream_arguments
         for key, value in extra_body.items():
             if key in {
                 "thinking",
@@ -674,11 +689,12 @@ def _build_payload(
                 "tool_choice",
                 "functionDeclarations",
                 "toolConfig",
+                "tool_config",
                 "contents",
                 "systemInstruction",
             }:
                 continue
-            if key == "generationConfig" and isinstance(value, dict):
+            if key in {"generationConfig", "generation_config"} and isinstance(value, dict):
                 merged = dict(generation_config)
                 merged.update(value)
                 # 5C: do not enable cached content helpers from extra.
@@ -688,6 +704,19 @@ def _build_payload(
             if key in {"cachedContent", "cache"}:
                 continue
             payload[key] = value
+    generation_config = payload["generationConfig"]
+    modalities = generation_config.get("responseModalities", generation_config.get("response_modalities"))
+    mime_type = generation_config.get("responseMimeType", generation_config.get("response_mime_type"))
+    if (
+        isinstance(modalities, list) and any(str(value).upper() != "TEXT" for value in modalities)
+        or isinstance(mime_type, str) and mime_type.lower().startswith(("image/", "audio/"))
+    ):
+        raise _protocol_error(
+            code="provider_request_invalid",
+            message="当前 Gemini 聊天适配器只支持文本输出，请移除图片或音频输出配置",
+            detail="generationConfig contains an unsupported output modality",
+            status_code=422,
+        )
     return payload
 
 
@@ -709,34 +738,143 @@ def _decode_json_object(response: httpx.Response, *, context: str) -> dict[str, 
     return data
 
 
-def _function_call_to_openai_tool_call(fc: dict[str, Any], *, index: int) -> dict[str, Any]:
-    name = fc.get("name")
-    if not isinstance(name, str):
-        name = ""
+def _function_call_to_openai_tool_call(fc: dict[str, Any], signature: str | None) -> dict[str, Any]:
+    name = fc.get("name") if isinstance(fc.get("name"), str) else ""
+    upstream_id = fc.get("id") if isinstance(fc.get("id"), str) and fc["id"] else None
     args = fc.get("args") if "args" in fc else fc.get("arguments")
-    call_id = fc.get("id")
-    if not isinstance(call_id, str) or not call_id:
-        call_id = f"call_{name}_{index}"
     return {
-        "id": call_id,
+        "id": upstream_id or f"call_{uuid4().hex}",
+        "_gemini_id": upstream_id,
+        "_gemini_thought_signature": signature,
         "type": "function",
-        "function": {
-            "name": name,
-            "arguments": _args_to_openai_json_string(args),
-        },
+        "function": {"name": name, "arguments": _args_to_openai_json_string(args)},
     }
+
+
+_ARG_PATH_SEGMENT = re.compile(r'\.([^.[\]]+)|\[(\d+|"(?:[^"\\]|\\.)*")\]')
+
+
+def _assign_argument(args: dict[str, Any], path: str, value: Any, append: bool) -> None:
+    position = 1
+    keys: list[str | int] = []
+    while path.startswith("$") and (match := _ARG_PATH_SEGMENT.match(path, position)) is not None:
+        key = match[1] if match[1] is not None else json.loads(match[2])
+        if isinstance(key, int) and not 0 <= key <= 10_000:
+            raise ValueError("invalid function argument array index")
+        keys.append(key)
+        position = match.end()
+    if len(keys) > 64 or not keys or position != len(path) or not isinstance(keys[0], str):
+        raise ValueError("invalid function argument JSONPath")
+
+    parent: dict | list = args
+    for index, key in enumerate(keys):
+        is_field = isinstance(key, str)
+        if is_field != isinstance(parent, dict):
+            raise ValueError("inconsistent function argument JSONPath")
+        if isinstance(parent, list) and key >= len(parent):
+            parent.extend([None] * (key + 1 - len(parent)))
+        current = parent.get(key) if isinstance(parent, dict) else parent[key]
+        if index == len(keys) - 1:
+            parent[key] = current + value if append and isinstance(current, str) and isinstance(value, str) else value
+        else:
+            child = current
+            if child is None:
+                child = {} if isinstance(keys[index + 1], str) else []
+                parent[key] = child
+            if not isinstance(child, (dict, list)):
+                raise ValueError("invalid nested function argument")
+            parent = child
+
+
+class _StreamFunctionCalls:
+    def __init__(self) -> None:
+        self.pending: dict[str, tuple[dict[str, Any], str | None, set[str]]] = {}
+
+    def add(self, block: dict[str, Any], signature: str | None) -> dict[str, Any] | None:
+        key = str(block.get("id") or "")
+        if not block.get("name") and len(self.pending) == 1:
+            pending_key = next(iter(self.pending))
+            if not key or (not pending_key and key not in self.pending):
+                key = pending_key
+        fragments = block.get("partialArgs")
+        continuing = block.get("willContinue") is True
+        previous = self.pending.get(key)
+        if previous is None and not continuing and not isinstance(fragments, list):
+            if not block.get("name"):
+                raise ValueError("unexpected anonymous Gemini function call")
+            return _function_call_to_openai_tool_call(block, signature)
+
+        call, old_signature, open_paths = previous or ({}, None, set())
+        for field in ("name", "id"):
+            if block.get(field):
+                call[field] = block[field]
+        signature = old_signature or signature
+        if isinstance(block.get("args"), dict):
+            call["args"] = block["args"]
+        args = call.setdefault("args", {})
+        for fragment in fragments or []:
+            path = fragment.get("jsonPath")
+            if not isinstance(path, str):
+                raise ValueError("missing function argument JSONPath")
+            for field in ("stringValue", "numberValue", "boolValue", "nullValue"):
+                if field in fragment:
+                    value = None if field == "nullValue" else fragment[field]
+                    _assign_argument(args, path, value, path in open_paths)
+                    break
+            open_paths.discard(path)
+            if fragment.get("willContinue") is True:
+                open_paths.add(path)
+
+        if continuing:
+            self.pending[key] = call, signature, open_paths
+            return None
+        self.pending.pop(key, None)
+        if not call.get("name"):
+            raise ValueError("incomplete Gemini function call name")
+        return _function_call_to_openai_tool_call(call, signature)
+
+
+def _first_candidate(data: dict[str, Any]) -> dict[str, Any]:
+    candidates = data.get("candidates")
+    if isinstance(candidates, list) and candidates and isinstance(candidates[0], dict):
+        return candidates[0]
+    return {}
+
+
+def _grounding_links(candidate: dict[str, Any]) -> dict[str, str]:
+    metadata = candidate.get("groundingMetadata")
+    if not isinstance(metadata, dict) or not isinstance(metadata.get("groundingChunks"), list):
+        return {}
+    links: dict[str, str] = {}
+    for chunk in metadata["groundingChunks"]:
+        web = chunk.get("web") if isinstance(chunk, dict) else None
+        if not isinstance(web, dict) or not isinstance(web.get("uri"), str):
+            continue
+        url = web["uri"].strip()
+        try:
+            parsed = urlsplit(url)
+            if parsed.scheme not in {"https", "http"} or not parsed.hostname or parsed.username or parsed.password:
+                continue
+        except ValueError:
+            continue
+        links[url] = " ".join(str(web.get("title") or parsed.hostname).split())
+    return links
+
+
+def _grounding_footer(links: dict[str, str]) -> str:
+    rendered = []
+    for url, title in list(links.items())[:20]:
+        label = title.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
+        target = quote(url, safe=":/?#[]@!$&'()*+,;=%-._~")
+        rendered.append(f"[{label}](<{target}>)")
+    return "\n\n来源：" + " · ".join(rendered) if rendered else ""
 
 
 def _extract_text_thoughts_and_tool_calls(
     data: dict[str, Any],
+    streamed_calls: _StreamFunctionCalls | None = None,
 ) -> tuple[str, str | None, list[dict[str, Any]] | None]:
-    candidates = data.get("candidates")
-    if not isinstance(candidates, list) or not candidates:
-        return "", None, None
-    first = candidates[0]
-    if not isinstance(first, dict):
-        return "", None, None
-    content = first.get("content")
+    content = _first_candidate(data).get("content")
     if not isinstance(content, dict):
         return "", None, None
     parts = content.get("parts")
@@ -753,9 +891,18 @@ def _extract_text_thoughts_and_tool_calls(
             fc = part.get("function_call")
         if isinstance(fc, dict):
             fc_name = str(fc.get("name") or "").strip().lower()
-            if fc_name in {"google_search", "googlesearch", "web_search"}:
+            if fc_name in {"google_search", "googlesearch"}:
                 continue
-            tool_calls.append(_function_call_to_openai_tool_call(fc, index=len(tool_calls)))
+            signature = part.get("thoughtSignature") or part.get("thought_signature")
+            signature = signature if isinstance(signature, str) else None
+            try:
+                call = streamed_calls.add(fc, signature) if streamed_calls is not None else _function_call_to_openai_tool_call(fc, signature)
+            except (ValueError, TypeError, AttributeError) as exc:
+                raise _protocol_error(
+                    code="stream_event_invalid", message="Gemini 返回的工具参数片段无效", detail=str(exc),
+                ) from exc
+            if call:
+                tool_calls.append(call)
             continue
         text = part.get("text")
         if not isinstance(text, str) or not text:
@@ -764,7 +911,7 @@ def _extract_text_thoughts_and_tool_calls(
             thoughts.append(text)
         else:
             texts.append(text)
-    reasoning = "".join(thoughts).strip() or None
+    reasoning = "".join(thoughts) or None
     return "".join(texts), reasoning, tool_calls or None
 
 
@@ -883,6 +1030,7 @@ def _payload_from_config(
         extra_body=config.extra_body,
         tools=config.tools,
         tool_choice=config.tool_choice,
+        stream=config.stream,
     )
 
 
@@ -955,6 +1103,8 @@ async def complete_gemini(
             data = _decode_json_object(r, context="gemini generateContent")
             _log.set_response(body=data)
             text, reasoning, tool_calls = _extract_text_thoughts_and_tool_calls(data)
+            if text.strip():
+                text += _grounding_footer(_grounding_links(_first_candidate(data)))
             usage = decode_usage(_usage_with_tier(data))
             usage_dict = usage.to_public_dict() if usage is not None else None
             if as_message:
@@ -1012,6 +1162,7 @@ async def stream_gemini(
     )
 
     saw_output = False
+    finish_reason: str | None = None
     terminal_usage: dict[str, Any] | None = None
 
     try:
@@ -1026,6 +1177,8 @@ async def stream_gemini(
             aggregated_content: list[str] = []
             aggregated_reasoning: list[str] = []
             aggregated_tool_calls: list[dict[str, Any]] = []
+            streamed_calls = _StreamFunctionCalls()
+            grounding_links: dict[str, str] = {}
             client = get_async_http_client()
             retried_cache = False
             while True:
@@ -1093,7 +1246,12 @@ async def stream_gemini(
                         usage = data.get("usageMetadata")
                         if isinstance(usage, dict):
                             terminal_usage = usage
-                        text, reasoning, tool_calls = _extract_text_thoughts_and_tool_calls(data)
+                        candidate = _first_candidate(data)
+                        reason = candidate.get("finishReason") or candidate.get("finish_reason")
+                        if isinstance(reason, str) and reason and reason != "FINISH_REASON_UNSPECIFIED":
+                            finish_reason = reason
+                        grounding_links.update(_grounding_links(candidate))
+                        text, reasoning, tool_calls = _extract_text_thoughts_and_tool_calls(data, streamed_calls)
                         if reasoning:
                             saw_output = True
                             aggregated_reasoning.append(reasoning)
@@ -1120,16 +1278,27 @@ async def stream_gemini(
                     "usageMetadata": terminal_usage,
                 }
             )
+            if finish_reason is None or streamed_calls.pending:
+                raise _protocol_error(
+                    code="stream_incomplete",
+                    message="Gemini 响应流提前中断",
+                    detail="missing candidate finishReason or unfinished function call",
+                    retryable=True,
+                )
             if not saw_output:
                 raise _protocol_error(
                     code="provider_response_invalid",
                     message="上游流未返回任何文本",
-                    detail="gemini stream produced no text/thought/tool_call parts",
+                    detail=f"Gemini finishReason={finish_reason}",
                 )
+            footer = _grounding_footer(grounding_links) if aggregated_content else ""
+            if footer:
+                yield StreamChunk(kind="content", text=footer)
             yield StreamChunk(
                 kind="finish",
                 tool_calls=finish_tool_calls,
                 usage=usage.to_public_dict() if usage is not None else None,
+                stop_reason=finish_reason,
             )
     except AppError as error:
         raise _finish_error(error, api_key, config.auth_style)
