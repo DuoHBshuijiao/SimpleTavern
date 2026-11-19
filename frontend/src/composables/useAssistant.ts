@@ -35,7 +35,7 @@
  *    - 依赖：依赖vue、api/http.ts、api/sse.ts
  *    - 位置：Composables层，提供聊天助手逻辑
  */
-import { nextTick, ref } from 'vue'
+import { ref, watch } from 'vue'
 import type { ComputedRef } from 'vue'
 import { apiGet, apiPost, apiPut, apiDelete } from '../api/http'
 import { postAndConsumeSse } from '../api/sse'
@@ -69,6 +69,7 @@ type AssistantIngestResponse = {
 export type SendAssistantMessageOptions = {
   /** 覆盖输入框草稿的正文 */
   userMessageOverride?: string
+  regenerateFromMessageId?: string
   /** 仅本次请求覆盖「记忆写入」开关（聊天作用域） */
   allowWriteMemoryOverride?: boolean
   /** 仅本次请求覆盖「破坏性工具」开关 */
@@ -348,6 +349,7 @@ export function useAssistant(options: UseAssistantOptions) {
   }
 
   async function cleanupWorkspaceSession() {
+    invalidateGeneration('workspace')
     const sessionId = workspaceSessionId.value
     if (!sessionId) return
     try {
@@ -368,13 +370,12 @@ export function useAssistant(options: UseAssistantOptions) {
    * @param {AssistantScope} scope - 作用域（'chat'或'workspace'）
    * @returns {string} 完整的API路径
    */
-  function buildPath(base: string, scope: AssistantScope): string {
+  function buildPath(base: string, scope: AssistantScope, targetChatId = chatId.value): string {
     const params: string[] = []
     if (scope === 'workspace') {
       params.push('scope=workspace')
     } else {
-      const id = chatId.value
-      if (id) params.push(`chatId=${encodeURIComponent(id)}`)
+      if (targetChatId) params.push(`chatId=${encodeURIComponent(targetChatId)}`)
     }
     if (!params.length) return base
     const sep = base.includes('?') ? '&' : '?'
@@ -545,33 +546,29 @@ export function useAssistant(options: UseAssistantOptions) {
     return v
   }
 
-  async function saveSettings() {
+  async function saveSettings(next: AssistantSettings = assistantSettings.value) {
     const payload = {
-      temperature: assistantSettings.value.temperature,
-      model: assistantSettings.value.model,
-      presetId: assistantSettings.value.presetId,
-      reasoningEffort: assistantSettings.value.reasoningEffort ?? null,
-      fastMode: assistantSettings.value.fastMode ?? null,
-      context_size: normalizeContextSize(assistantSettings.value.context_size),
+      temperature: typeof next.temperature === 'number' ? next.temperature : null,
+      model: next.model,
+      presetId: next.presetId,
+      reasoningEffort: next.reasoningEffort ?? null,
+      fastMode: next.fastMode ?? null,
+      context_size: normalizeContextSize(next.context_size),
       tool_read_max_messages:
-        assistantSettings.value.tool_read_max_messages != null &&
-        assistantSettings.value.tool_read_max_messages >= 1
-          ? assistantSettings.value.tool_read_max_messages
+        next.tool_read_max_messages != null &&
+        next.tool_read_max_messages >= 1
+          ? next.tool_read_max_messages
           : null,
       tool_read_max_tokens:
-        assistantSettings.value.tool_read_max_tokens != null &&
-        assistantSettings.value.tool_read_max_tokens >= 1
-          ? assistantSettings.value.tool_read_max_tokens
+        next.tool_read_max_tokens != null &&
+        next.tool_read_max_tokens >= 1
+          ? next.tool_read_max_tokens
           : null,
-      maxToolTurns: normalizePositiveInt(assistantSettings.value.maxToolTurns),
-      maxToolsPerTurn: normalizePositiveInt(assistantSettings.value.maxToolsPerTurn),
+      maxToolTurns: normalizePositiveInt(next.maxToolTurns),
+      maxToolsPerTurn: normalizePositiveInt(next.maxToolsPerTurn),
     }
     await apiPut('/api/assistant/settings', payload)
-    assistantSettings.value.context_size = payload.context_size
-    assistantSettings.value.tool_read_max_messages = payload.tool_read_max_messages ?? null
-    assistantSettings.value.tool_read_max_tokens = payload.tool_read_max_tokens ?? null
-    assistantSettings.value.maxToolTurns = payload.maxToolTurns ?? 8
-    assistantSettings.value.maxToolsPerTurn = payload.maxToolsPerTurn ?? null
+    assistantSettings.value = { ...payload, maxToolTurns: payload.maxToolTurns ?? 8 }
   }
 
   /**
@@ -581,9 +578,15 @@ export function useAssistant(options: UseAssistantOptions) {
    *
    * @returns {Promise<void>} 完成时返回
    */
-  async function saveSettingsAndClose() {
-    await saveSettings()
-    showAssistantSettings.value = false
+  async function saveSettingsAndClose(next: AssistantSettings): Promise<boolean> {
+    try {
+      await saveSettings(next)
+      showAssistantSettings.value = false
+      return true
+    } catch (error) {
+      await notifyMessage(error instanceof Error ? error.message : String(error), { title: '助手设置保存失败' })
+      return false
+    }
   }
 
   /**
@@ -595,9 +598,37 @@ export function useAssistant(options: UseAssistantOptions) {
    * @param {AssistantScope} scope - 作用域（'chat'或'workspace'）
    * @returns {Promise<void>} 完成时返回
    */
-  async function loadChat(scope: AssistantScope) {
+  const chatLoadVersions = { chat: 0, workspace: 0 }
+
+  function stopGeneration(scope: AssistantScope) {
+    assistantAborters[scope]?.abort()
+  }
+
+  function invalidateGeneration(scope: AssistantScope) {
+    ++chatLoadVersions[scope]
+    stopGeneration(scope)
+    assistantAborters[scope] = null
     const state = getState(scope)
-    const res = await apiGet<{ messages: unknown[] }>(buildPath('/api/assistant/chat', scope))
+    state.streamingContent.value = ''
+    state.streamingReasoning.value = ''
+    state.isGenerating.value = false
+    if (scope === 'workspace') {
+      workspaceReasoningStreamPhaseActive.value = false
+      workspaceReasoningElapsedSec.value = null
+    } else {
+      assistantReasoningStreamPhaseActive.value = false
+      assistantReasoningElapsedSec.value = null
+    }
+  }
+
+  watch(chatId, () => invalidateGeneration('chat'), { flush: 'sync' })
+
+  async function loadChat(scope: AssistantScope, targetChatId = chatId.value) {
+    const version = ++chatLoadVersions[scope]
+    const state = getState(scope)
+    const res = await apiGet<{ messages: unknown[] }>(buildPath('/api/assistant/chat', scope, targetChatId))
+    if (version !== chatLoadVersions[scope]) return
+    if (scope === 'chat' && targetChatId !== chatId.value) return
     state.messages.value = normalizeMessages(res.messages)
   }
 
@@ -628,9 +659,12 @@ export function useAssistant(options: UseAssistantOptions) {
    * @returns {Promise<void>} 完成时返回
    */
   async function resetChat() {
-    if (chatId.value) {
-      await apiPost(buildPath('/api/assistant/reset', 'chat'), {})
+    const targetChatId = chatId.value
+    invalidateGeneration('chat')
+    if (targetChatId) {
+      await apiPost(buildPath('/api/assistant/reset', 'chat', targetChatId), {})
     }
+    if (targetChatId !== chatId.value) return
     assistantMessages.value = []
     assistantDraft.value = ''
     assistantDraftAttachments.value = []
@@ -646,6 +680,7 @@ export function useAssistant(options: UseAssistantOptions) {
    * @returns {Promise<void>} 完成时返回
    */
   async function resetWorkspaceChat() {
+    invalidateGeneration('workspace')
     await apiPost('/api/assistant/reset?scope=workspace', {})
     workspaceAssistantMessages.value = []
     workspaceAssistantDraft.value = ''
@@ -662,6 +697,7 @@ export function useAssistant(options: UseAssistantOptions) {
    * @returns {Promise<void>} 完成时返回
    */
   async function deleteWorkspaceChat() {
+    invalidateGeneration('workspace')
     await apiPost('/api/assistant/workspace/chat/delete', {})
     workspaceAssistantMessages.value = []
     workspaceAssistantDraft.value = ''
@@ -743,23 +779,18 @@ export function useAssistant(options: UseAssistantOptions) {
 
     const m = editingAssistantMessage.value
     const content = editingAssistantMessageContent.value.trim()
+    const targetChatId = chatId.value
     try {
-      await apiPut(buildPath(`/api/assistant/chat/messages/${m.id}`, scope), {
+      await apiPut(buildPath(`/api/assistant/chat/messages/${m.id}`, scope, targetChatId), {
         role: m.role,
         content,
       })
-      const messages = state.messages.value
-      const idx = messages.findIndex(msg => msg.id === m.id)
-      if (idx >= 0) {
-        const toDelete = messages.slice(idx + 1)
-        for (const msg of toDelete) {
-          await apiDelete(buildPath(`/api/assistant/chat/messages/${msg.id}`, scope))
-        }
-      }
-      await loadChat(scope)
+      if (scope === 'chat' && targetChatId !== chatId.value) return
       closeEditMessage()
-      state.draft.value = content
-      await sendMessage(scope, false)
+      await sendMessage(scope, false, undefined, {
+        userMessageOverride: content,
+        regenerateFromMessageId: m.id,
+      })
     } catch (e: unknown) {
       const error = e instanceof Error ? e.message : String(e)
       state.streamError.value = error
@@ -788,37 +819,12 @@ export function useAssistant(options: UseAssistantOptions) {
     }
   }
 
-  /**
-   * 重写助手消息
-   *
-   * 删除指定的助手消息，然后使用上一个用户消息重新生成回复。
-   * 如果找到上一个用户消息，则将其设置为草稿并发送。
-   *
-   * @param {AssistantMessage} m - 要重写的消息
-   * @param {AssistantScope} scope - 作用域（'chat'或'workspace'）
-   * @returns {Promise<void>} 完成时返回
-   */
-  async function rewriteMessage(m: AssistantMessage, scope: AssistantScope) {
-    const state = getState(scope)
-    const idx = state.messages.value.findIndex(msg => msg.id === m.id)
-    if (idx < 0) return
-    
-    let lastUserMsgText = ''
-    for (let i = idx - 1; i >= 0; i--) {
-      const msg = state.messages.value[i]
-      if (!msg) continue
-      if (msg.role === 'user') {
-        lastUserMsgText = msg.content
-        break
-      }
-    }
-
-    await deleteMessage(m, scope)
-    
-    if (lastUserMsgText) {
-      state.draft.value = lastUserMsgText
-      await sendMessage(scope, false)
-    }
+  async function rewriteMessage(message: AssistantMessage, scope: AssistantScope) {
+    if (message.role !== 'assistant') return
+    await sendMessage(scope, false, undefined, {
+      userMessageOverride: '',
+      regenerateFromMessageId: message.id,
+    })
   }
 
   /**
@@ -841,6 +847,8 @@ export function useAssistant(options: UseAssistantOptions) {
     sendOptions?: SendAssistantMessageOptions,
   ) {
     const state = getState(scope)
+    const targetChatId = chatId.value
+    if (scope === 'chat' && !targetChatId) return
     const shouldAppend = typeof appendUserMessage === 'boolean' ? appendUserMessage : true
     const draftAttachments = shouldAppend && !sendOptions?.userMessageOverride
       ? [...getDraftAttachmentsRef(scope).value]
@@ -878,8 +886,17 @@ export function useAssistant(options: UseAssistantOptions) {
       assistantReasoningStreamPhaseActive.value = true
       assistantReasoningElapsedSec.value = null
     }
-    assistantAborters[scope]?.abort()
-    assistantAborters[scope] = new AbortController()
+    const controller = new AbortController()
+    assistantAborters[scope] = controller
+    const isCurrent = () => assistantAborters[scope] === controller
+    const regenerateFromMessageId = sendOptions?.regenerateFromMessageId
+    if (regenerateFromMessageId) {
+      const index = state.messages.value.findIndex((message) => message.id === regenerateFromMessageId)
+      if (index >= 0) {
+        const anchor = state.messages.value[index]
+        state.messages.value = state.messages.value.slice(0, index + (anchor?.role === 'user' ? 1 : 0))
+      }
+    }
 
     const useStream = streamEnabled?.value !== false
     const allowWriteMemory =
@@ -901,7 +918,8 @@ export function useAssistant(options: UseAssistantOptions) {
       model: assistantSettings.value.model,
       temperature: assistantSettings.value.temperature,
       appendUserMessage: shouldAppend,
-      chatId: scope === 'chat' ? chatId.value : null,
+      chatId: scope === 'chat' ? targetChatId : null,
+      regenerateFromMessageId,
       allowWriteMemory,
       allowDestructiveTools,
       allowWebSearch,
@@ -909,7 +927,6 @@ export function useAssistant(options: UseAssistantOptions) {
       attachments: draftAttachments,
     }
 
-    let aborted = false
     let reasoningBuffer = ''
     let deltaBuffer = ''
     let needsFlushBeforeTool = true
@@ -965,6 +982,7 @@ export function useAssistant(options: UseAssistantOptions) {
           '/api/assistant/stream',
           body,
           (evt) => {
+            if (!isCurrent() || controller.signal.aborted) return
             if (evt.event === 'delta') {
               if (reasoningPhaseStartedAtMs !== null) {
                 touchReasoningElapsedRef()
@@ -1018,18 +1036,6 @@ export function useAssistant(options: UseAssistantOptions) {
               reasoningBuffer = ''
               deltaBuffer = ''
               reasoningPhaseStartedAtMs = null
-              const data = evt.data as { messageId?: string } | undefined
-              const serverMessageId = data?.messageId
-              if (typeof serverMessageId === 'string' && serverMessageId.trim()) {
-                const msgs = state.messages.value
-                for (let i = msgs.length - 1; i >= 0; i--) {
-                  const m = msgs[i]
-                  if (m && m.role === 'assistant') {
-                    m.id = serverMessageId.trim()
-                    break
-                  }
-                }
-              }
             } else if (evt.event === 'tool_trace') {
               const data = evt.data as {
                 content?: string
@@ -1073,7 +1079,7 @@ export function useAssistant(options: UseAssistantOptions) {
               reasoningPhaseStartedAtMs = null
             }
           },
-          assistantAborters[scope]?.signal,
+          controller.signal,
         )
       } else {
         const res = await apiPost<{
@@ -1087,7 +1093,8 @@ export function useAssistant(options: UseAssistantOptions) {
           worldbookUpdated?: Array<{ worldbookId?: string }>
           chatOverridesUpdated?: Array<{ chatId?: string }>
           error?: string
-        }>('/api/assistant/stream', body)
+        }>('/api/assistant/stream', body, controller.signal)
+        if (!isCurrent() || controller.signal.aborted) return
         if (res?.ok && res.stream === false) {
           if (Array.isArray(res.worldbookUpdated)) {
             for (const u of res.worldbookUpdated) {
@@ -1136,72 +1143,22 @@ export function useAssistant(options: UseAssistantOptions) {
           state.streamError.value = res.error
         }
       }
-    } catch (e: unknown) {
-      if (e instanceof Error && e.name === 'AbortError') {
-        aborted = true
-      } else if (e instanceof Error) {
-        state.streamError.value = e.message
-      } else {
-        state.streamError.value = String(e)
+    } catch (error) {
+      if (isCurrent() && !controller.signal.aborted) {
+        state.streamError.value = error instanceof Error ? error.message : String(error)
       }
     } finally {
-      const hadStreamingSurface =
-        (state.streamingReasoning.value ?? '').trim() !== '' || (state.streamingContent.value ?? '').trim() !== ''
-      if (scope === 'workspace') {
-        workspaceReasoningStreamPhaseActive.value = false
-        workspaceReasoningElapsedSec.value = null
-      } else {
-        assistantReasoningStreamPhaseActive.value = false
-        assistantReasoningElapsedSec.value = null
-      }
-      if (aborted || hadStreamingSurface) {
-        await nextTick()
-        await new Promise<void>((resolve) => {
-          requestAnimationFrame(() => {
-            requestAnimationFrame(() => resolve())
-          })
-        })
-      }
-      state.streamingContent.value = ''
-      state.streamingReasoning.value = ''
-      state.isGenerating.value = false
-      if (aborted) {
-        const reasoningPersist = reasoningBuffer.trim()
-        const msgs = state.messages.value
-        const parts: string[] = []
-        for (let i = msgs.length - 1; i >= 0; i--) {
-          const m = msgs[i]
-          if (!m) continue
-          if (m.role === 'user') break
-          if (m.role === 'assistant' && m.content.trim()) {
-            parts.unshift(m.content.trim())
+      if (isCurrent()) {
+        try {
+          await loadChat(scope, targetChatId)
+        } catch (error) {
+          if (isCurrent()) {
+            state.streamError.value ||= error instanceof Error ? error.message : String(error)
           }
-        }
-        const merged = parts.join('\n\n')
-        const abortReasoningSec = reasoningElapsedNow()
-        if (merged.trim() || reasoningPersist) {
-          try {
-            if (reasoningPersist) {
-              await apiPost(buildPath('/api/assistant/chat/messages', scope), {
-                role: 'reasoning',
-                content: reasoningPersist,
-                ...(typeof abortReasoningSec === 'number' && Number.isFinite(abortReasoningSec)
-                  ? { reasoningDurationSec: abortReasoningSec }
-                  : {}),
-              })
-            }
-            if (merged.trim()) {
-              await apiPost(buildPath('/api/assistant/chat/messages', scope), {
-                role: 'assistant',
-                content: merged,
-              })
-            }
-          } catch (_) {
-            // 持久化失败时仍重新加载，避免本地与服务器不一致
-          }
+        } finally {
+          if (isCurrent()) invalidateGeneration(scope)
         }
       }
-      await loadChat(scope)
     }
   }
 
@@ -1215,9 +1172,7 @@ export function useAssistant(options: UseAssistantOptions) {
    * @returns {Promise<void>} 完成时返回
    */
   async function handleModelSelect(option: { value: string; presetId?: string | null }) {
-    assistantSettings.value.model = option.value
-    assistantSettings.value.presetId = option.presetId ?? null
-    await saveSettings()
+    await saveSettings({ ...assistantSettings.value, model: option.value, presetId: option.presetId ?? null })
   }
 
   /**
@@ -1300,6 +1255,7 @@ export function useAssistant(options: UseAssistantOptions) {
     deleteMessage,
     rewriteMessage,
     sendMessage,
+    stopGeneration,
     runAutoMemorySummaryPrompt,
     handleModelSelect,
   }

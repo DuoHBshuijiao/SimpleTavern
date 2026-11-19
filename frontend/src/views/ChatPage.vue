@@ -1196,12 +1196,22 @@ scheduleMaybeTriggerAutoMemorySummary = (chatId: string) => {
   }, 80)
 }
 
-async function setAssistantWriteMemoryEnabled(checked: boolean) {
-  await assistant.setAllowWriteMemory(checked)
-}
+const savingAssistantSettings = ref(false)
 
-async function setAssistantDestructiveToolsEnabled(checked: boolean) {
-  await assistant.setAllowDestructiveTools(checked)
+async function saveAssistantSettings(
+  next: Parameters<typeof assistant.saveSettingsAndClose>[0],
+  permissions: { allowWebSearch: boolean; allowWriteMemory: boolean; allowDestructiveTools: boolean },
+) {
+  if (savingAssistantSettings.value) return
+  savingAssistantSettings.value = true
+  try {
+    if (!(await assistant.saveSettingsAndClose(next))) return
+    assistant.setAllowWebSearch(permissions.allowWebSearch)
+    await assistant.setAllowWriteMemory(permissions.allowWriteMemory)
+    await assistant.setAllowDestructiveTools(permissions.allowDestructiveTools)
+  } finally {
+    savingAssistantSettings.value = false
+  }
 }
 
 type DraftHelpConversationMessage = Pick<ChatMessage, 'id' | 'role' | 'content' | 'characterId' | 'senderName'>
@@ -2445,10 +2455,15 @@ watch(
   },
 )
 
+let characterEditorVersion = 0
+let characterEditorCleanup = Promise.resolve()
+
 async function cleanupCharacterEditorAssistantContext() {
-  await assistant.cleanupWorkspaceSession()
-  await assistant.deleteWorkspaceChat()
-  if (assistant.isAssistantPanelOpen.value) await assistant.loadState('chat')
+  try {
+    await assistant.cleanupWorkspaceSession()
+  } finally {
+    await assistant.deleteWorkspaceChat()
+  }
 }
 
 /**
@@ -2458,12 +2473,15 @@ async function cleanupCharacterEditorAssistantContext() {
  */
 watch(actions.showCharacterEditor, (next, prev) => {
   if (!next && prev) {
-    void cleanupCharacterEditorAssistantContext()
+    ++characterEditorVersion
+    characterEditorCleanup = cleanupCharacterEditorAssistantContext().catch((error) => {
+      void notifyMessage(error instanceof Error ? error.message : String(error), { title: '助手工作区清理失败' })
+    })
     actions.editingCharacter.value = null
     actions.isNewCharacter.value = false
     clearEmbeddedCardPreviewState()
   }
-})
+}, { flush: 'sync' })
 
 /**
  * 根据当前聊天窗口动态更新页面标题
@@ -4248,13 +4266,17 @@ async function handleCreateGroup(data: {
  * @returns {Promise<void>} 完成时返回
  */
 async function openCreateCharacter() {
-  actions.openCreateCharacter()
+  const version = ++characterEditorVersion
+  await characterEditorCleanup
+  if (version !== characterEditorVersion) return
   await assistant.resetWorkspaceChat()
+  if (version !== characterEditorVersion) return
+  actions.openCreateCharacter()
   void assistant.loadState('workspace')
-  
+
   try {
     const card = await apiGet<CharacterCard>('/api/assistant/workspace/character-card')
-    if (card) {
+    if (card && version === characterEditorVersion) {
       actions.applyAssistantCard(card)
     }
   } catch (e) {
@@ -4274,8 +4296,12 @@ async function openCreateCharacter() {
  * @returns {Promise<void>} 完成时返回
  */
 async function openEditCharacter(card: CharacterCard) {
-  actions.openEditCharacter(card)
+  const version = ++characterEditorVersion
+  await characterEditorCleanup
+  if (version !== characterEditorVersion) return
   await assistant.resetWorkspaceChat()
+  if (version !== characterEditorVersion) return
+  actions.openEditCharacter(card)
   void assistant.loadState('workspace')
 }
 
@@ -5143,6 +5169,7 @@ const editingPersonaAvatarUrl = computed(() => {
       @toggle-destructive="assistant.toggleAllowDestructiveTools"
       @toggle-web-search="assistant.toggleAllowWebSearch"
       @send="assistant.sendMessage('chat')"
+      @stop="assistant.stopGeneration('chat')"
       @reset="assistant.resetChat"
       @open-settings="assistant.showAssistantSettings.value = true"
       @select-model="assistant.handleModelSelect"
@@ -5232,20 +5259,22 @@ const editingPersonaAvatarUrl = computed(() => {
     />
 
     <!-- 助手消息编辑弹窗 -->
-    <MessageEditorModal
-      :show="assistant.showAssistantMessageEditor.value"
-      :message-id="assistant.editingAssistantMessage.value?.id || null"
-      :message-role="(assistant.editingAssistantMessage.value?.role === 'tool' || assistant.editingAssistantMessage.value?.role === 'reasoning' ? 'assistant' : assistant.editingAssistantMessage.value?.role) || 'user'"
-      :message-content="assistant.editingAssistantMessageContent.value"
-      :character-avatar-url="null"
-      :user-avatar-url="null"
-      :is-generating="assistant.isAssistantGenerating.value || assistant.isWorkspaceAssistantGenerating.value"
-      @update:show="assistant.showAssistantMessageEditor.value = $event"
-      @update:message-role="(r) => { if (assistant.editingAssistantMessage.value) assistant.editingAssistantMessage.value.role = r }"
-      @update:message-content="assistant.editingAssistantMessageContent.value = $event"
-      @save="assistant.saveEditedMessage"
-      @save-and-send="assistant.saveEditedMessageAndSend" 
-    />
+    <Teleport to="body">
+      <MessageEditorModal
+        :show="assistant.showAssistantMessageEditor.value"
+        :message-id="assistant.editingAssistantMessage.value?.id || null"
+        :message-role="(assistant.editingAssistantMessage.value?.role === 'tool' || assistant.editingAssistantMessage.value?.role === 'reasoning' ? 'assistant' : assistant.editingAssistantMessage.value?.role) || 'user'"
+        :message-content="assistant.editingAssistantMessageContent.value"
+        :character-avatar-url="null"
+        :user-avatar-url="null"
+        :is-generating="assistant.isAssistantGenerating.value || assistant.isWorkspaceAssistantGenerating.value"
+        @update:show="assistant.showAssistantMessageEditor.value = $event"
+        @update:message-role="(r) => { if (assistant.editingAssistantMessage.value) assistant.editingAssistantMessage.value.role = r }"
+        @update:message-content="assistant.editingAssistantMessageContent.value = $event"
+        @save="assistant.saveEditedMessage"
+        @save-and-send="assistant.saveEditedMessageAndSend"
+      />
+    </Teleport>
 
     <!-- 设置抽屉 -->
     <SettingsDrawer 
@@ -5362,10 +5391,7 @@ const editingPersonaAvatarUrl = computed(() => {
       :allow-write-memory="assistant.allowWriteMemoryEnabled.value"
       :allow-destructive-tools="assistant.allowDestructiveToolsEnabled.value"
       @cancel="closeAssistantSettings"
-      @save="assistant.saveSettingsAndClose"
-      @update:allow-web-search="assistant.setAllowWebSearch"
-      @update:allow-write-memory="setAssistantWriteMemoryEnabled"
-      @update:allow-destructive-tools="setAssistantDestructiveToolsEnabled"
+      @save="saveAssistantSettings"
     />
 
     <EmbeddedCardConfirmModal

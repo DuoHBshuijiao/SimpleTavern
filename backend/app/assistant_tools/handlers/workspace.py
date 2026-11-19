@@ -31,14 +31,16 @@ def handle_workspace_create_file(_ctx: AssistantToolContext, args: dict[str, Any
         target = resolve_ai_path(path_str)
     except ValueError as e:
         return R.err(R.VALIDATION_ERROR, str(e), tool="workspace_create_file")
-    if target.exists():
-        return R.err(R.CONFLICT, "file already exists", tool="workspace_create_file", details={"path": path_str})
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(content, encoding="utf-8")
+    try:
+        with target.open("x", encoding="utf-8") as stream:
+            stream.write(content)
+    except FileExistsError:
+        return R.err(R.CONFLICT, "file already exists", tool="workspace_create_file", details={"path": path_str})
     return R.ok({"path": path_str}, tool="workspace_create_file")
 
 
-def handle_workspace_write_file(_ctx: AssistantToolContext, args: dict[str, Any]) -> dict[str, Any]:
+def handle_workspace_write_file(ctx: AssistantToolContext, args: dict[str, Any]) -> dict[str, Any]:
     path_str = str(args.get("path") or "")
     content = str(args.get("content") or "")
     try:
@@ -46,7 +48,12 @@ def handle_workspace_write_file(_ctx: AssistantToolContext, args: dict[str, Any]
     except ValueError as e:
         return R.err(R.VALIDATION_ERROR, str(e), tool="workspace_write_file")
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(content, encoding="utf-8")
+    mode = "w" if ctx.allow_destructive_tools else "x"
+    try:
+        with target.open(mode, encoding="utf-8") as stream:
+            stream.write(content)
+    except FileExistsError:
+        return R.err(R.FORBIDDEN, "overwriting an existing file requires destructive tools", tool="workspace_write_file")
     return R.ok({"path": path_str}, tool="workspace_write_file")
 
 

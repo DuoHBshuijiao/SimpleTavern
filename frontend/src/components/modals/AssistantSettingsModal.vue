@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref, watch } from 'vue'
 import { X } from 'lucide-vue-next'
 import ModernSelect from '../ModernSelect.vue'
 import SettingsField from '../settings-drawer/SettingsField.vue'
@@ -18,11 +19,28 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   cancel: []
-  save: []
-  'update:allowWebSearch': [value: boolean]
-  'update:allowWriteMemory': [value: boolean]
-  'update:allowDestructiveTools': [value: boolean]
+  save: [settings: AssistantSettings, permissions: {
+    allowWebSearch: boolean
+    allowWriteMemory: boolean
+    allowDestructiveTools: boolean
+  }]
 }>()
+
+const draft = ref({ ...props.settings })
+const permissions = ref({
+  allowWebSearch: props.allowWebSearch,
+  allowWriteMemory: props.allowWriteMemory,
+  allowDestructiveTools: props.allowDestructiveTools,
+})
+watch(() => props.show, (show) => {
+  if (!show) return
+  draft.value = { ...props.settings }
+  permissions.value = {
+    allowWebSearch: props.allowWebSearch,
+    allowWriteMemory: props.allowWriteMemory,
+    allowDestructiveTools: props.allowDestructiveTools,
+  }
+}, { immediate: true })
 
 const titleId = 'assistant-settings-title'
 const dialogAttrs = dialogAria(titleId)
@@ -37,7 +55,7 @@ const effortOptions = [
   ...REASONING_EFFORT_OPTIONS.map((o) => ({ label: o.label, value: o.value })),
 ]
 function effortValue(): string {
-  return props.settings.reasoningEffort ?? ''
+  return draft.value.reasoningEffort ?? ''
 }
 </script>
 
@@ -57,7 +75,7 @@ function effortValue(): string {
             <div class="settings-group-title">模型</div>
             <SettingsField label="温度">
               <input
-                v-model.number="settings.temperature"
+                v-model.number="draft.temperature"
                 type="number"
                 min="0"
                 max="2"
@@ -74,14 +92,14 @@ function effortValue(): string {
                 :options="effortOptions"
                 class="w-full"
                 placeholder="沿用全局…"
-                @update:model-value="(v) => { settings.reasoningEffort = String(v) ? String(v) : null }"
+                @update:model-value="(v) => { draft.reasoningEffort = String(v) ? String(v) : null }"
               />
             </SettingsField>
             <SettingsSwitch
               label="Fast 模式"
-              :model-value="!!settings.fastMode"
+              :model-value="!!draft.fastMode"
               hint="约 2× 计费。"
-              @update:model-value="(v) => { settings.fastMode = v ? true : null }"
+              @update:model-value="(v) => { draft.fastMode = v ? true : null }"
             />
           </div>
 
@@ -92,7 +110,7 @@ function effortValue(): string {
               more="填 0 或留空表示不限制。角色卡、用户信息和系统提示词不计入这个长度。"
             >
               <input
-                v-model.number="settings.context_size"
+                v-model.number="draft.context_size"
                 type="number"
                 min="0"
                 class="input w-full"
@@ -104,7 +122,7 @@ function effortValue(): string {
               more="限制「读取会话」工具返回的消息条数，留空不额外限制。"
             >
               <input
-                v-model.number="settings.tool_read_max_messages"
+                v-model.number="draft.tool_read_max_messages"
                 type="number"
                 min="1"
                 class="input w-full"
@@ -116,7 +134,7 @@ function effortValue(): string {
               more="按 token 估算裁剪读到的消息，保留最新的；留空不启用。"
             >
               <input
-                v-model.number="settings.tool_read_max_tokens"
+                v-model.number="draft.tool_read_max_tokens"
                 type="number"
                 min="1"
                 class="input w-full"
@@ -129,7 +147,7 @@ function effortValue(): string {
             <div class="settings-group-title">工具调用</div>
             <SettingsField label="最大工具轮次" more="单次请求里，助手最多连续调用工具的轮数。">
               <input
-                v-model.number="settings.maxToolTurns"
+                v-model.number="draft.maxToolTurns"
                 type="number"
                 min="1"
                 class="input w-full"
@@ -138,7 +156,7 @@ function effortValue(): string {
             </SettingsField>
             <SettingsField label="单轮工具数上限" more="超出的工具调用会被跳过，并返回「超出限制」。">
               <input
-                v-model.number="settings.maxToolsPerTurn"
+                v-model.number="draft.maxToolsPerTurn"
                 type="number"
                 min="1"
                 class="input w-full"
@@ -151,28 +169,28 @@ function effortValue(): string {
             <div class="settings-group-title">工具权限</div>
             <SettingsSwitch
               label="允许网络搜索"
-              :model-value="allowWebSearch"
+              :model-value="permissions.allowWebSearch"
               more="聊天助手和工具区助手可以用全局设置里的搜索服务；MVU Agent 不会用。"
-              @update:model-value="emit('update:allowWebSearch', $event)"
+              @update:model-value="permissions.allowWebSearch = $event"
             />
             <SettingsSwitch
               label="允许记忆写入"
-              :model-value="allowWriteMemory"
+              :model-value="permissions.allowWriteMemory"
               more="助手可以追加或覆盖当前会话的长期记忆。只对聊天助手生效，工作区助手不可用。"
-              @update:model-value="emit('update:allowWriteMemory', $event)"
+              @update:model-value="permissions.allowWriteMemory = $event"
             />
             <SettingsSwitch
               label="允许破坏性工具"
-              :model-value="allowDestructiveTools"
+              :model-value="permissions.allowDestructiveTools"
               hint="操作不可逆。"
               more="开启后助手可执行删除文件、删除世界书、覆盖整卡与覆盖全部记忆等不可逆操作。"
-              @update:model-value="emit('update:allowDestructiveTools', $event)"
+              @update:model-value="permissions.allowDestructiveTools = $event"
             />
           </div>
         </div>
         <div class="modal-footer">
           <button class="btn btn-secondary" @click="emit('cancel')">取消</button>
-          <button class="btn btn-primary" @click="emit('save')">保存</button>
+          <button class="btn btn-primary" @click="emit('save', draft, permissions)">保存</button>
         </div>
       </div>
     </div>

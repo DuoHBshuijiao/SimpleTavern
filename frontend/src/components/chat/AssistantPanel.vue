@@ -47,7 +47,7 @@ import type { AssistantAttachment } from '../../types/models'
 import ModernSelect from '../ModernSelect.vue'
 import AssistantThread from './AssistantThread.vue'
 import ConfirmPopover from '../../components/ConfirmPopover.vue'
-import { Globe, Sparkles, Loader2, MoreHorizontal, X } from 'lucide-vue-next'
+import { Globe, Sparkles, MoreHorizontal, X } from 'lucide-vue-next'
 import { ref, watch, nextTick } from 'vue'
 import { resolveRichPaste } from '../../utils/richPaste'
 
@@ -94,6 +94,7 @@ const emit = defineEmits<{
   'update:isOpen': [value: boolean]
   'update:draft': [value: string]
   'send': []
+  'stop': []
   'attach-files': [files: File[]]
   'remove-attachment': [attachmentId: string]
   'reset': []
@@ -488,15 +489,10 @@ watch(
           <button class="btn btn-sm btn-secondary" :disabled="isGenerating" @click="confirmReset($event)">清空</button>
           <button 
             class="btn btn-sm btn-primary relative px-6" 
-            :disabled="(!draft.trim() && !draftAttachments.length) || isGenerating" 
-            :aria-busy="isGenerating"
-            @click="emit('send')"
+            :disabled="!isGenerating && !draft.trim() && !draftAttachments.length"
+            @click="isGenerating ? emit('stop') : emit('send')"
           >
-            <Loader2
-              v-if="isGenerating"
-              class="pointer-events-none absolute left-3 top-1/2 h-3 w-3 -translate-y-1/2 animate-spin"
-            />
-            发送
+            {{ isGenerating ? '停止' : '发送' }}
           </button>
         </div>
       </div>

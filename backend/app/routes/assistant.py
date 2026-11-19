@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import base64
 import json
+from threading import RLock
 from typing import Any, AsyncIterator
 from uuid import uuid4
 
@@ -60,6 +61,7 @@ from app.services.assistant_agent import (
 )
 from app.llm.preset_resolve import LlmPresetResolveError
 from app.llm.resolution import PreparedLlmRequest, prepare_llm_request
+from app.services.request_cancellation import ClientDisconnected, until_client_disconnect
 from app.services.user_message_content import build_user_message_content
 from app.schemas import (
     AssistantAppendRole,
@@ -74,7 +76,6 @@ from app.schemas import (
 )
 from app.storage import (
     assistant_attachment_path,
-    clear_assistant_chat_attachments,
     clear_workspace_session_attachments,
     load_assistant_attachment_bytes,
     save_workspace_character_card,
@@ -104,6 +105,13 @@ from app.tokenizer_service import trim_assistant_openai_messages_to_context
 
 
 router = APIRouter(tags=["assistant"])
+_assistant_chat_lock = RLock()
+_active_runs: dict[tuple[bool, str | None], set[object]] = {}
+
+
+def _assistant_chat_key(scope: str | None, chat_id: str | None) -> tuple[bool, str | None]:
+    workspace = scope == "workspace"
+    return workspace, None if workspace else ((chat_id or "").strip() or None)
 
 
 def _prepare_assistant_request(
@@ -149,6 +157,7 @@ class AssistantStreamRequest(BaseModel):
     model: str | None = None
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     appendUserMessage: bool | None = True
+    regenerateFromMessageId: str | None = None
     chatId: str | None = None
     allowWriteMemory: bool | None = None
     allowDestructiveTools: bool | None = None
@@ -737,25 +746,26 @@ def append_assistant_message(
     """
     向助手聊天追加一条消息（用于流式中断时保存截断内容）。
     """
-    chat = _resolve_assistant_chat_by_scope(scope, chatId)
-    if req.role == "reasoning":
-        chat.messages.append(
-            ChatMessage(
-                role="reasoning",
-                content=req.content or "",
-                reasoningDurationSec=req.reasoningDurationSec,
+    with _assistant_chat_lock:
+        chat = _resolve_assistant_chat_by_scope(scope, chatId)
+        if req.role == "reasoning":
+            chat.messages.append(
+                ChatMessage(
+                    role="reasoning",
+                    content=req.content or "",
+                    reasoningDurationSec=req.reasoningDurationSec,
+                )
             )
-        )
-    else:
-        chat.messages.append(
-            ChatMessage(
-                role=req.role,
-                content=req.content,
-                reasoningContent=req.reasoningContent,
-                reasoningDurationSec=req.reasoningDurationSec,
+        else:
+            chat.messages.append(
+                ChatMessage(
+                    role=req.role,
+                    content=req.content,
+                    reasoningContent=req.reasoningContent,
+                    reasoningDurationSec=req.reasoningDurationSec,
+                )
             )
-        )
-    return _save_assistant_chat_by_scope(scope, chatId, chat)
+        return _save_assistant_chat_by_scope(scope, chatId, chat)
 
 
 @router.post("/assistant/reset")
@@ -775,9 +785,13 @@ def reset_assistant(
     Returns:
         dict: 成功响应 {"ok": True}
     """
-    _clear_assistant_chat_by_scope(scope, chatId)
     if scope != "workspace":
-        clear_assistant_chat_attachments(chatId)
+        chatId = (chatId or "").strip()
+        if not chatId:
+            raise HTTPException(status_code=400, detail="chatId is required to reset a chat assistant")
+    with _assistant_chat_lock:
+        _active_runs.pop(_assistant_chat_key(scope, chatId), None)
+        _clear_assistant_chat_by_scope(scope, chatId)
     return {"ok": True}
 
 
@@ -789,7 +803,9 @@ def delete_workspace_chat() -> dict:
     Returns:
         dict: 成功响应 {"ok": True}
     """
-    delete_assistant_workspace_chat()
+    with _assistant_chat_lock:
+        _active_runs.pop(_assistant_chat_key("workspace", None), None)
+        delete_assistant_workspace_chat()
     return {"ok": True}
 
 
@@ -815,15 +831,15 @@ def update_assistant_message(
     Raises:
         HTTPException: 消息不存在时抛出404错误
     """
-    chat = _resolve_assistant_chat_by_scope(scope, chatId)
-    for m in chat.messages:
-        if m.id == message_id:
-            m.role = req.role
-            m.content = req.content
-            _save_assistant_chat_by_scope(scope, chatId, chat)
-            return chat
-    from fastapi import HTTPException
-    raise HTTPException(status_code=404, detail="message not found")
+    with _assistant_chat_lock:
+        chat = _resolve_assistant_chat_by_scope(scope, chatId)
+        for m in chat.messages:
+            if m.id == message_id:
+                m.role = req.role
+                m.content = req.content
+                _save_assistant_chat_by_scope(scope, chatId, chat)
+                return chat
+        raise HTTPException(status_code=404, detail="message not found")
 
 
 @router.delete("/assistant/chat/messages/{message_id}")
@@ -843,11 +859,12 @@ def delete_assistant_message(
     Returns:
         AssistantChat: 更新后的助手聊天对象
     """
-    chat = _resolve_assistant_chat_by_scope(scope, chatId)
-    new_msgs = [m for m in chat.messages if m.id != message_id]
-    chat.messages = new_msgs
-    _save_assistant_chat_by_scope(scope, chatId, chat)
-    return chat
+    with _assistant_chat_lock:
+        chat = _resolve_assistant_chat_by_scope(scope, chatId)
+        new_msgs = [m for m in chat.messages if m.id != message_id]
+        chat.messages = new_msgs
+        _save_assistant_chat_by_scope(scope, chatId, chat)
+        return chat
 
 
 @router.post("/assistant/stream", response_model=None)
@@ -871,7 +888,7 @@ async def stream_assistant(req: AssistantStreamRequest, request: Request):
     assistant_settings = load_assistant_settings()
     scope = req.scope
     chat_id = None if scope == "workspace" else req.chatId
-    chat = _resolve_assistant_chat_by_scope(scope, chat_id)
+    key = _assistant_chat_key(scope, chat_id)
 
     model = req.model or assistant_settings.model or settings.llm.defaultModel
     temperature = req.temperature if req.temperature is not None else assistant_settings.temperature
@@ -893,19 +910,79 @@ async def stream_assistant(req: AssistantStreamRequest, request: Request):
         temperature = None
     llm_provider = prepared.llm_provider
 
-    existing_messages = chat.messages or []
-    
-    if req.appendUserMessage:
-        new_user_msg = ChatMessage(
-            role="user",
-            content=req.userMessage,
-            attachments=list(req.attachments or []),
-        )
-        existing_messages.append(new_user_msg)
-        chat.messages = existing_messages
-        _save_assistant_chat_by_scope(scope, chat_id, chat)
+    with _assistant_chat_lock:
+        chat = _resolve_assistant_chat_by_scope(scope, chat_id)
+        original_messages = None
+        anchor = None
+        if req.regenerateFromMessageId:
+            if req.appendUserMessage:
+                raise HTTPException(status_code=422, detail="重写时不能追加新提问")
+            for index, message in enumerate(chat.messages):
+                if message.id == req.regenerateFromMessageId and message.role in {"user", "assistant"}:
+                    anchor = message
+                    original_messages = list(chat.messages)
+                    # 保存并发送保留已编辑的用户消息，重写从目标回复之前开始。
+                    chat.messages = chat.messages[:index + (message.role == "user")]
+                    break
+            if original_messages is None:
+                raise HTTPException(status_code=404, detail="找不到要重写的助手消息")
+        elif req.appendUserMessage:
+            chat.messages.append(ChatMessage(
+                role="user", content=req.userMessage, attachments=list(req.attachments),
+            ))
+            _save_assistant_chat_by_scope(scope, chat_id, chat)
+        run = object()
+        _active_runs.setdefault(key, set()).add(run)
 
-    conversation = _assistant_messages_to_openai(list(existing_messages))
+    def ensure_active() -> None:
+        with _assistant_chat_lock:
+            if run not in _active_runs.get(key, ()):
+                raise AppError(
+                    code="assistant_session_closed", message="助手会话已清理",
+                    source="assistant.stream", status_code=409,
+                )
+
+    def finish_run() -> None:
+        with _assistant_chat_lock:
+            runs = _active_runs.get(key)
+            if runs is not None:
+                runs.discard(run)
+                if not runs:
+                    _active_runs.pop(key, None)
+
+    def append_for_run(message: ChatMessage) -> None:
+        with _assistant_chat_lock:
+            ensure_active()
+            if original_messages is not None:
+                chat.messages.append(message)
+            else:
+                latest = _resolve_assistant_chat_by_scope(scope, chat_id)
+                latest.messages.append(message)
+                _save_assistant_chat_by_scope(scope, chat_id, latest)
+
+    def commit_rewrite(message_id: str) -> str:
+        if original_messages is None:
+            return message_id
+        with _assistant_chat_lock:
+            ensure_active()
+            if not chat.messages or not chat.messages[-1].content.strip():
+                raise AppError(
+                    code="assistant_empty_rewrite", message="助手返回空白回复，已保留原对话",
+                    source="assistant.stream", status_code=502,
+                )
+            current = _resolve_assistant_chat_by_scope(scope, chat_id)
+            if current.messages != original_messages:
+                raise AppError(
+                    code="assistant_rewrite_conflict", message="助手对话已修改，请刷新后重试",
+                    source="assistant.stream", status_code=409,
+                )
+            if anchor and anchor.role == "assistant":
+                chat.messages[-1].id = anchor.id
+                message_id = anchor.id
+            _save_assistant_chat_by_scope(scope, chat_id, chat)
+            return message_id
+
+    conversation = _assistant_messages_to_openai(chat.messages)
     _compact_tool_result_contents_for_llm(conversation)
     context_size = getattr(assistant_settings, "context_size", None)
     if context_size and context_size >= 1:
@@ -944,8 +1021,7 @@ async def stream_assistant(req: AssistantStreamRequest, request: Request):
         messages=llm_msgs,
         extra_body=extra_body,
         tool_ctx=tool_ctx,
-        load_chat=lambda: _resolve_assistant_chat_by_scope(scope, chat_id),
-        save_chat=lambda assistant_chat: _save_assistant_chat_by_scope(scope, chat_id, assistant_chat),
+        append_message=append_for_run,
         max_tool_turns=req.maxToolTurns or assistant_settings.maxToolTurns or 8,
         max_tools_per_turn=req.maxToolsPerTurn or assistant_settings.maxToolsPerTurn,
         protocol=protocol,
@@ -957,15 +1033,20 @@ async def stream_assistant(req: AssistantStreamRequest, request: Request):
     # 非流式：与全局设置 streamEnabled 一致，返回 JSON
     if not getattr(settings, "streamEnabled", True):
         try:
-            result = await agent.run_nonstream()
+            result = await until_client_disconnect(request, agent.run_nonstream())
+            message_id = commit_rewrite(result.message_id)
         except AppError as exc:
             return app_error_response(exc, request_id)
+        except ClientDisconnected:
+            return JSONResponse({"ok": False}, status_code=499)
+        finally:
+            finish_run()
         return JSONResponse(
             {
                 "ok": True,
                 "stream": False,
                 "content": result.content,
-                "messageId": result.message_id,
+                "messageId": message_id,
                 "toolTraces": result.tool_traces,
                 "toolRecords": result.tool_records,
                 "card": result.card,
@@ -982,20 +1063,22 @@ async def stream_assistant(req: AssistantStreamRequest, request: Request):
         使用 stream_chat_completions 逐块推送 reasoning 与 content，实现打字机效果。
         支持多轮工具调用；错误事件携带统一 ErrorEnvelope。
         """
-        yield sse_meta(
-            request_id=request_id,
-            provider=llm_provider,
-            protocol=protocol,
-            resolved_model=model,
-            protocol_resolution=prepared.resolution.to_public_dict(),
-        )
         try:
+            yield sse_meta(
+                request_id=request_id,
+                provider=llm_provider,
+                protocol=protocol,
+                resolved_model=model,
+                protocol_resolution=prepared.resolution.to_public_dict(),
+            )
             async for event in agent.iter_events():
+                ensure_active()
                 if event.kind == "error":
                     yield _sse("error", event.data)
                     return
                 if event.kind == "done":
-                    yield sse_done(event.data)
+                    message_id = commit_rewrite(event.data["messageId"])
+                    yield sse_done({**event.data, "messageId": message_id})
                     return
                 yield _sse(event.kind, event.data)
         except Exception as exc:
@@ -1009,6 +1092,8 @@ async def stream_assistant(req: AssistantStreamRequest, request: Request):
                 protocol=protocol,
                 enrich=prepared.enrich_error,
             )
+        finally:
+            finish_run()
 
     return StreamingResponse(
         event_iter(),

@@ -1,5 +1,5 @@
 ﻿<script setup lang="ts">
-import { X, Sparkles, Loader2, MoreHorizontal, GripVertical, Check, Plus, Globe } from 'lucide-vue-next'
+import { X, Sparkles, MoreHorizontal, GripVertical, Check, Plus, Globe } from 'lucide-vue-next'
 import type { AssistantAttachment, CharacterCard, MvuMode } from '../../types/models'
 import ModernAvatar from '../ModernAvatar.vue'
 import ModernSelect from '../ModernSelect.vue'
@@ -429,15 +429,10 @@ void dialogRef
                 />
                 <button
                   class="btn btn-primary relative px-6"
-                  :disabled="(!assistant.workspaceAssistantDraft.value.trim() && !assistant.workspaceAssistantDraftAttachments.value.length) || assistant.isWorkspaceAssistantGenerating.value"
-                  :aria-busy="assistant.isWorkspaceAssistantGenerating.value"
-                  @click="assistant.sendMessage('workspace', true, applyAssistantCard)"
+                  :disabled="!assistant.isWorkspaceAssistantGenerating.value && !assistant.workspaceAssistantDraft.value.trim() && !assistant.workspaceAssistantDraftAttachments.value.length"
+                  @click="assistant.isWorkspaceAssistantGenerating.value ? assistant.stopGeneration('workspace') : assistant.sendMessage('workspace', true, applyAssistantCard)"
                 >
-                  <Loader2
-                    v-if="assistant.isWorkspaceAssistantGenerating.value"
-                    class="pointer-events-none absolute left-3 top-1/2 h-3 w-3 -translate-y-1/2 animate-spin"
-                  />
-                  发送
+                  {{ assistant.isWorkspaceAssistantGenerating.value ? '停止' : '发送' }}
                 </button>
               </div>
               <div

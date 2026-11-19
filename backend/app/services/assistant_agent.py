@@ -15,12 +15,10 @@ from app.assistant_tools import result as tool_result
 from app.errors import AppError, as_app_error
 from app.llm.runtime import chat_completions_message, stream_chat_completions
 from app.llm.types import ANTHROPIC_MESSAGES_PROTOCOL, OPENAI_COMPATIBLE_CHAT_PROTOCOL, OPENAI_RESPONSES_PROTOCOL, provider_id_for_protocol
-from app.schemas import AssistantChat, ChatMessage
+from app.schemas import ChatMessage
 from app.services.native_web import WebPlan, execute_web_tool
 
 
-AssistantChatLoader = Callable[[], AssistantChat]
-AssistantChatSaver = Callable[[AssistantChat], AssistantChat]
 
 
 @dataclass(frozen=True)
@@ -63,8 +61,7 @@ class AssistantAgentRunContext:
     messages: list[dict[str, Any]]
     extra_body: dict[str, Any]
     tool_ctx: AssistantToolContext
-    load_chat: AssistantChatLoader
-    save_chat: AssistantChatSaver
+    append_message: Callable[[ChatMessage], None]
     max_tool_turns: int = 8
     max_tools_per_turn: int | None = None
     protocol: str = OPENAI_COMPATIBLE_CHAT_PROTOCOL
@@ -443,9 +440,7 @@ class AssistantAgentService:
         yield AssistantAgentEvent("error", _error_event_payload(_loop_limit_error(self._ctx.max_tool_turns)))
 
     def _append_message(self, message: ChatMessage) -> None:
-        chat = self._ctx.load_chat()
-        chat.messages.append(message)
-        self._ctx.save_chat(chat)
+        self._ctx.append_message(message)
 
     async def _execute_tool_calls(
         self,
