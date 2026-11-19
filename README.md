@@ -1,4 +1,4 @@
-> **维护状态**：当前版本 v0.810，正在做 **v1.000 发布验收**，新功能已冻结，只修问题。验收清单见 `docs/tasks/T-814-v1000-release-acceptance.md`，版本计划见 `docs/00-INDEX.md`，接口与界面规格见 `docs/specs/`。
+> **维护状态**：当前版本 v0.810，正在做 **v1.000 发布验收**。已解除发版前的新功能冻结，亮色主题和 DeepSeek 朗读进入接入调研。验收清单见 `docs/tasks/T-814-v1000-release-acceptance.md`，版本计划见 `docs/00-INDEX.md`，接口与界面规格见 `docs/specs/`。
 <div align="center">
 
 <img src="frontend/public/image1.jpeg" alt="SimpleTavern" />

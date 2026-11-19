@@ -1,6 +1,8 @@
 # Last Handoff
 
-## 当前交接（2026-11-08）
+> 2026-11-18 更新：发版前的新功能冻结已撤销。当前范围见 [T-814 发布验收清单](../tasks/T-814-v1000-release-acceptance.md)。
+
+## 交接记录（2026-11-08）
 
 - 在做 v1.000 发布验收，清单是 `docs/tasks/T-814-v1000-release-acceptance.md`。新功能已冻结，只修问题。全部提交在本地 master，没有推送（推送由作者决定）。
 - 这一批：T-832（Bedrock Converse、Mistral Conversations、Vertex 上的 Claude，eventstream 解析），模糊改用 Tailwind 工具类，验收中找到的 10 个缺陷都已修复并做了对照，清单的“问题记录”里有列表。

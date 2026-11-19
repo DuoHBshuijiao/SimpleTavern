@@ -1,10 +1,10 @@
 # 当前任务
 
-- current: v1.000 发布验收（2026-11-08）。新功能已冻结，只修问题。
+- current: v1.000 发布验收（2026-11-18）。发版前的新功能冻结已撤销，亮色主题和 DeepSeek 朗读进入调研。
 - checklist: `docs/tasks/T-814-v1000-release-acceptance.md`。作者的 18 项决定、问题记录和验收记录都在这里。
 - status: 自动和沙箱核对项已完成，剩作者手测三晚（真实模型、真实账号、数据进出）、Vertex 真实项目验收和发布动作。运行版本仍为 v0.810，作者手测通过后直接改 v1.000。
 - next_read: `docs/00-INDEX.md`（测试政策）、`docs/specs/BACKEND-API.md` 的「2026-11-07 增补」、`docs/specs/FRONTEND-FEATURES.md`
-- goal: 作者手测发现问题就修，每次修改后重跑两套黑盒检查；不加新功能。
+- goal: 继续验收，每次修复后重跑两套黑盒检查。同时调研主题与朗读接入，文件解析和 OCR 暂缓。
 
 ## 怎么验证
 
