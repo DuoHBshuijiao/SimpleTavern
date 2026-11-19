@@ -702,7 +702,19 @@ async function enqueueMessageReadAloud(message: ChatMessage, mode: 'manual' | 'a
       ? (live.ttsAudioAssetId?.trim() ?? undefined)
       : undefined
 
-    if (existingAssetId) {
+    const onPlaybackError = (error: unknown) => {
+      if (autoReadFingerprint) getTtsAutoReadFingerprintSet(chat.id).delete(autoReadFingerprint)
+      errorStack.pushError({
+        message: `无法播放音频：${formatApiError(error)}。可再次点击朗读重试。`,
+        source: 'main',
+        title: 'TTS 播放失败',
+      })
+    }
+    const cacheAvailable = existingAssetId
+      ? await fetch(`/api/tts/audio/${encodeURIComponent(existingAssetId)}`, { method: 'HEAD', cache: 'no-store' })
+        .then((response) => response.ok, () => false)
+      : false
+    if (existingAssetId && cacheAvailable) {
       await ttsQueue.enqueue(live.id, originalText, voiceId, {
         previewLabel,
         model: resolveTtsModel(tts, preset),
@@ -712,6 +724,7 @@ async function enqueueMessageReadAloud(message: ChatMessage, mode: 'manual' | 'a
         gapSeconds: tts.readGapSeconds ?? 0,
         enqueueMode: mode === 'manual' ? 'manual' : 'auto',
         manualPlacement: mode === 'manual' ? 'cachedJump' : 'tail',
+        onPlaybackError,
       })
       return true
     }
@@ -742,7 +755,7 @@ async function enqueueMessageReadAloud(message: ChatMessage, mode: 'manual' | 'a
     await ttsQueue.enqueue(live.id, spokenText, voiceId, {
       previewLabel,
       model: resolveTtsModel(tts, preset),
-      existingAssetId,
+      onPlaybackError,
       chatId: chat.id,
       contentText: originalText,
       presetId: preset?.id ?? tts.presetId ?? null,

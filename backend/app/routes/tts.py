@@ -11,7 +11,7 @@ import asyncio
 import logging
 import re
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal, get_args
 from urllib.parse import urlparse, urlunparse
 from uuid import uuid4
 
@@ -35,6 +35,7 @@ from app.services import omnivoice_local_tts_process
 from app.services import qwen3_local_tts_process
 from app.services.tts_cache import tts_cache_patrol
 from app.services.tts_platform import (
+    GLM_TTS_MAX_TEXT_LENGTH,
     GlmLocalTtsPlatform,
     GlmTtsPlatform,
     MiniMaxTtsPlatform,
@@ -45,7 +46,7 @@ from app.services.tts_platform import (
     SynthesisResult,
     TtsPlatform,
 )
-from app.storage import get_tts_cache_dir, load_chat, load_settings, save_chat
+from app.storage import chat_write_lock, get_tts_cache_dir, load_chat, load_settings, save_chat_record
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/tts", tags=["tts"])
@@ -149,6 +150,7 @@ def _build_platform(
     voice_catalog: list[dict[str, Any]] | None = None,
     voice_clone_base_url: str | None = None,
 ) -> TtsPlatform:
+    base_url = _tts_base_url(base_url)
     if provider == "glm_local":
         return GlmLocalTtsPlatform(
             base_url=base_url or "http://127.0.0.1:8088",
@@ -189,7 +191,7 @@ def _get_platform(settings: Settings, preset_id: str | None = None) -> TtsPlatfo
     if provider not in {"glm_local", "qwen3_local", "omnivoice_local"} and not matched.apiKey:
         raise HTTPException(status_code=400, detail="TTS 预设缺少 API Key")
     voice_catalog = [v.model_dump(mode="json") for v in matched.voiceCatalog] if provider in {"glm_local", "qwen3_local", "omnivoice_local"} else None
-    base_url = matched.baseUrl.strip()
+    base_url = _tts_base_url(matched.baseUrl)
     if provider == "glm_local" and not base_url:
         port = matched.ttsGlmLocalPort or 8088
         base_url = f"http://127.0.0.1:{port}"
@@ -213,6 +215,13 @@ def _get_platform(settings: Settings, preset_id: str | None = None) -> TtsPlatfo
         voice_catalog=voice_catalog,
         voice_clone_base_url=vc_url,
     )
+
+
+def _tts_base_url(value: str) -> str:
+    raw = (value or "").strip()
+    host = urlparse(raw if "://" in raw else "//" + raw).hostname
+    # Older presets inherit the LLM default even after switching to a speech-only provider.
+    return "" if host and host.rstrip(".") == "api.openai.com" else raw
 
 
 def _get_inline_platform(base_url: str, api_key: str, provider: str | None) -> TtsPlatform:
@@ -283,32 +292,38 @@ def _write_asset_id_to_message(
     if not chat_id or not message_id:
         return
 
-    try:
-        chat = load_chat(chat_id)
-    except FileNotFoundError:
-        logger.warning("[TTS] chat not found when binding asset", extra={"chat_id": chat_id, "message_id": message_id})
-        return
+    with chat_write_lock(chat_id):
+        try:
+            chat = load_chat(chat_id)
+        except FileNotFoundError:
+            logger.warning("[TTS] chat not found when binding asset", extra={"chat_id": chat_id, "message_id": message_id})
+            return
 
-    updated = False
-    for index, message in enumerate(chat.messages):
-        if message.id != message_id:
-            continue
-        payload = message.model_dump(mode="json")
-        payload["ttsAudioAssetId"] = asset_id
-        if spoken_text is not None:
-            payload["ttsAudioSourceText"] = spoken_text
-        chat.messages[index] = type(message).model_validate(payload)
-        chat.updatedAt = datetime.now().astimezone().isoformat()
-        updated = True
-        break
+        updated = False
+        for index, message in enumerate(chat.messages):
+            if message.id != message_id:
+                continue
+            payload = message.model_dump(mode="json")
+            payload["ttsAudioAssetId"] = asset_id
+            if spoken_text is not None:
+                payload["ttsAudioSourceText"] = spoken_text
+            chat.messages[index] = type(message).model_validate(payload)
+            chat.updatedAt = datetime.now().astimezone().isoformat()
+            updated = True
+            break
 
-    if updated:
-        save_chat(chat)
-    else:
-        logger.warning("[TTS] message not found when binding asset", extra={"chat_id": chat_id, "message_id": message_id})
+        if updated:
+            save_chat_record(chat)
+        else:
+            logger.warning("[TTS] message not found when binding asset", extra={"chat_id": chat_id, "message_id": message_id})
 
 
-def _store_preview_audio(audio_bytes: bytes, audio_format: str = "mp3") -> str:
+AudioFormat = Literal["mp3", "wav", "opus", "pcm", "flac", "aac"]
+
+
+def _store_cached_audio(audio_bytes: bytes, audio_format: str) -> str:
+    if audio_format not in get_args(AudioFormat):
+        raise HTTPException(status_code=502, detail="上游返回了不支持的音频格式")
     asset_id = uuid4().hex
     cache_dir = get_tts_cache_dir()
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -422,7 +437,7 @@ class SynthesizeReq(BaseModel):
     volume: float = Field(default=1.0, gt=0.0, le=10.0)
     pitch: int = Field(default=0, ge=-12, le=12)
     emotion: str | None = None
-    audio_format: str = "mp3"
+    audio_format: AudioFormat = "mp3"
     sample_rate: int = 32000
     stream: bool = False
     message_id: str | None = None  # 关联消息 ID（用于写回 ttsAudioAssetId）
@@ -538,6 +553,8 @@ async def synthesize(request: Request, req: SynthesizeReq):
     settings = _require_tts_enabled()
     matched_preset = _resolve_tts_preset(settings, req.preset_id)
     provider = _resolve_tts_provider(matched_preset.ttsProvider)
+    if provider == "glm" and len(req.text) > GLM_TTS_MAX_TEXT_LENGTH:
+        raise HTTPException(status_code=422, detail=f"GLM 朗读每次最多支持 {GLM_TTS_MAX_TEXT_LENGTH} 个字符，请缩短文本后重试")
 
     if provider == "glm_local" and matched_preset.ttsGlmLocalManaged:
         repo_path = (matched_preset.ttsGlmLocalRepoPath or "").strip()
@@ -662,12 +679,8 @@ async def synthesize(request: Request, req: SynthesizeReq):
             await platform.close()
 
             # 写入缓存文件
-            asset_id = uuid4().hex
-            cache_dir = get_tts_cache_dir()
-            cache_dir.mkdir(parents=True, exist_ok=True)
             ext = result.format or "mp3"
-            cache_path = cache_dir / f"{asset_id}.{ext}"
-            cache_path.write_bytes(result.audio_bytes)
+            asset_id = _store_cached_audio(result.audio_bytes, ext)
             # 前端流式阶段仍使用 local_* 临时 id，磁盘消息为服务端 UUID，写回必失败；由 bind-message 补绑
             mid = (req.message_id or "").strip()
             if mid and not mid.startswith("local_"):
@@ -680,7 +693,7 @@ async def synthesize(request: Request, req: SynthesizeReq):
 
             return {
                 "assetId": asset_id,
-                "format": result.format,
+                "format": ext,
                 "sampleRate": result.sample_rate,
                 "sizeBytes": len(result.audio_bytes),
                 "warnings": list(getattr(result, "warnings", ()) or ()),
@@ -717,6 +730,7 @@ def bind_tts_asset_to_message(req: BindMessageReq):
     return {"ok": True}
 
 
+@router.head("/audio/{asset_id}")
 @router.get("/audio/{asset_id}")
 def get_audio(asset_id: str):
     """通过 UUID 获取已缓存的音频文件。"""
@@ -1060,7 +1074,7 @@ async def design_voice(req: DesignVoiceReq):
         )
         preview_url = None
         if result.preview_audio_bytes:
-            asset_id = _store_preview_audio(result.preview_audio_bytes, result.preview_format)
+            asset_id = _store_cached_audio(result.preview_audio_bytes, result.preview_format)
             preview_url = f"/api/tts/audio/{asset_id}"
         return {
             "voiceId": result.voice_id,

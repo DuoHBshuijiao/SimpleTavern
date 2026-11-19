@@ -34,6 +34,7 @@ export interface QueueItem {
   status: QueueItemStatus
   abortController?: AbortController
   gapSeconds?: number
+  onPlaybackError?: (error: unknown) => void
 }
 
 export type EnqueueMode = 'auto' | 'manual'
@@ -153,6 +154,7 @@ export function useTtsPlaybackQueue() {
       presetId?: string | null
       gapSeconds?: number
       onReady?: (assetId: string) => void
+      onPlaybackError?: (error: unknown) => void
       /** 合成失败时回调（如接入主聊天 errorStack） */
       onSynthesizeError?: (err: unknown) => void
       /** auto：队尾 push；manual + cachedJump：头插缓存；manual + second：下标 1 插入（空队列为 0） */
@@ -165,7 +167,7 @@ export function useTtsPlaybackQueue() {
     const enqueueMode = opts.enqueueMode ?? 'auto'
     const manualPlacement = opts.manualPlacement ?? 'tail'
 
-    const newItemBase = { messageId, gapSeconds, previewLabel }
+    const newItemBase = { messageId, gapSeconds, previewLabel, onPlaybackError: opts.onPlaybackError }
 
     if (opts.existingAssetId) {
       const readyItem: QueueItem = {
@@ -184,14 +186,11 @@ export function useTtsPlaybackQueue() {
         ...newItemBase,
         status: 'pending',
       }
-      if (enqueueMode === 'manual' && manualPlacement === 'second') {
-        const idx = queue.value.length === 0 ? 0 : 1
-        queue.value.splice(idx, 0, pendingItem)
-      } else {
-        queue.value.push(pendingItem)
-      }
-      const inserted = pendingItem
-      await downloadItem(inserted, text, voiceId, opts)
+      const index = enqueueMode === 'manual' && manualPlacement === 'second'
+        ? Math.min(1, queue.value.length)
+        : queue.value.length
+      queue.value.splice(index, 0, pendingItem)
+      await downloadItem(queue.value[index]!, text, voiceId, opts)
     }
 
     if (!isPlaying.value) void playNext()
@@ -246,7 +245,7 @@ export function useTtsPlaybackQueue() {
         item.status = 'error'
         console.error('[TTS] download error', e)
         opts?.onSynthesizeError?.(e)
-        const errIdx = queue.value.findIndex((i) => i === item)
+        const errIdx = queue.value.indexOf(item)
         if (errIdx >= 0) queue.value.splice(errIdx, 1)
       }
     } finally {
@@ -311,6 +310,7 @@ export function useTtsPlaybackQueue() {
       next.status = 'done'
     } catch (e) {
       if (myGen === playGeneration) {
+        next.onPlaybackError?.(e)
         console.error('[TTS] playback error', e)
         const idx = queue.value.findIndex((i) => i === next)
         if (idx >= 0) queue.value.splice(idx, 1)

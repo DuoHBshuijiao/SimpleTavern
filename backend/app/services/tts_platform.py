@@ -15,7 +15,7 @@ import logging
 import mimetypes
 import pathlib
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Literal
+from typing import Any, AsyncIterator, Callable, Literal
 from urllib.parse import urlsplit, urlunsplit
 import wave
 
@@ -35,10 +35,10 @@ def _normalize_minimax_api_base(raw: str) -> str:
     if base and not (base.startswith("http://") or base.startswith("https://")):
         base = "https://" + base
     base = base.rstrip("/")
-    low = base.lower()
-    if "/chat/completions" in low:
-        idx = low.find("/chat/completions")
-        base = base[:idx].rstrip("/")
+    for suffix in ("/chat/completions", "/t2a_v2"):
+        if base.lower().endswith(suffix):
+            base = base[:-len(suffix)]
+            break
     return _normalize_base_url(base)
 
 
@@ -255,7 +255,7 @@ class MiniMaxTtsPlatform(TtsPlatform):
     async def synthesize(self, req: SynthesisRequest) -> SynthesisResult:
         body = self._build_t2a_body(req, stream=False)
         resp = await self._client.post("/t2a_v2", json=body, headers=self._headers())
-        resp.raise_for_status()
+        self._raise_for_http_error(resp)
         data = resp.json()
         self._check_base_resp(data)
         audio_hex: str = data.get("data", {}).get("audio", "")
@@ -274,7 +274,9 @@ class MiniMaxTtsPlatform(TtsPlatform):
         async with self._client.stream(
             "POST", "/t2a_v2", json=body, headers=self._headers()
         ) as resp:
-            resp.raise_for_status()
+            if not resp.is_success:
+                await resp.aread()
+                self._raise_for_http_error(resp)
             async for line in resp.aiter_lines():
                 if not line.strip():
                     continue
@@ -288,6 +290,7 @@ class MiniMaxTtsPlatform(TtsPlatform):
                     chunk = _json.loads(line)
                 except Exception:
                     continue
+                self._check_base_resp(chunk)
                 audio_hex = chunk.get("data", {}).get("audio", "")
                 if audio_hex:
                     yield bytes.fromhex(audio_hex)
@@ -518,12 +521,49 @@ class MiniMaxTtsPlatform(TtsPlatform):
             msg = base_resp.get("status_msg", f"MiniMax error code={code}")
             raise RuntimeError(msg)
 
+    @classmethod
+    def _raise_for_http_error(cls, response: httpx.Response) -> None:
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            try:
+                payload = response.json()
+            except ValueError:
+                raise exc from None
+            if isinstance(payload, dict):
+                cls._check_base_resp(payload)
+                details = payload.get("error")
+                message = details.get("message") if isinstance(details, dict) else payload.get("message")
+                if isinstance(message, str) and message.strip():
+                    raise RuntimeError(message) from exc
+            raise
+
 
 # ---------------------------------------------------------------------------
 # GLM 实现
 # ---------------------------------------------------------------------------
 
 _GLM_BASE = "https://open.bigmodel.cn/api"
+GLM_TTS_MAX_TEXT_LENGTH = 1024
+
+
+def _require_audio_bytes(response: httpx.Response, extract_error: Callable[[Any], str | None]) -> bytes:
+    audio = response.content
+    media_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    labeled_json = media_type == "application/json" or media_type.endswith("+json")
+    if labeled_json or audio.lstrip().startswith((b"{", b"[")):
+        try:
+            body = response.json()
+        except ValueError:
+            if labeled_json:
+                raise RuntimeError("TTS 返回了无法解析的 JSON，未收到音频") from None
+        else:
+            raise RuntimeError(extract_error(body) or "TTS 返回了 JSON，未收到音频")
+    if not audio:
+        raise RuntimeError("TTS 返回空音频")
+    if media_type.startswith("text/") or media_type in {"application/xml", "application/xhtml+xml"}:
+        raise RuntimeError("TTS 返回了文本，未收到音频")
+    return audio
 
 
 class GlmTtsPlatform(TtsPlatform):
@@ -589,16 +629,15 @@ class GlmTtsPlatform(TtsPlatform):
         return data
 
     @staticmethod
-    def _clamp_text(text: str, *, max_length: int = 1024) -> str:
-        if len(text) <= max_length:
-            return text
-        logger.warning("[TTS] GLM input truncated", extra={"original_length": len(text), "max_length": max_length})
-        return text[:max_length]
+    def _validate_text(text: str) -> str:
+        if len(text) > GLM_TTS_MAX_TEXT_LENGTH:
+            raise ValueError(f"GLM 朗读每次最多支持 {GLM_TTS_MAX_TEXT_LENGTH} 个字符，请缩短文本后重试")
+        return text
 
     async def synthesize(self, req: SynthesisRequest) -> SynthesisResult:
         body = {
             "model": (req.model or "glm-tts").strip() or "glm-tts",
-            "input": self._clamp_text(req.text),
+            "input": self._validate_text(req.text),
             "voice": req.voice_id,
             "response_format": "wav",
             "speed": max(0.5, min(2.0, req.speed)),
@@ -607,7 +646,7 @@ class GlmTtsPlatform(TtsPlatform):
         resp = await self._client.post("/paas/v4/audio/speech", json=body, headers=self._json_headers())
         self._raise_for_http_error(resp)
         return SynthesisResult(
-            audio_bytes=resp.content,
+            audio_bytes=_require_audio_bytes(resp, self._extract_error_message),
             format="wav",
             sample_rate=24000,
         )
@@ -615,7 +654,7 @@ class GlmTtsPlatform(TtsPlatform):
     async def synthesize_stream(self, req: SynthesisRequest) -> AsyncIterator[bytes]:
         body = {
             "model": (req.model or "glm-tts").strip() or "glm-tts",
-            "input": self._clamp_text(req.text),
+            "input": self._validate_text(req.text),
             "voice": req.voice_id,
             "stream": True,
             "response_format": "pcm",
@@ -1427,9 +1466,7 @@ class OpenAiSpeechCompatTtsPlatform(TtsPlatform):
         body = self._build_speech_json_body(req, stream=stream_arg)
         resp = await self._client.post("/audio/speech", json=body, headers=self._speech_headers_json())
         self._raise_for_speech_http_error(resp)
-        audio_bytes = resp.content
-        if not audio_bytes:
-            raise RuntimeError("TTS 返回空音频")
+        audio_bytes = _require_audio_bytes(resp, self._extract_json_error_message)
         ct_fmt = _speech_compat_content_type_to_format(resp.headers.get("content-type"))
         out_fmt = ct_fmt or fmt_norm
         return SynthesisResult(

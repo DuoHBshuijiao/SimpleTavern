@@ -1368,8 +1368,10 @@ async function logoutCurrentOAuthPreset() {
 
 function normalizePresetDraft(preset: ApiPreset): ApiPreset {
   const isTts = isTtsApiPreset(preset)
+  const provider = isTts ? resolveTtsProvider(preset) : null
   return {
     ...preset,
+    baseUrl: cloudTtsBaseUrl(preset.baseUrl, provider),
     protocol: isTts ? (preset.protocol ?? null) : normalizeLlmProtocol(preset.protocol),
     anthropicPromptCache: isTts
       ? (preset.anthropicPromptCache ?? null)
@@ -1380,9 +1382,16 @@ function normalizePresetDraft(preset: ApiPreset): ApiPreset {
     providerParams: { ...preset.providerParams },
     authStyle: preset.authStyle ?? null,
     presetKind: isTts ? 'tts' : (preset.presetKind ?? null),
-    ttsProvider: isTts ? resolveTtsProvider(preset) : null,
+    ttsProvider: provider,
     voiceCatalog: normalizeVoiceCatalog(preset.voiceCatalog),
   }
+}
+
+function cloudTtsBaseUrl(baseUrl: string, provider: TtsProvider | null): string {
+  const defaults = { minimax: 'https://api.minimaxi.com', glm: 'https://open.bigmodel.cn/api' }
+  if (provider !== 'minimax' && provider !== 'glm') return baseUrl
+  const value = baseUrl?.trim() || ''
+  return !value || /^(?:https?:\/\/)?api\.openai\.com(?:\/.*)?$/i.test(value) ? defaults[provider] : value
 }
 
 function resetTtsPresetTransientUi() {
@@ -1415,6 +1424,11 @@ function applyPresetTtsProvider(preset: ApiPreset, provider: TtsProvider) {
   const previousProvider = resolveTtsProvider(preset)
   preset.presetKind = 'tts'
   preset.ttsProvider = nextProvider
+  if (nextProvider === 'minimax' || nextProvider === 'glm') {
+    const previousDefault = cloudTtsBaseUrl('', previousProvider)
+    const raw = previousProvider !== nextProvider && preset.baseUrl === previousDefault ? '' : preset.baseUrl
+    preset.baseUrl = cloudTtsBaseUrl(raw, nextProvider)
+  }
   if (previousProvider === nextProvider) return
   preset.voiceCatalog = []
   resetTtsPresetTransientUi()
