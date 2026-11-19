@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { X } from 'lucide-vue-next'
-import { apiGet } from '../../api/http'
+import { apiGet, apiPost } from '../../api/http'
 import { useSettingsImport, type ImportWarningItem, coerceImportWarningText } from '../../composables/useSettingsImport'
 import { notifyMessage } from '../../composables/useNotify'
 import type { CharacterCard, Chat, MvuMode, UserPersona } from '../../types/models'
@@ -147,41 +147,34 @@ const stConfirmLabel = computed(() => {
 
 const characterListKey = computed(() => props.characters.map((c) => c.id).join(','))
 
+let pendingPreviewController: AbortController | null = null
+
+function clearPendingPreview() {
+  pendingPreviewController?.abort()
+  pendingPreviewController = null
+  pendingLoading.value = false
+  pendingError.value = ''
+  pendingPreview.value = null
+}
+
 watch(
-  () => props.show,
-  (visible) => {
+  () => [props.show, props.pendingId, props.pendingReloadNonce] as const,
+  ([visible, pendingId]) => {
+    clearPendingPreview()
     if (!visible) return
-    if (!selectedCharacterId.value) {
-      const firstCharacter = props.characters[0]
-      if (firstCharacter) selectedCharacterId.value = firstCharacter.id
-    }
-    if (props.pendingId) {
-      void loadPendingPreview(props.pendingId)
-    }
+    if (pendingId) void loadPendingPreview(pendingId)
   },
   { immediate: true },
 )
 
-watch(
-  () => props.pendingId,
-  (pendingId) => {
-    if (props.show && pendingId) {
-      void loadPendingPreview(pendingId)
-    }
-  },
-)
-
-watch(
-  () => props.pendingReloadNonce,
-  (n, prev) => {
-    if (n == null || n === prev) return
-    if (props.show && props.pendingId) {
-      void loadPendingPreview(props.pendingId)
-    }
-  },
-)
+watch([() => props.show, characterListKey], ([visible]) => {
+  if (visible && !props.characters.some((character) => character.id === selectedCharacterId.value)) {
+    selectedCharacterId.value = props.characters[0]?.id ?? ''
+  }
+}, { immediate: true })
 
 function close() {
+  clearPendingPreview()
   emit('update:show', false)
 }
 
@@ -383,53 +376,50 @@ async function openJaiCharacterUrlAndCapture() {
 }
 
 async function loadPendingPreview(pendingId: string) {
+  const controller = new AbortController()
+  pendingPreviewController = controller
   pendingLoading.value = true
-  pendingError.value = ''
   try {
-    const data = await apiGet<{ preview: JanitorPendingPreview }>(`/api/import/janitor/pending/${pendingId}`)
-    pendingPreview.value = data.preview
-  } catch (err) {
-    pendingPreview.value = null
-    pendingError.value = err instanceof Error ? err.message : String(err)
+    const data = await apiGet<{ preview: JanitorPendingPreview }>(
+      `/api/import/janitor/pending/${encodeURIComponent(pendingId)}`,
+      controller.signal,
+    )
+    if (pendingPreviewController === controller) pendingPreview.value = data.preview
+  } catch (error) {
+    if (pendingPreviewController === controller) {
+      pendingError.value = error instanceof Error ? error.message : String(error)
+    }
   } finally {
-    pendingLoading.value = false
+    if (pendingPreviewController === controller) {
+      pendingLoading.value = false
+      pendingPreviewController = null
+    }
   }
 }
 
 async function confirmJanitorImport() {
-  if (!props.pendingId) {
-    await notifyMessage('未检测到待导入的数据。')
-    return
-  }
-  if (!selectedCharacterId.value) {
-    await notifyMessage('请选择角色。')
-    return
-  }
+  if (janitorConfirming.value || !pendingPreview.value) return
+  const pendingId = props.pendingId
+  const characterId = selectedCharacterId.value
+  const shouldOpen = openAfterImport.value
+  if (!pendingId || !characterId) return
   janitorConfirming.value = true
   try {
-    const r = await fetch('/api/import/janitor/confirm', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        pendingId: props.pendingId,
-        characterId: selectedCharacterId.value,
-        userPersonaId: selectedPersonaId.value || null,
-      }),
+    const result = await apiPost<JanitorConfirmResult>('/api/import/janitor/confirm', {
+      pendingId,
+      characterId,
+      userPersonaId: selectedPersonaId.value || null,
     })
-    if (!r.ok) {
-      throw new Error(await r.text())
-    }
-    const result = (await r.json()) as JanitorConfirmResult
-    await refreshDataAfterImport()
-    await notifyMessage(formatImportResultMessage(result))
     emit('janitor-imported', {
       chatId: result.chat.id,
       characterId: result.chat.characterId ?? null,
-      openAfterImport: openAfterImport.value,
+      openAfterImport: shouldOpen,
     })
     close()
-  } catch (err) {
-    await notifyMessage(err instanceof Error ? err.message : String(err))
+    await refreshDataAfterImport()
+    await notifyMessage(formatImportResultMessage(result))
+  } catch (error) {
+    await notifyMessage(error instanceof Error ? error.message : String(error))
   } finally {
     janitorConfirming.value = false
   }
@@ -598,7 +588,7 @@ async function confirmJanitorImport() {
             <div class="flex justify-end">
               <button
                 class="btn btn-sm btn-primary"
-                :disabled="!pendingId || !selectedCharacterId || janitorConfirming"
+                :disabled="!pendingPreview || !selectedCharacterId || janitorConfirming"
                 @click="confirmJanitorImport"
               >
                 {{ janitorConfirming ? '导入中...' : '确认导入 Janitor 聊天' }}

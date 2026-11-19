@@ -1,5 +1,8 @@
 (function injectXhrAndFetchBridge() {
   const CHANNEL = 'st-janitor-bridge';
+  const { searchParams } = new URL(window.location.href);
+  const captureCharacter = searchParams.get('_st_char_html') === '1';
+  if (!captureCharacter && searchParams.get('_st_import') !== '1') return;
 
   const isLikelyChatEndpoint = (url) => {
     if (typeof url !== 'string') return false;
@@ -32,8 +35,9 @@
     this.addEventListener('load', function onLoad() {
       try {
         if (!isLikelyChatEndpoint(this.__stUrl)) return;
-        if (!this.responseText) return;
-        postPayload('xhr', this.responseText);
+        const payload = this.responseType === 'json' ? this.response : this.responseText;
+        if (!payload) return;
+        postPayload('xhr', payload);
       } catch (_) {
         // noop
       }
@@ -69,7 +73,10 @@
         const storeKey = Object.keys(entry).find((k) => k.endsWith('characterStore'));
         if (!storeKey) continue;
         const ch = entry[storeKey] && entry[storeKey].character;
-        if (ch && typeof ch === 'object' && (ch.first_message || (ch.first_messages && ch.first_messages.length))) {
+        if (ch && typeof ch === 'object' && (
+          (typeof ch.first_message === 'string' && ch.first_message.trim()) ||
+          (Array.isArray(ch.first_messages) && ch.first_messages.some(item => typeof item === 'string' && item.trim()))
+        )) {
           return ch;
         }
       }
@@ -93,6 +100,7 @@
     if (ch) postCharJson(ch);
   }
 
+  if (!captureCharacter) return;
   if (document.readyState === 'complete') {
     tryEmitCharJson();
   } else {

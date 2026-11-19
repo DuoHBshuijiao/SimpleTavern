@@ -18,14 +18,6 @@
     appBaseHint: '',
   };
 
-  function injectScript() {
-    const src = chrome.runtime.getURL('injected.js');
-    const script = document.createElement('script');
-    script.src = src;
-    script.onload = () => script.remove();
-    (document.head || document.documentElement).appendChild(script);
-  }
-
   function parseCandidate(raw) {
     try {
       if (typeof raw === 'string') return JSON.parse(raw);
@@ -64,6 +56,34 @@
 
   function logWarn(...args) {
     console.warn(LOG_PREFIX, ...args);
+  }
+
+  function postImport(kind, apiBaseUrl, payload) {
+    logInfo('posting import to', `${apiBaseUrl}/api/import/janitor/${kind}`);
+    return new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage({ type: 'post-janitor-import', kind, apiBaseUrl, payload }, (response) => {
+        if (chrome.runtime.lastError || !response?.ok) {
+          reject(new Error(chrome.runtime.lastError?.message || response?.error || '扩展没有返回导入结果'));
+          return;
+        }
+        resolve(response.result);
+      });
+    });
+  }
+
+  function reportImportError(error) {
+    logWarn('import failed', error);
+    let alert = document.getElementById('simpletavern-janitor-import-error');
+    if (!alert) {
+      alert = document.createElement('button');
+      alert.id = 'simpletavern-janitor-import-error';
+      alert.type = 'button';
+      alert.setAttribute('role', 'alert');
+      alert.style.cssText = 'position:fixed;top:1rem;right:1rem;max-width:min(28rem,calc(100vw - 2rem));z-index:2147483647;padding:.75rem;background:#27272a;color:white;border-radius:.5rem';
+      alert.addEventListener('click', () => alert.remove());
+      (document.body || document.documentElement).appendChild(alert);
+    }
+    alert.textContent = `SimpleTavern 导入失败。${error.message}（点击关闭）`;
   }
 
   const AVATAR_POLL_MS = 200;
@@ -139,11 +159,6 @@
       state.chatActivated = !state.charHtmlActivated && u.searchParams.get(ACTIVATE_PARAM) === '1';
       state.appBaseHint = (u.searchParams.get(APP_BASE_PARAM) || '').replace(/\/+$/, '');
       if (state.charHtmlActivated || state.chatActivated) {
-        u.searchParams.delete(CHAR_HTML_PARAM);
-        u.searchParams.delete(ACTIVATE_PARAM);
-        u.searchParams.delete('_st_ts');
-        u.searchParams.delete(APP_BASE_PARAM);
-        history.replaceState(null, '', u.toString());
         if (state.charHtmlActivated) {
           logInfo('character HTML capture armed', state.appBaseHint ? `(appBase=${state.appBaseHint})` : '');
         } else {
@@ -159,6 +174,15 @@
     }
   }
 
+  function clearImportParams() {
+    const url = new URL(window.location.href);
+    for (const key of [CHAR_HTML_PARAM, ACTIVATE_PARAM, '_st_ts', APP_BASE_PARAM]) {
+      url.searchParams.delete(key);
+    }
+    history.replaceState(history.state, '', url.toString());
+    document.getElementById('simpletavern-janitor-import-error')?.remove();
+  }
+
   async function sendPending(payload) {
     if (!state.chatActivated) return;
     if (state.sent || state.sending) return;
@@ -166,21 +190,13 @@
     try {
       const { apiBaseUrl, appBaseUrl } = await getConfig();
       const openBase = (state.appBaseHint || appBaseUrl || DEFAULT_APP_BASE).replace(/\/+$/, '');
-      logInfo('posting pending to', `${apiBaseUrl}/api/import/janitor/pending`);
-      const resp = await fetch(`${apiBaseUrl}/api/import/janitor/pending`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (!resp.ok) {
-        throw new Error(await resp.text());
-      }
-      const result = await resp.json();
+      const result = await postImport('pending', state.appBaseHint || apiBaseUrl, payload);
       const pendingId = result?.pendingId;
       if (!pendingId) {
         throw new Error('pendingId missing');
       }
       state.sent = true;
+      clearImportParams();
       state.chatActivated = false;
       const targetUrl = `${openBase}/chat?janitorPending=${encodeURIComponent(pendingId)}`;
       chrome.runtime.sendMessage({ type: 'open-simpletavern', url: targetUrl }, () => {
@@ -193,7 +209,7 @@
     } catch (err) {
       // 网络或配置失败时保持可重试（刷新后再次自动尝试）
       state.sent = false;
-      logWarn('send pending failed', err);
+      reportImportError(err);
     } finally {
       state.sending = false;
     }
@@ -215,20 +231,12 @@
       }
       const payload = { charJson };
       if (avatarUrl) payload.avatarUrl = avatarUrl;
-      logInfo('posting JAI character JSON to', `${apiBaseUrl}/api/import/janitor/character-json`);
-      const resp = await fetch(`${apiBaseUrl}/api/import/janitor/character-json`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (!resp.ok) {
-        throw new Error(await resp.text());
-      }
-      const result = await resp.json();
+      const result = await postImport('character-json', state.appBaseHint || apiBaseUrl, payload);
       const characterId = result?.characterId;
       const characterName = result?.characterName || '';
       const warnings = Array.isArray(result?.warnings) ? result.warnings : [];
       state.sent = true;
+      clearImportParams();
       state.charHtmlActivated = false;
       if (state.charHtmlFallbackTimer) {
         window.clearTimeout(state.charHtmlFallbackTimer);
@@ -255,7 +263,7 @@
       });
     } catch (err) {
       state.sent = false;
-      logWarn('send character json failed', err);
+      reportImportError(err);
     } finally {
       state.sending = false;
     }
@@ -281,20 +289,12 @@
       }
       const payload = { html };
       if (avatarUrl) payload.avatarUrl = avatarUrl;
-      logInfo('posting character page HTML to', `${apiBaseUrl}/api/import/janitor/character-html`);
-      const resp = await fetch(`${apiBaseUrl}/api/import/janitor/character-html`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (!resp.ok) {
-        throw new Error(await resp.text());
-      }
-      const result = await resp.json();
+      const result = await postImport('character-html', state.appBaseHint || apiBaseUrl, payload);
       const characterId = result?.characterId;
       const characterName = result?.characterName || '';
       const warnings = Array.isArray(result?.warnings) ? result.warnings : [];
       state.sent = true;
+      clearImportParams();
       state.charHtmlActivated = false;
       const q = new URLSearchParams();
       q.set('janitorCharImport', '1');
@@ -317,7 +317,7 @@
       });
     } catch (err) {
       state.sent = false;
-      logWarn('send character html failed', err);
+      reportImportError(err);
     } finally {
       state.sending = false;
     }
@@ -349,7 +349,7 @@
 
   window.addEventListener('message', (event) => {
     const data = event.data;
-    if (!data || data.source !== CHANNEL) return;
+    if (event.source !== window || !data || data.source !== CHANNEL) return;
     if (data.type === 'char-json' && state.charHtmlActivated) {
       const obj = data.data;
       if (!obj || typeof obj !== 'object') return;
@@ -369,8 +369,12 @@
   });
 
   resolveActivation();
-  if (state.chatActivated || state.charHtmlActivated) {
-    injectScript();
+  if (state.chatActivated) {
+    window.setTimeout(() => {
+      if (!state.sent && !state.sending) {
+        reportImportError(new Error('未捕获聊天数据。请刷新此页面重试。'));
+      }
+    }, 15000);
   }
   if (state.charHtmlActivated) {
     scheduleCharacterHtmlCapture();

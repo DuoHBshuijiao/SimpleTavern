@@ -36,6 +36,7 @@ import zipfile
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote, urlparse
+from threading import Lock
 from typing import Annotated, Any, Literal
 from uuid import uuid4
 from urllib.error import HTTPError, URLError
@@ -100,6 +101,7 @@ JANITOR_CHAT_PENDING_TTL_SECONDS = 10 * 60
 SILLYTAVERN_IMPORT_PENDING_TTL_SECONDS = 10 * 60
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 # 仅暂存 Janitor「聊天」捕获；角色 HTML 导入走独立接口，不写入此字典。
+_janitor_chat_pending_lock = Lock()
 _janitor_chat_pending_store: dict[str, tuple[datetime, dict[str, Any]]] = {}
 _sillytavern_pending_store: dict[str, tuple[datetime, dict[str, Any]]] = {}
 
@@ -162,8 +164,8 @@ def _validate_janitor_payload(raw: Any) -> dict[str, Any]:
     messages = raw.get("chatMessages")
     if not isinstance(messages, list):
         raise HTTPException(status_code=400, detail="janitor payload missing chatMessages list")
-    if not messages:
-        raise HTTPException(status_code=400, detail="janitor chatMessages is empty")
+    if not _sorted_janitor_messages(raw):
+        raise HTTPException(status_code=400, detail="没有可导入的 Janitor 主线消息")
     return raw
 
 
@@ -196,7 +198,10 @@ def _extract_message_text(raw_msg: dict[str, Any]) -> str:
 
 
 def _sorted_janitor_messages(raw: dict[str, Any]) -> list[dict[str, Any]]:
-    messages = [m for m in raw.get("chatMessages", []) if isinstance(m, dict)]
+    messages = [
+        m for m in raw.get("chatMessages", [])
+        if isinstance(m, dict) and m.get("is_main") is not False
+    ]
     return sorted(messages, key=lambda m: str(m.get("created_at") or ""))
 
 
@@ -423,12 +428,14 @@ _JANITOR_MSG_COUNTER = re.compile(
 )
 
 
-def _janitor_char_json_has_greetings(char: dict[str, Any]) -> bool:
-    fms = char.get("first_messages")
-    if isinstance(fms, list) and any(str(x).strip() for x in fms):
-        return True
-    fm = char.get("first_message")
-    return isinstance(fm, str) and fm.strip() != ""
+def _janitor_greetings(char: dict[str, Any]) -> list[str]:
+    first_messages = char.get("first_messages")
+    if isinstance(first_messages, list):
+        greetings = [item.strip() for item in first_messages if isinstance(item, str) and item.strip()]
+        if greetings:
+            return greetings
+    single = char.get("first_message")
+    return [single.strip()] if isinstance(single, str) and single.strip() else []
 
 
 def _janitor_js_decode_double_quoted_string_body(html: str, start: int) -> tuple[str, int | None]:
@@ -466,30 +473,30 @@ def _janitor_js_decode_double_quoted_string_body(html: str, start: int) -> tuple
 
 def _extract_janitor_character_from_mbxm_html(html: str) -> dict[str, Any] | None:
     marker = "window.mbxM.push(JSON.parse("
-    idx = html.find(marker)
-    if idx < 0:
-        return None
-    j = idx + len(marker)
-    while j < len(html) and html[j] in " \t\n\r":
-        j += 1
-    if j >= len(html) or html[j] != '"':
-        return None
-    j += 1
-    body, end = _janitor_js_decode_double_quoted_string_body(html, j)
-    if end is None:
-        return None
-    try:
-        payload = json.loads(body)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(payload, dict):
-        return None
-    for k, v in payload.items():
-        if isinstance(k, str) and k.endswith("characterStore") and isinstance(v, dict):
-            ch = v.get("character")
-            if isinstance(ch, dict):
-                return ch
-    return None
+    fallback = None
+    for match in re.finditer(re.escape(marker) + r'\s*"', html):
+        body, end = _janitor_js_decode_double_quoted_string_body(html, match.end())
+        if end is None:
+            continue
+        try:
+            payload = json.loads(body)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        for key, store in payload.items():
+            if not key.endswith("characterStore") or not isinstance(store, dict):
+                continue
+            candidate = store.get("character")
+            if not isinstance(candidate, dict):
+                continue
+            if _janitor_greetings(candidate) and any(candidate.get(field) for field in (
+                "description", "personality", "scenario", "example_dialogs",
+            )):
+                return candidate
+            if fallback is None or _janitor_greetings(candidate):
+                fallback = candidate
+    return fallback
 
 
 def _strip_janitor_token_label_suffix(raw: str) -> str:
@@ -686,13 +693,7 @@ def _parse_character_from_json(char: dict[str, Any], avatar_url_hint: str | None
     example_dial = (str(char.get("example_dialogs") or "")).strip()
     description = _strip_html(str(char.get("description") or ""))
 
-    fms = char.get("first_messages")
-    all_messages: list[str] = []
-    if isinstance(fms, list):
-        # JanitorAI writes null for an empty greeting; str(None) used to save the text "None".
-        all_messages = [x.strip() for x in fms if isinstance(x, str) and x.strip()]
-    if not all_messages and isinstance(char.get("first_message"), str) and (char.get("first_message") or "").strip():
-        all_messages = [str(char.get("first_message") or "").strip()]
+    all_messages = _janitor_greetings(char)
 
     first_msg = all_messages[0] if all_messages else ""
     extras: list[ExtraFirstMessageEntry] = [
@@ -729,7 +730,7 @@ def _parse_character_from_json(char: dict[str, Any], avatar_url_hint: str | None
 
 def _parse_character_from_html(html: str, avatar_url_hint: str | None = None) -> tuple[CharacterCard, list[str]]:
     ch = _extract_janitor_character_from_mbxm_html(html)
-    if ch and _janitor_char_json_has_greetings(ch):
+    if ch and _janitor_greetings(ch):
         return _parse_character_from_json(ch, avatar_url_hint=avatar_url_hint)
     if re.search(r'characterInfoAccordionItem_|\bid="info-\d+"', html):
         w_acc: list[str] = []
@@ -752,6 +753,10 @@ def _parse_character_from_html(html: str, avatar_url_hint: str | None = None) ->
                 pass
             else:
                 raise
+    if ch:
+        card, warnings = _parse_character_from_json(ch, avatar_url_hint=avatar_url_hint)
+        warnings.append("来源缺少有效开场白")
+        return card, warnings
     return _parse_character_from_html_flat_legacy(html, avatar_url_hint)
 
 
@@ -2401,12 +2406,13 @@ def _import_from_zip(payload: bytes, *, conflict: ChatImportConflict = "replace"
 
 @router.post("/import/janitor/pending")
 def import_janitor_pending(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
-    _cleanup_expired_janitor_chat_pending()
     raw = _validate_janitor_payload(payload)
     pending_id = uuid4().hex
     expires_at = datetime.now().astimezone() + timedelta(seconds=JANITOR_CHAT_PENDING_TTL_SECONDS)
     expires_at = expires_at.replace(microsecond=0)
-    _janitor_chat_pending_store[pending_id] = (expires_at, raw)
+    with _janitor_chat_pending_lock:
+        _cleanup_expired_janitor_chat_pending()
+        _janitor_chat_pending_store[pending_id] = (expires_at, raw)
     return {
         "ok": True,
         "pendingId": pending_id,
@@ -2416,8 +2422,9 @@ def import_janitor_pending(payload: dict[str, Any] = Body(...)) -> dict[str, Any
 
 @router.get("/import/janitor/pending/{pending_id}")
 def get_janitor_pending_preview(pending_id: str) -> dict[str, Any]:
-    _cleanup_expired_janitor_chat_pending()
-    item = _janitor_chat_pending_store.get(pending_id)
+    with _janitor_chat_pending_lock:
+        _cleanup_expired_janitor_chat_pending()
+        item = _janitor_chat_pending_store.get(pending_id)
     if not item:
         raise HTTPException(status_code=404, detail="janitor pending not found or expired")
     _, raw = item
@@ -2426,22 +2433,27 @@ def get_janitor_pending_preview(pending_id: str) -> dict[str, Any]:
 
 @router.post("/import/janitor/confirm")
 def confirm_janitor_import(req: JanitorConfirmRequest) -> dict[str, Any]:
-    _cleanup_expired_janitor_chat_pending()
-    item = _janitor_chat_pending_store.get(req.pendingId)
-    if not item:
-        raise HTTPException(status_code=404, detail="janitor pending not found or expired")
-    _, raw = item
-    if not req.characterId.strip():
-        raise HTTPException(status_code=400, detail="characterId is required")
-    settings = load_settings()
-    chat = Chat(
-        characterId=req.characterId,
-        title=_janitor_title(raw),
-        userPersonaId=req.userPersonaId,
-        messages=_janitor_messages_to_chat_messages(raw, req.characterId, req.userPersonaId, settings),
-    )
-    saved = save_chat(chat)
-    _janitor_chat_pending_store.pop(req.pendingId, None)
+    with _janitor_chat_pending_lock, character_lifecycle_lock:
+        _cleanup_expired_janitor_chat_pending()
+        item = _janitor_chat_pending_store.get(req.pendingId)
+        if item is None:
+            raise HTTPException(status_code=404, detail="待导入聊天已处理或已过期")
+        character_id = req.characterId.strip()
+        try:
+            load_character(character_id)
+        except (FileNotFoundError, ValueError):
+            raise HTTPException(status_code=404, detail="所选角色已不存在，请重新选择") from None
+
+        _, raw = item
+        settings = load_settings()
+        chat = Chat(
+            characterId=character_id,
+            title=_janitor_title(raw),
+            userPersonaId=req.userPersonaId,
+            messages=_janitor_messages_to_chat_messages(raw, character_id, req.userPersonaId, settings),
+        )
+        saved = save_chat(chat)
+        del _janitor_chat_pending_store[req.pendingId]
     return {
         "ok": True,
         "imported": ["chat"],
@@ -2600,6 +2612,8 @@ def _decode_character_html_bytes(payload: bytes) -> str:
 
 def _import_character_from_html_string(html: str, avatar_url_hint: str | None = None) -> dict[str, Any]:
     card, warnings = _parse_character_from_html(html, avatar_url_hint=avatar_url_hint)
+    if not any((card.description, card.personality, card.scenario, card.exampleDialogue)):
+        warnings.append("来源未提供可识别的角色设定")
     saved = save_character(card)
     return {
         "ok": True,
@@ -2611,8 +2625,8 @@ def _import_character_from_html_string(html: str, avatar_url_hint: str | None = 
 
 
 def _import_character_from_janitor_json_dict(char: dict[str, Any], avatar_url_hint: str | None = None) -> dict[str, Any]:
-    if not _janitor_char_json_has_greetings(char):
-        raise HTTPException(status_code=400, detail="charJson must include first_message or first_messages")
+    if not _janitor_greetings(char):
+        raise HTTPException(status_code=400, detail="角色数据缺少有效开场白")
     card, warnings = _parse_character_from_json(char, avatar_url_hint=avatar_url_hint)
     saved = save_character(card)
     return {

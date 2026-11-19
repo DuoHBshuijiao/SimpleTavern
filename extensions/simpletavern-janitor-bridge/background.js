@@ -16,8 +16,45 @@ function mergeJanitorPendingFromTab(currentUrl, destUrl) {
   }
 }
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+const importKinds = new Set(['pending', 'character-json', 'character-html']);
+
+async function postJanitorImport(message, sender) {
+  const page = new URL(sender.url);
+  if (page.protocol !== 'https:' || (page.hostname !== 'janitorai.com' && !page.hostname.endsWith('.janitorai.com'))) {
+    throw new Error('JanitorAI import must originate from a JanitorAI tab');
+  }
+  if (!importKinds.has(message.kind)) throw new Error('Unknown import type');
+
+  const target = new URL(message.apiBaseUrl);
+  if (!['http:', 'https:'].includes(target.protocol) || !['127.0.0.1', 'localhost'].includes(target.hostname)
+      || target.username || target.password || target.pathname !== '/' || target.search || target.hash) {
+    throw new Error('SimpleTavern import needs a local HTTP address');
+  }
+  const response = await fetch(new URL(`/api/import/janitor/${message.kind}`, target), {
+    method: 'POST',
+    credentials: 'omit',
+    redirect: 'error',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(message.payload),
+  });
+  const result = await response.json().catch(() => null);
+  if (!response.ok) {
+    const detail = result?.detail?.message ?? result?.detail ?? result?.message;
+    throw new Error(typeof detail === 'string' ? detail : `HTTP ${response.status}`);
+  }
+  if (!result?.ok) throw new Error('SimpleTavern did not return an import result');
+  return result;
+}
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.info('[ST-JanitorBridge:bg] message', message?.type || 'unknown');
+  if (message?.type === 'post-janitor-import') {
+    postJanitorImport(message, sender).then(
+      (result) => sendResponse({ ok: true, result }),
+      (error) => sendResponse({ ok: false, error: error.message }),
+    );
+    return true;
+  }
   if (!message || message.type !== 'open-simpletavern' || typeof message.url !== 'string') {
     return false;
   }
