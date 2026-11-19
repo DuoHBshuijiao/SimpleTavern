@@ -33,11 +33,12 @@ from app.schemas import (
 )
 from app.services.mvu_agent import MvuAgentEvent, MvuAgentJob, MvuAgentRunContext, MvuAgentService
 from app.storage import (
+    chat_write_lock,
     load_chat,
     load_character,
     load_mvu_logs,
     load_settings,
-    save_chat,
+    save_chat_record,
     save_mvu_logs,
 )
 from app.worker_health import WorkerHealth
@@ -407,21 +408,22 @@ async def _run_once(chat_id: str) -> None:
 
     # 标记已消费消息：最新被处理消息设 mvuProcessed，清除旧标记
     if mode == "regex" and consumed_msg_id:
-        try:
-            chat_reload = load_chat(chat_id)
-        except FileNotFoundError:
-            return
-        dirty = False
-        for m in chat_reload.messages:
-            if m.id == consumed_msg_id:
-                if not m.mvuProcessed:
-                    m.mvuProcessed = True
+        with chat_write_lock(chat_id):
+            try:
+                chat_reload = load_chat(chat_id)
+            except FileNotFoundError:
+                return
+            dirty = False
+            for m in chat_reload.messages:
+                if m.id == consumed_msg_id:
+                    if not m.mvuProcessed:
+                        m.mvuProcessed = True
+                        dirty = True
+                elif m.mvuProcessed:
+                    m.mvuProcessed = False
                     dirty = True
-            elif m.mvuProcessed:
-                m.mvuProcessed = False
-                dirty = True
-        if dirty:
-            save_chat(chat_reload)
+            if dirty:
+                save_chat_record(chat_reload)
 
 
 def signal_generate_done(chat_id: str) -> None:

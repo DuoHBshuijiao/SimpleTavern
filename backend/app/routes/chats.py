@@ -69,6 +69,8 @@ from app.schemas import (
     WorldBookAttachment,
 )
 from app.storage import (
+    append_chat_message,
+    chat_write_lock,
     chat_image_path,
     copy_chat_images_for_promote,
     delete_chat,
@@ -1030,48 +1032,49 @@ def update_chat(chat_id: str, req: UpdateChatRequest) -> Chat:
     Raises:
         HTTPException: 聊天不存在、非群聊尝试更新memberIds或成员集合不一致时抛出错误
     """
-    try:
-        chat = load_chat(chat_id)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="chat not found")
+    with chat_write_lock(chat_id):
+        try:
+            chat = load_chat(chat_id)
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="chat not found")
 
-    if req.title is not None:
-        chat.title = req.title
-    if req.groupDelay is not None:
-        chat.groupDelay = req.groupDelay
-    if "groupSystemInjectDepth" in req.model_fields_set and req.groupSystemInjectDepth is not None:
-        chat.groupSystemInjectDepth = max(0, int(req.groupSystemInjectDepth))
-    if "groupSystemAlwaysAtBottom" in req.model_fields_set and req.groupSystemAlwaysAtBottom is not None:
-        chat.groupSystemAlwaysAtBottom = bool(req.groupSystemAlwaysAtBottom)
-    if req.memberIds is not None:
-        if not chat.isGroup:
-            raise HTTPException(status_code=400, detail="memberIds can only be updated for group chats")
-        if set(req.memberIds) != set(chat.memberIds):
-            raise HTTPException(status_code=400, detail="memberIds must contain the same members (reorder only)")
-        chat.memberIds = req.memberIds
-    if req.memberSettings is not None:
-        for member_id, settings in req.memberSettings.items():
-            chat.memberSettings[member_id] = settings
-    if "userPersonaId" in req.model_fields_set:
-        chat.userPersonaId = req.userPersonaId
-    # 仅在本次请求真正修改了长期记忆内容时才标记 memoryUpdatedAfterThis，避免仅切换模型等操作时误触发
-    incoming_memory = getattr(req.overrides, "longTermMemory", None) if req.overrides else None
-    current_memory = getattr(chat.overrides, "longTermMemory", None) or ""
-    memory_actually_changed = (
-        incoming_memory is not None
-        and (incoming_memory or "") != (current_memory or "")
-    )
-    _merge_overrides(chat, req)
-    _validate_group_mvu_overrides(chat)
-    if "stateVariables" in req.model_fields_set:
-        if req.stateVariables is None:
-            chat.stateVariables = None
-        else:
-            chat.stateVariables = req.stateVariables.model_copy(deep=True)
-    if memory_actually_changed:
-        mark_last_message_memory_updated(chat)
-    chat.updatedAt = _now_iso()
-    return save_chat(chat)
+        if req.title is not None:
+            chat.title = req.title
+        if req.groupDelay is not None:
+            chat.groupDelay = req.groupDelay
+        if "groupSystemInjectDepth" in req.model_fields_set and req.groupSystemInjectDepth is not None:
+            chat.groupSystemInjectDepth = max(0, int(req.groupSystemInjectDepth))
+        if "groupSystemAlwaysAtBottom" in req.model_fields_set and req.groupSystemAlwaysAtBottom is not None:
+            chat.groupSystemAlwaysAtBottom = bool(req.groupSystemAlwaysAtBottom)
+        if req.memberIds is not None:
+            if not chat.isGroup:
+                raise HTTPException(status_code=400, detail="memberIds can only be updated for group chats")
+            if set(req.memberIds) != set(chat.memberIds):
+                raise HTTPException(status_code=400, detail="memberIds must contain the same members (reorder only)")
+            chat.memberIds = req.memberIds
+        if req.memberSettings is not None:
+            for member_id, settings in req.memberSettings.items():
+                chat.memberSettings[member_id] = settings
+        if "userPersonaId" in req.model_fields_set:
+            chat.userPersonaId = req.userPersonaId
+        # 仅在本次请求真正修改了长期记忆内容时才标记 memoryUpdatedAfterThis，避免仅切换模型等操作时误触发
+        incoming_memory = getattr(req.overrides, "longTermMemory", None) if req.overrides else None
+        current_memory = getattr(chat.overrides, "longTermMemory", None) or ""
+        memory_actually_changed = (
+            incoming_memory is not None
+            and (incoming_memory or "") != (current_memory or "")
+        )
+        _merge_overrides(chat, req)
+        _validate_group_mvu_overrides(chat)
+        if "stateVariables" in req.model_fields_set:
+            if req.stateVariables is None:
+                chat.stateVariables = None
+            else:
+                chat.stateVariables = req.stateVariables.model_copy(deep=True)
+        if memory_actually_changed:
+            mark_last_message_memory_updated(chat)
+        chat.updatedAt = _now_iso()
+        return save_chat(chat)
 
 
 @router.post("/chats/{chat_id}/messages", response_model=Chat)
@@ -1090,42 +1093,19 @@ def append_message(chat_id: str, req: AppendMessageRequest) -> Chat:
         HTTPException: 聊天不存在时抛出404错误
     """
     try:
-        chat = load_chat(chat_id)
+        return append_chat_message(chat_id, ChatMessage(
+            role=req.role,
+            content=req.content,
+            images=getattr(req, "images", []) or [],
+            characterId=req.characterId,
+            senderPersonaId=getattr(req, "senderPersonaId", None),
+            senderName=getattr(req, "senderName", None),
+            senderAvatar=getattr(req, "senderAvatar", None),
+            reasoningContent=req.reasoningContent,
+            reasoningDurationSec=req.reasoningDurationSec,
+        ))
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="chat not found")
-
-    # 用户（或纯 AI 模式下首条 system）开始发言后，锁定开场白，去掉多版本元数据
-    if req.role in ("user", "system"):
-        for m in chat.messages:
-            if m.role != "assistant":
-                continue
-            if not (
-                getattr(m, "greetingVariants", None)
-                or getattr(m, "greetingVariantIndex", None) is not None
-                or getattr(m, "greetingVariantReasoningContents", None)
-                or getattr(m, "greetingVariantReasoningDurations", None)
-            ):
-                continue
-            m.greetingVariants = None
-            m.greetingVariantIndex = None
-            if hasattr(m, "greetingVariantReasoningContents"):
-                m.greetingVariantReasoningContents = None
-            if hasattr(m, "greetingVariantReasoningDurations"):
-                m.greetingVariantReasoningDurations = None
-
-    chat.messages.append(ChatMessage(
-        role=req.role,
-        content=req.content,
-        images=getattr(req, "images", []) or [],
-        characterId=req.characterId,
-        senderPersonaId=getattr(req, "senderPersonaId", None),
-        senderName=getattr(req, "senderName", None),
-        senderAvatar=getattr(req, "senderAvatar", None),
-        reasoningContent=req.reasoningContent,
-        reasoningDurationSec=req.reasoningDurationSec,
-    ))
-    chat.updatedAt = _now_iso()
-    return save_chat(chat)
 
 
 @router.put("/chats/{chat_id}/messages/{message_id}", response_model=Chat)
@@ -1147,61 +1127,64 @@ def update_message(chat_id: str, message_id: str, req: UpdateMessageRequest) -> 
     Raises:
         HTTPException: 聊天或消息不存在时抛出404错误
     """
-    try:
-        chat = load_chat(chat_id)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="chat not found")
+    with chat_write_lock(chat_id):
+        try:
+            chat = load_chat(chat_id)
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="chat not found")
 
-    for m in chat.messages:
-        if m.id == message_id:
-            old_images = list(getattr(m, "images", []) or [])
-            stored_content = m.content
-            m.role = req.role
-            m.content = req.content
-            if getattr(req, "images", None) is not None:
-                m.images = req.images or []
-                old_ids = {img.id for img in old_images}
-                new_ids = {img.id for img in (m.images or [])}
-                for old_img in old_images:
-                    if old_img.id not in new_ids:
-                        delete_chat_image(chat, old_img)
-            # 仅当客户端显式传入 characterId 时更新，避免群聊中编辑仅改内容时覆盖发言人
-            if req.characterId is not None:
-                m.characterId = req.characterId
-            if getattr(req, "senderPersonaId", None) is not None:
-                m.senderPersonaId = req.senderPersonaId
-            if getattr(req, "senderName", None) is not None:
-                m.senderName = req.senderName
-            if getattr(req, "senderAvatar", None) is not None:
-                m.senderAvatar = req.senderAvatar
-            req_dump = req.model_dump(exclude_unset=True)
-            if "greetingVariants" in req_dump:
-                _apply_greeting_variants_on_update(m, req, req_dump, chat)
-            elif "greetingVariantIndex" in req_dump:
-                m.greetingVariantIndex = req_dump["greetingVariantIndex"]
-                gv = getattr(m, "greetingVariants", None)
-                if (
-                    isinstance(gv, list)
-                    and len(gv) >= 2
-                    and isinstance(m.greetingVariantIndex, int)
-                    and 0 <= m.greetingVariantIndex < len(gv)
-                ):
-                    m.content = gv[m.greetingVariantIndex]
-                    gvr = getattr(m, "greetingVariantReasoningContents", None)
-                    if gvr and isinstance(gvr, list) and 0 <= m.greetingVariantIndex < len(gvr):
-                        r0 = (gvr[m.greetingVariantIndex] or "").strip()
-                        m.reasoningContent = r0 if r0 else None
-            if "reasoningContent" in req_dump:
-                m.reasoningContent = req_dump["reasoningContent"]
-            if "reasoningDurationSec" in req_dump:
-                m.reasoningDurationSec = req_dump["reasoningDurationSec"]
-            if m.content != stored_content:
-                m.ttsAudioAssetId = None
-                m.ttsAudioSourceText = None
-            chat.updatedAt = _now_iso()
-            return save_chat(chat)
+        for m in chat.messages:
+            if m.id == message_id:
+                old_images = list(getattr(m, "images", []) or [])
+                stored_content = m.content
+                m.role = req.role
+                m.content = req.content
+                if getattr(req, "images", None) is not None:
+                    m.images = req.images or []
+                    old_ids = {img.id for img in old_images}
+                    new_ids = {img.id for img in (m.images or [])}
+                    for old_img in old_images:
+                        if old_img.id not in new_ids:
+                            delete_chat_image(chat, old_img)
+                # 仅当客户端显式传入 characterId 时更新，避免群聊中编辑仅改内容时覆盖发言人
+                if req.characterId is not None:
+                    m.characterId = req.characterId
+                if getattr(req, "senderPersonaId", None) is not None:
+                    m.senderPersonaId = req.senderPersonaId
+                if getattr(req, "senderName", None) is not None:
+                    m.senderName = req.senderName
+                if getattr(req, "senderAvatar", None) is not None:
+                    m.senderAvatar = req.senderAvatar
+                req_dump = req.model_dump(exclude_unset=True)
+                if "greetingVariants" in req_dump:
+                    _apply_greeting_variants_on_update(m, req, req_dump, chat)
+                elif "greetingVariantIndex" in req_dump:
+                    m.greetingVariantIndex = req_dump["greetingVariantIndex"]
+                    gv = getattr(m, "greetingVariants", None)
+                    if (
+                        isinstance(gv, list)
+                        and len(gv) >= 2
+                        and isinstance(m.greetingVariantIndex, int)
+                        and 0 <= m.greetingVariantIndex < len(gv)
+                    ):
+                        m.content = gv[m.greetingVariantIndex]
+                        gvr = getattr(m, "greetingVariantReasoningContents", None)
+                        if gvr and isinstance(gvr, list) and 0 <= m.greetingVariantIndex < len(gvr):
+                            r0 = (gvr[m.greetingVariantIndex] or "").strip()
+                            m.reasoningContent = r0 if r0 else None
+                elif m.greetingVariants and m.greetingVariantIndex is not None:
+                    m.greetingVariants[m.greetingVariantIndex] = req.content
+                if "reasoningContent" in req_dump:
+                    m.reasoningContent = req_dump["reasoningContent"]
+                if "reasoningDurationSec" in req_dump:
+                    m.reasoningDurationSec = req_dump["reasoningDurationSec"]
+                if m.content != stored_content:
+                    m.ttsAudioAssetId = None
+                    m.ttsAudioSourceText = None
+                chat.updatedAt = _now_iso()
+                return save_chat(chat)
 
-    raise HTTPException(status_code=404, detail="message not found")
+        raise HTTPException(status_code=404, detail="message not found")
 
 
 @router.delete("/chats/{chat_id}/messages/{message_id}", response_model=Chat)
@@ -1219,24 +1202,25 @@ def delete_message(chat_id: str, message_id: str) -> Chat:
     Raises:
         HTTPException: 聊天或消息不存在时抛出404错误
     """
-    try:
-        chat = load_chat(chat_id)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="chat not found")
+    with chat_write_lock(chat_id):
+        try:
+            chat = load_chat(chat_id)
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="chat not found")
 
-    before = len(chat.messages)
-    kept_messages: list[ChatMessage] = []
-    for msg in chat.messages:
-        if msg.id == message_id:
-            delete_message_images(chat, msg)
-            continue
-        kept_messages.append(msg)
-    chat.messages = kept_messages
-    if len(chat.messages) == before:
-        raise HTTPException(status_code=404, detail="message not found")
+        before = len(chat.messages)
+        kept_messages: list[ChatMessage] = []
+        for msg in chat.messages:
+            if msg.id == message_id:
+                delete_message_images(chat, msg)
+                continue
+            kept_messages.append(msg)
+        chat.messages = kept_messages
+        if len(chat.messages) == before:
+            raise HTTPException(status_code=404, detail="message not found")
 
-    chat.updatedAt = _now_iso()
-    return save_chat(chat)
+        chat.updatedAt = _now_iso()
+        return save_chat(chat)
 
 
 @router.put("/chats/{chat_id}/messages/{message_id}/save-and-truncate", response_model=Chat)
@@ -1246,69 +1230,72 @@ def save_message_and_truncate(chat_id: str, message_id: str, req: UpdateMessageR
     合并 update_message + 逐条 delete_message 为一次 load/save，
     避免多次 HTTP 往返与重复 JSON 读写。
     """
-    try:
-        chat = load_chat(chat_id)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="chat not found")
+    with chat_write_lock(chat_id):
+        try:
+            chat = load_chat(chat_id)
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="chat not found")
 
-    found_idx: int | None = None
-    for i, m in enumerate(chat.messages):
-        if m.id == message_id:
-            old_images = list(getattr(m, "images", []) or [])
-            stored_content = m.content
-            m.role = req.role
-            m.content = req.content
-            if getattr(req, "images", None) is not None:
-                m.images = req.images or []
-                old_ids = {img.id for img in old_images}
-                new_ids = {img.id for img in (m.images or [])}
-                for old_img in old_images:
-                    if old_img.id not in new_ids:
-                        delete_chat_image(chat, old_img)
-            if req.characterId is not None:
-                m.characterId = req.characterId
-            if getattr(req, "senderPersonaId", None) is not None:
-                m.senderPersonaId = req.senderPersonaId
-            if getattr(req, "senderName", None) is not None:
-                m.senderName = req.senderName
-            if getattr(req, "senderAvatar", None) is not None:
-                m.senderAvatar = req.senderAvatar
-            req_dump = req.model_dump(exclude_unset=True)
-            if "greetingVariants" in req_dump:
-                _apply_greeting_variants_on_update(m, req, req_dump, chat)
-            elif "greetingVariantIndex" in req_dump:
-                m.greetingVariantIndex = req_dump["greetingVariantIndex"]
-                gv = getattr(m, "greetingVariants", None)
-                if (
-                    isinstance(gv, list)
-                    and len(gv) >= 2
-                    and isinstance(m.greetingVariantIndex, int)
-                    and 0 <= m.greetingVariantIndex < len(gv)
-                ):
-                    m.content = gv[m.greetingVariantIndex]
-                    gvr = getattr(m, "greetingVariantReasoningContents", None)
-                    if gvr and isinstance(gvr, list) and 0 <= m.greetingVariantIndex < len(gvr):
-                        r0 = (gvr[m.greetingVariantIndex] or "").strip()
-                        m.reasoningContent = r0 if r0 else None
-            if "reasoningContent" in req_dump:
-                m.reasoningContent = req_dump["reasoningContent"]
-            if "reasoningDurationSec" in req_dump:
-                m.reasoningDurationSec = req_dump["reasoningDurationSec"]
-            if m.content != stored_content:
-                m.ttsAudioAssetId = None
-                m.ttsAudioSourceText = None
-            found_idx = i
-            break
+        found_idx: int | None = None
+        for i, m in enumerate(chat.messages):
+            if m.id == message_id:
+                old_images = list(getattr(m, "images", []) or [])
+                stored_content = m.content
+                m.role = req.role
+                m.content = req.content
+                if getattr(req, "images", None) is not None:
+                    m.images = req.images or []
+                    old_ids = {img.id for img in old_images}
+                    new_ids = {img.id for img in (m.images or [])}
+                    for old_img in old_images:
+                        if old_img.id not in new_ids:
+                            delete_chat_image(chat, old_img)
+                if req.characterId is not None:
+                    m.characterId = req.characterId
+                if getattr(req, "senderPersonaId", None) is not None:
+                    m.senderPersonaId = req.senderPersonaId
+                if getattr(req, "senderName", None) is not None:
+                    m.senderName = req.senderName
+                if getattr(req, "senderAvatar", None) is not None:
+                    m.senderAvatar = req.senderAvatar
+                req_dump = req.model_dump(exclude_unset=True)
+                if "greetingVariants" in req_dump:
+                    _apply_greeting_variants_on_update(m, req, req_dump, chat)
+                elif "greetingVariantIndex" in req_dump:
+                    m.greetingVariantIndex = req_dump["greetingVariantIndex"]
+                    gv = getattr(m, "greetingVariants", None)
+                    if (
+                        isinstance(gv, list)
+                        and len(gv) >= 2
+                        and isinstance(m.greetingVariantIndex, int)
+                        and 0 <= m.greetingVariantIndex < len(gv)
+                    ):
+                        m.content = gv[m.greetingVariantIndex]
+                        gvr = getattr(m, "greetingVariantReasoningContents", None)
+                        if gvr and isinstance(gvr, list) and 0 <= m.greetingVariantIndex < len(gvr):
+                            r0 = (gvr[m.greetingVariantIndex] or "").strip()
+                            m.reasoningContent = r0 if r0 else None
+                elif m.greetingVariants and m.greetingVariantIndex is not None:
+                    m.greetingVariants[m.greetingVariantIndex] = req.content
+                if "reasoningContent" in req_dump:
+                    m.reasoningContent = req_dump["reasoningContent"]
+                if "reasoningDurationSec" in req_dump:
+                    m.reasoningDurationSec = req_dump["reasoningDurationSec"]
+                if m.content != stored_content:
+                    m.ttsAudioAssetId = None
+                    m.ttsAudioSourceText = None
+                found_idx = i
+                break
 
-    if found_idx is None:
-        raise HTTPException(status_code=404, detail="message not found")
+        if found_idx is None:
+            raise HTTPException(status_code=404, detail="message not found")
 
-    # 删除 found_idx 之后的所有消息（含关联图片）
-    for msg in chat.messages[found_idx + 1:]:
-        delete_message_images(chat, msg)
-    chat.messages = chat.messages[:found_idx + 1]
-    chat.updatedAt = _now_iso()
-    return save_chat(chat)
+        # 删除 found_idx 之后的所有消息（含关联图片）
+        for msg in chat.messages[found_idx + 1:]:
+            delete_message_images(chat, msg)
+        chat.messages = chat.messages[:found_idx + 1]
+        chat.updatedAt = _now_iso()
+        return save_chat(chat)
 
 
 @router.delete("/chats/{chat_id}")
@@ -1403,25 +1390,26 @@ def add_member(chat_id: str, member_id: str) -> Chat:
     Raises:
         HTTPException: 聊天不存在、非群聊、角色不存在时抛出相应错误
     """
-    try:
-        chat = load_chat(chat_id)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="chat not found")
-    
-    if not chat.isGroup:
-        raise HTTPException(status_code=400, detail="only group chats can add members")
-    
-    try:
-        load_character(member_id)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="character not found")
-    
-    if member_id not in chat.memberIds:
-        chat.memberIds.append(member_id)
-        chat.updatedAt = _now_iso()
-        return save_chat(chat)
-    
-    return chat
+    with chat_write_lock(chat_id):
+        try:
+            chat = load_chat(chat_id)
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="chat not found")
+
+        if not chat.isGroup:
+            raise HTTPException(status_code=400, detail="only group chats can add members")
+
+        try:
+            load_character(member_id)
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="character not found")
+
+        if member_id not in chat.memberIds:
+            chat.memberIds.append(member_id)
+            chat.updatedAt = _now_iso()
+            return save_chat(chat)
+
+        return chat
 
 
 @router.delete("/chats/{chat_id}/members/{member_id}", response_model=Chat)
@@ -1441,17 +1429,18 @@ def remove_member(chat_id: str, member_id: str) -> Chat:
     Raises:
         HTTPException: 聊天不存在或非群聊时抛出相应错误
     """
-    try:
-        chat = load_chat(chat_id)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="chat not found")
-    
-    if not chat.isGroup:
-        raise HTTPException(status_code=400, detail="only group chats can remove members")
-    
-    if member_id in chat.memberIds:
-        chat.memberIds.remove(member_id)
-        chat.updatedAt = _now_iso()
-        return save_chat(chat)
-    
-    return chat
+    with chat_write_lock(chat_id):
+        try:
+            chat = load_chat(chat_id)
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="chat not found")
+
+        if not chat.isGroup:
+            raise HTTPException(status_code=400, detail="only group chats can remove members")
+
+        if member_id in chat.memberIds:
+            chat.memberIds.remove(member_id)
+            chat.updatedAt = _now_iso()
+            return save_chat(chat)
+
+        return chat

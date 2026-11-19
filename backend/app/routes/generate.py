@@ -36,7 +36,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from app.errors import AppError, app_error_response, as_app_error
 from app.llm.preset_resolve import LlmPresetResolveError
 from app.llm.resolution import PreparedLlmRequest, prepare_llm_request
-from app.llm.runtime import chat_completions, chat_completions_message, stream_chat_completions
+from app.llm.runtime import chat_completions_message, stream_chat_completions
 from app.llm.types import (
     ANTHROPIC_MESSAGES_PROTOCOL,
     GEMINI_GENERATE_CONTENT_PROTOCOL,
@@ -61,6 +61,7 @@ from app.schemas import (
     GroupGenerateRequest,
     SingleInterjectRequest,
 )
+from app.services.request_cancellation import ClientDisconnected, until_client_disconnect
 from app.services.generate_web_search_runtime import iter_web_search_stream_events, nonstream_web_search_rounds
 from app.services.mvu_daemon import ensure_mvu_worker, signal_generate_done, _resolve_mvu_runtime_config
 from app.services.usage_ledger import append_usage_event, build_generation_metadata
@@ -68,7 +69,17 @@ from app.services.native_web import resolve_web_plan
 from app.services.user_message_content import build_user_message_content
 from app.request_context import REQUEST_ID_HEADER, get_request_id, new_request_id
 from app.sse import sse_done, sse_event, sse_meta, sse_terminal_error
-from app.storage import load_character, load_chat, load_chat_image_bytes, load_settings, load_worldbook, save_chat, save_settings
+from app.storage import (
+    append_chat_message,
+    chat_write_lock,
+    load_character,
+    load_chat,
+    load_chat_image_bytes,
+    load_settings,
+    load_worldbook,
+    remember_used_model,
+    save_chat_record,
+)
 from app.tokenizer_service import (
     count_tokens,
     count_tokens_for_messages,
@@ -169,8 +180,7 @@ def _resolve_gemini_search(*, req: Any, chat: Any, settings: Any) -> str:
 
 def _persist_generation_record(
     *,
-    chat: Any,
-    assistant_msg: ChatMessage | None,
+    chat_id: str,
     prepared: PreparedLlmRequest,
     request_id: str,
     model: str,
@@ -179,9 +189,14 @@ def _persist_generation_record(
     started_mono: float,
     first_token_mono: float | None,
     streaming: bool,
-    settings: Any | None = None,
+    content: str = "",
+    merge_message_id: str | None = None,
+    character_id: str | None = None,
+    reasoning_content: str | None = None,
+    reasoning_duration_sec: float | None = None,
+    require_content: bool = False,
     update_used_models: bool = False,
-) -> dict[str, Any]:
+) -> tuple[ChatMessage | None, dict[str, Any]]:
     """给助手消息挂 generationMetadata，落盘会话，再追加 usage ledger（T-807）。"""
     now = time.monotonic()
     first_ms = (
@@ -190,10 +205,9 @@ def _persist_generation_record(
         else None
     )
     total_ms = int(max(0, round((now - started_mono) * 1000)))
-    meta = build_generation_metadata(
+    metadata_args = dict(
         request_id=request_id,
-        chat_id=getattr(chat, "id", None),
-        message_id=getattr(assistant_msg, "id", None) if assistant_msg is not None else None,
+        chat_id=chat_id,
         provider=prepared.llm_provider,
         protocol=prepared.protocol,
         requested_model=model,
@@ -205,22 +219,40 @@ def _persist_generation_record(
         streaming=streaming,
         status="completed",
     )
-    if assistant_msg is not None:
-        assistant_msg.generationMetadata = meta
-        chat.updatedAt = _now_iso()
-        save_chat(chat)
+    assistant_msg = None
+    merge_message_id = (merge_message_id or "").strip()
+    if (require_content or merge_message_id) and not content.strip():
+        raise AppError(
+            code="empty_generation",
+            message="模型没有返回回复正文，已保留原有消息",
+            source="generate.persist",
+            status_code=502,
+        )
+    if content:
+        with chat_write_lock(chat_id):
+            try:
+                current_chat = load_chat(chat_id)
+            except FileNotFoundError as exc:
+                raise HTTPException(status_code=404, detail="chat not found") from exc
+            assistant_msg = _append_or_merge_assistant_output(
+                current_chat,
+                merge_message_id=merge_message_id,
+                content=content,
+                character_id=character_id,
+                reasoning_content=reasoning_content,
+                reasoning_duration_sec=reasoning_duration_sec,
+                usage=usage,
+            )
+            meta = build_generation_metadata(message_id=assistant_msg.id, **metadata_args)
+            assistant_msg.generationMetadata = meta
+            current_chat.updatedAt = _now_iso()
+            save_chat_record(current_chat)
+    else:
+        meta = build_generation_metadata(message_id=None, **metadata_args)
     append_usage_event(meta)
-    if (
-        update_used_models
-        and settings is not None
-        and model
-        and model not in settings.llm.usedModels
-    ):
-        settings.llm.usedModels.insert(0, model)
-        settings.llm.usedModels = settings.llm.usedModels[:20]
-        settings.updatedAt = _now_iso()
-        save_settings(settings)
-    return meta
+    if assistant_msg is not None and update_used_models and model:
+        remember_used_model(model)
+    return assistant_msg, meta
 
 
 def _omit_message_ids_from_request(req: Any) -> set[str]:
@@ -236,6 +268,13 @@ def _omit_message_ids_from_request(req: Any) -> set[str]:
         if s:
             out.add(s)
     return out
+
+
+def _wire_history_message(message: dict[str, Any]) -> dict[str, Any]:
+    result = dict(message)
+    if result.pop("_message_id", None) and result.get("role") == "system":
+        result["_system_turn"] = True
+    return result
 
 
 def _merge_assistant_output_into_message(
@@ -301,28 +340,25 @@ def _merge_assistant_output_into_message(
 
 
 def _append_or_merge_assistant_output(
-    chat: Any,
-    req: Any,
+    chat: Chat,
     *,
     content: str,
+    merge_message_id: str | None,
     character_id: str | None = None,
     reasoning_content: str | None = None,
     reasoning_duration_sec: float | None = None,
     usage: dict[str, Any] | None = None,
-) -> ChatMessage | None:
-    merge_id = (getattr(req, "mergeAssistantIntoMessageId", None) or "").strip()
-    if merge_id:
+) -> ChatMessage:
+    if merge_message_id:
         return _merge_assistant_output_into_message(
             chat,
-            message_id=merge_id,
+            message_id=merge_message_id,
             content=content,
             character_id=character_id,
             reasoning_content=reasoning_content,
             reasoning_duration_sec=reasoning_duration_sec,
             usage=usage,
         )
-    if not content:
-        return None
     assistant_msg = ChatMessage(
         role="assistant",
         content=content,
@@ -434,15 +470,12 @@ def _build_group_api_messages(
     conv: list[dict[str, Any]] = [dict(x) for x in conversation]
     if system_prompt and not always_first:
         idx = max(0, len(conv) - depth)
-        conv.insert(idx, {"role": "system", "content": system_prompt})
+        conv.insert(idx, {"role": "system", "content": system_prompt, "_system_turn": True})
 
     messages: list[dict[str, Any]] = []
     if system_prompt and always_first:
         messages.append({"role": "system", "content": system_prompt})
-    for c in conv:
-        c = dict(c)
-        c.pop("_message_id", None)
-        messages.append(c)
+    messages.extend(_wire_history_message(c) for c in conv)
     messages.append({"role": "user", "content": _build_group_identity_guardrail(character_name)})
     _resolve_and_append_global_prefill(
         messages,
@@ -502,7 +535,7 @@ def _resolve_and_append_global_prefill(
     )
     if not resolved.strip():
         return ""
-    messages.append({"role": "assistant", "content": resolved})
+    messages.append({"role": "assistant", "content": resolved, "_assistant_prefill": True})
     return resolved
 
 
@@ -725,7 +758,7 @@ def _apply_placeholder_rewrite_to_history(
     default_char_name: str,
     fallback_user_name: str,
 ) -> bool:
-    changed = False
+    edits: dict[str, tuple[str, str]] = {}
     char_cache: dict[str, str] = {}
     for msg in chat.messages:
         user_name = _resolve_user_name_for_message(msg, fallback_user_name)
@@ -740,11 +773,21 @@ def _apply_placeholder_rewrite_to_history(
             user_name=user_name,
         )
         if replaced != msg.content:
+            edits[msg.id] = (msg.content, replaced)
             msg.content = replaced
-            changed = True
-    if changed:
-        chat.updatedAt = _now_iso()
-        save_chat(chat)
+    if not edits:
+        return False
+    with chat_write_lock(chat.id):
+        current = load_chat(chat.id)
+        changed = False
+        for msg in current.messages:
+            edit = edits.get(msg.id)
+            if edit and msg.content == edit[0]:
+                msg.content = edit[1]
+                changed = True
+        if changed:
+            current.updatedAt = _now_iso()
+            save_chat_record(current)
     return changed
 
 
@@ -934,7 +977,7 @@ def build_worldbook_injections(book, entries: list[Any], conversation_len: int, 
     insert_index = max(0, conversation_len - insert_depth)
     return [{
         "insert_index": insert_index,
-        "message": {"role": "system", "content": "\n\n".join(chunk_parts)},
+        "message": {"role": "system", "content": "\n\n".join(chunk_parts), "_system_turn": True},
     }]
 
 
@@ -1279,29 +1322,12 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
         user_role = "system" if pure_ai_mode else "user"
         user_display_name = getattr(req, "senderName", None) or (getattr(req, "userPersona", None).name if getattr(req, "userPersona", None) else "用户")
         char_name_for_user_input = character.name or "角色"
-        # 与 chats.append_message 一致：在追加新用户条目前清除已有 assistant 上的多版本元数据
-        for m0 in chat.messages:
-            if m0.role != "assistant":
-                continue
-            if not (
-                getattr(m0, "greetingVariants", None)
-                or getattr(m0, "greetingVariantIndex", None) is not None
-                or getattr(m0, "greetingVariantReasoningContents", None)
-                or getattr(m0, "greetingVariantReasoningDurations", None)
-            ):
-                continue
-            m0.greetingVariants = None
-            m0.greetingVariantIndex = None
-            if hasattr(m0, "greetingVariantReasoningContents"):
-                m0.greetingVariantReasoningContents = None
-            if hasattr(m0, "greetingVariantReasoningDurations"):
-                m0.greetingVariantReasoningDurations = None
         replaced_user_message = replace_placeholders_in_text(
             req.userMessage,
             char_name=char_name_for_user_input,
             user_name=user_display_name or "用户",
         )
-        chat.messages.append(ChatMessage(
+        chat = append_chat_message(chat.id, ChatMessage(
             role=user_role,
             content=replaced_user_message,
             images=getattr(req, "userImages", []) or [],
@@ -1309,8 +1335,6 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
             senderName=None if pure_ai_mode else getattr(req, "senderName", None),
             senderAvatar=None if pure_ai_mode else getattr(req, "senderAvatar", None),
         ))
-        chat.updatedAt = _now_iso()
-        save_chat(chat)
 
     runtime = req.runtimeOverrides
 
@@ -1478,7 +1502,8 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
         getattr(chat.overrides, "contextStartMessageId", None),
         getattr(chat.overrides, "contextStartKeepBeforeMessages", None),
     )
-    conversation, worldbook_regex_warnings, _prep_profile = prepare_conversation_with_worldbooks(
+    conversation, worldbook_regex_warnings, _prep_profile = await run_in_threadpool(
+        prepare_conversation_with_worldbooks,
         conversation=conversation,
         chat=chat,
         settings=settings,
@@ -1489,10 +1514,7 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
     messages: list[dict] = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
-    for c in conversation:
-        c = dict(c)
-        c.pop("_message_id", None)
-        messages.append(c)
+    messages.extend(_wire_history_message(c) for c in conversation)
 
     prefill_user = (
         (persona_for_prompt.name or "").strip() or "用户"
@@ -1609,30 +1631,25 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
             usage_public = _stamp_usage(usage_public, prepared)
             if usage_public:
                 yield _sse("usage", usage_public)
-            assistant_msg = None
-            if assistant_content or (getattr(req, "mergeAssistantIntoMessageId", None) and reasoning_text):
-                assistant_msg = _append_or_merge_assistant_output(
-                    chat,
-                    req,
-                    content=assistant_content,
-                    reasoning_content=reasoning_text,
-                    reasoning_duration_sec=duration_sec,
-                    usage=usage_public,
-                )
-                gen_meta = _persist_generation_record(
-                    chat=chat,
-                    assistant_msg=assistant_msg,
-                    prepared=prepared,
-                    request_id=request_id,
-                    model=model,
-                    usage=usage_public,
-                    started_at=started_at,
-                    started_mono=started_mono,
-                    first_token_mono=first_token_mono,
-                    streaming=True,
-                    settings=settings,
-                    update_used_models=True,
-                )
+            assistant_msg, gen_meta = await run_in_threadpool(
+                _persist_generation_record,
+                chat_id=chat.id,
+                content=assistant_content,
+                reasoning_content=reasoning_text,
+                reasoning_duration_sec=duration_sec,
+                merge_message_id=req.mergeAssistantIntoMessageId,
+                require_content=bool(req.omitMessageIds),
+                prepared=prepared,
+                request_id=request_id,
+                model=model,
+                usage=usage_public,
+                started_at=started_at,
+                started_mono=started_mono,
+                first_token_mono=first_token_mono,
+                streaming=True,
+                update_used_models=True,
+            )
+            if assistant_msg is not None:
                 done_payload: dict[str, Any] = {
                     "ok": True,
                     "chatId": chat.id,
@@ -1648,18 +1665,6 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
                     done_payload["generationMetadata"] = gen_meta
                 yield sse_done(done_payload)
             else:
-                gen_meta = _persist_generation_record(
-                    chat=chat,
-                    assistant_msg=None,
-                    prepared=prepared,
-                    request_id=request_id,
-                    model=model,
-                    usage=usage_public,
-                    started_at=started_at,
-                    started_mono=started_mono,
-                    first_token_mono=first_token_mono,
-                    streaming=True,
-                )
                 yield sse_done({"ok": True, "chatId": chat.id, "generationMetadata": gen_meta})
             signal_generate_done(chat.id)
         except Exception as e:
@@ -1682,7 +1687,7 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
             first_token_mono: float | None = None
             nonstream_usage: dict[str, Any] | None = None
             if web_plan.local:
-                assistant_content, reasoning_content, req_duration, nonstream_usage = await nonstream_web_search_rounds(
+                assistant_content, reasoning_content, req_duration, nonstream_usage = await until_client_disconnect(request, nonstream_web_search_rounds(
                     messages=messages,
                     base_url=base_url,
                     api_key=api_key,
@@ -1695,11 +1700,11 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
                     settings=settings,
                     web_search_enabled=True,
                     web_plan=web_plan,
-                )
+                ))
                 if reasoning_content is None:
                     req_duration = None
-            elif thinking_enabled:
-                resp = await chat_completions_message(
+            else:
+                resp = await until_client_disconnect(request, chat_completions_message(
                     base_url=base_url,
                     api_key=api_key,
                     model=model,
@@ -1710,66 +1715,30 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
                     extra_body=extra_body,
                     tools=gen_tools,
                     protocol=protocol,
-                )
+                ))
                 assistant_content = (resp.content or "").strip()
                 reasoning_content = (resp.reasoning_content or None)
                 nonstream_usage = resp.usage
                 req_duration = round(max(0.0, time.monotonic() - req_start), 1) if reasoning_content else None
-            else:
-                result = await chat_completions(
-                    base_url=base_url,
-                    api_key=api_key,
-                    model=model,
-                    messages=messages,
-                    temperature=temperature,
-                    top_p=top_p,
-                    max_tokens=max_tokens,
-                    extra_body=extra_body,
-                    tools=gen_tools,
-                    protocol=protocol,
-                )
-                assistant_content = result.text.strip()
-                reasoning_content = None
-                req_duration = None
-                nonstream_usage = result.usage
             nonstream_usage = _stamp_usage(nonstream_usage, prepared)
-            assistant_msg = None
-            if assistant_content or (getattr(req, "mergeAssistantIntoMessageId", None) and reasoning_content):
-                assistant_msg = _append_or_merge_assistant_output(
-                    chat,
-                    req,
-                    content=assistant_content,
-                    reasoning_content=(reasoning_content.strip() if isinstance(reasoning_content, str) and reasoning_content.strip() else None),
-                    reasoning_duration_sec=req_duration,
-                    usage=nonstream_usage,
-                )
-                gen_meta = _persist_generation_record(
-                    chat=chat,
-                    assistant_msg=assistant_msg,
-                    prepared=prepared,
-                    request_id=request_id,
-                    model=model,
-                    usage=nonstream_usage,
-                    started_at=started_at,
-                    started_mono=started_mono,
-                    first_token_mono=first_token_mono or time.monotonic(),
-                    streaming=False,
-                    settings=settings,
-                    update_used_models=True,
-                )
-            else:
-                gen_meta = _persist_generation_record(
-                    chat=chat,
-                    assistant_msg=None,
-                    prepared=prepared,
-                    request_id=request_id,
-                    model=model,
-                    usage=nonstream_usage,
-                    started_at=started_at,
-                    started_mono=started_mono,
-                    first_token_mono=first_token_mono or time.monotonic(),
-                    streaming=False,
-                )
+            assistant_msg, gen_meta = await run_in_threadpool(
+                _persist_generation_record,
+                chat_id=chat.id,
+                content=assistant_content,
+                reasoning_content=reasoning_content,
+                reasoning_duration_sec=req_duration,
+                merge_message_id=req.mergeAssistantIntoMessageId,
+                require_content=bool(req.omitMessageIds),
+                prepared=prepared,
+                request_id=request_id,
+                model=model,
+                usage=nonstream_usage,
+                started_at=started_at,
+                started_mono=started_mono,
+                first_token_mono=first_token_mono or time.monotonic(),
+                streaming=False,
+                update_used_models=True,
+            )
             payload = {
                 "ok": True,
                 "chatId": chat.id,
@@ -1786,6 +1755,8 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
             payload["generationMetadata"] = gen_meta
             signal_generate_done(chat.id)
             return JSONResponse(payload)
+        except ClientDisconnected:
+            return JSONResponse({"ok": False}, status_code=499)
         except Exception as e:
             error = as_app_error(
                 e,
@@ -2229,7 +2200,8 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
         getattr(chat.overrides, "contextStartMessageId", None),
         getattr(chat.overrides, "contextStartKeepBeforeMessages", None),
     )
-    conversation, worldbook_regex_warnings, _prep_profile = prepare_conversation_with_worldbooks(
+    conversation, worldbook_regex_warnings, _prep_profile = await run_in_threadpool(
+        prepare_conversation_with_worldbooks,
         conversation=conversation,
         chat=chat,
         settings=settings,
@@ -2349,29 +2321,25 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
             usage_public = _stamp_usage(usage_public, prepared)
             if usage_public:
                 yield _sse("usage", usage_public)
-            assistant_msg = None
-            if assistant_content or (getattr(req, "mergeAssistantIntoMessageId", None) and reasoning_text):
-                assistant_msg = _append_or_merge_assistant_output(
-                    chat,
-                    req,
-                    content=assistant_content,
-                    character_id=req.characterId,
-                    reasoning_content=reasoning_text,
-                    reasoning_duration_sec=duration_sec,
-                    usage=usage_public,
-                )
-                gen_meta = _persist_generation_record(
-                    chat=chat,
-                    assistant_msg=assistant_msg,
-                    prepared=prepared,
-                    request_id=request_id,
-                    model=model,
-                    usage=usage_public,
-                    started_at=started_at,
-                    started_mono=started_mono,
-                    first_token_mono=first_token_mono,
-                    streaming=True,
-                )
+            assistant_msg, gen_meta = await run_in_threadpool(
+                _persist_generation_record,
+                chat_id=chat.id,
+                content=assistant_content,
+                reasoning_content=reasoning_text,
+                reasoning_duration_sec=duration_sec,
+                merge_message_id=req.mergeAssistantIntoMessageId,
+                require_content=bool(req.omitMessageIds),
+                character_id=req.characterId,
+                prepared=prepared,
+                request_id=request_id,
+                model=model,
+                usage=usage_public,
+                started_at=started_at,
+                started_mono=started_mono,
+                first_token_mono=first_token_mono,
+                streaming=True,
+            )
+            if assistant_msg is not None:
                 done_payload: dict[str, Any] = {
                     "ok": True,
                     "chatId": chat.id,
@@ -2388,18 +2356,6 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
                     done_payload["generationMetadata"] = gen_meta
                 yield sse_done(done_payload)
             else:
-                gen_meta = _persist_generation_record(
-                    chat=chat,
-                    assistant_msg=None,
-                    prepared=prepared,
-                    request_id=request_id,
-                    model=model,
-                    usage=usage_public,
-                    started_at=started_at,
-                    started_mono=started_mono,
-                    first_token_mono=first_token_mono,
-                    streaming=True,
-                )
                 yield sse_done({"ok": True, "chatId": chat.id, "characterId": req.characterId, "generationMetadata": gen_meta})
             signal_generate_done(chat.id)
         except Exception as e:
@@ -2422,7 +2378,7 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
             first_token_mono: float | None = None
             nonstream_usage: dict[str, Any] | None = None
             if web_plan.local:
-                assistant_content, reasoning_content, req_duration, nonstream_usage = await nonstream_web_search_rounds(
+                assistant_content, reasoning_content, req_duration, nonstream_usage = await until_client_disconnect(request, nonstream_web_search_rounds(
                     messages=messages,
                     base_url=base_url,
                     api_key=api_key,
@@ -2435,11 +2391,11 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
                     settings=settings,
                     web_search_enabled=True,
                     web_plan=web_plan,
-                )
+                ))
                 if reasoning_content is None:
                     req_duration = None
-            elif thinking_enabled:
-                resp = await chat_completions_message(
+            else:
+                resp = await until_client_disconnect(request, chat_completions_message(
                     base_url=base_url,
                     api_key=api_key,
                     model=model,
@@ -2450,65 +2406,30 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
                     extra_body=extra_body,
                     tools=gen_tools,
                     protocol=protocol,
-                )
+                ))
                 assistant_content = (resp.content or "").strip()
                 reasoning_content = resp.reasoning_content or None
                 nonstream_usage = resp.usage
                 req_duration = round(max(0.0, time.monotonic() - req_start), 1) if reasoning_content else None
-            else:
-                result = await chat_completions(
-                    base_url=base_url,
-                    api_key=api_key,
-                    model=model,
-                    messages=messages,
-                    temperature=temperature,
-                    top_p=top_p,
-                    max_tokens=max_tokens,
-                    extra_body=extra_body,
-                    tools=gen_tools,
-                    protocol=protocol,
-                )
-                assistant_content = result.text.strip()
-                reasoning_content = None
-                req_duration = None
-                nonstream_usage = result.usage
             nonstream_usage = _stamp_usage(nonstream_usage, prepared)
-            assistant_msg = None
-            if assistant_content or (getattr(req, "mergeAssistantIntoMessageId", None) and reasoning_content):
-                assistant_msg = _append_or_merge_assistant_output(
-                    chat,
-                    req,
-                    content=assistant_content,
-                    character_id=req.characterId,
-                    reasoning_content=(reasoning_content.strip() if isinstance(reasoning_content, str) and reasoning_content.strip() else None),
-                    reasoning_duration_sec=req_duration,
-                    usage=nonstream_usage,
-                )
-                gen_meta = _persist_generation_record(
-                    chat=chat,
-                    assistant_msg=assistant_msg,
-                    prepared=prepared,
-                    request_id=request_id,
-                    model=model,
-                    usage=nonstream_usage,
-                    started_at=started_at,
-                    started_mono=started_mono,
-                    first_token_mono=first_token_mono or time.monotonic(),
-                    streaming=False,
-                )
-            else:
-                gen_meta = _persist_generation_record(
-                    chat=chat,
-                    assistant_msg=None,
-                    prepared=prepared,
-                    request_id=request_id,
-                    model=model,
-                    usage=nonstream_usage,
-                    started_at=started_at,
-                    started_mono=started_mono,
-                    first_token_mono=first_token_mono or time.monotonic(),
-                    streaming=False,
-                )
+            assistant_msg, gen_meta = await run_in_threadpool(
+                _persist_generation_record,
+                chat_id=chat.id,
+                content=assistant_content,
+                reasoning_content=reasoning_content,
+                reasoning_duration_sec=req_duration,
+                merge_message_id=req.mergeAssistantIntoMessageId,
+                require_content=bool(req.omitMessageIds),
+                character_id=req.characterId,
+                prepared=prepared,
+                request_id=request_id,
+                model=model,
+                usage=nonstream_usage,
+                started_at=started_at,
+                started_mono=started_mono,
+                first_token_mono=first_token_mono or time.monotonic(),
+                streaming=False,
+            )
             payload = {
                 "ok": True,
                 "chatId": chat.id,
@@ -2526,6 +2447,8 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
             payload["generationMetadata"] = gen_meta
             signal_generate_done(chat.id)
             return JSONResponse(payload)
+        except ClientDisconnected:
+            return JSONResponse({"ok": False}, status_code=499)
         except Exception as e:
             error = as_app_error(
                 e,
@@ -2787,7 +2710,8 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
         getattr(chat.overrides, "contextStartMessageId", None),
         getattr(chat.overrides, "contextStartKeepBeforeMessages", None),
     )
-    conversation, worldbook_regex_warnings, _prep_profile = prepare_conversation_with_worldbooks(
+    conversation, worldbook_regex_warnings, _prep_profile = await run_in_threadpool(
+        prepare_conversation_with_worldbooks,
         conversation=conversation,
         chat=chat,
         settings=settings,
@@ -2907,29 +2831,25 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
             usage_public = _stamp_usage(usage_public, prepared)
             if usage_public:
                 yield _sse("usage", usage_public)
-            assistant_msg = None
-            if assistant_content:
-                assistant_msg = ChatMessage(
-                    role="assistant",
-                    content=assistant_content,
-                    characterId=req.characterId,
-                    reasoningContent=reasoning_text,
-                    reasoningDurationSec=duration_sec if reasoning_text else None,
-                    usage=usage_public,
-                )
-                chat.messages.append(assistant_msg)
-                gen_meta = _persist_generation_record(
-                    chat=chat,
-                    assistant_msg=assistant_msg,
-                    prepared=prepared,
-                    request_id=request_id,
-                    model=model,
-                    usage=usage_public,
-                    started_at=started_at,
-                    started_mono=started_mono,
-                    first_token_mono=first_token_mono,
-                    streaming=True,
-                )
+            assistant_msg, gen_meta = await run_in_threadpool(
+                _persist_generation_record,
+                chat_id=chat.id,
+                content=assistant_content,
+                reasoning_content=reasoning_text,
+                reasoning_duration_sec=duration_sec,
+                merge_message_id=req.mergeAssistantIntoMessageId,
+                require_content=bool(req.omitMessageIds),
+                character_id=req.characterId,
+                prepared=prepared,
+                request_id=request_id,
+                model=model,
+                usage=usage_public,
+                started_at=started_at,
+                started_mono=started_mono,
+                first_token_mono=first_token_mono,
+                streaming=True,
+            )
+            if assistant_msg is not None:
                 done_payload: dict[str, Any] = {
                     "ok": True,
                     "chatId": chat.id,
@@ -2947,18 +2867,6 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
                     done_payload["generationMetadata"] = gen_meta
                 yield sse_done(done_payload)
             else:
-                gen_meta = _persist_generation_record(
-                    chat=chat,
-                    assistant_msg=None,
-                    prepared=prepared,
-                    request_id=request_id,
-                    model=model,
-                    usage=usage_public,
-                    started_at=started_at,
-                    started_mono=started_mono,
-                    first_token_mono=first_token_mono,
-                    streaming=True,
-                )
                 yield sse_done({
                     "ok": True,
                     "chatId": chat.id,
@@ -2987,7 +2895,7 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
             first_token_mono: float | None = None
             nonstream_usage: dict[str, Any] | None = None
             if web_plan.local:
-                assistant_content, reasoning_content, req_duration, nonstream_usage = await nonstream_web_search_rounds(
+                assistant_content, reasoning_content, req_duration, nonstream_usage = await until_client_disconnect(request, nonstream_web_search_rounds(
                     messages=messages,
                     base_url=base_url,
                     api_key=api_key,
@@ -3000,11 +2908,11 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
                     settings=settings,
                     web_search_enabled=True,
                     web_plan=web_plan,
-                )
+                ))
                 if reasoning_content is None:
                     req_duration = None
-            elif thinking_enabled:
-                resp = await chat_completions_message(
+            else:
+                resp = await until_client_disconnect(request, chat_completions_message(
                     base_url=base_url,
                     api_key=api_key,
                     model=model,
@@ -3015,65 +2923,30 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
                     extra_body=extra_body,
                     tools=gen_tools,
                     protocol=protocol,
-                )
+                ))
                 assistant_content = (resp.content or "").strip()
                 reasoning_content = resp.reasoning_content or None
                 nonstream_usage = resp.usage
                 req_duration = round(max(0.0, time.monotonic() - req_start), 1) if reasoning_content else None
-            else:
-                result = await chat_completions(
-                    base_url=base_url,
-                    api_key=api_key,
-                    model=model,
-                    messages=messages,
-                    temperature=temperature,
-                    top_p=top_p,
-                    max_tokens=max_tokens,
-                    extra_body=extra_body,
-                    tools=gen_tools,
-                    protocol=protocol,
-                )
-                assistant_content = result.text.strip()
-                reasoning_content = None
-                req_duration = None
-                nonstream_usage = result.usage
             nonstream_usage = _stamp_usage(nonstream_usage, prepared)
-            assistant_msg = None
-            if assistant_content:
-                assistant_msg = ChatMessage(
-                    role="assistant",
-                    content=assistant_content,
-                    characterId=req.characterId,
-                    reasoningContent=(reasoning_content.strip() if isinstance(reasoning_content, str) and reasoning_content.strip() else None),
-                    reasoningDurationSec=req_duration,
-                    usage=nonstream_usage,
-                )
-                chat.messages.append(assistant_msg)
-                gen_meta = _persist_generation_record(
-                    chat=chat,
-                    assistant_msg=assistant_msg,
-                    prepared=prepared,
-                    request_id=request_id,
-                    model=model,
-                    usage=nonstream_usage,
-                    started_at=started_at,
-                    started_mono=started_mono,
-                    first_token_mono=first_token_mono or time.monotonic(),
-                    streaming=False,
-                )
-            else:
-                gen_meta = _persist_generation_record(
-                    chat=chat,
-                    assistant_msg=None,
-                    prepared=prepared,
-                    request_id=request_id,
-                    model=model,
-                    usage=nonstream_usage,
-                    started_at=started_at,
-                    started_mono=started_mono,
-                    first_token_mono=first_token_mono or time.monotonic(),
-                    streaming=False,
-                )
+            assistant_msg, gen_meta = await run_in_threadpool(
+                _persist_generation_record,
+                chat_id=chat.id,
+                content=assistant_content,
+                reasoning_content=reasoning_content,
+                reasoning_duration_sec=req_duration,
+                merge_message_id=req.mergeAssistantIntoMessageId,
+                require_content=bool(req.omitMessageIds),
+                character_id=req.characterId,
+                prepared=prepared,
+                request_id=request_id,
+                model=model,
+                usage=nonstream_usage,
+                started_at=started_at,
+                started_mono=started_mono,
+                first_token_mono=first_token_mono or time.monotonic(),
+                streaming=False,
+            )
             payload = {
                 "ok": True,
                 "chatId": chat.id,
@@ -3092,6 +2965,8 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
             payload["generationMetadata"] = gen_meta
             signal_generate_done(chat.id)
             return JSONResponse(payload)
+        except ClientDisconnected:
+            return JSONResponse({"ok": False}, status_code=499)
         except Exception as e:
             error = as_app_error(
                 e,

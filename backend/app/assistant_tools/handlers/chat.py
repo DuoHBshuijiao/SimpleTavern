@@ -15,6 +15,7 @@ from app.chat_transcript import (
 from app.routes.generate import collect_active_worldbooks
 from app.schemas import Chat, ChatOverrides, WorldBookAttachment
 from app.storage import (
+    chat_write_lock,
     load_chat,
     load_chat_memory,
     load_character,
@@ -23,7 +24,6 @@ from app.storage import (
     load_worldbook,
     mark_last_message_memory_updated,
     save_chat,
-    save_chat_memory,
     save_chat_state_variables,
     save_worldbook,
 )
@@ -213,16 +213,16 @@ def handle_chat_append_long_term_memory(ctx: AssistantToolContext, args: dict[st
     chat_id = ctx.chat_id
     if not chat_id:
         return R.err(R.FORBIDDEN, "chat context required", tool="chat_append_long_term_memory")
-    chat = _load_chat_ctx(chat_id)
-    if chat is None:
-        return R.err(R.NOT_FOUND, "chat not found", tool="chat_append_long_term_memory")
-    content = str(args.get("content") or "").strip()
-    current = (getattr(chat.overrides, "longTermMemory", None) or "").strip()
-    new_content = (current + "\n" + content).strip() if current else content
-    save_chat_memory(chat.characterId, chat.id, new_content)
-    chat.overrides.longTermMemory = new_content
-    mark_last_message_memory_updated(chat)
-    save_chat(chat)
+    with chat_write_lock(chat_id):
+        chat = _load_chat_ctx(chat_id)
+        if chat is None:
+            return R.err(R.NOT_FOUND, "chat not found", tool="chat_append_long_term_memory")
+        content = str(args.get("content") or "").strip()
+        current = (getattr(chat.overrides, "longTermMemory", None) or "").strip()
+        new_content = (current + "\n" + content).strip() if current else content
+        chat.overrides.longTermMemory = new_content
+        mark_last_message_memory_updated(chat)
+        save_chat(chat)
     return R.ok({"chatId": chat_id}, tool="chat_append_long_term_memory")
 
 
@@ -234,14 +234,14 @@ def handle_chat_overwrite_long_term_memory(ctx: AssistantToolContext, args: dict
     chat_id = ctx.chat_id
     if not chat_id:
         return R.err(R.FORBIDDEN, "chat context required", tool="chat_overwrite_long_term_memory")
-    chat = _load_chat_ctx(chat_id)
-    if chat is None:
-        return R.err(R.NOT_FOUND, "chat not found", tool="chat_overwrite_long_term_memory")
-    content = str(args.get("content") or "")
-    save_chat_memory(chat.characterId, chat.id, content)
-    chat.overrides.longTermMemory = content
-    mark_last_message_memory_updated(chat)
-    save_chat(chat)
+    with chat_write_lock(chat_id):
+        chat = _load_chat_ctx(chat_id)
+        if chat is None:
+            return R.err(R.NOT_FOUND, "chat not found", tool="chat_overwrite_long_term_memory")
+        content = str(args.get("content") or "")
+        chat.overrides.longTermMemory = content
+        mark_last_message_memory_updated(chat)
+        save_chat(chat)
     return R.ok({"chatId": chat_id}, tool="chat_overwrite_long_term_memory")
 
 

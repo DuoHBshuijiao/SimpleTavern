@@ -1,8 +1,9 @@
 import { ref, watch } from 'vue'
-import type { Chat } from '../types/models'
+import type { Chat, ChatMessage } from '../types/models'
 
 export interface UseMainChatReasoningOptions {
   getActiveChat: () => Chat | null | undefined
+  getLocalMessage?: (messageId: string) => ChatMessage | undefined
 }
 
 /**
@@ -72,27 +73,17 @@ export function useMainChatReasoning(options: UseMainChatReasoningOptions) {
 
     const elapsed = chatReasoningElapsedSec.value
     const activeChat = getActiveChat()
-    if (typeof elapsed === 'number' && Number.isFinite(elapsed) && activeChat && ids.size > 0) {
-      for (const messageId of ids) {
-        const msg = activeChat.messages.find((m) => m.id === messageId)
-        if (msg && msg.role === 'assistant') {
-          msg.reasoningDurationSec = elapsed
-        }
-      }
+    for (const messageId of ids) {
+      const message = options.getLocalMessage?.(messageId) ?? activeChat?.messages.find((m) => m.id === messageId)
+      if (message?.role !== 'assistant') continue
+      if (typeof elapsed === 'number' && Number.isFinite(elapsed)) message.reasoningDurationSec = elapsed
+      if (content) message.reasoningContent = content
     }
-
-    if (content && ids.size > 0 && activeChat) {
-      for (const messageId of ids) {
-        const msg = activeChat.messages.find((m) => m.id === messageId)
-        if (msg && msg.role === 'assistant') {
-          msg.reasoningContent = content
-        }
-      }
-      let blocks = chatReasoningBlocks.value
-      for (const messageId of ids) {
-        blocks = [...blocks, { messageId, content }]
-      }
-      chatReasoningBlocks.value = blocks
+    if (content && ids.size) {
+      chatReasoningBlocks.value = [
+        ...chatReasoningBlocks.value,
+        ...Array.from(ids, (messageId) => ({ messageId, content })),
+      ]
     }
     chatReasoningContent.value = ''
     chatReasoningMessageId.value = null

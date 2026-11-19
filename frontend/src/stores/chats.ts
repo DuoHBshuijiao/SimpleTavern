@@ -78,6 +78,8 @@ export const useChatsStore = defineStore('chats', {
     groupList: [] as Chat[],
     activeChatId: null as string | null,
     activeChat: null as Chat | null,
+    selectionRequest: 0,
+    localMessages: {} as Record<string, ChatMessage[] | undefined>,
     loading: false,
     error: null as string | null,
   }),
@@ -131,6 +133,7 @@ export const useChatsStore = defineStore('chats', {
     async create(characterId: string, title?: string, pureAiMode?: boolean, userPersonaId?: string | null) {
       const chat = await apiPost<Chat>('/api/chats', { characterId, title, pureAiMode, userPersonaId })
       await this.loadList(characterId)
+      ++this.selectionRequest
       this.activeChatId = chat.id
       this.activeChat = chat
       return chat
@@ -195,6 +198,7 @@ export const useChatsStore = defineStore('chats', {
       }
       const chat = await apiPost<Chat>('/api/chats', body)
       await this.loadGroupList()
+      ++this.selectionRequest
       this.activeChatId = chat.id
       this.activeChat = chat
       return chat
@@ -228,6 +232,7 @@ export const useChatsStore = defineStore('chats', {
       )
       await this.loadGroupList()
       await this.loadList(chat.characterId)
+      ++this.selectionRequest
       this.activeChatId = chat.id
       this.activeChat = chat
       return chat
@@ -242,6 +247,7 @@ export const useChatsStore = defineStore('chats', {
       )
       await this.loadGroupList()
       await this.loadList(chat.characterId)
+      ++this.selectionRequest
       this.activeChatId = chat.id
       this.activeChat = chat
       return chat
@@ -259,6 +265,7 @@ export const useChatsStore = defineStore('chats', {
       )
       await this.loadGroupList()
       await this.loadList(chat.characterId)
+      ++this.selectionRequest
       this.activeChatId = chat.id
       this.activeChat = chat
       return chat
@@ -302,20 +309,45 @@ export const useChatsStore = defineStore('chats', {
      * @throws {Error} 请求失败时抛出错误，错误信息存储在error状态中
      */
     async load(chatId: string) {
+      const selectionRequest = ++this.selectionRequest
       this.loading = true
       this.error = null
       try {
         const chat = await apiGet<Chat>(`/api/chats/${chatId}`)
-        this.activeChatId = chat.id
-        this.activeChat = chat
+        if (selectionRequest === this.selectionRequest) {
+          this.activeChatId = chat.id
+          this.activeChat = this.withLocalMessages(chat)
+        }
         return chat
       } catch (e: unknown) {
         const error = e instanceof Error ? e.message : String(e)
-        this.error = error
+        if (selectionRequest === this.selectionRequest) this.error = error
         throw e
       } finally {
-        this.loading = false
+        if (selectionRequest === this.selectionRequest) this.loading = false
       }
+    },
+    async refresh(chatId: string, discardLocal = false) {
+      const chat = await apiGet<Chat>(`/api/chats/${chatId}`)
+      if (discardLocal) delete this.localMessages[chatId]
+      this.applyChatPayload(chat)
+      this.mergeChatIntoList(chat)
+      return chat
+    },
+    withLocalMessages(chat: Chat): Chat {
+      const pending = this.localMessages[chat.id]
+      if (!pending?.length) return chat
+      const storedIds = new Set(chat.messages.map((message) => message.id))
+      const storedRequests = new Set(chat.messages.map((message) => message.generationMetadata?.requestId).filter(Boolean))
+      const remaining = pending.filter((message) => {
+        const metadata = message.generationMetadata
+        if (metadata?.messageId && storedIds.has(String(metadata.messageId))) return false
+        if (metadata?.requestId && storedRequests.has(metadata.requestId)) return false
+        return message.role === 'assistant' || !chat.messages.some((stored) => (
+          stored.role === message.role && stored.content === message.content && Date.parse(stored.ts) >= Date.parse(message.ts)
+        ))
+      })
+      return { ...chat, messages: [...chat.messages, ...remaining] }
     },
     /**
      * 用服务端下发的聊天数据就地更新当前会话（不发起请求）。
@@ -325,7 +357,7 @@ export const useChatsStore = defineStore('chats', {
      */
     applyChatPayload(chat: Chat) {
       if (this.activeChatId === chat.id) {
-        this.activeChat = chat
+        this.activeChat = this.withLocalMessages(chat)
       }
     },
     /**
@@ -345,7 +377,7 @@ export const useChatsStore = defineStore('chats', {
         overrides: restOverrides,
         memberSettings: memberSettings || undefined
       })
-      this.activeChat = chat
+      this.applyChatPayload(chat)
       const skipLoadList = options?.skipLoadList === true
       if (chat.isGroup) {
         if (skipLoadList) this.mergeChatIntoList(chat)
@@ -372,7 +404,7 @@ export const useChatsStore = defineStore('chats', {
      */
     async rename(chatId: string, title: string) {
       const chat = await apiPut<Chat>(`/api/chats/${chatId}`, { title })
-      this.activeChat = chat
+      this.applyChatPayload(chat)
       if (chat.isGroup) {
         await this.loadGroupList()
       } else if (this.characterId) {
@@ -393,7 +425,7 @@ export const useChatsStore = defineStore('chats', {
      */
     async updateGroupDelay(chatId: string, groupDelay: number) {
       const chat = await apiPut<Chat>(`/api/chats/${chatId}`, { groupDelay })
-      this.activeChat = chat
+      this.applyChatPayload(chat)
       await this.loadGroupList()
       return chat
     },
@@ -421,7 +453,7 @@ export const useChatsStore = defineStore('chats', {
         ...(body.overrides ? { overrides: body.overrides } : {}),
         ...(body.stateVariables !== undefined ? { stateVariables: body.stateVariables } : {}),
       })
-      this.activeChat = chat
+      this.applyChatPayload(chat)
       await this.loadGroupList()
       return chat
     },
@@ -438,7 +470,7 @@ export const useChatsStore = defineStore('chats', {
      */
     async updateUserPersonaId(chatId: string, userPersonaId: string | null) {
       const chat = await apiPut<Chat>(`/api/chats/${chatId}`, { userPersonaId })
-      this.activeChat = chat
+      this.applyChatPayload(chat)
       if (this.characterId) await this.loadList(this.characterId)
       await this.loadGroupList()
       return chat
@@ -494,7 +526,7 @@ export const useChatsStore = defineStore('chats', {
         body.reasoningDurationSec = options.reasoningDurationSec
       }
       const chat = await apiPost<Chat>(`/api/chats/${chatId}/messages`, body)
-      this.activeChat = chat
+      this.applyChatPayload(chat)
       if (this.characterId) await this.loadList(this.characterId)
       return chat
     },
@@ -528,6 +560,7 @@ export const useChatsStore = defineStore('chats', {
         reasoningContent?: string | null
         reasoningDurationSec?: number | null
         skipReload?: boolean
+        applyPayload?: boolean
         images?: ChatMessage['images']
         senderPersonaId?: string | null
         senderName?: string | null
@@ -591,7 +624,7 @@ export const useChatsStore = defineStore('chats', {
       }
       const skipReload = opts?.skipReload === true
       const chat = await apiPut<Chat>(`/api/chats/${chatId}/messages/${messageId}`, body)
-      this.activeChat = chat
+      if (opts?.applyPayload !== false) this.applyChatPayload(chat)
       if (!skipReload && this.characterId) await this.loadList(this.characterId)
       return chat
     },
@@ -615,7 +648,7 @@ export const useChatsStore = defineStore('chats', {
           this.activeChat = { ...this.activeChat, messages: kept }
         }
       } else {
-        await this.load(chatId)
+        await this.refresh(chatId)
         if (this.characterId) await this.loadList(this.characterId)
       }
     },
@@ -644,7 +677,7 @@ export const useChatsStore = defineStore('chats', {
       } = { role, content }
       if (characterId !== undefined) body.characterId = characterId
       const chat = await apiPut<Chat>(`/api/chats/${chatId}/messages/${messageId}/save-and-truncate`, body)
-      this.activeChat = chat
+      this.applyChatPayload(chat)
       if (this.characterId) await this.loadList(this.characterId)
       return chat
     },
@@ -662,7 +695,7 @@ export const useChatsStore = defineStore('chats', {
      */
     async addMember(chatId: string, memberId: string) {
       const chat = await apiPost<Chat>(`/api/chats/${chatId}/members/${memberId}`, {})
-      this.activeChat = chat
+      this.applyChatPayload(chat)
       await this.loadGroupList()
       return chat
     },
@@ -678,7 +711,7 @@ export const useChatsStore = defineStore('chats', {
      */
     async removeMember(chatId: string, memberId: string) {
       await apiDelete(`/api/chats/${chatId}/members/${memberId}`)
-      await this.load(chatId)
+      await this.refresh(chatId)
       await this.loadGroupList()
     },
     /**
@@ -694,7 +727,7 @@ export const useChatsStore = defineStore('chats', {
      */
     async updateMemberOrder(chatId: string, memberIds: string[]) {
       const chat = await apiPut<Chat>(`/api/chats/${chatId}`, { memberIds })
-      this.activeChat = chat
+      this.applyChatPayload(chat)
       await this.loadGroupList()
       return chat
     },
@@ -712,7 +745,7 @@ export const useChatsStore = defineStore('chats', {
     async updateMemberSettings(chatId: string, memberId: string, settings: GroupMemberSettings) {
       const memberSettings = { [memberId]: settings }
       const chat = await apiPut<Chat>(`/api/chats/${chatId}`, { memberSettings })
-      this.activeChat = chat
+      this.applyChatPayload(chat)
       return chat
     },
     /**
@@ -723,9 +756,17 @@ export const useChatsStore = defineStore('chats', {
      *
      * @param {ChatMessage} message - 消息对象
      */
-    addLocalMessage(message: ChatMessage) {
-      if (!this.activeChat) return
-      this.activeChat.messages.push(message)
+    addLocalMessage(message: ChatMessage, chatId: string) {
+      const pending = this.localMessages[chatId] ?? (this.localMessages[chatId] = [])
+      pending.push(message)
+      if (this.activeChat?.id === chatId) this.activeChat.messages.push(message)
+    },
+    getLocalMessage(messageId: string): ChatMessage | undefined {
+      for (const pending of Object.values(this.localMessages)) {
+        const message = pending?.find((candidate) => candidate.id === messageId)
+        if (message) return message
+      }
+      return undefined
     },
 
     /**
@@ -739,8 +780,7 @@ export const useChatsStore = defineStore('chats', {
      * @param {string} delta - 要追加的内容增量
      */
     appendLocalMessageContent(messageId: string, delta: string) {
-      if (!this.activeChat) return
-      const msg = this.activeChat.messages.find(m => m.id === messageId)
+      const msg = this.getLocalMessage(messageId)
       if (msg) {
         msg.content += delta
       }
@@ -750,8 +790,7 @@ export const useChatsStore = defineStore('chats', {
      * 就地补丁本地消息（流式 done.usage 回填缓存徽标等，不发网络请求）。
      */
     patchLocalMessage(messageId: string, patch: Partial<ChatMessage>) {
-      if (!this.activeChat) return
-      const msg = this.activeChat.messages.find((m) => m.id === messageId)
+      const msg = this.getLocalMessage(messageId)
       if (!msg) return
       Object.assign(msg, patch)
     },

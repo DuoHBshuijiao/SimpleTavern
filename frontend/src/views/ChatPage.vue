@@ -59,7 +59,7 @@
  *    - 依赖：依赖vue、stores、composables、components、api
  *    - 位置：视图层，作为聊天页面的主组件
  */
-import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick, type ComponentPublicInstance } from 'vue'
+import { computed, effectScope, onBeforeUnmount, onMounted, reactive, ref, watch, nextTick, type ComponentPublicInstance } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useCharacterSidebarRecencyStore, useCharactersStore, useChatsStore, useSettingsStore, useUiStore, useMvuStore } from '../stores'
 import type { SettingsDrawerTab } from '../stores/ui'
@@ -177,14 +177,42 @@ const errorStack = useErrorStack(6000)
 
 // ========== 页面级状态 ==========
 const selectedCharacterId = ref<string | null>(null)
-const draftMessage = ref('')
 interface DraftImageItem {
   id: string
   file: File
   name: string
   previewUrl: string
 }
-const draftImages = ref<DraftImageItem[]>([])
+interface ChatDraft {
+  text: string
+  images: DraftImageItem[]
+  helper: {
+    mode: 'write' | 'enhance' | null
+    status: 'reasoning' | 'writing' | 'done' | null
+    sourceDraft: string
+    lastGenerated: string
+  }
+  controller: AbortController | null
+  stopRequested: boolean
+}
+
+const chatDrafts = reactive(new Map<string, ChatDraft>())
+
+function chatDraftFor(chatId = chats.activeChatId) {
+  const key = chatId ?? ''
+  if (!chatDrafts.has(key)) {
+    chatDrafts.set(key, {
+      text: '', images: [],
+      helper: { mode: null, status: null, sourceDraft: '', lastGenerated: '' },
+      controller: null, stopRequested: false,
+    })
+  }
+  return chatDrafts.get(key)!
+}
+
+const draftMessage = computed({ get: () => chatDraftFor().text, set: (text) => { chatDraftFor().text = text } })
+const draftImages = computed({ get: () => chatDraftFor().images, set: (images) => { chatDraftFor().images = images } })
+const draftHelper = computed(() => chatDraftFor().helper)
 const workspaceAssistantTextareaRef = ref<HTMLTextAreaElement | null>(null)
 /** 角色编辑页内嵌助手消息列表滚动容器（与侧栏 AssistantPanel 分离） */
 const workspaceAssistantMessagesListRef = ref<HTMLElement | null>(null)
@@ -207,8 +235,11 @@ const JANITOR_CHAT_PENDING_STORAGE_KEY = 'simpletavern:janitorChatPendingId'
 const janitorPendingId = ref<string | null>(null)
 const janitorPendingReloadNonce = ref(0)
 const settingsTab = ref<SettingsDrawerTab>('global')
-const isGenerating = ref(false)
-const streamError = ref<unknown | null>(null)
+const isGenerating = computed(() => activeGeneration.value.isGenerating.value)
+const streamError = computed({
+  get: () => activeGeneration.value.streamError.value,
+  set: (value) => { activeGeneration.value.streamError.value = value },
+})
 const streamErrorMessage = computed(() => {
   const value = streamError.value
   if (value == null) return null
@@ -280,18 +311,6 @@ const showImageLayer = computed(() => pageBackground.hasImage.value && !webgpuPa
 
 const editingChatId = ref<string | null>(null)
 const editingTitle = ref('')
-const {
-  rewriteMergeCtx,
-  clearAll: clearGenerationDeferState,
-  beginSaveSendDefer,
-  beginRewriteDefer,
-  getSaveSendDeferForChat,
-  clearSaveSendDeferForChat,
-  clearRewriteAndVisibility,
-  finalizeRewriteAfterGeneration,
-  filterVisibleMessages,
-  finalizeSaveSendAfterGeneration,
-} = useGenerationDeferState()
 
 watch(() => uiStore.settingsDrawerRequestNonce, (nonce) => {
   if (!nonce) return
@@ -316,22 +335,54 @@ const selectedCharacter = computed(() => {
  */
 const activeChat = computed(() => chats.activeChat)
 
-const {
-  chatReasoningMessageId,
-  chatReasoningContent,
-  chatReasoningBlocks,
-  chatReasoningStreamActive,
-  chatReasoningElapsedSec,
-  markReasoningStreamPhaseStart,
-  clearReasoningPhaseTiming,
-  onAssistantContentDeltaStarted,
-  finalizeReasoningElapsedBeforeStop,
-  pushCurrentReasoningToBlocks,
-  getReasoningForMessageId,
-  clearReasoningForChatSwitch,
-} = useMainChatReasoning({
-  getActiveChat: () => activeChat.value,
-})
+const generationScope = effectScope(true)
+let localMessageSequence = 0
+const generationStates = new Map<string | null, ReturnType<typeof createGenerationState>>()
+
+function createGenerationState(chatId: string | null) {
+  const isGenerating = ref(false)
+  const streamError = ref<unknown | null>(null)
+  const visibleChat = computed(() => activeChat.value?.id === chatId ? activeChat.value : null)
+  const scrollVisible = (...args: Parameters<typeof scrollToBottom>) => {
+    if (visibleChat.value) scrollToBottom(...args)
+  }
+  const ttsAfterFlush = (messageId: string) => {
+    if (visibleChat.value) void tryAutoReadAssistantAfterStreamFlush(messageId)
+  }
+  const stream = useStreamOutput({ appendLocalMessageContent: chats.appendLocalMessageContent }, scrollVisible)
+  const reasoning = useMainChatReasoning({
+    getActiveChat: () => visibleChat.value,
+    getLocalMessage: chats.getLocalMessage,
+  })
+  const group = useGroupChat({ activeChat: visibleChat, isGenerating, settings })
+  const transport = useChatGeneration({
+    chats: { patchLocalMessage: chats.patchLocalMessage, getLocalMessage: chats.getLocalMessage },
+    stream,
+    ...reasoning,
+  })
+  const defer = useGenerationDeferState()
+  const versions = useMessageVersions()
+  return { isGenerating, streamError, group, stream, reasoning, transport, defer, versions, scrollVisible, ttsAfterFlush }
+}
+
+function getGenerationState(chatId: string | null) {
+  const existing = generationStates.get(chatId)
+  if (existing) return existing
+  const state = generationScope.run(() => createGenerationState(chatId))!
+  generationStates.set(chatId, state)
+  return state
+}
+
+const activeGeneration = computed(() => getGenerationState(activeChat.value?.id ?? null))
+const group = computed(() => activeGeneration.value.group)
+const chatReasoningMessageId = computed(() => activeGeneration.value.reasoning.chatReasoningMessageId.value)
+const chatReasoningBlocks = computed(() => activeGeneration.value.reasoning.chatReasoningBlocks.value)
+const chatReasoningContent = computed(() => activeGeneration.value.reasoning.chatReasoningContent.value)
+const chatReasoningStreamActive = computed(() => activeGeneration.value.reasoning.chatReasoningStreamActive.value)
+const chatReasoningElapsedSec = computed(() => activeGeneration.value.reasoning.chatReasoningElapsedSec.value)
+const generationDoneTick = computed(() => activeGeneration.value.transport.generationDoneTick.value)
+const webToolStatus = computed(() => activeGeneration.value.transport.webToolStatus.value)
+const getReasoningForMessageId = (messageId: string) => activeGeneration.value.reasoning.getReasoningForMessageId(messageId)
 
 /** 占位符重试成功后：在同一会话且同模型+同 API 预设下自动对上游使用 [image] 占位，直到切换模型/预设或换会话（localStorage 按 chatId 持久化） */
 const {
@@ -350,7 +401,7 @@ const {
 const messageListMessages = computed((): ChatMessage[] => {
   const chat = activeChat.value
   if (!chat?.messages?.length) return []
-  return filterVisibleMessages(chat.messages)
+  return activeGeneration.value.defer.filterVisibleMessages(chat.messages)
 })
 
 /** 侧栏角色列表：按会话活跃度置顶（与 characters.list 内容一致，仅顺序不同） */
@@ -590,7 +641,7 @@ async function enqueueMessageReadAloud(message: ChatMessage, mode: 'manual' | 'a
     return false
   }
 
-  const originalText = versions.getDisplayContent(live).trim()
+  const originalText = versions.value.getDisplayContent(live).trim()
   if (!originalText) {
     if (mode === 'manual') await notifyMessage('当前消息没有可朗读的文本。')
     return false
@@ -714,7 +765,7 @@ async function runAutoReadTtsForNewMessages() {
 
   for (const message of newMessages) {
     const displayText =
-      message.role === 'assistant' ? versions.getDisplayContent(message) : message.content || ''
+      message.role === 'assistant' ? versions.value.getDisplayContent(message) : message.content || ''
     if (
       getTtsAutoReadFingerprintSet(chat.id).has(
         makeTtsAutoReadContentFingerprint(chat.id, message, displayText),
@@ -784,7 +835,13 @@ function scheduleDeferredPostSwitchWork(chatId: string) {
 }
 
 async function afterChatReload(chatId: string) {
-  scheduleDeferredPostSwitchWork(chatId)
+  if (chats.activeChatId === chatId) scheduleDeferredPostSwitchWork(chatId)
+}
+
+async function refreshAfterGeneration(chatId: string) {
+  await chats.refresh(chatId, true)
+  getGenerationState(chatId).reasoning.clearReasoningForChatSwitch()
+  await afterChatReload(chatId)
 }
 
 /** 遍历 pendingTtsBinds，按内容指纹匹配当前消息并调用 bind-message 写回 TTS 字段 */
@@ -794,7 +851,7 @@ async function flushPendingTtsBinds() {
 
   for (const message of chat.messages) {
     if (message.id.startsWith('local_')) continue
-    const displayText = message.role === 'assistant' ? versions.getDisplayContent(message) : message.content || ''
+    const displayText = message.role === 'assistant' ? versions.value.getDisplayContent(message) : message.content || ''
     const fp = makeTtsAutoReadContentFingerprint(chat.id, message, displayText)
     const pending = pendingTtsBinds.get(fp)
     if (!pending) continue
@@ -834,38 +891,8 @@ watch(
 
 // ========== 初始化 Composables ==========
 // 流式输出
-const stream = useStreamOutput(
-  { appendLocalMessageContent: chats.appendLocalMessageContent },
-  // 不能强制：强制贴底会清掉“用户已滚走”的状态，流式时就没法往回看了
-  () => scrollToBottom(),
-)
-
-const {
-  aborter,
-  stopRequested,
-  stopStreamingHold,
-  webToolStatus,
-  beginGenerateAbort,
-  applyGenerateDonePayload,
-  makeGenerateSseHandler,
-  consumeGenerationFinallyFlags,
-  generationDoneTick,
-} = useChatGeneration({
-  chats: {
-    patchLocalMessage: chats.patchLocalMessage,
-    getLocalMessage: (messageId) => chats.activeChat?.messages.find((m) => m.id === messageId),
-  },
-  stream,
-  onAssistantContentDeltaStarted,
-  chatReasoningContent,
-  chatReasoningMessageId,
-  chatReasoningStreamActive,
-  pushCurrentReasoningToBlocks,
-  clearReasoningPhaseTiming,
-})
-
 // 消息版本
-const versions = useMessageVersions()
+const versions = computed(() => activeGeneration.value.versions)
 
 /** 用户消息落库后立即尝试自动朗读（无「输出完成」事件） */
 async function tryAutoReadUserMessage(localUserId: string) {
@@ -892,16 +919,9 @@ async function tryAutoReadAssistantAfterStreamFlush(localAssistantId: string) {
   await nextTick()
   const msg = chat.messages.find((m) => m.id === localAssistantId)
   if (!msg || msg.role !== 'assistant') return
-  if (!versions.getDisplayContent(msg).trim()) return
+  if (!versions.value.getDisplayContent(msg).trim()) return
   void enqueueMessageReadAloud(msg, 'auto')
 }
-
-// 群聊逻辑
-const group = useGroupChat({
-  activeChat,
-  isGenerating,
-  settings: settings as any,
-})
 
 /** 是否启用流式传输（与全局设置一致），供助手与生成共用 */
 const isStreamEnabled = computed(() => settings.settings?.streamEnabled !== false)
@@ -989,7 +1009,7 @@ async function onMvuPanelMvuModelSelect(payload: { value: string; presetId?: str
 }
 
 // 版本切换延迟持久化：切换版本时仅更新内存，记录脏状态，在发送消息前统一落盘
-const pendingGreetingVersion = ref<{
+type PendingGreetingVersion = {
   chatId: string
   messageId: string
   role: string
@@ -1000,23 +1020,37 @@ const pendingGreetingVersion = ref<{
   greetingVariantReasoningContents: string[]
   greetingVariantReasoningDurations: (number | null)[]
   reasoningContent: string | null
-} | null>(null)
+}
 
-async function flushPendingGreetingVersion() {
-  const p = pendingGreetingVersion.value
-  if (!p) return
-  pendingGreetingVersion.value = null
-  try {
-    await chats.updateMessage(p.chatId, p.messageId, p.role as MainChatRole, p.content, p.characterId, {
-      greetingVariantIndex: p.greetingVariantIndex,
-      greetingVariants: p.greetingVariants,
-      greetingVariantReasoningContents: p.greetingVariantReasoningContents,
-      greetingVariantReasoningDurations: p.greetingVariantReasoningDurations,
-      reasoningContent: p.reasoningContent,
-    })
-  } catch (e) {
-    console.error('Failed to persist greeting version:', e)
-  }
+const pendingGreetingVersions = new Map<string, PendingGreetingVersion>()
+let greetingVersionsWrite: Promise<void> = Promise.resolve()
+
+function queueGreetingVersion(version: PendingGreetingVersion) {
+  pendingGreetingVersions.set(JSON.stringify([version.chatId, version.messageId]), version)
+}
+
+async function flushPendingGreetingVersion(propagateError = false) {
+  const write = greetingVersionsWrite.then(async () => {
+    for (const [key, version] of pendingGreetingVersions) {
+      pendingGreetingVersions.delete(key)
+      try {
+        await chats.updateMessage(version.chatId, version.messageId, version.role as MainChatRole, version.content, version.characterId, {
+          greetingVariantIndex: version.greetingVariantIndex,
+          greetingVariants: version.greetingVariants,
+          greetingVariantReasoningContents: version.greetingVariantReasoningContents,
+          greetingVariantReasoningDurations: version.greetingVariantReasoningDurations,
+          reasoningContent: version.reasoningContent,
+          skipReload: true,
+          applyPayload: false,
+        })
+      } catch (error) {
+        if (!pendingGreetingVersions.has(key)) pendingGreetingVersions.set(key, version)
+        throw error
+      }
+    }
+  })
+  greetingVersionsWrite = write.catch((error) => console.error('Failed to persist greeting version:', error))
+  await (propagateError ? write : greetingVersionsWrite)
 }
 
 function switchFromMvuToAssistantPanel() {
@@ -1131,20 +1165,6 @@ async function setAssistantDestructiveToolsEnabled(checked: boolean) {
   await assistant.setAllowDestructiveTools(checked)
 }
 
-const draftHelper = ref<{
-  mode: 'write' | 'enhance' | null
-  status: 'reasoning' | 'writing' | 'done' | null
-  sourceDraft: string
-  lastGenerated: string
-}>({
-  mode: null,
-  status: null,
-  sourceDraft: '',
-  lastGenerated: '',
-})
-const draftHelperAborter = ref<AbortController | null>(null)
-const draftHelperStopRequested = ref(false)
-
 type DraftHelpConversationMessage = Pick<ChatMessage, 'id' | 'role' | 'content' | 'characterId' | 'senderName'>
 
 function buildDraftHelperConversation(): DraftHelpConversationMessage[] {
@@ -1153,7 +1173,7 @@ function buildDraftHelperConversation(): DraftHelpConversationMessage[] {
   return chat.messages.map((msg) => ({
     id: msg.id,
     role: msg.role,
-    content: msg.role === 'assistant' ? versions.getDisplayContent(msg) : msg.content,
+    content: msg.role === 'assistant' ? versions.value.getDisplayContent(msg) : msg.content,
     characterId: msg.characterId ?? null,
     senderName: msg.senderName ?? null,
   }))
@@ -1254,8 +1274,16 @@ watch(
 )
 
 onBeforeUnmount(() => {
-  draftHelperAborter.value?.abort()
-  clearDraftImages()
+  for (const draft of chatDrafts.values()) {
+    draft.controller?.abort()
+    for (const image of draft.images) URL.revokeObjectURL(image.previewUrl)
+  }
+  chatDrafts.clear()
+  for (const state of generationStates.values()) {
+    state.transport.aborter.value?.abort()
+    state.stream.cleanup()
+  }
+  generationScope.stop()
   errorStack.clearAll()
   window.removeEventListener('keydown', handleGlobalKeydown)
   window.removeEventListener('pointerdown', handleHeaderPointerdown)
@@ -1413,17 +1441,20 @@ function clearDraftImages() {
 }
 
 async function runDraftHelper(mode: 'write' | 'enhance', sourceDraft: string) {
-  if (!activeChat.value) return
+  const chatId = chats.activeChatId
+  if (!chatId) return
+  const draft = chatDraftFor(chatId)
+  const helper = draft.helper
   if (isGenerating.value) return
-  draftHelperAborter.value?.abort()
+  draft.controller?.abort()
   const controller = new AbortController()
-  draftHelperAborter.value = controller
-  draftHelperStopRequested.value = false
-  draftHelper.value.mode = mode
-  draftHelper.value.status = 'reasoning'
-  draftHelper.value.sourceDraft = sourceDraft
-  draftHelper.value.lastGenerated = ''
-  draftMessage.value = ''
+  draft.controller = controller
+  draft.stopRequested = false
+  helper.mode = mode
+  helper.status = 'reasoning'
+  helper.sourceDraft = sourceDraft
+  helper.lastGenerated = ''
+  draft.text = ''
   const conversation = buildDraftHelperConversation()
 
   const useStream = settings.settings?.streamEnabled !== false
@@ -1432,72 +1463,75 @@ async function runDraftHelper(mode: 'write' | 'enhance', sourceDraft: string) {
       let gotDelta = false
       let sseError: string | null = null
       await postAndConsumeSse('/api/generate/draft-help', {
-        chatId: activeChat.value.id,
+        chatId: chatId,
         mode,
         draft: mode === 'enhance' ? sourceDraft : null,
         conversation,
       }, (evt) => {
+        if (draft.controller !== controller) return
         if (evt.event === 'reasoning') {
-          draftHelper.value.status = 'reasoning'
+          helper.status = 'reasoning'
         } else if (evt.event === 'delta') {
           const data = evt.data as { text?: string } | undefined
           const t = data?.text
           if (typeof t === 'string') {
             if (!gotDelta) {
-              draftHelper.value.status = 'writing'
+              helper.status = 'writing'
               gotDelta = true
             }
-            draftMessage.value += t
-            draftHelper.value.lastGenerated = draftMessage.value
+            draft.text += t
+            helper.lastGenerated = draft.text
           }
         } else if (evt.event === 'done') {
-          draftHelper.value.status = 'done'
+          helper.status = 'done'
         } else if (evt.event === 'error') {
           const data = evt.data as { message?: string } | undefined
           sseError = String(data?.message ?? 'unknown error')
         }
       }, controller.signal)
       if (sseError) {
-        draftHelper.value.status = null
+        helper.status = null
         throw new Error(sseError)
       }
       return
     }
 
     const res = await apiPost<{ ok: boolean; content: string; reasoningContent?: string; error?: string }>('/api/generate/draft-help', {
-      chatId: activeChat.value.id,
+      chatId: chatId,
       mode,
       draft: mode === 'enhance' ? sourceDraft : null,
       conversation,
     }, controller.signal)
+    if (draft.controller !== controller) return
     if (!res.ok) {
-      draftHelper.value.status = null
+      helper.status = null
       throw new Error(res.error || 'unknown error')
     }
     if (typeof res.reasoningContent === 'string' && res.reasoningContent.trim()) {
-      draftHelper.value.status = 'reasoning'
+      helper.status = 'reasoning'
     }
-    draftMessage.value = res.content || ''
-    draftHelper.value.lastGenerated = draftMessage.value
-    draftHelper.value.status = 'done'
+    draft.text = res.content || ''
+    helper.lastGenerated = draft.text
+    helper.status = 'done'
   } catch (e) {
-    if (isAbortError(e) && draftHelperStopRequested.value) {
-      draftHelper.value.status = null
-      draftHelper.value.lastGenerated = draftMessage.value
+    if (draft.controller !== controller) return
+    if (isAbortError(e) && draft.stopRequested) {
+      helper.status = null
+      helper.lastGenerated = draft.text
       return
     }
     // 非用户终止的失败（如 HTTP 400）：复位 UI，避免状态栏卡在「思考中」且终止无效（aborter 已在 finally 清空）
-    if (draftHelperAborter.value === controller) {
-      draftHelper.value.status = null
-      draftHelper.value.mode = null
-      draftHelper.value.lastGenerated = ''
+    if (draft.controller === controller) {
+      helper.status = null
+      helper.mode = null
+      helper.lastGenerated = ''
     }
     throw e
   } finally {
-    if (draftHelperAborter.value === controller) {
-      draftHelperAborter.value = null
+    if (draft.controller === controller) {
+      draft.controller = null
+      draft.stopRequested = false
     }
-    draftHelperStopRequested.value = false
   }
 }
 
@@ -1506,24 +1540,27 @@ async function handleOpenDraftHelper(mode: 'write' | 'enhance') {
     streamError.value = '润色前请先输入草稿内容'
     return
   }
+  const chatId = chats.activeChatId
+  const draft = chatDraftFor(chatId)
+  const sourceDraft = draft.text
   try {
-    const sourceDraft = draftMessage.value
     await runDraftHelper(mode, sourceDraft)
   } catch (e: any) {
     if (mode === 'enhance') {
       // 润色失败时恢复原草稿，避免用户内容意外丢失
-      draftMessage.value = draftHelper.value.sourceDraft
+      draft.text = sourceDraft
     }
-    streamError.value = e
+    if (chats.activeChatId === chatId) streamError.value = e
   }
 }
 
 async function handleDraftHelperRewrite() {
   if (!draftHelper.value.mode) return
+  const chatId = chats.activeChatId
   try {
     await runDraftHelper(draftHelper.value.mode, draftHelper.value.sourceDraft)
   } catch (e: any) {
-    streamError.value = e
+    if (chats.activeChatId === chatId) streamError.value = e
   }
 }
 
@@ -1532,9 +1569,10 @@ function handleDraftHelperKeep() {
 }
 
 function handleDraftHelperStop() {
-  if (!draftHelperAborter.value) return
-  draftHelperStopRequested.value = true
-  draftHelperAborter.value.abort()
+  const draft = chatDraftFor()
+  if (!draft.controller) return
+  draft.stopRequested = true
+  draft.controller.abort()
 }
 
 function handleDraftHelperDiscard() {
@@ -1573,7 +1611,7 @@ function getLastUserPersonaIdFromChat(chat: Chat | null | undefined) {
  * 再次使用全局设置中的选中身份ID。如果为纯AI模式则返回null。
  */
 const effectiveSelectedPersonaId = computed(() => {
-  if (group.effectivePureAiMode.value) return null
+  if (group.value.effectivePureAiMode.value) return null
   const chat = activeChat.value
   return chat?.userPersonaId
     ?? getLastUserPersonaIdFromChat(chat)
@@ -2067,19 +2105,14 @@ const groupMembers = computed(() => {
     .filter((c): c is CharacterCard => c !== null)
 })
 
-/**
- * 计算是否正在流式传输
- *
- * 检查是否启用流式传输且（正在生成或正在插话）。
- */
-const isStreamingActive = computed(() => isStreamEnabled.value && (isGenerating.value || group.isInterjecting.value))
+const canStopGeneration = computed(() => isGenerating.value || group.value.isInterjecting.value)
 
 /**
  * 计算是否有草稿消息
  *
  * 检查输入框是否有非空内容。
  */
-const hasDraftMessage = computed(() => !!draftMessage.value.trim())
+const hasDraftMessage = computed(() => Boolean(draftMessage.value.trim() || draftImages.value.length))
 
 /**
  * 检查是否为AbortError
@@ -2272,6 +2305,7 @@ watch(
       return
     }
     await chats.loadList(cid)
+    if (selectedCharacterId.value !== cid) return
     const ac = chats.activeChat
     // 仅当当前群聊包含该角色时留在群聊；点击群外角色（如 A）应跳到该角色最新单聊
     if (ac?.isGroup && ac.memberIds?.includes(cid)) {
@@ -2280,6 +2314,7 @@ watch(
     const latest = pickLatestChatByUpdatedAt(chats.list)
     if (latest) {
       await chats.load(latest.id)
+      if (selectedCharacterId.value === cid && chats.activeChatId === latest.id) collapseSidebarOnNarrow()
     } else {
       chats.activeChatId = null
       chats.activeChat = null
@@ -2327,9 +2362,6 @@ watch(
     }
     if (prev != null && next !== prev) {
       clearMessageListEnterAnimations()
-      clearReasoningForChatSwitch()
-      versions.clearAll()
-      clearGenerationDeferState()
     }
     // 切换会话时自动关闭搜索面板并重置搜索状态
     showHeaderMoreMenu.value = false
@@ -2359,7 +2391,7 @@ watch(
       if (p.role !== 'assistant') continue
       const gv = p.greetingVariants
       if (!gv || gv.length <= 1) continue
-      versions.hydrateGreetingVariants(
+      versions.value.hydrateGreetingVariants(
         p.id,
         gv,
         p.content,
@@ -2435,25 +2467,35 @@ async function runGroupGeneration(
   startIndex: number,
   imageFallbackMode = false
 ) {
+  const state = getGenerationState(chatId)
+  const { group, stream } = state
+  const { aborter, stopRequested, applyGenerateDonePayload, makeGenerateSseHandler } = state.transport
+  const { chatReasoningMessageId, chatReasoningContent, chatReasoningStreamActive, markReasoningStreamPhaseStart, pushCurrentReasoningToBlocks } = state.reasoning
+  const { getSaveSendDeferForChat } = state.defer
+  const { scrollVisible, ttsAfterFlush } = state
+  const signal = aborter.value?.signal
+  const roster = activeChat.value?.id === chatId ? activeChat.value.memberIds : memberIds
+  const omitMessageIds = getSaveSendDeferForChat(chatId)?.tailIdsToDeleteOnSuccess ?? []
+  const webSearchEnabled = webSearchSessionEnabled.value
+  const geminiSearch = geminiSearchRequestValue.value
   for (let i = startIndex; i < memberIds.length; i++) {
     const characterId = memberIds[i]
     if (!characterId) continue
     
-    const actualIndex = activeChat.value?.memberIds ? activeChat.value.memberIds.indexOf(characterId) : -1
+    const actualIndex = roster.indexOf(characterId)
     group.currentSpeakerIndex.value = actualIndex
     
     if (i > startIndex) {
       await group.delay(groupDelay)
     }
     
+    signal?.throwIfAborted()
     if (group.isPaused.value) {
       group.setPausedState(memberIds.slice(i))
       return
     }
     
-    if (!activeChat.value) break
-    
-    const localAssistantId = `local_assistant_${Date.now()}_${i}`
+    const localAssistantId = `local_assistant_${Date.now()}_${++localMessageSequence}_${i}`
     chatReasoningMessageId.value = localAssistantId
     chatReasoningContent.value = ''
     chatReasoningStreamActive.value = true
@@ -2466,8 +2508,8 @@ async function runGroupGeneration(
       characterId,
       ts: new Date().toISOString()
     }
-    chats.addLocalMessage(localMsg)
-    scrollToBottom()
+    chats.addLocalMessage(localMsg, chatId)
+    scrollVisible()
 
     if (useStream) {
       stream.registerStreamMessage(localAssistantId)
@@ -2475,8 +2517,7 @@ async function runGroupGeneration(
       try {
         await postAndConsumeSse(
           '/api/generate/group',
-          { chatId, characterId, imageFallbackMode, webSearchEnabled: webSearchSessionEnabled.value,
-            geminiSearch: geminiSearchRequestValue.value },
+          { chatId, characterId, imageFallbackMode, omitMessageIds, webSearchEnabled, geminiSearch },
           makeGenerateSseHandler({
             localAssistantId,
             onTerminalError: (data) => {
@@ -2484,7 +2525,7 @@ async function runGroupGeneration(
               sseError = String(payload?.message ?? 'unknown error')
             },
           }),
-          aborter.value?.signal,
+          signal,
         )
         if (sseError) {
           throw new Error(sseError)
@@ -2493,7 +2534,7 @@ async function runGroupGeneration(
         stream.flushForMessage(localAssistantId)
         stopRequested.value = false
       }
-      void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
+      ttsAfterFlush(localAssistantId)
     } else {
       const res = await apiPost<{
         ok: boolean
@@ -2507,9 +2548,10 @@ async function runGroupGeneration(
         chatId,
         characterId,
         imageFallbackMode,
-        webSearchEnabled: webSearchSessionEnabled.value,
-            geminiSearch: geminiSearchRequestValue.value,
-      })
+        omitMessageIds,
+        webSearchEnabled,
+        geminiSearch,
+      }, signal)
       
       if (res.ok) {
         if (typeof res.reasoningContent === 'string') {
@@ -2518,8 +2560,8 @@ async function runGroupGeneration(
         pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined, localAssistantId)
         applyGenerateDonePayload(localAssistantId, res)
         chats.appendLocalMessageContent(localAssistantId, res.content || '')
-        scrollToBottom()
-        void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
+        scrollVisible()
+        ttsAfterFlush(localAssistantId)
       } else {
         throw new Error(res.error || 'unknown error')
       }
@@ -2567,30 +2609,39 @@ function handleRemoveDraftImage(imageId: string) {
  * @returns {Promise<void>} 完成时返回
  */
 async function sendUserMessage(options?: { retryText?: string }) {
-  // 发送前先落盘待持久化的版本切换状态
-  await flushPendingGreetingVersion()
-
+  const chat = activeChat.value
+  if (!chat) return
+  const chatId = chat.id
+  const state = getGenerationState(chatId)
+  const { versions } = state
+  const { group, isGenerating, streamError, stream } = state
+  const { stopRequested, beginGenerateAbort, applyGenerateDonePayload, makeGenerateSseHandler, consumeGenerationFinallyFlags } = state.transport
+  const { chatReasoningMessageId, chatReasoningContent, chatReasoningStreamActive, markReasoningStreamPhaseStart, pushCurrentReasoningToBlocks } = state.reasoning
+  const { scrollVisible, ttsAfterFlush } = state
   const isRetry = options?.retryText !== undefined
   const rawText = isRetry ? (options?.retryText ?? '') : draftMessage.value.trim()
   const pendingDraftImages = isRetry ? [] : [...draftImages.value]
   const text = isRetry ? rawText : replaceInputPlaceholders(rawText)
   if (!isRetry && !text && pendingDraftImages.length === 0) return
-  if (!activeChat.value) return
-  if (isGenerating.value) return
+  if (isGenerating.value || group.isInterjecting.value) return
   if (!isRetry) {
     draftMessage.value = ''
     clearDraftImages()
   }
   streamError.value = null
 
-  const chatId = activeChat.value.id
-  const isGroup = activeChat.value.isGroup
+  const isGroup = chat.isGroup
   const now = new Date().toISOString()
+  const persona = selectedPersona.value
+  const senderName = persona?.name ?? userName.value
+  const webSearchEnabled = webSearchSessionEnabled.value
+  const geminiSearch = geminiSearchRequestValue.value
+  const imageFallbackMode = isImageStickyActive()
   const userRole = group.effectivePureAiMode.value ? ('system' as const) : ('user' as const)
   let uploadedImages: ChatImageAttachment[] = []
 
   // 末尾已有同一条没回复的消息（比如上次生成失败）：直接重新生成，不再追加一条重复的
-  const tailMessage = activeChat.value.messages[activeChat.value.messages.length - 1]
+  const tailMessage = chat.messages[chat.messages.length - 1]
   const reuseTailMessage =
     !isGroup &&
     pendingDraftImages.length === 0 &&
@@ -2601,7 +2652,7 @@ async function sendUserMessage(options?: { retryText?: string }) {
 
   // 处理暂停状态下的插话
   if (isGroup && group.showContinueButton.value) {
-    const localUserId = `local_user_${Date.now()}`
+    const localUserId = `local_user_${Date.now()}_${++localMessageSequence}`
     armUserMessageEnterAnimation(localUserId)
     chats.addLocalMessage({
       version: 1,
@@ -2609,83 +2660,84 @@ async function sendUserMessage(options?: { retryText?: string }) {
       role: userRole,
       content: text,
       images: uploadedImages,
-      senderPersonaId: userRole === 'user' ? (selectedPersona.value?.id ?? null) : null,
-      senderName: userRole === 'user' ? (selectedPersona.value?.name ?? userName.value) : null,
-      senderAvatar: userRole === 'user' ? (selectedPersona.value?.avatar ?? null) : null,
+      senderPersonaId: userRole === 'user' ? (persona?.id ?? null) : null,
+      senderName: userRole === 'user' ? (senderName) : null,
+      senderAvatar: userRole === 'user' ? (persona?.avatar ?? null) : null,
       ts: now,
-    })
-    scrollToBottomAnimated()
+    }, chatId)
+    if (chats.activeChatId === chatId) scrollToBottomAnimated()
     void tryAutoReadUserMessage(localUserId)
 
     try {
+      uploadedImages = await uploadDraftImages(chatId, pendingDraftImages)
       await apiPost(`/api/chats/${chatId}/messages`, {
         role: userRole,
         content: text,
         images: uploadedImages,
-        senderPersonaId: userRole === 'user' ? (selectedPersona.value?.id ?? null) : null,
-        senderName: userRole === 'user' ? (selectedPersona.value?.name ?? userName.value) : null,
-        senderAvatar: userRole === 'user' ? (selectedPersona.value?.avatar ?? null) : null,
+        senderPersonaId: userRole === 'user' ? (persona?.id ?? null) : null,
+        senderName: userRole === 'user' ? (senderName) : null,
+        senderAvatar: userRole === 'user' ? (persona?.avatar ?? null) : null,
       })
-      await chats.load(chatId)
-      await afterChatReload(chatId)
-      bumpSidebarForActiveChat()
+      await refreshAfterGeneration(chatId)
+      if (chats.activeChatId === chatId) bumpSidebarForActiveChat()
     } catch (e: any) {
       streamError.value = e
     }
     return
   }
 
-  // 清理版本历史（含持久化：清 greetingVariants，仅保留当前选中正文与推理）
-  if (activeChat.value) {
-    for (const msg of activeChat.value.messages) {
-      if (msg.role !== 'assistant') continue
-      if (
-        Array.isArray(msg.greetingVariants) &&
-        msg.greetingVariants.length > 1 &&
-        !versions.hasMultipleVersions(msg)
-      ) {
-        versions.hydrateGreetingVariants(
-          msg.id,
-          msg.greetingVariants,
-          msg.content,
-          msg.greetingVariantIndex ?? null,
-          msg.greetingVariantReasoningContents ?? null,
-          msg.greetingVariantReasoningDurations ?? null,
-        )
-      }
-      if (
-        versions.hasMultipleVersions(msg) ||
-        (Array.isArray(msg.greetingVariants) && msg.greetingVariants.length > 1)
-      ) {
-        const content = versions.cleanupVersions(msg)
-        const r =
-          (versions.getDisplayReasoning(msg) || msg.reasoningContent || '').trim() || null
-        try {
-          await chats.updateMessage(activeChat.value.id, msg.id, msg.role as MainChatRole, content, msg.characterId, {
-            greetingVariants: null,
-            greetingVariantReasoningContents: null,
-            reasoningContent: r,
-          })
-        } catch (e) {
-          console.error(e)
+  isGenerating.value = true
+  const signal = beginGenerateAbort()
+  const useStream = settings.settings?.streamEnabled !== false
+  let generationHadError = false
+  try {
+    await flushPendingGreetingVersion()
+    signal.throwIfAborted()
+    // 清理版本历史（含持久化：清 greetingVariants，仅保留当前选中正文与推理）
+    if (chat.messages.length) {
+      for (const msg of chat.messages) {
+        if (msg.role !== 'assistant') continue
+        if (
+          Array.isArray(msg.greetingVariants) &&
+          msg.greetingVariants.length > 1 &&
+          !versions.hasMultipleVersions(msg)
+        ) {
+          versions.hydrateGreetingVariants(
+            msg.id,
+            msg.greetingVariants,
+            msg.content,
+            msg.greetingVariantIndex ?? null,
+            msg.greetingVariantReasoningContents ?? null,
+            msg.greetingVariantReasoningDurations ?? null,
+          )
         }
-        msg.content = content
-        msg.reasoningContent = r
+        if (
+          versions.hasMultipleVersions(msg) ||
+          (Array.isArray(msg.greetingVariants) && msg.greetingVariants.length > 1)
+        ) {
+          const content = versions.cleanupVersions(msg)
+          const r =
+            (versions.getDisplayReasoning(msg) || msg.reasoningContent || '').trim() || null
+          try {
+            await chats.updateMessage(chatId, msg.id, msg.role as MainChatRole, content, msg.characterId, {
+              greetingVariants: null,
+              greetingVariantReasoningContents: null,
+              reasoningContent: r,
+            })
+          } catch (e) {
+            console.error(e)
+          }
+          msg.content = content
+          msg.reasoningContent = r
+        }
       }
     }
-  }
-  
-  group.resetGroupState()
 
-  isGenerating.value = true
-  beginGenerateAbort()
-
-  const useStream = settings.settings?.streamEnabled !== false
-
-  try {
+    group.resetGroupState()
     uploadedImages = await uploadDraftImages(chatId, pendingDraftImages)
+    signal.throwIfAborted()
     if (isGroup) {
-      const localUserId = `local_user_${Date.now()}`
+      const localUserId = `local_user_${Date.now()}_${++localMessageSequence}`
       armUserMessageEnterAnimation(localUserId)
       chats.addLocalMessage({
         version: 1,
@@ -2693,28 +2745,28 @@ async function sendUserMessage(options?: { retryText?: string }) {
         role: userRole,
         content: text,
         images: uploadedImages,
-        senderPersonaId: userRole === 'user' ? (selectedPersona.value?.id ?? null) : null,
-        senderName: userRole === 'user' ? (selectedPersona.value?.name ?? userName.value) : null,
-        senderAvatar: userRole === 'user' ? (selectedPersona.value?.avatar ?? null) : null,
+        senderPersonaId: userRole === 'user' ? (persona?.id ?? null) : null,
+        senderName: userRole === 'user' ? (senderName) : null,
+        senderAvatar: userRole === 'user' ? (persona?.avatar ?? null) : null,
         ts: now,
-      })
-      scrollToBottomAnimated()
+      }, chatId)
+      if (chats.activeChatId === chatId) scrollToBottomAnimated()
       void tryAutoReadUserMessage(localUserId)
 
       await apiPost(`/api/chats/${chatId}/messages`, {
         role: userRole,
         content: text,
         images: uploadedImages,
-        senderPersonaId: userRole === 'user' ? (selectedPersona.value?.id ?? null) : null,
-        senderName: userRole === 'user' ? (selectedPersona.value?.name ?? userName.value) : null,
-        senderAvatar: userRole === 'user' ? (selectedPersona.value?.avatar ?? null) : null,
+        senderPersonaId: userRole === 'user' ? (persona?.id ?? null) : null,
+        senderName: userRole === 'user' ? (senderName) : null,
+        senderAvatar: userRole === 'user' ? (persona?.avatar ?? null) : null,
       })
-      bumpSidebarForActiveChat()
+      if (chats.activeChatId === chatId) bumpSidebarForActiveChat()
 
       group.showInterject()
     } else {
-      const localUserId = `local_user_${Date.now()}`
-      const localAssistantId = `local_assistant_${Date.now()}`
+      const localUserId = `local_user_${Date.now()}_${++localMessageSequence}`
+      const localAssistantId = `local_assistant_${Date.now()}_${++localMessageSequence}`
 
       chatReasoningMessageId.value = localAssistantId
       chatReasoningContent.value = ''
@@ -2729,15 +2781,15 @@ async function sendUserMessage(options?: { retryText?: string }) {
           role: userRole,
           content: text,
           images: uploadedImages,
-          senderPersonaId: userRole === 'user' ? (selectedPersona.value?.id ?? null) : null,
-          senderName: userRole === 'user' ? (selectedPersona.value?.name ?? userName.value) : null,
-          senderAvatar: userRole === 'user' ? (selectedPersona.value?.avatar ?? null) : null,
+          senderPersonaId: userRole === 'user' ? (persona?.id ?? null) : null,
+          senderName: userRole === 'user' ? (senderName) : null,
+          senderAvatar: userRole === 'user' ? (persona?.avatar ?? null) : null,
           ts: now,
-        })
+        }, chatId)
         void tryAutoReadUserMessage(localUserId)
       }
-      chats.addLocalMessage({ version: 1, id: localAssistantId, role: 'assistant', content: '', ts: now })
-      scrollToBottomAnimated()
+      chats.addLocalMessage({ version: 1, id: localAssistantId, role: 'assistant', content: '', ts: now }, chatId)
+      if (chats.activeChatId === chatId) scrollToBottomAnimated()
 
       if (useStream) {
         stream.registerStreamMessage(localAssistantId)
@@ -2749,22 +2801,22 @@ async function sendUserMessage(options?: { retryText?: string }) {
               userMessage: text,
               appendUserMessage: !reuseTailMessage,
               userImages: uploadedImages,
-              imageFallbackMode: isImageStickyActive(),
-              senderPersonaId: selectedPersona.value?.id ?? null,
-              senderName: selectedPersona.value?.name ?? userName.value,
-              senderAvatar: selectedPersona.value?.avatar ?? null,
-              userPersona: selectedPersona.value ?? null,
-              webSearchEnabled: webSearchSessionEnabled.value,
-            geminiSearch: geminiSearchRequestValue.value,
+              imageFallbackMode,
+              senderPersonaId: persona?.id ?? null,
+              senderName: senderName,
+              senderAvatar: persona?.avatar ?? null,
+              userPersona: persona ?? null,
+              webSearchEnabled,
+              geminiSearch,
             },
             makeGenerateSseHandler({ localAssistantId }),
-            aborter.value?.signal,
+            signal,
           )
         } finally {
           stream.flushForMessage(localAssistantId)
           stopRequested.value = false
         }
-        void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
+        ttsAfterFlush(localAssistantId)
       } else {
         const res = await apiPost<{
           ok: boolean
@@ -2778,14 +2830,14 @@ async function sendUserMessage(options?: { retryText?: string }) {
           userMessage: text,
           appendUserMessage: !reuseTailMessage,
           userImages: uploadedImages,
-          imageFallbackMode: isImageStickyActive(),
-          senderPersonaId: selectedPersona.value?.id ?? null,
-          senderName: selectedPersona.value?.name ?? userName.value,
-          senderAvatar: selectedPersona.value?.avatar ?? null,
-          userPersona: selectedPersona.value ?? null,
-          webSearchEnabled: webSearchSessionEnabled.value,
-            geminiSearch: geminiSearchRequestValue.value,
-        })
+          imageFallbackMode,
+          senderPersonaId: persona?.id ?? null,
+          senderName: senderName,
+          senderAvatar: persona?.avatar ?? null,
+          userPersona: persona ?? null,
+          webSearchEnabled,
+          geminiSearch,
+        }, signal)
         
         if (res.ok) {
           if (typeof res.reasoningContent === 'string') {
@@ -2794,8 +2846,8 @@ async function sendUserMessage(options?: { retryText?: string }) {
           pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined, localAssistantId)
           applyGenerateDonePayload(localAssistantId, res)
           chats.appendLocalMessageContent(localAssistantId, res.content || '')
-          scrollToBottom()
-          void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
+          scrollVisible()
+          ttsAfterFlush(localAssistantId)
         } else {
           throw new Error(res.error || 'unknown error')
         }
@@ -2804,51 +2856,60 @@ async function sendUserMessage(options?: { retryText?: string }) {
   } catch (e: any) {
     if (!isAbortError(e)) {
       const errMsg = e?.message ?? String(e)
-      if (uploadedImages.length > 0) {
+      generationHadError = true
+      if (uploadedImages.length > 0 && chats.activeChatId === chatId) {
         openImageFallback(errMsg, async () => {
           imageFallbackDialog.value.visible = false
           if (isGroup) {
-            await chats.load(chatId)
-            await afterChatReload(chatId)
+            await refreshAfterGeneration(chatId)
           } else {
-            const localAssistantId = `local_assistant_retry_${Date.now()}`
-            chats.addLocalMessage({ version: 1, id: localAssistantId, role: 'assistant', content: '', ts: new Date().toISOString() })
-            if (useStream) {
-              stream.registerStreamMessage(localAssistantId)
-              try {
-                await postAndConsumeSse('/api/generate/stream', {
+            if (isGenerating.value) return
+            const retrySignal = beginGenerateAbort()
+            isGenerating.value = true
+            try {
+              const localAssistantId = `local_assistant_retry_${Date.now()}_${++localMessageSequence}`
+              chats.addLocalMessage({ version: 1, id: localAssistantId, role: 'assistant', content: '', ts: new Date().toISOString() }, chatId)
+              if (useStream) {
+                stream.registerStreamMessage(localAssistantId)
+                try {
+                  await postAndConsumeSse('/api/generate/stream', {
+                    chatId,
+                    userMessage: text,
+                    appendUserMessage: false,
+                    imageFallbackMode: true,
+                    userPersona: persona ?? null,
+                    webSearchEnabled,
+                    geminiSearch,
+                  }, makeGenerateSseHandler({ localAssistantId }), retrySignal)
+                } finally {
+                  stream.flushForMessage(localAssistantId)
+                }
+                ttsAfterFlush(localAssistantId)
+              } else {
+                const retryRes = await apiPost<{ ok: boolean; content: string; error?: string }>('/api/generate/stream', {
                   chatId,
                   userMessage: text,
                   appendUserMessage: false,
                   imageFallbackMode: true,
-                  userPersona: selectedPersona.value ?? null,
-                  webSearchEnabled: webSearchSessionEnabled.value,
-            geminiSearch: geminiSearchRequestValue.value,
-                }, makeGenerateSseHandler({ localAssistantId }), aborter.value?.signal)
-              } finally {
-                stream.flushForMessage(localAssistantId)
+                  userPersona: persona ?? null,
+                  webSearchEnabled,
+                  geminiSearch,
+                }, retrySignal)
+                if (!retryRes.ok) throw new Error(retryRes.error || 'unknown error')
+                chats.appendLocalMessageContent(localAssistantId, retryRes.content || '')
+                ttsAfterFlush(localAssistantId)
               }
-              void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
-            } else {
-              const retryRes = await apiPost<{ ok: boolean; content: string; error?: string }>('/api/generate/stream', {
-                chatId,
-                userMessage: text,
-                appendUserMessage: false,
-                imageFallbackMode: true,
-                userPersona: selectedPersona.value ?? null,
-                webSearchEnabled: webSearchSessionEnabled.value,
-            geminiSearch: geminiSearchRequestValue.value,
-              })
-              if (!retryRes.ok) throw new Error(retryRes.error || 'unknown error')
-              chats.appendLocalMessageContent(localAssistantId, retryRes.content || '')
-              void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
-            }
-            await chats.load(chatId)
-            await afterChatReload(chatId)
-            const bind = resolveImageBindingKey()
-            if (bind) {
-              imageStickyBinding.value = bind
-              saveImageStickyBindingRow(bind)
+              await refreshAfterGeneration(chatId)
+              const bind = chats.activeChatId === chatId ? resolveImageBindingKey() : null
+              if (bind) {
+                imageStickyBinding.value = bind
+                saveImageStickyBindingRow(bind)
+              }
+            } catch (error) {
+              if (!isAbortError(error)) streamError.value = error
+              await settleAfterGeneration(() => persistLocalStreamingMessages(chatId))
+            } finally {
+              isGenerating.value = false
             }
           }
         })
@@ -2857,18 +2918,20 @@ async function sendUserMessage(options?: { retryText?: string }) {
       }
     }
   } finally {
-    isGenerating.value = false
     group.currentSpeakerIndex.value = -1
-    const persistInstead = consumeGenerationFinallyFlags(!!streamError.value) === 'persist'
-    await settleAfterGeneration(async () => {
-      if (persistInstead) {
-        await persistLocalStreamingMessages(chatId)
-      } else {
-        await chats.load(chatId)
-        await afterChatReload(chatId)
-        if (!isGroup && !streamError.value) bumpSidebarForActiveChat()
-      }
-    })
+    const persistInstead = consumeGenerationFinallyFlags(generationHadError) === 'persist'
+    try {
+      await settleAfterGeneration(async () => {
+        if (persistInstead) {
+          await persistLocalStreamingMessages(chatId)
+        } else {
+          await refreshAfterGeneration(chatId)
+          if (!isGroup && chats.activeChatId === chatId) bumpSidebarForActiveChat()
+        }
+      })
+    } finally {
+      isGenerating.value = false
+    }
     await settings.load()
   }
 }
@@ -2882,15 +2945,22 @@ async function sendUserMessage(options?: { retryText?: string }) {
  * @returns {Promise<void>} 完成时返回
  */
 async function continueGroupChat() {
-  if (!activeChat.value || group.pendingMembers.value.length === 0) return
+  const chat = activeChat.value
+  if (!chat) return
+  const chatId = chat.id
+  const state = getGenerationState(chatId)
+  const { group, isGenerating, streamError } = state
+  const { beginGenerateAbort, consumeGenerationFinallyFlags } = state.transport
+  const { finalizeSaveSendAfterGeneration } = state.defer
+  if (isGenerating.value || group.isInterjecting.value || group.pendingMembers.value.length === 0) return
   
   group.showContinueButton.value = false
   group.isPaused.value = false
   isGenerating.value = true
+  beginGenerateAbort()
   
-  const chatId = activeChat.value.id
   const useStream = settings.settings?.streamEnabled !== false
-  const groupDelay = activeChat.value.groupDelay || 1500
+  const groupDelay = chat.groupDelay || 1500
   
   try {
     await runGroupGeneration(chatId, group.pendingMembers.value, useStream, groupDelay, 0)
@@ -2914,9 +2984,9 @@ async function continueGroupChat() {
       group.pendingMembers.value = []
       if (!persistInstead) {
         await settleAfterGeneration(async () => {
-          await chats.load(chatId)
-          await afterChatReload(chatId)
-          if (!streamError.value) bumpSidebarForActiveChat()
+          await refreshAfterGeneration(chatId)
+          await finalizeSaveSendAfterGeneration(chatId, !!streamError.value, finalizeDeferredTailDelete)
+          if (!streamError.value && chats.activeChatId === chatId) bumpSidebarForActiveChat()
         })
         await settings.load()
       } else {
@@ -2936,22 +3006,30 @@ async function continueGroupChat() {
  * @returns {Promise<void>} 完成时返回
  */
 async function startNextRound() {
-  if (!activeChat.value) return
-  if (!activeChat.value.isGroup) return
-  if (isGenerating.value) return
+  const chat = activeChat.value
+  if (!chat?.isGroup) return
+  const chatId = chat.id
+  const state = getGenerationState(chatId)
+  const { group, isGenerating, streamError } = state
+  const { beginGenerateAbort, consumeGenerationFinallyFlags } = state.transport
+  const { beginSaveSendDefer, getSaveSendDeferForChat, finalizeSaveSendAfterGeneration } = state.defer
+  if (isGenerating.value || group.isInterjecting.value) return
 
   streamError.value = null
   group.resetGroupState()
 
-  const chatId = activeChat.value.id
+  const deferred = getSaveSendDeferForChat(chatId)
+  if (deferred?.singleAssistantTailMergeId) {
+    beginSaveSendDefer({ ...deferred, singleAssistantTailMergeId: null })
+  }
   const useStream = settings.settings?.streamEnabled !== false
-  const groupDelay = activeChat.value.groupDelay || 1500
+  const groupDelay = chat.groupDelay || 1500
 
   isGenerating.value = true
   beginGenerateAbort()
 
   try {
-    const allMemberIds = [...activeChat.value.memberIds]
+    const allMemberIds = [...chat.memberIds]
     const memberIds = group.filterMembersByProbability(allMemberIds)
 
     await runGroupGeneration(chatId, memberIds, useStream, groupDelay, 0)
@@ -2959,7 +3037,7 @@ async function startNextRound() {
 
     group.showInterject()
   } catch (e: any) {
-    streamError.value = e
+    if (!isAbortError(e)) streamError.value = e
   } finally {
     isGenerating.value = false
     group.currentSpeakerIndex.value = -1
@@ -2970,9 +3048,9 @@ async function startNextRound() {
     if (!group.isPaused.value) {
       if (!persistInstead) {
         await settleAfterGeneration(async () => {
-          await chats.load(chatId)
-          await afterChatReload(chatId)
-          if (!streamError.value) bumpSidebarForActiveChat()
+          await refreshAfterGeneration(chatId)
+          await finalizeSaveSendAfterGeneration(chatId, !!streamError.value, finalizeDeferredTailDelete)
+          if (!streamError.value && chats.activeChatId === chatId) bumpSidebarForActiveChat()
         })
       }
       await settings.load()
@@ -2991,9 +3069,17 @@ async function startNextRound() {
  * @returns {Promise<void>} 完成时返回
  */
 async function triggerInterject(characterId: string) {
-  if (!activeChat.value || isGenerating.value || group.isInterjecting.value) return
+  const chat = activeChat.value
+  if (!chat) return
+  const chatId = chat.id
+  const state = getGenerationState(chatId)
+  const { group, isGenerating, streamError, stream } = state
+  const { aborter, stopRequested, beginGenerateAbort, applyGenerateDonePayload, makeGenerateSseHandler, consumeGenerationFinallyFlags } = state.transport
+  const { chatReasoningMessageId, chatReasoningContent, chatReasoningStreamActive, markReasoningStreamPhaseStart, pushCurrentReasoningToBlocks } = state.reasoning
+  const { getSaveSendDeferForChat, finalizeSaveSendAfterGeneration } = state.defer
+  const { scrollVisible, ttsAfterFlush } = state
+  if (isGenerating.value || group.isInterjecting.value) return
   
-  const chatId = activeChat.value.id
   group.isInterjecting.value = true
   streamError.value = null
   beginGenerateAbort()
@@ -3015,8 +3101,8 @@ async function triggerInterject(characterId: string) {
     characterId,
     ts: new Date().toISOString() 
   }
-  chats.addLocalMessage(localMsg)
-  scrollToBottom()
+  chats.addLocalMessage(localMsg, chatId)
+  scrollVisible()
   
   let generationHadError = false
   try {
@@ -3034,7 +3120,7 @@ async function triggerInterject(characterId: string) {
         stream.flushForMessage(localAssistantId)
         stopRequested.value = false
       }
-      void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
+      ttsAfterFlush(localAssistantId)
     } else {
       const res = await apiPost<{
         ok: boolean
@@ -3049,8 +3135,8 @@ async function triggerInterject(characterId: string) {
         characterId,
         omitMessageIds,
         webSearchEnabled: webSearchSessionEnabled.value,
-            geminiSearch: geminiSearchRequestValue.value,
-      })
+        geminiSearch: geminiSearchRequestValue.value,
+      }, aborter.value?.signal)
       
       if (res.ok) {
         if (typeof res.reasoningContent === 'string') {
@@ -3059,8 +3145,8 @@ async function triggerInterject(characterId: string) {
         pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined, localAssistantId)
         applyGenerateDonePayload(localAssistantId, res)
         chats.appendLocalMessageContent(localAssistantId, res.content || '')
-        scrollToBottom()
-        void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
+        scrollVisible()
+        ttsAfterFlush(localAssistantId)
       } else {
         generationHadError = true
         streamError.value = res.error || 'unknown error'
@@ -3078,12 +3164,11 @@ async function triggerInterject(characterId: string) {
       if (persistInstead) {
         await persistLocalStreamingMessages(chatId)
       } else {
-        await chats.load(chatId)
-        await afterChatReload(chatId)
+        await refreshAfterGeneration(chatId)
         const hadSaveSendDefer = !!getSaveSendDeferForChat(chatId)
         await finalizeSaveSendAfterGeneration(chatId, generationHadError, finalizeDeferredTailDelete)
         if (!hadSaveSendDefer && !generationHadError) {
-          bumpSidebarForActiveChat()
+          if (chats.activeChatId === chatId) bumpSidebarForActiveChat()
         }
       }
     })
@@ -3097,6 +3182,10 @@ async function triggerInterject(characterId: string) {
  * 取消请求，刷新所有流式缓冲，但不重新加载聊天数据。
  */
 function stopStreaming() {
+  const state = getGenerationState(activeChat.value?.id ?? null)
+  const { stream } = state
+  const { aborter, stopRequested, stopStreamingHold } = state.transport
+  const { chatReasoningMessageId, chatReasoningElapsedSec, chatReasoningStreamActive, finalizeReasoningElapsedBeforeStop } = state.reasoning
   if (!aborter.value) return
   stopRequested.value = true
   stopStreamingHold.value = true
@@ -3136,10 +3225,12 @@ async function settleAfterGeneration(task: () => Promise<unknown>) {
 }
 
 async function persistLocalStreamingMessages(chatId: string) {
-  const chat = activeChat.value
-  if (!chat?.messages?.length) return
-
+  const state = getGenerationState(chatId)
+  const { chatReasoningMessageId, chatReasoningContent, chatReasoningBlocks, chatReasoningElapsedSec, chatReasoningStreamActive, clearReasoningPhaseTiming } = state.reasoning
+  const { rewriteMergeCtx, getSaveSendDeferForChat, clearSaveSendDeferForChat, clearRewriteAndVisibility } = state.defer
+  const localMessages = chats.localMessages[chatId] ?? []
   const saveSendSnapshot = getSaveSendDeferForChat(chatId)
+  const rewriteSnapshot = rewriteMergeCtx.value?.chatId === chatId ? rewriteMergeCtx.value : null
   const capturedReasoningMessageId = chatReasoningMessageId.value
   const capturedReasoningFromRef = chatReasoningContent.value.trim()
   const blocksSnapshot = [...chatReasoningBlocks.value]
@@ -3155,7 +3246,7 @@ async function persistLocalStreamingMessages(chatId: string) {
 
   const durationSecForLocalId = (localId: string): number | null => {
     if (capturedReasoningMessageId !== localId) return null
-    const lm = chat.messages.find((x) => x.id === localId)
+    const lm = localMessages.find((x) => x.id === localId)
     if (
       lm &&
       typeof lm.reasoningDurationSec === 'number' &&
@@ -3169,7 +3260,7 @@ async function persistLocalStreamingMessages(chatId: string) {
     return null
   }
 
-  const localAssistantMessages = chat.messages
+  const localAssistantMessages = localMessages
     .filter((m) => m.role === 'assistant' && m.id.startsWith('local_'))
     .map((m) => ({
       localId: m.id,
@@ -3178,18 +3269,15 @@ async function persistLocalStreamingMessages(chatId: string) {
     }))
     .filter((m) => {
       if (m.content) return true
-      return !!reasoningTextForLocalId(m.localId)
+      return !saveSendSnapshot && !rewriteSnapshot && !!reasoningTextForLocalId(m.localId)
     })
 
-  await chats.load(chatId)
-  let serverMessages = activeChat.value?.messages ?? []
-
-  const rewriteSnapshot = rewriteMergeCtx.value
+  let serverMessages = (await chats.refresh(chatId, true)).messages
 
   if (saveSendSnapshot) {
     clearSaveSendDeferForChat(chatId)
 
-    if (!saveSendSnapshot.singleAssistantTailMergeId) {
+    if (localAssistantMessages.length && !saveSendSnapshot.singleAssistantTailMergeId) {
       for (const id of saveSendSnapshot.tailIdsToDeleteOnSuccess) {
         if (!id.startsWith('local_')) {
           try {
@@ -3199,8 +3287,7 @@ async function persistLocalStreamingMessages(chatId: string) {
           }
         }
       }
-      await chats.load(chatId)
-      serverMessages = activeChat.value?.messages ?? []
+      serverMessages = (await chats.refresh(chatId)).messages
     }
   }
 
@@ -3228,7 +3315,7 @@ async function persistLocalStreamingMessages(chatId: string) {
         reasoningForThis,
         durationForThis,
       })
-      serverMessages = activeChat.value?.messages ?? []
+      serverMessages = (await chats.refresh(chatId)).messages
       continue
     }
 
@@ -3246,7 +3333,7 @@ async function persistLocalStreamingMessages(chatId: string) {
         durationForThis,
       })
       clearRewriteAndVisibility()
-      serverMessages = activeChat.value?.messages ?? []
+      serverMessages = (await chats.refresh(chatId)).messages
       continue
     }
 
@@ -3328,8 +3415,7 @@ async function persistLocalStreamingMessages(chatId: string) {
   chatReasoningStreamActive.value = false
   clearRewriteAndVisibility()
   clearReasoningPhaseTiming()
-  await chats.load(chatId)
-  await afterChatReload(chatId)
+  await refreshAfterGeneration(chatId)
 }
 
 async function finalizeDeferredTailDelete(chatId: string, tailIds: string[]) {
@@ -3343,9 +3429,8 @@ async function finalizeDeferredTailDelete(chatId: string, tailIds: string[]) {
       }
     }
   }
-  await chats.load(chatId)
-  await afterChatReload(chatId)
-  bumpSidebarForActiveChat()
+  await refreshAfterGeneration(chatId)
+  if (chats.activeChatId === chatId) bumpSidebarForActiveChat()
 }
 
 /**
@@ -3359,11 +3444,11 @@ async function finalizeDeferredTailDelete(chatId: string, tailIds: string[]) {
  * - 否则发送消息
  */
 function handlePrimaryAction() {
-  if (isStreamingActive.value) {
+  if (canStopGeneration.value) {
     stopStreaming()
     return
   }
-  if (group.showContinueButton.value && activeChat.value?.isGroup) {
+  if (group.value.showContinueButton.value && activeChat.value?.isGroup) {
     if (hasDraftMessage.value) {
       sendUserMessage()
     } else {
@@ -3381,21 +3466,21 @@ function handlePrimaryAction() {
 /**
  * 切换到上一个版本
  *
- * 使用versions.switchToPreviousVersion（来自composables/useMessageVersions.ts）切换到消息的上一个版本。
+ * 使用versions.value.switchToPreviousVersion（来自composables/useMessageVersions.ts）切换到消息的上一个版本。
  *
  * @param {ChatMessage} m - 消息对象（来自types/models.ts）
  */
 function handleSwitchPreviousVersion(m: ChatMessage) {
-  const previousContent = versions.getDisplayContent(m)
-  const newContent = versions.switchToPreviousVersion(m)
+  const previousContent = versions.value.getDisplayContent(m)
+  const newContent = versions.value.switchToPreviousVersion(m)
   if (newContent !== null && activeChat.value) {
     const msg = activeChat.value.messages.find((msg) => msg.id === m.id)
     if (msg) {
       invalidateTtsCacheIfTextChanged(msg, previousContent, newContent)
       msg.content = newContent
-      const idx = versions.getCurrentVersionIndex(m)
+      const idx = versions.value.getCurrentVersionIndex(m)
       msg.greetingVariantIndex = idx
-      const snap = versions.getVariantArraysForMessage(m)
+      const snap = versions.value.getVariantArraysForMessage(m)
       if (snap && idx >= 0 && idx < snap.reasonings.length) {
         msg.reasoningContent = snap.reasonings[idx]?.trim() || null
         msg.reasoningDurationSec = snap.durations[idx] ?? undefined
@@ -3405,12 +3490,12 @@ function handleSwitchPreviousVersion(m: ChatMessage) {
       !m.id.startsWith('local_') &&
       activeChat.value &&
       m.role !== 'tool' &&
-      (versions.hasMultipleVersions(m) || (Array.isArray(msg?.greetingVariants) && msg.greetingVariants.length > 1))
+      (versions.value.hasMultipleVersions(m) || (Array.isArray(msg?.greetingVariants) && msg.greetingVariants.length > 1))
     if (needPersist) {
-      const idx = versions.getCurrentVersionIndex(m)
-      const snap = versions.getVariantArraysForMessage(m)
+      const idx = versions.value.getCurrentVersionIndex(m)
+      const snap = versions.value.getVariantArraysForMessage(m)
       if (snap) {
-        pendingGreetingVersion.value = {
+        queueGreetingVersion({
           chatId: activeChat.value.id,
           messageId: m.id,
           role: m.role,
@@ -3421,7 +3506,8 @@ function handleSwitchPreviousVersion(m: ChatMessage) {
           greetingVariantReasoningContents: snap.reasonings,
           greetingVariantReasoningDurations: snap.durations,
           reasoningContent: (snap.reasonings[idx]?.trim() || null),
-        }
+        })
+        void flushPendingGreetingVersion()
       }
     }
   }
@@ -3430,21 +3516,21 @@ function handleSwitchPreviousVersion(m: ChatMessage) {
 /**
  * 切换到下一个版本
  *
- * 使用versions.switchToNextVersion（来自composables/useMessageVersions.ts）切换到消息的下一个版本。
+ * 使用versions.value.switchToNextVersion（来自composables/useMessageVersions.ts）切换到消息的下一个版本。
  *
  * @param {ChatMessage} m - 消息对象（来自types/models.ts）
  */
 function handleSwitchNextVersion(m: ChatMessage) {
-  const previousContent = versions.getDisplayContent(m)
-  const newContent = versions.switchToNextVersion(m)
+  const previousContent = versions.value.getDisplayContent(m)
+  const newContent = versions.value.switchToNextVersion(m)
   if (newContent !== null && activeChat.value) {
     const msg = activeChat.value.messages.find((msg) => msg.id === m.id)
     if (msg) {
       invalidateTtsCacheIfTextChanged(msg, previousContent, newContent)
       msg.content = newContent
-      const idx = versions.getCurrentVersionIndex(m)
+      const idx = versions.value.getCurrentVersionIndex(m)
       msg.greetingVariantIndex = idx
-      const snap = versions.getVariantArraysForMessage(m)
+      const snap = versions.value.getVariantArraysForMessage(m)
       if (snap && idx >= 0 && idx < snap.reasonings.length) {
         msg.reasoningContent = snap.reasonings[idx]?.trim() || null
         msg.reasoningDurationSec = snap.durations[idx] ?? undefined
@@ -3454,12 +3540,12 @@ function handleSwitchNextVersion(m: ChatMessage) {
       !m.id.startsWith('local_') &&
       activeChat.value &&
       m.role !== 'tool' &&
-      (versions.hasMultipleVersions(m) || (Array.isArray(msg?.greetingVariants) && msg.greetingVariants.length > 1))
+      (versions.value.hasMultipleVersions(m) || (Array.isArray(msg?.greetingVariants) && msg.greetingVariants.length > 1))
     if (needPersist) {
-      const idx = versions.getCurrentVersionIndex(m)
-      const snap = versions.getVariantArraysForMessage(m)
+      const idx = versions.value.getCurrentVersionIndex(m)
+      const snap = versions.value.getVariantArraysForMessage(m)
       if (snap) {
-        pendingGreetingVersion.value = {
+        queueGreetingVersion({
           chatId: activeChat.value.id,
           messageId: m.id,
           role: m.role,
@@ -3470,7 +3556,8 @@ function handleSwitchNextVersion(m: ChatMessage) {
           greetingVariantReasoningContents: snap.reasonings,
           greetingVariantReasoningDurations: snap.durations,
           reasoningContent: (snap.reasonings[idx]?.trim() || null),
-        }
+        })
+        void flushPendingGreetingVersion()
       }
     }
   }
@@ -3487,9 +3574,10 @@ async function mergePartialAssistantIntoExistingMessage(payload: {
   reasoningForThis: string | null
   durationForThis: number | null
 }) {
+  const { versions } = getGenerationState(payload.chatId)
   const { chatId, targetMessageId, partialBody, reasoningForThis, durationForThis } = payload
-  await chats.load(chatId)
-  const targetMsg = activeChat.value?.messages.find((x) => x.id === targetMessageId)
+  const refreshed = await chats.refresh(chatId)
+  const targetMsg = refreshed.messages.find((x) => x.id === targetMessageId)
   if (!targetMsg || targetMsg.role !== 'assistant') return
 
   const originalMessageId = payload.originalMessageId ?? versions.getOriginalMessageId(targetMsg.id)
@@ -3571,15 +3659,24 @@ async function mergeRewriteInterruptedIntoAnchor(payload: {
  * @returns {Promise<void>} 完成时返回
  */
 async function handleRewriteMessage(m: ChatMessage) {
-  if (!activeChat.value) return
-  if (isGenerating.value) return
+  const chat = activeChat.value
+  if (!chat) return
+  const chatId = chat.id
+  const state = getGenerationState(chatId)
+  const { versions } = state
+  const { group, isGenerating, streamError, stream } = state
+  const { aborter, stopRequested, stopStreamingHold, beginGenerateAbort, applyGenerateDonePayload, makeGenerateSseHandler, consumeGenerationFinallyFlags } = state.transport
+  const { chatReasoningMessageId, chatReasoningContent, chatReasoningStreamActive, markReasoningStreamPhaseStart, pushCurrentReasoningToBlocks } = state.reasoning
+  const { beginRewriteDefer, finalizeRewriteAfterGeneration } = state.defer
+  const { scrollVisible, ttsAfterFlush } = state
+  if (isGenerating.value || group.isInterjecting.value) return
   if (m.id.startsWith('local_')) return
   if (m.role !== 'assistant') return
 
   // 先落盘待持久化的版本切换状态
   await flushPendingGreetingVersion()
+  if (activeChat.value?.id !== chatId || isGenerating.value) return
 
-  const chatId = activeChat.value.id
   const messageIndex = activeChat.value.messages.findIndex(msg => msg.id === m.id)
   if (messageIndex === -1) return
 
@@ -3628,7 +3725,7 @@ async function handleRewriteMessage(m: ChatMessage) {
 
   let generationHadError = false
   try {
-    const localAssistantId = `local_rewrite_${Date.now()}`
+    const localAssistantId = `local_rewrite_${Date.now()}_${++localMessageSequence}`
     chatReasoningMessageId.value = localAssistantId
     chatReasoningContent.value = ''
     chatReasoningStreamActive.value = true
@@ -3642,14 +3739,14 @@ async function handleRewriteMessage(m: ChatMessage) {
       ts: new Date().toISOString()
     }
     armAssistantRowEnterAnimation(localAssistantId)
-    chats.addLocalMessage(localMsg)
+    chats.addLocalMessage(localMsg, chatId)
     await nextTick()
     const listElAfter = messageListRef.value?.scrollRef ?? null
     if (listElAfter && oldListScrollHeight > 0) {
       const delta = listElAfter.scrollHeight - oldListScrollHeight
       listElAfter.scrollTop = Math.max(0, oldListScrollTop + delta)
     }
-    scrollToBottom(false, true)
+    scrollVisible(false, true)
 
     if (isGroup) {
       if (useStream) {
@@ -3663,7 +3760,7 @@ async function handleRewriteMessage(m: ChatMessage) {
               omitMessageIds,
               mergeAssistantIntoMessageId: anchorId,
               webSearchEnabled: webSearchSessionEnabled.value,
-            geminiSearch: geminiSearchRequestValue.value,
+              geminiSearch: geminiSearchRequestValue.value,
             },
             makeGenerateSseHandler({ localAssistantId }),
             aborter.value?.signal,
@@ -3672,7 +3769,7 @@ async function handleRewriteMessage(m: ChatMessage) {
           stream.flushForMessage(localAssistantId)
           stopRequested.value = false
         }
-        void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
+        ttsAfterFlush(localAssistantId)
       } else {
         const res = await apiPost<{
           ok: boolean
@@ -3686,8 +3783,8 @@ async function handleRewriteMessage(m: ChatMessage) {
           omitMessageIds,
           mergeAssistantIntoMessageId: anchorId,
           webSearchEnabled: webSearchSessionEnabled.value,
-            geminiSearch: geminiSearchRequestValue.value,
-        })
+          geminiSearch: geminiSearchRequestValue.value,
+        }, aborter.value?.signal)
         
         if (res.ok) {
           if (typeof res.reasoningContent === 'string') {
@@ -3696,8 +3793,8 @@ async function handleRewriteMessage(m: ChatMessage) {
           pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined, localAssistantId)
           applyGenerateDonePayload(localAssistantId, res)
           chats.appendLocalMessageContent(localAssistantId, res.content || '')
-          scrollToBottom()
-          void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
+          scrollVisible()
+          ttsAfterFlush(localAssistantId)
         } else {
           generationHadError = true
           streamError.value = res.error || 'unknown error'
@@ -3721,7 +3818,7 @@ async function handleRewriteMessage(m: ChatMessage) {
               omitMessageIds,
               mergeAssistantIntoMessageId: anchorId,
               webSearchEnabled: webSearchSessionEnabled.value,
-            geminiSearch: geminiSearchRequestValue.value,
+              geminiSearch: geminiSearchRequestValue.value,
             },
             makeGenerateSseHandler({ localAssistantId }),
             aborter.value?.signal,
@@ -3730,7 +3827,7 @@ async function handleRewriteMessage(m: ChatMessage) {
           stream.flushForMessage(localAssistantId)
           stopRequested.value = false
         }
-        void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
+        ttsAfterFlush(localAssistantId)
       } else {
         const res = await apiPost<{
           ok: boolean
@@ -3747,8 +3844,8 @@ async function handleRewriteMessage(m: ChatMessage) {
           omitMessageIds,
           mergeAssistantIntoMessageId: anchorId,
           webSearchEnabled: webSearchSessionEnabled.value,
-            geminiSearch: geminiSearchRequestValue.value,
-        })
+          geminiSearch: geminiSearchRequestValue.value,
+        }, aborter.value?.signal)
         
         if (res.ok) {
           if (typeof res.reasoningContent === 'string') {
@@ -3757,8 +3854,8 @@ async function handleRewriteMessage(m: ChatMessage) {
           pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined, localAssistantId)
           applyGenerateDonePayload(localAssistantId, res)
           chats.appendLocalMessageContent(localAssistantId, res.content || '')
-          scrollToBottom()
-          void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
+          scrollVisible()
+          ttsAfterFlush(localAssistantId)
         } else {
           generationHadError = true
           streamError.value = res.error || 'unknown error'
@@ -3778,15 +3875,16 @@ async function handleRewriteMessage(m: ChatMessage) {
       if (persistInstead) {
         await persistLocalStreamingMessages(chatId)
       } else {
-        await chats.load(chatId)
-        await afterChatReload(chatId)
+        await refreshAfterGeneration(chatId)
       }
     })
     await settings.load()
 
     // 成功后：后端已将新版本原位写入锚点；前端只 hydrate 并删除尾部
-    if (!skippedReload && activeChat.value) {
-      const anchorMsg = activeChat.value.messages.find((msg) => msg.id === anchorId && msg.role === 'assistant')
+    if (!skippedReload) {
+      const anchorMsg = activeChat.value?.id === chatId
+        ? activeChat.value.messages.find((msg) => msg.id === anchorId && msg.role === 'assistant')
+        : undefined
       if (anchorMsg?.greetingVariants && anchorMsg.greetingVariants.length > 1) {
         versions.hydrateGreetingVariants(
           anchorMsg.id,
@@ -4215,7 +4313,7 @@ async function confirmSwitchPersonaNewSession() {
   if (!activeChat.value) return
 
   const title = `${activeChat.value.title}（新建会话）`
-  const pure = group.effectivePureAiMode.value
+  const pure = group.value.effectivePureAiMode.value
   const personaId = pure ? null : targetId
   if (activeChat.value.isGroup) {
     await chats.createGroup(
@@ -4246,14 +4344,15 @@ async function confirmSwitchPersonaNewSession() {
 async function confirmSwitchPersonaContinue() {
   if (!settings.settings) return
   if (!actions.pendingPersonaId.value) return
+  const chatId = activeChat.value?.id
   const targetId = actions.pendingPersonaId.value
   actions.showPersonaSwitchConfirm.value = false
   actions.pendingPersonaId.value = null
   
   await actions.freezeUserMessagesSenderSnapshot()
   await settings.save({ ...settings.settings, selectedPersonaId: targetId })
-  if (activeChat.value) {
-    await chats.updateUserPersonaId(activeChat.value.id, targetId)
+  if (chatId) {
+    await chats.updateUserPersonaId(chatId, targetId)
   }
 }
 
@@ -4270,9 +4369,9 @@ async function handleSaveEditedMessage() {
   if (messageId && activeChat.value && newContent !== undefined) {
     const msg = activeChat.value.messages.find(m => m.id === messageId)
     if (msg) {
-      const previousContent = versions.getDisplayContent(msg)
-      if (versions.hasMultipleVersions(msg)) {
-        versions.updateCurrentVersionContent(messageId, newContent)
+      const previousContent = versions.value.getDisplayContent(msg)
+      if (versions.value.hasMultipleVersions(msg)) {
+        versions.value.updateCurrentVersionContent(messageId, newContent)
       }
       invalidateTtsCacheIfTextChanged(msg, previousContent, newContent)
       msg.content = newContent
@@ -4294,10 +4393,16 @@ async function handleSaveEditedMessage() {
 async function handleSaveAndSend() {
   if (!activeChat.value) return
   if (!actions.editingMessageId.value) return
-  if (isGenerating.value) return
   if (actions.editingMessageRole.value === 'assistant') return
 
   const chatId = activeChat.value.id
+  const state = getGenerationState(chatId)
+  const { group, isGenerating, streamError, stream } = state
+  const { aborter, stopRequested, beginGenerateAbort, applyGenerateDonePayload, makeGenerateSseHandler, consumeGenerationFinallyFlags } = state.transport
+  const { chatReasoningMessageId, chatReasoningContent, chatReasoningStreamActive, markReasoningStreamPhaseStart, pushCurrentReasoningToBlocks } = state.reasoning
+  const { beginSaveSendDefer, finalizeSaveSendAfterGeneration } = state.defer
+  const { scrollVisible, ttsAfterFlush } = state
+  if (isGenerating.value || group.isInterjecting.value) return
   const messageId = actions.editingMessageId.value
   const messageIndex = activeChat.value.messages.findIndex(msg => msg.id === messageId)
   if (messageIndex === -1) return
@@ -4309,6 +4414,10 @@ async function handleSaveAndSend() {
 
   const useStream = settings.settings?.streamEnabled !== false
   const isGroup = activeChat.value.isGroup
+  const persona = selectedPersona.value
+  const imageFallbackMode = isImageStickyActive()
+  const webSearchEnabled = webSearchSessionEnabled.value
+  const geminiSearch = geminiSearchRequestValue.value
   const now = new Date().toISOString()
   const tailMessagesToDefer = activeChat.value.messages
     .slice(messageIndex + 1)
@@ -4333,16 +4442,15 @@ async function handleSaveAndSend() {
       senderName: originalMessage.senderName ?? null,
       senderAvatar: originalMessage.senderAvatar ?? null,
     })
-    bumpSidebarForActiveChat()
+    if (chats.activeChatId === chatId) bumpSidebarForActiveChat()
 
-    actions.closeEditMessage()
+    if (chats.activeChatId === chatId) actions.closeEditMessage()
     group.resetGroupState()
 
     group.showInterject()
     try {
-      await chats.load(chatId)
-      await afterChatReload(chatId)
-      scrollToBottom(true, true)
+      await refreshAfterGeneration(chatId)
+      scrollVisible(true, true)
     } catch {
       /* ignore */
     }
@@ -4365,9 +4473,10 @@ async function handleSaveAndSend() {
     senderName: originalMessage.senderName ?? null,
     senderAvatar: originalMessage.senderAvatar ?? null,
   })
-  bumpSidebarForActiveChat()
-
-  actions.closeEditMessage()
+  if (chats.activeChatId === chatId) {
+    bumpSidebarForActiveChat()
+    actions.closeEditMessage()
+  }
   group.resetGroupState()
 
   streamError.value = null
@@ -4376,14 +4485,14 @@ async function handleSaveAndSend() {
 
   let generationHadError = false
   try {
-    const localAssistantId = `local_assistant_${Date.now()}`
+    const localAssistantId = `local_assistant_${Date.now()}_${++localMessageSequence}`
     chatReasoningMessageId.value = localAssistantId
     chatReasoningContent.value = ''
     chatReasoningStreamActive.value = true
     markReasoningStreamPhaseStart()
     armAssistantRowEnterAnimation(localAssistantId)
-    chats.addLocalMessage({ version: 1, id: localAssistantId, role: 'assistant', content: '', ts: now })
-    scrollToBottom(false, true)
+    chats.addLocalMessage({ version: 1, id: localAssistantId, role: 'assistant', content: '', ts: now }, chatId)
+    scrollVisible(false, true)
 
     if (useStream) {
         stream.registerStreamMessage(localAssistantId)
@@ -4394,11 +4503,11 @@ async function handleSaveAndSend() {
               chatId,
               userMessage: editedContent,
               appendUserMessage: false,
-              imageFallbackMode: isImageStickyActive(),
-              userPersona: selectedPersona.value ?? null,
+              imageFallbackMode,
+              userPersona: persona ?? null,
               omitMessageIds,
-              webSearchEnabled: webSearchSessionEnabled.value,
-            geminiSearch: geminiSearchRequestValue.value,
+              webSearchEnabled,
+              geminiSearch,
             },
             makeGenerateSseHandler({ localAssistantId }),
             aborter.value?.signal,
@@ -4407,18 +4516,18 @@ async function handleSaveAndSend() {
           stream.flushForMessage(localAssistantId)
           stopRequested.value = false
         }
-        void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
+        ttsAfterFlush(localAssistantId)
       } else {
         const res = await apiPost<{ ok: boolean; content: string; reasoningContent?: string; assistantMessageId?: string | null; error?: string }>('/api/generate/stream', {
           chatId,
           userMessage: editedContent,
           appendUserMessage: false,
-          imageFallbackMode: isImageStickyActive(),
-          userPersona: selectedPersona.value ?? null,
+          imageFallbackMode,
+          userPersona: persona ?? null,
           omitMessageIds,
-          webSearchEnabled: webSearchSessionEnabled.value,
-            geminiSearch: geminiSearchRequestValue.value,
-        })
+          webSearchEnabled,
+          geminiSearch,
+        }, aborter.value?.signal)
 
         if (res.ok) {
           if (typeof res.reasoningContent === 'string') {
@@ -4427,8 +4536,8 @@ async function handleSaveAndSend() {
           pushCurrentReasoningToBlocks(res.assistantMessageId ?? undefined, localAssistantId)
           applyGenerateDonePayload(localAssistantId, res)
           chats.appendLocalMessageContent(localAssistantId, res.content || '')
-          scrollToBottom()
-          void tryAutoReadAssistantAfterStreamFlush(localAssistantId)
+          scrollVisible()
+          ttsAfterFlush(localAssistantId)
         } else {
           generationHadError = true
           streamError.value = res.error || 'unknown error'
@@ -4447,8 +4556,7 @@ async function handleSaveAndSend() {
       if (persistInstead) {
         await persistLocalStreamingMessages(chatId)
       } else {
-        await chats.load(chatId)
-        await afterChatReload(chatId)
+        await refreshAfterGeneration(chatId)
         await finalizeSaveSendAfterGeneration(chatId, generationHadError, finalizeDeferredTailDelete)
       }
     })
@@ -4882,7 +4990,7 @@ const editingPersonaAvatarUrl = computed(() => {
             :can-interject="group.canInterject.value"
             :is-interjecting="group.isInterjecting.value"
             :effective-pure-ai-mode="group.effectivePureAiMode.value"
-            :is-streaming-active="isStreamingActive"
+            :is-streaming-active="canStopGeneration"
             :user-avatar-url="userAvatarUrl"
             :user-name="userName"
             :current-model="currentModel"

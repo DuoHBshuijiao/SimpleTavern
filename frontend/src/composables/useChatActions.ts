@@ -78,6 +78,7 @@ export interface ChatActionsDeps {
     ) => Promise<void>
     deleteMessage: (chatId: string, messageId: string) => Promise<void>
     load: (chatId: string) => Promise<void>
+    refresh: (chatId: string) => Promise<unknown>
     updateUserPersonaId: (chatId: string, personaId: string) => Promise<void>
     updateMemberSettings: (chatId: string, memberId: string, settings: GroupMemberSettings) => Promise<void>
   }
@@ -648,7 +649,7 @@ export function useChatActions(deps: ChatActionsDeps) {
     }
 
     if (targets.length > 0) {
-      await chatsStore.load(chatId)
+      await chatsStore.refresh(chatId)
     }
   }
 
