@@ -30,12 +30,14 @@ from __future__ import annotations
 import asyncio
 import os
 from contextlib import asynccontextmanager
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.content_regex_scanner import ensure_content_regex_scanner_started
 from app.errors import install_error_handlers
+from app.local_requests import CORS_ORIGIN_PATTERN, LocalRequestMiddleware
 from app.request_context import REQUEST_ID_HEADER, RequestIdMiddleware
 from app.routes.avatars import router as avatars_router
 from app.routes.characters import router as characters_router
@@ -144,37 +146,39 @@ app = FastAPI(title="SimpleTavern", version=APP_VERSION, lifespan=lifespan)
 
 
 def _cors_allow_origins() -> list[str]:
-    """默认只放行本机前端 Origin；局域网请设置 SIMPLETAVERN_CORS_ORIGINS。"""
-    defaults = (
-        "http://127.0.0.1:9081",
-        "http://localhost:9081",
-        "http://127.0.0.1:9181",
-        "http://localhost:9181",
-        "http://127.0.0.1:4173",
-        "http://localhost:4173",
-        "http://127.0.0.1:5173",
-        "http://localhost:5173",
-    )
+    """读取额外受信任的局域网来源。"""
     extra = os.environ.get("SIMPLETAVERN_CORS_ORIGINS", "")
     origins: list[str] = []
     seen: set[str] = set()
-    for item in [*defaults, *[part.strip() for part in extra.split(",")]]:
+    for item in extra.split(","):
         origin = item.strip().rstrip("/")
-        if not origin or origin in seen:
+        try:
+            parsed = urlsplit(origin)
+            if parsed.scheme not in {"http", "https"} or not parsed.hostname or (
+                parsed.username or parsed.password or parsed.path or parsed.query or parsed.fragment
+            ):
+                continue
+            parsed.port  # Reject malformed configured ports before installing middleware.
+        except ValueError:
+            continue
+        if origin in seen:
             continue
         seen.add(origin)
         origins.append(origin)
     return origins
 
 
+trusted_origins = _cors_allow_origins()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_cors_allow_origins(),
+    allow_origins=trusted_origins,
+    allow_origin_regex=CORS_ORIGIN_PATTERN,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=[REQUEST_ID_HEADER],
 )
+app.add_middleware(LocalRequestMiddleware, origins=trusted_origins)
 app.add_middleware(RequestIdMiddleware)
 install_error_handlers(app)
 

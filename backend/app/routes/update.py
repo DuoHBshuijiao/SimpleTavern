@@ -177,9 +177,9 @@ def download_update(body: dict) -> dict:
     将指定 tag 的源码 zip 下载到 data/update/update.zip。
     body: { "tagName": "v0.229" }
     """
-    tag_name = (body.get("tagName") or "").strip()
-    if not tag_name:
-        raise HTTPException(status_code=400, detail="缺少 tagName")
+    tag_name = body.get("tagName")
+    if not isinstance(tag_name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", tag_name):
+        raise HTTPException(status_code=400, detail="tagName 格式无效")
     zip_url = f"https://github.com/{GITHUB_REPO}/archive/refs/tags/{tag_name}.zip"
     update_dir = get_update_dir()
     update_dir.mkdir(parents=True, exist_ok=True)
