@@ -9,8 +9,13 @@ __pycache__/
 /venv/
 .venv/
 
+# Windows desktop build output
+/desktop/target/
+/desktop/gen/
+
 # User data: chats, characters and real API keys. Never commit.
 /data/
+/data-sandbox/
 
 # System and editor files (frontend/.vscode is tracked on purpose)
 .DS_Store
@@ -26,6 +31,7 @@ __pycache__/
 
 # Temporary output
 /temp/
+/_update_tmp/
 /temp_commit_msg.txt
 /session.log
 /stickers/
