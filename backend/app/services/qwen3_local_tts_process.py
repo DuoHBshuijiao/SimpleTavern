@@ -12,13 +12,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import signal
 import subprocess
 import sys
 from pathlib import Path
 
 import httpx
 
+from app.services.managed_process import desktop_process_options, terminate_windows_process
 from app.storage import apply_hf_cache_env
 
 logger = logging.getLogger(__name__)
@@ -60,7 +60,8 @@ def _resolve_python_command(repo: Path, port: int) -> tuple[list[str], str]:
                 repo / "venv" / "bin" / "python",
             ]
         )
-    python_candidates.append(Path(sys.executable))
+    if not getattr(sys, 'frozen', False):
+        python_candidates.append(Path(sys.executable))
 
     for python_executable in python_candidates:
         if python_executable.is_file():
@@ -90,7 +91,7 @@ def _terminate_process(proc: subprocess.Popen) -> None:
     logger.info("[QWEN3-TTS] 正在终止子进程 (pid=%d)…", proc.pid)
     try:
         if sys.platform == "win32":
-            proc.send_signal(signal.CTRL_BREAK_EVENT)
+            terminate_windows_process(proc)
         else:
             proc.terminate()
         proc.wait(timeout=15)
@@ -156,7 +157,7 @@ async def start(
         cmd,
         cwd=str(repo),
         env=env,
-        creationflags=creation_flags,
+        **desktop_process_options(creation_flags),
     )
     _processes[port] = proc
 
@@ -165,7 +166,7 @@ async def start(
         logger.info("[QWEN3-TTS] 服务已就绪 (pid=%d, port=%d)", proc.pid, port)
     else:
         logger.error("[QWEN3-TTS] 健康检查超时，服务可能未正常启动 (port=%d)", port)
-        logger.error("[QWEN3-TTS] 若已弹出独立控制台窗口，请直接查看 uvicorn / gateway 的错误输出。")
+        logger.error("[QWEN3-TTS] 请检查语音网关环境和端口。")
     return ok
 
 
@@ -181,4 +182,15 @@ def stop() -> None:
         if proc.poll() is not None:
             logger.info("[QWEN3-TTS] 端口 %d 子进程已退出 (code=%s)", port, proc.returncode)
             continue
+        _terminate_process(proc)
+
+
+def owns_port(port: int) -> bool:
+    proc = _processes.get(port)
+    return proc is not None and proc.poll() is None
+
+
+def stop_port(port: int) -> None:
+    proc = _processes.pop(port, None)
+    if proc is not None:
         _terminate_process(proc)

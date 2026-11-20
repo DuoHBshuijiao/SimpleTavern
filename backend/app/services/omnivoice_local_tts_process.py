@@ -10,13 +10,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import signal
 import subprocess
 import sys
 from pathlib import Path
 
 import httpx
 
+from app.services.managed_process import desktop_process_options, terminate_windows_process
 from app.storage import apply_hf_cache_env
 
 logger = logging.getLogger(__name__)
@@ -59,7 +59,8 @@ def _resolve_python_command(repo: Path, port: int) -> tuple[list[str], str]:
                 repo / "venv" / "bin" / "python",
             ]
         )
-    python_candidates.append(Path(sys.executable))
+    if not getattr(sys, 'frozen', False):
+        python_candidates.append(Path(sys.executable))
 
     for python_executable in python_candidates:
         if python_executable.is_file():
@@ -138,7 +139,7 @@ async def start(
         cmd,
         cwd=str(repo),
         env=env,
-        creationflags=creation_flags,
+        **desktop_process_options(creation_flags),
     )
     _managed_port = port
 
@@ -147,7 +148,7 @@ async def start(
         logger.info("[OMNIVOICE] 服务已就绪 (pid=%d, port=%d)", _process.pid, port)
     else:
         logger.error("[OMNIVOICE] 健康检查超时，服务可能未正常启动")
-        logger.error("[OMNIVOICE] 若已弹出独立控制台窗口，请直接查看 uvicorn / OmniVoice 的错误输出。")
+        logger.error("[OMNIVOICE] 请检查语音网关环境和端口。")
     return ok
 
 
@@ -167,7 +168,7 @@ def stop() -> None:
     logger.info("[OMNIVOICE] 正在终止子进程 (pid=%d)…", _process.pid)
     try:
         if sys.platform == "win32":
-            _process.send_signal(signal.CTRL_BREAK_EVENT)
+            terminate_windows_process(_process)
         else:
             _process.terminate()
         _process.wait(timeout=15)
@@ -180,3 +181,11 @@ def stop() -> None:
     finally:
         _process = None
         _managed_port = None
+
+def owns_port(port: int) -> bool:
+    return _managed_port == port and is_running()
+
+
+def stop_port(port: int) -> None:
+    if owns_port(port):
+        stop()

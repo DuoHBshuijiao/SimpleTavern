@@ -231,8 +231,15 @@ def _process_chat(chat: Any, settings: Any, character_cache: dict[str, Any]) -> 
 
 
 def _scan_once() -> dict[str, Any]:
+    from app.services.work_drain import draining
     with _scan_run_lock:
+        if draining.is_set():
+            return dict(_last_scan_stats)
         return _scan_once_unlocked()
+
+
+def scan_in_progress() -> bool:
+    return _scan_run_lock.locked()
 
 
 def _scan_once_unlocked() -> dict[str, Any]:

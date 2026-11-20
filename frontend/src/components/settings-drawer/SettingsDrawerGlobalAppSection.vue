@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import SettingsDrawerGlobalAccordion from './SettingsDrawerGlobalAccordion.vue'
 import SettingsDrawerGlobalUsageSummary from './SettingsDrawerGlobalUsageSummary.vue'
+import DesktopUpdate from '../DesktopUpdate.vue'
+
+const desktop = Boolean(document.querySelector('meta[name="simpletavern-desktop"]'))
 
 defineProps<{
   appVersion: string
@@ -35,6 +38,7 @@ const emit = defineEmits<{
           查看 HTTP 请求
         </button>
         <button
+          v-if="!desktop"
           type="button"
           class="btn btn-sm btn-secondary"
           :disabled="checkUpdateLoading"
@@ -45,11 +49,13 @@ const emit = defineEmits<{
       </div>
       <p v-if="checkUpdateMessage" class="settings-hint">{{ checkUpdateMessage }}</p>
       <a
+        v-if="!desktop"
         href="https://github.com/DuoHBshuijiao/SimpleTavern/releases"
         target="_blank"
         rel="noopener noreferrer"
         class="settings-hint self-start cursor-pointer transition-colors hover:text-[var(--color-text-secondary)] hover:underline"
       >{{ appVersion || '…' }}</a>
     </div>
+    <DesktopUpdate v-if="desktop" />
   </SettingsDrawerGlobalAccordion>
 </template>

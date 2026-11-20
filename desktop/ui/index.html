@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SimpleTavern 服务管理器</title><link rel="stylesheet" href="manager.css">
+  <script type="module" src="manager.js"></script>
+</head>
+<body>
+  <header>
+    <div><h1 id="status" role="status">正在读取服务状态</h1><p id="detail" role="status"></p>
+    <div id="address" hidden><code id="url"></code> <button id="copy" class="link">复制地址</button></div></div>
+    <div class="actions"><button id="primary" class="primary" hidden></button><button id="secondary" hidden></button></div>
+  </header>
+  <main>
+    <section id="trayTip" hidden><p>关闭窗口后，聊天服务会继续运行。可从系统托盘重新打开管理器。</p><button data-action="hide">知道了，收至托盘</button></section>
+    <form id="ports" hidden><label>聊天端口 <input id="port" type="number" min="1" max="65535" required></label>
+      <label>API 端口 <input id="apiPort" type="number" min="1" max="65535" required></label><button>保存并启动</button></form>
+    <section aria-labelledby="servicesTitle"><h2 id="servicesTitle">服务</h2>
+      <div class="row"><strong>本地聊天服务</strong><span class="badge" id="serviceState"></span>
+        <details id="serviceMenu" class="menu" hidden><summary>管理</summary><div><button data-action="restart_service">重启服务</button><button data-action="stop">停止服务</button></div></details></div>
+      <div id="voices"></div></section>
+    <details id="logs" open><summary>运行日志</summary><div class="filters">
+      <select id="source" aria-label="日志来源"><option>全部来源</option><option>桌面端</option><option>聊天服务</option><option>语音</option><option>更新</option></select>
+      <label><input type="checkbox" id="errors">仅错误</label><button id="pause">暂停滚动</button><button data-action="export">导出日志</button>
+      </div><div tabindex="0" aria-label="近期运行日志，可选择复制" id="entries"></div><button id="follow" hidden></button></details>
+    <p id="feedback" role="status"></p>
+  </main>
+  <footer><span id="version"></span><span id="updateMessage" role="status"></span>
+    <button id="update" hidden></button><button data-action="quit">退出服务</button></footer>
+</body></html>

@@ -1,0 +1,11 @@
+{
+  "productName": "SimpleTavern",
+  "identifier": "io.github.duohbshuijiao.simpletavern",
+  "build": { "frontendDist": "ui" },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [{ "title": "SimpleTavern 服务管理器", "visible": false, "width": 780, "height": 540, "minWidth": 460, "minHeight": 390 }],
+    "security": { "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src ipc: http://ipc.localhost 'self'" }
+  },
+  "bundle": { "active": false, "icon": ["icons/icon.ico","icons/icon.png"] }
+}

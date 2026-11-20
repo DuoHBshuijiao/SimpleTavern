@@ -35,6 +35,7 @@ import { useAppearance } from './composables/useAppearance'
 
 useAppFont()
 useAppearance()
+const desktop = Boolean(document.querySelector('meta[name="simpletavern-desktop"]'))
 </script>
 
 <template>
@@ -42,7 +43,7 @@ useAppearance()
     <!-- 路由视图容器：根据路由配置渲染对应的页面组件 -->
     <RouterView />
     <StartupIntegrityWatcher />
-    <StartupUpdateCard />
+    <StartupUpdateCard v-if="!desktop" />
     <AppNotificationHost />
   </div>
 </template>

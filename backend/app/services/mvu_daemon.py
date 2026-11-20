@@ -200,6 +200,7 @@ def ensure_mvu_worker(
 
 
 async def _mvu_loop(chat_id: str) -> None:
+    from app.services.work_drain import draining
     event, lock = _events[chat_id], _locks[chat_id]
     health = _chat_health(chat_id)
 
@@ -210,6 +211,8 @@ async def _mvu_loop(chat_id: str) -> None:
             triggered_by_signal = True
         except asyncio.TimeoutError:
             pass
+        while draining.is_set():
+            await asyncio.sleep(.2)
         event.clear()
 
         async with lock:
@@ -276,6 +279,10 @@ async def _mvu_loop(chat_id: str) -> None:
 
             health.record_success()
             _last_run[chat_id] = time.monotonic()
+
+
+def work_in_progress() -> bool:
+    return any(lock.locked() for lock in _locks.values())
 
 
 async def _run_once(chat_id: str) -> None:

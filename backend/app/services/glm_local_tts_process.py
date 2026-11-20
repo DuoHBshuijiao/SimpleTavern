@@ -12,7 +12,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import signal
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -21,12 +20,14 @@ from typing import Any
 
 import httpx
 
+from app.services.managed_process import desktop_process_options, terminate_windows_process
 from app.storage import apply_hf_cache_env
 
 logger = logging.getLogger(__name__)
 
 _process: subprocess.Popen | None = None
 _managed_port: int | None = None
+_owned_port: int | None = None
 _failure_count = 0
 _last_error: dict[str, Any] | None = None
 _last_success_at: str | None = None
@@ -106,7 +107,7 @@ async def start(repo_path: str, port: int = 8088) -> bool:
     如果端口已可访问（已有服务），跳过启动。
     返回 True 表示服务可用（无论是否新启动）。
     """
-    global _process, _managed_port
+    global _process, _managed_port, _owned_port
 
     base_url = f"http://127.0.0.1:{port}"
 
@@ -161,14 +162,14 @@ async def start(repo_path: str, port: int = 8088) -> bool:
             cmd,
             cwd=str(repo),
             env=env,
-            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NEW_CONSOLE,
+            **desktop_process_options(subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NEW_CONSOLE),
         )
     except OSError as exc:
         logger.exception("[GLM-TTS] 启动子进程失败")
         _record_failure("tts_local_process_start_failed", str(exc))
         _process = None
         return False
-    _managed_port = port
+    _managed_port = _owned_port = port
 
     ok = await _health_poll(base_url)
     if ok:
@@ -177,7 +178,7 @@ async def start(repo_path: str, port: int = 8088) -> bool:
     else:
         logger.error("[GLM-TTS] 健康检查超时，服务可能未正常启动")
         logger.error(
-            "[GLM-TTS] 若已弹出独立控制台窗口，请在该窗口中查看 run_api_gpu / 下游进程的报错输出。"
+            "[GLM-TTS] 请检查 run_api_gpu 的环境和端口。"
         )
         # 仅由 start() 记一次失败，避免与 _health_poll 重复累加
         _record_failure("tts_local_process_start_failed", "health check timed out after start")
@@ -200,7 +201,7 @@ def stop() -> None:
     logger.info("[GLM-TTS] 正在终止子进程 (pid=%d)…", _process.pid)
     try:
         if sys.platform == "win32":
-            _process.send_signal(signal.CTRL_BREAK_EVENT)
+            terminate_windows_process(_process)
         else:
             _process.terminate()
         _process.wait(timeout=15)
@@ -214,3 +215,12 @@ def stop() -> None:
     finally:
         _process = None
         _managed_port = None
+
+
+def owns_port(port: int) -> bool:
+    return _owned_port == port and is_running()
+
+
+def stop_port(port: int) -> None:
+    if owns_port(port):
+        stop()
