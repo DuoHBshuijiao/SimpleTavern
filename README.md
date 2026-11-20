@@ -23,51 +23,45 @@
 
 ## 🚀 快速开始（5 分钟上手）
 
-### 1. 准备环境
+### 1. 选择 Windows 桌面版
 
-确保你的电脑已经安装了 **Python 3.10+** 和 **Node.js 16+**（安装时记得勾选 **Add to PATH**）。  
-装好后，打开终端（例如按Win + R，输入cmd后回车）验证一下：
+在 [Releases](https://github.com/DuoHBshuijiao/SimpleTavern/releases) 的 Assets 里选择 Windows x64 成品。安装版双击 `SimpleTavern-win-x64-Setup.exe`。免安装版将 `SimpleTavern-win-x64-Portable.zip` 完整解压到可写文件夹，再双击根目录的 `SimpleTavern.exe`。缺少 WebView2 时，安装版会补齐运行时，免安装用户可安装 [Microsoft WebView2 Evergreen Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)。
 
-```bash
-python --version   # 应显示 Python 3.10.x 或更高
-node -v            # 应显示 v16.x 或更高
-npm -v             # 应显示版本号
-```
+### 2. 开始聊天
 
-> 如果这里就报错（例如提示“不是内部或外部命令”），请直接跳到下方的 [常见启动问题速查](#4-常见启动问题速查)。
+首次运行时选「开始使用」，或先关闭旧服务后选「导入旧版数据」，选择旧仓库的 `data` 文件夹。导入会复制到新的空数据目录。服务就绪后，默认浏览器会打开聊天。再次启动应用会唤回服务管理器。
 
----
-
-### 2. 下载 & 一键启动
-
-1. 在 [Releases 页面](https://github.com/DuoHBshuijiao/SimpleTavern/releases) 下载最新的源码压缩包并解压。
-2. 进入解压后的文件夹（应该能看到 `deploy.py`、`frontend`、`backend` 等）。
-3. 按你的系统执行：
-
-| 系统 | 操作 |
-| ---- | ---- |
-| **Windows** | 双击 **`deploy.bat`**，会弹出命令窗口并自动安装与启动；或者你在该目录下打开 PowerShell / 命令提示符，执行 `python deploy.py`（与 `.bat` 等价）。`deploy.bat` 在结束前会 **pause**，窗口一般会保留，方便查看输出与报错。 |
-| **Linux / macOS** | 在终端里执行 `python3 deploy.py`（也可以给 `deploy.sh` 可执行权限后运行 `./deploy.sh`）。 |
-
-脚本会自动检查环境、创建虚拟环境、安装前后端依赖、构建前端，然后启动后端（默认 `9091` 端口）和前端预览（默认 `9081` 端口）。一切就绪后，浏览器通常会自己打开 SimpleTavern。  
-需要停止时，在运行脚本的终端窗口按 **Ctrl + C**。
+- 管理器显示聊天地址、语音网关、运行日志和版本。关闭窗口后服务留在系统托盘。需要结束时选择「退出并停止服务」。
+- 新版出现在管理器底部及浏览器的「全局设置 → 应用与更新」。选择「退出时更新」后可继续聊天，正常退出时安装。选择「立即重启更新」会等待当前生成与写入完成，浏览器标签可以留在原处。
+- 安装版数据位于 `%LOCALAPPDATA%\SimpleTavern.User\data`。免安装版数据位于解压目录的 `data`。移动免安装版时请先退出并复制整个目录。
+- Linux、macOS 和源码开发环境可使用下方「进阶运行方式」与 `python3 deploy.py`。Windows 源码开发入口为 `deploy.bat`。
+- Windows 构建、发布资产与升级验证见 [桌面版构建说明](desktop/README.md)。
 
 ---
 
 ### 3. 从 JanitorAI 迁移聊天记录（可选）
 
-如果你想把在 JanitorAI 上的聊天记录搬到本地，需要使用专用的浏览器扩展。**这个扩展必须由你手动加载，部署脚本不会自动安装它。**
+如果你想把 JanitorAI 的聊天记录搬到本地，可在浏览器中加载随桌面版提供的扩展。
 
 1. 打开 Chrome/Edge 的扩展管理页面（地址栏输入 `chrome://extensions` 并回车）。
 2. 打开页面右上角的 **“开发者模式”** 开关。
-3. 点击 **“加载已解压的扩展程序”**，在弹出的文件选择窗口中，选中仓库里的 `extensions/simpletavern-janitor-bridge/` 这个**文件夹**。
+3. 将程序目录中的 `current/extensions/simpletavern-janitor-bridge/` 复制到固定位置，点击 **“加载已解压的扩展程序”**，选中复制后的文件夹。使用源码版时，扩展在仓库的 `extensions/` 下。
 4. 确保 SimpleTavern 已经启动（后端正在运行），然后正常访问 JanitorAI 网站。扩展会自动抓取聊天数据，并通过本地 API 导入到 SimpleTavern 中。
 
 > ⚠️ 提示：如果导入时遇到问题，请确认 SimpleTavern 已启动且扩展图标已出现在浏览器工具栏。
 
 ---
 
-### 4. 常见启动问题速查
+### 4. 桌面版常见启动问题
+
+| 现象 | 处理方式 |
+| ---- | ---- |
+| 管理器报告端口被占用 | 在管理器填写可用的聊天和 API 端口，选择「保存并启动」。使用 Janitor 扩展时，同步修改扩展中的 API 地址。 |
+| 浏览器没有打开，或找不到原聊天标签 | 在管理器选择「打开聊天」，也可复制窗口中的聊天地址。 |
+| 关闭窗口后需要再次管理服务 | 点击系统托盘的 SimpleTavern 图标，或再次双击启动器。 |
+| 免安装版提示无法写入 | 先退出管理器，再把整个解压目录移动到当前用户可写的位置。 |
+
+#### 使用源码部署脚本时
 
 | 现象 | 可能原因与解决办法 |
 | ---- | ---- |

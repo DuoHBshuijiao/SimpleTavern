@@ -1,0 +1,54 @@
+name: Windows desktop packages
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Package SemVer (e.g. 1.0.0)"
+        required: true
+  release:
+    types: [published]
+
+jobs:
+  package:
+    runs-on: windows-2022
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Prepare packaging tools
+        run: |
+          rustup default stable-x86_64-pc-windows-msvc
+          python -m pip install -r backend/requirements.txt pyinstaller==6.22.3
+          dotnet tool install --global vpk --version 1.2.161
+      - name: Build packages
+        env:
+          REQUESTED_VERSION: ${{ inputs.version || github.event.release.tag_name }}
+        run: |
+          $releaseVersion = $env:REQUESTED_VERSION.TrimStart('v')
+          if ($releaseVersion -match '^(\d+)\.(\d+)$') {
+            $releaseVersion = '{0}.{1}.0' -f [int]$Matches[1],[int]$Matches[2]
+          }
+          python desktop/build_windows.py --version $releaseVersion
+      - name: Exercise packaged service
+        run: python tools/desktop-check/service.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SimpleTavern-windows-x64
+          path: dist/windows/*
+      - name: Attach Windows assets to the published release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          $assets = (Get-ChildItem dist/windows -File | Where-Object Name -Match '(-Setup\.exe|-Portable\.zip|\.nupkg|^releases\.win-x64\.json)$').FullName
+          gh release upload -- $env:RELEASE_TAG @assets
