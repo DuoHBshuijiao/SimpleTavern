@@ -254,4 +254,4 @@ Vue 路由只有一个页面；浏览器前进/后退只作用于 `/chat` 路由
 - 设置层级：`frontend/src/components/SettingsDrawer.vue`、`frontend/src/components/settings-drawer/SettingsDrawerGlobalConnectionSection.vue`、`SettingsDrawerPresetsTab.vue`、`SettingsDrawerChatTab.vue`、`SettingsDrawerChatWorldBookSection.vue`、`SettingsDrawerChatTtsSection.vue`。
 - 参数/提示/世界书真实解析：`backend/app/routes/generate.py`、`backend/app/llm/preset_resolve.py`、`backend/app/llm/resolution.py`、`backend/app/worldbook_index.py`、`backend/app/routes/chats.py`。
 - 聊天助手/工具能力：`frontend/src/components/chat/AssistantPanel.vue`、`frontend/src/composables/useAssistant.ts`、`backend/app/assistant/AGENT.md`、`backend/app/assistant_tools/registry.py` 与 `handlers/`。
-- 已确认的隔离运行说明（仅用于辨认启动与数据行为，不将它当用户体验证据）：`docs/SANDBOX.md`、`sandbox.py`。
+- 已确认的隔离运行说明（仅用于辨认启动与数据行为）见 [沙箱指南](../SANDBOX.md) 和 [沙箱脚本](../../tools/sandbox.py)。

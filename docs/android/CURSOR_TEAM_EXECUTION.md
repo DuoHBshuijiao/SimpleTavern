@@ -30,7 +30,7 @@
 
 禁止触碰：`frontend/`、`demos/`、现有设计资产和界面文档中的视觉方案；生产数据、用户密钥及无关改动。不要自动提交或推送。不要为了迁移方便改变现有桌面 JSON 数据结构。
 
-`ANDROID_HOST_FEASIBILITY.md` 中的 Python 核心复用是旧调查，已失效。`docs/SANDBOX.md` 描述的是桌面黑盒验证环境，不是本次 Android 多沙箱的实现。
+[Android 宿主可行性调查](ANDROID_HOST_FEASIBILITY.md)保留了先前的 Python 核心复用方案。[沙箱指南](../SANDBOX.md)介绍桌面端黑盒验证环境。
 
 ## 3. 已定产品要求，不重新投票
 

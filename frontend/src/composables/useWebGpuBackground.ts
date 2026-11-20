@@ -35,7 +35,7 @@ export interface WebGpuBackgroundOptions {
  * Uniform 约定（MVP）：
  * - tail 默认填 0，未来字段追加时保持尾部扩展兼容
  * - 同时提供 CSS 与物理像素分辨率（resolutionCss/resolutionPhysical）
- * - 尾部含 frameCounter、对齐槽、mouseNorm、immersiveBlend（见 WEBGPU_UNIFORM_CONTRACT.md）
+ * - 尾部含 frameCounter、对齐槽、mouseNorm、immersiveBlend（见 docs/specs/WEBGPU_UNIFORM_CONTRACT.md）
  * - WGSL struct Uniforms 在 immersiveBlend 后按 8 字节对齐，实际 56 字节；索引 13 为 WGSL 尾部 padding，恒 0
  */
 const UNIFORM_FLOAT_COUNT = 14
@@ -76,7 +76,7 @@ export function useWebGpuBackground(options: WebGpuBackgroundOptions) {
   let lastMouseNormX = 0.5
   let lastMouseNormY = 0.5
   let pointerMoveHandler: ((ev: PointerEvent) => void) | null = null
-  /** 向 immersive 目标平滑，供着色器做缓动（与 WEBGPU_UNIFORM_CONTRACT.md 一致） */
+  /** 向 immersive 目标平滑，布局见 docs/specs/WEBGPU_UNIFORM_CONTRACT.md */
   let immersiveBlendSmooth = 0
 
   const uniformFloats = new Float32Array(UNIFORM_FLOAT_COUNT)

@@ -4,7 +4,7 @@
 提供检查云端版本、下载更新包、触发更新脚本的 API。
 - GET /api/update/check: 检查是否有新版本
 - POST /api/update/download: 下载指定 tag 的源码 zip 到 data/update
-- POST /api/update/run: 触发根目录更新脚本（关闭前后端与主终端、解压覆盖、执行 deploy.bat）
+- POST /api/update/run: 触发源码版更新脚本（关闭前后端与主终端、解压覆盖、执行部署脚本）
 """
 
 from __future__ import annotations
@@ -213,31 +213,32 @@ def download_update(body: dict) -> dict:
 @router.post("/update/run")
 def run_update() -> dict:
     """
-    触发根目录更新脚本。
-    脚本将：关闭前后端与主终端、解压 data/update/update.zip 覆盖、删除 zip、执行 deploy.bat、退出。
+    触发 tools/source-update 下的源码版更新脚本。
+    脚本关闭前后端与主终端，解压并删除 data/update/update.zip，然后重新部署。
     """
     root = get_repo_root()
+    scripts = root / "tools" / "source-update"
     backend_pid = os.getpid()
     if sys.platform == "win32":
-        script = root / "update.bat"
+        script = scripts / "update.bat"
         if not script.is_file():
-            raise HTTPException(status_code=500, detail="根目录未找到 update.bat")
+            raise HTTPException(status_code=500, detail="tools/source-update 下未找到 update.bat")
         try:
             subprocess.Popen(
-                ["cmd.exe", "/c", "update.bat", str(backend_pid), str(root)],
-                cwd=str(root),
+                ["cmd.exe", "/c", script.name, str(backend_pid), str(root)],
+                cwd=str(scripts),
                 creationflags=subprocess.CREATE_NEW_CONSOLE,
             )
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"启动更新脚本失败: {e}")
     else:
-        script = root / "update.sh"
+        script = scripts / "update.sh"
         if not script.is_file():
-            raise HTTPException(status_code=500, detail="根目录未找到 update.sh")
+            raise HTTPException(status_code=500, detail="tools/source-update 下未找到 update.sh")
         try:
             subprocess.Popen(
                 ["/bin/sh", str(script), str(backend_pid), str(root)],
-                cwd=str(root),
+                cwd=str(scripts),
                 start_new_session=True,
             )
         except Exception as e:

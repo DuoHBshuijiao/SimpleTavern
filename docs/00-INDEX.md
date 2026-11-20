@@ -4,6 +4,16 @@
 
 当前任务：[v1.000 发布验收清单](tasks/T-814-v1000-release-acceptance.md)。发布前的新功能冻结已撤销，亮色主题和 DeepSeek 朗读先做接入调研，验收继续。
 
+## 按主题查找
+
+| 主题 | 文档 |
+| --- | --- |
+| 安装与部署 | [快速开始与源码部署](../README.md#常用入口)、[Windows 打包与发布](../desktop/README.md)、[并行沙箱](SANDBOX.md) |
+| 本地语音 | [GLM-TTS 配置指南](guides/GLM_TTS_LOCAL_GUIDE.md) |
+| 设计与接口 | [产品说明](../PRODUCT.md)、[设计系统](../DESIGN.md)、[后端接口](specs/BACKEND-API.md)、[前端功能](specs/FRONTEND-FEATURES.md)、[WebGPU Uniform 布局](specs/WEBGPU_UNIFORM_CONTRACT.md) |
+| 审计与历史调查 | [项目现状审计](audits/PROJECT_STATE.md)、[前端体验审计](audits/FRONTEND_UX_AUDIT.md)、[Android 宿主可行性调查](android/ANDROID_HOST_FEASIBILITY.md) |
+| 版本记录 | [变更日志](../CHANGELOG.md)、[路线图](01-ROADMAP.md)、[待办事项](02-BACKLOG.md) |
+
 ## 测试策略（强制，2026-11-07 作者决定）
 
 撤掉测试框架的原因：AI 写完业务代码接着写测试，容易照着答案出题，几百个测试永远是绿的。
@@ -22,7 +32,7 @@
 
 ## 并行沙箱（黑盒点按）
 
-完整操作说明见 [`docs/SANDBOX.md`](SANDBOX.md)。摘要：仓库根目录 `python sandbox.py`，浏览器打开 `http://127.0.0.1:9181`；数据在 `data-sandbox/`，不写生产 `data/`。
+在仓库根目录运行 `python tools/sandbox.py` 后访问 `http://127.0.0.1:9181`。沙箱数据放在 `data-sandbox/`。操作细节见 [沙箱指南](SANDBOX.md)。
 
 ## 下一步阅读顺序
 

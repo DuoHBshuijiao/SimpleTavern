@@ -41,7 +41,7 @@ DEFAULT_SHADER_TEMPLATE = """// 使用 AI 写着色器代码时，请将该完�
 // ── 运行行为约定 ─────────────────────────────────────────────────────────────
 //  · 标签页不可见（document.hidden）时降频绘制约 1 fps；time 仍连续累加（可用于动画）
 //  · 本模板用 immersiveBlend 做「右下偏移 → 中心」等效摄像机缓动；片元内勿用阶跃 u.immersive 驱动线宽/粒子（会跳变）
-//  · 其余约定见项目根目录 WEBGPU_UNIFORM_CONTRACT.md
+//  · 其余约定见 docs/specs/WEBGPU_UNIFORM_CONTRACT.md
 
 struct Uniforms {
   time: f32,

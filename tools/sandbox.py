@@ -22,7 +22,7 @@ FRONTEND_HOST = "127.0.0.1"
 
 
 def repo_root() -> Path:
-    return Path(__file__).resolve().parent
+    return Path(__file__).resolve().parents[1]
 
 
 def venv_python(root: Path) -> Path:

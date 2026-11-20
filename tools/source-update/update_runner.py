@@ -2,7 +2,7 @@
 """
 SimpleTavern 更新执行脚本（由后端 /api/update/run 触发）
 
-用法: python update_runner.py <backend_pid> <repo_root>
+用法: python tools/source-update/update_runner.py <backend_pid> <repo_root>
 
 步骤：
 1. 结束占用 9081 端口的进程（前端）
@@ -118,7 +118,7 @@ def _kill_by_port(port: int) -> None:
 
 def main() -> None:
     if len(sys.argv) < 3:
-        print("用法: python update_runner.py <backend_pid> <repo_root>")
+        print("用法: python tools/source-update/update_runner.py <backend_pid> <repo_root>")
         _countdown_and_exit(1)
     try:
         backend_pid = int(sys.argv[1])

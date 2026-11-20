@@ -8,7 +8,7 @@
 
 | | 生产 | 沙箱 |
 | --- | --- | --- |
-| 启动 | `python deploy.py` 或手动 uvicorn + Vite | 仓库根目录 `python sandbox.py` |
+| 启动 | `python deploy.py` 或手动 uvicorn + Vite | 仓库根目录 `python tools/sandbox.py` |
 | 前端 | `http://127.0.0.1:9081` | `http://127.0.0.1:9181` |
 | 后端 | `http://127.0.0.1:9091` | `http://127.0.0.1:9191` |
 | 数据目录 | 仓库 `data/` | 仓库 `data-sandbox/` |
@@ -29,7 +29,7 @@
 在仓库根目录：
 
 ```bash
-python sandbox.py
+python tools/sandbox.py
 ```
 
 看到类似输出即就绪：
@@ -42,9 +42,9 @@ python sandbox.py
 浏览器点按请打开上述前端地址。Ctrl+C 结束沙箱进程。
 ```
 
-停止：在运行 `sandbox.py` 的终端按 **Ctrl+C**。脚本会结束它拉起的前后端子进程。
+在运行 `tools/sandbox.py` 的终端按 **Ctrl+C**，脚本会结束它启动的前后端子进程。
 
-Windows 若提示无法加载脚本，用 `python sandbox.py`，不要依赖未授权的 `.ps1`。
+Windows 可直接运行 `python tools/sandbox.py`。
 
 ## 浏览器点按
 
@@ -63,7 +63,7 @@ Windows 若提示无法加载脚本，用 `python sandbox.py`，不要依赖未�
 之后再启动默认**不覆盖**沙箱里已改过的设置。需要重新从生产抄 Key / 预设时：
 
 ```bash
-python sandbox.py --refresh-settings
+python tools/sandbox.py --refresh-settings
 ```
 
 `--refresh-settings` 会覆盖沙箱 `settings.json`，不会删除沙箱里已创建的角色、会话等其它文件。
@@ -91,7 +91,7 @@ Janitor 浏览器扩展写死生产 `127.0.0.1:9091`，沙箱收不到该扩展�
 | `SIMPLETAVERN_FRONTEND_PORT` | `9181` | Vite 开发/预览端口 |
 | `SIMPLETAVERN_API_PROXY` | `http://127.0.0.1:9191` | 前端 `/api` 代理目标 |
 
-相对路径的 `SIMPLETAVERN_DATA_DIR` 相对**进程当前工作目录**解析。`sandbox.py` 始终传入绝对路径。不要在 `backend/` 目录下手写相对路径 `data-sandbox`，否则会落到 `backend/data-sandbox`。
+相对路径的 `SIMPLETAVERN_DATA_DIR` 相对**进程当前工作目录**解析。`tools/sandbox.py` 始终传入绝对路径。在 `backend/` 下手写相对路径 `data-sandbox` 会落到 `backend/data-sandbox`。
 
 ## 常见问题
 
@@ -104,7 +104,7 @@ Janitor 浏览器扩展写死生产 `127.0.0.1:9091`，沙箱收不到该扩展�
 | 测模型失败、没有 Key | 确认 `data-sandbox/settings.json` 已有预设；或加 `--refresh-settings` 再启动。 |
 | OAuth 提示未登录 | 沙箱不复制 token，在沙箱设置里重新登录。 |
 | 字体/背景空白 | 未复制资源文件，属预期；在沙箱设置里重新选字体或上传背景。 |
-| 改完代码沙箱前端没更新 | 沙箱走 Vite `dev`，保存后应热更新；若进程已死，Ctrl+C 后重新 `python sandbox.py`。 |
+| 改完代码沙箱前端没更新 | 沙箱使用 Vite `dev`，保存后应热更新。若进程已退出，重新运行 `python tools/sandbox.py`。 |
 
 ## 不要做的事
 

@@ -109,7 +109,7 @@ Python 复用路线已由用户排除。现有 Python 源码可以作为业务�
 - 小型应用偏好可使用 DataStore；消息历史放入数据库。[Android DataStore 文档](https://developer.android.com/topic/libraries/architecture/datastore)说明了其适用边界。
 - 使用 Room 管理 SQLite、查询与 schema 升级。[Android Room 文档](https://developer.android.com/training/data-storage/room)说明了其 SQLite 抽象和迁移支持。
 
-**SQLite + Room、Kotlin 与 Compose 已选定，Python 核心复用已排除**。既有 `ANDROID_HOST_FEASIBILITY.md` 的 Python 共享核心路线是先前调查，已不属于当前候选。各模块应通过 repository 边界访问同一个存储服务，明确数据库写入和 schema 迁移的责任方。
+**SQLite + Room、Kotlin 与 Compose 已选定，Python 核心复用已排除**。[Android 宿主可行性调查](ANDROID_HOST_FEASIBILITY.md)记录了先前的 Python 共享核心路线。各模块应通过 repository 边界访问同一个存储服务，明确数据库写入和 schema 迁移的责任方。
 
 先前比较已结束：Room、SQLDelight 在 Android 上仍使用 SQLite，不是独立的替代引擎；ObjectBox 和 Couchbase Lite 保留为调查参考，不属于当前实施方案。MMKV 等键值存储不承担完整会话数据库职责。
 
@@ -165,7 +165,7 @@ RikkaHub 第一版优先打通“导入 → 找到原来的助手与会话 → �
 
 ## 源码与资料
 
-- 本地：`backend/app/routes/import_export.py`、`backend/app/storage.py`、`backend/app/schemas.py`、`backend/app/services/usage_ledger.py`、`ANDROID_HOST_FEASIBILITY.md`。
+- 本地参考包括 `backend/app/routes/import_export.py`、`backend/app/storage.py`、`backend/app/schemas.py`、`backend/app/services/usage_ledger.py` 和 [Android 宿主可行性调查](ANDROID_HOST_FEASIBILITY.md)。
 - [RikkaHub 2.5.5 BackupManager](https://github.com/rikkahub/rikkahub/blob/6c903feba7e6b65f518b320a88ae29efebae77c4/app/src/main/java/me/rerere/rikkahub/data/sync/BackupManager.kt)
 - [RikkaHub 2.5.5 DatabaseBackup](https://github.com/rikkahub/rikkahub/blob/6c903feba7e6b65f518b320a88ae29efebae77c4/app/src/main/java/me/rerere/rikkahub/data/sync/DatabaseBackup.kt)
 - [RikkaHub schema 25](https://github.com/rikkahub/rikkahub/blob/6c903feba7e6b65f518b320a88ae29efebae77c4/app/schemas/me.rerere.rikkahub.data.db.AppDatabase/25.json)

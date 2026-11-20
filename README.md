@@ -11,6 +11,16 @@
 
 </div>
 
+## 常用入口
+
+| 要做什么 | 入口 |
+| --- | --- |
+| 安装 Windows 桌面版或使用免安装版 | [快速开始](#-快速开始5-分钟上手) |
+| 用源码部署到 Windows | 双击 [deploy.bat](deploy.bat)，或运行 [`python deploy.py`](deploy.py) |
+| 用源码部署到 Linux / macOS | 运行 [`bash deploy.sh`](deploy.sh) 或 [`python3 deploy.py`](deploy.py) |
+| 启动并行沙箱 | 运行 `python tools/sandbox.py`。见 [沙箱指南](docs/SANDBOX.md) |
+| 找配置指南、设计规范和审计记录 | [文档索引](docs/00-INDEX.md) |
+
 ---
 
 <p align="center">
@@ -124,7 +134,7 @@
 
 ### 并行沙箱（不打扰生产数据）
 
-需要一边继续用现有角色/会话，一边在干净数据上点按核对时，在仓库根目录执行 `python sandbox.py`，浏览器打开 `http://127.0.0.1:9181`。沙箱写入 `data-sandbox/`，端口为 9181/9191，不会改 `data/` 或占用 9081/9091。完整说明见 [`docs/SANDBOX.md`](docs/SANDBOX.md)。
+需要一边继续用现有角色/会话，一边在干净数据上点按核对时，在仓库根目录执行 `python tools/sandbox.py`，浏览器打开 `http://127.0.0.1:9181`。沙箱使用 `data-sandbox/` 和 9181/9191 端口。完整说明见 [沙箱指南](docs/SANDBOX.md)。
 
 ### 手动部署（最小步骤）
 
