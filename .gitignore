@@ -23,11 +23,16 @@ __pycache__/
 
 # Local agent and tool state
 /.claude/
+/.agents/skills/
+/.codex/agents/
 /CLAUDE.md
 /.cursor/
 /.shared/
 /.memsearch/
 /.impeccable.md
+
+# Local prototypes
+/demos/mobile-story/
 
 # Temporary output
 /temp/

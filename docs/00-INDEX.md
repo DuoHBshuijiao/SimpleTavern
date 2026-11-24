@@ -10,7 +10,7 @@
 | --- | --- |
 | 安装与部署 | [快速开始与源码部署](../README.md#常用入口)、[Windows 打包与发布](../desktop/README.md)、[并行沙箱](SANDBOX.md) |
 | 本地语音 | [GLM-TTS 配置指南](guides/GLM_TTS_LOCAL_GUIDE.md) |
-| 设计与接口 | [产品说明](../PRODUCT.md)、[设计系统](../DESIGN.md)、[后端接口](specs/BACKEND-API.md)、[前端功能](specs/FRONTEND-FEATURES.md)、[WebGPU Uniform 布局](specs/WEBGPU_UNIFORM_CONTRACT.md) |
+| 设计与接口 | [产品说明](PRODUCT.md)、[设计系统](DESIGN.md)、[后端接口](specs/BACKEND-API.md)、[前端功能](specs/FRONTEND-FEATURES.md)、[WebGPU Uniform 布局](specs/WEBGPU_UNIFORM_CONTRACT.md) |
 | 审计与历史调查 | [项目现状审计](audits/PROJECT_STATE.md)、[前端体验审计](audits/FRONTEND_UX_AUDIT.md)、[Android 宿主可行性调查](android/ANDROID_HOST_FEASIBILITY.md) |
 | 版本记录 | [变更日志](../CHANGELOG.md)、[路线图](01-ROADMAP.md)、[待办事项](02-BACKLOG.md) |
 
