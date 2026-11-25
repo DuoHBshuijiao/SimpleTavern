@@ -99,7 +99,10 @@
   box-shadow: none;
 }
 
-:root[data-color-scheme='light'] :is(.themed-checkbox, .checkbox input):not([aria-checked='true'], :checked),
+:root[data-color-scheme='light'] :is(.themed-checkbox, .checkbox input):not([aria-checked='true'], :checked) {
+  background-color: color-mix(in srgb, var(--color-track) 82%, var(--color-surface-overlay));
+}
+
 :root[data-color-scheme='light'] .switch-track:not(.active) {
   background-color: var(--color-track);
 }
