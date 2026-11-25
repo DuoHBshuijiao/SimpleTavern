@@ -240,6 +240,11 @@ function resetSettingsTabFocus(event: FocusEvent) {
   if (!(target instanceof Node) || !settingsTabListRef.value?.contains(target)) focusedTab.value = tab.value
 }
 
+function openTtsPresetsTab() {
+  tab.value = 'presets'
+  settingsTabListRef.value?.querySelector<HTMLButtonElement>('#settings-tab-presets')?.focus({ preventScroll: true })
+}
+
 watch([() => props.show, tab], ([open, current], [wasOpen, previous]) => {
   if (!open) return
   if (!wasOpen) {
@@ -4596,6 +4601,7 @@ provide(
                 :cache-percent="ttsCachePercent"
                 @toggle-enabled="toggleGlobalTtsEnabled"
                 @clear-cache="clearTtsCacheAndRefresh"
+                @open-presets="openTtsPresetsTab"
               />
 
               <SettingsDrawerGlobalAppSection

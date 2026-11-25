@@ -23,6 +23,7 @@ const open = defineModel<boolean>('open', { required: true })
 const emit = defineEmits<{
   'toggle-enabled': []
   'clear-cache': []
+  'open-presets': []
 }>()
 
 function formatBytes(bytes: number): string {
@@ -35,12 +36,19 @@ function formatBytes(bytes: number): string {
 <template>
   <SettingsDrawerGlobalAccordion v-model:open="open" title="文字转语音（TTS）">
     <div class="settings-group">
-      <SettingsSwitch
-        :model-value="!!draft.ttsEnabled"
-        label="启用文字转语音"
-        hint="需在 API 预设中至少配置一个 TTS 服务预设。"
-        @update:model-value="emit('toggle-enabled')"
-      />
+      <div class="flex flex-col gap-1.5">
+        <SettingsSwitch
+          :model-value="!!draft.ttsEnabled"
+          label="启用文字转语音"
+          @update:model-value="emit('toggle-enabled')"
+        />
+        <p class="settings-hint">
+          需至少配置一个 TTS 服务预设。
+          <button type="button" class="text-brand underline underline-offset-2" @click="emit('open-presets')">
+            前往 API 预设
+          </button>
+        </p>
+      </div>
 
       <SettingsField v-if="draft.ttsEnabled" label="缓存上限（MB）">
         <input
