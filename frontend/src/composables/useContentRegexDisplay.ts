@@ -54,13 +54,25 @@ export function useContentRegexDisplay(getRules: () => ChatContentRegexRule[] | 
     queueMicrotask(processNext)
   }
 
-  watch(getRules, (value) => {
+  watch(() => {
+    // 保存会话或设置会重建规则对象，按影响正文显示的字段判断缓存是否失效。
+    const displayRules = (getRules() ?? [])
+      .filter((rule) => rule.enabled !== false && rule.action !== 'extract' && rule.pattern.trim())
+      .map(({ id, order, pattern, action, replacement, matchMode }) => ({
+        id,
+        order,
+        pattern,
+        action,
+        replacement: replacement ?? '',
+        matchMode: matchMode ?? 'global',
+        enabled: true,
+      }))
+    return JSON.stringify(displayRules)
+  }, (serializedRules) => {
     resetWorker()
     pending.clear()
     results.clear()
-    rules = JSON.parse(JSON.stringify((value ?? []).filter((rule) =>
-      rule.enabled !== false && rule.action !== 'extract' && rule.pattern.trim(),
-    )))
+    rules = JSON.parse(serializedRules)
   }, { immediate: true, flush: 'sync' })
 
   onBeforeUnmount(() => {

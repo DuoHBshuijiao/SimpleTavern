@@ -22,6 +22,19 @@ const md = new MarkdownIt({
 md.use(footnote)
 md.use(mathIslandPlugin)
 
+// 中文列表常见的 "**标题：**正文" 在标点和正文之间不能闭合加粗。
+// 只调整列表项首段，代码块、转义符号和正文中的 Markdown 保持原有解析规则。
+md.core.ruler.before('inline', 'localized_list_labels', ({ tokens }) => {
+  tokens.forEach((token, index) => {
+    if (token.type !== 'inline' || tokens[index - 1]?.type !== 'paragraph_open'
+      || tokens[index - 2]?.type !== 'list_item_open') return
+    token.content = token.content.replace(
+      /^(\*\*|__)([^*_`\\\r\n]+?)([：:])[ \t]*\1(?=[\p{L}\p{N}])/u,
+      '$1$2$1$3',
+    )
+  })
+})
+
 md.renderer.rules.link_open = (tokens, index, options, _environment, renderer) => {
   const link = tokens[index]!
   if (!link.attrGet('href')?.startsWith('#')) {
