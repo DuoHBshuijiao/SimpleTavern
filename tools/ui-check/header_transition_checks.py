@@ -42,8 +42,17 @@ async def switch_and_sample(page, chat_id, title):
 async def check_chat_header_switch(ctx):
     """群聊与单聊切换时，顶栏高度和成员出入场同时变化"""
     url = ctx.serve_built()
-    group = ctx.api(f"/api/chats/{ctx.fixtures['group']}")
     single = ctx.api(f"/api/chats/{ctx.fixtures['LONG']}")
+    character_id = single['characterId']
+    other = next(card['id'] for card in ctx.api('/api/characters') if card['id'] != character_id)
+    # 进入群聊时如果所选角色不在群里，侧栏会切换角色，原单聊也会从历史列表消失。
+    status, _, payload = dom.request(ctx, 'POST', '/api/chats', {
+        'characterId': character_id, 'isGroup': True, 'title': '顶栏切换验收群聊',
+        'memberIds': [character_id, other],
+    })
+    if status != 200:
+        raise RuntimeError(f'创建顶栏验收群聊失败：HTTP {status}')
+    group = json.loads(payload)
     saved = ctx.api('/api/settings')
     opening_group = f'document.querySelector(\'[data-sidebar-chat-id="{group["id"]}"]\')'
 
@@ -52,6 +61,7 @@ async def check_chat_header_switch(ctx):
             dom.update_settings(ctx, themeMode=theme)
             page = await dom.open_app(ctx, url, width, height, reduce_motion=reduced)
             try:
+                await dom.enter_chat(ctx, page, "LONG")
                 await page.wait_for(opening_group)
                 await page.js(f'{opening_group}.click()')
                 await page.wait_for(f"document.querySelector('main header h2')?.innerText === {json.dumps(group['title'])}")
@@ -93,6 +103,7 @@ async def check_chat_header_switch(ctx):
             finally:
                 await ctx.close(page)
     finally:
+        dom.request(ctx, 'DELETE', f"/api/chats/{group['id']}")
         dom.request(ctx, 'PUT', '/api/settings', saved)
 
 

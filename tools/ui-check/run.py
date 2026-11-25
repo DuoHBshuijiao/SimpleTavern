@@ -383,7 +383,8 @@ def main():
             cwd=frontend, env={**env, "SIMPLETAVERN_API_PROXY": f"http://127.0.0.1:{args.back_port}"}, stdout=log, stderr=log))
         wait_http(f"http://127.0.0.1:{args.front_port}/")
         chrome_args = [find_chrome(), "--headless=new", f"--remote-debugging-port={args.cdp_port}",
-                       f"--user-data-dir={profile}", "--window-size=1440,900", "--no-first-run", "--disable-gpu"]
+                       f"--user-data-dir={profile}", "--window-size=1440,900", "--no-first-run", "--disable-gpu",
+                       "--disable-extensions"]
         if not args.show_scrollbars:
             chrome_args.append("--hide-scrollbars")
         processes.append(subprocess.Popen([*chrome_args, "about:blank"], stdout=log, stderr=log))
