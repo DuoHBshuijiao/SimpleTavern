@@ -200,14 +200,21 @@ def _models_url(base_url: str) -> str:
         raise ValueError("API 基础地址未配置或为空。")
     if not (raw.startswith("http://") or raw.startswith("https://")):
         raw = "https://" + raw
-    raw = raw.rstrip("/")
+    endpoint = httpx.URL(raw)
+    raw = str(endpoint.copy_with(query=None, fragment=None)).rstrip("/")
     lower = raw.lower()
     for suffix in (_RESPONSES_SUFFIX, "/chat/completions"):
         if suffix in lower:
             idx = lower.rfind(suffix)
             raw = raw[:idx].rstrip("/")
             break
-    return _normalize_base_url(raw) + "/models"
+    url = httpx.URL(_normalize_base_url(raw) + "/models").copy_with(query=endpoint.query or None)
+    if url.scheme == "https" and url.host == "chatgpt.com" and url.path == "/backend-api/codex/models":
+        from app.llm.oauth.codex import MODEL_CATALOG_CLIENT_VERSION
+
+        if not url.params.get("client_version"):
+            url = url.copy_set_param("client_version", MODEL_CATALOG_CLIENT_VERSION)
+    return str(url)
 
 
 def _auth_headers(api_key: str, auth_style: str | None = None) -> dict[str, str]:

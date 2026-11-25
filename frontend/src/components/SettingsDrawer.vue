@@ -3134,9 +3134,10 @@ async function openModelSelector(preset: ApiPreset) {
             protocol: normalizeLlmProtocol(preset.protocol),
             providerId: preset.providerId,
             providerParams: preset.providerParams,
-            presetId: preset.id,
+            presetId: presetRequiresOAuth(preset) ? preset.id : undefined,
             authStyle: preset.authStyle,
         })
+        if (editingPreset.value !== preset) return
         candidateModels.value = models
         selectedCandidateModels.value = new Set(preset.models)
         modelSelectorQuery.value = ''

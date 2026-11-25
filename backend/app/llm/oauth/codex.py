@@ -30,6 +30,8 @@ DEVICE_CODE_TIMEOUT_SECONDS = 15 * 60
 SCOPE = "openid profile email offline_access"
 JWT_CLAIM_PATH = "https://api.openai.com/auth"
 ORIGINATOR = "simpletavern"
+# Compatibility target for the legacy Codex model catalog, which requires a CLI version.
+MODEL_CATALOG_CLIENT_VERSION = "0.169.0"
 
 
 def extra_request_headers(account_id: str | None) -> dict[str, str]:
