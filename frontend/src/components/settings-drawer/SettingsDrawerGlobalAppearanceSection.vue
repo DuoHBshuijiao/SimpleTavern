@@ -6,9 +6,16 @@ import SettingsDrawerGlobalAccordion from './SettingsDrawerGlobalAccordion.vue'
 import SettingsField from './SettingsField.vue'
 import SettingsHint from './SettingsHint.vue'
 import SettingsSwitch from './SettingsSwitch.vue'
-import { THEME_OPTIONS, type MvuMode, type Settings } from '../../types/models'
+import { THEME_OPTIONS, type MvuMode, type Settings, type ThemeMode } from '../../types/models'
 import type { SillyTavernImportPreview } from '../../composables/useSettingsImport'
 import type { CSSProperties } from 'vue'
+
+const themeModeOptions: { value: ThemeMode; label: string }[] = [
+  { value: 'system', label: '跟随系统' },
+  { value: 'background', label: '跟随背景亮度' },
+  { value: 'light', label: '固定亮色' },
+  { value: 'dark', label: '固定暗色' },
+]
 
 type WebgpuPreset = NonNullable<Settings['webgpuBackgroundPresets']>[number]
 
@@ -66,6 +73,11 @@ const emit = defineEmits<{
 
 /** 正在拖的背景滑块：抽屉其余部分让位给背景，只留这一个 */
 const activeBackgroundSlider = ref<'opacity' | 'blur' | null>(null)
+const advancedBackgroundOpen = ref(false)
+
+function sliderProgress(value: number, min: number, max: number) {
+  return { '--appearance-range-progress': `${Math.min(100, Math.max(0, (value - min) * 100 / (max - min)))}%` }
+}
 
 function startBackgroundAdjust(slider: 'opacity' | 'blur') {
   activeBackgroundSlider.value = slider
@@ -105,168 +117,20 @@ function triggerStImport() {
 <template>
   <SettingsDrawerGlobalAccordion v-model:open="open" title="外观与数据">
     <div class="settings-group">
-      <SettingsHint title="页面背景" more="图片叠在主题底色之上，调低透明度会透出底色，100% 为完整显示图片。模糊只作用于图片层。" />
-      <div class="flex flex-wrap gap-2">
-        <button type="button" class="btn btn-sm btn-secondary" @click="triggerPageBackgroundImport">导入图片</button>
-        <button
-          v-if="draft.pageBackgroundImage"
-          type="button"
-          class="btn btn-sm btn-secondary"
-          @click="emit('clear-page-background')"
-        >
-          清除
-        </button>
-      </div>
-      <input
-        ref="pageBackgroundInputRef"
-        type="file"
-        class="hidden"
-        accept="image/*,.png,.jpg,.jpeg,.webp,.gif"
-        @change="emit('page-background-file', $event)"
-      />
-      <div
-        v-if="pageBackgroundImageUrl"
-        class="w-1/2 min-w-[12rem] max-w-[22rem] overflow-hidden rounded-lg"
-      >
-        <div class="h-32 overflow-hidden">
-          <img
-            :src="pageBackgroundImageUrl || ''"
-            alt="页面背景预览"
-            class="h-full w-full object-cover object-center"
-            :style="pageBackgroundImageStyle"
-          />
-        </div>
-      </div>
-      <p v-else class="settings-hint">还未导入页面背景，聊天页仅使用主题底色。</p>
-      <div class="grid gap-3 md:grid-cols-2">
-        <label class="settings-field" :class="{ 'settings-slider-active': activeBackgroundSlider === 'opacity' }">
-          <span class="settings-field-head">
-            <span class="settings-label">透明度</span>
-            <span class="settings-hint">{{ pageBackgroundOpacity }}%</span>
-          </span>
-          <input v-model="pageBackgroundOpacity" type="range" min="0" max="100" step="1" class="input-range" @pointerdown="startBackgroundAdjust('opacity')" />
-        </label>
-        <label class="settings-field" :class="{ 'settings-slider-active': activeBackgroundSlider === 'blur' }">
-          <span class="settings-field-head">
-            <span class="settings-label">模糊</span>
-            <span class="settings-hint">{{ pageBackgroundBlur }} px</span>
-          </span>
-          <input v-model="pageBackgroundBlur" type="range" min="0" max="64" step="1" class="input-range" @pointerdown="startBackgroundAdjust('blur')" />
-        </label>
-      </div>
-    </div>
-
-    <div class="settings-group">
-      <div class="settings-group-title">WebGPU 着色器背景</div>
-      <SettingsSwitch
-        :model-value="!!draft.webgpuBackgroundEnabled"
-        label="启用着色器背景"
-        hint="点「保存设置」才持久化。"
-        more="运行态可先编译并应用，不会自动写入后端；仅「保存设置」才持久化。"
-        @update:model-value="(v) => { draft.webgpuBackgroundEnabled = v }"
-      />
-      <div class="flex flex-wrap gap-2">
-        <button
-          type="button"
-          class="btn btn-xs btn-secondary"
-          :disabled="webgpuPresetCreateBusy"
-          @click="emit('create-webgpu-preset')"
-        >
-          新建预设
-        </button>
-      </div>
-
-      <div class="space-y-2">
-        <div class="flex items-center justify-between gap-3">
-          <span class="settings-label">活动预设</span>
-          <div class="flex shrink-0 items-center gap-1.5">
-            <span class="settings-hint whitespace-nowrap">渲染性能</span>
-            <ModernSelect
-              v-model="webgpuTargetFps"
-              :options="webgpuTargetFpsOptions"
-              placement="top"
-              class="w-[96px] min-w-0"
-            />
-          </div>
-        </div>
-        <div class="settings-hint flex flex-wrap items-center gap-x-2 gap-y-1">
-          <span>适配器：{{ webgpuAvailability === 'available' ? '可用' : webgpuAvailability === 'unavailable' ? '不可用' : '检测中' }}</span>
-          <span v-if="webgpuHasRuntimeOverride">· 运行态覆盖</span>
-          <span v-if="webgpuPresetSourceDirty">· 未保存</span>
-        </div>
-        <p
-          v-if="webgpuPresetCompileDiagnosticsCount > 0 || webgpuPresetCompileMessage"
-          class="text-xs text-[var(--color-error-text)]"
-        >
-          编译失败，请使用对应预设行的「编辑」查看详情。
-        </p>
-        <div class="space-y-1">
-          <template v-for="item in webgpuPresets" :key="item.id">
-            <div
-              class="flex min-h-9 w-full flex-wrap items-center gap-1.5 rounded-md px-1 py-0.5 text-xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-brand-a40"
-              :class="
-                item.id === activeWebgpuPresetId
-                  ? 'cursor-pointer bg-brand-a20 text-brand ring-1 ring-brand-a30'
-                  : 'cursor-pointer hover:bg-surface-hover/40'
-              "
-              tabindex="0"
-              @click="activeWebgpuPresetId = item.id"
-              @keydown.enter.prevent="activeWebgpuPresetId = item.id"
-              @keydown.space.prevent="activeWebgpuPresetId = item.id"
-            >
-              <div class="flex min-h-9 min-w-0 flex-1 basis-[min(100%,10rem)] items-center px-2 py-1">
-                <span class="truncate">{{ item.name }}</span>
-              </div>
-              <div class="flex flex-wrap items-center gap-1.5" @click.stop>
-                <button
-                  type="button"
-                  class="min-h-8 shrink-0 rounded-md border border-[var(--color-border-subtle)] px-2 py-1 text-2xs text-[var(--color-text-secondary)] transition-colors hover:bg-surface-hover/40 hover:text-[var(--color-text)]"
-                  :class="item.id === activeWebgpuPresetId ? 'border-[var(--color-border-subtle)]/80' : ''"
-                  @click="emit('open-webgpu-editor', item.id)"
-                >
-                  编辑
-                </button>
-                <template v-if="item.id === activeWebgpuPresetId">
-                  <button
-                    type="button"
-                    class="min-h-8 shrink-0 rounded-md border border-[var(--color-border-subtle)] px-2 py-1 text-2xs transition-colors hover:bg-surface-hover/30"
-                    @click="emit('run-webgpu-preset')"
-                  >
-                    运行
-                  </button>
-                  <button
-                    type="button"
-                    class="min-h-8 shrink-0 rounded-md border border-[color-mix(in_srgb,var(--color-error)_40%,transparent)] px-2 py-1 text-2xs text-[var(--color-error-text)] transition-colors hover:bg-[var(--color-danger-hover)] disabled:opacity-50"
-                    :disabled="webgpuPresetDeleteBusy"
-                    @click="emit('delete-webgpu-preset')"
-                  >
-                    删除
-                  </button>
-                </template>
-              </div>
-            </div>
-          </template>
-          <div v-if="webgpuPresets.length === 0" class="settings-hint">
-            暂无预设
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="settings-group">
       <div class="settings-group-title">界面与字体</div>
       <SettingsField label="外观模式" more="跟随背景亮度时，偏亮的静态图片使用亮色。背景不可判定或正在显示 WebGPU 时使用暗色。">
-        <select v-model="draft.themeMode" class="input w-full" aria-label="外观模式">
-          <option value="system">跟随系统</option>
-          <option value="background">跟随背景亮度</option>
-          <option value="light">固定亮色</option>
-          <option value="dark">固定暗色</option>
-        </select>
+        <ModernSelect
+          :model-value="draft.themeMode ?? 'dark'"
+          :options="themeModeOptions"
+          aria-label="外观模式"
+          @update:model-value="draft.themeMode = $event as ThemeMode"
+        />
       </SettingsField>
       <SettingsField label="界面色系">
         <ModernSelect
           v-model="draft.themeId"
           :options="[...THEME_OPTIONS]"
+          aria-label="界面色系"
           placeholder="选择色系..."
           class="w-full"
         />
@@ -284,10 +148,10 @@ function triggerStImport() {
           />
         </div>
         <div class="flex flex-wrap items-center gap-2" :class="isNarrowPortrait ? 'w-full' : ''">
-          <div class="flex h-10 items-center gap-0.5 rounded-lg border border-[var(--color-border)] bg-surface-muted px-1 py-0.5">
+          <div class="input input-group h-10 !w-auto !items-center gap-0.5 !px-1 !py-0.5">
             <button
               type="button"
-              class="flex min-h-9 min-w-9 items-center justify-center rounded-md p-2 text-[var(--color-text-muted)] transition-colors hover:bg-surface-hover hover:text-[var(--color-text)]"
+              class="icon-button min-h-9 min-w-9 p-2"
               aria-label="减小字号"
               @click="emit('step-font-size', -1)"
             >
@@ -298,12 +162,12 @@ function triggerStImport() {
               type="number"
               min="8"
               max="72"
-              placeholder=""
-              class="w-10 border-0 bg-transparent text-center text-sm text-[var(--color-text)] [appearance:textfield] focus:outline-none focus:ring-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              aria-label="界面字号"
+              class="input-number-value w-10 rounded-sm border-0 bg-transparent text-center text-sm"
             />
             <button
               type="button"
-              class="flex min-h-9 min-w-9 items-center justify-center rounded-md p-2 text-[var(--color-text-muted)] transition-colors hover:bg-surface-hover hover:text-[var(--color-text)]"
+              class="icon-button min-h-9 min-w-9 p-2"
               aria-label="增大字号"
               @click="emit('step-font-size', 1)"
             >
@@ -341,7 +205,6 @@ function triggerStImport() {
       <SettingsField label="消息行高">
         <template #actions>
           <span class="flex items-center gap-2">
-            <span class="settings-hint">{{ draft.messageLineHeight == null ? '默认' : draft.messageLineHeight.toFixed(2) }}</span>
             <button
               type="button"
               class="btn btn-xs btn-ghost"
@@ -350,6 +213,7 @@ function triggerStImport() {
             >
               恢复默认
             </button>
+            <span class="settings-hint appearance-range-value">{{ (draft.messageLineHeight ?? 1.7).toFixed(2) }}×</span>
           </span>
         </template>
         <input
@@ -358,11 +222,185 @@ function triggerStImport() {
           min="1.2"
           max="2.4"
           step="0.05"
-          class="input-range"
+          class="appearance-range"
+          :style="sliderProgress(draft.messageLineHeight ?? 1.7, 1.2, 2.4)"
           aria-label="消息行高"
+          :aria-valuetext="`${draft.messageLineHeight == null ? '默认 ' : ''}${(draft.messageLineHeight ?? 1.7).toFixed(2)} 倍`"
           @input="draft.messageLineHeight = Number(($event.target as HTMLInputElement).value)"
         />
       </SettingsField>
+    </div>
+
+    <div class="settings-group appearance-background">
+      <SettingsHint title="页面背景" more="图片叠在主题底色之上，调低透明度会透出底色，100% 为完整显示图片。模糊只作用于图片层。" />
+      <div class="flex flex-wrap gap-2">
+        <button type="button" class="btn btn-sm btn-secondary" @click="triggerPageBackgroundImport">导入图片</button>
+        <button
+          v-if="draft.pageBackgroundImage"
+          type="button"
+          class="btn btn-sm btn-secondary"
+          @click="emit('clear-page-background')"
+        >
+          清除
+        </button>
+      </div>
+      <input
+        ref="pageBackgroundInputRef"
+        type="file"
+        class="hidden"
+        accept="image/*,.png,.jpg,.jpeg,.webp,.gif"
+        @change="emit('page-background-file', $event)"
+      />
+      <div
+        class="appearance-background-controls"
+        :class="{ 'appearance-background-controls--with-preview': pageBackgroundImageUrl }"
+      >
+        <div v-if="pageBackgroundImageUrl" class="h-32 min-w-0 overflow-hidden rounded-lg">
+          <img
+            :src="pageBackgroundImageUrl || ''"
+            alt="页面背景预览"
+            class="h-full w-full object-cover object-center"
+            :style="pageBackgroundImageStyle"
+          />
+        </div>
+        <div class="grid min-w-0 gap-3">
+          <label class="settings-field" :class="{ 'settings-slider-active': activeBackgroundSlider === 'opacity' }">
+            <span class="settings-field-head">
+              <span class="settings-label">透明度</span>
+              <span class="settings-hint appearance-range-value">{{ pageBackgroundOpacity }}%</span>
+            </span>
+            <input
+              v-model="pageBackgroundOpacity"
+              type="range"
+              min="0"
+              max="100"
+              step="1"
+              class="appearance-range"
+              :style="sliderProgress(pageBackgroundOpacity, 0, 100)"
+              aria-label="透明度"
+              :aria-valuetext="`${pageBackgroundOpacity}%`"
+              @pointerdown="startBackgroundAdjust('opacity')"
+            />
+          </label>
+          <label class="settings-field" :class="{ 'settings-slider-active': activeBackgroundSlider === 'blur' }">
+            <span class="settings-field-head">
+              <span class="settings-label">模糊</span>
+              <span class="settings-hint appearance-range-value">{{ pageBackgroundBlur }} px</span>
+            </span>
+            <input
+              v-model="pageBackgroundBlur"
+              type="range"
+              min="0"
+              max="64"
+              step="1"
+              class="appearance-range"
+              :style="sliderProgress(pageBackgroundBlur, 0, 64)"
+              aria-label="模糊"
+              :aria-valuetext="`${pageBackgroundBlur} 像素`"
+              @pointerdown="startBackgroundAdjust('blur')"
+            />
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div class="settings-group">
+      <SettingsDrawerGlobalAccordion v-model:open="advancedBackgroundOpen" title="高级背景">
+        <div class="settings-group">
+          <div class="settings-group-title">WebGPU 着色器背景</div>
+          <SettingsSwitch
+            :model-value="!!draft.webgpuBackgroundEnabled"
+            label="启用着色器背景"
+            hint="点「保存设置」后保留当前背景。"
+            @update:model-value="(v) => { draft.webgpuBackgroundEnabled = v }"
+          />
+          <div class="flex flex-wrap gap-2">
+            <button
+              type="button"
+              class="btn btn-xs btn-secondary"
+              :disabled="webgpuPresetCreateBusy"
+              @click="emit('create-webgpu-preset')"
+            >
+              新建预设
+            </button>
+          </div>
+
+          <div class="space-y-2">
+            <div class="flex items-center justify-between gap-3">
+              <span class="settings-label">活动预设</span>
+              <div class="flex shrink-0 items-center gap-1.5">
+                <span class="settings-hint whitespace-nowrap">渲染性能</span>
+                <ModernSelect
+                  v-model="webgpuTargetFps"
+                  :options="webgpuTargetFpsOptions"
+                  placement="top"
+                  class="w-[96px] min-w-0"
+                />
+              </div>
+            </div>
+            <div class="settings-hint flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span>适配器：{{ webgpuAvailability === 'available' ? '可用' : webgpuAvailability === 'unavailable' ? '不可用' : '检测中' }}</span>
+              <span v-if="webgpuHasRuntimeOverride">· 运行态覆盖</span>
+              <span v-if="webgpuPresetSourceDirty">· 未保存</span>
+            </div>
+            <p
+              v-if="webgpuPresetCompileDiagnosticsCount > 0 || webgpuPresetCompileMessage"
+              class="text-xs text-[var(--color-error-text)]"
+            >
+              编译失败，请使用对应预设行的「编辑」查看详情。
+            </p>
+            <div class="space-y-1">
+              <template v-for="item in webgpuPresets" :key="item.id">
+                <div
+                  class="flex min-h-9 w-full flex-wrap items-center gap-1.5 rounded-md px-1 py-0.5 text-xs transition-colors"
+                  :class="
+                    item.id === activeWebgpuPresetId
+                      ? 'cursor-pointer bg-brand-a20 text-brand dark-ui:ring-1 ring-brand-a30'
+                      : 'cursor-pointer hover:bg-surface-hover/40'
+                  "
+                  tabindex="0"
+                  @click="activeWebgpuPresetId = item.id"
+                  @keydown.enter.prevent="activeWebgpuPresetId = item.id"
+                  @keydown.space.prevent="activeWebgpuPresetId = item.id"
+                >
+                  <div class="flex min-h-9 min-w-0 flex-1 basis-[min(100%,10rem)] items-center px-2 py-1">
+                    <span class="truncate">{{ item.name }}</span>
+                  </div>
+                  <div class="flex flex-wrap items-center gap-1.5" @click.stop>
+                    <button
+                      type="button"
+                      class="btn btn-xs btn-secondary shrink-0"
+                      @click="emit('open-webgpu-editor', item.id)"
+                    >
+                      编辑
+                    </button>
+                    <template v-if="item.id === activeWebgpuPresetId">
+                      <button
+                        type="button"
+                        class="btn btn-xs btn-secondary shrink-0"
+                        @click="emit('run-webgpu-preset')"
+                      >
+                        运行
+                      </button>
+                      <button
+                        type="button"
+                        class="btn btn-xs btn-danger shrink-0"
+                        :disabled="webgpuPresetDeleteBusy"
+                        @click="emit('delete-webgpu-preset')"
+                      >
+                        删除
+                      </button>
+                    </template>
+                  </div>
+                </div>
+              </template>
+              <div v-if="webgpuPresets.length === 0" class="settings-hint">
+                暂无预设
+              </div>
+            </div>
+          </div>
+        </div>
+      </SettingsDrawerGlobalAccordion>
     </div>
 
     <div class="settings-group">
@@ -475,3 +513,76 @@ function triggerStImport() {
     </div>
   </SettingsDrawerGlobalAccordion>
 </template>
+
+<style scoped>
+.appearance-background {
+  container-type: inline-size;
+}
+
+.appearance-background-controls {
+  display: grid;
+  gap: 1rem;
+}
+
+@container (min-width: 22rem) {
+  .appearance-background-controls--with-preview {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: center;
+  }
+}
+
+.appearance-range-value {
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+  white-space: nowrap;
+}
+
+.appearance-range {
+  appearance: none;
+  display: block;
+  width: 100%;
+  height: 1.75rem;
+  margin: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  cursor: pointer;
+}
+
+.appearance-range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: linear-gradient(to right, var(--color-brand) var(--appearance-range-progress), var(--color-track) var(--appearance-range-progress));
+}
+
+.appearance-range::-webkit-slider-thumb {
+  appearance: none;
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border: 2px solid var(--color-brand);
+  border-radius: var(--radius-full);
+  background: var(--color-on-brand);
+}
+
+.appearance-range::-moz-range-track,
+.appearance-range::-moz-range-progress {
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: var(--color-track);
+}
+
+.appearance-range::-moz-range-progress {
+  background: var(--color-brand);
+}
+
+.appearance-range::-moz-range-thumb {
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--color-brand);
+  border-radius: var(--radius-full);
+  background: var(--color-on-brand);
+}
+</style>

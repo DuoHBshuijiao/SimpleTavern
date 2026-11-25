@@ -191,7 +191,66 @@ const {
   formatImportResultMessage,
 } = useSettingsImport()
 
-const tab = ref<'global' | 'presets' | 'chat'>('global')
+const settingsTabs = [
+  { id: 'global', label: '全局设置' },
+  { id: 'presets', label: 'API 预设' },
+  { id: 'chat', label: '当前会话' },
+] as const
+type SettingsTab = typeof settingsTabs[number]['id']
+const tab = ref<SettingsTab>('global')
+const focusedTab = ref<SettingsTab>('global')
+const settingsTabListRef = ref<HTMLElement | null>(null)
+const drawerScrollRef = ref<HTMLElement | null>(null)
+const tabScrollPositions: Record<SettingsTab, number> = { global: 0, presets: 0, chat: 0 }
+
+function handleSettingsTabKeydown(event: KeyboardEvent, index: number) {
+  const count = settingsTabs.length
+  let next: number
+  switch (event.key) {
+    case 'ArrowLeft':
+      next = (index - 1 + count) % count
+      break
+    case 'ArrowRight':
+      next = (index + 1) % count
+      break
+    case 'Home':
+      next = 0
+      break
+    case 'End':
+      next = count - 1
+      break
+    case 'Enter':
+    case ' ':
+      event.preventDefault()
+      tab.value = settingsTabs[index]!.id
+      return
+    default: return
+  }
+  event.preventDefault()
+  const target = settingsTabs[next]!.id
+  focusedTab.value = target
+  settingsTabListRef.value?.querySelector<HTMLButtonElement>(`#settings-tab-${target}`)?.focus()
+}
+
+function resetSettingsTabFocus(event: FocusEvent) {
+  const target = event.relatedTarget
+  if (!(target instanceof Node) || !settingsTabListRef.value?.contains(target)) focusedTab.value = tab.value
+}
+
+watch([() => props.show, tab], ([open, current], [wasOpen, previous]) => {
+  if (!open) return
+  if (!wasOpen) {
+    for (const { id } of settingsTabs) tabScrollPositions[id] = 0
+  } else if (drawerScrollRef.value) {
+    tabScrollPositions[previous] = drawerScrollRef.value.scrollTop
+  }
+  void nextTick(() => {
+    if (props.show && tab.value === current && drawerScrollRef.value) {
+      drawerScrollRef.value.scrollTop = tabScrollPositions[current]
+    }
+  })
+})
+
 const preloaded = ref(false)
 const chatTabEverOpened = ref(false)
 const savedPageBackgroundImage = ref<string | null>(null)
@@ -239,8 +298,10 @@ async function applySettingsFocusTarget() {
   // 全局和预设两个 Tab 用同一个连接组件，同名字段各有一份，隐藏的那份不能作为目标
   const el = Array.from(
     root?.querySelectorAll<HTMLElement>(`[data-settings-field="${target.field}"]`) ?? [],
-  ).find((node) => node.offsetParent !== null)
+  ).find((node) => (node.closest('details') ?? node).offsetParent !== null)
   if (!el) return
+  const disclosure = el.closest('details')
+  if (disclosure) disclosure.open = true
   el.scrollIntoView({ behavior: 'smooth', block: 'center' })
   el.classList.add('settings-field-focus-ring')
   window.setTimeout(() => el.classList.remove('settings-field-focus-ring'), 2400)
@@ -273,6 +334,7 @@ watch(
 )
 
 watch(tab, (t) => {
+  focusedTab.value = t
   if (t === 'chat') chatTabEverOpened.value = true
   if (t === 'presets') void refreshOAuthStatuses()
 })
@@ -4398,30 +4460,44 @@ provide(
         </div>
 
         <!-- Tabs：整块可点；底层滑块平移承载高光，与 gap-1 / px-2 对齐 -->
-        <div class="relative flex gap-1 border-b border-[var(--color-border-subtle)] bg-[var(--color-settings-control-bg)] px-2 py-2">
+        <div
+          ref="settingsTabListRef"
+          role="tablist"
+          aria-label="设置分类"
+          class="relative flex gap-1 border-b border-[var(--color-border-subtle)] bg-[var(--color-settings-control-bg)] px-2 py-2"
+          @focusout="resetSettingsTabFocus"
+        >
           <div
-            class="pointer-events-none absolute left-2 top-2 bottom-2 rounded-lg bg-brand-a10 transition-transform duration-[var(--motion-duration-moderate)] ease-out"
+            aria-hidden="true"
+            class="pointer-events-none settings-tab-indicator absolute left-2 top-2 bottom-2 rounded-lg bg-brand-a10 transition-transform duration-[var(--motion-duration-moderate)] ease-out"
             :style="{
               width: 'calc((100% - 1.5rem) / 3)',
               transform: `translateX(calc(${tab === 'global' ? 0 : tab === 'presets' ? 1 : 2} * (100% + 0.25rem)))`,
             }"
           />
           <button
-            v-for="t in ['global', 'presets', 'chat']"
-            :key="t"
+            v-for="({ id, label }, index) in settingsTabs"
+            :id="`settings-tab-${id}`"
+            :key="id"
             type="button"
-            class="group relative z-10 flex min-h-11 min-w-0 flex-1 touch-manipulation items-center justify-center px-0.5 py-0.5 text-sm font-medium transition-colors duration-[var(--motion-duration-moderate)]"
-            @click="tab = t as any"
+            role="tab"
+            class="btn btn-ghost group relative z-10 min-h-11 min-w-0 flex-1 touch-manipulation px-0.5 py-0.5 hover:translate-y-0"
+            :aria-controls="`settings-panel-${id}`"
+            :aria-selected="tab === id"
+            :tabindex="focusedTab === id ? 0 : -1"
+            @click="tab = id"
+            @focus="focusedTab = id"
+            @keydown="handleSettingsTabKeydown($event, index)"
           >
             <span
               class="block min-h-10 w-full rounded-lg py-2 text-center transition-colors duration-[var(--motion-duration-moderate)]"
               :class="
-                tab === t
+                tab === id
                   ? 'text-brand'
                   : 'text-[var(--color-text-muted)] group-hover:text-[var(--color-text)] group-hover:bg-surface-muted'
               "
             >
-              {{ t === 'global' ? '全局设置' : t === 'presets' ? 'API 预设' : '当前会话' }}
+              {{ label }}
             </span>
           </button>
         </div>
@@ -4432,8 +4508,8 @@ provide(
           class="drawer-scroll flex-1 min-h-0 min-w-0 overflow-y-auto p-6 custom-scrollbar bg-transparent"
         >
           <!-- Global Settings -->
-          <div v-if="preloaded" v-show="tab === 'global'" class="space-y-6">
-            <div v-if="!globalDraft" class="text-center text-[var(--color-text-muted)] py-8">加载中...</div>
+          <div v-show="tab === 'global'" id="settings-panel-global" role="tabpanel" aria-labelledby="settings-tab-global" tabindex="0" class="space-y-6">
+            <div v-if="!preloaded || !globalDraft" class="text-center text-[var(--color-text-muted)] py-8">加载中...</div>
             <div v-else class="space-y-4">
 
               <SettingsDrawerGlobalConnectionSection
@@ -4534,12 +4610,18 @@ provide(
             </div>
           </div>
 
-          <SettingsDrawerPresetsTab v-if="show && preloaded && tab === 'presets'" />
-
-          <SettingsDrawerChatTab v-if="chatTabEverOpened" v-show="tab === 'chat'" />
+          <div v-show="tab === 'presets'" id="settings-panel-presets" role="tabpanel" aria-labelledby="settings-tab-presets" tabindex="0">
+            <SettingsDrawerPresetsTab v-if="show && preloaded && tab === 'presets'" />
+          </div>
+          <div v-show="tab === 'chat'" id="settings-panel-chat" role="tabpanel" aria-labelledby="settings-tab-chat" tabindex="0">
+            <SettingsDrawerChatTab v-if="chatTabEverOpened" />
+          </div>
         </div>
 
-        <div class="shrink-0 flex justify-end gap-3 border-t border-[var(--color-border-subtle)] px-6 py-4 bg-[var(--color-settings-panel-bg)] rounded-b-2xl">
+        <div class="shrink-0 flex flex-wrap items-center justify-end gap-x-3 gap-y-1 border-t border-[var(--color-border-subtle)] px-6 py-4 bg-[var(--color-settings-panel-bg)] rounded-b-2xl">
+          <span role="status" class="mr-auto text-xs text-[var(--color-text-secondary)]">
+            {{ hasUnsavedChanges && !isSaving ? '有未保存修改' : '' }}
+          </span>
           <button
             type="button"
             class="btn btn-secondary min-h-11 whitespace-nowrap"
@@ -4550,7 +4632,7 @@ provide(
           </button>
           <button
             type="button"
-            class="btn btn-primary min-h-11 whitespace-nowrap"
+            class="btn btn-primary settings-save-button min-h-11 whitespace-nowrap"
             :disabled="isSaving"
             @click="handleSaveAll"
           >

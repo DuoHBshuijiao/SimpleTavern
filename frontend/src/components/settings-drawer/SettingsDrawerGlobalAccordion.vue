@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref, useId, watch } from 'vue'
 import { ChevronDown } from 'lucide-vue-next'
 
 defineProps<{
@@ -8,14 +9,23 @@ defineProps<{
 }>()
 
 const open = defineModel<boolean>('open', { required: true })
+const contentId = useId()
+const trigger = ref<HTMLButtonElement | null>(null)
+const content = ref<HTMLElement | null>(null)
+
+watch(open, (expanded) => {
+  if (!expanded && content.value?.contains(document.activeElement)) trigger.value?.focus({ preventScroll: true })
+})
 </script>
 
 <template>
-  <div class="overflow-hidden rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-settings-panel-bg)]">
+  <div class="settings-accordion overflow-hidden rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-settings-panel-bg)]">
     <button
+      ref="trigger"
       type="button"
       class="flex w-full cursor-pointer select-none items-center justify-between gap-3 px-4 py-3.5 text-left text-sm font-medium text-[var(--color-text)] hover:bg-surface-hover/40"
       :aria-expanded="open"
+      :aria-controls="contentId"
       @click="open = !open"
     >
       <span>{{ title }}</span>
@@ -25,8 +35,11 @@ const open = defineModel<boolean>('open', { required: true })
       />
     </button>
     <div
+      :id="contentId"
+      ref="content"
       class="grid transition-[grid-template-rows] duration-[var(--motion-duration-expand)] ease-out"
       :class="open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'"
+      :inert="!open"
     >
       <div class="min-h-0 overflow-hidden">
         <div

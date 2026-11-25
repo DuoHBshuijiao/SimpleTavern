@@ -3,7 +3,6 @@ import { computed, ref, watch } from 'vue'
 import ModernSelect from '../ModernSelect.vue'
 import ThemedRadioTags from '../ThemedRadioTags.vue'
 import SettingsField from './SettingsField.vue'
-import SettingsHint from './SettingsHint.vue'
 import {
   getUsageSummary,
   type UsageModelRow,
@@ -88,7 +87,6 @@ const costLines = computed(() => {
     return [
       {
         currency,
-        total: row.total,
         provider: row.provider,
         estimated: row.estimated,
       },
@@ -166,7 +164,7 @@ watch(
       <ModernSelect :model-value="range" :options="RANGE_OPTIONS" placeholder="选择时间范围…" class="w-full" @update:model-value="onRange" />
     </SettingsField>
     <p v-if="errorText" class="text-xs text-[var(--color-error-text)]">{{ errorText }}</p>
-    <SettingsHint more="云端金额不被本地估算覆盖；未知成本不计 0。">账本事件 {{ eventCount }} 条。</SettingsHint>
+    <p class="settings-hint">账本事件 {{ eventCount }} 条</p>
     <div v-if="summary" class="grid grid-cols-2 gap-2 text-xs">
       <div class="settings-readout">
         <div class="text-[var(--color-text-muted)]">输入 / 输出 token</div>
@@ -197,11 +195,10 @@ watch(
     </div>
     <div class="settings-field">
       <span class="settings-label">成本来源</span>
-      <SettingsHint more="云端 = 供应商返回金额；本地估算 = 目录/用户价格表；未知 = 无法可靠计算。">未知成本事件 {{ summary?.unknownCostCount ?? 0 }} 条。</SettingsHint>
+      <p v-if="summary?.unknownCostCount" class="settings-hint">{{ summary.unknownCostCount }} 条记录待确认费用</p>
       <ul v-if="costLines.length" class="space-y-0.5 text-xs text-[var(--color-text)]">
         <li v-for="line in costLines" :key="line.currency" class="tabular-nums">
-          {{ line.currency }} 合计 {{ money.format(line.total) }}
-          （云端 {{ money.format(line.provider) }} · 估算 {{ money.format(line.estimated) }}；合计=实付，估算不加进合计）
+          {{ line.currency }} · 实付 {{ money.format(line.provider) }} · 估算 {{ money.format(line.estimated) }}
         </li>
       </ul>
       <p v-else class="settings-hint">尚无已知金额。</p>
