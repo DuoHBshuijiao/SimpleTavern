@@ -50,7 +50,7 @@ export function summarizeAutoRepair(autoIssues: DataIntegrityIssue[], manualIssu
   ]
   if (manualIssues.length > 0) {
     parts.push('')
-    parts.push(`另有 ${manualIssues.length} 个设置/角色/世界书/孤儿会话异常需人工检查，不会被自动清理：`)
+    parts.push(`另有 ${manualIssues.length} 个设置、角色、世界书或孤儿会话文件需要手动检查。`)
     parts.push(...formatIssueLines(manualIssues, 4))
   }
   return parts.join('\n')
@@ -58,7 +58,7 @@ export function summarizeAutoRepair(autoIssues: DataIntegrityIssue[], manualIssu
 
 export function summarizeManualOnly(manualIssues: DataIntegrityIssue[]): string {
   return [
-    '检测到以下数据文件异常，需人工检查处理（不会自动修改设置/角色/世界书）：',
+    '请手动检查以下异常数据文件。',
     '',
     ...formatIssueLines(manualIssues),
   ].join('\n')

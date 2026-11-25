@@ -5295,9 +5295,9 @@ const editingPersonaAvatarUrl = computed(() => {
         role="dialog"
         aria-modal="true"
         aria-labelledby="image-fallback-title"
-        class="modal-content modal-surface relative w-[min(640px,calc(100vw-2rem))] border-[color-mix(in_srgb,var(--color-error)_30%,transparent)]"
+        class="modal-content modal-surface relative w-[min(640px,calc(100vw-2rem))] border-[color-mix(in_srgb,var(--color-error)_30%,transparent)] light:border-transparent"
       >
-        <div class="px-4 py-3 border-b border-[color-mix(in_srgb,var(--color-error)_20%,transparent)]">
+        <div class="px-4 py-3 border-b border-[color-mix(in_srgb,var(--color-error)_20%,transparent)] light:border-transparent">
           <h3 id="image-fallback-title" class="text-sm font-semibold text-[var(--color-error-text)]">模型不支持图片或图片请求失败</h3>
         </div>
         <div class="px-4 py-3">

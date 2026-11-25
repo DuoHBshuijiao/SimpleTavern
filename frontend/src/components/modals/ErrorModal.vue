@@ -48,14 +48,16 @@ async function copyMessage() {
 </script>
 
 <template>
+  <Teleport to="body">
   <div
     class="fixed right-4 w-[min(560px,calc(100vw-2rem))] pointer-events-auto"
     :style="{ top: `${72 + offsetY}px`, zIndex }"
+    role="alert"
     @mouseenter="emit('pause', item.id)"
     @mouseleave="emit('resume', item.id)"
   >
-    <div class="surface-panel overflow-hidden border-[color-mix(in_srgb,var(--color-error)_30%,transparent)] bg-[var(--color-error-bg)]">
-      <div class="flex items-center justify-between px-3 py-2 border-b border-[color-mix(in_srgb,var(--color-error)_20%,transparent)]">
+    <div class="error-surface surface-panel overflow-hidden backdrop-blur-[var(--glass-blur-popover)] backdrop-saturate-[1.5]">
+      <div class="flex items-center justify-between px-3 py-2 border-b border-[color-mix(in_srgb,var(--color-error)_20%,transparent)] light:border-transparent">
         <div class="text-sm font-semibold text-[var(--color-error-text)]">{{ item.title }}</div>
         <button type="button" class="icon-button p-1 text-[var(--color-error-text)]" aria-label="关闭错误提示" @click="emit('close', item.id)">
           <X class="w-4 h-4" />
@@ -88,4 +90,13 @@ async function copyMessage() {
       </div>
     </div>
   </div>
+  </Teleport>
 </template>
+
+<style scoped>
+.error-surface {
+  border-color: color-mix(in srgb, var(--color-error) 30%, var(--color-border));
+  background-color: color-mix(in srgb, var(--color-surface-panel), var(--color-error-bg) 18%);
+  box-shadow: var(--shadow-lg);
+}
+</style>

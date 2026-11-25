@@ -4,6 +4,7 @@
  */
 import type { HttpLogDetail } from '../../api/httpLog'
 import CodeViewer from '../common/CodeViewer.vue'
+import ThemedRadioTags from '../ThemedRadioTags.vue'
 import HttpRecordPreview from './HttpRecordPreview.vue'
 
 defineProps<{
@@ -27,6 +28,14 @@ const emit = defineEmits<{
 }>()
 
 const contentMaxHeightClassDefault = 'max-h-[72vh]'
+const viewModeOptions: { value: 'pretty' | 'raw'; label: string }[] = [
+  { value: 'pretty', label: 'Pretty' },
+  { value: 'raw', label: 'Raw JSON' },
+]
+const rawSectionOptions: { value: 'request' | 'response'; label: string }[] = [
+  { value: 'request', label: 'Request' },
+  { value: 'response', label: 'Response' },
+]
 </script>
 
 <template>
@@ -36,45 +45,19 @@ const contentMaxHeightClassDefault = 'max-h-[72vh]'
       :class="stackDetailHeader ? 'flex-col gap-2' : 'flex-row flex-wrap items-center gap-x-3 gap-y-1'"
     >
       <div class="flex flex-wrap items-center gap-2" :class="stackDetailHeader ? '' : 'shrink-0'">
-        <div class="inline-flex overflow-hidden rounded-lg border border-[var(--color-border-subtle)]">
-          <button
-            type="button"
-            class="px-3 py-1 text-xs transition-colors"
-            :class="viewMode === 'pretty' ? 'bg-brand-a20 text-[var(--color-brand)]' : 'text-[var(--color-text-secondary)] hover:bg-surface-hover'"
-            @click="emit('update:viewMode', 'pretty')"
-          >
-            Pretty
-          </button>
-          <button
-            type="button"
-            class="px-3 py-1 text-xs transition-colors"
-            :class="viewMode === 'raw' ? 'bg-brand-a20 text-[var(--color-brand)]' : 'text-[var(--color-text-secondary)] hover:bg-surface-hover'"
-            @click="emit('update:viewMode', 'raw')"
-          >
-            Raw JSON
-          </button>
-        </div>
-        <div
+        <ThemedRadioTags
+          :model-value="viewMode"
+          :options="viewModeOptions"
+          aria-label="日志显示格式"
+          @update:model-value="emit('update:viewMode', $event)"
+        />
+        <ThemedRadioTags
           v-if="viewMode === 'raw'"
-          class="inline-flex overflow-hidden rounded-lg border border-[var(--color-border-subtle)]"
-        >
-          <button
-            type="button"
-            class="px-3 py-1 text-xs transition-colors"
-            :class="rawSection === 'request' ? 'bg-[var(--color-surface-hover)] text-[var(--color-text)]' : 'text-[var(--color-text-secondary)] hover:bg-surface-hover'"
-            @click="emit('update:rawSection', 'request')"
-          >
-            Request
-          </button>
-          <button
-            type="button"
-            class="px-3 py-1 text-xs transition-colors"
-            :class="rawSection === 'response' ? 'bg-[var(--color-surface-hover)] text-[var(--color-text)]' : 'text-[var(--color-text-secondary)] hover:bg-surface-hover'"
-            @click="emit('update:rawSection', 'response')"
-          >
-            Response
-          </button>
-        </div>
+          :model-value="rawSection"
+          :options="rawSectionOptions"
+          aria-label="日志原始数据"
+          @update:model-value="emit('update:rawSection', $event)"
+        />
       </div>
       <div
         v-if="detail"
@@ -115,7 +98,7 @@ const contentMaxHeightClassDefault = 'max-h-[72vh]'
     <div
       class="shrink-0 border-t border-[var(--color-border-subtle)] bg-[var(--color-surface-muted)]/20 px-3 py-1.5 text-center text-2xs text-[var(--color-text-muted)]"
     >
-      仅保留最近 30 分钟，每 30s 自动清理一次；API Key 与文件内容已脱敏。
+      显示最近 30 分钟的请求。
     </div>
   </div>
 </template>

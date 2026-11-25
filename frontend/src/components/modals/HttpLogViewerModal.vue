@@ -301,7 +301,7 @@ function detailEmbedId(itemId: string) {
           >
             <button
               type="button"
-              class="inline-flex min-h-9 items-center gap-1 rounded-lg bg-surface-muted px-2.5 py-1.5 text-xs text-[var(--color-text)] transition-colors hover:bg-surface-hover disabled:opacity-50"
+              class="btn btn-sm btn-secondary"
               :disabled="listLoading"
               @click="loadList(true)"
             >
@@ -310,7 +310,7 @@ function detailEmbedId(itemId: string) {
             </button>
             <button
               type="button"
-              class="inline-flex min-h-9 items-center gap-1 rounded-lg bg-surface-muted px-2.5 py-1.5 text-xs text-[var(--color-text)] transition-colors hover:bg-surface-hover"
+              class="btn btn-sm btn-secondary"
               @click="onCopy"
             >
               <Copy class="h-3.5 w-3.5" />
@@ -318,7 +318,7 @@ function detailEmbedId(itemId: string) {
             </button>
             <button
               type="button"
-              class="inline-flex min-h-9 items-center gap-1 rounded-lg border border-[var(--color-error)]/30 bg-[var(--color-error-bg)] px-2.5 py-1.5 text-xs text-[var(--color-error-text)] transition-colors hover:bg-[var(--color-danger-hover)]"
+              class="btn btn-sm btn-danger"
               @click="onClear"
             >
               <Trash2 class="h-3.5 w-3.5" />
@@ -367,8 +367,8 @@ function detailEmbedId(itemId: string) {
                   v-for="it in items"
                   :key="it.id"
                   type="button"
-                  class="flex w-full flex-col gap-1 border-b border-[var(--color-border-subtle)]/60 px-3 py-2 text-left transition-colors hover:bg-[var(--color-surface-hover)]"
-                  :class="selectedId === it.id ? 'bg-[var(--color-surface-hover)]' : ''"
+                  class="select-option flex-col items-stretch gap-1 rounded-none border-b border-[var(--color-border-subtle)]/60"
+                  :aria-pressed="selectedId === it.id"
                   @click="selectedId = it.id"
                 >
                   <div class="flex items-center gap-1.5">
@@ -402,8 +402,8 @@ function detailEmbedId(itemId: string) {
                   <div class="flex items-stretch">
                     <button
                       type="button"
-                      class="flex min-w-0 flex-1 flex-col gap-1 px-3 py-2 text-left transition-colors hover:bg-[var(--color-surface-hover)]"
-                      :class="selectedId === it.id ? 'bg-[var(--color-surface-hover)]' : ''"
+                      class="select-option min-w-0 flex-1 flex-col items-stretch gap-1 rounded-none"
+                      :aria-pressed="selectedId === it.id"
                       @click="selectedId = it.id"
                     >
                       <div class="flex items-center gap-1.5">
@@ -428,7 +428,7 @@ function detailEmbedId(itemId: string) {
                     <button
                       v-if="selectedId === it.id"
                       type="button"
-                      class="shrink-0 self-stretch border-l border-[var(--color-border-subtle)]/60 px-2.5 text-xs text-[var(--color-brand)] transition-colors hover:bg-[var(--color-surface-hover)] touch-manipulation"
+                      class="btn btn-xs btn-ghost shrink-0 self-stretch text-brand touch-manipulation"
                       :aria-expanded="detailPanelOpen"
                       :aria-controls="detailEmbedId(it.id)"
                       @click.stop="toggleDetailPanel"

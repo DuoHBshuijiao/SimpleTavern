@@ -12,7 +12,7 @@ const checking = ref(false)
 
 const renderedNotes = computed(() => {
   const notes = startupUpdate.value?.releaseNotes?.trim()
-  return renderChatMarkdown(notes || '本次 release 暂无可展示的更新说明。')
+  return notes ? renderChatMarkdown(notes) : ''
 })
 
 let startupTimerId: number | null = null
@@ -72,22 +72,20 @@ onBeforeUnmount(() => {
       <section class="theme-panel-bg backdrop-blur-[var(--glass-blur-panel)] backdrop-saturate-[1.8] border border-[var(--color-border)] shadow-glass-panel rounded-2xl overflow-hidden flex flex-col flex-1 min-h-0">
         <header class="px-4 pt-4 pb-3 border-b border-[var(--color-border-subtle)] shrink-0 flex items-start justify-between gap-3">
           <div class="min-w-0">
-            <div class="inline-flex items-center gap-2 rounded-full border border-[var(--color-brand-a30)] bg-[var(--color-brand-a10)] px-2.5 py-1 text-2xs font-medium tracking-[0.08em] uppercase text-[var(--color-brand-fg-soft)]">
-              启动检查
-            </div>
-            <h2 class="mt-3 text-base font-semibold text-[var(--color-text)]">发现新版本 {{ startupUpdate.latestVersion }}</h2>
+            <h2 class="text-base font-semibold text-[var(--color-text)]">发现新版本 {{ startupUpdate.latestVersion }}</h2>
             <p class="mt-1 text-sm text-[var(--color-text-secondary)]">
-              当前版本 {{ startupUpdate.currentVersion }}，可在设置中的更新流程里继续安装。
+              当前版本 {{ startupUpdate.currentVersion }}
             </p>
           </div>
         </header>
 
         <div
+          v-if="renderedNotes"
           class="px-4 py-3 flex-1 min-h-0 overflow-y-auto overscroll-contain startup-update-markdown prose prose-invert prose-sm max-w-none"
           v-html="renderedNotes"
         ></div>
 
-        <footer class="px-4 py-3 border-t border-[var(--color-border-subtle)] shrink-0 flex items-center justify-end gap-2">
+        <footer class="px-4 py-3 shrink-0 flex items-center justify-end gap-2" :class="{ 'border-t border-[var(--color-border-subtle)]': renderedNotes }">
           <button type="button" class="btn btn-sm btn-secondary" :disabled="ignoring" @click="ignoreRelease">
             {{ ignoring ? '处理中...' : '忽略' }}
           </button>
