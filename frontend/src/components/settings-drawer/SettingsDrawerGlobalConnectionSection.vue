@@ -30,46 +30,15 @@ const emit = defineEmits<{
 <template>
   <SettingsDrawerGlobalAccordion v-model:open="open" title="连接与默认模型">
     <div class="settings-group">
-      <div class="settings-group-title">对话模式</div>
-      <SettingsSwitch v-model="draft.streamEnabled" label="流式传输" />
-      <SettingsSwitch
-        v-model="draft.pureAiMode"
-        label="纯 AI 模式"
-        more="不注入用户 Persona，用户发言以「系统」角色影响世界。"
-      />
-    </div>
-
-    <div class="settings-group">
-      <div class="settings-group-title">思考</div>
-      <SettingsField
-        label="思考模式"
-        more="选「无」关闭思考，其他档位请求更高的推理深度。聊天面板可以按会话覆盖。"
-      >
-        <ModernSelect
-          v-model="draft.reasoningEffort"
-          :options="[...REASONING_EFFORT_OPTIONS]"
-          placeholder="选择思考深度..."
-          class="w-full"
-        />
-      </SettingsField>
-      <SettingsField
-        label="回传思考内容"
-        data-settings-field="reasoningEchoBack"
-        :hint="draft.reasoningEchoBack === 'off' ? 'DeepSeek 调用工具时需要回传思考内容。' : undefined"
-        more="「按预设」使用各预设自己的选择。全部开启或关闭时会覆盖预设。"
-      >
-        <ModernSelect
-          :model-value="draft.reasoningEchoBack || 'preset'"
-          :options="[...REASONING_ECHO_BACK_OPTIONS]"
-          placeholder="按预设…"
-          class="w-full"
-          @update:model-value="(v) => { draft.reasoningEchoBack = String(v) as Settings['reasoningEchoBack'] }"
-        />
-      </SettingsField>
-    </div>
-
-    <div class="settings-group">
       <div class="settings-group-title">默认连接</div>
+      <SettingsField label="模型名称">
+        <input
+          v-model="draft.llm.defaultModel"
+          type="text"
+          class="input w-full"
+          placeholder="例如: gpt-3.5-turbo"
+        />
+      </SettingsField>
       <SettingsField
         label="API 基础地址"
         more="支持 Base（如 https://api.openai.com 或 …/v1）或完整 chat/completions 地址；末尾有无 / 均可。"
@@ -110,14 +79,6 @@ const emit = defineEmits<{
           </button>
         </div>
       </SettingsField>
-      <SettingsField label="模型名称">
-        <input
-          v-model="draft.llm.defaultModel"
-          type="text"
-          class="input w-full"
-          placeholder="例如: gpt-3.5-turbo"
-        />
-      </SettingsField>
       <SettingsField
         label="MVU Agent 模型"
         more="MVU 后台和 SillyTavern directive 导入共用这个模型。"
@@ -130,6 +91,45 @@ const emit = defineEmits<{
           searchable
           allow-create
           @select="emit('mvu-model-select', $event)"
+        />
+      </SettingsField>
+    </div>
+
+    <div class="settings-group">
+      <div class="settings-group-title">对话模式</div>
+      <SettingsSwitch v-model="draft.streamEnabled" label="流式传输" />
+      <SettingsSwitch
+        v-model="draft.pureAiMode"
+        label="纯 AI 模式"
+        more="不注入用户 Persona，用户发言以「系统」角色影响世界。"
+      />
+    </div>
+
+    <div class="settings-group">
+      <div class="settings-group-title">思考</div>
+      <SettingsField
+        label="思考模式"
+        more="选「无」关闭思考，其他档位请求更高的推理深度。聊天面板可以按会话覆盖。"
+      >
+        <ModernSelect
+          v-model="draft.reasoningEffort"
+          :options="[...REASONING_EFFORT_OPTIONS]"
+          placeholder="选择思考深度..."
+          class="w-full"
+        />
+      </SettingsField>
+      <SettingsField
+        label="回传思考内容"
+        data-settings-field="reasoningEchoBack"
+        :hint="draft.reasoningEchoBack === 'off' ? 'DeepSeek 调用工具时需要回传思考内容。' : undefined"
+        more="「按预设」使用各预设自己的选择。全部开启或关闭时会覆盖预设。"
+      >
+        <ModernSelect
+          :model-value="draft.reasoningEchoBack || 'preset'"
+          :options="[...REASONING_ECHO_BACK_OPTIONS]"
+          placeholder="按预设…"
+          class="w-full"
+          @update:model-value="(v) => { draft.reasoningEchoBack = String(v) as Settings['reasoningEchoBack'] }"
         />
       </SettingsField>
     </div>
