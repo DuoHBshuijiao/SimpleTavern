@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, inject, ref } from 'vue'
 import { SETTINGS_DRAWER_CHAT_KEY } from '../../composables/settingsDrawerChatKey'
+import DraggableRadioTags from '../DraggableRadioTags.vue'
 import ModernSelect from '../ModernSelect.vue'
 import ThemedCheckbox from '../ThemedCheckbox.vue'
-import ThemedRadioTags from '../ThemedRadioTags.vue'
 import MvuCapabilityEditor from '../chat/MvuCapabilityEditor.vue'
 import SettingsDrawerChatRegexSection from './SettingsDrawerChatRegexSection.vue'
 import SettingsDrawerChatWorldBookSection from './SettingsDrawerChatWorldBookSection.vue'
@@ -13,9 +13,10 @@ import SettingsField from './SettingsField.vue'
 import SettingsHint from './SettingsHint.vue'
 import SettingsSwitch from './SettingsSwitch.vue'
 import { formatChatGenerationField, resolveChatConnection, type ChatGenerationField } from '../../utils/chatGenerationSettings'
+import type { SessionSystemPromptMode } from '../../types/models'
 
 const chat = inject(SETTINGS_DRAWER_CHAT_KEY)!
-const promptModeOptions = [
+const promptModeOptions: { value: SessionSystemPromptMode; label: string }[] = [
   { value: 'append', label: '追加全局' },
   { value: 'override', label: '覆盖全局' },
 ]
@@ -82,11 +83,11 @@ const mvuOpen = ref(false)
             more="追加全局会保留全局系统提示并在后面附加本会话内容；覆盖全局会在本会话提示非空时跳过全局系统提示。"
           >
             <template #actions>
-              <ThemedRadioTags
+              <DraggableRadioTags
                 v-model="chat.chatDraft.sessionSystemPromptMode"
                 :options="promptModeOptions"
-                aria-label="会话系统提示模式"
-                class="shrink-0"
+                ariaLabel="会话系统提示模式"
+                class="flex shrink-0"
               />
             </template>
             <textarea

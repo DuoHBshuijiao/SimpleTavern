@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { X } from 'lucide-vue-next'
 import ModernSelect from '../ModernSelect.vue'
-import ReasoningEffortSegments from '../chat/ReasoningEffortSegments.vue'
+import DraggableRadioTags from '../DraggableRadioTags.vue'
 import SettingsField from '../settings-drawer/SettingsField.vue'
 import SettingsSwitch from '../settings-drawer/SettingsSwitch.vue'
 import type { AssistantSettings } from '../../composables/useAssistant'
@@ -154,10 +154,12 @@ function selectEffort(value: string | number | null) {
                   @click="draft.reasoningEffort = null">恢复沿用全局</button>
                 <span v-else class="settings-hint shrink-0">沿用全局</span>
               </template>
-              <ReasoningEffortSegments
+              <DraggableRadioTags
                 class="assistant-effort-segments"
                 :model-value="effectiveEffort"
                 :options="effortOptions"
+                ariaLabel="思考深度"
+                stretch
                 @update:model-value="selectEffort"
               />
               <ModernSelect

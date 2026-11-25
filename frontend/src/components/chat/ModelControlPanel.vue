@@ -3,7 +3,7 @@
 import { computed, nextTick, ref, shallowRef, useId, watch } from 'vue'
 import { Brain, Check, ChevronDown, Search, Zap } from 'lucide-vue-next'
 import SelectDropdownSurface from '../SelectDropdownSurface.vue'
-import ReasoningEffortSegments from './ReasoningEffortSegments.vue'
+import DraggableRadioTags from '../DraggableRadioTags.vue'
 import { useSettingsStore } from '../../stores'
 import { useProtocolPreview } from '../../composables/useProtocolPreview'
 import {
@@ -478,11 +478,13 @@ function toggleOpen() {
                     {{ isOverridingEffort ? '恢复沿用全局' : '沿用全局' }}
                   </button>
                 </div>
-                <ReasoningEffortSegments
+                <DraggableRadioTags
                   v-if="effortOptions.length"
                   :key="`${currentPresetId ?? ''}:${currentModel}`"
                   :model-value="effortPreview ?? effectiveEffort"
                   :options="effortOptions"
+                  ariaLabel="思考深度"
+                  stretch
                   @update:model-value="selectEffort"
                 />
               </section>

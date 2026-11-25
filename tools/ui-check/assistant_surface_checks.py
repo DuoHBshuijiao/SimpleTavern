@@ -129,17 +129,21 @@ async def check_assistant_model_surface(ctx):
           return {{x: selected.left + selected.width / 2, y: selected.top + selected.height / 2,
             width: selected.width, target: target.left + target.width / 2}};
         }})()""")
-        grip = f"{MODEL_DIALOG}.querySelector('.model-control-effort-grip')"
-        await page.mouse('mousePressed', drag['x'], drag['y'], button='left', buttons=1, clickCount=1)
+        grip = f"{MODEL_DIALOG}.querySelector('.radio-tags-drag-thumb')"
         await page.wait_for(grip)
+        resting_cursor = await page.js(f"getComputedStyle({checked}).cursor")
+        await page.mouse('mousePressed', drag['x'], drag['y'], button='left', buttons=1, clickCount=1)
+        await page.wait_for(f"{grip}.classList.contains('radio-tags-drag-thumb--pressed')")
         pressed = await page.js(f'{grip}.getBoundingClientRect().toJSON()')
         movements = []
         for ratio in (.2, .4, .6, .8):
             await page.mouse('mouseMoved', drag['x'] + (drag['target'] - drag['x']) * ratio, drag['y'], button='left', buttons=1)
             movements.append(await page.js(f'{grip}.getBoundingClientRect().left'))
             await page.shot(f'assistant-effort-drag-{int(ratio * 10)}')
+        ctx.check('助手思考深度胶囊悬停与拖动都使用点击指针',
+                  resting_cursor == await page.js(f'getComputedStyle({checked}).cursor') == 'pointer')
         await page.mouse('mouseReleased', drag['target'], drag['y'], button='left', clickCount=1)
-        await page.wait_for(f"!{grip} && {checked}.innerText === '高'")
+        await page.wait_for(f"!{grip}.classList.contains('radio-tags-drag-thumb--pressed') && {checked}.innerText === '高'")
         await page.shot('assistant-effort-drag-release')
         ctx.check('胶囊按下缩小 2.5 px，拖动连续，松手吸附，温度草稿保留',
                   abs(drag['width'] - pressed['width'] - 2.5) < .2 and all(a < b for a, b in zip(movements, movements[1:]))

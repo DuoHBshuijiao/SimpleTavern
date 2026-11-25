@@ -306,9 +306,12 @@ async def check_luna_reasoning(ctx):
           return {{low: points[1], middle: points[2], max: points.at(-1),
                    width: {selected}.getBoundingClientRect().width, height: {selected}.getBoundingClientRect().height}};
         }})()""")
-        grip = "document.querySelector('.model-control-effort-grip')"
-        await page.mouse("mousePressed", *coords["low"], button="left", buttons=1, clickCount=1)
+        grip = "document.querySelector('.radio-tags-drag-thumb')"
         await page.wait_for(grip)
+        resting_cursor = await page.js(f"getComputedStyle({selected}).cursor")
+        await page.mouse("mousePressed", *coords["low"], button="left", buttons=1, clickCount=1)
+        await page.wait_for(f"{grip}.classList.contains('radio-tags-drag-thumb--pressed')")
+        pressed_cursor = await page.js(f"getComputedStyle({selected}).cursor")
         pressed = await page.js(f"[{grip}.getBoundingClientRect().width, {grip}.getBoundingClientRect().height, {grip}.getBoundingClientRect().left]")
         delta = round((coords["middle"][0] - coords["low"][0]) / 4)
         await page.mouse("mouseMoved", coords["low"][0] + delta, coords["low"][1], button="left", buttons=1)
@@ -319,6 +322,8 @@ async def check_luna_reasoning(ctx):
                   {"pressed": pressed[:2], "shift": slid, "mouseDelta": delta})
         await page.mouse("mouseMoved", *coords["max"], button="left", buttons=1)
         await page.wait_for(f"{selected}?.textContent.trim() === 'Max'")
+        ctx.check("思考深度悬停、按住和拖动时都使用点击指针",
+                  resting_cursor == pressed_cursor == await page.js(f"getComputedStyle({selected}).cursor") == "pointer")
         stored = ctx.api(chat_path)["overrides"]["params"]["reasoningEffort"]
         ctx.check("拖动选中档位即时预览，松手前保留原设置", stored == "minimal", stored)
         await page.mouse("mouseReleased", *coords["max"], button="left", buttons=0, clickCount=1)
