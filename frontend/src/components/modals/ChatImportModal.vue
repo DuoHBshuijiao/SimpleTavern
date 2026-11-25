@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { X } from 'lucide-vue-next'
 import { apiGet, apiPost } from '../../api/http'
 import { useSettingsImport, type ImportWarningItem, coerceImportWarningText } from '../../composables/useSettingsImport'
@@ -15,15 +15,37 @@ import { dialogAria } from '../../utils/uiPrimitives'
 declare global {
   interface Window {
     __ST_JANITOR_BRIDGE_INSTALLED__?: boolean
+    __ST_JANITOR_BRIDGE_VERSION__?: string
   }
 }
 
-/** 由仓库内 Janitor Bridge 扩展在应用页注入，用于判断是否已安装并启用该扩展。 */
-function isJanitorBridgeInstalled(): boolean {
-  return typeof window !== 'undefined' && window.__ST_JANITOR_BRIDGE_INSTALLED__ === true
+const JANITOR_BRIDGE_EXT_REL_PATH = 'extensions/simpletavern-janitor-bridge'
+const JANITOR_BRIDGE_MIN_VERSION = '0.1.11'
+const JANITOR_BRIDGE_INSTALL_URL = 'https://github.com/DuoHBshuijiao/SimpleTavern#3-从-janitorai-迁移聊天记录可选'
+const bridgeInstalled = ref(false)
+const bridgeVersion = ref('')
+const copiedExtensionUrl = ref(false)
+const bridgeStatus = computed(() => {
+  if (!bridgeInstalled.value) return 'missing'
+  if (!/^\d+\.\d+\.\d+(?:\.\d+)?$/.test(bridgeVersion.value)) return 'outdated'
+  const current = bridgeVersion.value.split('.').map(Number)
+  const minimum = JANITOR_BRIDGE_MIN_VERSION.split('.').map(Number)
+  for (const [i, required] of minimum.entries()) {
+    if (current[i] !== required) return current[i]! > required ? 'ready' : 'outdated'
+  }
+  return 'ready'
+})
+
+function refreshBridgeStatus() {
+  bridgeInstalled.value = window.__ST_JANITOR_BRIDGE_INSTALLED__ === true
+  bridgeVersion.value = window.__ST_JANITOR_BRIDGE_VERSION__ || ''
 }
 
-const JANITOR_BRIDGE_EXT_REL_PATH = 'extensions/simpletavern-janitor-bridge'
+onMounted(() => {
+  refreshBridgeStatus()
+  window.addEventListener('simpletavern:janitor-bridge-ready', refreshBridgeStatus)
+})
+onUnmounted(() => window.removeEventListener('simpletavern:janitor-bridge-ready', refreshBridgeStatus))
 
 function getExtensionsManageUrlHint(): string {
   const ua = navigator.userAgent
@@ -31,28 +53,12 @@ function getExtensionsManageUrlHint(): string {
   return 'chrome://extensions'
 }
 
-function buildJanitorBridgeMissingMessage(): string {
-  const addr = getExtensionsManageUrlHint()
-  return [
-    '未检测到「SimpleTavern Janitor Bridge」浏览器扩展，无法从 Janitor 页面抓取数据。',
-    '',
-    '请在本地仓库中「加载已解压的扩展」，目录为（相对仓库根）：',
-    JANITOR_BRIDGE_EXT_REL_PATH,
-    '',
-    '在浏览器地址栏输入并打开以下地址以进入扩展管理页：',
-    addr,
-  ].join('\n')
-}
-
-/** 未检测到扩展时走与主聊天一致的错误栈（ErrorModal），无回调时退回全局通知。 */
-function notifyJanitorBridgeMissingIfNeeded(): void {
-  if (isJanitorBridgeInstalled()) return
-  const message = buildJanitorBridgeMissingMessage()
-  const title = '未安装 Janitor Bridge 扩展'
-  if (props.pushError) {
-    props.pushError({ message, source: 'main', title })
-  } else {
-    void notifyMessage(message, { title })
+async function copyExtensionManagerUrl() {
+  try {
+    await navigator.clipboard.writeText(getExtensionsManageUrlHint())
+    copiedExtensionUrl.value = true
+  } catch {
+    await notifyMessage(`在浏览器地址栏打开 ${getExtensionsManageUrlHint()}。`)
   }
 }
 
@@ -129,14 +135,9 @@ const characterOptions = computed(() =>
 )
 
 const stMvuModeOptions = [
-  { label: 'Regex 兼容', value: 'regex' },
+  { label: '正则兼容', value: 'regex' },
   { label: '指令模式', value: 'directive' },
 ]
-
-const stDetectedMvu = computed(() => {
-  const mvu = stPreview.value?.mvu
-  return Boolean(mvu?.hasTavernHelper || mvu?.hasRegexScripts || mvu?.characterBookCandidateCount)
-})
 
 const stConfirmLabel = computed(() => {
   if (!stConfirming.value) return '确认导入 ST 角色'
@@ -162,6 +163,7 @@ watch(
   ([visible, pendingId]) => {
     clearPendingPreview()
     if (!visible) return
+    refreshBridgeStatus()
     if (pendingId) void loadPendingPreview(pendingId)
   },
   { immediate: true },
@@ -328,6 +330,8 @@ async function confirmStImport() {
 }
 
 async function openJanitorLinkAndTryCapture() {
+  refreshBridgeStatus()
+  if (bridgeStatus.value !== 'ready') return
   const raw = janitorLink.value.trim()
   if (!raw) {
     await notifyMessage('请先填写 JanitorAI 聊天链接。')
@@ -347,11 +351,12 @@ async function openJanitorLinkAndTryCapture() {
   parsed.searchParams.set('_st_import', '1')
   parsed.searchParams.set('_st_ts', String(Date.now()))
   parsed.searchParams.set('_st_app_base', window.location.origin)
-  notifyJanitorBridgeMissingIfNeeded()
-  window.open(parsed.toString(), '_blank')
+  window.open(parsed.toString(), '_blank', 'noopener')
 }
 
 async function openJaiCharacterUrlAndCapture() {
+  refreshBridgeStatus()
+  if (bridgeStatus.value !== 'ready') return
   const raw = jaiCharacterUrl.value.trim()
   if (!raw) {
     await notifyMessage('请先填写 JanitorAI 角色页链接。')
@@ -371,8 +376,7 @@ async function openJaiCharacterUrlAndCapture() {
   parsed.searchParams.set('_st_char_html', '1')
   parsed.searchParams.set('_st_ts', String(Date.now()))
   parsed.searchParams.set('_st_app_base', window.location.origin)
-  notifyJanitorBridgeMissingIfNeeded()
-  window.open(parsed.toString(), '_blank')
+  window.open(parsed.toString(), '_blank', 'noopener')
 }
 
 async function loadPendingPreview(pendingId: string) {
@@ -446,9 +450,7 @@ async function confirmJanitorImport() {
         <div class="modal-body custom-scrollbar">
           <section class="settings-group">
             <div class="settings-group-title">本地文件导入</div>
-            <SettingsHint more="其中 PNG 或 SillyTavern 形状 JSON 会先进入下方预览（含 MVU 选项），与设置里「仅备份 JSON」区分。专用按钮同样仅用于 PNG / ST 角色 JSON；不支持 ST 聊天记录导入。">
-              支持 txt/json/jsonl/zip；不支持 ST 聊天记录。
-            </SettingsHint>
+            <SettingsHint>SimpleTavern 数据支持 TXT、JSON、JSONL、ZIP。SillyTavern 角色卡支持 PNG、JSON。</SettingsHint>
             <div class="flex flex-wrap gap-2">
               <button class="btn btn-sm btn-secondary" @click="triggerImport">选择文件导入</button>
               <button class="btn btn-sm btn-secondary" :disabled="stPreviewLoading" @click="triggerStImport">
@@ -503,13 +505,11 @@ async function confirmJanitorImport() {
               <SettingsSwitch
                 label="启用 MVU 兼容"
                 :model-value="stEnableMvuCompatibility"
-                :hint="stDetectedMvu ? '已检测到候选结构。' : undefined"
-                :more="stPreview.worldBookEntryCount ? 'ST 世界书将作为 SimpleTavern 世界书完整保留；MVU 兼容只生成指令或正文正则，不删除原条目。' : undefined"
                 @update:model-value="stEnableMvuCompatibility = $event"
               />
               <SettingsField
                 label="MVU 模式"
-                more="Regex 模式会尝试转换可表达的 regex_scripts；指令模式会把完整 ST 卡上下文交给 MVU Agent，生成 MVU 指令与初始状态表，Tavern Helper JS 不会执行。"
+                more="正则兼容模式尝试转换卡内正则。指令模式将完整角色卡交给 MVU 模型，用于生成指令和初始状态。"
               >
                 <ModernSelect
                   :model-value="stMvuMode"
@@ -529,14 +529,28 @@ async function confirmJanitorImport() {
 
           <section class="settings-group">
             <div class="settings-group-title">JanitorAI 聊天迁移</div>
-            <SettingsHint>填写 JanitorAI 聊天链接后打开页面，扩展会在该页面首次合法捕获时自动提交到本地。</SettingsHint>
+            <div v-if="bridgeStatus !== 'ready'" class="settings-readout space-y-2" role="status">
+              <p class="font-medium text-[var(--color-warning-text)]">
+                {{ bridgeStatus === 'missing' ? '未检测到 SimpleTavern Janitor Bridge 扩展' : '请更新 SimpleTavern Janitor Bridge 扩展' }}
+              </p>
+              <p v-if="bridgeStatus === 'outdated'">当前版本：{{ bridgeVersion || '旧版（未报告版本）' }}。需要 {{ JANITOR_BRIDGE_MIN_VERSION }} 或更新版本。</p>
+              <p>在浏览器扩展管理页加载或重新加载扩展，再刷新 SimpleTavern。</p>
+              <p class="break-all">扩展目录 <code>{{ JANITOR_BRIDGE_EXT_REL_PATH }}</code>，Windows 安装版位于 <code>current/</code> 下。</p>
+              <div class="flex flex-wrap items-center gap-2">
+                <a :href="JANITOR_BRIDGE_INSTALL_URL" target="_blank" rel="noopener noreferrer" class="btn btn-xs btn-secondary">查看安装步骤</a>
+                <button type="button" class="btn btn-xs btn-ghost" @click="copyExtensionManagerUrl">
+                  {{ copiedExtensionUrl ? '已复制扩展管理地址' : '复制扩展管理地址' }}
+                </button>
+                <code>{{ getExtensionsManageUrlHint() }}</code>
+              </div>
+            </div>
             <div class="flex flex-wrap gap-2">
               <input
                 v-model="janitorLink"
                 class="input min-w-[12rem] flex-1"
                 placeholder="https://janitorai.com/chats/..."
               />
-              <button class="btn btn-sm btn-secondary" @click="openJanitorLinkAndTryCapture">打开并尝试获取</button>
+              <button class="btn btn-sm btn-secondary" :disabled="bridgeStatus !== 'ready'" @click="openJanitorLinkAndTryCapture">打开并尝试获取</button>
             </div>
 
             <div class="settings-readout">
@@ -598,16 +612,13 @@ async function confirmJanitorImport() {
 
           <section class="settings-group">
             <div class="settings-group-title">导入 JAI 角色（链接）</div>
-            <SettingsHint more="填写 JanitorAI 公开角色页链接后在新标签页打开；已安装的「SimpleTavern Janitor Bridge」扩展会抓取页面 HTML 并提交到本地，自动提取名称、简介、Personality、Scenario、首句与角色图片。">
-              需要已安装「SimpleTavern Janitor Bridge」扩展。
-            </SettingsHint>
             <div class="flex flex-wrap gap-2">
               <input
                 v-model="jaiCharacterUrl"
                 class="input min-w-[12rem] flex-1"
                 placeholder="https://janitorai.com/characters/..."
               />
-              <button class="btn btn-sm btn-secondary" @click="openJaiCharacterUrlAndCapture">打开并抓取</button>
+              <button class="btn btn-sm btn-secondary" :disabled="bridgeStatus !== 'ready'" @click="openJaiCharacterUrlAndCapture">打开并抓取</button>
             </div>
           </section>
         </div>

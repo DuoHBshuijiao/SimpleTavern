@@ -48,36 +48,44 @@ function handleExport(format: 'txt' | 'json' | 'jsonl' | 'character' | 'characte
           </button>
         </div>
         <div class="modal-body">
-          <div class="space-y-3" :class="disabled || busy ? 'opacity-50 pointer-events-none' : ''">
-            <div class="rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface-muted)] p-4 text-sm text-[var(--color-text-muted)]">
-              {{ busy ? '正在准备导出…' : '选择导出格式' }}
-            </div>
+          <div class="space-y-3">
+            <p v-if="busy" role="status" class="text-sm text-[var(--color-text-secondary)]">正在准备导出…</p>
             <button
-              class="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-overlay)] px-4 py-3 text-left text-[var(--color-text)] transition-colors hover:bg-[var(--color-surface-hover)]"
+              type="button"
+              class="btn btn-secondary w-full justify-start"
+              :disabled="disabled || busy"
               @click="handleExport('txt')"
             >
               导出 TXT
             </button>
             <button
-              class="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-overlay)] px-4 py-3 text-left text-[var(--color-text)] transition-colors hover:bg-[var(--color-surface-hover)]"
+              type="button"
+              class="btn btn-secondary w-full justify-start"
+              :disabled="disabled || busy"
               @click="handleExport('json')"
             >
               导出 JSON
             </button>
             <button
-              class="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-overlay)] px-4 py-3 text-left text-[var(--color-text)] transition-colors hover:bg-[var(--color-surface-hover)]"
+              type="button"
+              class="btn btn-secondary w-full justify-start"
+              :disabled="disabled || busy"
               @click="handleExport('jsonl')"
             >
               导出 JSONL（精简）
             </button>
             <button
-              class="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-overlay)] px-4 py-3 text-left text-[var(--color-text)] transition-colors hover:bg-[var(--color-surface-hover)]"
+              type="button"
+              class="btn btn-secondary w-full justify-start"
+              :disabled="disabled || busy"
               @click="handleExport('character')"
             >
               导出角色（JSON）
             </button>
             <button
-              class="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-overlay)] px-4 py-3 text-left text-[var(--color-text)] transition-colors hover:bg-[var(--color-surface-hover)]"
+              type="button"
+              class="btn btn-secondary w-full justify-start"
+              :disabled="disabled || busy"
               @click="handleExport('character_with_worldbooks')"
             >
               导出角色+世界书（ZIP）

@@ -3,6 +3,7 @@
   try {
     const el = document.createElement('script');
     el.src = chrome.runtime.getURL('page-mark.js');
+    el.dataset.bridgeVersion = chrome.runtime.getManifest().version;
     el.onload = () => el.remove();
     el.onerror = () => el.remove();
     (document.documentElement || document.head).appendChild(el);

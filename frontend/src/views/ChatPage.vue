@@ -4814,11 +4814,11 @@ const editingPersonaAvatarUrl = computed(() => {
                       role="menu"
                       aria-label="更多操作"
                     >
-                      <button class="header-more-menu__item" role="menuitem" :disabled="!activeChat" @click="showExportModal = true; closeHeaderMoreMenu()">
+                      <button type="button" class="select-option flex-col items-start gap-0.5" role="menuitem" :disabled="!activeChat" @click="showExportModal = true; closeHeaderMoreMenu()">
                         <span class="header-more-menu__label">导出当前会话</span>
                         <span class="header-more-menu__meta">聊天记录</span>
                       </button>
-                      <button class="header-more-menu__item" role="menuitem" @click="showImportModal = true; closeHeaderMoreMenu()">
+                      <button type="button" class="select-option flex-col items-start gap-0.5" role="menuitem" @click="showImportModal = true; closeHeaderMoreMenu()">
                         <span class="header-more-menu__label">导入会话</span>
                         <span class="header-more-menu__meta">JSON / 扩展来源</span>
                       </button>
