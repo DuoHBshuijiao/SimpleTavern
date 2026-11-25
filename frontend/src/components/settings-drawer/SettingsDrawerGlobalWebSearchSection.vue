@@ -1,5 +1,6 @@
 ﻿<script setup lang="ts">
-import { watch } from 'vue'
+import { computed, ref, useId, watch } from 'vue'
+import { ChevronDown } from 'lucide-vue-next'
 import ModernSelect from '../ModernSelect.vue'
 import ThemedRadioTags from '../ThemedRadioTags.vue'
 import WebSearchQuotaSummary from '../WebSearchQuotaSummary.vue'
@@ -26,6 +27,13 @@ const props = defineProps<{
 }>()
 
 const open = defineModel<boolean>('open', { required: true })
+const thirdPartyId = useId()
+const thirdPartyExpanded = ref(false)
+const usesNativeSearch = computed(() => props.draft.webSearch?.source === 'native')
+
+watch(usesNativeSearch, () => {
+  thirdPartyExpanded.value = false
+})
 
 watch(
   () => props.draft.webSearch,
@@ -40,7 +48,7 @@ watch(
   <SettingsDrawerGlobalAccordion v-model:open="open" title="网络搜索">
     <div class="settings-group">
       <template v-if="draft.webSearch">
-        <SettingsField label="联网来源" more="原生搜索使用当前模型的联网工具。第三方搜索需配置下方供应商的 API Key。">
+        <SettingsField label="联网来源" more="原生搜索使用当前模型的联网工具。「第三方搜索配置」也可供 API 预设单独使用。">
           <ThemedRadioTags
             :model-value="draft.webSearch.source || ''"
             :options="SEARCH_SOURCE_OPTIONS"
@@ -48,103 +56,116 @@ watch(
             @update:model-value="(v) => { if (draft.webSearch) draft.webSearch.source = v as WebSearchSource }"
           />
         </SettingsField>
-        <SettingsField label="第三方搜索供应商">
-          <ModernSelect
-            v-model="draft.webSearch.provider"
-            :options="WEB_SEARCH_PROVIDER_OPTIONS"
-            placeholder="选择搜索提供方…"
-            class="w-full"
-          />
-        </SettingsField>
-        <template v-if="draft.webSearch.provider === 'tavily' && draft.webSearch.tavily">
-          <SettingsField label="Tavily API Key">
-            <input
-              v-model="draft.webSearch.tavily.apiKey"
-              type="password"
-              autocomplete="off"
-              class="input w-full"
-              placeholder="tvly-..."
+        <button
+          v-if="usesNativeSearch"
+          type="button"
+          class="btn btn-sm btn-secondary self-start"
+          :aria-expanded="thirdPartyExpanded"
+          :aria-controls="thirdPartyId"
+          @click="thirdPartyExpanded = !thirdPartyExpanded"
+        >
+          第三方搜索配置
+          <ChevronDown aria-hidden="true" class="h-4 w-4" :class="{ 'rotate-180': thirdPartyExpanded }" />
+        </button>
+        <div :id="thirdPartyId" v-show="!usesNativeSearch || thirdPartyExpanded" class="flex flex-col gap-4">
+          <SettingsField label="第三方搜索供应商">
+            <ModernSelect
+              v-model="draft.webSearch.provider"
+              :options="WEB_SEARCH_PROVIDER_OPTIONS"
+              placeholder="选择搜索提供方…"
+              class="w-full"
             />
           </SettingsField>
-          <div class="grid grid-cols-2 gap-3">
-            <SettingsField label="结果上限（0–20）">
+          <template v-if="draft.webSearch.provider === 'tavily' && draft.webSearch.tavily">
+            <SettingsField label="Tavily API Key">
               <input
-                v-model.number="draft.webSearch.tavily.max_results"
+                v-model="draft.webSearch.tavily.apiKey"
+                type="password"
+                autocomplete="off"
+                class="input w-full"
+                placeholder="tvly-..."
+              />
+            </SettingsField>
+            <div class="grid grid-cols-2 gap-3">
+              <SettingsField label="结果上限（0–20）">
+                <input
+                  v-model.number="draft.webSearch.tavily.max_results"
+                  type="number"
+                  min="0"
+                  max="20"
+                  class="input w-full"
+                />
+              </SettingsField>
+              <SettingsField label="搜索深度">
+                <input
+                  v-model="draft.webSearch.tavily.search_depth"
+                  type="text"
+                  class="input w-full"
+                  placeholder="basic / advanced / fast …"
+                />
+              </SettingsField>
+            </div>
+          </template>
+          <template v-else-if="draft.webSearch.provider === 'brave' && draft.webSearch.brave">
+            <SettingsField label="Brave Subscription Token">
+              <input
+                v-model="draft.webSearch.brave.apiKey"
+                type="password"
+                autocomplete="off"
+                class="input w-full"
+                placeholder="BSA..."
+              />
+            </SettingsField>
+            <SettingsField label="结果上限（1–20）">
+              <input
+                v-model.number="draft.webSearch.brave.count"
                 type="number"
-                min="0"
+                min="1"
                 max="20"
                 class="input w-full"
               />
             </SettingsField>
-            <SettingsField label="搜索深度">
+          </template>
+          <template v-else-if="draft.webSearch.bocha">
+            <SettingsField label="博查 API Key">
               <input
-                v-model="draft.webSearch.tavily.search_depth"
-                type="text"
+                v-model="draft.webSearch.bocha.apiKey"
+                type="password"
+                autocomplete="off"
                 class="input w-full"
-                placeholder="basic / advanced / fast …"
               />
             </SettingsField>
+            <SettingsField label="API 根地址">
+              <input
+                v-model="draft.webSearch.bocha.baseUrl"
+                type="text"
+                class="input w-full"
+                placeholder="https://api.bocha.cn"
+              />
+            </SettingsField>
+            <SettingsField label="结果上限（1–50）">
+              <input
+                v-model.number="draft.webSearch.bocha.count"
+                type="number"
+                min="1"
+                max="50"
+                class="input w-full"
+              />
+            </SettingsField>
+          </template>
+          <div
+            class="settings-readout transition-opacity duration-200"
+            :class="remoteStatusFetching ? 'opacity-70' : ''"
+          >
+            <div class="mb-1 flex items-center justify-between gap-2 font-medium text-[var(--color-text-secondary)]">
+              <span>用量 / 余额</span>
+              <span v-if="remoteStatusFetching" class="font-normal text-[var(--color-text-muted)]">刷新中…</span>
+            </div>
+            <p v-if="remoteStatusError" role="status" class="text-[var(--color-warning-text,var(--color-warning))]">
+              额度刷新失败。
+            </p>
+            <WebSearchQuotaSummary v-else :status="remoteStatus" :provider="draft.webSearch.provider" />
           </div>
-        </template>
-        <template v-else-if="draft.webSearch.provider === 'brave' && draft.webSearch.brave">
-          <SettingsField label="Brave Subscription Token">
-            <input
-              v-model="draft.webSearch.brave.apiKey"
-              type="password"
-              autocomplete="off"
-              class="input w-full"
-              placeholder="BSA..."
-            />
-          </SettingsField>
-          <SettingsField label="结果上限（1–20）">
-            <input
-              v-model.number="draft.webSearch.brave.count"
-              type="number"
-              min="1"
-              max="20"
-              class="input w-full"
-            />
-          </SettingsField>
-        </template>
-        <template v-else-if="draft.webSearch.bocha">
-          <SettingsField label="博查 API Key">
-            <input
-              v-model="draft.webSearch.bocha.apiKey"
-              type="password"
-              autocomplete="off"
-              class="input w-full"
-            />
-          </SettingsField>
-          <SettingsField label="API 根地址">
-            <input
-              v-model="draft.webSearch.bocha.baseUrl"
-              type="text"
-              class="input w-full"
-              placeholder="https://api.bocha.cn"
-            />
-          </SettingsField>
-          <SettingsField label="结果上限（1–50）">
-            <input
-              v-model.number="draft.webSearch.bocha.count"
-              type="number"
-              min="1"
-              max="50"
-              class="input w-full"
-            />
-          </SettingsField>
-        </template>
-        <div
-          class="settings-readout transition-opacity duration-200"
-          :class="remoteStatusFetching ? 'opacity-70' : ''"
-        >
-          <div class="mb-1 flex items-center justify-between gap-2 font-medium text-[var(--color-text-secondary)]">
-            <span>用量 / 余额</span>
-            <span v-if="remoteStatusFetching" class="font-normal text-[var(--color-text-muted)]">刷新中…</span>
-          </div>
-          <p v-if="remoteStatusError" role="status" class="text-[var(--color-warning-text,var(--color-warning))]">
-            额度刷新失败。
-          </p>
-          <WebSearchQuotaSummary v-else :status="remoteStatus" :provider="draft.webSearch.provider" />
         </div>
       </template>
     </div>
