@@ -204,7 +204,7 @@ watch(dropdownOpen, (open) => {
     <div class="absolute inset-y-1 right-1 flex items-center gap-0.5">
       <button
         type="button"
-        class="inline-flex h-full min-h-0 w-8 shrink-0 items-center justify-center rounded-md text-[var(--color-text-muted)] transition-colors hover:bg-surface-hover hover:text-[var(--color-text-secondary)] disabled:pointer-events-none disabled:opacity-40"
+        class="icon-button h-full w-8 shrink-0 disabled:pointer-events-none disabled:opacity-40"
         :disabled="disabled || !modelValue.trim()"
         aria-label="清空"
         @click.stop="clearInput"
@@ -213,7 +213,7 @@ watch(dropdownOpen, (open) => {
       </button>
       <button
         type="button"
-        class="inline-flex h-full min-h-0 w-8 shrink-0 items-center justify-center rounded-md text-[var(--color-text-muted)] transition-colors hover:bg-surface-hover hover:text-[var(--color-text-secondary)]"
+        class="icon-button h-full w-8 shrink-0"
         :disabled="disabled"
         aria-label="展开供应商列表"
         @click="toggleDropdown"
@@ -227,7 +227,7 @@ watch(dropdownOpen, (open) => {
         <div
           v-if="dropdownOpen"
           ref="panelRef"
-          class="preset-combobox-panel z-dropdown flex flex-col overflow-hidden rounded-xl border border-[var(--color-border)] bg-[color-mix(in_srgb,var(--color-glass-l6)_62%,transparent)] shadow-xl backdrop-blur-[var(--glass-blur-popover)]"
+          class="preset-combobox-panel z-dropdown select-dropdown glass-l6 flex flex-col overflow-hidden rounded-xl backdrop-blur-[var(--glass-blur-popover)]"
           :class="dropdownPlacement === 'down' ? 'select-dropdown-pop--bottom' : 'select-dropdown-pop--top'"
           :style="panelStyle"
           @keydown="onPanelKeydown"
@@ -246,7 +246,7 @@ watch(dropdownOpen, (open) => {
             </label>
           </div>
           <div
-            class="min-h-0 overflow-y-auto p-1 custom-scrollbar"
+            class="select-dropdown-options min-h-0 overflow-y-auto p-1 custom-scrollbar"
             :style="{ maxHeight: `${panelMaxHeightPx}px` }"
           >
             <template v-for="group in groupedPresets" :key="group.group">
@@ -257,8 +257,8 @@ watch(dropdownOpen, (open) => {
                 v-for="preset in group.items"
                 :key="preset.id"
                 type="button"
-                class="preset-combobox-item flex w-full flex-col items-stretch gap-1 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-surface-hover"
-                :class="{ 'bg-brand-a10': preset.name === modelValue }"
+                class="preset-combobox-item select-option flex-col items-stretch gap-1 px-2.5"
+                :aria-pressed="preset.name === modelValue"
                 @click="choosePreset(preset)"
               >
                 <div class="flex min-w-0 items-center gap-2">

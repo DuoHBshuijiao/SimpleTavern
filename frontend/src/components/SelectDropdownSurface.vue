@@ -1,10 +1,10 @@
 <script setup lang="ts">
 /**
- * Teleport + 与站内模型下拉相同的玻璃渐变外壳与 fixed 定位（含窄竖屏左右留白）。
- * 仅用于 ChatInput 写作辅助 / 省略号菜单及同类「按钮锚点 + 自定义条目」场景；不参与 ModernSelect 等既有稳定下拉。
+ * 将模型面板、操作菜单和音色列表传送到 body，并根据触发器定位。
+ * 与 ModernSelect 复用玻璃表面和进出场动效。
  */
 import type { MaybeRef } from 'vue'
-import { ref, watch, nextTick, onMounted, onUnmounted, unref } from 'vue'
+import { ref, watch, nextTick, onMounted, onUnmounted, unref, useSlots } from 'vue'
 import { useViewportNarrowPortrait } from '../composables/useViewportNarrowPortrait'
 
 const NARROW_SELECT_GUTTER = '1rem'
@@ -21,6 +21,8 @@ const props = withDefaults(
     /** 固定宽度（px）并以锚点右缘对齐（与 ModernSelect dropdown-width 行为一致）；设置后忽略 autoWidth。窄竖屏仍左右留白铺满 */
     fixedWidthPx?: number | null
     maxHeightClass?: string
+    /** 限制为锚点所在一侧的可见高度，空间不足时尝试另一侧。 */
+    fitToViewport?: boolean
     /** 窄竖屏时改为底部抽屉（模型控制面板） */
     preferBottomSheet?: boolean
   }>(),
@@ -35,11 +37,13 @@ const props = withDefaults(
 )
 
 const open = defineModel<boolean>('open', { default: false })
+const slots = useSlots()
 
 const { isNarrowPortrait } = useViewportNarrowPortrait()
 
 const dropdownRef = ref<HTMLElement | null>(null)
 const dropdownStyle = ref<Record<string, string>>({})
+const actualPlacement = ref(props.placement)
 
 function updateDropdownPosition() {
   const trigger = unref(props.anchorRef)
@@ -47,6 +51,7 @@ function updateDropdownPosition() {
   const rect = trigger.getBoundingClientRect()
   const g = props.gapPx
   const style: Record<string, string> = { position: 'fixed' }
+  actualPlacement.value = props.placement
   if (props.preferBottomSheet && isNarrowPortrait.value) {
     style.left = NARROW_SELECT_GUTTER
     style.right = NARROW_SELECT_GUTTER
@@ -57,7 +62,21 @@ function updateDropdownPosition() {
     dropdownStyle.value = style
     return
   }
-  if (props.placement === 'top') {
+  if (props.fitToViewport) {
+    const viewport = window.visualViewport
+    const viewTop = viewport?.offsetTop ?? 0
+    const viewBottom = viewTop + (viewport?.height ?? window.innerHeight)
+    const above = rect.top - viewTop - g - 8
+    const below = viewBottom - rect.bottom - g - 8
+    const preferredSpace = props.placement === 'top' ? above : below
+    const otherSpace = props.placement === 'top' ? below : above
+    if (preferredSpace < 180 && otherSpace > preferredSpace) {
+      actualPlacement.value = props.placement === 'top' ? 'bottom' : 'top'
+    }
+    const available = actualPlacement.value === 'top' ? above : below
+    style.maxHeight = `min(35rem, ${Math.max(0, available)}px)`
+  }
+  if (actualPlacement.value === 'top') {
     style.bottom = `${window.innerHeight - rect.top + g}px`
     style.top = 'auto'
   } else {
@@ -196,18 +215,20 @@ onUnmounted(() => {
       <div
         v-if="open"
         ref="dropdownRef"
-        class="z-dropdown select-dropdown glass-l6 rounded-xl overflow-hidden flex flex-col"
+        class="z-dropdown select-dropdown glass-l6 rounded-xl overflow-hidden flex flex-col backdrop-blur-[var(--glass-blur-popover)]"
         :class="[
           autoWidth && !fixedWidthPx ? 'w-max min-w-0' : '',
           preferBottomSheet && isNarrowPortrait ? 'max-h-[min(80vh,36rem)] rounded-t-2xl rounded-b-none' : maxHeightClass,
           preferBottomSheet && isNarrowPortrait
             ? 'select-dropdown-pop--sheet'
-            : (placement === 'top' ? 'select-dropdown-pop--top' : 'select-dropdown-pop--bottom'),
+            : (actualPlacement === 'top' ? 'select-dropdown-pop--top' : 'select-dropdown-pop--bottom'),
         ]"
         :style="dropdownStyle"
       >
         <slot name="header" />
+        <slot v-if="slots.body" name="body" />
         <div
+          v-else
           class="select-dropdown-options min-h-0 flex-1 overflow-y-auto custom-scrollbar p-1"
         >
           <slot />
@@ -216,74 +237,3 @@ onUnmounted(() => {
     </Transition>
   </Teleport>
 </template>
-
-<style scoped>
-.select-dropdown {
-  background-color: var(--color-popover-surface);
-  background-image: none;
-}
-
-.select-dropdown-options {
-  background-color: color-mix(in srgb, var(--color-popover-surface) 72%, transparent);
-  background-image: none;
-}
-
-.select-dropdown-pop-enter-active,
-.select-dropdown-pop-leave-active {
-  transition:
-    transform 0.2s cubic-bezier(0.33, 1, 0.68, 1),
-    opacity 0.2s ease;
-}
-
-.select-dropdown-pop-enter-from.select-dropdown-pop--bottom,
-.select-dropdown-pop-leave-to.select-dropdown-pop--bottom {
-  transform: translateY(-0.5rem);
-  opacity: 0;
-}
-
-.select-dropdown-pop-enter-to.select-dropdown-pop--bottom,
-.select-dropdown-pop-leave-from.select-dropdown-pop--bottom {
-  transform: translateY(0);
-  opacity: 1;
-}
-
-.select-dropdown-pop-enter-from.select-dropdown-pop--top,
-.select-dropdown-pop-leave-to.select-dropdown-pop--top {
-  transform: translateY(0.5rem);
-  opacity: 0;
-}
-
-.select-dropdown-pop-enter-to.select-dropdown-pop--top,
-.select-dropdown-pop-leave-from.select-dropdown-pop--top {
-  transform: translateY(0);
-  opacity: 1;
-}
-
-.select-dropdown-pop-enter-from.select-dropdown-pop--sheet,
-.select-dropdown-pop-leave-to.select-dropdown-pop--sheet {
-  transform: translateY(1rem);
-  opacity: 0;
-}
-
-.select-dropdown-pop-enter-to.select-dropdown-pop--sheet,
-.select-dropdown-pop-leave-from.select-dropdown-pop--sheet {
-  transform: translateY(0);
-  opacity: 1;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .select-dropdown-pop-enter-active,
-  .select-dropdown-pop-leave-active {
-    transition: opacity 0.15s ease;
-  }
-
-  .select-dropdown-pop-enter-from.select-dropdown-pop--bottom,
-  .select-dropdown-pop-leave-to.select-dropdown-pop--bottom,
-  .select-dropdown-pop-enter-from.select-dropdown-pop--top,
-  .select-dropdown-pop-leave-to.select-dropdown-pop--top,
-  .select-dropdown-pop-enter-from.select-dropdown-pop--sheet,
-  .select-dropdown-pop-leave-to.select-dropdown-pop--sheet {
-    transform: none;
-  }
-}
-</style>

@@ -37,7 +37,7 @@
  *    - 依赖：依赖vue
  *    - 位置：组件层，提供选择器功能
  */
-import { computed, ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { computed, ref, shallowRef, watch, onMounted, onUnmounted, nextTick, useId } from 'vue'
 import { Check, Loader2, ChevronDown } from 'lucide-vue-next'
 import { useViewportNarrowPortrait } from '../composables/useViewportNarrowPortrait'
 
@@ -61,6 +61,7 @@ const props = withDefaults(defineProps<{
   modelValue?: string | null
   selectedPresetId?: string | null
   options: (Option | OptionGroup | string)[]
+  ariaLabel?: string
   placeholder?: string
   searchable?: boolean
   loading?: boolean
@@ -94,6 +95,11 @@ const triggerRef = ref<HTMLButtonElement | null>(null)
 const dropdownRef = ref<HTMLElement | null>(null)
 const inputRef = ref<HTMLInputElement | null>(null)
 const dropdownStyle = ref<Record<string, string>>({})
+const dropdownPlacement = ref<'top' | 'bottom'>(props.placement)
+const listboxId = useId()
+const activeOptionId = `${listboxId}-active`
+const activeOption = shallowRef<Option | null>(null)
+const hasSearchField = computed(() => props.searchable || props.allowCreate)
 
 /**
  * 计算规范化后的选项列表
@@ -148,6 +154,11 @@ const filteredOptions = computed(() => {
   return result
 })
 
+const enabledOptions = computed(() =>
+  filteredOptions.value.flatMap(opt => 'options' in opt ? opt.options as Option[] : [opt])
+    .filter(opt => !opt.disabled),
+)
+
 function optionPresetId(opt: Option): string {
   return opt.presetId == null ? '' : String(opt.presetId)
 }
@@ -161,6 +172,46 @@ function isOptionSelected(opt: Option): boolean {
   if (!optionValueEqualsModel(opt.value)) return false
   if (props.selectedPresetId == null || props.selectedPresetId === '') return true
   return optionPresetId(opt) === String(props.selectedPresetId)
+}
+
+function handleTriggerKeydown(event: KeyboardEvent) {
+  if (event.key === 'Tab') {
+    close()
+    return
+  }
+  if (hasSearchField.value) return
+  const options = enabledOptions.value
+  const index = options.findIndex(opt => opt === activeOption.value)
+  if (isOpen.value && index >= 0 && (event.key === 'Enter' || event.key === ' ')) {
+    event.preventDefault()
+    select(options[index]!)
+    return
+  }
+
+  let next: number
+  switch (event.key) {
+    case 'ArrowDown':
+      next = index < 0 ? Math.max(0, options.findIndex(isOptionSelected)) : Math.min(index + 1, options.length - 1)
+      break
+    case 'ArrowUp':
+      next = index < 0 ? options.length - 1 : Math.max(0, index - 1)
+      break
+    case 'Home':
+      if (!isOpen.value) return
+      next = 0
+      break
+    case 'End':
+      if (!isOpen.value) return
+      next = options.length - 1
+      break
+    default:
+      return
+  }
+
+  event.preventDefault()
+  if (!isOpen.value) open()
+  activeOption.value = options[next] ?? null
+  nextTick(() => document.getElementById(activeOptionId)?.scrollIntoView({ block: 'nearest' }))
 }
 
 /**
@@ -216,18 +267,27 @@ function toggle() {
  * 计算并更新下拉框的 fixed 定位样式（用于 Teleport 到 body 时脱离父级 overflow 裁剪）。
  * 窄竖屏（isNarrowPortrait）：横向左右固定留白、宽度自动铺满，不再按触发器右对齐固定像素宽，
  * 避免窄屏下列表挤在一侧；纵向仍锚定触发器上下方。
- * （LlmPresetNameCombobox / TtsVoiceInput 等为输入框内 absolute，不走此 Teleport 逻辑，无需同步改 props。）
  */
 function updateDropdownPosition() {
   const trigger = triggerRef.value
   if (!trigger) return
   const rect = trigger.getBoundingClientRect()
-  const style: Record<string, string> = { position: 'fixed' }
-  if (props.placement === 'top') {
-    style.bottom = `${window.innerHeight - rect.top + 4}px`
+  const gap = 4
+  const above = rect.top - gap
+  const below = window.innerHeight - rect.bottom - gap
+  const preferredSpace = props.placement === 'top' ? above : below
+  const list = dropdownRef.value?.querySelector<HTMLElement>('.select-dropdown-options')
+  const contentHeight = list ? list.offsetTop + list.scrollHeight : 320
+  dropdownPlacement.value = preferredSpace >= Math.min(contentHeight, 320)
+    ? props.placement
+    : above > below ? 'top' : 'bottom'
+  const availableSpace = dropdownPlacement.value === 'top' ? above : below
+  const style = { position: 'fixed', maxHeight: `${Math.max(0, Math.min(320, availableSpace - gap))}px` } as Record<string, string>
+  if (dropdownPlacement.value === 'top') {
+    style.bottom = `${window.innerHeight - rect.top + gap}px`
     style.top = 'auto'
   } else {
-    style.top = `${rect.bottom + 4}px`
+    style.top = `${rect.bottom + gap}px`
     style.bottom = 'auto'
   }
   if (isNarrowPortrait.value) {
@@ -368,6 +428,7 @@ function select(opt: Option) {
   emit('change', opt.value)
   emit('select', opt)
   close()
+  triggerRef.value?.focus({ preventScroll: true })
 }
 
 /**
@@ -434,13 +495,15 @@ onUnmounted(() => {
       ref="triggerRef"
       type="button"
       :disabled="disabled"
+      :role="hasSearchField ? undefined : 'combobox'"
+      :aria-label="ariaLabel"
       :aria-expanded="isOpen"
-      class="flex items-center justify-between w-full bg-surface-muted border border-[var(--color-border)] rounded-lg px-3 py-2 text-left text-sm text-[var(--color-text)] transition-[background-color,border-color,box-shadow] cursor-pointer shadow-sm"
-      :class="[
-        disabled ? 'opacity-50 cursor-not-allowed' : 'hover:bg-surface-hover hover:border-brand-a30',
-        isOpen ? '!border-brand-a50 ring-1 ring-brand-a20' : ''
-      ]"
+      :aria-haspopup="hasSearchField ? undefined : 'listbox'"
+      :aria-controls="isOpen ? listboxId : undefined"
+      :aria-activedescendant="activeOption && enabledOptions.includes(activeOption) ? activeOptionId : undefined"
+      class="select-trigger"
       @click="toggle"
+      @keydown="handleTriggerKeydown"
     >
       <span
         class="min-w-0 flex-1 truncate select-none"
@@ -460,8 +523,8 @@ onUnmounted(() => {
         <div
           v-if="isOpen"
           ref="dropdownRef"
-          class="z-dropdown select-dropdown glass-l6 rounded-xl overflow-hidden flex flex-col max-h-[320px]"
-          :class="placement === 'top' ? 'select-dropdown-pop--top' : 'select-dropdown-pop--bottom'"
+          class="z-dropdown select-dropdown glass-l6 rounded-xl overflow-hidden flex flex-col backdrop-blur-[var(--glass-blur-popover)]"
+          :class="dropdownPlacement === 'top' ? 'select-dropdown-pop--top' : 'select-dropdown-pop--bottom'"
           :style="dropdownStyle"
         >
       <!-- Search Input -->
@@ -477,7 +540,7 @@ onUnmounted(() => {
       </div>
 
       <!-- Options List -->
-      <div class="select-dropdown-options overflow-y-auto custom-scrollbar p-1">
+      <div :id="listboxId" role="listbox" :aria-label="ariaLabel || placeholder" class="select-dropdown-options overflow-y-auto custom-scrollbar p-1">
         <template v-for="(item, idx) in filteredOptions">
            <!-- Group Header -->
            <div v-if="'options' in item" :key="`group-${idx}`" class="px-2 py-1">
@@ -485,12 +548,12 @@ onUnmounted(() => {
               <div 
                 v-for="opt in item.options" 
                 :key="opt.value"
-                class="px-3 py-2 rounded-lg text-sm transition-colors flex items-center justify-between group/item pl-4"
-                :class="[
-                  opt.disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
-                  isOptionSelected(opt) ? 'bg-brand-a20 text-brand' : 'text-[var(--color-text-secondary)]',
-                  !opt.disabled && !isOptionSelected(opt) ? 'hover:bg-surface-muted' : '',
-                ]"
+                :id="activeOption === opt ? activeOptionId : undefined"
+                role="option"
+                :aria-selected="isOptionSelected(opt)"
+                :aria-disabled="!!opt.disabled"
+                class="select-option pl-4"
+                :data-active="activeOption === opt"
                 @click="select(opt)"
               >
                 <span class="truncate">{{ opt.label }}</span>
@@ -502,12 +565,12 @@ onUnmounted(() => {
             <div 
               v-else 
               :key="`single-${idx}`"
-              class="px-3 py-2 rounded-lg text-sm transition-colors flex items-center justify-between group/item"
-              :class="[
-                item.disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
-                isOptionSelected(item) ? 'bg-brand-a20 text-brand' : 'text-[var(--color-text-secondary)]',
-                !item.disabled && !isOptionSelected(item) ? 'hover:bg-surface-muted' : '',
-              ]"
+              :id="activeOption === item ? activeOptionId : undefined"
+              role="option"
+              :aria-selected="isOptionSelected(item)"
+              :aria-disabled="!!item.disabled"
+              class="select-option"
+              :data-active="activeOption === item"
               @click="select(item)"
             >
               <span class="truncate">{{ item.label }}</span>
@@ -525,61 +588,3 @@ onUnmounted(() => {
     </Teleport>
   </div>
 </template>
-
-<style scoped>
-.select-dropdown {
-  background-color: var(--color-popover-surface);
-  background-image: none;
-}
-
-.select-dropdown-options {
-  background-color: color-mix(in srgb, var(--color-popover-surface) 72%, transparent);
-  background-image: none;
-}
-
-/* 下拉：自上方滑入；上拉：自下方滑入（与 placement 一致） */
-.select-dropdown-pop-enter-active,
-.select-dropdown-pop-leave-active {
-  transition:
-    transform 0.2s cubic-bezier(0.33, 1, 0.68, 1),
-    opacity 0.2s ease;
-}
-
-.select-dropdown-pop-enter-from.select-dropdown-pop--bottom,
-.select-dropdown-pop-leave-to.select-dropdown-pop--bottom {
-  transform: translateY(-0.5rem);
-  opacity: 0;
-}
-
-.select-dropdown-pop-enter-to.select-dropdown-pop--bottom,
-.select-dropdown-pop-leave-from.select-dropdown-pop--bottom {
-  transform: translateY(0);
-  opacity: 1;
-}
-
-.select-dropdown-pop-enter-from.select-dropdown-pop--top,
-.select-dropdown-pop-leave-to.select-dropdown-pop--top {
-  transform: translateY(0.5rem);
-  opacity: 0;
-}
-
-.select-dropdown-pop-enter-to.select-dropdown-pop--top,
-.select-dropdown-pop-leave-from.select-dropdown-pop--top {
-  transform: translateY(0);
-  opacity: 1;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .select-dropdown-pop-enter-active,
-  .select-dropdown-pop-leave-active {
-    transition: opacity 0.15s ease;
-  }
-
-  .select-dropdown-pop-enter-from.select-dropdown-pop--bottom,
-  .select-dropdown-pop-leave-to.select-dropdown-pop--bottom,
-  .select-dropdown-pop-enter-from.select-dropdown-pop--top,
-  .select-dropdown-pop-leave-to.select-dropdown-pop--top {
-    transform: none;
-  }
-}
-</style>
