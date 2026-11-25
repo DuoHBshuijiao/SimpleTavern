@@ -587,7 +587,7 @@ def _build_payload(
         "store": False,
     }
     if instructions:
-        if openai_responses_wants_explicit_breakpoint(plan):
+        if protocol_variant != "chatgpt_subscription" and openai_responses_wants_explicit_breakpoint(plan):
             # T-821：GPT-5.6+ 显式缓存——system 放进 developer message 的 input_text 块并打 prompt_cache_breakpoint
             payload["input"] = [openai_responses_developer_item(instructions), *input_items]
         else:
@@ -632,7 +632,7 @@ def _build_payload(
         payload.pop(key, None)
     if protocol_variant == "chatgpt_subscription":
         for key in ("background", "conversation", "max_output_tokens", "max_tool_calls", "metadata",
-                    "moderation", "multi_agent", "prompt", "prompt_cache_retention", "safety_identifier",
+                    "moderation", "multi_agent", "prompt", "prompt_cache_retention", "prompt_cache_options", "safety_identifier",
                     "temperature", "top_logprobs", "top_p", "truncation", "user", "previous_response_id"):
             payload.pop(key, None)
         payload.update(store=False, stream=True)

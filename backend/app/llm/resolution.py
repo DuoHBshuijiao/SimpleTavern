@@ -849,6 +849,21 @@ def resolve_request(
         chat_id=chat_id,
         character_id=character_id,
     )
+    if credentials.provider_id == "openai-chatgpt" and cache_plan.enabled:
+        cache_adjustments = tuple(adj for adj in cache_plan.adjustments if adj["type"] not in {
+            "cache_mode_auto", "cache_mode_downgraded", "cache_ttl_translated",
+        })
+        requested_cache_mode = credentials.prompt_cache.mode
+        if requested_cache_mode in {"explicit", "best_effort"}:
+            cache_adjustments += (_adj(
+                "cache_mode_downgraded", **{"from": requested_cache_mode, "to": "implicit"},
+                reason="ChatGPT 订阅使用自动缓存",
+            ),)
+        cache_plan = replace(
+            cache_plan, mode="implicit", openai_style=None, ttl=None,
+            breakpoints=(), explicit_markers=False, unsupported_reason=None,
+            adjustments=cache_adjustments,
+        )
 
     adjustments = list(proto_adjustments)
     if clamp_adj:
