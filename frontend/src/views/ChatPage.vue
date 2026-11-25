@@ -113,7 +113,7 @@ import AvatarCropper from '../components/AvatarCropper.vue'
 import ModernAvatar from '../components/ModernAvatar.vue'
 import TtsPlaybackFab from '../components/chat/TtsPlaybackFab.vue'
 import { useTtsPlaybackQueue } from '../composables/useTtsPlaybackQueue'
-import { Users, Settings, MoreHorizontal, Search } from 'lucide-vue-next'
+import { Users, Settings, MoreHorizontal, Search, X } from 'lucide-vue-next'
 
 // API
 import { postAndConsumeSse } from '../api/sse'
@@ -4792,7 +4792,7 @@ const editingPersonaAvatarUrl = computed(() => {
                   <button
                     v-if="!showChatSearch && !holdSearchChipUntilSearchPanelClosed"
                     key="hdr-search-trigger"
-                    :class="['header-action-chip', { 'header-action-chip--icon': isNarrowPortrait }]"
+                    :class="['chat-toolbar-button header-action-chip backdrop-blur-[var(--blur-light)]', { 'header-action-chip--icon': isNarrowPortrait }]"
                     :disabled="!activeChat"
                     @click="openChatSearchBar"
                   >
@@ -4804,7 +4804,7 @@ const editingPersonaAvatarUrl = computed(() => {
                 </Transition>
                 <button
                   v-if="activeChat.isGroup"
-                  :class="['header-action-chip', { 'header-action-chip--icon': isNarrowPortrait }]"
+                  :class="['chat-toolbar-button header-action-chip backdrop-blur-[var(--blur-light)]', { 'header-action-chip--icon': isNarrowPortrait }]"
                   @click="showGroupSettings = true"
                 >
                   <Settings class="w-3.5 h-3.5" />
@@ -4812,7 +4812,7 @@ const editingPersonaAvatarUrl = computed(() => {
                   <span v-if="!isNarrowPortrait">群聊</span>
                 </button>
                 <button
-                  :class="['header-action-chip', { 'header-action-chip--icon': isNarrowPortrait }]"
+                  :class="['chat-toolbar-button header-action-chip backdrop-blur-[var(--blur-light)]', { 'header-action-chip--icon': isNarrowPortrait }]"
                   @click="settingsTab = 'global'; showSettings = true"
                 >
                   <Settings class="w-3.5 h-3.5" />
@@ -4822,7 +4822,7 @@ const editingPersonaAvatarUrl = computed(() => {
                 <div class="relative">
                   <button
                     ref="headerMoreButtonRef"
-                    class="header-action-chip header-action-chip--icon"
+                    class="chat-toolbar-button header-action-chip header-action-chip--icon backdrop-blur-[var(--blur-light)]"
                     :class="showHeaderMoreMenu ? 'header-action-chip--active' : ''"
                     :aria-expanded="showHeaderMoreMenu"
                     @click="toggleHeaderMoreMenu"
@@ -4886,19 +4886,30 @@ const editingPersonaAvatarUrl = computed(() => {
                         </div>
                       </div>
 
-                      <input
-                        ref="chatSearchInputRef"
-                        v-model="chatSearchQuery"
-                        type="search"
-                        autocomplete="off"
-                        name="conversation-search"
-                        class="min-w-0 grow basis-32 bg-transparent text-sm outline-none"
-                        placeholder="搜索当前会话"
-                        aria-label="搜索当前会话"
-                        @keydown.enter.exact.prevent="handleChatSearchEnter(false)"
-                        @keydown.enter.shift.exact.prevent="handleChatSearchEnter(true)"
-                        @keydown.esc.prevent="closeChatSearchBar"
-                      />
+                      <div class="relative min-w-0 grow basis-32">
+                        <input
+                          ref="chatSearchInputRef"
+                          v-model="chatSearchQuery"
+                          type="search"
+                          autocomplete="off"
+                          name="conversation-search"
+                          class="input input-sm input-search pr-8"
+                          placeholder="搜索当前会话"
+                          aria-label="搜索当前会话"
+                          @keydown.enter.exact.prevent="handleChatSearchEnter(false)"
+                          @keydown.enter.shift.exact.prevent="handleChatSearchEnter(true)"
+                          @keydown.esc.prevent="closeChatSearchBar"
+                        />
+                        <button
+                          v-if="chatSearchQuery"
+                          type="button"
+                          class="icon-button absolute inset-y-1 right-1 w-6"
+                          aria-label="清空会话搜索"
+                          @click="chatSearchQuery = ''; chatSearchInputRef?.focus()"
+                        >
+                          <X class="h-3.5 w-3.5" />
+                        </button>
+                      </div>
 
                       <button type="button" class="btn btn-xs btn-secondary shrink-0" aria-label="上一个搜索结果" @click="goToPrevSearchResult">上一个</button>
                       <button type="button" class="btn btn-xs btn-secondary shrink-0" aria-label="下一个搜索结果" @click="goToNextSearchResult">下一个</button>
@@ -4921,8 +4932,8 @@ const editingPersonaAvatarUrl = computed(() => {
                           <button
                             v-for="(hit, idx) in chatSearchChipsDisplayHits"
                             :key="`${hit.messageId}_${hit.messageIndex}`"
-                            class="inline-flex w-[220px] shrink-0 items-start rounded-lg border px-3 py-2 text-left text-xs transition-colors hover:bg-surface-muted"
-                            :class="idx === chatSearchCursor ? 'bg-surface-muted border-[var(--color-border-strong)]' : 'bg-surface-muted/55 border-[var(--color-border-subtle)]'"
+                        class="settings-item inline-flex w-[220px] shrink-0 items-start text-left text-xs hover:bg-surface-hover"
+                        :class="{ 'settings-item--selected': idx === chatSearchCursor }"
                             :aria-current="idx === chatSearchCursor ? 'true' : undefined"
                             :data-search-chip="idx"
                             @click="jumpToSearchResult(idx)"
@@ -4942,44 +4953,50 @@ const editingPersonaAvatarUrl = computed(() => {
               </div>
             </div>
 
-            <!-- 群成员头像行 -->
-            <Transition name="chat-header-groupstrip">
-            <div v-if="activeChat.isGroup && groupMembers.length > 0" key="hdr-group-strip" class="px-6 pb-2 pointer-events-auto">
-              <div class="flex items-center gap-3 overflow-x-auto rounded-xl border border-[var(--color-border-subtle)] bg-surface-overlay/55 px-3 py-2">
-                <div class="shrink-0 text-2xs tracking-[0.08em] text-[var(--color-text-muted)]">
-                  成员
-                </div>
-                <div 
-                  v-for="(member, idx) in groupMembers" 
-                  :key="member.id"
-                  class="flex items-center gap-1.5 shrink-0 rounded-full border border-[var(--color-border-subtle)] bg-surface-muted/80 px-2.5 py-1 transition-colors group/member"
-                  :class="group.canInterject.value ? 'cursor-pointer hover:bg-[var(--color-purple-bg)]' : ''"
-                  @click="group.canInterject.value && triggerInterject(member.id)"
-                >
-                  <span class="text-2xs text-[var(--color-text-muted)]">{{ idx + 1 }}</span>
-                  <ModernAvatar 
-                    :src="member.avatar ? `/api/avatars/${member.avatar}` : null" 
-                    :name="member.name" 
-                    :size="20" 
-                    aspect="1"
-                    rounded="rounded"
-                  />
-                  <span class="max-w-[72px] truncate text-xs text-[var(--color-text-secondary)]">{{ member.name }}</span>
-                  <span 
-                    v-if="group.getMemberSettings(member.id).probability < 1" 
-                    class="rounded-full border border-[var(--color-warning)]/20 bg-[var(--color-warning-bg)] px-1.5 py-0.5 text-2xs leading-none text-[var(--color-warning-text)]"
+            <div class="chat-header-groupstrip-layout">
+              <div class="min-h-0 min-w-0 overflow-hidden">
+                <Transition name="chat-header-groupstrip">
+                  <div
+                    v-if="activeChat.isGroup && groupMembers.length > 0"
+                    class="chat-header-groupstrip-content px-6 pb-2 pointer-events-auto"
                   >
-                    {{ Math.round(group.getMemberSettings(member.id).probability * 100) }}%
-                  </span>
-                </div>
-                <div v-if="!group.effectivePureAiMode.value" class="flex items-center gap-1.5 shrink-0 rounded-full border border-brand-a20 bg-brand-a10 px-2.5 py-1">
-                  <ModernAvatar :src="userAvatarUrl" :name="userName" :size="20" aspect="1" rounded="rounded" />
-                  <span class="max-w-[72px] truncate text-xs text-brand">{{ userName }}</span>
-                  <span class="text-2xs text-brand-a60">你</span>
-                </div>
+                    <div class="flex items-center gap-3 overflow-x-auto rounded-xl border border-[var(--color-border-subtle)] bg-surface-overlay/55 px-3 py-2">
+                      <div class="shrink-0 text-2xs tracking-[0.08em] text-[var(--color-text-muted)]">
+                        成员
+                      </div>
+                      <div
+                        v-for="(member, idx) in groupMembers"
+                        :key="member.id"
+                        class="flex items-center gap-1.5 shrink-0 rounded-full border border-[var(--color-border-subtle)] bg-surface-muted/80 px-2.5 py-1 transition-colors group/member"
+                        :class="group.canInterject.value ? 'cursor-pointer hover:bg-[var(--color-purple-bg)]' : ''"
+                        @click="group.canInterject.value && triggerInterject(member.id)"
+                      >
+                        <span class="text-2xs text-[var(--color-text-muted)]">{{ idx + 1 }}</span>
+                        <ModernAvatar
+                          :src="member.avatar ? `/api/avatars/${member.avatar}` : null"
+                          :name="member.name"
+                          :size="20"
+                          aspect="1"
+                          rounded="rounded"
+                        />
+                        <span class="max-w-[72px] truncate text-xs text-[var(--color-text-secondary)]">{{ member.name }}</span>
+                        <span
+                          v-if="group.getMemberSettings(member.id).probability < 1"
+                          class="rounded-full border border-[var(--color-warning)]/20 light:border-transparent bg-[var(--color-warning-bg)] px-1.5 py-0.5 text-2xs leading-none text-[var(--color-warning-text)]"
+                        >
+                          {{ Math.round(group.getMemberSettings(member.id).probability * 100) }}%
+                        </span>
+                      </div>
+                      <div v-if="!group.effectivePureAiMode.value" class="flex items-center gap-1.5 shrink-0 rounded-full border border-brand-a20 light:border-transparent bg-brand-a10 px-2.5 py-1">
+                        <ModernAvatar :src="userAvatarUrl" :name="userName" :size="20" aspect="1" rounded="rounded" />
+                        <span class="max-w-[72px] truncate text-xs text-brand">{{ userName }}</span>
+                        <span class="text-2xs text-brand-a60">你</span>
+                      </div>
+                    </div>
+                  </div>
+                </Transition>
               </div>
             </div>
-            </Transition>
             </div>
           </header>
 
@@ -5153,7 +5170,7 @@ const editingPersonaAvatarUrl = computed(() => {
           <div class="flex flex-col items-center">
             <h3 class="text-xl font-bold text-[var(--color-text-secondary)] mb-2">未打开会话</h3>
             <p class="text-[var(--color-text-muted)] mb-8 leading-relaxed px-4 max-w-[468px] w-full">从左侧选择角色以进入现有会话或新建会话。如果还没有角色，先创建一个。</p>
-            <button class="bg-brand text-on-brand px-6 py-2 rounded-xl hover:bg-brand-hover transition-colors" @click="openCreateCharacter">
+            <button type="button" class="btn btn-primary" @click="openCreateCharacter">
               创建角色
             </button>
           </div>
@@ -5463,43 +5480,10 @@ const editingPersonaAvatarUrl = computed(() => {
 }
 
 .header-action-chip {
-  display: inline-flex;
-  align-items: center;
   gap: 0.45rem;
   min-height: 2rem;
   padding: 0.4rem 0.7rem;
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--color-border-subtle);
-  background-color: var(--color-chrome-widget);
-  background-image: none;
-  color: var(--color-text-secondary);
-  font-size: 0.75rem;
-  line-height: 1;
-  transition:
-    background-color 200ms cubic-bezier(0.25, 1, 0.5, 1),
-    border-color 200ms cubic-bezier(0.25, 1, 0.5, 1),
-    color 200ms cubic-bezier(0.25, 1, 0.5, 1),
-    transform 180ms cubic-bezier(0.25, 1, 0.5, 1);
-  backdrop-filter: blur(var(--blur-light));
-  -webkit-backdrop-filter: blur(var(--blur-light));
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .header-action-chip:active:not(:disabled) {
-    transform: scale(0.97);
-  }
-}
-
-.header-action-chip:hover:not(:disabled),
-.header-action-chip:focus-visible {
-  background-color: var(--color-popover-surface);
-  border-color: var(--color-border);
-  color: var(--color-text);
-}
-
-.header-action-chip:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+  font-size: var(--text-xs);
 }
 
 .header-action-chip--icon {
@@ -5596,17 +5580,38 @@ const editingPersonaAvatarUrl = computed(() => {
   pointer-events: auto;
 }
 
+/* 让网格和成员从同一帧开始变化，顶栏的 ResizeObserver 会随每一帧更新高度。 */
+.chat-header-groupstrip-layout {
+  --groupstrip-duration: 300ms;
+  --groupstrip-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--groupstrip-duration) var(--groupstrip-ease);
+}
+
+.chat-header-groupstrip-layout:has(.chat-header-groupstrip-content:not(.chat-header-groupstrip-enter-from, .chat-header-groupstrip-leave-to)) {
+  grid-template-rows: 1fr;
+}
+
 .chat-header-groupstrip-enter-active,
 .chat-header-groupstrip-leave-active {
   transition:
-    opacity 300ms cubic-bezier(0.4, 0, 0.2, 1),
-    transform 300ms cubic-bezier(0.4, 0, 0.2, 1);
+    opacity var(--groupstrip-duration) var(--groupstrip-ease),
+    transform var(--groupstrip-duration) var(--groupstrip-ease);
 }
 
-.chat-header-groupstrip-enter-from,
-.chat-header-groupstrip-leave-to {
+.chat-header-groupstrip-leave-active {
+  pointer-events: none;
+}
+
+.chat-header-groupstrip-enter-from {
   opacity: 0;
   transform: translateY(6px);
+}
+
+.chat-header-groupstrip-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
 }
 
 /* MVU 状态条：从输入区方向滑入/滑出（锚点在底边） */
@@ -5694,33 +5699,13 @@ const editingPersonaAvatarUrl = computed(() => {
     transition: none;
   }
 
+  .chat-header-groupstrip-layout {
+    transition: none;
+  }
+
   .chat-header-search-reveal-layer {
     transition: none;
   }
-}
-
-.header-more-menu__item {
-  display: flex;
-  width: 100%;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.1rem;
-  padding: 0.65rem 0.75rem;
-  border-radius: var(--radius-lg);
-  color: var(--color-text-secondary);
-  text-align: left;
-  transition: background-color 160ms ease, color 160ms ease;
-}
-
-.header-more-menu__item:hover:not(:disabled),
-.header-more-menu__item:focus-visible {
-  background-color: var(--color-surface-hover);
-  color: var(--color-text);
-}
-
-.header-more-menu__item:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .header-more-menu__label {
