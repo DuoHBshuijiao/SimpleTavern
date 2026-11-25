@@ -45,6 +45,7 @@ void dialogRef
             <div class="flex items-center gap-4">
               <ModernAvatar
                 :src="avatarUrl"
+                :name="persona.name"
                 :size="80"
                 aspect="1"
                 rounded="rounded-xl"

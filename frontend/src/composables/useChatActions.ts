@@ -534,7 +534,7 @@ export function useChatActions(deps: ChatActionsDeps) {
    * 选择身份
    *
    * 切换选中的用户身份。
-   * 如果在现有对话中切换，会弹出确认框（新建会话或继续对话）。
+   * 会话已有用户消息时，会弹出确认框（新建会话或继续对话）。
    * 使用settingsStore.save（来自stores/settings.ts）保存选中身份。
    *
    * @param {string} id - 身份ID
@@ -544,8 +544,7 @@ export function useChatActions(deps: ChatActionsDeps) {
     if (!settingsStore.settings) return
     if (settingsStore.settings.selectedPersonaId === id && activeChat.value?.userPersonaId === id) return
     
-    // 若在现有对话中切换 persona，弹确认框
-    if (activeChat.value && (activeChat.value.messages?.length || 0) > 0) {
+    if (activeChat.value?.messages?.some((message) => message.role === 'user')) {
       pendingPersonaId.value = id
       showPersonaSwitchConfirm.value = true
       return

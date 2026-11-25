@@ -103,11 +103,62 @@
   }
 
   .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: var(--color-border);
+    background: var(--color-scrollbar-thumb, var(--color-border));
     border-radius: var(--radius-track);
   }
 
   .custom-scrollbar:hover::-webkit-scrollbar-thumb {
-    background: var(--color-border-strong);
+    background: var(--color-scrollbar-hover, var(--color-border-strong));
+  }
+
+  .work-area-scrollbar {
+    scrollbar-width: auto;
+    scrollbar-color: var(--color-text-secondary) transparent;
+  }
+
+  @supports selector(::-webkit-scrollbar) {
+    .work-area-scrollbar {
+      scrollbar-color: auto;
+    }
+  }
+
+  .work-area-scrollbar::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .work-area-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .work-area-scrollbar::-webkit-scrollbar-thumb {
+    background: var(--color-text-secondary);
+    border-radius: var(--radius-full);
+  }
+
+  /* 侧栏分区只改变滑块颜色，保留滚动、命中区域与排版宽度。 */
+  .sidebar-scrollbar {
+    --sidebar-scroll-thumb: transparent;
+    --sidebar-scroll-thumb-hover: transparent;
+    scrollbar-color: var(--sidebar-scroll-thumb) transparent;
+    transition: scrollbar-color var(--transition-fast);
+  }
+
+  .sidebar-scroll-region:hover > .sidebar-scrollbar {
+    --sidebar-scroll-thumb: var(--color-scrollbar-thumb, var(--color-track));
+    --sidebar-scroll-thumb-hover: var(--color-scrollbar-hover, var(--color-track-hover));
+  }
+
+  .sidebar-scrollbar::-webkit-scrollbar-thumb {
+    background: var(--sidebar-scroll-thumb);
+  }
+
+  .sidebar-scrollbar:hover::-webkit-scrollbar-thumb {
+    background: var(--sidebar-scroll-thumb-hover);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .sidebar-scrollbar {
+      transition: none;
+    }
   }
 }

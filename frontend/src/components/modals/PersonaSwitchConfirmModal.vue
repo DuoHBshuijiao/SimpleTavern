@@ -34,18 +34,11 @@ void dialogRef
         </button>
       </div>
       <div class="modal-body">
-        <div class="space-y-4">
-          <div class="text-sm text-[var(--color-text-secondary)]">
-            你正在尝试切换用户身份，请选择"新建会话"或"仍然继续对话"。
-          </div>
-          <div class="text-xs text-[var(--color-text-muted)]">
-            提示：继续对话时，历史消息会保持原身份显示；后续新发送的 user 消息将使用新身份。
-          </div>
-        </div>
+        <p class="text-sm text-[var(--color-text-secondary)]">继续对话时，接下来发送的消息使用新身份，历史消息保留原身份。</p>
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" @click="emit('cancel')">取消</button>
-        <button class="btn btn-secondary" @click="emit('continue-chat')">仍然继续对话</button>
+        <button class="btn btn-secondary" @click="emit('continue-chat')">继续对话</button>
         <button class="btn btn-primary" @click="emit('new-session')">新建会话</button>
       </div>
     </div>

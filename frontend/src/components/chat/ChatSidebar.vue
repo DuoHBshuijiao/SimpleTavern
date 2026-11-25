@@ -56,21 +56,25 @@
  *    - 位置：组件层，提供侧边栏功能
  */
 import type { CharacterCard, UserPersona, Chat } from '../../types/models'
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 
 import { MAIN_LAYOUT_TRANSITION_MS } from '../../constants/chatHeaderMorph'
 import { usePreferHoverChrome } from '../../composables/usePreferHoverChrome'
 import ModernAvatar from '../ModernAvatar.vue'
 import ConfirmPopover from '../ConfirmPopover.vue'
+import SidebarPersonas from './SidebarPersonas.vue'
 
 import {
   ArrowUp,
   Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Copy,
   GitBranch,
+  MoreHorizontal,
   Pencil,
+  Plus,
   Trash2,
   Users,
   X,
@@ -96,6 +100,67 @@ const props = defineProps<{
   editingChatId: string | null
   editingTitle: string
 }>()
+
+const groupListExpanded = ref(false)
+const visibleGroupList = computed(() => groupListExpanded.value ? props.groupList : props.groupList.slice(0, 4))
+const groupAvatars = computed(() => new Map(visibleGroupList.value.map(chat => [chat.id, getChatAvatars(chat)])))
+
+const sidebar = ref<HTMLElement | null>(null)
+const sidebarLists = ref<HTMLElement | null>(null)
+const sidebarDivider = ref<HTMLButtonElement | null>(null)
+const characterPanelId = useId()
+const listSpace = ref(0)
+const characterShare = ref(0.58)
+const split = computed(() => {
+  const space = listSpace.value
+  const min = Math.min(106, Math.floor(space * 0.4))
+  const max = space - Math.min(150, Math.floor(space * 0.52))
+  const height = Math.round(Math.max(min, Math.min(max, space * characterShare.value)))
+  return { min, max, height, history: space - height }
+})
+
+let splitObserver: ResizeObserver | undefined
+const splitDrag = ref<{ pointerId: number; originY: number; initialHeight: number } | null>(null)
+
+onMounted(() => {
+  const lists = sidebarLists.value
+  const divider = sidebarDivider.value
+  if (!lists || !divider) return
+  function measure() {
+    if (lists && divider) listSpace.value = Math.max(0, lists.clientHeight - divider.offsetHeight)
+  }
+  splitObserver = new ResizeObserver(measure)
+  splitObserver.observe(lists)
+  splitObserver.observe(divider)
+  measure()
+})
+
+onBeforeUnmount(() => splitObserver?.disconnect())
+
+function resizeCharacters(height: number) {
+  if (!listSpace.value) return
+  const { min, max } = split.value
+  characterShare.value = Math.max(min, Math.min(max, height)) / listSpace.value
+}
+
+function startSplitDrag(event: PointerEvent) {
+  if (event.button !== 0 || !event.isPrimary || splitDrag.value || !listSpace.value) return
+  const divider = event.currentTarget as HTMLButtonElement
+  event.preventDefault()
+  divider.focus({ preventScroll: true })
+  divider.setPointerCapture(event.pointerId)
+  splitDrag.value = { pointerId: event.pointerId, originY: event.clientY, initialHeight: split.value.height }
+}
+
+function moveSplitDrag(event: PointerEvent) {
+  const drag = splitDrag.value
+  if (drag?.pointerId !== event.pointerId) return
+  resizeCharacters(drag.initialHeight + event.clientY - drag.originY)
+}
+
+function endSplitDrag(event: PointerEvent) {
+  if (splitDrag.value?.pointerId === event.pointerId) splitDrag.value = null
+}
 
 const emit = defineEmits<{
   'update:collapsed': [value: boolean]
@@ -304,6 +369,7 @@ const deleteConfirmMessage = computed(() => {
 const deleteTargetEl = ref<HTMLElement | null>(null)
 
 const characterListScrollRef = ref<HTMLElement | null>(null)
+const historyListScrollRef = ref<HTMLElement | null>(null)
 
 watch(
   () => props.selectedCharacterId,
@@ -317,10 +383,23 @@ watch(
   },
 )
 
-function confirmDeletePersona(persona: UserPersona, event: Event) {
-  deleteTargetEl.value = (event.currentTarget as HTMLElement)
+function confirmDeletePersona(persona: UserPersona, target: HTMLElement) {
+  deleteTargetEl.value = target
   deleteConfirm.value = { type: 'persona', id: persona.id, label: persona.name || '未命名身份' }
 }
+
+watch(() => props.activeChatId, async (id) => {
+  if (!id) return
+  if (props.groupList.findIndex(chat => chat.id === id) >= 4) groupListExpanded.value = true
+  await nextTick()
+  const list = historyListScrollRef.value
+  const row = list?.querySelector(`[data-sidebar-chat-id="${CSS.escape(id)}"]`)
+  if (!list || !row) return
+  const viewport = list.getBoundingClientRect()
+  const position = row.getBoundingClientRect()
+  if (position.top < viewport.top) list.scrollTop -= viewport.top - position.top
+  if (position.bottom > viewport.bottom) list.scrollTop += position.bottom - viewport.bottom
+}, { immediate: true })
 
 /**
  * 确认删除角色
@@ -369,62 +448,24 @@ function confirmDelete() {
 </script>
 
 <template>
-  <aside :class="asideBaseClass" :style="asideStyle">
+  <aside ref="sidebar" :class="asideBaseClass" :style="asideStyle" :inert="collapsed">
     <div class="flex flex-col h-full overflow-hidden rounded-2xl">
-      
-      <!-- 用户身份区域 (头部)：滚动区全宽使滚动条贴侧栏右缘，内容用 px-4 与标题对齐 -->
-      <div class="bg-[var(--color-sidebar-sandwich-outer)] border-b border-[var(--color-border-subtle)] shrink-0">
-        <div class="flex items-center justify-between mb-3 px-4 pt-4">
-          <span class="text-xs text-[var(--color-text-secondary)] uppercase tracking-wider">我的身份</span>
-          <button 
-            class="btn btn-xs btn-ghost text-brand" 
-            @click="emit('create-persona')"
-          >
-            + 新建
-          </button>
-        </div>
+      <SidebarPersonas
+        :personas="personas"
+        :selected-persona-id="selectedPersonaId"
+        :sidebar="sidebar"
+        :collapsed="collapsed"
+        :confirming-delete="deleteConfirm?.type === 'persona'"
+        @create="emit('create-persona')"
+        @select="emit('select-persona', $event)"
+        @edit="emit('edit-persona', $event)"
+        @remove="confirmDeletePersona"
+      />
 
-        <div class="max-h-[140px] overflow-y-auto min-h-0 custom-scrollbar pb-4">
-          <div class="space-y-2 px-4">
-            <div 
-              v-for="p in personas"
-              :key="p.id"
-              class="group settings-item flex cursor-pointer items-center gap-3 p-2"
-              :class="selectedPersonaId === p.id ? 'settings-item--selected' : 'hover:bg-surface-hover'"
-              @click="emit('select-persona', p.id)"
-            >
-              <ModernAvatar :src="p.avatar ? `/api/avatars/${p.avatar}` : null" :name="p.name" :size="36" aspect="1" />
-              <div class="flex-1 min-w-0">
-                <div class="text-sm truncate" :class="selectedPersonaId === p.id ? 'text-brand' : 'text-[var(--color-text-secondary)]'">{{ p.name }}</div>
-              </div>
-              <div
-                class="flex gap-1 transition-opacity ml-auto rounded-lg bg-[var(--color-surface-inset)] p-0.5"
-                :class="
-                  !preferHoverChrome && selectedPersonaId === p.id
-                    ? 'opacity-100'
-                    : 'opacity-0 group-hover:opacity-100'
-                "
-              >
-                <button class="icon-button p-1" aria-label="编辑身份" @click.stop="emit('edit-persona', p)">
-                  <Pencil class="w-3.5 h-3.5" />
-                </button>
-                <button class="icon-button p-1 hover:text-error" aria-label="删除身份" @click.stop="confirmDeletePersona(p, $event)">
-                  <Trash2 class="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-            
-            <div v-if="!personas.length" class="text-xs text-[var(--color-text-muted)] text-center py-2">
-              点击上方新建创建你的第一个身份
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 角色列表区域 (中间，弹性伸缩) -->
-      <div ref="characterListScrollRef" class="flex-1 overflow-y-auto min-h-0 custom-scrollbar bg-[var(--color-sidebar-sandwich-middle)] p-3">
-        <div class="flex items-center justify-between mb-2 px-1">
-          <span class="text-xs text-[var(--color-text-secondary)] uppercase tracking-wider">角色列表</span>
+      <div ref="sidebarLists" class="flex min-h-0 flex-1 flex-col">
+      <section :id="characterPanelId" class="sidebar-scroll-region flex min-h-0 flex-1 flex-col bg-[var(--color-sidebar-sandwich-middle)]">
+        <div class="flex shrink-0 items-center justify-between px-4 pb-2 pt-3">
+          <span class="text-xs text-[var(--color-text-secondary)]">角色列表</span>
           <button 
             class="btn btn-xs btn-ghost text-brand" 
             @click="emit('create-character')"
@@ -433,6 +474,7 @@ function confirmDelete() {
           </button>
         </div>
 
+        <div ref="characterListScrollRef" class="sidebar-scrollbar custom-scrollbar min-h-0 flex-1 overflow-y-auto px-3 pb-3">
         <div class="grid grid-cols-1 gap-2">
           <div 
             v-for="c in characters"
@@ -453,19 +495,23 @@ function confirmDelete() {
               class="shadow-md"
             />
             
-            <div class="flex-1 min-w-0 flex flex-col">
-              <div class="flex justify-between items-start">
-                <div class="text-sm truncate" :class="selectedCharacterId === c.id ? 'text-brand' : 'text-[var(--color-text)]'">{{ c.name }}</div>
-              </div>
+            <div class="sidebar-role-text flex-1 min-w-0 flex flex-col">
+              <button
+                type="button"
+                class="sidebar-row-target min-w-0 truncate rounded-sm text-left text-sm"
+                :class="selectedCharacterId === c.id ? 'text-brand' : 'text-[var(--color-text)]'"
+                :aria-current="selectedCharacterId === c.id ? 'true' : undefined"
+                :title="c.name"
+              >{{ c.name }}</button>
               <div class="text-xs text-[var(--color-text-muted)] line-clamp-2 mt-1 leading-relaxed">{{ c.description || '暂无简介' }}</div>
             </div>
 
             <div
-              class="absolute top-3 right-2 transition-opacity rounded-lg bg-[var(--color-surface-inset)] p-0.5 flex gap-1"
+              class="sidebar-role-capsule absolute top-3 right-2 transition-opacity rounded-lg bg-[var(--color-surface-inset)] p-0.5 flex gap-1"
               :class="
                 !preferHoverChrome && selectedCharacterId === c.id
                   ? 'opacity-100'
-                  : 'opacity-0 group-hover:opacity-100'
+                  : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
               "
             >
               <button class="icon-button p-1.5" aria-label="编辑角色" @click.stop="emit('edit-character', c)">
@@ -477,45 +523,76 @@ function confirmDelete() {
             </div>
           </div>
         </div>
-      </div>
+        </div>
+      </section>
 
-      <!-- 会话列表区域 (底部) -->
-      <div class="h-1/3 min-h-[150px] border-t border-[var(--color-border-subtle)] bg-[var(--color-sidebar-sandwich-outer)] flex flex-col">
-        <div class="p-3 pb-1 shrink-0 flex items-center justify-between">
-          <span class="text-xs text-[var(--color-text-secondary)] uppercase tracking-wider">历史会话</span>
-          <div class="flex gap-2">
-            <button 
-              class="btn btn-xs btn-secondary text-[var(--color-purple)]" 
-              :disabled="characters.length < 2" 
-              @click="emit('create-group')"
-            >
-              + 群聊
-            </button>
-            <button 
-              class="btn btn-xs btn-primary"
+      <button
+        ref="sidebarDivider"
+        type="button"
+        class="sidebar-divider shrink-0"
+        role="separator"
+        aria-label="调整角色列表和历史会话高度"
+        aria-orientation="horizontal"
+        :aria-controls="characterPanelId"
+        :aria-valuemin="split.min"
+        :aria-valuemax="split.max"
+        :aria-valuenow="split.height"
+        :aria-valuetext="`角色列表高度 ${split.height} 像素`"
+        :data-dragging="splitDrag ? 'true' : undefined"
+        @pointerdown="startSplitDrag"
+        @pointermove="moveSplitDrag"
+        @lostpointercapture="endSplitDrag"
+        @keydown.up.prevent="resizeCharacters(split.height - 12)"
+        @keydown.down.prevent="resizeCharacters(split.height + 12)"
+        @keydown.home.prevent="resizeCharacters(split.min)"
+        @keydown.end.prevent="resizeCharacters(split.max)"
+      />
+
+      <section
+        class="sidebar-scroll-region flex min-h-0 shrink-0 flex-col bg-[var(--color-sidebar-sandwich-outer)]"
+        :style="{ height: listSpace ? `${split.history}px` : '42%' }"
+      >
+        <div class="flex shrink-0 items-center justify-between px-4 pb-1 pt-1">
+          <span class="text-xs text-[var(--color-text-secondary)]">历史会话</span>
+          <div class="sidebar-create-actions inline-flex" role="group" aria-label="新建会话">
+            <button
+              type="button"
+              class="btn btn-xs btn-primary gap-1"
               :disabled="!selectedCharacterId" 
               @click="emit('create-chat')"
             >
+              <Plus class="h-3.5 w-3.5" aria-hidden="true" />
               新建会话
+            </button>
+            <button
+              type="button"
+              class="btn btn-xs btn-primary"
+              aria-label="新建群聊"
+              title="新建群聊"
+              :disabled="characters.length < 2"
+              @click="emit('create-group')"
+            >
+              <ChevronDown class="h-3.5 w-3.5" aria-hidden="true" />
             </button>
           </div>
         </div>
-        <div class="flex-1 overflow-y-auto p-2 custom-scrollbar">
+        <div ref="historyListScrollRef" class="sidebar-scrollbar custom-scrollbar min-h-0 flex-1 overflow-y-auto px-3 pb-2 pt-1">
           <!-- 群聊列表 -->
           <div v-if="groupList.length > 0" class="mb-3">
             <div class="text-2xs text-[var(--color-purple)] uppercase tracking-wider px-2 mb-1 flex items-center gap-1">
               <Users class="w-3 h-3" /> 群聊
             </div>
             <div 
-              v-for="c in groupList"
+              v-for="c in visibleGroupList"
               :key="c.id"
-              class="group flex items-center justify-between p-2 rounded-lg cursor-pointer text-sm mb-1 transition-colors"
-              :class="activeChatId === c.id ? 'bg-[var(--color-purple-bg)] text-[var(--color-purple)]' : 'text-[var(--color-text-muted)] hover:bg-surface-muted hover:text-[var(--color-text)]'"
+              :data-sidebar-chat-id="c.id"
+              class="sidebar-chat-row sidebar-chat-row--group group relative flex items-center rounded-lg p-2 text-sm mb-1 transition-colors cursor-pointer"
+              :class="activeChatId === c.id ? 'bg-brand-a10 text-brand' : 'text-[var(--color-text-muted)] hover:bg-surface-muted hover:text-[var(--color-text)]'"
               @click="emit('select-group', c)"
             >
-              <div class="flex items-center gap-2 flex-1 min-w-0 pr-2 max-w-[calc(100%-60px)]">
-                <div class="flex -space-x-1.5 overflow-hidden shrink-0">
-                  <template v-for="(avatar, i) in getChatAvatars(c).slice(0, 3)" :key="i">
+              <div class="sidebar-chat-content flex items-center gap-2 flex-1 min-w-0">
+                <div class="sidebar-chat-avatars flex -space-x-1.5 shrink-0">
+                  <template v-for="(avatar, i) in groupAvatars.get(c.id)?.slice(0, 3)" :key="i">
                     <ModernAvatar
                       :src="avatar.src"
                       :name="avatar.name"
@@ -524,51 +601,168 @@ function confirmDelete() {
                       object-fit="cover"
                       :object-position="avatar.objectPosition || '50% 50%'"
                       rounded="rounded-full"
-                      class="ring-1 ring-[var(--color-surface-overlay)] bg-[var(--color-surface-overlay)]"
+                      class="dark-ui:ring-1 ring-[var(--color-surface-overlay)] bg-[var(--color-surface-overlay)]"
                     />
                   </template>
-                  <div v-if="getChatAvatars(c).length > 3" class="w-5 h-5 rounded-full bg-surface-hover flex items-center justify-center text-2xs ring-1 ring-[var(--color-surface-overlay)]">
-                    +{{ getChatAvatars(c).length - 3 }}
+                  <div
+                    v-if="(groupAvatars.get(c.id)?.length ?? 0) > 3"
+                    class="sidebar-group-overflow w-4 h-4 self-center rounded-full bg-surface-hover flex items-center justify-center dark-ui:ring-1 ring-[var(--color-surface-overlay)]"
+                    :aria-label="`另有 ${(groupAvatars.get(c.id)?.length ?? 0) - 3} 个头像`"
+                    :title="`另有 ${(groupAvatars.get(c.id)?.length ?? 0) - 3} 个头像`"
+                  >
+                    <MoreHorizontal class="h-3 w-3" aria-hidden="true" />
                   </div>
                 </div>
-                <div v-if="editingChatId === c.id" @click.stop class="flex gap-1 flex-1">
+                <div v-if="editingChatId === c.id" @click.stop class="flex min-w-0 gap-1 flex-1">
                   <input 
                     :value="editingTitle"
                     @input="emit('update:editingTitle', ($event.target as HTMLInputElement).value)"
-                    class="input input-sm bg-surface-overlay border border-[var(--color-purple)]/50 rounded px-1 py-0.5 text-xs w-full outline-none focus:border-[var(--color-purple)]"
+                    class="input input-sm min-w-0 px-1 py-0.5 text-xs"
                     @keyup.enter="emit('save-title')"
                     @keyup.escape="emit('cancel-edit-title')"
                     autofocus
                   />
-                  <button class="text-[var(--color-purple)] hover:text-[var(--color-text)]" @click="emit('save-title')">
+                  <button type="button" class="icon-button shrink-0 px-0.5" aria-label="保存名称" @click="emit('save-title')">
                     <Check class="w-3 h-3" />
                   </button>
-                  <button class="text-[var(--color-text-muted)] hover:text-[var(--color-text)]" @click="emit('cancel-edit-title')">
+                  <button type="button" class="icon-button shrink-0 px-0.5" aria-label="取消重命名" @click="emit('cancel-edit-title')">
                     <X class="w-3 h-3" />
                   </button>
                 </div>
-                <div v-else class="truncate flex-1 flex items-center gap-1 min-w-0">
+                <button
+                  v-else
+                  type="button"
+                  class="sidebar-row-target flex flex-1 items-center gap-1 min-w-0 rounded-sm text-left"
+                  :aria-current="activeChatId === c.id ? 'true' : undefined"
+                  :title="c.title"
+                >
                   <GitBranch
                     v-if="c.forkedFromChatId"
                     class="w-3 h-3 shrink-0 text-brand"
                     aria-hidden="true"
                   />
                   <span class="truncate">{{ c.title }}</span>
-                </div>
+                </button>
                 <span class="text-2xs text-[var(--color-text-muted)] shrink-0">({{ c.memberIds.length }}人)</span>
               </div>
               
               <div
                 v-if="editingChatId !== c.id"
-                class="rounded-lg bg-[var(--color-surface-inset)] flex gap-1 shrink-0 ml-auto transition-opacity"
+                class="sidebar-chat-capsule rounded-lg bg-[var(--color-surface-inset)] flex gap-1 shrink-0 transition-opacity"
                 :class="
                   !preferHoverChrome && activeChatId === c.id
                     ? 'opacity-100'
-                    : 'opacity-0 group-hover:opacity-100'
+                    : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
                 "
               >
                 <button
-                  class="p-1 hover:text-[var(--color-purple)] text-[var(--color-text-secondary)] transition-colors"
+                  class="icon-button p-1 hover:text-brand"
+                  aria-label="创建分支"
+                  @click.stop="emit('branch-chat', c)"
+                >
+                  <Copy class="w-3.5 h-3.5" />
+                </button>
+                <button class="icon-button p-1" aria-label="重命名群聊" @click.stop="emit('start-edit-title', c.id, c.title)">
+                  <Pencil class="w-3.5 h-3.5" />
+                </button>
+                <button class="icon-button p-1 hover:text-error" aria-label="删除群聊" @click.stop="confirmDeleteChat(c, $event)">
+                  <Trash2 class="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+            <button
+              v-if="groupList.length > 4"
+              type="button"
+              class="btn btn-xs btn-ghost mx-1"
+              :aria-expanded="groupListExpanded"
+              :aria-label="groupListExpanded ? '收起群聊' : `展开其余 ${groupList.length - 4} 个群聊`"
+              @click="groupListExpanded = !groupListExpanded"
+            >
+              <MoreHorizontal class="h-4 w-4" aria-hidden="true" />
+              <span>{{ groupListExpanded ? '收起' : `还有 ${groupList.length - 4} 个群聊` }}</span>
+            </button>
+          </div>
+
+          <!-- 单聊列表 -->
+          <div v-if="chatList.filter(c => !c.isGroup).length > 0">
+            <div v-if="groupList.length > 0" class="text-2xs text-[var(--color-text-muted)] uppercase tracking-wider px-2 mb-1">
+              单聊
+            </div>
+            <div 
+              v-for="c in chatList.filter(chat => !chat.isGroup)"
+              :key="c.id"
+              :data-sidebar-chat-id="c.id"
+              class="sidebar-chat-row group relative flex items-center rounded-lg p-2 cursor-pointer text-sm mb-1 transition-colors"
+              :class="activeChatId === c.id ? 'bg-brand-a10 text-brand' : 'text-[var(--color-text-muted)] hover:bg-surface-muted hover:text-[var(--color-text)]'"
+              @click="emit('select-chat', c)"
+            >
+              <div class="sidebar-chat-content flex items-center gap-2 flex-1 min-w-0">
+                <div class="sidebar-chat-avatars flex -space-x-1.5 shrink-0">
+                  <template v-for="(avatar, i) in getChatAvatars(c).slice(0, 2)" :key="i">
+                    <ModernAvatar
+                      :src="avatar.src"
+                      :name="avatar.name"
+                      :size="20"
+                      aspect="1"
+                      object-fit="cover"
+                      :object-position="avatar.objectPosition || '50% 50%'"
+                      rounded="rounded-full"
+                      class="dark-ui:ring-1 ring-[var(--color-surface-overlay)] bg-[var(--color-surface-overlay)]"
+                    />
+                  </template>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div v-if="editingChatId === c.id" @click.stop class="flex gap-1">
+                    <input 
+                      :value="editingTitle"
+                      @input="emit('update:editingTitle', ($event.target as HTMLInputElement).value)"
+                      class="input input-sm min-w-0 px-1 py-0.5 text-xs"
+                      @keyup.enter="emit('save-title')"
+                      @keyup.escape="emit('cancel-edit-title')"
+                      autofocus
+                    />
+                    <button type="button" class="icon-button shrink-0 px-0.5" aria-label="保存名称" @click="emit('save-title')">
+                      <Check class="w-3 h-3" />
+                    </button>
+                    <button type="button" class="icon-button shrink-0 px-0.5" aria-label="取消重命名" @click="emit('cancel-edit-title')">
+                      <X class="w-3 h-3" />
+                    </button>
+                  </div>
+                  <button
+                    v-else
+                    type="button"
+                    class="sidebar-row-target flex w-full items-center gap-1 min-w-0 rounded-sm text-left"
+                    :aria-current="activeChatId === c.id ? 'true' : undefined"
+                    :title="c.title"
+                  >
+                    <GitBranch
+                      v-if="c.forkedFromChatId"
+                      class="w-3 h-3 shrink-0 text-brand"
+                      aria-hidden="true"
+                    />
+                    <span class="truncate">{{ c.title }}</span>
+                  </button>
+                </div>
+              </div>
+              
+              <div
+                v-if="editingChatId !== c.id"
+                class="sidebar-chat-capsule rounded-lg bg-[var(--color-surface-inset)] flex gap-1 shrink-0 transition-opacity"
+                :class="
+                  !preferHoverChrome && activeChatId === c.id
+                    ? 'opacity-100'
+                    : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
+                "
+              >
+                <button
+                  class="icon-button p-1 hover:text-brand"
+                  aria-label="创建副本改为群聊"
+                  @click.stop="emit('promote-to-group', c)"
+                >
+                  <ArrowUp class="w-3.5 h-3.5" />
+                </button>
+                <button
+                  class="icon-button p-1 hover:text-brand"
                   aria-label="创建分支"
                   @click.stop="emit('branch-chat', c)"
                 >
@@ -583,98 +777,11 @@ function confirmDelete() {
               </div>
             </div>
           </div>
-
-          <!-- 单聊列表 -->
-          <div v-if="chatList.filter(c => !c.isGroup).length > 0">
-            <div v-if="groupList.length > 0" class="text-2xs text-[var(--color-text-muted)] uppercase tracking-wider px-2 mb-1">
-              单聊
-            </div>
-            <div 
-              v-for="c in chatList.filter(chat => !chat.isGroup)"
-              :key="c.id"
-              class="group flex items-center justify-between p-2 rounded-lg cursor-pointer text-sm mb-1 transition-colors"
-              :class="activeChatId === c.id ? 'bg-brand-a10 text-brand' : 'text-[var(--color-text-muted)] hover:bg-surface-muted hover:text-[var(--color-text)]'"
-              @click="emit('select-chat', c)"
-            >
-              <div class="flex items-center gap-2 flex-1 min-w-0 pr-2 max-w-[calc(100%-60px)]">
-                <div class="flex -space-x-1.5 overflow-hidden shrink-0">
-                  <template v-for="(avatar, i) in getChatAvatars(c).slice(0, 2)" :key="i">
-                    <ModernAvatar
-                      :src="avatar.src"
-                      :name="avatar.name"
-                      :size="20"
-                      aspect="1"
-                      object-fit="cover"
-                      :object-position="avatar.objectPosition || '50% 50%'"
-                      rounded="rounded-full"
-                      class="ring-1 ring-[var(--color-surface-overlay)] bg-[var(--color-surface-overlay)]"
-                    />
-                  </template>
-                </div>
-                <div class="flex-1 min-w-0">
-                  <div v-if="editingChatId === c.id" @click.stop class="flex gap-1">
-                    <input 
-                      :value="editingTitle"
-                      @input="emit('update:editingTitle', ($event.target as HTMLInputElement).value)"
-                      class="input input-sm bg-surface-overlay border border-brand-a50 rounded px-1 py-0.5 text-xs w-full outline-none focus:border-brand"
-                      @keyup.enter="emit('save-title')"
-                      @keyup.escape="emit('cancel-edit-title')"
-                      autofocus
-                    />
-                    <button class="text-brand hover:text-[var(--color-text)]" @click="emit('save-title')">
-                      <Check class="w-3 h-3" />
-                    </button>
-                    <button class="text-[var(--color-text-muted)] hover:text-[var(--color-text)]" @click="emit('cancel-edit-title')">
-                      <X class="w-3 h-3" />
-                    </button>
-                  </div>
-                  <div v-else class="truncate flex items-center gap-1 min-w-0">
-                    <GitBranch
-                      v-if="c.forkedFromChatId"
-                      class="w-3 h-3 shrink-0 text-brand"
-                      aria-hidden="true"
-                    />
-                    <span class="truncate">{{ c.title }}</span>
-                  </div>
-                </div>
-              </div>
-              
-              <div
-                v-if="editingChatId !== c.id"
-                class="rounded-lg bg-[var(--color-surface-inset)] flex gap-1 shrink-0 ml-auto transition-opacity"
-                :class="
-                  !preferHoverChrome && activeChatId === c.id
-                    ? 'opacity-100'
-                    : 'opacity-0 group-hover:opacity-100'
-                "
-              >
-                <button
-                  class="p-1 hover:text-brand text-[var(--color-text-secondary)] transition-colors"
-                  aria-label="创建副本改为群聊"
-                  @click.stop="emit('promote-to-group', c)"
-                >
-                  <ArrowUp class="w-3.5 h-3.5" />
-                </button>
-                <button
-                  class="p-1 hover:text-brand text-[var(--color-text-secondary)] transition-colors"
-                  aria-label="创建分支"
-                  @click.stop="emit('branch-chat', c)"
-                >
-                  <Copy class="w-3.5 h-3.5" />
-                </button>
-                <button class="icon-button p-1" aria-label="重命名群聊" @click.stop="emit('start-edit-title', c.id, c.title)">
-                  <Pencil class="w-3.5 h-3.5" />
-                </button>
-                <button class="icon-button p-1 hover:text-error" aria-label="删除群聊" @click.stop="confirmDeleteChat(c, $event)">
-                  <Trash2 class="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-          </div>
           <div v-if="!chatList.length && !groupList.length" class="text-center text-xs text-[var(--color-text-muted)] py-4">
             无历史会话
           </div>
         </div>
+      </section>
       </div>
     </div>
   </aside>
@@ -693,7 +800,7 @@ function confirmDelete() {
 
   <!-- 侧边栏开关 -->
   <div 
-    class="fixed top-1/2 -translate-y-1/2 z-floating cursor-pointer p-2 bg-brand-a30 hover:bg-brand-a50 rounded-r-lg transition-[left,background-color] duration-300 border border-l-0 border-brand-a40 shadow-heavy"
+    class="fixed top-1/2 -translate-y-1/2 z-floating cursor-pointer p-2 bg-brand-a30 hover:bg-brand-a50 rounded-r-lg transition-[left,background-color] duration-300 border border-l-0 border-brand-a40 light:border-transparent shadow-heavy"
     :class="collapsed ? 'left-0' : 'left-[21rem]'"
     role="button"
     tabindex="0"
@@ -705,3 +812,137 @@ function confirmDelete() {
     <component :is="collapsed ? ChevronRight : ChevronLeft" class="w-3 h-3 text-on-brand" />
   </div>
 </template>
+
+<style scoped>
+.sidebar-divider {
+  position: relative;
+  height: 14px;
+  width: 100%;
+  cursor: row-resize;
+  touch-action: none;
+  background: var(--color-sidebar-sandwich-outer);
+}
+
+.sidebar-divider::before,
+.sidebar-divider::after {
+  position: absolute;
+  top: 50%;
+  content: '';
+  transform: translateY(-50%);
+}
+
+.sidebar-divider::before {
+  inset-inline: 0;
+  height: 1px;
+  background: var(--color-border-subtle);
+}
+
+.sidebar-divider::after {
+  inset-inline-start: calc(50% - 12px);
+  height: 3px;
+  width: 24px;
+  border-radius: var(--radius-track);
+  background: var(--color-text-muted);
+  box-shadow: 0 0 0 4px var(--color-sidebar-sandwich-outer);
+}
+
+.sidebar-divider:is(:hover, :focus-visible, [data-dragging])::after {
+  background: var(--color-brand);
+}
+
+.sidebar-row-target {
+  cursor: pointer;
+}
+
+:root[data-color-scheme] button.sidebar-divider:focus-visible,
+:root[data-color-scheme] button.sidebar-row-target:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: -2px;
+  background-image: none;
+}
+
+.sidebar-create-actions > .btn {
+  position: relative;
+  min-height: 30px;
+  box-shadow: none;
+  transform: none;
+}
+
+.sidebar-create-actions > .btn:first-child {
+  border-start-end-radius: 0;
+  border-end-end-radius: 0;
+}
+
+.sidebar-create-actions > .btn:last-child {
+  min-width: 28px;
+  padding-inline: 5px;
+  border-start-start-radius: 0;
+  border-end-start-radius: 0;
+  border-inline-start-color: color-mix(in srgb, currentColor 31%, transparent);
+}
+
+:root[data-color-scheme] .sidebar-create-actions > .btn:focus-visible {
+  z-index: 1;
+  outline: 2px solid currentColor;
+  outline-offset: -2px;
+  background-image: none;
+}
+
+:root[data-color-scheme='light'] .sidebar-create-actions > .btn {
+  background-color: var(--color-brand);
+}
+
+:root[data-color-scheme='dark'] .sidebar-create-actions > .btn {
+  background-color: var(--color-brand);
+  color: var(--color-surface);
+}
+
+:root[data-color-scheme] .sidebar-create-actions > .btn:hover:not(:disabled) {
+  background-color: var(--color-brand-hover);
+}
+
+.sidebar-chat-row {
+  --sidebar-chat-action-width: 6.75rem;
+}
+
+.sidebar-chat-row--group {
+  --sidebar-chat-action-width: 5rem;
+}
+
+.sidebar-chat-avatars {
+  width: 3.625rem;
+}
+
+.sidebar-chat-capsule {
+  position: absolute;
+  inset-inline-end: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.sidebar-chat-row:is(:hover, :focus-within) .sidebar-chat-capsule,
+.sidebar-chat-capsule.opacity-100 {
+  pointer-events: auto;
+}
+
+.sidebar-chat-row:has(.sidebar-chat-capsule):is(:hover, :focus-within, :has(.sidebar-chat-capsule.opacity-100)) .sidebar-chat-content {
+  padding-inline-end: var(--sidebar-chat-action-width);
+}
+
+.sidebar-role-capsule {
+  z-index: 1;
+  pointer-events: none;
+}
+
+.settings-item:is(:hover, :focus-within) .sidebar-role-capsule,
+.sidebar-role-capsule.opacity-100 {
+  pointer-events: auto;
+}
+
+@media (any-pointer: coarse) {
+  .sidebar-divider {
+    height: 24px;
+  }
+}
+</style>
