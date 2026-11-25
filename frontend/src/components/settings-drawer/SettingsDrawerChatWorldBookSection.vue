@@ -72,7 +72,7 @@ const open = ref(true)
   <div>
     <div class="settings-field-head">
       <span class="settings-label">全部世界书（{{ chat.worldbooks.length }} 本）</span>
-      <button type="button" class="settings-hint hover:underline" @click="chat.toggleAllWorldBooksSection">
+            <button type="button" class="btn btn-xs btn-link" @click="chat.toggleAllWorldBooksSection">
         {{ chat.allWorldBooksSectionOpen ? '收起' : '展开' }}
       </button>
     </div>

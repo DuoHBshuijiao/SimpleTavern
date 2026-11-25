@@ -3045,6 +3045,7 @@ MVU 状态表格行。
 
 - `title`: (string | null)。Title
 - `overrides`: (ChatOverrides | null)
+- `replaceGenerationOverrides`: (boolean，默认 `false`)。为 `true` 时，`overrides.params` 中显式的 `null` 可清除 `model`、`temperature`、`top_p` 和 `max_tokens` 的旧会话覆盖。省略字段沿用原合并行为。`context_size` 保留独立语义，`null` 恢复继承，`0` 关闭长度限制。
 - `groupDelay`: (integer | null)。Groupdelay
 - `memberSettings`: (map<string, GroupMemberSettings> | null)。Membersettings
 - `memberIds`: (array<string> | null)。Memberids

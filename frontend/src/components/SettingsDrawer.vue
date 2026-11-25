@@ -96,6 +96,7 @@ import { normalizeVoiceCatalog } from '../utils/voiceCatalog'
 import { useSettingsDrawerPresetListHeight } from '../composables/useSettingsDrawerPresetListHeight'
 import { SETTINGS_DRAWER_PRESETS_KEY } from '../composables/settingsDrawerPresetsKey'
 import { SETTINGS_DRAWER_CHAT_KEY } from '../composables/settingsDrawerChatKey'
+import { normalizeChatContextSize } from '../utils/chatGenerationSettings'
 import { getWebGpuUnavailableMessage, probeWebGpuAdapter } from '../utils/webgpuProbe'
 import type { WebGpuUnavailableReason } from '../utils/webgpuProbe'
 import { concatEnabledWorldBookContents, countTokensForText } from '../utils/tokenEstimate'
@@ -1916,13 +1917,11 @@ async function hideSavedFloors() {
     return
   }
   chatDraft.value.contextStartMessageId = anchorId
-  await saveChatOverrides()
 }
 
-async function resetHiddenFloors() {
+function resetHiddenFloors() {
   if (!props.chat?.id || !chatDraft.value) return
   chatDraft.value.contextStartMessageId = null
-  await saveChatOverrides()
 }
 
 async function fetchMemoryTokenCount() {
@@ -3509,13 +3508,13 @@ function handleGlobalMvuModelSelect(option: { value: string; presetId?: string |
  *
  * @param {any} option - 模型选项，包含value和可选的presetId
  */
-function handleChatModelSelect(option: any) {
-  if (chatDraft.value) {
-     chatDraft.value.params.model = option.value
-     if (option.presetId) {
-         chatDraft.value.presetId = option.presetId
-     }
-  }
+function handleChatModelSelect(option: { value: string; presetId?: string | null }) {
+  const draft = chatDraft.value
+  if (!draft) return
+  const model = option.value.trim() || null
+  draft.params.model = model
+  if (!model) draft.presetId = null
+  else if (option.presetId) draft.presetId = option.presetId
 }
 
 /**
@@ -3690,7 +3689,7 @@ function normalizeComparableChatOverrides(source?: Partial<ChatOverrides> | null
       temperature: normalizeOptionalNumber(overrides.params.temperature),
       top_p: normalizeOptionalNumber(overrides.params.top_p),
       max_tokens: normalizeOptionalNumber(overrides.params.max_tokens),
-      context_size: normalizeContextSize(overrides.params.context_size),
+      context_size: normalizeChatContextSize(overrides.params.context_size),
     },
     draftHelp: {
       context_message_limit: normalizePositiveInteger(draftHelp.context_message_limit),
@@ -4072,7 +4071,6 @@ async function saveChatOverrides() {
     draftHelp: { ...ensureDraftHelpDefaults(chatDraft.value.draftHelp) },
     tts: ensureTtsSessionConfig(chatDraft.value.tts),
   }
-  draft.params.context_size = normalizeContextSize(draft.params.context_size)
   draft.draftHelp.context_message_limit = normalizePositiveInteger(draft.draftHelp.context_message_limit)
   const normalizedDraft = normalizeComparableChatOverrides(draft)
   const normalizedCurrent = normalizeComparableChatOverrides(chat.overrides)
@@ -4092,7 +4090,7 @@ async function saveChatOverrides() {
     return
   }
 
-  await chatsStore.updateOverrides(chat.id, chatDraft.value, { skipLoadList: true })
+  await chatsStore.updateOverrides(chat.id, chatDraft.value, { skipLoadList: true, replaceGenerationOverrides: true })
 
   if (shouldSyncWorldBookBindings) {
     try {
@@ -4337,6 +4335,7 @@ provide(
   SETTINGS_DRAWER_CHAT_KEY,
   reactive({
     chat: computed(() => props.chat),
+    savedSettings: computed(() => settingsStore.settings),
     globalDraft,
     chatDraft,
     chatStateTablesDraft,

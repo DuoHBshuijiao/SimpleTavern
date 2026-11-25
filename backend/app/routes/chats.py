@@ -322,7 +322,7 @@ def _merge_overrides(existing: Chat, incoming: UpdateChatRequest) -> None:
     合并聊天覆盖设置
     
     将更新请求中的overrides合并到现有聊天对象中。
-    对于params字段，只覆盖非None的值，避免一次更新清空所有旧参数。
+    对于基础生成参数，常规更新只覆盖非空值；设置抽屉可显式清除覆盖。
     
     Args:
         existing: 现有的聊天对象（会被修改）
@@ -406,10 +406,12 @@ def _merge_overrides(existing: Chat, incoming: UpdateChatRequest) -> None:
 
     for key in ("model", "temperature", "top_p", "max_tokens", "context_size"):
         val = getattr(ov.params, key, None)
-        # context_size 允许显式设为 None 表示“未启用”；其他参数仅在有值时覆盖
-        if key == "context_size" or val is not None:
+        # context_size 保留旧合并规则。None 沿用全局，0 关闭会话的上下文长度限制。
+        if key == "context_size" or val is not None or (
+            incoming.replaceGenerationOverrides and key in ov.params.model_fields_set
+        ):
             setattr(existing.overrides.params, key, val)
-    for key in ("reasoningEffort", "fastMode", "geminiSearch"):
+    for key in ("reasoningEffort", "fastMode", "geminiSearch", "webSearchSource"):
         if key in ov.params.model_fields_set:
             setattr(existing.overrides.params, key, getattr(ov.params, key))
 

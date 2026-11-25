@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, inject, ref } from 'vue'
 import { SETTINGS_DRAWER_CHAT_KEY } from '../../composables/settingsDrawerChatKey'
-import type { ApiPreset } from '../../types/models'
 import ModernSelect from '../ModernSelect.vue'
 import ThemedCheckbox from '../ThemedCheckbox.vue'
+import ThemedRadioTags from '../ThemedRadioTags.vue'
 import MvuCapabilityEditor from '../chat/MvuCapabilityEditor.vue'
 import SettingsDrawerChatRegexSection from './SettingsDrawerChatRegexSection.vue'
 import SettingsDrawerChatWorldBookSection from './SettingsDrawerChatWorldBookSection.vue'
@@ -12,14 +12,39 @@ import SettingsDrawerGlobalAccordion from './SettingsDrawerGlobalAccordion.vue'
 import SettingsField from './SettingsField.vue'
 import SettingsHint from './SettingsHint.vue'
 import SettingsSwitch from './SettingsSwitch.vue'
+import { formatChatGenerationField, resolveChatConnection, type ChatGenerationField } from '../../utils/chatGenerationSettings'
 
 const chat = inject(SETTINGS_DRAWER_CHAT_KEY)!
+const promptModeOptions = [
+  { value: 'append', label: '追加全局' },
+  { value: 'override', label: '覆盖全局' },
+]
 
-const linkedChatPresetName = computed(() => {
-  const presetId = chat.chatDraft?.presetId
-  const presets = chat.globalDraft?.apiPresets as ApiPreset[] | undefined
-  return presets?.find((p) => p.id === presetId)?.name || '未知预设'
+const savedConnection = computed(() => chat.savedSettings
+  ? resolveChatConnection(chat.savedSettings, chat.chat?.overrides)
+  : null)
+const draftConnection = computed(() => chat.globalDraft
+  ? resolveChatConnection(chat.globalDraft, chat.chatDraft)
+  : null)
+const modelDraftChanged = computed(() => {
+  const saved = savedConnection.value
+  const draft = draftConnection.value
+  if (!draft || !saved) return false
+  const stored = chat.chat?.overrides
+  return saved.model !== draft.model || saved.presetId !== draft.presetId || saved.connection !== draft.connection
+    || saved.issue !== draft.issue || (stored?.params?.model || null) !== (chat.chatDraft?.params?.model || null)
+    || (stored?.presetId || null) !== (chat.chatDraft?.presetId || null)
 })
+const modelScopeHint = computed(() => {
+  const scope = chat.chatDraft?.params?.model ? '会话覆盖' : '沿用全局'
+  return `${modelDraftChanged.value ? '保存后 · ' : ''}${scope} · ${draftConnection.value?.model || '未设置模型'}`
+})
+
+function generationFieldHint(key: ChatGenerationField) {
+  const current = formatChatGenerationField(chat.savedSettings?.generationDefaults ?? {}, chat.chat?.overrides?.params, key)
+  const draft = formatChatGenerationField(chat.globalDraft?.generationDefaults ?? {}, chat.chatDraft?.params, key)
+  return current === draft ? draft : `保存后 · ${draft}`
+}
 
 const promptOpen = ref(true)
 const modelOpen = ref(true)
@@ -30,9 +55,25 @@ const mvuOpen = ref(false)
   <div>
     <div v-if="!chat.chat" class="settings-hint text-center py-8">请先选择一个会话</div>
     <div v-else-if="chat.chatDraft && chat.globalDraft" class="space-y-4">
-      <SettingsHint more="这些设置仅应用于当前会话，并会覆盖全局设置。模型选择将自动关联对应的 API 预设。">
-        仅对当前会话生效，会覆盖全局设置。
-      </SettingsHint>
+      <section class="space-y-1.5" aria-label="当前会话的模型与连接">
+        <h3 class="settings-group-title [overflow-wrap:anywhere]">{{ chat.chat.title || '未命名会话' }}</h3>
+        <dl class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-xs">
+          <template v-if="savedConnection">
+            <dt class="text-[var(--color-text-muted)]">{{ chat.chat.isGroup ? '群聊默认' : '当前使用' }}</dt>
+            <dd class="session-current-connection [overflow-wrap:anywhere] text-[var(--color-text-secondary)]">
+              {{ savedConnection.model || '未设置模型' }} · {{ savedConnection.connection }}
+              <span v-if="savedConnection.issue" class="text-warning"> · {{ savedConnection.issue }}</span>
+            </dd>
+          </template>
+          <template v-if="modelDraftChanged && draftConnection">
+            <dt class="text-[var(--color-text-muted)]">保存后</dt>
+            <dd class="session-draft-connection [overflow-wrap:anywhere] text-[var(--color-text-secondary)]">
+              {{ draftConnection.model || '未设置模型' }} · {{ draftConnection.connection }}
+              <span v-if="draftConnection.issue" class="text-warning"> · {{ draftConnection.issue }}</span>
+            </dd>
+          </template>
+        </dl>
+      </section>
 
       <SettingsDrawerGlobalAccordion v-model:open="promptOpen" title="提示词与记忆">
         <div class="settings-group">
@@ -41,35 +82,12 @@ const mvuOpen = ref(false)
             more="追加全局会保留全局系统提示并在后面附加本会话内容；覆盖全局会在本会话提示非空时跳过全局系统提示。"
           >
             <template #actions>
-              <div class="relative inline-flex shrink-0 gap-1 rounded-lg bg-surface-muted p-1">
-                <div
-                  class="pointer-events-none absolute left-1 top-1 bottom-1 rounded-md bg-brand shadow-sm transition-transform duration-[var(--motion-duration-moderate)] ease-out"
-                  :style="{
-                    width: 'calc((100% - 0.75rem) / 2)',
-                    transform: `translateX(calc(${chat.chatDraft.sessionSystemPromptMode === 'override' ? 1 : 0} * (100% + 0.25rem)))`,
-                  }"
-                />
-                <button
-                  type="button"
-                  class="relative z-10 min-w-[4.25rem] flex-1 rounded-md px-2 py-1 text-center text-xs font-medium transition-colors duration-[var(--motion-duration-moderate)] ease-out touch-manipulation"
-                  :class="
-                    chat.chatDraft.sessionSystemPromptMode === 'append'
-                      ? 'text-[var(--color-on-brand)]'
-                      : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'
-                  "
-                  @click="chat.chatDraft.sessionSystemPromptMode = 'append'"
-                >追加全局</button>
-                <button
-                  type="button"
-                  class="relative z-10 min-w-[4.25rem] flex-1 rounded-md px-2 py-1 text-center text-xs font-medium transition-colors duration-[var(--motion-duration-moderate)] ease-out touch-manipulation"
-                  :class="
-                    chat.chatDraft.sessionSystemPromptMode === 'override'
-                      ? 'text-[var(--color-on-brand)]'
-                      : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'
-                  "
-                  @click="chat.chatDraft.sessionSystemPromptMode = 'override'"
-                >覆盖全局</button>
-              </div>
+              <ThemedRadioTags
+                v-model="chat.chatDraft.sessionSystemPromptMode"
+                :options="promptModeOptions"
+                aria-label="会话系统提示模式"
+                class="shrink-0"
+              />
             </template>
             <textarea
               v-model="chat.chatDraft.prompt"
@@ -146,42 +164,53 @@ const mvuOpen = ref(false)
 
       <SettingsDrawerGlobalAccordion v-model:open="modelOpen" title="模型与生成参数">
         <div class="settings-group">
-          <SettingsField label="模型覆盖" :hint="chat.chatDraft?.presetId ? `已关联 API 预设：${linkedChatPresetName}` : undefined">
+          <SettingsField label="模型覆盖" :hint="modelScopeHint">
+            <template #actions>
+              <button
+                v-if="chat.chatDraft.params.model || chat.chatDraft.presetId"
+                type="button"
+                class="btn btn-xs btn-link"
+                @click="chat.handleChatModelSelect({ value: '' })"
+              >
+                恢复沿用全局
+              </button>
+            </template>
             <ModernSelect
-              v-model="chat.chatDraft.params.model"
-              :selected-preset-id="chat.chatDraft?.presetId ?? null"
+              :model-value="chat.chatDraft.params.model"
+              :selected-preset-id="draftConnection?.presetId ?? null"
               :options="chat.chatModelOptions"
               searchable
               allow-create
-              placeholder="选择模型 (自动关联预设)..."
+              aria-label="模型覆盖"
+              placeholder="选择模型..."
               @select="chat.handleChatModelSelect"
             />
           </SettingsField>
           <div class="grid grid-cols-2 gap-4">
-            <SettingsField label="Temperature">
+            <SettingsField label="Temperature" :hint="generationFieldHint('temperature')">
               <input
                 v-model.number="chat.chatDraft.params.temperature"
                 type="number"
                 step="0.1" min="0" max="2"
-                placeholder="使用全局"
+                aria-label="Temperature"
                 class="input w-full"
               />
             </SettingsField>
-            <SettingsField label="Top P">
+            <SettingsField label="Top P" :hint="generationFieldHint('top_p')">
               <input
                 v-model.number="chat.chatDraft.params.top_p"
                 type="number"
                 step="0.1" min="0" max="1"
-                placeholder="使用全局"
+                aria-label="Top P"
                 class="input w-full"
               />
             </SettingsField>
-            <SettingsField label="最大输出长度">
+            <SettingsField label="最大输出长度" :hint="generationFieldHint('max_tokens')">
               <input
                 v-model.number="chat.chatDraft.params.max_tokens"
                 type="number"
                 step="128" min="1"
-                placeholder="使用全局"
+                aria-label="最大输出长度"
                 class="input w-full"
               />
             </SettingsField>
@@ -190,12 +219,12 @@ const mvuOpen = ref(false)
         <div class="settings-group">
           <div class="settings-group-title">上下文</div>
           <div class="grid grid-cols-2 gap-4">
-            <SettingsField label="上下文长度" more="角色卡、用户信息和系统提示词不计入这个长度。">
+            <SettingsField label="上下文长度" :hint="generationFieldHint('context_size')" more="留空沿用全局，填 0 关闭此会话的上下文长度限制。角色卡、用户信息和系统提示词不计入这个长度。">
               <input
                 v-model.number="chat.chatDraft.params.context_size"
                 type="number"
-                min="0"
-                placeholder="未启用（使用全局）"
+                min="0" step="1"
+                aria-label="上下文长度"
                 class="input w-full"
               />
             </SettingsField>
@@ -265,7 +294,7 @@ const mvuOpen = ref(false)
             :model-value="chat.chatDraft?.knowledgeGraphEnabled !== false"
             label="启用知识图谱"
             :hint="chat.kgStatsSummary"
-            more="关闭后不注入 RP 上下文，MVU 也不会自动维护图谱；仍可手动打开图谱编辑。"
+            more="开启后，聊天会参考图谱，MVU 会随剧情更新图谱。"
             @update:model-value="(v) => { if (chat.chatDraft) chat.chatDraft.knowledgeGraphEnabled = v }"
           />
           <div class="flex flex-wrap gap-2">

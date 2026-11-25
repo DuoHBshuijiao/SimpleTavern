@@ -1680,6 +1680,10 @@ class UpdateChatRequest(BaseModel):
     """
     title: str | None = None
     overrides: ChatOverrides | None = None
+    replaceGenerationOverrides: bool = Field(
+        default=False,
+        description="设置抽屉保存时，显式传空的模型、温度、Top P 和最大输出覆盖恢复全局继承。",
+    )
     groupDelay: int | None = None
     memberSettings: dict[str, GroupMemberSettings] | None = None
     memberIds: list[str] | None = None

@@ -64,6 +64,7 @@ import { apiDelete, apiGet, apiPost, apiPut } from '../api/http'
 
 interface UpdateOverridesOptions {
   skipLoadList?: boolean
+  replaceGenerationOverrides?: boolean
 }
 
 /**
@@ -375,7 +376,8 @@ export const useChatsStore = defineStore('chats', {
       const { memberSettings, ...restOverrides } = overrides
       const chat = await apiPut<Chat>(`/api/chats/${chatId}`, { 
         overrides: restOverrides,
-        memberSettings: memberSettings || undefined
+        memberSettings: memberSettings || undefined,
+        replaceGenerationOverrides: options?.replaceGenerationOverrides,
       })
       this.applyChatPayload(chat)
       const skipLoadList = options?.skipLoadList === true
