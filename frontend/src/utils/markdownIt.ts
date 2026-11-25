@@ -49,6 +49,80 @@ export function renderChatMarkdown(text: string): string {
   return md.render(normalizeMarkdownInput(text))
 }
 
+export interface ChatWebSource {
+  url: string
+  label: string
+}
+
+const WEB_SOURCE_HEADING = /^ {0,3}(?:#{1,6}[ \t]+)?(?:\*\*|__)?(?:来源|参考来源|参考链接|Sources|References)(?:(?:\*\*|__)?[：:](?:\*\*|__)?|(?:\*\*|__)?(?=[ \t]*$))[ \t]*/i
+const WEB_SOURCE_BLOCKS = /^(?:bullet_list|ordered_list|list_item|paragraph)_(?:open|close)$/
+const WEB_SOURCE_SEPARATOR = /^[\s·•|,，、;；]*$/
+
+function sourceLinks(markdown: string): ChatWebSource[] {
+  const sources: ChatWebSource[] = []
+  for (const token of md.parse(markdown, {})) {
+    if (WEB_SOURCE_BLOCKS.test(token.type)) continue
+    if (token.type !== 'inline') return []
+
+    let url: URL | null = null
+    let label = ''
+    for (const part of token.children ?? []) {
+      if (part.type === 'link_open') {
+        const raw = part.attrGet('href')
+        try {
+          url = new URL(raw ?? '')
+        } catch {
+          return []
+        }
+        if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return []
+        label = ''
+      } else if (part.type === 'link_close' && url) {
+        const title = label.trim()
+        sources.push({
+          url: url.href,
+          label: title && !/^https?:\/\//i.test(title) ? title : url.hostname.replace(/^www\./, ''),
+        })
+        url = null
+      } else if (url) {
+        if (['text', 'code_inline', 'image'].includes(part.type)) label += part.content
+      } else if (!['softbreak', 'hardbreak'].includes(part.type) &&
+                 !(part.type === 'text' && WEB_SOURCE_SEPARATOR.test(part.content))) {
+        return []
+      }
+    }
+  }
+  return sources
+}
+
+/** Only convert a trailing, top-level sources section. Leave prose, code and inline citations in the body. */
+export function splitChatWebSources(text: string): { body: string; sources: ChatWebSource[] } {
+  const lines = text.split(/\r?\n/)
+  if (!lines.some(line => WEB_SOURCE_HEADING.test(line))) return { body: text, sources: [] }
+
+  const headings = md.parse(normalizeMarkdownInput(text), {})
+    .filter(token => token.level === 0 && token.map && ['paragraph_open', 'heading_open'].includes(token.type))
+    .map(token => token.map![0])
+    .filter(index => WEB_SOURCE_HEADING.test(lines[index] ?? ''))
+
+  const chunks: ChatWebSource[][] = []
+  let end = lines.length
+  for (const start of headings.reverse()) {
+    const section = lines.slice(start, end)
+    section[0] = section[0]!.replace(WEB_SOURCE_HEADING, '')
+    const links = sourceLinks(section.join('\n'))
+    if (!links.length) break
+    chunks.unshift(links)
+    end = start
+  }
+  if (!chunks.length) return { body: text, sources: [] }
+
+  const sources = new Map<string, ChatWebSource>()
+  for (const source of chunks.flat()) {
+    if (!sources.has(source.url)) sources.set(source.url, source)
+  }
+  return { body: lines.slice(0, end).join('\n').trimEnd(), sources: [...sources.values()] }
+}
+
 type FencedSplitPart = { code: boolean; content: string }
 
 type FencedSplitResult = {

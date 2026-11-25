@@ -1,11 +1,13 @@
 ﻿<script setup lang="ts">
 import { keepPreviewCloseVisible as vKeepPreviewCloseVisible } from '../../utils/imagePreviewViewport'
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { usePreferHoverChrome } from '../../composables/usePreferHoverChrome'
-import { renderChatMarkdown } from '../../utils/markdownIt'
+import { renderChatMarkdown, splitChatWebSources } from '../../utils/markdownIt'
+import MessageWebSources from './MessageWebSources.vue'
 import type { AssistantMessage } from '../../composables/useAssistant'
 import type { AssistantAttachment } from '../../types/models'
 import InlineConfirmButton from '../common/InlineConfirmButton.vue'
+import DisclosureSummary from '../common/DisclosureSummary.vue'
 import AnimatedClipHeight from './AnimatedClipHeight.vue'
 import ReasoningBubble from './ReasoningBubble.vue'
 
@@ -41,6 +43,16 @@ const emit = defineEmits<{
 function renderMarkdown(text: string) {
   return renderChatMarkdown(text ?? '')
 }
+
+const messageWebSources = computed(() => {
+  const parsed = new Map<string, ReturnType<typeof splitChatWebSources>>()
+  for (const message of props.messages) {
+    if (message.role !== 'assistant' || !message.content) continue
+    const result = splitChatWebSources(message.content)
+    if (result.sources.length) parsed.set(message.id, result)
+  }
+  return parsed
+})
 
 const expandedReasoningMessageId = ref<string | null>(null)
 const expandedTextAttachmentId = ref<string | null>(null)
@@ -334,8 +346,8 @@ function getToolStatusLabel(message: AssistantMessage): string {
 
 function getToolStatusClass(message: AssistantMessage): string {
   return isToolOk(message)
-    ? 'bg-[var(--color-success-bg)] text-[var(--color-success-text)] border border-[color-mix(in_srgb,var(--color-success)_30%,transparent)]'
-    : 'bg-[var(--color-warning-bg)] text-[var(--color-warning-text)] border border-[color-mix(in_srgb,var(--color-warning)_30%,transparent)]'
+    ? 'bg-[var(--color-success-bg)] text-[var(--color-success-text)] border border-[color-mix(in_srgb,var(--color-success)_30%,transparent)] light:border-transparent'
+    : 'bg-[var(--color-warning-bg)] text-[var(--color-warning-text)] border border-[color-mix(in_srgb,var(--color-warning)_30%,transparent)] light:border-transparent'
 }
 
 function getToolDetailContent(message: AssistantMessage): string {
@@ -406,7 +418,7 @@ onMounted(() => {
           argsDigest: {{ getToolArgsDigest(message) }}
         </div>
         <details class="surface-inset mt-2 overflow-hidden">
-          <summary class="cursor-pointer px-3 py-2 text-2xs text-secondary select-none">查看结果 JSON</summary>
+          <DisclosureSummary class="px-3 py-2 text-2xs text-secondary select-none">查看结果 JSON</DisclosureSummary>
           <pre class="max-w-full overflow-x-auto px-3 pb-3 text-2xs leading-relaxed text-secondary whitespace-pre-wrap break-all break-words">{{ getToolDetailContent(message) }}</pre>
         </details>
       </div>
@@ -442,7 +454,7 @@ onMounted(() => {
             <div
               v-if="(message.content ?? '').trim()"
               class="prose prose-invert prose-sm max-w-none"
-              v-html="renderMarkdown(message.content ?? '')"
+              v-html="renderMarkdown(messageWebSources.get(message.id)?.body ?? message.content ?? '')"
             ></div>
             <div v-if="getTextAttachments(message).length" class="mt-3 flex flex-wrap gap-2">
               <button
@@ -471,7 +483,7 @@ onMounted(() => {
                 v-for="attachment in getImageAttachments(message)"
                 :key="attachment.id"
                 type="button"
-                class="block overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-inset)]"
+              class="media-thumbnail-button"
                 :aria-label="`预览图片 ${getAttachmentLabel(attachment)}`"
                 @click="openImagePreview(buildAttachmentUrl(attachment), getAttachmentLabel(attachment))"
               >
@@ -490,7 +502,7 @@ onMounted(() => {
               <div
                 v-if="(message.content ?? '').trim()"
                 class="prose prose-invert prose-sm max-w-none"
-                v-html="renderMarkdown(message.content ?? '')"
+                v-html="renderMarkdown(messageWebSources.get(message.id)?.body ?? message.content ?? '')"
               ></div>
               <div v-if="getTextAttachments(message).length" class="mt-3 flex flex-wrap gap-2">
                 <div
@@ -531,6 +543,10 @@ onMounted(() => {
           </template>
         </AnimatedClipHeight>
       </div>
+      <MessageWebSources
+        v-if="messageWebSources.has(message.id)"
+        :sources="messageWebSources.get(message.id)!.sources"
+      />
       </div>
     </template>
 
@@ -661,23 +677,6 @@ onMounted(() => {
   transform-origin: center center;
   user-select: none;
   touch-action: none;
-}
-
-.image-preview-close {
-  transform: scale(var(--preview-control-scale, 1));
-  transform-origin: top right;
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  width: 28px;
-  height: 28px;
-  border-radius: 9999px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--color-overlay-heavy);
-  color: var(--color-text);
-  border: 1px solid var(--color-border);
 }
 
 .image-preview-img {

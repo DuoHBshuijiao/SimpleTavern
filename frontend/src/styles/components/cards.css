@@ -207,7 +207,7 @@
   /* ========== 消息气泡 ========== */
   .message-bubble {
     position: relative;
-    padding: 0.875rem 1.25rem;
+    padding: 0.875rem var(--message-content-inset, 1.25rem);
     border-radius: var(--radius-2xl);
     font-size: var(--text-base);
     line-height: 1.75;

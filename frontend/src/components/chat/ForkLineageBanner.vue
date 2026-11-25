@@ -14,14 +14,14 @@ const emit = defineEmits<{
 <template>
   <div
     v-if="lineage?.origin"
-    class="mx-4 mb-2 px-3 py-2 rounded-lg border border-brand-a20 bg-brand-a10 text-sm text-[var(--color-text-secondary)]"
+    class="mx-4 mb-2 px-3 py-2 rounded-lg border border-brand-a20 light:border-transparent bg-brand-a10 text-sm text-[var(--color-text-secondary)]"
   >
     <span v-if="loading" class="text-[var(--color-text-muted)]">加载分叉信息…</span>
     <template v-else>
       <span>分叉自</span>
       <button
         type="button"
-        class="text-brand hover:underline mx-0.5"
+        class="btn btn-xs btn-link mx-0.5"
         aria-label="跳转到源会话"
         @click="emit('navigate-source')"
       >

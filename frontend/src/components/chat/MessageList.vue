@@ -65,7 +65,8 @@ import InlineConfirmButton from '../common/InlineConfirmButton.vue'
 import SelectDropdownSurface from '../SelectDropdownSurface.vue'
 import ReasoningBubble from './ReasoningBubble.vue'
 import AnimatedClipHeight from './AnimatedClipHeight.vue'
-import { renderChatMarkdown, renderChatMarkdownStreaming } from '../../utils/markdownIt'
+import { renderChatMarkdown, renderChatMarkdownStreaming, splitChatWebSources, type ChatWebSource } from '../../utils/markdownIt'
+import MessageWebSources from './MessageWebSources.vue'
 import { useContentRegexDisplay } from '../../composables/useContentRegexDisplay'
 import { usePreferHoverChrome } from '../../composables/usePreferHoverChrome'
 import { Settings, ChevronLeft, ChevronRight, ChevronDown, X } from 'lucide-vue-next'
@@ -250,16 +251,18 @@ const MESSAGE_JUMP_SETTLE_MS = 1200
  */
 let pinnedToBottom = true
 
-const MARKDOWN_HTML_CACHE_LIMIT = 400
-const markdownHtmlCache = new Map<string, string>()
+type RenderedMessage = { html: string; sources: ChatWebSource[] }
 
-function rememberMarkdownHtml(key: string, html: string) {
-  if (markdownHtmlCache.has(key)) markdownHtmlCache.delete(key)
-  markdownHtmlCache.set(key, html)
-  while (markdownHtmlCache.size > MARKDOWN_HTML_CACHE_LIMIT) {
-    const oldestKey = markdownHtmlCache.keys().next().value
+const RENDERED_MESSAGES_LIMIT = 400
+const renderedMessages = new Map<string, RenderedMessage>()
+
+function rememberRenderedMessage(key: string, message: RenderedMessage) {
+  if (renderedMessages.has(key)) renderedMessages.delete(key)
+  renderedMessages.set(key, message)
+  while (renderedMessages.size > RENDERED_MESSAGES_LIMIT) {
+    const oldestKey = renderedMessages.keys().next().value
     if (typeof oldestKey !== 'string') break
-    markdownHtmlCache.delete(oldestKey)
+    renderedMessages.delete(oldestKey)
   }
 }
 
@@ -517,16 +520,15 @@ function getReasoningDurationForMessage(m: ChatMessage): number | null {
   return null
 }
 
-function messageCacheBadge(m: ChatMessage): string | null {
-  const u = m.usage
-  if (!u) return null
-  const read = typeof u.cacheReadInputTokens === 'number' ? u.cacheReadInputTokens : 0
-  const write = typeof u.cacheWriteInputTokens === 'number' ? u.cacheWriteInputTokens : 0
-  if (read <= 0 && write <= 0) return null
-  const parts: string[] = []
-  if (read > 0) parts.push(`缓存命中 ${read}`)
-  if (write > 0) parts.push(`缓存写入 ${write}`)
-  return parts.join(' · ')
+function formatContextTokens(tokens: number): string {
+  return tokens > 10_000 ? `${(tokens / 1_000).toFixed(1)}K` : String(tokens)
+}
+
+function messageContextUsage(m: ChatMessage): string | null {
+  const input = m.usage?.inputTokens
+  if (typeof input !== 'number' || !Number.isFinite(input)) return null
+  const cached = m.usage?.cacheReadInputTokens ?? 0
+  return `${formatContextTokens(input)} 上下文  已缓存 ${formatContextTokens(cached)}`
 }
 
 function messageFastMissBadge(m: ChatMessage): string | null {
@@ -549,35 +551,47 @@ function getDisplayText(m: ChatMessage): string {
   return displayWithContentRegex(m.id, raw)
 }
 
-function renderMarkdown(m: ChatMessage) {
-  const text = getDisplayText(m)
-  const isStreaming =
-    (props.isGenerating || props.isInterjecting) && m.id === props.reasoningMessageId
-  if (isStreaming) return renderChatMarkdownStreaming(text)
-  const key = text
-  const cached = markdownHtmlCache.get(key)
-  if (cached != null) {
-    rememberMarkdownHtml(key, cached)
-    return cached
-  }
-  const html = renderChatMarkdown(text)
-  rememberMarkdownHtml(key, html)
-  return html
+function isMessageContentStreaming(m: ChatMessage) {
+  return (props.isGenerating || props.isInterjecting) && m.id === props.reasoningMessageId
 }
 
+function renderMessage(m: ChatMessage): RenderedMessage {
+  const text = getDisplayText(m)
+  if (isMessageContentStreaming(m)) return { html: renderChatMarkdownStreaming(text), sources: [] }
+  const key = `${m.role}:${text}`
+  const cached = renderedMessages.get(key)
+  if (cached) {
+    rememberRenderedMessage(key, cached)
+    return cached
+  }
+  const { body, sources } = m.role === 'assistant' ? splitChatWebSources(text) : { body: text, sources: [] }
+  const message = { html: renderChatMarkdown(body), sources }
+  rememberRenderedMessage(key, message)
+  return message
+}
+
+const messageActionsLocked = computed(() => props.isGenerating || props.isInterjecting)
+
 function messageRowMemoDeps(m: ChatMessage): unknown[] {
-  const streaming =
-    (props.isGenerating || props.isInterjecting) && m.id === props.reasoningMessageId
   return [
     m.id,
     getDisplayText(m),
     props.getCurrentVersionIndex(m),
+    props.getVersionCount(m),
     m.usage?.finishReason,
+    messageContextUsage(m),
+    preferHoverChrome.value,
+    messageFastMissBadge(m),
+    m.memoryUpdatedAfterThis,
+    messageActionsLocked.value,
+    props.isForking,
+    canForkMessage(m),
+    settingsStore.settings?.ttsEnabled,
     getMessageLabel(m),
     getMessageAvatar(m),
     getOutgoingFork(m),
     forkListMessageId.value === m.id,
-    streaming,
+    isMessageContentStreaming(m),
     props.reasoningMessageId,
     // 纯思考阶段正文为空，须单独依赖思考内容，否则气泡不会随流式刷新
     getReasoningForMessage(m),
@@ -1552,7 +1566,7 @@ watch(
   () => {
     cancelPendingBottomSnap()
     measuredHeights.value = {}
-    markdownHtmlCache.clear()
+    renderedMessages.clear()
     pendingMeasureIds.clear()
     rowEls.clear()
     prevRowRects.clear()
@@ -1715,7 +1729,7 @@ onBeforeUnmount(() => {
     cancelAnimationFrame(pendingHeightFlushRaf)
     pendingHeightFlushRaf = null
   }
-  markdownHtmlCache.clear()
+  renderedMessages.clear()
   window.removeEventListener('resize', updateViewport)
   if (contentResizeObserver) {
     contentResizeObserver.disconnect()
@@ -1763,36 +1777,32 @@ onBeforeUnmount(() => {
           <div v-if="m.role === 'system'" class="w-10 h-10 rounded-full bg-[var(--color-warning-bg)] flex items-center justify-center text-[var(--color-warning-text)]">
             <Settings class="w-6 h-6" />
           </div>
-          <button
+          <ModernAvatar
             v-else
-            type="button"
-            class="rounded-xl transition-transform hover:scale-[1.03] active:scale-100"
-            :class="getMessageAvatar(m) ? 'cursor-zoom-in' : 'cursor-default'"
-            :disabled="!getMessageAvatar(m)"
-            :aria-label="getMessageAvatar(m) ? `预览 ${getMessageLabel(m)} 的头像` : `${getMessageLabel(m)} 头像`"
-            @click="openAvatarPreview(m)"
+            :src="getMessageAvatar(m)"
+            :name="getMessageLabel(m)"
+            :size="40"
+            aspect="1"
+            :object-position="getMessageAvatarObjectPosition(m)"
+            class="bg-[var(--color-surface-inset)]"
           >
-            <ModernAvatar 
-              :src="getMessageAvatar(m)"
-              :name="getMessageLabel(m)"
-              :size="40"
-              aspect="1"
-              object-fit="cover"
-              :object-position="getMessageAvatarObjectPosition(m)"
-              rounded="rounded-xl"
-              class="shadow-sm bg-[var(--color-surface-inset)]"
+            <button
+              type="button"
+              class="chat-avatar-preview absolute inset-0 cursor-zoom-in rounded-xl"
+              :aria-label="`预览 ${getMessageLabel(m)} 的头像`"
+              @click="openAvatarPreview(m)"
             />
-          </button>
+          </ModernAvatar>
         </div>
 
         <!-- 消息体 -->
         <div
-          class="flex flex-1 min-w-0 flex-col max-w-[85%]"
+          class="message-reading-column flex flex-1 min-w-0 flex-col max-w-[85%]"
           data-chat-bubble-column
           :class="m.role === 'user' ? 'items-end' : 'items-start'"
         >
-          <div class="flex items-center gap-2 mb-1 px-1 flex-wrap">
-            <span class="text-xs font-bold" :class="m.role === 'user' ? 'text-brand-fg-soft' : 'text-[var(--color-text-muted)]'">
+          <div class="message-reading-header flex items-center gap-2 mb-1 flex-wrap">
+            <span class="message-author text-xs font-semibold">
               {{ getMessageLabel(m) }}
             </span>
             <span v-if="m.role === 'system'" class="text-2xs bg-[var(--color-warning-bg)] text-[var(--color-warning-text)] px-1.5 py-0.5 rounded">SYSTEM</span>
@@ -1803,7 +1813,7 @@ onBeforeUnmount(() => {
             >
               <button
                 type="button"
-                class="text-2xs text-brand hover:underline"
+                    class="btn btn-xs btn-link text-2xs"
                 :aria-label="`已有 ${getOutgoingFork(m)?.count ?? 0} 个分叉，点击查看`"
                 @click.stop="toggleForkList(m.id)"
               >
@@ -1823,11 +1833,11 @@ onBeforeUnmount(() => {
                   v-for="fc in getOutgoingFork(m)?.chats ?? []"
                   :key="fc.chatId"
                   type="button"
-                  class="w-full text-left px-3 py-2 rounded-lg text-sm text-[var(--color-text-secondary)] hover:bg-surface-muted truncate"
+                  class="select-option"
                   role="menuitem"
                   @click="onSelectForkChild(fc.chatId)"
                 >
-                  {{ fc.title }}
+                  <span class="min-w-0 truncate">{{ fc.title }}</span>
                 </button>
               </SelectDropdownSurface>
             </div>
@@ -1870,14 +1880,14 @@ onBeforeUnmount(() => {
                   :style="messageContentFontSizeStyle"
                   :ref="(el) => setContentRef(m.id, el)"
                 >
-                  <div class="stream-markdown" v-html="renderMarkdown(m)"></div>
+                  <div class="stream-markdown" v-html="renderMessage(m).html"></div>
                 </div>
                 <div v-if="m.images?.length" class="mt-3 grid grid-cols-2 md:grid-cols-3 gap-2">
                   <button
                     v-for="img in m.images"
                     :key="img.id"
                     type="button"
-                    class="block rounded-lg overflow-hidden border border-[var(--color-border)] bg-[var(--color-surface-inset)]"
+                class="media-thumbnail-button"
                     :aria-label="`预览图片 ${img.originalName || 'chat-image'}`"
                     @click="openImagePreview(getChatImageUrl(img.id), img.originalName || 'chat-image')"
                   >
@@ -1897,7 +1907,7 @@ onBeforeUnmount(() => {
                     class="message-reading-content md prose prose-invert prose-sm max-w-none prose-p:my-1 prose-headings:my-2 prose-pre:bg-[var(--color-surface-inset)] prose-pre:border prose-pre:border-[var(--color-border-subtle)]"
                     :style="messageContentFontSizeStyle"
                   >
-                    <div class="stream-markdown" v-html="renderMarkdown(m)"></div>
+                    <div class="stream-markdown" v-html="renderMessage(m).html"></div>
                   </div>
                   <div v-if="m.images?.length" class="mt-3 grid grid-cols-2 md:grid-cols-3 gap-2">
                     <div
@@ -1918,19 +1928,6 @@ onBeforeUnmount(() => {
               </template>
             </AnimatedClipHeight>
             <div
-              v-if="m.role === 'assistant' && (messageCacheBadge(m) || messageFastMissBadge(m) || m.usage?.finishReason === 'length')"
-              class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 px-1 text-[10px] leading-none text-[var(--color-text-muted)]"
-            >
-              <span v-if="messageCacheBadge(m)">{{ messageCacheBadge(m) }}</span>
-              <span v-if="m.usage?.finishReason === 'length'" class="text-[var(--color-warning-text,var(--color-warning))]">
-                已达到输出长度上限
-              </span>
-              <span
-                v-if="messageFastMissBadge(m)"
-                class="text-[var(--color-warning-text,var(--color-warning))]"
-              >{{ messageFastMissBadge(m) }}</span>
-            </div>
-            <div
               v-if="m.memoryUpdatedAfterThis"
               class="absolute right-2 bottom-2 flex items-center gap-1 pointer-events-none"
               style="font-size: 10px; line-height: 1;"
@@ -1939,77 +1936,112 @@ onBeforeUnmount(() => {
               <span class="text-muted" style="font-size: 10px;">已保存</span>
             </div>
           </div>
-
-          <!-- 版本切换箭头 -->
-          <div v-if="m.role === 'assistant' && hasMultipleVersions(m)" class="flex items-center justify-center gap-2 mt-1 px-1">
-            <button 
-              class="icon-button text-xs px-2 py-0.5"
-              :aria-label="`上一个版本 (${getCurrentVersionIndex(m) + 1}/${getVersionCount(m)})`"
-              @click="switchVersion(m, -1)"
-            >
-              <ChevronLeft class="w-3 h-3" />
-            </button>
-            <span class="text-xs text-muted">
-              {{ getCurrentVersionIndex(m) + 1 }}/{{ getVersionCount(m) }}
-            </span>
-            <button 
-              class="icon-button text-xs px-2 py-0.5"
-              :aria-label="`下一个版本 (${getCurrentVersionIndex(m) + 1}/${getVersionCount(m)})`"
-              @click="switchVersion(m, 1)"
-            >
-              <ChevronRight class="w-3 h-3" />
-            </button>
-          </div>
-
-          <button
-            v-if="canRetryUserMessage(m)"
-            type="button"
-            class="btn btn-xs btn-secondary mt-1"
-            @click="emit('retry-user-message', m)"
-          >
-            重试
-          </button>
-
-          <!-- 底部操作栏：鼠标 hover 显示；触控/笔常驻（与侧栏列表一致） -->
           <div
-            class="flex items-center gap-2 mt-1 px-1 transition-opacity"
-            :class="preferHoverChrome ? 'opacity-0 group-hover:opacity-100' : 'opacity-100'"
+            v-if="m.role === 'assistant' && (messageFastMissBadge(m) || m.usage?.finishReason === 'length')"
+            class="message-reading-meta mt-1 flex flex-wrap items-center gap-1 text-xs"
           >
-            <button
-              v-if="settingsStore.settings?.ttsEnabled && (m.role === 'assistant' || m.role === 'user') && !m.id.startsWith('local_') && getDisplayContent(m).trim()"
-              class="btn btn-xs btn-ghost"
-              @click="emit('read-aloud-message', m)"
-            >
-              朗读
-            </button>
-            <button
-              v-if="canForkMessage(m)"
-              class="btn btn-xs btn-ghost"
-              :disabled="isGenerating || isForking"
-              @click="emit('fork-message', m)"
-            >
-              分支
-            </button>
-            <button 
-              v-if="m.role === 'assistant' && !m.id.startsWith('local_')" 
-              class="btn btn-xs btn-ghost" 
-              @click="emit('rewrite-message', m)" 
-              :disabled="isGenerating"
-            >
-              重写
-            </button>
-            <button 
-              class="btn btn-xs btn-ghost" 
-              @click="emit('edit-message', m)" 
-              :disabled="isGenerating"
-            >
-              编辑
-            </button>
-            <InlineConfirmButton
-              :disabled="isGenerating"
-              @confirm="emit('delete-message', m)"
-            />
+            <span v-if="m.usage?.finishReason === 'length'" class="message-result-state">
+              已达到输出长度上限
+            </span>
+            <span v-if="messageFastMissBadge(m)" class="message-result-state">
+              {{ messageFastMissBadge(m) }}
+            </span>
           </div>
+
+          <MessageWebSources
+            class="message-reading-meta message-footer mt-1.5 max-w-full"
+            :class="{ 'message-footer--user': m.role === 'user' }"
+            :sources="m.role === 'assistant' && !isMessageContentStreaming(m) ? renderMessage(m).sources : []"
+          >
+            <div class="message-footer-start">
+              <div
+                class="message-action-toolbar"
+                :class="{ 'message-actions-hover': preferHoverChrome }"
+              >
+                <div
+                  v-if="m.role === 'assistant' && (hasMultipleVersions(m) || !m.id.startsWith('local_'))"
+                  class="message-action-capsule"
+                  role="group"
+                  aria-label="回复版本"
+                >
+                  <template v-if="hasMultipleVersions(m)">
+                    <button
+                      type="button"
+                      class="btn btn-xs btn-ghost message-version-arrow"
+                      :aria-label="`上一个版本 (${getCurrentVersionIndex(m) + 1}/${getVersionCount(m)})`"
+                      @click="switchVersion(m, -1)"
+                    >
+                      <ChevronLeft class="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>
+                    <span class="px-0.5 text-xs tabular-nums text-[var(--color-text-secondary)]">
+                      {{ getCurrentVersionIndex(m) + 1 }}/{{ getVersionCount(m) }}
+                    </span>
+                    <button
+                      type="button"
+                      class="btn btn-xs btn-ghost message-version-arrow"
+                      :aria-label="`下一个版本 (${getCurrentVersionIndex(m) + 1}/${getVersionCount(m)})`"
+                      @click="switchVersion(m, 1)"
+                    >
+                      <ChevronRight class="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>
+                  </template>
+                  <button
+                    v-if="!m.id.startsWith('local_')"
+                    type="button"
+                    class="btn btn-xs btn-ghost"
+                    :disabled="messageActionsLocked"
+                    @click="emit('rewrite-message', m)"
+                  >
+                    重写
+                  </button>
+                </div>
+                <div class="message-action-capsule" role="group" aria-label="消息操作">
+                  <button
+                    v-if="canRetryUserMessage(m)"
+                    type="button"
+                    class="btn btn-xs btn-ghost"
+                    @click="emit('retry-user-message', m)"
+                  >
+                    重试
+                  </button>
+                  <button
+                    v-if="settingsStore.settings?.ttsEnabled && (m.role === 'assistant' || m.role === 'user') && !m.id.startsWith('local_') && getDisplayContent(m).trim()"
+                    class="btn btn-xs btn-ghost"
+                    @click="emit('read-aloud-message', m)"
+                  >
+                    朗读
+                  </button>
+                  <button
+                    v-if="canForkMessage(m)"
+                    class="btn btn-xs btn-ghost"
+                    :disabled="messageActionsLocked || isForking"
+                    @click="emit('fork-message', m)"
+                  >
+                    分支
+                  </button>
+                  <button
+                    class="btn btn-xs btn-ghost"
+                    @click="emit('edit-message', m)"
+                    :disabled="messageActionsLocked"
+                  >
+                    编辑
+                  </button>
+                  <InlineConfirmButton
+                    :disabled="messageActionsLocked"
+                    @confirm="emit('delete-message', m)"
+                  />
+                </div>
+              </div>
+            </div>
+            <template #below-toolbar>
+              <span
+                v-if="m.role === 'assistant' && messageContextUsage(m)"
+                class="message-context-usage"
+              >
+                {{ messageContextUsage(m) }}
+              </span>
+            </template>
+          </MessageWebSources>
         </div>
       </div>
         <div v-if="bottomSpacerHeight > 0" :style="{ height: `${bottomSpacerHeight}px` }"></div>
@@ -2106,6 +2138,111 @@ onBeforeUnmount(() => {
 .message-bubble .md {
   width: 100%;
 }
+
+.message-reading-column {
+  --message-content-inset: 1.25rem;
+  --message-reading-edge: calc(var(--message-content-inset) + 1px);
+}
+
+.message-reading-header {
+  max-width: 100%;
+  padding-inline: var(--message-reading-edge);
+}
+
+.message-author {
+  max-width: 100%;
+  padding-block: 0.15rem;
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+.message-reading-meta {
+  padding-inline: var(--message-reading-edge);
+}
+
+.message-result-state {
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--radius-md);
+  background: var(--color-popover-surface);
+  color: var(--color-warning-text, var(--color-warning));
+}
+
+.message-footer {
+  --message-action-capsule-padding: 0.125rem;
+  --message-action-label-inset: calc(var(--message-action-capsule-padding) + 0.5rem + 2px);
+  align-self: stretch;
+}
+
+.message-footer:not(.message-footer--user) {
+  /* 对齐按钮文字，补偿胶囊和 .btn-xs 的内边距及两道 1px 边框。 */
+  padding-inline-start: calc(var(--message-reading-edge) - var(--message-action-label-inset));
+}
+
+.message-footer-start,
+.message-action-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  max-width: 100%;
+}
+
+.message-footer-start {
+  flex: 0 0 auto;
+}
+
+.message-footer--user :deep(.message-web-source-leading) {
+  margin-inline-start: auto;
+}
+
+.message-actions-hover {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--transition-fast);
+}
+
+.group:hover .message-actions-hover,
+.message-actions-hover:has(:focus-visible) {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.message-context-usage {
+  display: block;
+  margin-block-start: 0.1875rem;
+  padding-inline-start: var(--message-action-label-inset);
+  color: var(--color-text-secondary);
+  font-size: 0.625rem;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  white-space: pre;
+}
+
+.message-action-capsule {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  min-height: 1.75rem;
+  padding-inline: var(--message-action-capsule-padding);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-full);
+  background: var(--color-popover-surface);
+  color: var(--color-text-secondary);
+}
+
+.message-action-capsule :deep(.btn) {
+  border-radius: var(--radius-full);
+}
+
+.message-action-capsule .message-version-arrow {
+  min-width: 1.5rem;
+  padding-inline: 0.25rem;
+}
+
+.message-reading-content :deep(li + li) {
+  margin-block-start: 0.375em;
+}
+
 .message-bubble .md .stream-markdown {
   /* 勿用 hidden/auto 形成内层滚动区；块级 KaTeX 需完整铺开（宽公式由外层列宽与页面滚动处理） */
   overflow: visible;
@@ -2119,7 +2256,7 @@ onBeforeUnmount(() => {
   overflow-x: auto;
   max-width: 100%;
   scrollbar-width: thin;
-  scrollbar-color: var(--color-border) transparent;
+  scrollbar-color: var(--color-scrollbar-thumb, var(--color-border)) transparent;
 }
 .message-bubble .md :deep(pre)::-webkit-scrollbar {
   height: 6px;
@@ -2128,11 +2265,11 @@ onBeforeUnmount(() => {
   background: transparent;
 }
 .message-bubble .md :deep(pre)::-webkit-scrollbar-thumb {
-  background: var(--color-border);
+  background: var(--color-scrollbar-thumb, var(--color-border));
   border-radius: var(--radius-scrollbar);
 }
 .message-bubble .md :deep(pre):hover::-webkit-scrollbar-thumb {
-  background: var(--color-border-strong);
+  background: var(--color-scrollbar-hover, var(--color-border-strong));
 }
 .message-bubble .md :deep(pre code) {
   display: block;
@@ -2162,28 +2299,6 @@ onBeforeUnmount(() => {
   transform-origin: center center;
   user-select: none;
   touch-action: none;
-}
-
-.image-preview-close {
-  transform: scale(var(--preview-control-scale, 1));
-  transform-origin: top right;
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  width: 28px;
-  height: 28px;
-  border-radius: 9999px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--color-overlay-heavy);
-  color: var(--color-text);
-  border: 1px solid var(--color-border);
-  transition: background-color var(--transition-fast), color var(--transition-fast);
-}
-
-.image-preview-close:hover {
-  background: var(--color-surface-hover);
 }
 
 .image-preview-img {
