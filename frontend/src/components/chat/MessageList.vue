@@ -51,7 +51,7 @@
  *    - 位置：组件层，提供消息列表显示功能
  */
 import { keepPreviewCloseVisible as vKeepPreviewCloseVisible } from '../../utils/imagePreviewViewport'
-import { ref, nextTick, computed, onBeforeUnmount, onMounted, onBeforeUpdate, onUpdated, watch } from 'vue'
+import { ref, nextTick, computed, onBeforeUnmount, onMounted, onBeforeUpdate, onUpdated, watch, type ObjectDirective } from 'vue'
 import type {
   ChatContentRegexRule,
   ChatMessage,
@@ -530,6 +530,70 @@ function messageContextUsage(m: ChatMessage): string | null {
   const cached = m.usage?.cacheReadInputTokens ?? 0
   return `${formatContextTokens(input)} 上下文  已缓存 ${formatContextTokens(cached)}`
 }
+
+function measureUsageRow(row: Element) {
+  const toolbar = row.firstElementChild as HTMLElement | null
+  const usage = row.lastElementChild as HTMLElement | null
+  if (!(row instanceof HTMLElement) || !toolbar || !usage || toolbar === usage) return
+  // offsetLeft 不受滑动影响。换行后保留用量在下一行的文字起点。
+  const shift = usage.offsetLeft - toolbar.offsetLeft
+  row.toggleAttribute('data-usage-inline', shift > 0)
+  if (shift <= 0) return
+
+  const style = getComputedStyle(usage)
+  const start = row.getBoundingClientRect().left + toolbar.offsetLeft + parseFloat(style.paddingInlineStart)
+  const deleteButton = toolbar.querySelector('.inline-confirm') ?? toolbar
+  const targetAtCue = deleteButton.getBoundingClientRect().right - 25
+  const progressAtCue = (targetAtCue - start) / shift
+  const cueMs = 100
+  const targetDurationMs = 210
+  let durationMs = targetDurationMs
+  let firstHandle = 0.28
+  let secondHandle = 0.18
+
+  if (progressAtCue > 0 && progressAtCue < 1) {
+    // y 控制点为 0 和 1，两端速度为零。先反求位移对应的参数，再解出 x 控制点。
+    const t = 0.5 - Math.sin(Math.asin(1 - 2 * progressAtCue) / 3)
+    const firstWeight = 3 * (1 - t) ** 2 * t
+    const secondWeight = 3 * (1 - t) * t ** 2
+    const endWeight = t ** 3
+    const cueTime = cueMs / targetDurationMs - endWeight
+    const minHandle = 0.04
+    firstHandle = Math.min(firstHandle, Math.max(minHandle, (cueTime - minHandle * secondWeight) / firstWeight))
+    secondHandle = Math.min(1 - minHandle, Math.max(minHandle, (cueTime - firstHandle * firstWeight) / secondWeight))
+    // 极端宽度若触及控制点边界，以 100 ms 的位置为准微调总时长。
+    durationMs = cueMs / (firstWeight * firstHandle + secondWeight * secondHandle + endWeight)
+  }
+
+  row.style.setProperty('--message-usage-shift', `${shift}px`)
+  row.style.setProperty('--message-usage-duration', `${durationMs}ms`)
+  row.style.setProperty('--message-usage-easing', `cubic-bezier(${firstHandle}, 0, ${secondHandle}, 1)`)
+}
+
+let usageRowObserver: ResizeObserver | undefined
+const vMeasureUsageRow: ObjectDirective<HTMLElement> = {
+  mounted(usage) {
+    const row = usage.parentElement
+    const toolbar = usage.previousElementSibling
+    if (!row || !toolbar) return
+    usageRowObserver ??= new ResizeObserver((entries) => {
+      const rows = new Set(entries.map(({ target }) => target.closest('.message-footer-start')))
+      for (const entry of rows) {
+        if (entry) measureUsageRow(entry)
+      }
+    })
+    usageRowObserver.observe(row)
+    usageRowObserver.observe(toolbar)
+    usageRowObserver.observe(usage)
+    measureUsageRow(row)
+  },
+  beforeUnmount(usage) {
+    usageRowObserver?.unobserve(usage)
+    if (usage.parentElement) usageRowObserver?.unobserve(usage.parentElement)
+    if (usage.previousElementSibling) usageRowObserver?.unobserve(usage.previousElementSibling)
+  },
+}
+onBeforeUnmount(() => usageRowObserver?.disconnect())
 
 function messageFastMissBadge(m: ChatMessage): string | null {
   const u = m.usage
@@ -2032,15 +2096,14 @@ onBeforeUnmount(() => {
                   />
                 </div>
               </div>
-            </div>
-            <template #below-toolbar>
               <span
                 v-if="m.role === 'assistant' && messageContextUsage(m)"
+                v-measure-usage-row
                 class="message-context-usage"
               >
                 {{ messageContextUsage(m) }}
               </span>
-            </template>
+            </div>
           </MessageWebSources>
         </div>
       </div>
@@ -2188,6 +2251,7 @@ onBeforeUnmount(() => {
 }
 
 .message-footer-start {
+  position: relative;
   flex: 0 0 auto;
 }
 
@@ -2198,7 +2262,7 @@ onBeforeUnmount(() => {
 .message-actions-hover {
   opacity: 0;
   pointer-events: none;
-  transition: opacity var(--transition-fast);
+  transition: opacity var(--motion-duration-fast) var(--motion-ease-product);
 }
 
 .group:hover .message-actions-hover,
@@ -2209,13 +2273,35 @@ onBeforeUnmount(() => {
 
 .message-context-usage {
   display: block;
-  margin-block-start: 0.1875rem;
+  max-width: 100%;
   padding-inline-start: var(--message-action-label-inset);
   color: var(--color-text-secondary);
   font-size: 0.625rem;
   line-height: 1.2;
   font-variant-numeric: tabular-nums;
-  white-space: pre;
+  white-space: pre-wrap;
+}
+
+.message-footer-start[data-usage-inline] > .message-action-toolbar {
+  position: relative;
+  z-index: 1;
+}
+
+.message-footer-start[data-usage-inline] > .message-actions-hover + .message-context-usage {
+  transform: translateX(calc(-1 * var(--message-usage-shift)));
+  transition: transform var(--message-usage-duration) var(--message-usage-easing);
+}
+
+.group:hover .message-footer-start[data-usage-inline] > .message-actions-hover + .message-context-usage,
+.message-footer-start[data-usage-inline] > .message-actions-hover:has(:focus-visible) + .message-context-usage {
+  transform: translateX(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .message-footer-start[data-usage-inline] > .message-actions-hover,
+  .message-footer-start[data-usage-inline] > .message-actions-hover + .message-context-usage {
+    transition: none;
+  }
 }
 
 .message-action-capsule {

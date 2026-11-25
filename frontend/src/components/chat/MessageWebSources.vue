@@ -50,9 +50,8 @@ async function handleIconError(origin: string | null, failedIcon: string) {
 <template>
   <div v-if="sources.length || $slots.default" class="message-web-sources">
     <div class="message-web-source-toolbar">
-      <div v-if="$slots.default || $slots['below-toolbar']" class="message-web-source-leading">
+      <div v-if="$slots.default" class="message-web-source-leading">
         <slot />
-        <slot name="below-toolbar" />
       </div>
       <button
         v-if="sources.length"

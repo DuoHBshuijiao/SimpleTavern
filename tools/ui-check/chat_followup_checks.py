@@ -631,16 +631,43 @@ async def check_chat_followup(ctx):
             format: usage.textContent.trim() === '12.4K 上下文  已缓存 10.5K' &&
             s.backgroundColor === 'rgba(0, 0, 0, 0)' && s.borderTopWidth === '0px' &&
             !row.innerText.includes('生成详情'),
-            size: parseFloat(s.fontSize), gap: u.top - t.bottom,
+            size: parseFloat(s.fontSize), centerDelta: Math.abs((u.top + u.bottom - t.top - t.bottom) / 2),
             textDelta: Math.abs(labelStart(usage) - labelStart($btn(row, '重写'))),
+            clearsToolbar: labelStart(usage) >= t.right + 3,
             positions: [actions.left - origin.left, actions.top - origin.top, u.left - origin.left, u.top - origin.top],
             interactive: ['分支','重写','编辑','删除'].every(text=>{const button=$btn(row,text);return button && !button.disabled})
           };
         })()"""
+        await page.mouse("mouseMoved", 1, 1)
         layout = await page.js(layout_probe)
-        ctx.check("用量文字在工具栏下方对齐，字号 10 px，间距紧凑",
+        ctx.check("用量文字与工具栏同排，归位时对齐首个操作文字，字号 10 px",
                   layout["format"] and layout["interactive"] and layout["size"] == 10
-                  and 0 <= layout["gap"] <= 4 and layout["textDelta"] <= 1, layout)
+                  and layout["centerDelta"] <= 1 and layout["textDelta"] <= 1, layout)
+        hover_point = await page.js("""(() => {
+          const row = $rows().at(-1);
+          const bubble = row.querySelector('.message-bubble');
+          bubble.scrollIntoView({block:'center', behavior:'instant'});
+          const r = bubble.getBoundingClientRect();
+          return [r.left + r.width/2, r.top + r.height/2];
+        })()""")
+        await page.mouse("mouseMoved", *hover_point)
+        await page.wait_for("$rows().at(-1).matches(':hover')")
+        moved = await page.js(layout_probe)
+        ctx.check("悬停时用量移到操作区右侧，工具栏位置固定",
+                  moved["clearsToolbar"] and moved["centerDelta"] <= 1
+                  and moved["positions"][:2] == layout["positions"][:2], moved)
+        await page.mouse("mouseMoved", 1, 1)
+        await page.wait_for("!$rows().at(-1).matches(':hover')")
+        ctx.check("离开消息后用量归位", (await page.js(layout_probe))["positions"] == layout["positions"])
+        await page.send("Emulation.setEmulatedMedia", features=[{"name": "prefers-reduced-motion", "value": "no-preference"}])
+        ctx.check("用量以单条无延时的贝塞尔曲线过渡",
+                  await page.js("""(() => {
+                    const usage = $rows().at(-1).querySelector('.message-context-usage');
+                    const style = getComputedStyle(usage);
+                    return style.transitionProperty === 'transform' && style.transitionDelay === '0s'
+                      && style.transitionTimingFunction.startsWith('cubic-bezier(');
+                  })()"""))
+        await page.send("Emulation.setEmulatedMedia", features=[{"name": "prefers-reduced-motion", "value": "reduce"}])
         sources = "$rows().at(-1).querySelector('.message-web-source-toggle')"
         await page.wait_for(sources)
         await page.js(f"{sources}.click()")
