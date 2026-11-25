@@ -1317,7 +1317,7 @@ const showHeaderMoreMenu = ref(false)
 const headerMoreMenuRef = ref<HTMLElement | null>(null)
 const headerMoreButtonRef = ref<HTMLElement | null>(null)
 
-/** 主聊天网络搜索开关：为 true 时每次生成启用搜索，直至关闭；Responses 走内建 web_search，其它协议需 Tavily/博查 */
+/** 主聊天网络搜索开关：开启后按当前来源使用搜索工具。 */
 const webSearchSessionEnabled = ref(false)
 
 watch(streamError, (value) => {
@@ -1826,7 +1826,7 @@ const chatModelOptions = computed(() => {
   const options: ModelOptionGroup[] = []
   if (!settings.settings) return []
 
-  const recentModels = (settings.settings.llm.usedModels || []).filter(m => availableModelSet.value.has(m))
+  const recentModels = (settings.settings.llm.usedModels || []).filter(m => availableModelSet.value.has(m)).slice(0, 5)
   if (recentModels.length > 0) {
     options.push({
       label: '最近使用',
@@ -1898,19 +1898,13 @@ const currentModel = computed(() => {
   return chats.activeChat?.overrides?.params?.model || settings.settings?.llm.defaultModel || '未设置'
 })
 
-const geminiSearchRequestValue = computed((): 'native' | 'independent' | null => {
-  const v = chats.activeChat?.overrides?.params?.geminiSearch
-  if (v === 'native' || v === 'independent') return v
-  return null
-})
-
 /**
  * 计算助手当前模型
  *
- * 优先使用助手设置中的模型，其次使用全局默认模型，都没有则返回"未设置"。
+ * 优先使用助手设置中的模型，其次使用全局默认模型。
  */
 const assistantCurrentModel = computed(() => {
-  return assistant.assistantSettings.value.model || settings.settings?.llm.defaultModel || '未设置'
+  return (assistant.assistantSettings.value.model || settings.settings?.llm.defaultModel || '').trim()
 })
 
 /**
@@ -1942,18 +1936,24 @@ async function handleModelSelect(option: any) {
   await chats.updateOverrides(chats.activeChat.id, overrides)
 }
 
-/**
- * T-824：会话级思考深度覆盖（null = 恢复沿用全局 settings.reasoningEffort）。
- * 写入 chat.overrides.params.reasoningEffort，后端 prepare_llm_request 按模型能力 clamp 并在 meta.protocolResolution 回报。
- */
+let reasoningEffortWrite: Promise<void> = Promise.resolve()
+
+/** 松手或按键提交。串行写入，避免连续按键时旧响应覆盖新档位。 */
 async function handleReasoningEffortChange(value: string | null) {
-  if (!chats.activeChat) return
-  const overrides = { ...chats.activeChat.overrides }
-  const params = { ...overrides.params }
-  if (value == null || value === '') params.reasoningEffort = null
-  else params.reasoningEffort = value
-  overrides.params = params
-  await chats.updateOverrides(chats.activeChat.id, overrides)
+  const chat = chats.activeChat
+  if (!chat) return
+
+  const write = reasoningEffortWrite.then(async () => {
+    const active = chats.activeChat
+    const current = active?.id === chat.id ? active : chat
+    const overrides = {
+      ...current.overrides,
+      params: { ...current.overrides.params, reasoningEffort: value },
+    }
+    await chats.updateOverrides(chat.id, overrides, { skipLoadList: true })
+  })
+  reasoningEffortWrite = write.catch(() => undefined)
+  await write
 }
 
 /**
@@ -1966,15 +1966,6 @@ async function handleFastModeChange(value: boolean | null) {
   const params = { ...overrides.params }
   if (value == null) params.fastMode = null
   else params.fastMode = value
-  overrides.params = params
-  await chats.updateOverrides(chats.activeChat.id, overrides)
-}
-
-async function handleGeminiSearchChange(value: 'native' | 'independent' | null) {
-  if (!chats.activeChat) return
-  const overrides = { ...chats.activeChat.overrides }
-  const params = { ...overrides.params }
-  params.geminiSearch = value
   overrides.params = params
   await chats.updateOverrides(chats.activeChat.id, overrides)
 }
@@ -2557,7 +2548,6 @@ async function runGroupGeneration(
   const roster = activeChat.value?.id === chatId ? activeChat.value.memberIds : memberIds
   const omitMessageIds = getSaveSendDeferForChat(chatId)?.tailIdsToDeleteOnSuccess ?? []
   const webSearchEnabled = webSearchSessionEnabled.value
-  const geminiSearch = geminiSearchRequestValue.value
   for (let i = startIndex; i < memberIds.length; i++) {
     const characterId = memberIds[i]
     if (!characterId) continue
@@ -2597,7 +2587,7 @@ async function runGroupGeneration(
       try {
         await postAndConsumeSse(
           '/api/generate/group',
-          { chatId, characterId, imageFallbackMode, omitMessageIds, webSearchEnabled, geminiSearch },
+          { chatId, characterId, imageFallbackMode, omitMessageIds, webSearchEnabled },
           makeGenerateSseHandler({
             localAssistantId,
             onTerminalError: (data) => {
@@ -2630,7 +2620,6 @@ async function runGroupGeneration(
         imageFallbackMode,
         omitMessageIds,
         webSearchEnabled,
-        geminiSearch,
       }, signal)
       
       if (res.ok) {
@@ -2715,7 +2704,6 @@ async function sendUserMessage(options?: { retryText?: string }) {
   const persona = selectedPersona.value
   const senderName = persona?.name ?? userName.value
   const webSearchEnabled = webSearchSessionEnabled.value
-  const geminiSearch = geminiSearchRequestValue.value
   const imageFallbackMode = isImageStickyActive()
   const userRole = group.effectivePureAiMode.value ? ('system' as const) : ('user' as const)
   let uploadedImages: ChatImageAttachment[] = []
@@ -2887,7 +2875,6 @@ async function sendUserMessage(options?: { retryText?: string }) {
               senderAvatar: persona?.avatar ?? null,
               userPersona: persona ?? null,
               webSearchEnabled,
-              geminiSearch,
             },
             makeGenerateSseHandler({ localAssistantId }),
             signal,
@@ -2916,7 +2903,6 @@ async function sendUserMessage(options?: { retryText?: string }) {
           senderAvatar: persona?.avatar ?? null,
           userPersona: persona ?? null,
           webSearchEnabled,
-          geminiSearch,
         }, signal)
         
         if (res.ok) {
@@ -2959,7 +2945,6 @@ async function sendUserMessage(options?: { retryText?: string }) {
                     imageFallbackMode: true,
                     userPersona: persona ?? null,
                     webSearchEnabled,
-                    geminiSearch,
                   }, makeGenerateSseHandler({ localAssistantId }), retrySignal)
                 } finally {
                   stream.flushForMessage(localAssistantId)
@@ -2973,7 +2958,6 @@ async function sendUserMessage(options?: { retryText?: string }) {
                   imageFallbackMode: true,
                   userPersona: persona ?? null,
                   webSearchEnabled,
-                  geminiSearch,
                 }, retrySignal)
                 if (!retryRes.ok) throw new Error(retryRes.error || 'unknown error')
                 chats.appendLocalMessageContent(localAssistantId, retryRes.content || '')
@@ -3191,8 +3175,7 @@ async function triggerInterject(characterId: string) {
       try {
         await postAndConsumeSse(
           '/api/generate/interject',
-          { chatId, characterId, omitMessageIds, webSearchEnabled: webSearchSessionEnabled.value,
-            geminiSearch: geminiSearchRequestValue.value },
+          { chatId, characterId, omitMessageIds, webSearchEnabled: webSearchSessionEnabled.value },
           makeGenerateSseHandler({ localAssistantId }),
           aborter.value?.signal,
         )
@@ -3215,7 +3198,6 @@ async function triggerInterject(characterId: string) {
         characterId,
         omitMessageIds,
         webSearchEnabled: webSearchSessionEnabled.value,
-        geminiSearch: geminiSearchRequestValue.value,
       }, aborter.value?.signal)
       
       if (res.ok) {
@@ -3840,7 +3822,6 @@ async function handleRewriteMessage(m: ChatMessage) {
               omitMessageIds,
               mergeAssistantIntoMessageId: anchorId,
               webSearchEnabled: webSearchSessionEnabled.value,
-              geminiSearch: geminiSearchRequestValue.value,
             },
             makeGenerateSseHandler({ localAssistantId }),
             aborter.value?.signal,
@@ -3863,7 +3844,6 @@ async function handleRewriteMessage(m: ChatMessage) {
           omitMessageIds,
           mergeAssistantIntoMessageId: anchorId,
           webSearchEnabled: webSearchSessionEnabled.value,
-          geminiSearch: geminiSearchRequestValue.value,
         }, aborter.value?.signal)
         
         if (res.ok) {
@@ -3898,7 +3878,6 @@ async function handleRewriteMessage(m: ChatMessage) {
               omitMessageIds,
               mergeAssistantIntoMessageId: anchorId,
               webSearchEnabled: webSearchSessionEnabled.value,
-              geminiSearch: geminiSearchRequestValue.value,
             },
             makeGenerateSseHandler({ localAssistantId }),
             aborter.value?.signal,
@@ -3924,7 +3903,6 @@ async function handleRewriteMessage(m: ChatMessage) {
           omitMessageIds,
           mergeAssistantIntoMessageId: anchorId,
           webSearchEnabled: webSearchSessionEnabled.value,
-          geminiSearch: geminiSearchRequestValue.value,
         }, aborter.value?.signal)
         
         if (res.ok) {
@@ -4505,7 +4483,6 @@ async function handleSaveAndSend() {
   const persona = selectedPersona.value
   const imageFallbackMode = isImageStickyActive()
   const webSearchEnabled = webSearchSessionEnabled.value
-  const geminiSearch = geminiSearchRequestValue.value
   const now = new Date().toISOString()
   const tailMessagesToDefer = activeChat.value.messages
     .slice(messageIndex + 1)
@@ -4595,7 +4572,6 @@ async function handleSaveAndSend() {
               userPersona: persona ?? null,
               omitMessageIds,
               webSearchEnabled,
-              geminiSearch,
             },
             makeGenerateSseHandler({ localAssistantId }),
             aborter.value?.signal,
@@ -4614,7 +4590,6 @@ async function handleSaveAndSend() {
           userPersona: persona ?? null,
           omitMessageIds,
           webSearchEnabled,
-          geminiSearch,
         }, aborter.value?.signal)
 
         if (res.ok) {
@@ -5072,6 +5047,7 @@ const editingPersonaAvatarUrl = computed(() => {
           <!-- 输入区域 -->
           <ChatInput
             ref="chatInputRef"
+            :chat-id="activeChat.id"
             v-model="draftMessage"
             :sidebar-collapsed="sidebarCollapsed"
             :is-narrow-portrait="isNarrowPortrait"
@@ -5107,6 +5083,7 @@ const editingPersonaAvatarUrl = computed(() => {
             :model-options="chatModelOptions"
             :reasoning-effort="activeChat?.overrides?.params?.reasoningEffort ?? null"
             :global-reasoning-effort="settings.settings?.reasoningEffort ?? 'none'"
+            :save-reasoning-effort="handleReasoningEffortChange"
             :fast-mode="activeChat?.overrides?.params?.fastMode ?? null"
             :get-member-settings="group.getMemberSettings"
             @send="() => sendUserMessage()"
@@ -5115,7 +5092,6 @@ const editingPersonaAvatarUrl = computed(() => {
             @continue-group="continueGroupChat"
             @trigger-interject="triggerInterject"
             @select-model="handleModelSelect"
-            @update:reasoning-effort="handleReasoningEffortChange"
             @update:fast-mode="handleFastModeChange"
             @toggle-assistant="assistant.isAssistantPanelOpen.value = !assistant.isAssistantPanelOpen.value"
             @focus-assistant-panel="switchFromMvuToAssistantPanel"
@@ -5128,10 +5104,7 @@ const editingPersonaAvatarUrl = computed(() => {
             @draft-helper-stop="handleDraftHelperStop"
             @toggle-mvu-panel="mvuPanelOpen = !mvuPanelOpen"
             :web-search-enabled="webSearchSessionEnabled"
-            :gemini-search="activeChat?.overrides?.params?.geminiSearch ?? null"
-            :global-gemini-search="settings.settings?.webSearch?.geminiSearch ?? 'native'"
             @update:web-search-enabled="webSearchSessionEnabled = $event"
-            @update:gemini-search="handleGeminiSearchChange"
           />
 
           <!-- TTS 播放/下载 FAB（仅在 TTS 启用时显示） -->

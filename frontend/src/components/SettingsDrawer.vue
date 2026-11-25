@@ -345,13 +345,11 @@ function ensureWebSearchSettingsShape(s: Settings) {
   if (!s.webSearch) {
     s.webSearch = {
       provider: 'tavily',
-      geminiSearch: 'native',
       tavily: { apiKey: '' },
       bocha: { apiKey: '', baseUrl: 'https://api.bocha.cn' },
     }
   }
   if (!s.webSearch.provider) s.webSearch.provider = 'tavily'
-  if (!s.webSearch.geminiSearch) s.webSearch.geminiSearch = 'native'
   if (!s.webSearch.tavily) s.webSearch.tavily = { apiKey: '' }
   if (!s.webSearch.bocha) s.webSearch.bocha = { apiKey: '', baseUrl: 'https://api.bocha.cn' }
   if (!s.webSearch.bocha.baseUrl) s.webSearch.bocha.baseUrl = 'https://api.bocha.cn'
@@ -2699,7 +2697,6 @@ function createPreset() {
   const newPreset: ApiPreset = {
     id: crypto.randomUUID().replace(/-/g, ''),
     name: '新 API 预设',
-    webSearchSource: 'native',
     webSearchSearchEnabled: true,
     webSearchFetchEnabled: true,
     baseUrl: 'https://api.openai.com',
@@ -3400,7 +3397,7 @@ const globalMvuModelOptions = computed(() => {
 
   const recentModels = (globalDraft.value.llm.usedModels || []).filter((m) =>
     globalAvailableModelSet.value.has(m),
-  )
+  ).slice(0, 5)
   if (recentModels.length > 0) {
     options.push({
       label: '最近使用',

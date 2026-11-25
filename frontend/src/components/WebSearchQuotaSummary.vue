@@ -102,7 +102,7 @@ const tavilyParsed = computed((): TavilyParsed | null => {
   const b = tavilyBlock.value
   if (!b || b.ok !== true) return null
   const data = asRecord(b.data)
-  if (!data) return { mode: 'hint', text: '接口未返回用量结构，请稍后重试或检查 Key。' }
+  if (!data) return { mode: 'hint', text: '请稍后刷新用量，或检查 API Key。' }
   const keyM = parseKeyMetrics(data)
   const planM = parseAccountPlan(data)
   if (!keyM && !planM) return { mode: 'hint', text: '暂无可用用量字段（响应格式可能已变更）。' }
@@ -123,13 +123,13 @@ const braveBlock = computed(() => asRecord(props.status?.brave))
 const emptyHintForCurrentProvider = computed(() => {
   if (!props.status) return ''
   if (props.provider === 'tavily' && !tavilyBlock.value) {
-    return '服务端未返回 Tavily 用量（通常表示未保存或未填写 Tavily API Key）。保存 Key 后重新打开抽屉可刷新。'
+    return '请确认已保存 Tavily API Key，再刷新用量。'
   }
   if (props.provider === 'bocha' && !bochaBlock.value) {
-    return '服务端未返回博查余额（通常表示未保存或未填写博查 API Key）。保存 Key 后重新打开抽屉可刷新。'
+    return '请确认已保存博查 API Key，再刷新余额。'
   }
   if (props.provider === 'brave' && !braveBlock.value) {
-    return '服务端未返回 Brave 配置状态（通常表示未保存或未填写 Subscription Token）。'
+    return '请填写并保存 Brave Subscription Token。'
   }
   return ''
 })
@@ -202,7 +202,7 @@ const emptyHintForCurrentProvider = computed(() => {
             ¥{{ nfMoney.format(bochaRemaining) }}
           </span>
         </p>
-        <p v-else class="text-xs text-[var(--color-text-muted)]">暂无法读取余额字段。</p>
+        <p v-else class="text-xs text-[var(--color-text-muted)]">请刷新余额或在博查账户中查看。</p>
       </template>
       <p v-else class="text-xs text-[var(--color-error-text)]">{{ blockMessage(bochaBlock) }}</p>
     </div>
@@ -210,7 +210,7 @@ const emptyHintForCurrentProvider = computed(() => {
     <div v-if="showBrave && braveBlock" class="space-y-3">
       <div class="text-xs font-medium text-[var(--color-text-secondary)]">Brave Search</div>
       <p v-if="braveBlock.ok === true" class="text-xs text-[var(--color-text-muted)]">
-        {{ typeof braveBlock.message === 'string' ? braveBlock.message : '已配置 Token。Brave 无公开余额查询接口。' }}
+        已配置 Token。
       </p>
       <p v-else class="text-xs text-[var(--color-error-text)]">{{ blockMessage(braveBlock) }}</p>
     </div>

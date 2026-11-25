@@ -5,8 +5,7 @@ import ThemedRadioTags from '../ThemedRadioTags.vue'
 import WebSearchQuotaSummary from '../WebSearchQuotaSummary.vue'
 import SettingsDrawerGlobalAccordion from './SettingsDrawerGlobalAccordion.vue'
 import SettingsField from './SettingsField.vue'
-import SettingsHint from './SettingsHint.vue'
-import type { Settings, WebSearchProvider } from '../../types/models'
+import type { Settings, WebSearchProvider, WebSearchSource } from '../../types/models'
 
 const WEB_SEARCH_PROVIDER_OPTIONS: Array<{ label: string; value: WebSearchProvider }> = [
   { label: 'Tavily', value: 'tavily' },
@@ -14,9 +13,9 @@ const WEB_SEARCH_PROVIDER_OPTIONS: Array<{ label: string; value: WebSearchProvid
   { label: 'Brave Search', value: 'brave' },
 ]
 
-const GEMINI_SEARCH_OPTIONS = [
-  { label: '原生 Google Search', value: 'native' },
-  { label: '第三方（Tavily / 博查 / Brave）', value: 'independent' },
+const SEARCH_SOURCE_OPTIONS = [
+  { label: '供应商原生', value: 'native' },
+  { label: '第三方搜索', value: 'independent' },
 ]
 
 const props = defineProps<{
@@ -32,7 +31,6 @@ watch(
   () => props.draft.webSearch,
   (ws) => {
     if (ws && !ws.brave) ws.brave = { apiKey: '' }
-    if (ws && !ws.geminiSearch) ws.geminiSearch = 'native'
   },
   { immediate: true },
 )
@@ -41,19 +39,16 @@ watch(
 <template>
   <SettingsDrawerGlobalAccordion v-model:open="open" title="网络搜索">
     <div class="settings-group">
-      <SettingsHint more="独立搜索供应商（Tavily / 博查 / Brave，走本地工具循环）与模型原生联网。OpenAI Responses / Anthropic Messages 打开搜索后走厂商原生。Gemini 必须在下方显式选择「原生 Google Search」或「第三方」；选第三方时需要独立搜索 API Key。">
-        独立搜索供应商与模型原生联网互不自动切换。
-      </SettingsHint>
       <template v-if="draft.webSearch">
-        <SettingsField label="Gemini 搜索来源">
+        <SettingsField label="联网来源" more="原生搜索使用当前模型的联网工具。第三方搜索需配置下方供应商的 API Key。">
           <ThemedRadioTags
-            :model-value="draft.webSearch.geminiSearch || 'native'"
-            :options="GEMINI_SEARCH_OPTIONS"
-            aria-label="Gemini 搜索来源"
-            @update:model-value="(v) => { if (draft.webSearch) draft.webSearch.geminiSearch = v as 'native' | 'independent' }"
+            :model-value="draft.webSearch.source || ''"
+            :options="SEARCH_SOURCE_OPTIONS"
+            aria-label="联网来源"
+            @update:model-value="(v) => { if (draft.webSearch) draft.webSearch.source = v as WebSearchSource }"
           />
         </SettingsField>
-        <SettingsField label="提供方">
+        <SettingsField label="第三方搜索供应商">
           <ModernSelect
             v-model="draft.webSearch.provider"
             :options="WEB_SEARCH_PROVIDER_OPTIONS"
@@ -72,7 +67,7 @@ watch(
             />
           </SettingsField>
           <div class="grid grid-cols-2 gap-3">
-            <SettingsField label="max_results（0–20）">
+            <SettingsField label="结果上限（0–20）">
               <input
                 v-model.number="draft.webSearch.tavily.max_results"
                 type="number"
@@ -81,7 +76,7 @@ watch(
                 class="input w-full"
               />
             </SettingsField>
-            <SettingsField label="search_depth">
+            <SettingsField label="搜索深度">
               <input
                 v-model="draft.webSearch.tavily.search_depth"
                 type="text"
@@ -101,7 +96,7 @@ watch(
               placeholder="BSA..."
             />
           </SettingsField>
-          <SettingsField label="count（1–20）">
+          <SettingsField label="结果上限（1–20）">
             <input
               v-model.number="draft.webSearch.brave.count"
               type="number"
@@ -128,7 +123,7 @@ watch(
               placeholder="https://api.bocha.cn"
             />
           </SettingsField>
-          <SettingsField label="count（1–50）">
+          <SettingsField label="结果上限（1–50）">
             <input
               v-model.number="draft.webSearch.bocha.count"
               type="number"
@@ -147,7 +142,7 @@ watch(
             <span v-if="remoteStatusFetching" class="font-normal text-[var(--color-text-muted)]">刷新中…</span>
           </div>
           <p v-if="remoteStatusError" role="status" class="text-[var(--color-warning-text,var(--color-warning))]">
-            刷新失败，当前额度不可用。
+            额度刷新失败。
           </p>
           <WebSearchQuotaSummary v-else :status="remoteStatus" :provider="draft.webSearch.provider" />
         </div>

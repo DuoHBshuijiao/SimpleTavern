@@ -126,6 +126,7 @@ export interface ResolvePreviewRequest {
   protocol?: string | null
   providerId?: string | null
   providerParams?: Record<string, string> | null
+  authStyle?: string | null
   promptCache?: PromptCacheConfig | null
   reasoningEffort?: string | null
   fastMode?: boolean

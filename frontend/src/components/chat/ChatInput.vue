@@ -62,9 +62,7 @@ import {
   TOP_BAR_AGENT_AFTER_TTS_GAP_PX,
   type HeaderMorphPhase,
 } from '../../constants/chatHeaderMorph'
-import type { CharacterCard, GeminiSearchMode, GroupMemberSettings } from '../../types/models'
-import { isTtsApiPreset } from '../../utils/apiPresetKind'
-import { useSettingsStore } from '../../stores'
+import type { CharacterCard, GroupMemberSettings } from '../../types/models'
 import { validateFilesForTarget } from '../../utils/attachmentPolicy'
 import { FILE_ONLY_PASTE_MESSAGE, resolveRichPaste } from '../../utils/richPaste'
 import ModernAvatar from '../ModernAvatar.vue'
@@ -151,6 +149,7 @@ const props = withDefaults(
   userName: string
   
   // 模型选择
+  chatId: string
   currentModel: string
   currentPresetId?: string | null
   modelOptions: (ModelOption | ModelOptionGroup | string)[]
@@ -158,15 +157,12 @@ const props = withDefaults(
   reasoningEffort?: string | null
   /** 全局思考深度（供面板展示「沿用全局 · x」） */
   globalReasoningEffort?: string | null
+  saveReasoningEffort: (value: string | null) => Promise<void>
   /** T-824：会话级 Fast 模式（null 沿用全局） */
   fastMode?: boolean | null
   
   /** 主聊天网络搜索开关：为 true 时每次发送均启用搜索，直至用户关闭 */
   webSearchEnabled?: boolean
-  /** 会话级 Gemini 搜索来源；null 沿用全局 */
-  geminiSearch?: GeminiSearchMode | null
-  /** 全局 webSearch.geminiSearch */
-  globalGeminiSearch?: GeminiSearchMode | null
   
   // 辅助函数
   getMemberSettings: (memberId: string) => GroupMemberSettings
@@ -182,8 +178,6 @@ const props = withDefaults(
     reasoningEffort: null,
     globalReasoningEffort: 'none',
     fastMode: null,
-    geminiSearch: null,
-    globalGeminiSearch: 'native',
   }
 )
 
@@ -195,7 +189,6 @@ const emit = defineEmits<{
   'continue-group': []
   'trigger-interject': [characterId: string]
   'select-model': [option: any]
-  'update:reasoningEffort': [value: string | null]
   'update:fastMode': [value: boolean | null]
   'toggle-assistant': []
   'select-images': [files: File[]]
@@ -208,11 +201,9 @@ const emit = defineEmits<{
   'toggle-mvu-panel': []
   'focus-assistant-panel': []
   'update:webSearchEnabled': [value: boolean]
-  'update:geminiSearch': [value: GeminiSearchMode | null]
 }>()
 
 const mvuStore = useMvuStore()
-const settingsStore = useSettingsStore()
 const imageInputRef = ref<HTMLInputElement | null>(null)
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const showDraftHelperMenu = ref(false)
@@ -265,41 +256,6 @@ function onMvueFabClick(e: MouseEvent) {
 
 function toggleWebSearch() {
   emit('update:webSearchEnabled', !props.webSearchEnabled)
-}
-
-const composerProtocol = computed(() => {
-  const s = settingsStore.settings
-  if (!s) return 'auto'
-  const preset = props.currentPresetId
-    ? s.apiPresets.find((p) => p.id === props.currentPresetId && !isTtsApiPreset(p))
-    : s.apiPresets.find((p) => !isTtsApiPreset(p) && p.models.includes(props.currentModel))
-  return String(preset?.protocol ?? s.llm.protocol ?? 'auto')
-})
-
-const showGeminiSearchSource = computed(() => {
-  if (!props.webSearchEnabled) return false
-  const proto = composerProtocol.value.trim().toLowerCase()
-  if (proto === 'gemini_generate_content') return true
-  if (proto === 'auto' || proto === '') return /gemini/i.test(props.currentModel || '')
-  return false
-})
-
-const effectiveGeminiSearch = computed((): GeminiSearchMode => {
-  if (props.geminiSearch === 'native' || props.geminiSearch === 'independent') return props.geminiSearch
-  if (props.globalGeminiSearch === 'independent') return 'independent'
-  return 'native'
-})
-
-const isOverridingGeminiSearch = computed(
-  () => props.geminiSearch === 'native' || props.geminiSearch === 'independent',
-)
-
-function setGeminiSearch(value: GeminiSearchMode) {
-  emit('update:geminiSearch', value)
-}
-
-function clearGeminiSearchOverride() {
-  emit('update:geminiSearch', null)
 }
 
 function openImagePickerFromOverflow() {
@@ -615,13 +571,9 @@ const morphCssVars = computed(() => {
   } as Record<string, string>
 })
 
-/** 与叠层可见文案一致，并补充底部提示中的 Markdown 说明，供读屏 */
-const textareaAriaLabel = computed(() => {
-  if (showPlaceholderReveal.value) {
-    return `${ENHANCED_PLACEHOLDER_TEXT} Markdown 支持。`
-  }
-  return inputPlaceholder.value
-})
+const textareaAriaLabel = computed(() =>
+  showPlaceholderReveal.value ? ENHANCED_PLACEHOLDER_TEXT : inputPlaceholder.value
+)
 
 const textareaPlaceholderAttr = computed(() =>
   showPlaceholderReveal.value ? '' : inputPlaceholder.value
@@ -663,7 +615,7 @@ defineExpose({
     >
     <!-- 主输入区使用统一 surface-panel 玻璃层级，具体背景/模糊/边框由样式基座控制。 -->
     <div
-      class="chat-input-card-morph surface-panel relative z-0 p-3 flex flex-col gap-2 focus-within:border-brand-a40 focus-within:ring-1 focus-within:ring-[var(--color-focus-ring)]"
+      class="chat-input-card-morph surface-panel relative z-0 p-3 flex flex-col gap-2"
       style="opacity: 1;"
       @dragenter.prevent="handleDragEnter"
       @dragover.prevent="handleDragOver"
@@ -677,11 +629,11 @@ defineExpose({
         aria-hidden="true"
         @animationend="doneGlowKey = 0"
       />
-      <div v-if="draftHelperStatus" class="flex items-center justify-between gap-3 px-3 py-2 rounded-lg bg-[var(--color-border-subtle)] border border-[var(--color-border)]">
+      <div v-if="draftHelperStatus" class="flex items-center justify-between gap-3 px-3 py-2 rounded-lg bg-[var(--color-border-subtle)] light:bg-surface-muted border border-[var(--color-border)]">
         <div class="text-xs text-[var(--color-text-secondary)] min-w-0">{{ draftHelperStatusText }}</div>
         <button
           v-if="isDraftHelperRunning"
-          class="btn btn-xs btn-secondary border border-[var(--color-error)]/20 bg-[var(--color-error-bg)] text-[var(--color-error)] hover:opacity-90"
+          class="btn btn-xs btn-danger"
           @click="emit('draft-helper-stop')"
         >
           终止
@@ -695,16 +647,18 @@ defineExpose({
           <button class="btn btn-xs btn-secondary" @click="emit('draft-helper-discard')">放弃</button>
         </div>
       </div>
-      <div class="relative min-h-[80px]">
+      <div class="chat-draft-editor">
+      <div class="chat-draft-field chat-draft-measure work-area-scrollbar" aria-hidden="true">{{ (modelValue || '') + ' ' }}</div>
       <textarea
         ref="textareaRef"
+        rows="2"
         :value="modelValue"
         @input="handleInput"
         @paste="handlePaste"
         :placeholder="textareaPlaceholderAttr"
         :aria-label="textareaAriaLabel"
         :disabled="inputDisabled"
-        class="input textarea !bg-transparent !border-0 text-base resize-none min-h-[80px] w-full text-primary placeholder:text-muted"
+        class="input chat-draft-field chat-draft-textarea work-area-scrollbar !bg-transparent !border-0 resize-none w-full text-primary placeholder:text-muted"
         :class="inputDisabled ? 'opacity-50' : ''"
         @keydown="handleKeydown"
       ></textarea>
@@ -735,8 +689,10 @@ defineExpose({
         </div>
       </div>
       
-      <div class="flex min-w-0 items-center justify-between gap-2 pt-2 border-t border-[var(--color-border-subtle)]">
-          <div class="flex-1 min-w-0 h-8 flex items-center gap-2 overflow-x-auto">
+          <div
+            v-if="groupShowsRoundStatus || (isGroup && canInterject)"
+            class="flex min-w-0 min-h-7 flex-wrap items-center gap-2 px-2"
+          >
             <!-- 轮次 / 输出中：状态条 -->
             <template v-if="groupShowsRoundStatus">
               <div v-if="isGroup && isGenerating && currentSpeakerIndex >= 0" class="flex items-center gap-2 text-xs text-[var(--color-purple)] shrink-0">
@@ -789,56 +745,15 @@ defineExpose({
                     :size="22"
                     aspect="1"
                     rounded="rounded-lg"
-                    class="ring-2 ring-[var(--color-brand-a30)] hover:ring-[var(--color-brand-a50)]"
+                    class="dark-ui:ring-2 ring-[var(--color-brand-a30)] hover:ring-[var(--color-brand-a50)]"
                   />
                 </div>
               </div>
             </template>
           </div>
           
-          <div
-            v-if="showGeminiSearchSource"
-            class="flex min-w-0 flex-col gap-1.5 px-1"
-          >
-            <div class="flex items-center justify-between gap-2">
-              <span class="text-xs text-[var(--color-text-secondary)]">Gemini 搜索来源</span>
-              <button
-                v-if="isOverridingGeminiSearch"
-                type="button"
-                class="text-2xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
-                @click="clearGeminiSearchOverride"
-              >
-                恢复沿用全局
-              </button>
-            </div>
-            <div class="flex flex-wrap gap-1.5">
-              <button
-                type="button"
-                class="rounded-full px-2.5 py-1 text-2xs transition-colors"
-                :class="
-                  effectiveGeminiSearch === 'native'
-                    ? 'bg-brand-a20 text-brand ring-1 ring-[var(--color-brand-a40)]'
-                    : 'bg-surface-muted text-[var(--color-text-secondary)] hover:bg-surface-hover'
-                "
-                @click="setGeminiSearch('native')"
-              >
-                原生 Google Search
-              </button>
-              <button
-                type="button"
-                class="rounded-full px-2.5 py-1 text-2xs transition-colors"
-                :class="
-                  effectiveGeminiSearch === 'independent'
-                    ? 'bg-brand-a20 text-brand ring-1 ring-[var(--color-brand-a40)]'
-                    : 'bg-surface-muted text-[var(--color-text-secondary)] hover:bg-surface-hover'
-                "
-                @click="setGeminiSearch('independent')"
-              >
-                第三方（Tavily / 博查 / Brave）
-              </button>
-            </div>
-          </div>
-          <div class="flex min-w-0 shrink flex-wrap items-center gap-2">
+          <p v-if="isGenerating && webToolStatus" role="status" class="px-2 text-xs text-[var(--color-text-secondary)]">{{ webToolStatus }}</p>
+          <div class="flex min-w-0 flex-wrap items-center gap-2 pt-2 border-t border-[var(--color-border-subtle)]">
           <div class="flex items-center gap-0 shrink-0">
           <div ref="draftHelperMenuAnchorRef" class="relative">
             <button
@@ -859,7 +774,7 @@ defineExpose({
             >
               <button
                 type="button"
-                class="w-full text-left px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors text-[var(--color-text-secondary)] hover:bg-surface-muted"
+                class="select-option"
                 role="menuitem"
                 @click="triggerDraftHelper('write')"
               >
@@ -867,7 +782,7 @@ defineExpose({
               </button>
               <button
                 type="button"
-                class="w-full text-left px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors text-[var(--color-text-secondary)] hover:bg-surface-muted"
+                class="select-option"
                 role="menuitem"
                 @click="triggerDraftHelper('enhance')"
               >
@@ -881,11 +796,12 @@ defineExpose({
             class="chat-action-button shadow-lg transition-[transform,box-shadow] active:scale-95"
             :class="
               webSearchEnabled
-                ? 'bg-brand-a20 text-brand ring-2 ring-[var(--color-brand-a40)] border border-[var(--color-brand-a30)]'
+                ? 'bg-brand-a20 text-brand dark-ui:ring-2 ring-[var(--color-brand-a40)] border border-[var(--color-brand-a30)] light:border-transparent'
                 : 'chat-action-button--secondary'
             "
             :disabled="isGenerating && !showContinueButton"
-            aria-label="网络搜索：开启后每次发送启用，直至关闭；Gemini 可选手动选择原生 Google Search 或第三方 Tavily/博查/Brave；OpenAI Responses / Anthropic 仍走厂商原生联网"
+            aria-label="网络搜索"
+            :aria-pressed="webSearchEnabled"
             @click="toggleWebSearch"
           >
             <Globe class="w-4 h-4" />
@@ -920,13 +836,9 @@ defineExpose({
             >
               <button
                 type="button"
-                class="w-full px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors flex items-center justify-between gap-2"
-                :class="
-                  webSearchEnabled
-                    ? 'bg-brand-a20 text-brand hover:bg-brand-a30'
-                    : 'text-[var(--color-text-secondary)] hover:bg-surface-muted'
-                "
-                role="menuitem"
+                class="select-option"
+                role="menuitemcheckbox"
+                :aria-checked="webSearchEnabled"
                 @click="showComposerOverflowMenu = false; toggleWebSearch()"
               >
                 <span class="min-w-0 truncate text-left">网络搜索</span>
@@ -934,7 +846,7 @@ defineExpose({
               </button>
               <button
                 type="button"
-                class="w-full text-left px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors text-[var(--color-text-secondary)] hover:bg-surface-muted"
+                class="select-option"
                 role="menuitem"
                 @click="openImagePickerFromOverflow"
               >
@@ -952,24 +864,25 @@ defineExpose({
             class="hidden"
             @change="handleImageInputChange"
           />
-          <p v-if="isGenerating && webToolStatus" role="status" class="text-xs text-[var(--color-text-secondary)]">{{ webToolStatus }}</p>
-          <div class="min-w-0 max-w-[240px] grow basis-28">
+          <div class="ml-auto flex min-w-0 max-w-[18rem] flex-[1_1_10rem] items-center gap-2">
+          <div class="min-w-0 grow">
           <ModelControlPanel
+            :key="chatId"
             :current-model="currentModel"
             :current-preset-id="currentPresetId ?? null"
             :model-options="modelOptions"
             :reasoning-effort="reasoningEffort"
             :global-reasoning-effort="globalReasoningEffort"
+            :save-reasoning-effort="saveReasoningEffort"
             :fast-mode="fastMode"
             placement="top"
             class="min-w-0 w-full max-w-[240px]"
             @select-model="emit('select-model', $event)"
-            @update:reasoning-effort="emit('update:reasoningEffort', $event)"
             @update:fast-mode="emit('update:fastMode', $event)"
           />
           </div>
           <button
-            class="chat-action-button chat-action-button--morph ml-auto shrink-0 shadow-lg active:scale-95"
+            class="chat-action-button chat-action-button--morph shrink-0 shadow-lg active:scale-95"
             :class="[primaryActionClass, primaryActionDisabled ? 'opacity-50 cursor-not-allowed' : 'hover:shadow-brand hover:-translate-y-0.5']"
             :aria-label="primaryActionLabel"
             :disabled="primaryActionDisabled"
@@ -983,17 +896,17 @@ defineExpose({
       </div>
       <div
         v-show="isDragOverComposer"
-        class="pointer-events-none absolute inset-0 z-[21] rounded-2xl bg-[var(--color-brand-a20)] ring-1 ring-inset ring-[var(--color-brand-a40)] transition-opacity duration-150"
+        class="pointer-events-none absolute inset-0 z-[21] rounded-2xl bg-[var(--color-brand-a20)] dark-ui:ring-1 dark-ui:ring-inset ring-[var(--color-brand-a40)] transition-opacity duration-150"
         aria-hidden="true"
       />
     </div>
     </div>
-
     <div
-      class="chat-input-footer-hint relative z-0 text-center mt-2 text-xs text-[var(--color-text-muted)] pointer-events-none"
+      class="chat-input-footer-hint relative z-0 mt-2 text-center text-xs text-[var(--color-text-muted)] pointer-events-none"
       :class="sinkMorphed ? 'opacity-0' : 'opacity-100'"
+      :aria-hidden="sinkMorphed"
     >
-      Markdown 支持 · Ctrl + Enter 发送
+      Ctrl + Enter 发送
     </div>
     </div>
     
@@ -1021,7 +934,7 @@ defineExpose({
       <button
         v-if="mvuStore.isConnected"
         type="button"
-        class="chat-fab-surface w-12 h-12 rounded-xl font-bold shadow-lg transition-[transform,background-color,box-shadow] border border-[var(--color-border)] hover:scale-105 active:scale-95 flex items-center justify-center cursor-grab active:cursor-grabbing"
+        class="chat-fab-surface cursor-grab active:cursor-grabbing"
         aria-label="打开 MVU 工作日志"
         @pointerdown="assistantFabPointerDown"
         @pointermove="assistantFabPointerMove"
@@ -1033,7 +946,7 @@ defineExpose({
       </button>
     </div>
 
-    <Transition name="tts-top-bar-fade">
+    <Transition name="chat-toolbar-fade">
       <div
         v-if="showAgentTopBarControls"
         class="fixed z-[9] flex flex-col gap-2 pointer-events-none"
@@ -1061,11 +974,36 @@ defineExpose({
 @reference "tailwindcss";
 
 /* 组件特有样式，保持 scoped */
-.textarea {
-  scrollbar-width: none;
+.chat-draft-editor {
+  --chat-draft-line-height: 1.5;
+  position: relative;
+  font-size: var(--text-base);
+  min-height: calc(2 * var(--chat-draft-line-height) * 1em + 1rem);
+  max-height: min(12rem, 27dvh);
 }
-.textarea::-webkit-scrollbar {
-  display: none;
+
+.chat-draft-editor .chat-draft-field {
+  box-sizing: border-box;
+  padding: 0.5rem 0.75rem;
+  font-size: var(--text-base);
+  line-height: var(--chat-draft-line-height);
+  overflow-y: auto;
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
+  scrollbar-gutter: stable;
+}
+
+.chat-draft-measure {
+  visibility: hidden;
+  min-height: inherit;
+  max-height: inherit;
+}
+
+.chat-draft-textarea {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  min-height: 0;
 }
 
 /* 与 forms.css .input 内边距一致，叠层起点与原生 placeholder 对齐 */
@@ -1074,11 +1012,10 @@ defineExpose({
 }
 
 /*
- * 下沉：morph-wrap 用 translateY 下移（卡片 + 底部提示同相）；外壳用等量负 margin-top
+ * 下沉：morph-wrap 带着卡片和底部提示一起下移；外壳用等量负 margin-top
  * 上移布局，抵消 transform 不占流的空隙，避免与消息列表之间多出 sink-shift。
  * margin 的 transition 必须挂在壳基类上：仅写在 --sink 上时，侧栏展开去掉类后
  * 元素失去 transition，margin 会瞬间归零而 transform 仍在过渡，造成底部「截断」感。
- * --chat-input-sink-shift：略大于原 1.125rem，以盖住底部提示行（mt-2 + text-xs）并略有余量。
  */
 .chat-input-shell {
   --chat-input-sink-shift: 1.75rem;
@@ -1227,101 +1164,7 @@ defineExpose({
   visibility: hidden;
 }
 
-/* 与 TtsPlaybackFab .tts-top-bar-fade 同名，过渡时长一致 */
-.tts-top-bar-fade-enter-active,
-.tts-top-bar-fade-leave-active {
-  transition: opacity 0.22s cubic-bezier(0.25, 1, 0.5, 1);
-}
-
-.tts-top-bar-fade-enter-from,
-.tts-top-bar-fade-leave-to {
-  opacity: 0;
-}
-
-/* 小于 TTS 顶栏 chip，气质对齐 TtsPlaybackFab .tts-top-bar-btn */
-.agent-top-bar-btn {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  min-height: 1.75rem;
-  padding: 0.3rem 0.6rem;
-  border-radius: 0.75rem;
-  border: 1px solid var(--color-border-subtle);
-  background-color: var(--color-chrome-widget);
-  background-image: none;
-  color: var(--color-text-secondary);
-  font-size: var(--text-2xs);
-  line-height: 1;
-  cursor: pointer;
-  overflow: hidden;
-  box-shadow: var(--shadow-glass-panel);
-  transition:
-    background-color 200ms cubic-bezier(0.25, 1, 0.5, 1),
-    border-color 200ms cubic-bezier(0.25, 1, 0.5, 1),
-    color 200ms cubic-bezier(0.25, 1, 0.5, 1),
-    transform 180ms cubic-bezier(0.25, 1, 0.5, 1);
-  animation: agentTopBarSlideIn 0.38s cubic-bezier(0.25, 1, 0.5, 1) backwards;
-}
-
 .agent-top-bar-btn--after-tts {
   animation-delay: 0.14s;
-}
-
-.agent-top-bar-btn__glow {
-  position: absolute;
-  inset: 0;
-  opacity: 0.32;
-  pointer-events: none;
-  background-color: var(--color-brand-a20);
-}
-
-.agent-top-bar-btn__icon {
-  width: 0.875rem;
-  height: 0.875rem;
-  flex-shrink: 0;
-  color: var(--color-text);
-  position: relative;
-  z-index: 1;
-}
-
-.agent-top-bar-btn__label {
-  position: relative;
-  z-index: 1;
-  font-weight: 400;
-  letter-spacing: 0.04em;
-  color: var(--color-text);
-}
-
-.agent-top-bar-btn:hover {
-  background-color: var(--color-popover-surface);
-  border-color: var(--color-border);
-  color: var(--color-text);
-}
-
-.agent-top-bar-btn:active {
-  transform: scale(0.97);
-}
-
-@keyframes agentTopBarSlideIn {
-  from {
-    opacity: 0;
-    transform: translateY(-14px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .agent-top-bar-btn {
-    animation: none;
-  }
-
-  .tts-top-bar-fade-enter-active,
-  .tts-top-bar-fade-leave-active {
-    transition-duration: 0.01ms !important;
-  }
 }
 </style>

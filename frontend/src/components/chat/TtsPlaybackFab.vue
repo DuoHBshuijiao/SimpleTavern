@@ -254,7 +254,7 @@ defineExpose({ getRect: getTtsFabRect, setTtsTopPx: setTopPxFromSeparation })
       <button
         ref="queueBtnFabRef"
         type="button"
-        class="chat-fab-surface w-12 h-12 rounded-xl font-bold shadow-lg transition-[transform,background-color,box-shadow] border border-[var(--color-border)] hover:scale-105 active:scale-95 flex items-center justify-center cursor-pointer"
+        class="chat-fab-surface cursor-pointer"
         aria-label="打开 TTS 队列"
         @click="handleQueueAction"
       >
@@ -277,7 +277,7 @@ defineExpose({ getRect: getTtsFabRect, setTtsTopPx: setTopPxFromSeparation })
       <!-- 播放控制按钮 -->
       <button
         type="button"
-        class="chat-fab-surface w-12 h-12 rounded-xl font-bold shadow-lg transition-[transform,background-color,box-shadow] border border-[var(--color-border)] hover:scale-105 active:scale-95 flex items-center justify-center cursor-pointer"
+        class="chat-fab-surface cursor-pointer"
         :aria-label="isPlaying && !audioPaused ? '暂停播放' : '播放'"
         @click="handlePlayClick"
       >
@@ -297,7 +297,7 @@ defineExpose({ getRect: getTtsFabRect, setTtsTopPx: setTopPxFromSeparation })
     </div>
 
     <!-- 不挂 body：顶栏 TTS 条保持 z-9，低于 header 区域，避免挡「更多」菜单。队列面板单独 z-[11]，高于主内容壳 z-10，避免被消息气泡压住 -->
-    <Transition name="tts-top-bar-fade">
+    <Transition name="chat-toolbar-fade">
       <div
         v-if="showTopBarControls"
         class="tts-top-bar-stack fixed z-10 flex flex-col gap-2 pointer-events-none"
@@ -307,13 +307,13 @@ defineExpose({ getRect: getTtsFabRect, setTtsTopPx: setTopPxFromSeparation })
           <button
             ref="queueBtnTopRef"
             type="button"
-            class="tts-top-bar-btn tts-top-bar-btn--queue"
+            class="chat-toolbar-button chat-toolbar-button--animated tts-top-bar-btn--queue"
             aria-label="打开 TTS 队列"
             @click="handleTopQueueClick"
           >
-            <span class="tts-top-bar-btn__glow tts-top-bar-btn__glow--queue" aria-hidden="true" />
+            <span class="chat-toolbar-button-tint" aria-hidden="true" />
             <svg
-              class="tts-top-bar-btn__icon"
+              class="chat-toolbar-button-icon"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -326,28 +326,28 @@ defineExpose({ getRect: getTtsFabRect, setTtsTopPx: setTopPxFromSeparation })
               <polyline points="7 10 12 15 17 10" />
               <line x1="12" y1="15" x2="12" y2="3" />
             </svg>
-            <span class="tts-top-bar-btn__label">队列</span>
+            <span class="chat-toolbar-button-label">队列</span>
           </button>
           <button
             type="button"
-            class="tts-top-bar-btn tts-top-bar-btn--transport"
+            class="chat-toolbar-button chat-toolbar-button--animated tts-top-bar-btn--transport"
             :aria-label="isPlaying && !audioPaused ? '暂停播放' : '播放'"
             @click="handleTopPlayClick"
           >
-            <span class="tts-top-bar-btn__glow tts-top-bar-btn__glow--transport" aria-hidden="true" />
+            <span class="chat-toolbar-button-tint tts-top-bar-btn-tint--transport" aria-hidden="true" />
             <svg
               v-if="!(isPlaying && !audioPaused)"
-              class="tts-top-bar-btn__icon tts-icon--fill"
+              class="chat-toolbar-button-icon tts-icon--fill"
               viewBox="0 0 24 24"
               aria-hidden="true"
             >
               <polygon points="8 5 19 12 8 19 8 5" />
             </svg>
-            <svg v-else class="tts-top-bar-btn__icon tts-icon--fill" viewBox="0 0 24 24" aria-hidden="true">
+            <svg v-else class="chat-toolbar-button-icon tts-icon--fill" viewBox="0 0 24 24" aria-hidden="true">
               <rect x="6" y="5" width="4" height="14" rx="1" />
               <rect x="14" y="5" width="4" height="14" rx="1" />
             </svg>
-            <span class="tts-top-bar-btn__label">{{ isPlaying && !audioPaused ? '暂停' : '播放' }}</span>
+            <span class="chat-toolbar-button-label">{{ isPlaying && !audioPaused ? '暂停' : '播放' }}</span>
           </button>
         </div>
       </div>
@@ -461,104 +461,17 @@ defineExpose({ getRect: getTtsFabRect, setTtsTopPx: setTopPxFromSeparation })
   background: var(--color-text-muted);
 }
 
-/* 顶栏 chip：尺寸与 ChatInput Agent 胶囊一致 */
-.tts-top-bar-btn {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  min-height: 1.75rem;
-  padding: 0.3rem 0.6rem;
-  border-radius: 0.75rem;
-  border: 1px solid var(--color-border-subtle);
-  background: color-mix(in srgb, var(--color-surface-overlay) 88%, transparent);
-  color: var(--color-text-secondary);
-  font-size: var(--text-2xs);
-  line-height: 1;
-  cursor: pointer;
-  overflow: hidden;
-  box-shadow: var(--shadow-glass-panel);
-  transition:
-    background-color 200ms cubic-bezier(0.25, 1, 0.5, 1),
-    border-color 200ms cubic-bezier(0.25, 1, 0.5, 1),
-    color 200ms cubic-bezier(0.25, 1, 0.5, 1),
-    transform 180ms cubic-bezier(0.25, 1, 0.5, 1);
-  animation: ttsTopBarSlideIn 0.38s cubic-bezier(0.25, 1, 0.5, 1) backwards;
-}
-
-.tts-top-bar-btn--transport {
-  animation-delay: 0.07s;
-}
-
-.tts-top-bar-btn__glow {
-  position: absolute;
-  inset: 0;
-  opacity: 0.35;
-  pointer-events: none;
-}
-
-.tts-top-bar-btn__glow--queue {
-  background-color: var(--color-brand-a20);
-}
-
-.tts-top-bar-btn__glow--transport {
-  background-color: var(--color-purple-bg);
-}
-
-.tts-top-bar-btn__icon {
-  width: 0.875rem;
-  height: 0.875rem;
-  flex-shrink: 0;
-  color: var(--color-text);
-  position: relative;
-  z-index: 1;
-}
-
-.tts-top-bar-btn__label {
-  position: relative;
-  z-index: 1;
-  font-weight: 400;
-  letter-spacing: 0.04em;
-  color: var(--color-text);
-}
-
 .tts-top-bar-btn--queue {
   border-color: color-mix(in srgb, var(--color-border-subtle) 70%, var(--color-brand) 30%);
 }
 
 .tts-top-bar-btn--transport {
   border-color: color-mix(in srgb, var(--color-border-subtle) 72%, var(--color-purple) 28%);
+  animation-delay: 0.07s;
 }
 
-.tts-top-bar-btn:hover {
-  background: color-mix(in srgb, var(--color-surface-overlay) 96%, var(--color-border-subtle) 4%);
-  border-color: var(--color-border);
-  color: var(--color-text);
-}
-
-.tts-top-bar-btn:active {
-  transform: scale(0.97);
-}
-
-@keyframes ttsTopBarSlideIn {
-  from {
-    opacity: 0;
-    transform: translateY(-14px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.tts-top-bar-fade-enter-active,
-.tts-top-bar-fade-leave-active {
-  transition: opacity 0.22s cubic-bezier(0.25, 1, 0.5, 1);
-}
-
-.tts-top-bar-fade-enter-from,
-.tts-top-bar-fade-leave-to {
-  opacity: 0;
+.tts-top-bar-btn-tint--transport {
+  background-color: var(--color-purple-bg);
 }
 
 .tts-queue-panel-fade-enter-active,
@@ -572,12 +485,6 @@ defineExpose({ getRect: getTtsFabRect, setTtsTopPx: setTopPxFromSeparation })
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .tts-top-bar-btn {
-    animation: none;
-  }
-
-  .tts-top-bar-fade-enter-active,
-  .tts-top-bar-fade-leave-active,
   .tts-queue-panel-fade-enter-active,
   .tts-queue-panel-fade-leave-active {
     transition-duration: 0.01ms !important;
