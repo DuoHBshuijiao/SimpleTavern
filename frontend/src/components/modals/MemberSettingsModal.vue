@@ -32,6 +32,7 @@
  *    - 位置：组件层，提供成员设置编辑功能
  */
 import { X } from 'lucide-vue-next'
+import { computed, ref, watch } from 'vue'
 import type { GroupMemberSettings, CharacterCard } from '../../types/models'
 import { REASONING_EFFORT_OPTIONS } from '../../types/models'
 import ModernAvatar from '../ModernAvatar.vue'
@@ -96,15 +97,98 @@ function handleModelSelect(opt: { value: string; presetId?: string }) {
   })
 }
 
-/** 留空恢复默认 100%；0 是有效值，表示这名成员通常不发言 */
-function onProbabilityInput(event: Event) {
-  const raw = (event.target as HTMLInputElement).value
-  if (raw.trim() === '') {
-    updateField('probability', 1)
-    return
+const probabilityStops = 20
+const storedProbability = computed(() => props.settings.probability ?? 1)
+const probabilityDraft = ref('')
+const dragPreview = ref<number | null>(null)
+let probabilityPointer: number | null = null
+
+function clearProbabilityDrag() {
+  probabilityPointer = null
+  dragPreview.value = null
+}
+
+watch([() => props.show, () => props.memberId], () => {
+  probabilityDraft.value = String(storedProbability.value)
+  clearProbabilityDrag()
+}, { immediate: true })
+watch(storedProbability, (value) => { probabilityDraft.value = String(value) })
+
+function clampProbability(value: number) {
+  return Math.max(0, Math.min(1, value))
+}
+
+const typedProbability = computed(() => {
+  const text = probabilityDraft.value.trim()
+  return /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(text) ? Number(text) : null
+})
+const visibleProbability = computed(() => dragPreview.value ?? clampProbability(typedProbability.value ?? storedProbability.value))
+const probabilityPercent = computed(() => Math.round(visibleProbability.value * 100))
+
+function setProbability(value: number) {
+  const next = clampProbability(value)
+  probabilityDraft.value = String(next)
+  if (next !== storedProbability.value) updateField('probability', next)
+}
+
+/** 留空后离开输入框，恢复默认 100%。 */
+function commitProbabilityInput() {
+  setProbability(probabilityDraft.value.trim() ? typedProbability.value ?? storedProbability.value : 1)
+}
+
+function probabilityAtPointer(event: PointerEvent) {
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  return rect.width > 0 ? clampProbability((event.clientX - rect.left) / rect.width) : storedProbability.value
+}
+
+function snapProbability(value: number) {
+  return Math.round(value * probabilityStops) / probabilityStops
+}
+
+function startProbabilityDrag(event: PointerEvent) {
+  if (!event.isPrimary || event.button !== 0) return
+  const track = event.currentTarget as HTMLElement
+  track.focus({ preventScroll: true })
+  track.setPointerCapture(event.pointerId)
+  probabilityPointer = event.pointerId
+  dragPreview.value = snapProbability(probabilityAtPointer(event))
+}
+
+function moveProbabilityDrag(event: PointerEvent) {
+  if (event.pointerId === probabilityPointer) dragPreview.value = probabilityAtPointer(event)
+}
+
+function finishProbabilityDrag(event: PointerEvent) {
+  if (event.pointerId !== probabilityPointer) return
+  clearProbabilityDrag()
+  setProbability(snapProbability(probabilityAtPointer(event)))
+}
+
+function cancelProbabilityDrag(event: PointerEvent) {
+  if (event.pointerId === probabilityPointer) clearProbabilityDrag()
+}
+
+function onProbabilitySliderKeydown(event: KeyboardEvent) {
+  const position = storedProbability.value * probabilityStops
+  switch (event.key) {
+    case 'ArrowLeft':
+    case 'ArrowDown':
+      setProbability((Math.ceil(position - 1e-9) - 1) / probabilityStops)
+      break
+    case 'ArrowRight':
+    case 'ArrowUp':
+      setProbability((Math.floor(position + 1e-9) + 1) / probabilityStops)
+      break
+    case 'Home':
+      setProbability(0)
+      break
+    case 'End':
+      setProbability(1)
+      break
+    default:
+      return
   }
-  const value = parseFloat(raw)
-  if (Number.isFinite(value)) updateField('probability', Math.max(0, Math.min(1, value)))
+  event.preventDefault()
 }
 
 function clearBoundModel() {
@@ -131,6 +215,7 @@ void dialogRef
  * 触发save事件。
  */
 function save() {
+  commitProbabilityInput()
   emit('save')
 }
 
@@ -266,23 +351,39 @@ function setFast(v: string) {
             >
               <div class="flex items-center gap-3">
                 <input
-                  type="number"
-                  :value="settings.probability"
+                  type="text"
+                  inputmode="decimal"
+                  aria-label="参与概率"
+                  :value="dragPreview === null ? probabilityDraft : String(probabilityPercent / 100)"
                   class="input w-24"
-                  min="0"
-                  max="1"
-                  step="0.1"
-                  @input="onProbabilityInput"
+                  @input="probabilityDraft = ($event.target as HTMLInputElement).value"
+                  @blur="commitProbabilityInput"
                 />
-                <div class="flex-1">
-                  <div class="h-2 bg-[var(--color-surface-muted)] rounded-full overflow-hidden">
+                <div
+                  class="member-probability-slider flex h-8 min-w-0 flex-1 cursor-pointer touch-pan-y select-none items-center rounded-full"
+                  role="slider"
+                  tabindex="0"
+                  aria-label="参与概率滑条"
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                  :aria-valuenow="probabilityPercent"
+                  :aria-valuetext="`${probabilityPercent}%`"
+                  @pointerdown="startProbabilityDrag"
+                  @pointermove="moveProbabilityDrag"
+                  @pointerup="finishProbabilityDrag"
+                  @pointercancel="cancelProbabilityDrag"
+                  @lostpointercapture="cancelProbabilityDrag"
+                  @keydown="onProbabilitySliderKeydown"
+                >
+                  <div class="h-2 w-full bg-[var(--color-surface-muted)] rounded-full overflow-hidden">
                     <div
-                      class="h-full bg-[var(--color-success)] transition-[width] duration-[var(--motion-duration-expand)] ease-out"
-                      :style="{ width: `${(settings.probability ?? 1) * 100}%` }"
+                      class="h-full bg-[var(--color-success)]"
+                      :class="dragPreview === null ? 'motion-safe:transition-[width] duration-[var(--motion-duration-expand)] ease-out' : 'transition-none'"
+                      :style="{ width: `${visibleProbability * 100}%` }"
                     ></div>
                   </div>
                 </div>
-                <span class="text-sm text-muted w-12 text-right">{{ Math.round((settings.probability ?? 1) * 100) }}%</span>
+                <span class="text-sm text-muted w-12 text-right">{{ probabilityPercent }}%</span>
               </div>
             </SettingsField>
           </div>
