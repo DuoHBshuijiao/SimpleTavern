@@ -75,9 +75,27 @@ async def check_deepseek_tts(ctx):
         first = await wait_asset(ctx, chat_path, lambda item: item['id'] == tail_id)
         ctx.check('手动朗读绑定完整音频', bool(first) and ctx.mock_state.tts_calls[-1].get('voice_id') == 'stella', first)
 
-        configure('tide', 'assistant_only')
-        await dom.goto_app(page)
-        await dom.enter_chat(ctx, page, fixture)
+        await dom.settings_open(page)
+        await page.js("$click(document, '当前会话')")
+        await page.js("$click(document.querySelector('.drawer-panel'), '文字转语音')")
+        preset_trigger = "document.querySelector('button[role=combobox][aria-label=\"TTS 预设\"]')"
+        voice_label = 'DeepSeek 朗读测试角色的朗读音色'
+        voice_trigger = f"document.querySelector('button[role=combobox][aria-label=\"{voice_label}\"]')"
+        await page.wait_for(f"{preset_trigger}?.textContent.includes({json.dumps(preset['name'])})")
+        await page.js(f"{preset_trigger}.click()")
+        await page.wait_for("document.querySelector('[role=listbox][aria-label=\"TTS 预设\"] [aria-selected=true]')")
+        await page.key('Escape', 27)
+        await page.wait_for(f"{voice_trigger}?.textContent.includes('海星')")
+        for label in ('选择音色', '暗潮'):
+            await page.js(f"{voice_trigger}.scrollIntoView({{block:'center'}}); {voice_trigger}.click()")
+            option = (f"[...document.querySelectorAll('[role=listbox][aria-label=\"{voice_label}\"] [role=option]')]"
+                      f".find(option => option.textContent.trim() === {json.dumps(label)})")
+            await page.wait_for(option)
+            await page.js(f"{option}.click()")
+            await page.wait_for(f"{voice_trigger}?.textContent.trim() === {json.dumps(label)}")
+        await page.js("$click(document.querySelector('[role=radiogroup][aria-label=自动朗读范围]'), '角色')")
+        await page.js("$click(document, '保存设置')")
+        await page.wait_for('!$drawerOpen()')
         await page.js("$click($rows().at(-1),'朗读')")
         second = await wait_asset(ctx, chat_path, lambda item: item['id'] == tail_id, previous=first)
         ctx.check('切换成暗潮后手动朗读使用新的音频', bool(second) and ctx.mock_state.tts_calls[-1].get('voice_id') == 'tide', second)

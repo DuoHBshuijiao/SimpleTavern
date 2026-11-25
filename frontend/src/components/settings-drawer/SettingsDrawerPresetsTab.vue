@@ -3,7 +3,7 @@ import { computed, inject, onBeforeUnmount, ref, watch } from 'vue'
 import SubscriptionUsagePanel from './SubscriptionUsagePanel.vue'
 import { Eye, EyeOff, Loader2, X } from 'lucide-vue-next'
 import ModernSelect from '../ModernSelect.vue'
-import ThemedCheckbox from '../ThemedCheckbox.vue'
+import AudioPreviewPlayer from '../common/AudioPreviewPlayer.vue'
 import LlmPresetNameCombobox from '../LlmPresetNameCombobox.vue'
 import VertexServiceAccountFields from './VertexServiceAccountFields.vue'
 import LlmConnectionAdvancedSection from './LlmConnectionAdvancedSection.vue'
@@ -383,7 +383,7 @@ const authStyleOptions = computed(() => {
                             >试听</button>
                           </div>
                           <SettingsHint v-if="!presets.canPreviewDeepSeekVoice">填写 API Key 并保存设置后可试听。</SettingsHint>
-                          <audio v-if="previewUrl" :src="previewUrl" controls autoplay class="w-full" aria-label="音色试听" />
+                          <AudioPreviewPlayer v-if="previewUrl" :src="previewUrl" label="音色试听" autoplay />
                         </div>
                         <div v-else-if="presets.isTtsPreset(presets.editingPreset)" class="settings-group">
 
@@ -425,7 +425,7 @@ const authStyleOptions = computed(() => {
                               label="由程序启动"
                               :model-value="!!presets.editingPreset!.ttsQwen3LocalManaged"
                               hint="两个端口必须不同。"
-                              more="托管模式会启动两个 uvicorn：主端口加载 CustomVoice（仅 speaker → /v1/tts/custom_voice）；语音克隆端口加载 Base（参考音频+转写 → /v1/tts/voice_clone）。两端口必须不同；手动启动时需自行各启一个网关并填好 Base URL（主地址对应主端口）。"
+                              more="手动启动时，请分别启动预置音色和音色复刻网关，并填写各自端口。API 基础地址使用主端口。"
                               @update:model-value="presets.editingPreset!.ttsQwen3LocalManaged = $event"
                             />
                             <SettingsField label="设备">
@@ -452,7 +452,6 @@ const authStyleOptions = computed(() => {
                             <SettingsSwitch
                               label="由程序启动"
                               :model-value="!!presets.editingPreset!.ttsOmniVoiceLocalManaged"
-                              more="托管模式会执行 python -m uvicorn omnivoice.api.server:app --host 127.0.0.1 --port <port>，并通过环境变量传入模型与 device；后端调用 JSON 接口 /v1/tts。"
                               @update:model-value="presets.editingPreset!.ttsOmniVoiceLocalManaged = $event"
                             />
                             <SettingsField label="模型 ID / 路径">
@@ -471,7 +470,7 @@ const authStyleOptions = computed(() => {
                             <button
                               v-if="presets.editingPresetSupportsVoiceFetch"
                               type="button"
-                              class="text-xs text-brand hover:underline flex items-center gap-1 shrink-0"
+                              class="btn btn-xs btn-link shrink-0"
                               :disabled="presets.presetVoicesLoading"
                               @click="presets.openVoiceSelector(presets.editingPreset!)"
                             >
@@ -484,13 +483,13 @@ const authStyleOptions = computed(() => {
                             v-if="presets.editingPresetVoiceCatalog.length"
                             class="flex flex-wrap items-center gap-x-1 gap-y-0.5"
                           >
-                            <button type="button" class="min-h-0 rounded px-0.5 py-0 text-xs text-brand hover:underline" @click="presets.selectAllPresetVoices">全选</button>
+                            <button type="button" class="btn btn-xs btn-link" @click="presets.selectAllPresetVoices">全选</button>
                             <span class="select-none text-[var(--color-text-muted)]">·</span>
-                            <button type="button" class="min-h-0 rounded px-0.5 py-0 text-xs text-brand hover:underline disabled:pointer-events-none disabled:opacity-40" :disabled="presets.presetVoiceListSelection.size === 0" @click="presets.clearPresetVoiceSelection">清空选择</button>
+                            <button type="button" class="btn btn-xs btn-link" :disabled="presets.presetVoiceListSelection.size === 0" @click="presets.clearPresetVoiceSelection">清空选择</button>
                             <span class="select-none text-[var(--color-text-muted)]">·</span>
-                            <button type="button" class="min-h-0 rounded px-0.5 py-0 text-xs text-error/90 hover:underline disabled:pointer-events-none disabled:opacity-40" :disabled="presets.presetVoiceListSelection.size === 0" @click="presets.removeSelectedPresetVoices">删除所选</button>
+                            <button type="button" class="btn btn-xs btn-link text-error" :disabled="presets.presetVoiceListSelection.size === 0" @click="presets.removeSelectedPresetVoices">删除所选</button>
                             <span class="select-none text-[var(--color-text-muted)]">·</span>
-                            <button type="button" class="min-h-0 rounded px-0.5 py-0 text-xs text-error/90 hover:underline disabled:pointer-events-none disabled:opacity-40" :disabled="presets.editingPresetVoiceCatalog.length === 0" @click="presets.clearAllPresetVoices">清空全部</button>
+                            <button type="button" class="btn btn-xs btn-link text-error" :disabled="presets.editingPresetVoiceCatalog.length === 0" @click="presets.clearAllPresetVoices">清空全部</button>
                           </div>
 
                           <div class="drawer-scroll settings-readout max-h-[200px] overflow-y-auto custom-scrollbar">
@@ -499,8 +498,9 @@ const authStyleOptions = computed(() => {
                                 v-for="voice in presets.editingPresetVoiceCatalog"
                                 :key="voice.voiceId"
                                 type="button"
-                                class="group relative inline-flex max-w-full cursor-pointer items-center gap-1 rounded-md border border-[var(--color-border-subtle)] bg-surface-overlay/55 px-2 py-1 text-xs text-[var(--color-text-secondary)] backdrop-blur-[var(--glass-blur-soft)] transition-[box-shadow,border-color] hover:bg-surface-overlay/80"
-                                :class="presets.presetVoiceListSelection.has(voice.voiceId) ? 'ring-1 ring-brand/50 border-brand/35 shadow-[0_0_0_1px_color-mix(in_srgb,var(--color-brand)_25%,transparent)]' : ''"
+                                class="settings-item inline-flex max-w-full cursor-pointer items-center gap-1 text-xs hover:bg-surface-hover"
+                                :class="{ 'settings-item--selected': presets.presetVoiceListSelection.has(voice.voiceId) }"
+                                :aria-pressed="presets.presetVoiceListSelection.has(voice.voiceId)"
                                 @click="presets.togglePresetVoiceSelection(voice.voiceId)"
                               >
                                 <span class="min-w-0 truncate">{{ voice.name }}</span>
@@ -562,7 +562,7 @@ const authStyleOptions = computed(() => {
                               <input v-model="presets.qwen3LocalVoiceDraft.promptAudioPath" type="text" class="input w-full font-mono" placeholder="参考音频路径（克隆时填）" />
                               <input v-model="presets.qwen3LocalVoiceDraft.promptText" type="text" class="input w-full" placeholder="参考音频转写（克隆时填）" />
                               <input v-model="presets.qwen3LocalVoiceDraft.instruction" type="text" class="input w-full" placeholder="instruction（可选）" />
-                              <SettingsHint more="音色 ID 是唯一标识，没有参考音频时作为 speaker 传给 custom_voice。语音克隆时填写 wav/flac 文件的绝对路径，并推荐填写转写文本。参考音频与转写走第二端口上的 Base 网关（/voice_clone）；仅 speaker 走主端口 CustomVoice（/custom_voice）。instruction 仅在 custom_voice 模式下生效。">路径为本机绝对路径。</SettingsHint>
+                              <SettingsHint>复刻时填写本机 WAV 或 FLAC 文件的完整路径，建议附上转写。</SettingsHint>
                               <button
                                 type="button"
                                 class="btn btn-sm btn-primary w-full"
@@ -588,7 +588,7 @@ const authStyleOptions = computed(() => {
                               <input v-model="presets.omniVoiceLocalVoiceDraft.promptAudioPath" type="text" class="input w-full font-mono" placeholder="参考音频路径（可选）" />
                               <input v-model="presets.omniVoiceLocalVoiceDraft.promptText" type="text" class="input w-full" placeholder="参考音频转写（可选）" />
                               <input v-model="presets.omniVoiceLocalVoiceDraft.instruction" type="text" class="input w-full" placeholder="instruction（可选）" />
-                              <SettingsHint more="音色 ID 用于在会话里选择。优先级为：参考音频可读则走克隆（可附转写文本）；否则有 instruction / instruct 走音色设计；两者都留空时仅按文本自动生成音色。">优先走参考音频克隆，其次 instruction，都空则自动生成。</SettingsHint>
+                              <SettingsHint>提供参考音频可复刻音色，填写音色描述可设计音色。</SettingsHint>
                               <button
                                 type="button"
                                 class="btn btn-sm btn-primary w-full"
@@ -609,7 +609,7 @@ const authStyleOptions = computed(() => {
                           <template v-else-if="presets.editingPresetIsSiliconflow">
                             <div class="settings-group">
                               <div class="settings-label">硅基流动 · 上传参考音频</div>
-                              <SettingsHint more="需提供参考音频文件、与音频一致的转写文本，以及自定义音色名（对应官方 customName）；模型如 FunAudioLLM/CosyVoice2-0.5B。成功后返回的 uri 将写入音色列表。">需要参考音频、一致的转写文本和自定义音色名。</SettingsHint>
+                              <SettingsHint>选择参考音频，并填写音色名称和对应转写。</SettingsHint>
                               <div class="flex flex-wrap gap-2">
                                 <button type="button" class="btn btn-xs btn-secondary" @click="presets.pickTtsCloneSourceFile">选择参考音频</button>
                                 <span class="settings-hint">{{ presets.ttsCloneSourceFile?.name || '未选择文件' }}</span>
@@ -626,14 +626,13 @@ const authStyleOptions = computed(() => {
                               />
                               <textarea v-model="presets.ttsCloneDraft.previewText" rows="3" class="input textarea w-full resize-y" placeholder="参考音频对应文本（必填）"></textarea>
                               <button type="button" class="btn btn-sm btn-primary w-full" :disabled="presets.ttsCloneLoading" @click="presets.submitTtsClone">{{ presets.ttsCloneLoading ? '上传中...' : '上传并写入音色' }}</button>
-                              <audio v-if="presets.ttsClonePreviewUrl" :src="presets.ttsClonePreviewUrl" controls class="w-full"></audio>
+                              <AudioPreviewPlayer v-if="presets.ttsClonePreviewUrl" :src="presets.ttsClonePreviewUrl" label="复刻音色试听" />
                             </div>
-                            <SettingsHint more="硅基流动不提供与本应用内 MiniMax「音色设计」等价的云端接口。">可使用上方上传或模型预置音色。</SettingsHint>
                           </template>
 
                           <template v-else-if="presets.editingPresetIsOpenrouter">
-                            <SettingsHint more="OpenRouter TTS 不支持在本面板内上传参考音频。上游路由与偏好请在 OpenRouter 网站自行配置。">
-                              在上方「音色列表」填写模型要求的 voice，详见 <a href="https://openrouter.ai/docs" target="_blank" rel="noopener noreferrer" class="text-brand underline">OpenRouter 文档</a>。
+                            <SettingsHint>
+                              在音色列表填写模型所需的音色 ID。<a href="https://openrouter.ai/docs" target="_blank" rel="noopener noreferrer" class="text-brand underline">OpenRouter 文档</a>
                             </SettingsHint>
                           </template>
 
@@ -656,26 +655,19 @@ const authStyleOptions = computed(() => {
                                 :placeholder="presets.editingPresetTtsProvider === 'glm' ? '复刻模型（可选，默认 glm-tts-clone）' : '试听模型（可选）'"
                                 @select="(option) => { presets.ttsCloneDraft.model = option.value }"
                               />
-                              <textarea v-model="presets.ttsCloneDraft.previewText" rows="2" class="input textarea w-full resize-y" :placeholder="presets.editingPresetTtsProvider === 'glm' ? '试听文本（GLM 必填，留空则后端用默认试听文案）' : '试听文本（可选）'"></textarea>
+                              <textarea v-model="presets.ttsCloneDraft.previewText" rows="2" class="input textarea w-full resize-y" placeholder="试听文本（可选）"></textarea>
                               <div v-if="presets.editingPresetSupportsPromptAudio" class="flex flex-wrap gap-2">
                                 <button type="button" class="btn btn-xs btn-secondary" @click="presets.pickTtsClonePromptFile">选择示例音频</button>
                                 <span class="settings-hint">{{ presets.ttsClonePromptFile?.name || '可选' }}</span>
                               </div>
                               <input v-if="presets.editingPresetSupportsPromptAudio" :ref="presets.bindTtsClonePromptInput" type="file" class="hidden" accept=".mp3,.wav,.m4a" @change="presets.onTtsClonePromptChange" />
                               <input v-model="presets.ttsCloneDraft.promptText" type="text" class="input w-full" :placeholder="presets.editingPresetTtsProvider === 'glm' ? '示例音频文本（可选）' : '示例音频对应文本（可选）'" />
-                              <div v-if="presets.editingPresetSupportsPromptAudio" class="settings-hint flex flex-wrap gap-4">
-                                <button type="button" class="inline-flex items-center gap-2 transition-colors hover:text-[var(--color-text)]" @click="presets.ttsCloneDraft.needNoiseReduction = !presets.ttsCloneDraft.needNoiseReduction">
-                                  <ThemedCheckbox :checked="presets.ttsCloneDraft.needNoiseReduction" />
-                                  <span>降噪</span>
-                                </button>
-                                <button type="button" class="inline-flex items-center gap-2 transition-colors hover:text-[var(--color-text)]" @click="presets.ttsCloneDraft.needVolumeNormalization = !presets.ttsCloneDraft.needVolumeNormalization">
-                                  <ThemedCheckbox :checked="presets.ttsCloneDraft.needVolumeNormalization" />
-                                  <span>音量归一</span>
-                                </button>
-                              </div>
-                              <p v-if="presets.editingPresetTtsProvider === 'glm'" class="settings-hint">GLM 只用源音频作样本，不用示例音频和降噪、归一。</p>
+                              <template v-if="presets.editingPresetSupportsPromptAudio">
+                                <SettingsSwitch v-model="presets.ttsCloneDraft.needNoiseReduction" label="降噪" />
+                                <SettingsSwitch v-model="presets.ttsCloneDraft.needVolumeNormalization" label="音量归一" />
+                              </template>
                               <button type="button" class="btn btn-sm btn-primary w-full" :disabled="presets.ttsCloneLoading" @click="presets.submitTtsClone">{{ presets.ttsCloneLoading ? '复刻中...' : '复刻并试听' }}</button>
-                              <audio v-if="presets.ttsClonePreviewUrl" :src="presets.ttsClonePreviewUrl" controls class="w-full"></audio>
+                              <AudioPreviewPlayer v-if="presets.ttsClonePreviewUrl" :src="presets.ttsClonePreviewUrl" label="复刻音色试听" />
                             </div>
 
                             <div v-if="presets.editingPresetSupportsVoiceDesign" class="settings-group">
@@ -684,12 +676,9 @@ const authStyleOptions = computed(() => {
                               <textarea v-model="presets.ttsDesignDraft.previewText" rows="2" class="input textarea w-full resize-y" placeholder="试听文本"></textarea>
                               <input v-model="presets.ttsDesignDraft.voiceId" type="text" class="input w-full" placeholder="voice_id（可选，不填则自动生成）" />
                               <button type="button" class="btn btn-sm btn-primary w-full" :disabled="presets.ttsDesignLoading" @click="presets.submitTtsDesign">{{ presets.ttsDesignLoading ? '设计中...' : '生成并试听' }}</button>
-                              <audio v-if="presets.ttsDesignPreviewUrl" :src="presets.ttsDesignPreviewUrl" controls class="w-full"></audio>
+                              <AudioPreviewPlayer v-if="presets.ttsDesignPreviewUrl" :src="presets.ttsDesignPreviewUrl" label="设计音色试听" />
                             </div>
 
-                            <div v-else class="settings-hint">
-                              GLM TTS 暂不支持音色设计，当前仅支持音色列表、上传与音色复刻。
-                            </div>
                           </div>
                           </template>
                         </div>

@@ -3,21 +3,25 @@ import { computed, inject, ref } from 'vue'
 import type { AutoReadScope } from '../../types/models'
 import { SETTINGS_DRAWER_CHAT_KEY } from '../../composables/settingsDrawerChatKey'
 import ModernSelect from '../ModernSelect.vue'
-import ThemedCheckbox from '../ThemedCheckbox.vue'
+import ThemedRadioTags from '../ThemedRadioTags.vue'
 import TtsVoiceInput from '../TtsVoiceInput.vue'
 import SettingsDrawerGlobalAccordion from './SettingsDrawerGlobalAccordion.vue'
 import SettingsField from './SettingsField.vue'
 import SettingsHint from './SettingsHint.vue'
+import SettingsSwitch from './SettingsSwitch.vue'
 
 const chat = inject(SETTINGS_DRAWER_CHAT_KEY)!
 const open = ref(false)
 const isDeepSeek = computed(() => chat.selectedChatTtsProvider === 'deepseek')
+const voiceOptions = computed(() => [
+  { value: '', label: '选择音色' },
+  ...chat.availableTtsVoices.map((voice: { voiceId: string; name: string }) => ({ value: voice.voiceId, label: voice.name })),
+])
 
-const autoReadSlideIndex = computed(() => {
-  const scope = (chat.chatDraft?.tts?.autoReadScope ?? 'off') as AutoReadScope
-  const options = chat.TTS_AUTO_READ_OPTIONS as Array<{ value: AutoReadScope; label: string }>
-  return Math.max(0, options.findIndex((option) => option.value === scope))
-})
+function voiceSelection(value: string) {
+  return voiceOptions.value.some(option => option.value === value) ? value : ''
+}
+
 </script>
 
 <template>
@@ -26,19 +30,18 @@ const autoReadSlideIndex = computed(() => {
     <SettingsHint v-if="!chat.globalDraft.ttsEnabled">请先在“全局设置 → 文字转语音（TTS）”里开启 TTS，当前会话配置才会生效。</SettingsHint>
   <div
     class="flex flex-col gap-4"
-    :class="chat.globalDraft.ttsEnabled ? '' : 'opacity-55 pointer-events-none select-none'"
+    :class="chat.globalDraft.ttsEnabled ? '' : 'opacity-55'"
+    :inert="!chat.globalDraft.ttsEnabled"
   >
     <SettingsField label="TTS 预设">
-      <select
-        class="input w-full"
+      <ModernSelect
         aria-label="TTS 预设"
-        :value="chat.selectedChatTtsPreset?.id ?? ''"
+        :model-value="chat.selectedChatTtsPreset?.id ?? ''"
+        :options="chat.ttsPresetOptions"
+        :placeholder="chat.ttsPresetOptions.length ? '选择 TTS 预设...' : '请先添加 TTS 预设'"
         :disabled="chat.ttsPresetOptions.length === 0"
-        @change="chat.updateChatTtsPreset(($event.target as HTMLSelectElement).value)"
-      >
-        <option value="" disabled>请先添加 TTS 预设</option>
-        <option v-for="preset in chat.ttsPresetOptions" :key="preset.value" :value="preset.value">{{ preset.label }}</option>
-      </select>
+        @update:model-value="chat.updateChatTtsPreset"
+      />
     </SettingsField>
 
     <SettingsField v-if="!isDeepSeek" label="TTS 模型">
@@ -61,25 +64,13 @@ const autoReadSlideIndex = computed(() => {
     </SettingsField>
 
     <SettingsField label="自动朗读范围">
-      <div class="relative inline-flex w-full gap-1 rounded-lg bg-surface-muted p-1">
-        <div
-          class="pointer-events-none absolute left-1 top-1 bottom-1 rounded-md bg-brand shadow-sm transition-transform duration-[var(--motion-duration-moderate)] ease-out"
-          :style="{
-            width: 'calc((100% - 1.25rem) / 4)',
-            transform: `translateX(calc(${autoReadSlideIndex} * (100% + 0.25rem)))`,
-          }"
-        />
-        <button
-          v-for="option in chat.TTS_AUTO_READ_OPTIONS"
-          :key="option.value"
-          type="button"
-          class="relative z-10 min-h-[2.25rem] flex-1 rounded-md px-2 py-1 text-xs font-medium transition-colors duration-[var(--motion-duration-moderate)] ease-out"
-          :class="(chat.chatDraft.tts?.autoReadScope ?? 'off') === option.value ? 'text-[var(--color-on-brand)]' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'"
-          @click="chat.updateChatTtsAutoReadScope(option.value as AutoReadScope)"
-        >
-          {{ option.label }}
-        </button>
-      </div>
+      <ThemedRadioTags
+        :model-value="(chat.chatDraft.tts?.autoReadScope ?? 'off') as AutoReadScope"
+        :options="chat.TTS_AUTO_READ_OPTIONS"
+        aria-label="自动朗读范围"
+        stretch
+        @update:model-value="chat.updateChatTtsAutoReadScope"
+      />
     </SettingsField>
 
     <SettingsField label="朗读间隔（秒）">
@@ -94,22 +85,24 @@ const autoReadSlideIndex = computed(() => {
     </SettingsField>
 
     <SettingsField label="文本后处理">
-      <div class="settings-hint flex flex-wrap gap-4">
-        <button type="button" class="inline-flex items-center gap-2 transition-colors hover:text-[var(--color-text)]" @click="chat.updateChatTtsPreprocessEnabled(!(chat.chatDraft.tts?.preprocessEnabled === true))">
-          <ThemedCheckbox :checked="chat.chatDraft.tts?.preprocessEnabled === true" />
-          <span>启用文本后处理</span>
-        </button>
-        <button v-if="!isDeepSeek" type="button" class="inline-flex items-center gap-2 transition-colors hover:text-[var(--color-text)]" :disabled="!(chat.chatDraft.tts?.preprocessEnabled === true)" @click="chat.updateChatTtsInjectEmotionTags(!(chat.chatDraft.tts?.injectEmotionTags === true))">
-          <ThemedCheckbox :checked="chat.chatDraft.tts?.injectEmotionTags === true" :disabled="!(chat.chatDraft.tts?.preprocessEnabled === true)" />
-          <span>注入英文情绪标签</span>
-        </button>
-      </div>
+      <SettingsSwitch
+        label="启用文本后处理"
+        :model-value="chat.chatDraft.tts?.preprocessEnabled === true"
+        @update:model-value="chat.updateChatTtsPreprocessEnabled"
+      />
+      <SettingsSwitch
+        v-if="!isDeepSeek"
+        label="注入英文情绪标签"
+        :model-value="chat.chatDraft.tts?.injectEmotionTags === true"
+        :disabled="chat.chatDraft.tts?.preprocessEnabled !== true"
+        @update:model-value="chat.updateChatTtsInjectEmotionTags"
+      />
       <input
         v-if="chat.chatDraft.tts?.preprocessEnabled"
         type="text"
         class="input w-full"
         :value="chat.chatDraft.tts?.preprocessTargetLanguage ?? ''"
-        placeholder="后处理目标语言，例如 简体中文、English（留空则不翻译）"
+        placeholder="翻译成（可选）"
         @input="chat.updateChatTtsPreprocessTargetLanguage(($event.target as HTMLInputElement).value)"
       />
       <ModernSelect
@@ -123,8 +116,8 @@ const autoReadSlideIndex = computed(() => {
         :disabled="chat.ttsPreprocessModelOptions.length === 0"
         @select="chat.updateChatTtsPreprocessModel"
       />
-      <SettingsHint v-if="!isDeepSeek" more="后处理请求会以 JSON 发送 language、raw_text、inject_emotion_tags；目标语言同时写入提示词占位符。留空则不翻译。模型从普通文本预设里选。若开启「注入语气相关标签」，请确认当前 TTS 模型文档是否支持，否则可能产生异常或怪音。">
-        开启情绪标签前，请确认 TTS 模型支持，否则可能出现怪音。
+      <SettingsHint v-if="!isDeepSeek && chat.chatDraft.tts?.preprocessEnabled && chat.chatDraft.tts?.injectEmotionTags">
+        请确认朗读模型支持情绪标签。
       </SettingsHint>
     </SettingsField>
 
@@ -136,16 +129,14 @@ const autoReadSlideIndex = computed(() => {
           class="settings-item grid items-center gap-2 md:grid-cols-[minmax(0,11rem)_1fr]"
         >
           <div class="settings-label flex min-h-8 items-center">{{ row.name }}</div>
-          <select
+          <ModernSelect
             v-if="isDeepSeek"
-            class="input w-full"
             :aria-label="row.name + '的朗读音色'"
-            :value="chat.availableTtsVoices.some((voice: { voiceId: string }) => voice.voiceId === chat.getCharacterVoiceValue(row.id)) ? chat.getCharacterVoiceValue(row.id) : ''"
-            @change="chat.updateCharacterVoiceValue(row.id, ($event.target as HTMLSelectElement).value)"
-          >
-            <option value="">选择音色</option>
-            <option v-for="voice in chat.availableTtsVoices" :key="voice.voiceId" :value="voice.voiceId">{{ voice.name }}</option>
-          </select>
+            :model-value="voiceSelection(chat.getCharacterVoiceValue(row.id))"
+            :options="voiceOptions"
+            placeholder="选择音色"
+            @update:model-value="chat.updateCharacterVoiceValue(row.id, $event)"
+          />
           <TtsVoiceInput
             v-else
             :model-value="chat.getCharacterVoiceValue(row.id)"
@@ -166,16 +157,14 @@ const autoReadSlideIndex = computed(() => {
           class="settings-item grid items-center gap-2 md:grid-cols-[minmax(0,11rem)_1fr]"
         >
           <div class="settings-label flex min-h-8 items-center">{{ row.name }}</div>
-          <select
+          <ModernSelect
             v-if="isDeepSeek"
-            class="input w-full"
             :aria-label="row.name + '的朗读音色'"
-            :value="chat.availableTtsVoices.some((voice: { voiceId: string }) => voice.voiceId === chat.getPersonaVoiceValue(row.id)) ? chat.getPersonaVoiceValue(row.id) : ''"
-            @change="chat.updatePersonaVoiceValue(row.id, ($event.target as HTMLSelectElement).value)"
-          >
-            <option value="">选择音色</option>
-            <option v-for="voice in chat.availableTtsVoices" :key="voice.voiceId" :value="voice.voiceId">{{ voice.name }}</option>
-          </select>
+            :model-value="voiceSelection(chat.getPersonaVoiceValue(row.id))"
+            :options="voiceOptions"
+            placeholder="选择音色"
+            @update:model-value="chat.updatePersonaVoiceValue(row.id, $event)"
+          />
           <TtsVoiceInput
             v-else
             :model-value="chat.getPersonaVoiceValue(row.id)"

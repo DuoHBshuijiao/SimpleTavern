@@ -1,11 +1,10 @@
 ﻿<script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { ChevronDown, X } from 'lucide-vue-next'
 import type { ApiPresetVoice } from '../types/models'
+import SelectDropdownSurface from './SelectDropdownSurface.vue'
 
-/** 与模板中 gap 一致：top-[calc(100%+0.375rem)] */
 const DROPDOWN_GAP_PX = 6
-/** 对应原 max-h-56 */
 const PANEL_MAX_PX = 224
 const PANEL_MIN_PX = 96
 
@@ -25,6 +24,8 @@ const emit = defineEmits<{
 }>()
 
 const rootRef = ref<HTMLElement | null>(null)
+const toggleRef = ref<HTMLButtonElement | null>(null)
+const optionsRef = ref<HTMLElement | null>(null)
 const dropdownOpen = ref(false)
 /** 优先向下；空间不足时向上 */
 const dropdownPlacement = ref<'down' | 'up'>('down')
@@ -68,6 +69,7 @@ function bindPlacementListeners() {
   window.addEventListener('resize', onPlacementInvalidate)
   window.visualViewport?.addEventListener('resize', onPlacementInvalidate)
   window.addEventListener('scroll', onPlacementInvalidate, true)
+  document.addEventListener('keydown', handleDropdownEscape, true)
 }
 
 function unbindPlacementListeners() {
@@ -76,6 +78,7 @@ function unbindPlacementListeners() {
   window.removeEventListener('resize', onPlacementInvalidate)
   window.visualViewport?.removeEventListener('resize', onPlacementInvalidate)
   window.removeEventListener('scroll', onPlacementInvalidate, true)
+  document.removeEventListener('keydown', handleDropdownEscape, true)
 }
 
 const filteredVoices = computed(() => {
@@ -86,21 +89,27 @@ const filteredVoices = computed(() => {
   })
 })
 
-function handleDocumentPointerDown(event: PointerEvent) {
-  const root = rootRef.value
-  if (!root) return
-  if (event.target instanceof Node && root.contains(event.target)) return
+function handleDropdownEscape(event: KeyboardEvent) {
+  if (!dropdownOpen.value || event.key !== 'Escape') return
+  event.preventDefault()
+  event.stopImmediatePropagation()
   dropdownOpen.value = false
+  toggleRef.value?.focus({ preventScroll: true })
 }
 
-function toggleDropdown() {
+async function toggleDropdown(event: MouseEvent) {
   if (props.disabled) return
   dropdownOpen.value = !dropdownOpen.value
+  if (dropdownOpen.value && event.detail === 0) {
+    await nextTick()
+    optionsRef.value?.querySelector('button')?.focus({ preventScroll: true })
+  }
 }
 
 function chooseVoice(voiceId: string) {
   emit('update:modelValue', voiceId)
   dropdownOpen.value = false
+  toggleRef.value?.focus({ preventScroll: true })
 }
 
 function onInput(e: Event) {
@@ -113,12 +122,7 @@ function clearInput() {
   emit('update:modelValue', '')
 }
 
-onMounted(() => {
-  document.addEventListener('pointerdown', handleDocumentPointerDown)
-})
-
 onBeforeUnmount(() => {
-  document.removeEventListener('pointerdown', handleDocumentPointerDown)
   unbindPlacementListeners()
 })
 
@@ -147,7 +151,7 @@ watch(dropdownOpen, (open) => {
     <div class="absolute inset-y-1 right-1 flex items-center gap-0.5">
       <button
         type="button"
-        class="inline-flex h-full min-h-0 w-8 shrink-0 items-center justify-center rounded-md text-[var(--color-text-muted)] transition-colors hover:bg-surface-hover hover:text-[var(--color-text-secondary)] disabled:pointer-events-none disabled:opacity-40"
+        class="icon-button h-full w-8 shrink-0 disabled:pointer-events-none disabled:opacity-40"
         :disabled="disabled || !modelValue.trim()"
         aria-label="清空"
         @click.stop="clearInput"
@@ -155,34 +159,35 @@ watch(dropdownOpen, (open) => {
         <X class="h-4 w-4" stroke-width="2.5" />
       </button>
       <button
+        ref="toggleRef"
         type="button"
-        class="inline-flex h-full min-h-0 w-8 shrink-0 items-center justify-center rounded-md text-[var(--color-text-muted)] transition-colors hover:bg-surface-hover hover:text-[var(--color-text-secondary)]"
+        class="icon-button h-full w-8 shrink-0"
         :disabled="disabled"
         aria-label="展开音色列表"
+        :aria-expanded="dropdownOpen"
         @click="toggleDropdown"
       >
         <ChevronDown class="h-4 w-4" :class="dropdownOpen ? 'rotate-180' : ''" />
       </button>
     </div>
 
-    <div
-      v-if="dropdownOpen"
-      class="glass-l6 absolute left-0 right-0 z-30 overflow-hidden rounded-xl"
-      :class="
-        dropdownPlacement === 'down'
-          ? 'top-[calc(100%+0.375rem)] bottom-auto'
-          : 'bottom-[calc(100%+0.375rem)] top-auto'
-      "
+    <SelectDropdownSurface
+      v-model:open="dropdownOpen"
+      :anchor-ref="rootRef"
+      :auto-width="false"
+      :placement="dropdownPlacement === 'down' ? 'bottom' : 'top'"
+      :gap-px="DROPDOWN_GAP_PX"
     >
       <div
-        class="overflow-y-auto p-1 custom-scrollbar"
+        ref="optionsRef"
+        class="overflow-y-auto custom-scrollbar"
         :style="{ maxHeight: `${panelMaxHeightPx}px` }"
       >
         <button
           v-for="voice in filteredVoices"
           :key="voice.voiceId"
           type="button"
-          class="flex w-full items-start justify-between gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-surface-hover"
+          class="select-option items-start"
           @click="chooseVoice(voice.voiceId)"
         >
           <div class="min-w-0 flex-1">
@@ -195,6 +200,6 @@ watch(dropdownOpen, (open) => {
           暂无已获取音色
         </div>
       </div>
-    </div>
+    </SelectDropdownSurface>
   </div>
 </template>
