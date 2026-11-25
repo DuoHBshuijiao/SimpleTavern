@@ -199,15 +199,34 @@
 
   /* 主聊天可拖动 FAB（助手 / TTS）：统一中性底与悬停；助手色令牌保留在 variables 中但不在此使用 */
   .chat-fab-surface {
+    display: flex;
+    width: 3rem;
+    height: 3rem;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--color-glass-border);
+    border-radius: var(--radius-xl);
     background-color: var(--color-chat-dock);
     background-image: none;
     color: var(--color-text);
-    border-color: var(--color-glass-border);
     box-shadow: var(--shadow-glass-panel);
+    transition: scale var(--transition-fast), background-color var(--transition-fast), box-shadow var(--transition-fast);
   }
 
   .chat-fab-surface:hover {
     background-color: var(--color-glass-l5);
+    scale: 1.05;
+  }
+
+  .chat-fab-surface:active {
+    scale: 0.95;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .chat-fab-surface:hover,
+    .chat-fab-surface:active {
+      scale: 1;
+    }
   }
 
   /* TTS 队列等浮层：与 chat-fab-surface 同底与边框，无整容器悬停变色 */

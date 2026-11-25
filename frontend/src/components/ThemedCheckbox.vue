@@ -33,8 +33,8 @@ function onKeydown(event: KeyboardEvent) {
     :aria-checked="checked"
     :aria-label="ariaLabel"
     :disabled="disabled"
-    class="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus-ring)] disabled:cursor-not-allowed disabled:opacity-50"
-    :class="checked ? 'border-brand bg-brand text-[var(--color-on-brand)]' : 'border-[var(--color-border)] bg-surface-overlay text-transparent'"
+    class="themed-checkbox inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+    :class="checked ? 'border-brand light:border-transparent bg-brand text-[var(--color-on-brand)]' : 'border-[var(--color-border)] bg-surface-overlay text-transparent'"
     @click="toggle"
     @keydown="onKeydown"
   >

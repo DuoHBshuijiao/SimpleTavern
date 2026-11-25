@@ -17,7 +17,7 @@
  *    - 表单组：表单字段组容器
  *
  * 设计元素：
- *    - 基础输入框：深色表面背景，默认边框，焦点时品牌色边框和阴影
+ *    - 基础输入框：主题表面、默认边框和共用键盘焦点轮廓
  *    - 文本域：最小高度80px，可垂直调整大小
  *    - 复选框：自定义外观，选中时品牌色背景和白色勾选图标
  *    - 开关：深色轨道，白色滑块，激活时品牌色轨道，滑块右移
@@ -27,7 +27,7 @@
  *    - 表单错误：小字号，错误色文字
  *
  * 原理：
- *    - 输入框焦点效果：使用box-shadow实现品牌色光晕效果
+ *    - 编辑器焦点：轮廓由可见编辑区域承载
  *    - 复选框选中状态：使用background-image显示SVG勾选图标
  *    - 开关激活状态：使用transform translateX移动滑块位置
  *    - 范围滑块：使用 appearance:none 与伪元素统一轨道/拇指在各引擎下的表现
@@ -40,12 +40,6 @@
  */
 
 @layer components {
-  /* ========== 下拉选择框（主题适配，使用与 .input 相同的变量） ========== */
-  select.input option {
-    background-color: var(--app-color-surface);
-    color: var(--app-color-text);
-  }
-
   /* ========== 基础输入框 ========== */
   .input {
     width: 100%;
@@ -53,7 +47,7 @@
     font-size: var(--text-sm);
     line-height: 1.5;
     color: var(--color-text-primary);
-    background-color: var(--color-dark-surface);
+    background-color: var(--color-input-fill, var(--color-dark-surface));
     border: 1px solid var(--color-border-default);
     border-radius: var(--radius-lg);
     transition: 
@@ -70,10 +64,138 @@
     border-color: var(--color-border-strong);
   }
 
-  .input:focus {
+  .input[type='number'],
+  .input-number-value {
+    appearance: textfield;
+  }
+
+  .input-search::-webkit-search-cancel-button {
+    appearance: none;
+  }
+
+  .wgsl-monospace-editor:has(textarea:focus-visible) {
+    outline: 2px solid var(--color-focus-ring);
+    outline-offset: -2px;
+  }
+
+  :is(.input[type='number'], .input-number-value)::-webkit-inner-spin-button,
+  :is(.input[type='number'], .input-number-value)::-webkit-outer-spin-button {
+    appearance: none;
+    margin: 0;
+  }
+
+  .disclosure-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    list-style: none;
+  }
+
+  .disclosure-summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .disclosure-chevron {
+    color: var(--color-text-muted);
+    transition: transform var(--transition-fast);
+  }
+
+  details[open] > .disclosure-summary > .disclosure-chevron {
+    transform: rotate(180deg);
+  }
+
+  .select-trigger {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface-muted);
+    color: var(--color-text);
+    font-size: var(--text-sm);
+    text-align: left;
+    cursor: pointer;
+    box-shadow: var(--shadow-sm);
+    transition: background-color var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
+  }
+
+  .select-trigger:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--color-brand) 30%, transparent);
+    background-color: var(--color-surface-hover);
+  }
+
+  .select-trigger[aria-expanded='true'] {
+    background-color: var(--color-surface-selected);
+  }
+
+  .select-trigger[aria-expanded='true'][aria-activedescendant]:focus-visible {
+    /* DOM 焦点由触发器承接，轮廓跟随方向键指向的候选项。 */
     outline: none;
-    border-color: var(--color-brand);
-    box-shadow: 0 0 0 3px var(--color-focus-ring);
+  }
+
+  .select-trigger:disabled,
+  .select-option:disabled,
+  .select-option[aria-disabled='true'] {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .select-option {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: var(--radius-lg);
+    color: var(--color-text-secondary);
+    font-size: var(--text-sm);
+    text-align: left;
+    cursor: pointer;
+    transition: background-color var(--transition-fast), color var(--transition-fast);
+  }
+
+  .select-option:hover:not(:disabled, [aria-disabled='true'], [aria-selected='true'], [aria-checked='true'], [aria-pressed='true']) {
+    background-color: var(--color-surface-muted);
+  }
+
+  .select-option[aria-selected='true'],
+  .select-option[aria-checked='true'],
+  .select-option[aria-pressed='true'] {
+    background-color: color-mix(in srgb, var(--color-brand) 20%, transparent);
+    color: var(--color-brand);
+  }
+
+  .select-option[data-active='true'] {
+    outline: 2px solid var(--color-focus-ring);
+    outline-offset: -2px;
+  }
+
+  .image-preview-close {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    display: inline-flex;
+    width: 28px;
+    height: 28px;
+    align-items: center;
+    justify-content: center;
+    transform: scale(var(--preview-control-scale, 1));
+    transform-origin: top right;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-full);
+    background: var(--color-overlay-heavy);
+    color: var(--color-text);
+    transition: background-color var(--transition-fast);
+  }
+
+  .image-preview-close:hover {
+    background: var(--color-surface-hover);
   }
 
   .input:disabled {
@@ -164,6 +286,7 @@
   }
 
   .checkbox input[type="checkbox"] {
+    --checkbox-check-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z'/%3E%3C/svg%3E");
     appearance: none;
     width: 1rem;
     height: 1rem;
@@ -179,14 +302,14 @@
   .checkbox input[type="checkbox"]:checked {
     background-color: var(--color-brand);
     border-color: var(--color-brand);
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z'/%3E%3C/svg%3E");
+    background-image: var(--checkbox-check-image);
     background-size: 12px;
     background-position: center;
     background-repeat: no-repeat;
   }
 
   .checkbox input[type="checkbox"]:focus-visible {
-    outline: 2px solid var(--color-brand);
+    outline: 2px solid var(--color-focus-ring);
     outline-offset: 2px;
   }
 
@@ -354,5 +477,74 @@
 
   .form-group:last-child {
     margin-bottom: 0;
+  }
+}
+
+.select-dropdown {
+  background-color: var(--color-popover-surface);
+  background-image: none;
+}
+
+.select-dropdown-options {
+  background-color: color-mix(in srgb, var(--color-popover-surface) 72%, transparent);
+  background-image: none;
+}
+
+.select-dropdown-pop-enter-active,
+.select-dropdown-pop-leave-active {
+  transition:
+    transform 0.2s cubic-bezier(0.33, 1, 0.68, 1),
+    opacity 0.2s ease;
+}
+
+.select-dropdown-pop-enter-from.select-dropdown-pop--bottom,
+.select-dropdown-pop-leave-to.select-dropdown-pop--bottom {
+  transform: translateY(-0.5rem);
+  opacity: 0;
+}
+
+.select-dropdown-pop-enter-to.select-dropdown-pop--bottom,
+.select-dropdown-pop-leave-from.select-dropdown-pop--bottom {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+.select-dropdown-pop-enter-from.select-dropdown-pop--top,
+.select-dropdown-pop-leave-to.select-dropdown-pop--top {
+  transform: translateY(0.5rem);
+  opacity: 0;
+}
+
+.select-dropdown-pop-enter-to.select-dropdown-pop--top,
+.select-dropdown-pop-leave-from.select-dropdown-pop--top {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+.select-dropdown-pop-enter-from.select-dropdown-pop--sheet,
+.select-dropdown-pop-leave-to.select-dropdown-pop--sheet {
+  transform: translateY(1rem);
+  opacity: 0;
+}
+
+.select-dropdown-pop-enter-to.select-dropdown-pop--sheet,
+.select-dropdown-pop-leave-from.select-dropdown-pop--sheet {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .select-dropdown-pop-enter-active,
+  .select-dropdown-pop-leave-active {
+    transition: opacity 0.15s ease;
+  }
+
+  .select-dropdown-pop-enter-from.select-dropdown-pop--bottom,
+  .select-dropdown-pop-leave-to.select-dropdown-pop--bottom,
+  .select-dropdown-pop-enter-from.select-dropdown-pop--top,
+  .select-dropdown-pop-leave-to.select-dropdown-pop--top,
+  .select-dropdown-pop-enter-from.select-dropdown-pop--sheet,
+  .select-dropdown-pop-leave-to.select-dropdown-pop--sheet {
+    transform: none;
   }
 }

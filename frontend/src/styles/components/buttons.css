@@ -123,6 +123,13 @@
     background-color: var(--color-primary-action-active);
   }
 
+  :root[data-color-scheme='dark'] :is(.chat-action-button--primary, .settings-save-button) {
+    --color-primary-action: var(--color-brand);
+    --color-primary-action-hover: var(--color-brand-hover);
+    --color-primary-action-active: var(--color-brand-hover);
+    --color-on-brand: var(--color-surface);
+  }
+
   .btn-secondary {
     background-color: var(--color-dark-lighter);
     border-color: var(--color-border-default);
@@ -139,6 +146,122 @@
 
   .btn-ghost:hover:not(:disabled) {
     background-color: var(--color-surface-muted);
+  }
+
+  .btn-link {
+    min-height: 0;
+    padding: 0;
+    border-width: 0;
+    color: var(--color-brand);
+  }
+
+  .btn-link:hover:not(:disabled) {
+    transform: none;
+    text-decoration: underline;
+  }
+
+  .media-thumbnail-button {
+    display: block;
+    overflow: hidden;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    background-color: var(--color-surface-inset);
+  }
+
+  .chat-toolbar-button {
+    position: relative;
+    display: inline-flex;
+    min-height: 1.75rem;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.3rem 0.6rem;
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-lg);
+    background-color: var(--color-chrome-widget);
+    color: var(--color-text-secondary);
+    font-size: var(--text-2xs);
+    line-height: 1;
+    cursor: pointer;
+    transition:
+      background-color var(--transition-fast),
+      border-color var(--transition-fast),
+      color var(--transition-fast),
+      transform var(--transition-fast);
+  }
+
+  .chat-toolbar-button:hover:not(:disabled),
+  .chat-toolbar-button:focus-visible {
+    background-color: var(--color-popover-surface);
+    border-color: var(--color-border);
+    color: var(--color-text);
+  }
+
+  .chat-toolbar-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .chat-toolbar-button--animated {
+    overflow: hidden;
+    box-shadow: var(--shadow-glass-panel);
+    animation: chat-toolbar-slide-in 0.38s cubic-bezier(0.25, 1, 0.5, 1) backwards;
+  }
+
+  .chat-toolbar-button-tint {
+    position: absolute;
+    inset: 0;
+    opacity: 0.35;
+    pointer-events: none;
+    background-color: var(--color-brand-a20);
+  }
+
+  .chat-toolbar-button-icon,
+  .chat-toolbar-button-label {
+    position: relative;
+    z-index: 1;
+    color: var(--color-text);
+  }
+
+  .chat-toolbar-button-icon {
+    width: 0.875rem;
+    height: 0.875rem;
+    flex-shrink: 0;
+  }
+
+  .chat-toolbar-button-label {
+    letter-spacing: 0.04em;
+  }
+
+  @keyframes chat-toolbar-slide-in {
+    from { opacity: 0; transform: translateY(-14px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .chat-toolbar-fade-enter-active,
+  .chat-toolbar-fade-leave-active {
+    transition: opacity 0.22s cubic-bezier(0.25, 1, 0.5, 1);
+  }
+
+  .chat-toolbar-fade-enter-from,
+  .chat-toolbar-fade-leave-to {
+    opacity: 0;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .chat-toolbar-button:active:not(:disabled) {
+      transform: scale(0.97);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .chat-toolbar-button--animated {
+      animation: none;
+    }
+
+    .chat-toolbar-fade-enter-active,
+    .chat-toolbar-fade-leave-active {
+      transition-duration: 0.01ms;
+    }
   }
 
   /* 平时靠红字和淡底保持醒目，不发光；悬停才加深 */

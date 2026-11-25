@@ -494,7 +494,7 @@
   --color-surface-panel: var(--color-glass-l4);
   --color-surface-inset: var(--color-glass-l1);
   --color-surface-selected: color-mix(in srgb, var(--app-color-primary) 16%, transparent);
-  --color-focus-ring: color-mix(in srgb, var(--app-color-primary) 42%, transparent);
+  --color-focus-ring: var(--color-brand);
   --color-danger-hover: color-mix(in srgb, var(--app-color-error) 28%, transparent);
   --color-success-hover: color-mix(in srgb, var(--app-color-success) 28%, transparent);
   --color-warning-hover: color-mix(in srgb, var(--app-color-warning) 24%, transparent);
@@ -714,7 +714,7 @@
   --color-surface-panel: var(--color-glass-l4);
   --color-surface-inset: var(--color-glass-l1);
   --color-surface-selected: color-mix(in srgb, var(--app-color-primary) 16%, transparent);
-  --color-focus-ring: color-mix(in srgb, var(--app-color-primary) 42%, transparent);
+  --color-focus-ring: var(--color-brand);
   --color-danger-hover: color-mix(in srgb, var(--app-color-error) 28%, transparent);
   --color-success-hover: color-mix(in srgb, var(--app-color-success) 28%, transparent);
   --color-warning-hover: color-mix(in srgb, var(--app-color-warning) 24%, transparent);
@@ -756,30 +756,32 @@
   --color-reasoning-bubble-text: var(--app-color-text-muted);
 }
 
-/* 亮色共享中性表面，色系负责操作、选中与焦点。 */
+/* 桌面亮色表面与交互色，见 docs/specs/DESKTOP-LIGHT-THEME.md。 */
 :root[data-color-scheme="light"] {
   --native-color-scheme: light;
   --light-accent: #234e91;
   --app-color-primary: var(--light-accent);
-  --app-color-primary-hover: color-mix(in srgb, var(--light-accent) 85%, #17121b);
+  --app-color-primary-hover: color-mix(in srgb, var(--light-accent) 88%, var(--app-color-text));
   --app-color-brand-dark: var(--app-color-primary-hover);
   --app-color-brand-light: var(--light-accent);
-  --app-color-surface: color-mix(in srgb, #faf8f8 97%, var(--light-accent));
-  --app-color-surface-soft: color-mix(in srgb, #faf8f8 95%, var(--light-accent));
-  --app-color-surface-elevated: #fffdfe;
-  --app-dark-lighter: color-mix(in srgb, #fffdfe 94%, var(--light-accent));
-  --app-color-text: #251e29;
-  --app-color-text-muted: #554c5a;
-  --app-color-border: #756978;
-  --app-color-border-subtle: rgb(64 46 68 / 18%);
-  --app-color-border-strong: #67576b;
-  --app-surface-muted: color-mix(in srgb, var(--app-color-surface) 94%, var(--light-accent));
-  --app-surface-overlay: color-mix(in srgb, var(--app-color-surface) 93%, #514358);
-  --app-surface-hover: color-mix(in srgb, var(--app-color-surface) 88%, var(--light-accent));
-  --app-overlay: rgb(36 27 39 / 32%);
-  --app-overlay-heavy: rgb(36 27 39 / 50%);
-  --app-track: #887b8d;
-  --app-track-hover: #726478;
+  --app-color-surface: #f3f5f5;
+  --app-color-surface-soft: #f8fafa;
+  --app-color-surface-elevated: #ffffff;
+  --app-dark-lighter: #e9eeee;
+  --app-color-text: #20292b;
+  --app-color-text-muted: #536063;
+  --app-color-border: transparent;
+  --app-color-border-subtle: transparent;
+  --app-color-border-strong: transparent;
+  --app-surface-muted: var(--app-dark-lighter);
+  --app-surface-overlay: #eef2f2;
+  --app-surface-hover: #dce5e6;
+  --app-overlay: rgb(27 37 40 / 16%);
+  --app-overlay-heavy: rgb(27 37 40 / 28%);
+  --app-track: #68777a;
+  --app-track-hover: #4d5a5d;
+  --color-scrollbar-thumb: var(--app-track);
+  --color-scrollbar-hover: var(--app-track-hover);
   --app-color-success: #235e46;
   --app-color-success-bg: #e2efe7;
   --app-color-success-text: #204c3a;
@@ -789,28 +791,47 @@
   --app-color-error: #a12f42;
   --app-color-error-bg: #f8e5e8;
   --app-color-error-text: #862438;
-  --app-color-info: var(--light-accent);
-  --app-color-info-bg: color-mix(in srgb, #fffdfe 88%, var(--light-accent));
-  --app-color-info-text: var(--light-accent);
+  --app-color-info: #234e91;
+  --app-color-info-bg: #e4edf7;
+  --app-color-info-text: var(--app-color-info);
   --app-color-purple: #644291;
   --app-color-purple-bg: #efe7f6;
   --app-color-purple-text: #55337d;
   --app-color-assistant: #784359;
   --app-color-assistant-bg: #f3e7ed;
-  --app-shadow-light: 0 1px 3px rgb(38 25 43 / 14%);
-  --app-shadow-heavy: 0 8px 32px rgb(38 25 43 / 19%);
-  --app-shadow-brand: 0 6px 16px rgb(38 25 43 / 17%);
+
+  /* 透明阴影保留 Tailwind 的多重阴影组合语法。 */
+  --app-shadow-light: 0 0 transparent;
+  --app-shadow-heavy: 0 8px 24px rgb(25 45 49 / 12%);
+  --app-shadow-brand: 0 0 transparent;
+  --app-shadow-success: 0 0 transparent;
+  --app-shadow-error: 0 0 transparent;
+  --app-shadow-purple: 0 0 transparent;
+  --shadow-glass-l2: none;
+  --shadow-glass-l3: none;
+  --shadow-glass-l5: 0 16px 48px rgb(25 45 49 / 16%);
+  --shadow-glass-l6: 0 12px 32px rgb(25 45 49 / 18%);
+
   --color-primary-action: var(--app-color-primary);
   --color-primary-action-hover: var(--app-color-primary-hover);
-  --color-primary-action-active: color-mix(in srgb, var(--light-accent) 72%, #17121b);
-  --color-glass-l1: color-mix(in srgb, var(--app-color-surface) 92%, transparent);
-  --color-glass-l2: color-mix(in srgb, var(--app-color-surface-soft) 90%, transparent);
-  --color-glass-l3: color-mix(in srgb, var(--app-color-surface-soft) 96%, transparent);
-  --color-glass-l4: color-mix(in srgb, var(--app-color-surface-elevated) 96%, transparent);
+  --color-primary-action-active: color-mix(in srgb, var(--light-accent) 76%, var(--app-color-text));
+  --color-glass-l1: color-mix(in srgb, var(--app-surface-overlay) 96%, transparent);
+  --color-glass-l2: rgb(244 247 247 / 96%);
+  --color-glass-l3: color-mix(in srgb, var(--app-color-surface-soft) 98%, transparent);
+  --color-glass-l4: var(--color-glass-l3);
   --color-glass-l5: var(--app-color-surface-elevated);
-  --color-focus-ring: var(--app-color-primary);
+  --color-glass-l6: var(--app-color-surface-elevated);
+  --color-modal-backdrop: var(--app-overlay-heavy);
+  --color-settings-drawer-bg: var(--color-glass-l4);
+  --color-settings-panel-bg: var(--color-glass-l5);
+  --color-settings-control-bg: var(--color-settings-panel-bg);
+
+  --color-text-secondary: #4d5a5d;
+  --color-input-fill: var(--app-dark-lighter);
+  --color-surface-active: #cfdadd;
+  --color-surface-selected: color-mix(in srgb, var(--app-color-surface-elevated) 86%, var(--light-accent));
   --color-reasoning-bubble-bg: var(--app-color-surface-soft);
-  --color-user-message-bg: color-mix(in srgb, var(--app-color-surface-elevated) 89%, var(--light-accent));
+  --color-user-message-bg: color-mix(in srgb, var(--app-color-surface-elevated) 92%, var(--light-accent));
 }
 
 :root[data-color-scheme="light"][data-theme="green"] { --light-accent: #2b5846; }
@@ -819,6 +840,12 @@
 :root[data-color-scheme="light"][data-theme="amber"] { --light-accent: #744c20; }
 :root[data-color-scheme="light"][data-theme="rose"] { --light-accent: #774159; }
 :root[data-color-scheme="light"][data-theme="sunset"] { --light-accent: #62417b; }
+
+@media (forced-colors: active) {
+  :root[data-color-scheme] {
+    --color-focus-ring: Highlight;
+  }
+}
 
 .reasoning-bubble-surface {
   background-color: var(--color-reasoning-bubble-bg);

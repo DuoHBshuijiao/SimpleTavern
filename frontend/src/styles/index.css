@@ -71,3 +71,9 @@
 
 /* 8. 组件样式 */
 @import './components/index.css';
+
+/* 亮色共用组件与键盘状态规则。 */
+@import './light.css';
+
+@custom-variant light (&:where(:root[data-color-scheme='light'] *));
+@custom-variant dark-ui (&:where(:root:not([data-color-scheme='light']) *));

@@ -233,7 +233,7 @@ defineExpose({ scrollToLogicalLine })
 <template>
   <div
     ref="shellRef"
-    class="wgsl-monospace-editor flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-[var(--color-border-default)] bg-[var(--color-dark-surface)] transition-colors focus-within:border-[var(--color-brand)] focus-within:shadow-[0_0_0_3px_var(--color-brand-a15)]"
+    class="wgsl-monospace-editor flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-[var(--color-border-default)] bg-[var(--color-dark-surface)] transition-colors"
   >
     <div
       ref="scrollHostRef"

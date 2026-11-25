@@ -116,7 +116,7 @@
 
   /* ========== 焦点样式 ========== */
   :focus-visible {
-    outline: 2px solid var(--color-brand);
+    outline: 2px solid var(--color-focus-ring);
     outline-offset: 2px;
   }
 
