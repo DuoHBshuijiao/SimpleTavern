@@ -400,6 +400,9 @@ class _UpstreamHandler(BaseHTTPRequestHandler):
             if path == "/v1/chat/completions":
                 record.route = "openai"
                 return self._openai(record)
+            if path == "/v1/responses":
+                record.route = "openai_responses"
+                return self._openai_responses(record)
             if path == "/v1/tools/tts":
                 record.route = "deepseek_tts"
                 return self._deepseek_tts(record)
@@ -412,6 +415,30 @@ class _UpstreamHandler(BaseHTTPRequestHandler):
             self.close_connection = True
 
     # ----- 响应工具 -----
+    def _openai_responses(self, record):
+        body = record.json or {}
+        effort = (body.get("reasoning") or {}).get("effort")
+        efforts = ("none", "low", "medium", "high", "xhigh", "max")
+        if record.method != "POST" or body.get("model") != "gpt-6-luna":
+            return self._json(400, {"error": {"message": "Expected a GPT-6 Luna Responses request"}})
+        if effort is not None and effort not in efforts:
+            return self._json(400, {"error": {
+                "message": f"Unsupported value: {effort!r} for gpt-6-luna.",
+                "code": "unsupported_value",
+                "param": "reasoning.effort",
+                "type": "invalid_request_error",
+            }})
+        return self._json(200, {
+            "id": "resp-luna-fixture",
+            "status": "completed",
+            "output": [{
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "Luna 回复。", "annotations": []}],
+            }],
+            "usage": {"input_tokens": 11, "output_tokens": 7, "total_tokens": 18},
+        })
+
     def _deepseek_tts(self, record):
         body = record.json or {}
         if record.method != "POST" or record.headers.get("Authorization") != f"Bearer {self.upstream.api_key}":

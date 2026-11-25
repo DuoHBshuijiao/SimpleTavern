@@ -515,7 +515,7 @@ def _sanitize_extra_body(extra_body: dict[str, Any] | None) -> dict[str, Any]:
         reasoning["summary"] = "auto"
         out["reasoning"] = reasoning
     elif explicit_none:
-        # DeepSeek 默认开思考，关必须显式 none。GPT-6 Astra 等不接受 none：resolution 会省略 reasoning，走上面的分支。
+        # 对支持 none 的模型显式覆盖供应商默认档位。
         out["reasoning"] = {"effort": "none"}
 
     for key, value in extra_body.items():

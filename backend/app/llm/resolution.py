@@ -581,8 +581,8 @@ def build_request_extras(
     elif protocol == OPENAI_RESPONSES_PROTOCOL:
         if enabled:
             extra["reasoning"] = {"effort": effort}
-        elif is_deepseek:
-            # DeepSeek 默认开思考，关必须显式 none；GPT-6 Astra 等不接受 none，由省略 reasoning 关闭。
+        elif is_deepseek or (family == FAMILY_OPENAI and "none" in caps.efforts):
+            # 显式选择关闭，覆盖支持 none 的模型默认档位。
             extra["thinking"] = {"type": "disabled"}
             extra["reasoning"] = {"effort": "none"}
     elif protocol == GEMINI_GENERATE_CONTENT_PROTOCOL:

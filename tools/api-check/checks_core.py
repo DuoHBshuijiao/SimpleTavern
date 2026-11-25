@@ -897,6 +897,42 @@ def _(env):
     ensure(r.status_code == 200 and r.json().get("providerId") == "openai-codex", f"codex 地址解析成了 {r.json().get('providerId')!r}")
 
 
+@check("core.generate.luna_saved_effort", "GPT-6 Luna 旧会话的 minimal 通过正常生成路径降为 low")
+def core_luna_saved_effort(env):
+    saved = env.settings()
+    model = "gpt-6-luna"
+    try:
+        env.put_preset({"id": "core-luna", "name": "Luna 检查", "baseUrl": env.mock.url + "/v1",
+                        "apiKey": env.fixtures["openai_key"], "models": [model], "protocol": "openai_responses"})
+        env.set_stream(False)
+        env.mock.reset()
+        for stored, expected in (("minimal", "low"), ("none", "none"), ("xhigh", "xhigh"), ("max", "max")):
+            chat = env.new_chat("core-luna", model, reasoning=stored)
+            equal(env.read_chat(chat)["overrides"]["params"]["reasoningEffort"], stored, "生成前保留原存档档位")
+            result = env.generate(chat, USER_TEXT)
+            calls = env.mock.calls("openai_responses")
+            ensure(calls, f"生成应送达模拟 Responses 端点：{result.summary()}")
+            equal((calls[-1].json.get("reasoning") or {}).get("effort"), expected, f"存档 {stored} 对应的出站档位")
+            ensure(result.succeeded, result.summary())
+    finally:
+        env.api.json_ok("PUT", "/api/settings", json=saved)
+
+
+@check("core.catalog.luna_reasoning", "GPT-6 Luna 模型能力和订阅请求预览共用六档")
+def core_luna_reasoning(env):
+    model = {"model": "gpt-6-luna", "providerId": "openai-chatgpt", "baseUrl": "https://api.openai.com/v1"}
+    expected = ["none", "low", "medium", "high", "xhigh", "max"]
+    caps = env.api.json_ok("POST", "/api/llm/model-capabilities", json=model)
+    equal(caps["efforts"], expected, "模型能力档位")
+    preview = env.api.json_ok("POST", "/api/llm/resolve-preview", json={
+        **model, "protocol": "openai_responses", "reasoningEffort": "minimal", "promptCache": {"mode": "implicit"},
+    })
+    equal(preview["availableEfforts"], expected, "订阅预览可用档位")
+    equal(preview["effort"], "low", "订阅预览解析旧档位")
+    ensure(not any(a["type"] == "cache_mode_downgraded" for a in preview["adjustments"]),
+           "缓存策略保持隐式时无变更提示")
+
+
 @check("core.no_external_network", "核心检查期间后端没有访问外网模型服务")
 def _(env):
     hosts = [h for h in env.mock.proxy_attempts if any(word in h for word in ("amazonaws", "googleapis", "mistral", "anthropic", "openai"))]

@@ -471,7 +471,7 @@ export const REASONING_EFFORT_OPTIONS: Array<{ label: string; value: ReasoningEf
   { label: 'medium（中）', value: 'medium' },
   { label: 'high（高）', value: 'high' },
   { label: 'extra high（极高）', value: 'xhigh' },
-  { label: 'max（上限）', value: 'max' },
+  { label: 'Max', value: 'max' },
 ]
 
 /** 聊天面板用的短标签 */
@@ -482,7 +482,7 @@ export const REASONING_EFFORT_SHORT_LABELS: Record<ReasoningEffort, string> = {
   medium: '中',
   high: '高',
   xhigh: '极高',
-  max: '上限',
+  max: 'Max',
 }
 
 /** 将旧版 dark/light 与非法值归一为受支持的主题 ID */

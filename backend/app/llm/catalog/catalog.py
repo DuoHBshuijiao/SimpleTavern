@@ -69,6 +69,12 @@ _FAMILY_FAST_MODE: dict[str, str | None] = {
 _STRIP_SUFFIX_RE = re.compile(r":(free|beta|extended|nitro|floor|online|exacto|thinking)$", re.IGNORECASE)
 _DATE_SUFFIX_RE = re.compile(r"[-@](20\d{2}-?\d{2}-?\d{2}|20\d{6})$")
 
+# 官方模型档位补充，优先于目录快照及家族推断。
+# https://developers.openai.com/api/docs/models/gpt-6-luna
+_MODEL_REASONING_EFFORTS: dict[str, tuple[str, ...]] = {
+    "gpt-6-luna": ("none", "low", "medium", "high", "xhigh", "max"),
+}
+
 # 目录快照尚未收录的新模型 → 复用同代模型能力（正则 → 归一化 key）。
 # DeepSeek 官方：deepseek-chat / deepseek-reasoner 已下线；V4.1 Flash 2026-09-10 前后发布，接口与 V4 一致。
 _MODEL_ALIAS_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
@@ -542,6 +548,8 @@ class LlmCatalog:
         """返回模型能力；无元数据时按家族给默认值（``source=heuristic``）。"""
         model_id = (model or "").strip()
         family = model_family_from_id(model_id)
+        model_key = _DATE_SUFFIX_RE.sub("", _model_key_without_vendor(normalize_model_key(model_id)))
+        documented_efforts = _MODEL_REASONING_EFFORTS.get(model_key)
         if provider_id is None and base_url:
             entry = self.find_provider_by_base_url(base_url)
             provider_id = entry.id if entry else None
@@ -558,7 +566,7 @@ class LlmCatalog:
             or_efforts = tuple(or_entry.get("supportedEfforts") or ())
 
         if raw is not None:
-            efforts = tuple(raw.get("efforts") or ()) or or_efforts
+            efforts = documented_efforts or tuple(raw.get("efforts") or ()) or or_efforts
             modes = dict(raw.get("modes") or {})
             provider_entry = self.find_provider(provider_id) if provider_id else None
             fast_kind = provider_entry.fast_mode if provider_entry else _FAMILY_FAST_MODE.get(family)
@@ -569,7 +577,7 @@ class LlmCatalog:
                 family=family,
                 provider_id=pid,
                 name=raw.get("name"),
-                reasoning=bool(raw.get("reasoning")),
+                reasoning=bool(documented_efforts or raw.get("reasoning")),
                 efforts=efforts,
                 reasoning_toggle=bool(raw.get("reasoningToggle")),
                 temperature=raw.get("temperature", True) is not False,
@@ -578,10 +586,10 @@ class LlmCatalog:
                 modes=modes,
                 supported_parameters=supported_params,
                 release_date=raw.get("releaseDate"),
-                source="models_dev",
+                source="official" if documented_efforts else "models_dev",
             )
 
-        efforts = or_efforts or _FAMILY_DEFAULT_EFFORTS.get(family, ())
+        efforts = documented_efforts or or_efforts or _FAMILY_DEFAULT_EFFORTS.get(family, ())
         modes: dict[str, Any] = {}
         fast_kind = _FAMILY_FAST_MODE.get(family)
         if fast_kind and _family_default_fast(family, model_id):
@@ -594,7 +602,7 @@ class LlmCatalog:
             efforts=efforts,
             reasoning_toggle=family == FAMILY_CN_BEST_EFFORT,
             supported_parameters=supported_params,
-            source="openrouter" if or_entry else "heuristic",
+            source="official" if documented_efforts else ("openrouter" if or_entry else "heuristic"),
         )
 
     def to_public_dict(self) -> dict[str, Any]:
