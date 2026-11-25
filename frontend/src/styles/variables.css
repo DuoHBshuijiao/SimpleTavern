@@ -575,6 +575,7 @@
   --motion-duration-normal: 200ms;
   --motion-duration-moderate: 250ms;
   --motion-duration-expand: 280ms;
+  --chat-assistant-panel-width: 360px;
   --motion-ease-product: var(--ease-out-product);
   
   /* ========== 字体 ========== */

@@ -1,5 +1,5 @@
 ﻿<script setup lang="ts">
-import { X, Sparkles, MoreHorizontal, GripVertical, Check, Plus, Globe } from 'lucide-vue-next'
+import { X, Settings, GripVertical, Check, Plus, Globe } from 'lucide-vue-next'
 import type { AssistantAttachment, CharacterCard, MvuMode } from '../../types/models'
 import ModernAvatar from '../ModernAvatar.vue'
 import ModernSelect from '../ModernSelect.vue'
@@ -7,10 +7,11 @@ import SettingsField from '../settings-drawer/SettingsField.vue'
 import SettingsSwitch from '../settings-drawer/SettingsSwitch.vue'
 import SettingsHint from '../settings-drawer/SettingsHint.vue'
 import { MvuCapabilityEditor, AssistantThread } from '../chat'
+import AssistantEmptyState from '../chat/AssistantEmptyState.vue'
 import { useDialogBehavior } from '../../composables/useDialogBehavior'
 import { dialogAria } from '../../utils/uiPrimitives'
 import { useCharacterEditor } from '../../composables/useCharacterEditor'
-import type { ComponentPublicInstance } from 'vue'
+import { ref, type ComponentPublicInstance } from 'vue'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ModelOption = any
@@ -80,6 +81,10 @@ const {
 defineExpose({ reloadWorldbooks: loadCharacterEditorWorldbooks })
 
 const titleId = 'character-editor-title'
+const modelSelectRef = ref<InstanceType<typeof ModernSelect> | null>(null)
+function openModelSelect(event: MouseEvent) {
+  modelSelectRef.value?.open(event)
+}
 const dialogAttrs = dialogAria(titleId)
 const { dialogRef } = useDialogBehavior(
   () => props.show,
@@ -123,6 +128,7 @@ void dialogRef
                   <div class="flex shrink-0 flex-col items-center gap-3">
                     <ModernAvatar
                       :src="avatarUrl"
+                      :name="character.name"
                       :size="120"
                       aspect="auto"
                       object-fit="cover"
@@ -136,7 +142,7 @@ void dialogRef
                     <SettingsField label="名称">
                       <input v-model="character.name" class="input w-full" placeholder="角色名称" />
                     </SettingsField>
-                    <SettingsField label="简介" hint="不参与对话。">
+                    <SettingsField label="展示简介">
                       <textarea v-model="character.description" class="input textarea h-20 w-full" placeholder="简短描述"></textarea>
                     </SettingsField>
                   </div>
@@ -220,7 +226,7 @@ void dialogRef
                           </button>
                           <button
                             type="button"
-                            class="shrink-0 inline-flex h-7 w-7 items-center justify-center rounded text-[var(--color-text-muted)] hover:bg-surface-muted hover:text-[var(--color-text)]"
+                            class="icon-button h-7 w-7 shrink-0"
                             aria-label="从列表移除此条"
                             @click.stop="removeExtraFirstMessageAt(entry.index)"
                           >
@@ -301,7 +307,7 @@ void dialogRef
           </div>
 
           <div
-            class="flex min-h-0 min-w-0 flex-col glass-panel rounded-2xl p-4 shadow-inner"
+            class="flex min-h-0 min-w-0 flex-col glass-panel rounded-2xl p-4 dark-ui:shadow-inner light:shadow-none"
             :class="
               isNarrowPortrait
                 ? 'min-h-[28rem] h-[min(36rem,72vh)] shrink-0 max-h-[min(576px,72vh)]'
@@ -313,20 +319,20 @@ void dialogRef
                 <span class="w-2 h-2 rounded-full bg-brand animate-pulse"></span>
                 聊天助手
               </span>
-              <button class="text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors" @click="emit('open-assistant-settings')">
-                <MoreHorizontal class="w-4 h-4" />
+              <button type="button" class="icon-button p-1" aria-label="聊天助手设置" title="聊天助手设置" @click="emit('open-assistant-settings')">
+                <Settings class="w-4 h-4" />
               </button>
             </div>
             <div
               :ref="bindWorkspaceMessagesListRef"
               class="min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-auto custom-scrollbar space-y-4 pr-2 mb-4"
             >
-              <div v-if="assistant.workspaceAssistantMessages.value.length === 0" class="text-xs text-[var(--color-text-muted)] text-center py-12 flex flex-col items-center gap-3">
-                <div class="w-12 h-12 rounded-full bg-surface-muted flex items-center justify-center text-xl">
-                  <Sparkles class="w-6 h-6 text-[var(--color-warning)]" />
-                </div>
-                开始和助手对话以完善你的角色卡
-              </div>
+              <AssistantEmptyState
+                v-if="!assistant.workspaceAssistantMessages.value.length && !assistant.isWorkspaceAssistantGenerating.value"
+                scope="workspace"
+                :has-model="!!assistantCurrentModel"
+                @select-model="openModelSelect"
+              />
               <AssistantThread
                 :messages="assistant.workspaceAssistantMessages.value"
                 :is-generating="assistant.isWorkspaceAssistantGenerating.value"
@@ -350,26 +356,24 @@ void dialogRef
                   type="button"
                   disabled
                   aria-label="记忆写入，仅聊天会话中可用"
-                  class="text-xs px-2.5 py-1 rounded-lg border cursor-not-allowed opacity-50 border-[var(--color-border-subtle)] text-[var(--color-text-muted)]"
+                  class="btn btn-xs btn-secondary"
                 >
                   记忆写入
                 </button>
                 <button
                   type="button"
-                  class="text-xs px-2.5 py-1 rounded-lg border transition-colors"
-                  :class="assistant.allowDestructiveToolsEnabled.value
-                    ? 'bg-[var(--color-warning-bg)] border-[color-mix(in_srgb,var(--color-warning)_50%,transparent)] text-[var(--color-warning-text)]'
-                    : 'border-[var(--color-border-subtle)] text-[var(--color-text-muted)]'"
+                  class="btn btn-xs"
+                  :class="assistant.allowDestructiveToolsEnabled.value ? 'btn-danger' : 'btn-secondary'"
+                  :aria-pressed="assistant.allowDestructiveToolsEnabled.value"
                   @click="assistant.toggleAllowDestructiveTools"
                 >
                   破坏性工具
                 </button>
                 <button
                   type="button"
-                  class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg border transition-colors"
-                  :class="assistant.allowWebSearchEnabled.value
-                    ? 'bg-brand/15 border-brand/50 text-brand-foreground'
-                    : 'border-[var(--color-border-subtle)] text-[var(--color-text-muted)]'"
+                  class="btn btn-xs"
+                  :class="assistant.allowWebSearchEnabled.value ? 'btn-primary' : 'btn-secondary'"
+                  :aria-pressed="assistant.allowWebSearchEnabled.value"
                   @click="assistant.toggleAllowWebSearch"
                 >
                   <Globe class="h-3 w-3" />
@@ -386,7 +390,7 @@ void dialogRef
                     <img :src="buildAssistantAttachmentUrl('workspace', attachment)" :alt="getAssistantAttachmentLabel(attachment)" class="h-full w-full object-cover" />
                     <button
                       type="button"
-                      class="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full border border-[var(--color-border-subtle)] bg-overlay-heavy text-[var(--color-text)]"
+                      class="icon-button absolute right-1 top-1 h-5 w-5 rounded-full bg-overlay-heavy text-[var(--color-text)]"
                       aria-label="移除图片附件"
                       @click="assistant.removeDraftAttachment('workspace', attachment.id)"
                     >
@@ -396,7 +400,7 @@ void dialogRef
                   <button
                     v-else
                     type="button"
-                    class="group relative flex max-w-[220px] items-start gap-2 rounded-xl border border-[var(--color-border)] bg-surface-muted px-3 py-2 text-left"
+                    class="btn btn-secondary group relative max-w-[220px] items-start px-3 py-2 text-left"
                     @click="assistant.removeDraftAttachment('workspace', attachment.id)"
                   >
                     <span class="rounded bg-surface-overlay px-1.5 py-0.5 text-2xs font-semibold uppercase text-[var(--color-text-secondary)]">{{ getAssistantAttachmentExt(attachment) }}</span>
@@ -416,11 +420,13 @@ void dialogRef
               ></textarea>
               <div class="flex items-center justify-between mt-3 gap-3">
                 <ModernSelect
+                  ref="modelSelectRef"
                   :model-value="assistantCurrentModel"
                   :selected-preset-id="assistant.assistantSettings.value.presetId ?? null"
                   :options="chatModelOptions"
                   placement="top"
-                  placeholder="模型..."
+                  placeholder="选择模型…"
+                  aria-label="助手模型"
                   class="!w-[160px] !text-xs"
                   dropdown-width="410"
                   searchable
@@ -437,7 +443,7 @@ void dialogRef
               </div>
               <div
                 v-show="isWorkspaceAssistantDragOver"
-                class="pointer-events-none absolute inset-0 z-[21] rounded-xl bg-[var(--color-brand-a20)] backdrop-blur-[var(--glass-blur-soft)] ring-1 ring-inset ring-[var(--color-brand-a40)] transition-opacity duration-150"
+                class="pointer-events-none absolute inset-0 z-[21] rounded-xl bg-[var(--color-brand-a20)] backdrop-blur-[var(--glass-blur-soft)] dark-ui:ring-1 dark-ui:ring-inset ring-[var(--color-brand-a40)] transition-opacity duration-150"
                 aria-hidden="true"
               />
             </div>

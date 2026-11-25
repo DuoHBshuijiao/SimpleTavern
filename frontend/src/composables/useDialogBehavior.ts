@@ -6,6 +6,7 @@ interface UseDialogBehaviorOptions {
   closeOnEscape?: boolean
   autoFocus?: boolean
   restoreFocus?: boolean
+  trapFocus?: () => boolean
 }
 
 const FOCUSABLE_SELECTOR = [
@@ -65,7 +66,7 @@ export function useDialogBehavior(
       return
     }
 
-    if (event.key !== 'Tab') return
+    if (event.key !== 'Tab' || options.trapFocus?.() === false) return
     const focusable = getDialogFocusableElements(dialogRef.value)
     if (focusable.length === 0) {
       event.preventDefault()

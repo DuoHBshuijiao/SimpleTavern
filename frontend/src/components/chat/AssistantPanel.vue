@@ -46,9 +46,10 @@ import type { AssistantMessage } from '../../composables/useAssistant'
 import type { AssistantAttachment } from '../../types/models'
 import ModernSelect from '../ModernSelect.vue'
 import AssistantThread from './AssistantThread.vue'
+import AssistantEmptyState from './AssistantEmptyState.vue'
 import ConfirmPopover from '../../components/ConfirmPopover.vue'
-import { Globe, Sparkles, MoreHorizontal, X } from 'lucide-vue-next'
-import { ref, watch, nextTick } from 'vue'
+import { Globe, Settings, X } from 'lucide-vue-next'
+import { computed, ref, watch, nextTick } from 'vue'
 import { notifyMessage } from '../../composables/useNotify'
 import { FILE_ONLY_PASTE_MESSAGE, resolveRichPaste } from '../../utils/richPaste'
 
@@ -67,6 +68,7 @@ type ModelOptions = (ModelOption | ModelOptionGroup | string)[]
 
 const props = defineProps<{
   isOpen: boolean
+  suspended?: boolean
   messages: AssistantMessage[]
   draft: string
   draftAttachments: AssistantAttachment[]
@@ -111,7 +113,20 @@ const emit = defineEmits<{
 }>()
 
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
+const panelRef = ref<HTMLElement | null>(null)
+const modelSelectRef = ref<InstanceType<typeof ModernSelect> | null>(null)
+const visible = computed(() => props.isOpen && !props.suspended)
 const isDragOverComposer = ref(false)
+
+defineExpose({ panel: panelRef })
+
+watch(visible, (open) => {
+  if (!open) modelSelectRef.value?.close()
+})
+
+function openModelSelect(event: MouseEvent) {
+  modelSelectRef.value?.open(event)
+}
 
 /**
  * 处理键盘事件
@@ -299,9 +314,11 @@ watch(
   <!-- Teleport 到 body，避免主聊天区（含 z-50 助手按钮等）的层叠上下文遮挡侧栏下半部分 -->
   <Teleport to="body">
   <aside
-    class="drawer-surface fixed right-4 top-4 bottom-4 border border-[var(--color-border)] rounded-2xl transition-[transform,opacity,width] duration-300 overflow-hidden flex flex-col z-floating pointer-events-auto"
-    :class="isOpen ? 'translate-x-0 w-[min(360px,calc(100vw-2rem))] opacity-100' : 'translate-x-[calc(100%+20px)] w-[min(360px,calc(100vw-2rem))] opacity-0 pointer-events-none'"
-    :inert="!isOpen"
+    ref="panelRef"
+    aria-label="聊天助手"
+    class="drawer-surface fixed right-4 top-4 bottom-4 w-[min(var(--chat-assistant-panel-width),calc(100vw-2rem))] border border-[var(--color-border)] rounded-2xl backdrop-blur-[var(--glass-blur-panel)] transition-[transform,opacity,width] duration-300 motion-reduce:transition-none overflow-hidden flex flex-col z-floating"
+    :class="visible ? 'translate-x-0 opacity-100 pointer-events-auto' : 'translate-x-[calc(100%+20px)] opacity-0 pointer-events-none'"
+    :inert="!visible"
     style="contain: content; will-change: transform, opacity;"
   >
     <!-- 头部 -->
@@ -319,24 +336,6 @@ watch(
           <span class="text-xs font-bold text-muted uppercase tracking-widest flex items-center gap-2 flex-wrap min-w-0">
             <span class="w-2 h-2 rounded-full bg-[var(--color-assistant)] animate-pulse shrink-0"></span>
             聊天助手
-            <span
-              v-if="allowWriteMemory"
-              class="inline-flex items-center rounded px-1.5 py-0.5 text-2xs font-semibold normal-case tracking-normal bg-brand/20 text-brand-foreground border border-brand/40"
-            >
-              记忆
-            </span>
-            <span
-              v-if="allowDestructiveTools"
-              class="inline-flex items-center rounded px-1.5 py-0.5 text-2xs font-semibold normal-case tracking-normal bg-[var(--color-warning-bg)] text-[var(--color-warning-text)] border border-[color-mix(in_srgb,var(--color-warning)_40%,transparent)]"
-            >
-              破坏
-            </span>
-            <span
-              v-if="allowWebSearch"
-              class="inline-flex items-center rounded px-1.5 py-0.5 text-2xs font-semibold normal-case tracking-normal bg-brand/20 text-brand-foreground border border-brand/40"
-            >
-              搜索
-            </span>
           </span>
         </div>
       </div>
@@ -344,10 +343,11 @@ watch(
         <button
           type="button"
           class="icon-button w-7 h-7 shrink-0"
-          aria-label="更多"
+          aria-label="聊天助手设置"
+          title="聊天助手设置"
           @click="emit('open-settings')"
         >
-          <MoreHorizontal class="w-4 h-4" />
+          <Settings class="w-4 h-4" />
         </button>
         <button
           type="button"
@@ -366,12 +366,12 @@ watch(
         ref="messagesListEl"
         class="min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-auto custom-scrollbar space-y-4 px-4 pt-3 pb-14"
       >
-        <div v-if="messages.length === 0" class="text-xs text-muted text-center py-12 flex flex-col items-center gap-3">
-        <div class="surface-muted w-12 h-12 rounded-full flex items-center justify-center text-xl">
-            <Sparkles class="w-6 h-6 text-[var(--color-warning)]" />
-        </div>
-        开始和助手对话以获得帮助
-      </div>
+      <AssistantEmptyState
+        v-if="!messages.length && !isGenerating"
+        scope="chat"
+        :has-model="!!currentModel"
+        @select-model="openModelSelect"
+      />
       <AssistantThread
         :messages="messages"
         :is-generating="isGenerating"
@@ -397,6 +397,7 @@ watch(
             :class="allowWriteMemory
               ? 'btn-primary'
               : 'btn-secondary'"
+            :aria-pressed="!!allowWriteMemory"
             @click="emit('toggle-write-memory')"
           >
             记忆写入
@@ -407,6 +408,7 @@ watch(
             :class="allowDestructiveTools
               ? 'btn-danger'
               : 'btn-secondary'"
+            :aria-pressed="!!allowDestructiveTools"
             @click="emit('toggle-destructive')"
           >
             破坏性工具
@@ -417,6 +419,7 @@ watch(
             :class="allowWebSearch
               ? 'btn-primary'
               : 'btn-secondary'"
+            :aria-pressed="!!allowWebSearch"
             @click="emit('toggle-web-search')"
           >
             <Globe class="h-3 w-3" />
@@ -476,11 +479,13 @@ watch(
       </div>
       <div class="flex items-center justify-between mt-3 gap-3">
         <ModernSelect
+          ref="modelSelectRef"
           :model-value="currentModel"
           :selected-preset-id="currentPresetId ?? null"
           :options="modelOptions"
           placement="top"
-          placeholder="模型..."
+          placeholder="选择模型…"
+          aria-label="助手模型"
           class="!w-[160px] !text-xs"
           dropdown-width="410"
           searchable
@@ -500,7 +505,7 @@ watch(
       </div>
       <div
         v-show="isDragOverComposer"
-        class="pointer-events-none absolute inset-0 z-[21] bg-[var(--color-brand-a20)] ring-1 ring-inset ring-[var(--color-brand-a40)] transition-opacity duration-150"
+        class="pointer-events-none absolute inset-0 z-[21] bg-[var(--color-brand-a20)] dark-ui:ring-1 dark-ui:ring-inset ring-[var(--color-brand-a40)] transition-opacity duration-150"
         aria-hidden="true"
       />
     </div>

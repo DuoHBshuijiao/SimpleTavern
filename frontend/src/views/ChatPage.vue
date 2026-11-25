@@ -228,6 +228,12 @@ function bindWorkspaceTextareaRef(el: Element | ComponentPublicInstance | null) 
 }
 const isWorkspaceAssistantDragOver = ref(false)
 const showSettings = ref(false)
+const settingsDrawerVisible = ref(false)
+const settingsBesideAssistant = ref(false)
+const assistantSuspendedForSettings = ref(false)
+const assistantLaunchersHidden = ref(false)
+const assistantPanelRef = ref<InstanceType<typeof AssistantPanel> | null>(null)
+const settingsDrawerRef = ref<InstanceType<typeof SettingsDrawer> | null>(null)
 const showGroupSettings = ref(false)
 const showExportModal = ref(false)
 const exporting = ref(false)
@@ -264,7 +270,9 @@ const streamErrorMessage = computed(() => {
   return value instanceof Error ? value.message : String(value)
 })
 const sidebarCollapsed = ref(false)
-const { isNarrowPortrait } = useViewportNarrowPortrait()
+const { isNarrowPortrait, width: layoutWidth, height: layoutHeight } = useViewportNarrowPortrait()
+// 两个抽屉各用原宽度，预留两侧页边距和面板之间的间距。
+const canPlaceSettingsBesideAssistant = computed(() => layoutWidth.value >= layoutHeight.value && layoutWidth.value >= 908)
 /** 主内容区与 FAB 宿主 ref（须在 composable 前声明） */
 const chatMainRef = ref<HTMLElement | null>(null)
 const chatInputRef = ref<InstanceType<typeof ChatInput> | null>(null)
@@ -2225,8 +2233,45 @@ onMounted(async () => {
  *
  * 当助手面板打开时，加载聊天作用域的助手状态。
  */
-watch(assistant.isAssistantPanelOpen, (next) => {
-  if (next) void assistant.loadState('chat')
+watch(assistant.isAssistantPanelOpen, async (open, _, onCleanup) => {
+  if (open) {
+    assistantLaunchersHidden.value = true
+    void assistant.loadState('chat')
+    return
+  }
+  let interrupted = false
+  onCleanup(() => { interrupted = true })
+  await waitForPanelMotion(() => assistantPanelRef.value?.panel)
+  if (!interrupted) assistantLaunchersHidden.value = false
+})
+
+async function waitForPanelMotion(panel: () => HTMLElement | null | undefined) {
+  await nextTick()
+  const animations = panel()?.getAnimations() ?? []
+  await Promise.allSettled(animations.map(animation => animation.finished))
+}
+
+watch([showSettings, canPlaceSettingsBesideAssistant, assistant.isAssistantPanelOpen], async ([open, canDock, assistantOpen], _, onCleanup) => {
+  let interrupted = false
+  onCleanup(() => { interrupted = true })
+  if (!open) {
+    settingsDrawerVisible.value = false
+    await waitForPanelMotion(() => settingsDrawerRef.value?.panel)
+    if (interrupted) return
+    settingsBesideAssistant.value = false
+    assistantSuspendedForSettings.value = false
+    return
+  }
+
+  if (assistantOpen && !canDock) {
+    assistantSuspendedForSettings.value = true
+    await waitForPanelMotion(() => assistantPanelRef.value?.panel)
+    if (interrupted) return
+  } else {
+    assistantSuspendedForSettings.value = false
+  }
+  settingsBesideAssistant.value = assistantOpen && canDock
+  settingsDrawerVisible.value = true
 })
 
 // MVU SSE 生命周期：切换聊天或群聊 MVU 开关时重连
@@ -4337,6 +4382,23 @@ function closePersonaEditor() {
   actions.showPersonaEditor.value = false
 }
 
+let openingAssistantSettings = false
+async function openAssistantSettings(scope: 'chat' | 'workspace') {
+  if (openingAssistantSettings || assistant.showAssistantSettings.value) return
+  openingAssistantSettings = true
+  try {
+    await assistant.loadSettings()
+    const sourceOpen = scope === 'chat'
+      ? assistant.isAssistantPanelOpen.value && !assistantSuspendedForSettings.value
+      : actions.showCharacterEditor.value
+    if (sourceOpen) assistant.showAssistantSettings.value = true
+  } catch (error) {
+    void notifyMessage(error instanceof Error ? error.message : String(error), { title: '读取助手设置失败' })
+  } finally {
+    openingAssistantSettings = false
+  }
+}
+
 function closeAssistantSettings() {
   assistant.showAssistantSettings.value = false
 }
@@ -5054,6 +5116,7 @@ const editingPersonaAvatarUrl = computed(() => {
             :header-morph-phase="headerMorphPhase"
             :generation-done-tick="generationDoneTick"
             :show-agent-top-bar-controls="agentTopBarControlsVisible"
+            :assistant-launchers-hidden="assistantLaunchersHidden"
             :tts-enabled="!!settings.settings?.ttsEnabled"
             :tts-top-bar-controls-visible="ttsTopBarControlsVisible"
             :content-area-left-px="contentAreaLeftPx"
@@ -5153,8 +5216,10 @@ const editingPersonaAvatarUrl = computed(() => {
 
     <!-- 聊天助手面板 -->
     <AssistantPanel
+      ref="assistantPanelRef"
       :show-tool-permission-toggles="true"
       :is-open="assistant.isAssistantPanelOpen.value"
+      :suspended="assistantSuspendedForSettings"
       :messages="assistant.assistantMessages.value"
       :draft="assistant.assistantDraft.value"
       :draft-attachments="assistant.assistantDraftAttachments.value"
@@ -5181,7 +5246,7 @@ const editingPersonaAvatarUrl = computed(() => {
       @send="assistant.sendMessage('chat')"
       @stop="assistant.stopGeneration('chat')"
       @reset="assistant.resetChat"
-      @open-settings="assistant.showAssistantSettings.value = true"
+      @open-settings="openAssistantSettings('chat')"
       @select-model="assistant.handleModelSelect"
       @edit-message="(m) => assistant.openEditMessage(m, 'chat')"
       @delete-message="(m) => assistant.deleteMessage(m, 'chat')"
@@ -5287,8 +5352,11 @@ const editingPersonaAvatarUrl = computed(() => {
     </Teleport>
 
     <!-- 设置抽屉 -->
-    <SettingsDrawer 
-      v-model:show="showSettings" 
+    <SettingsDrawer
+      ref="settingsDrawerRef"
+      :show="settingsDrawerVisible"
+      :beside-assistant="settingsBesideAssistant"
+      @update:show="showSettings = $event"
       :chat="activeChat" 
       :initial-tab="settingsTab" 
       @open-member-settings="actions.openMemberSettingsEditor"
@@ -5373,7 +5441,7 @@ const editingPersonaAvatarUrl = computed(() => {
       @save="saveCharacter"
       @export="actions.exportCharacterCard"
       @open-avatar-cropper="actions.showCharacterAvatarCropper.value = true"
-      @open-assistant-settings="assistant.showAssistantSettings.value = true"
+      @open-assistant-settings="openAssistantSettings('workspace')"
     />
 
     <PersonaEditorModal

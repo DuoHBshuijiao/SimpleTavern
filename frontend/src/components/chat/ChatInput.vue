@@ -120,6 +120,8 @@ const props = withDefaults(
   generationDoneTick?: number
   /** 侧栏收起且顶栏 squeeze 完成后：顶栏下显示 Agent 胶囊（与 TTS 顶栏条时机一致） */
   showAgentTopBarControls?: boolean
+  /** 助手面板打开及退场期间，隐藏两种助手入口。 */
+  assistantLaunchersHidden?: boolean
   /** 全局 TTS 是否启用（决定 Agent 顶栏是否让位给队列/播放） */
   ttsEnabled?: boolean
   /** TTS 顶栏替代控件是否已显示（仅当 ttsEnabled 时为 true） */
@@ -920,7 +922,9 @@ defineExpose({
       <button
         ref="assistantFabButtonRef"
         type="button"
-        class="chat-fab-surface w-12 h-12 rounded-xl font-bold shadow-lg transition-[transform,background-color,box-shadow] border border-[var(--color-border)] hover:scale-105 active:scale-95 flex items-center justify-center cursor-grab active:cursor-grabbing"
+        class="chat-fab-surface cursor-grab active:cursor-grabbing"
+        :class="{ invisible: assistantLaunchersHidden }"
+        :inert="assistantLaunchersHidden"
         aria-label="打开聊天助手"
         @pointerdown="assistantFabPointerDown"
         @pointermove="assistantFabPointerMove"
@@ -955,14 +959,15 @@ defineExpose({
         <div class="pointer-events-auto flex flex-col gap-2">
           <button
             type="button"
-            class="agent-top-bar-btn"
-            :class="{ 'agent-top-bar-btn--after-tts': ttsEnabled && ttsTopBarControlsVisible }"
+            class="chat-toolbar-button chat-toolbar-button--animated"
+            :class="{ invisible: assistantLaunchersHidden, 'agent-top-bar-btn--after-tts': ttsEnabled && ttsTopBarControlsVisible }"
+            :inert="assistantLaunchersHidden"
             aria-label="打开聊天助手"
             @click="onAgentTopBarClick"
           >
-            <span class="agent-top-bar-btn__glow" aria-hidden="true" />
-            <Sparkles class="agent-top-bar-btn__icon" aria-hidden="true" />
-            <span class="agent-top-bar-btn__label">Agent</span>
+            <span class="chat-toolbar-button-tint" aria-hidden="true" />
+            <Sparkles class="chat-toolbar-button-icon" aria-hidden="true" />
+            <span class="chat-toolbar-button-label">Agent</span>
           </button>
         </div>
       </div>

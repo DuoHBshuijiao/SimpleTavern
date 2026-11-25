@@ -130,6 +130,7 @@ const props = defineProps<{
   show: boolean
   chat: Chat | null
   initialTab?: 'global' | 'presets' | 'chat'
+  besideAssistant?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -146,8 +147,9 @@ const { dialogRef: drawerDialogRef } = useDialogBehavior(() => props.show, () =>
   void close()
 }, {
   closeOnEscape: false,
+  trapFocus: () => !props.besideAssistant,
 })
-void drawerDialogRef
+defineExpose({ panel: drawerDialogRef })
 
 const mvuStore = useMvuStore()
 
@@ -4427,7 +4429,7 @@ provide(
 
 <template>
   <div>
-  <div class="drawer-wrapper fixed inset-0 z-drawer flex justify-end" :class="{ 'is-open': show, 'is-adjusting-background': backgroundAdjusting, 'is-background-fading': backgroundFading }" :inert="!show">
+  <div class="drawer-wrapper fixed inset-0 z-drawer" :class="{ 'is-open': show, 'beside-assistant': besideAssistant, 'is-adjusting-background': backgroundAdjusting, 'is-background-fading': backgroundFading }" :inert="!show">
     <!-- Backdrop -->
     <div
       class="drawer-backdrop absolute inset-0 bg-overlay"
@@ -4435,10 +4437,11 @@ provide(
       @click="close"
     ></div>
 
-    <!-- Drawer Panel -->
+    <div class="drawer-stage">
     <div
       ref="drawerDialogRef"
       v-bind="drawerA11yAttrs"
+      :aria-modal="besideAssistant ? undefined : 'true'"
       tabindex="-1"
       class="drawer-panel drawer-surface absolute right-4 top-4 bottom-4 w-[min(500px,calc(100vw-2rem))] border border-[var(--color-border)] rounded-2xl flex flex-col shadow-xl"
       :class="{ 'backdrop-blur-[var(--glass-blur-panel)]': !backgroundAdjusting }"
@@ -4637,6 +4640,7 @@ provide(
           </button>
         </div>
       </div>
+    </div>
   </div>
 
   <SettingsDrawerRegexRuleEditorModal
@@ -4734,21 +4738,35 @@ provide(
 <style scoped>
 /* 外层不能淡入淡出：祖先 opacity 小于 1 时面板的模糊会失效，到最后一帧才突然出现 */
 .drawer-wrapper {
+  --settings-assistant-inset: 0px;
   visibility: hidden;
   pointer-events: none;
   transition: visibility 0s linear 0.3s;
 }
+.drawer-wrapper.beside-assistant {
+  --settings-assistant-inset: calc(var(--chat-assistant-panel-width) + 1rem);
+}
 .drawer-wrapper.is-open {
   visibility: visible;
-  pointer-events: auto;
   transition: visibility 0s;
 }
+.drawer-stage {
+  /* 只裁剪抽屉的滑动范围，后面的遮罩铺满窗口。 */
+  position: absolute;
+  inset: 0 var(--settings-assistant-inset) 0 0;
+  overflow: clip;
+}
+.drawer-wrapper.is-open :is(.drawer-panel, .drawer-backdrop) {
+  pointer-events: auto;
+}
 .drawer-wrapper .drawer-panel {
+  /* 面板始终以窗口右侧作为动画起点。裁剪区只决定途中可见的范围。 */
+  right: calc(1rem - var(--settings-assistant-inset));
   transition: transform 0.3s ease-out;
   transform: translateX(calc(100% + 1.5rem));
 }
 .drawer-wrapper.is-open .drawer-panel {
-  transform: translateX(0);
+  transform: translateX(calc(-1 * var(--settings-assistant-inset)));
 }
 .drawer-wrapper .drawer-backdrop {
   opacity: 0.4;
@@ -4756,6 +4774,14 @@ provide(
 }
 .drawer-wrapper:not(.is-open) .drawer-backdrop {
   opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drawer-wrapper,
+  .drawer-wrapper .drawer-panel,
+  .drawer-wrapper .drawer-backdrop {
+    transition: none;
+  }
 }
 
 /* 触摸：纵向滚动更顺手，减少与页面手势冲突；iOS 惯性滚动 */
