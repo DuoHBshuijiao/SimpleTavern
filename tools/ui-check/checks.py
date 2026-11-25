@@ -7,8 +7,13 @@ import urllib.request
 
 import cdp
 import dom_checks
-from appearance_checks import check_appearance_modes
+from appearance_checks import check_appearance_modes, check_focus_indicators, check_settings_navigation_and_ranges
 from deepseek_tts_checks import check_deepseek_tts
+from chat_followup_checks import check_chat_followup, check_luna_reasoning, check_preset_disclosure, check_preset_session_binding
+from assistant_surface_checks import check_assistant_model_surface, check_assistant_settings_dock
+from header_transition_checks import check_chat_header_switch, check_composer_sidebar_spacing
+from member_probability_checks import check_member_probability
+from web_source_checks import check_web_sources
 
 C = "__chat().setupState"
 D = "__drawer().setupState"
@@ -251,7 +256,7 @@ async def check_settings(ctx):
     if pick is None:
         await page.js("""[...document.querySelectorAll('[role=dialog] button')].find(b=>b.innerText.includes('新建')).click()""")
         await asyncio.sleep(0.3)
-        await page.js("""[...document.querySelectorAll('[role=dialog] button')].find(b=>b.innerText.includes('作为 TTS 服务')).click()""")
+        await page.js("document.querySelector('[role=dialog] button[role=switch][aria-label=\"作为 TTS 服务\"]').click()")
     else:
         await page.js(f"""[...document.querySelectorAll('[draggable]')].find(e=>e.offsetParent!==null&&e.innerText.trim().startsWith({json.dumps(pick['name'])})).click()""")
     await asyncio.sleep(0.4)
@@ -540,13 +545,153 @@ async def check_reading(ctx):
 
 
 async def check_sidebar(ctx):
-    """侧栏：卡片无边框，简介不被切半行"""
-    page = await ctx.page()
-    info = await page.js("""(() => { const a=document.querySelector('aside'); const cards=[...a.querySelectorAll('.group')].filter(e=>e.offsetParent!==null); const bordered=cards.filter(e=>getComputedStyle(e).borderTopWidth!=='0px'&&getComputedStyle(e).borderTopStyle!=='none'); const clamp=[...a.querySelectorAll('.line-clamp-2')].slice(0,8).map(e=>{const lh=parseFloat(getComputedStyle(e).lineHeight); return +(e.clientHeight/lh).toFixed(2);}); return {cards:cards.length, bordered:bordered.length, clamp}; })()""")
-    ctx.check("卡片无边框", info["bordered"] == 0 and info["cards"] > 0, info)
-    ctx.check("简介整行显示", all(abs(x - round(x)) < 0.06 for x in info["clamp"]), info["clamp"])
-    await page.shot("sidebar")
-    await ctx.close(page)
+    """侧栏：身份浮层、卡片胶囊、分区拖动与滚动条"""
+    saved = ctx.api('/api/settings')
+    current_id = saved.get('selectedPersonaId') or 'sidebar-persona-1'
+    personas = [{'id': current_id if i == 1 else f'sidebar-persona-{i}', 'name': f'侧栏身份 {i}'} for i in range(1, 8)]
+    url = ctx.serve_built()
+    page = None
+    trigger = "document.querySelector('aside button[aria-haspopup=dialog]')"
+    layer = "document.querySelector('.sidebar-persona-layer')"
+    splitter = "document.querySelector('aside [role=separator]')"
+    scrollbars = """[...document.querySelectorAll('aside .sidebar-scrollbar')].map(el => ({
+      color: getComputedStyle(el).getPropertyValue('--sidebar-scroll-thumb').trim(),
+      width: el.clientWidth, left: el.getBoundingClientRect().left
+    }))"""
+
+    try:
+        dom_checks.update_settings(ctx, themeId='teal', themeMode='light',
+                                   userPersonas=personas, selectedPersonaId=personas[0]['id'])
+        page = await dom_checks.open_app(ctx, url, 1100, 515)
+        await page.send('Emulation.setScrollbarsHidden', hidden=False)
+        info = await page.js("""(() => {
+          const cards = [...document.querySelectorAll('aside .group')].filter(e => e.offsetParent !== null);
+          const bordered = cards.filter(e => getComputedStyle(e).borderTopWidth !== '0px' && getComputedStyle(e).borderTopStyle !== 'none');
+          const clamp = [...document.querySelectorAll('aside .line-clamp-2')].slice(0,8)
+            .map(e => +(e.clientHeight / parseFloat(getComputedStyle(e).lineHeight)).toFixed(2));
+          return {cards:cards.length, bordered:bordered.length, clamp};
+        })()""")
+        ctx.check("卡片无边框", info["bordered"] == 0 and info["cards"] > 0, info)
+        ctx.check("简介整行显示", all(abs(x - round(x)) < 0.06 for x in info["clamp"]), info["clamp"])
+        ctx.check("侧栏只显示当前身份卡，新建保留在顶部", await page.js("""document.querySelectorAll('aside .sidebar-persona-card').length === 1
+            && !!document.querySelector('aside button[aria-label=新建身份]')"""))
+
+        await page.js(f"{trigger}.focus(); {trigger}.click()")
+        await page.wait_for(f"{layer}?.classList.contains('sidebar-personas-enter-active')")
+        ctx.check("身份浮层使用非线性展开", await page.js(f"getComputedStyle({layer}).transitionTimingFunction.startsWith('cubic-bezier')"))
+        await page.wait_for(f"{layer} && !{layer}.classList.contains('sidebar-personas-enter-active')")
+        panel = await page.js(f"""(() => {{
+          const aside = document.querySelector('aside').getBoundingClientRect();
+          const surface = {layer}.getBoundingClientRect();
+          const card = {trigger}.getBoundingClientRect();
+          const list = {layer}.querySelector('ul'), body = list.getBoundingClientRect();
+          const entries = [...list.children];
+          return {{ sameWidth: Math.abs(surface.width - aside.width) < 1 && Math.abs(surface.left - aside.left) < 1,
+            behind: Math.abs(surface.top - card.bottom) < 1, portaled: {layer}.parentElement === document.body,
+            all: entries.length, visible: entries.filter(e => e.getBoundingClientRect().bottom <= body.bottom).length,
+            overflow: list.scrollHeight > list.clientHeight }};
+        }})()""")
+        ctx.check("身份浮层与侧栏等宽，从卡片下缘展开，首屏五张", panel == {
+            'sameWidth': True, 'behind': True, 'portaled': True, 'all': 7, 'visible': 5, 'overflow': True
+        }, panel)
+        await page.shot("sidebar-personas-light")
+        await page.js(f"{layer}.querySelector('ul').scrollTop = 10000")
+        ctx.check("滚动后最后一个身份可见", await page.js(f"""(() => {{
+          const list = {layer}.querySelector('ul');
+          const entry = list.lastElementChild.getBoundingClientRect();
+          return entry.bottom <= list.getBoundingClientRect().bottom && list.scrollTop > 0;
+        }})()"""))
+        await page.key('Escape', 27)
+        await page.wait_for(f"{layer}?.classList.contains('sidebar-personas-leave-active')")
+        ctx.check("身份浮层使用非线性退场", await page.js(f"getComputedStyle({layer}).transitionTimingFunction.startsWith('cubic-bezier')"))
+        await page.wait_for(f"!{layer}")
+        ctx.check("退出后焦点回到当前身份卡", await page.js(f"document.activeElement === {trigger}"))
+
+        trigger_point = await page.js(f"""(() => {{
+          const card = {trigger}.getBoundingClientRect();
+          return [card.left + card.width / 2, card.top + card.height / 2];
+        }})()""")
+        await page.mouse('mouseMoved', *trigger_point)
+        await page.mouse('mousePressed', *trigger_point, button='left', buttons=1, clickCount=1)
+        await page.mouse('mouseReleased', *trigger_point, button='left', clickCount=1)
+        await page.wait_for(f"{layer} && !{layer}.classList.contains('sidebar-personas-enter-active')")
+        hover_point = await page.js(f"""(() => {{
+          const row = {layer}.querySelectorAll('li')[1].getBoundingClientRect();
+          return [row.left + 35, row.top + row.height / 2];
+        }})()""")
+        await page.mouse('mouseMoved', *hover_point)
+        edit = f"""{layer}.querySelector('[aria-label="编辑身份 侧栏身份 2"]')"""
+        await page.wait_for(f"Number(getComputedStyle({edit}.parentElement).opacity) >= .99")
+        ctx.check("浮层仅显示所在分区滚动条，第二张身份卡保持编辑和删除胶囊",
+                  await page.js(f"{edit}.nextElementSibling.getAttribute('aria-label') === '删除身份 侧栏身份 2'"
+                                f" && Number(getComputedStyle({layer}.querySelector('.sidebar-persona-capsule')).opacity) === 0"
+                                f" && {scrollbars}.every(x => x.color === 'transparent')"
+                                f" && getComputedStyle({layer}.querySelector('ul')).getPropertyValue('--sidebar-scroll-thumb').trim() !== 'transparent'"))
+        await page.shot("sidebar-personas-hover")
+        await page.js(f"{edit}.nextElementSibling.click()")
+        await page.wait_for("document.querySelector('.popconfirm')?.innerText.includes('侧栏身份 2')")
+        await page.js("$click(document.querySelector('.popconfirm'), '取消')")
+        await page.wait_for("!document.querySelector('.popconfirm')")
+        ctx.check("删除直接打开对应身份确认，取消后浮层仍可操作", await page.js(f"!!{layer}"))
+        await page.js(f"{edit}.click()")
+        await page.wait_for("$modal('编辑身份')")
+        ctx.check("编辑对应身份一步打开", await page.js("!![...$modal('编辑身份').querySelectorAll('input')].find(i => i.value === '侧栏身份 2')"))
+        await page.key('Escape', 27)
+        await page.wait_for("!$modal('编辑身份')")
+
+        await page.mouse('mouseMoved', 700, 180)
+        traces = await page.js(scrollbars)
+        ctx.check("鼠标离开侧栏时两条滚动条透明", all(x['color'] == 'transparent' for x in traces), traces)
+        areas = await page.js("""[...document.querySelectorAll('aside .sidebar-scrollbar')].map(el => {
+          const r = el.getBoundingClientRect(); return [r.x + 20, r.y + r.height / 2];
+        })""")
+        for i, (x, y) in enumerate(areas):
+            await page.mouse('mouseMoved', x, y)
+            hover = await page.js(scrollbars)
+            ctx.check(f"分区 {i + 1} 仅本区显示滚动条且宽度不变",
+                      [entry['color'] != 'transparent' for entry in hover] == [n == i for n in range(2)]
+                      and [entry['width'] for entry in hover] == [entry['width'] for entry in traces], hover)
+            await asyncio.sleep(.2)
+            await page.shot(f"sidebar-scroll-hover-{i + 1}")
+
+        start = await page.js(f"Number({splitter}.getAttribute('aria-valuenow'))")
+        point = await page.js(f"""(() => {{
+          const r = {splitter}.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2];
+        }})()""")
+        await page.mouse('mouseMoved', *point)
+        await page.mouse('mousePressed', *point, button='left', buttons=1, clickCount=1)
+        await page.mouse('mouseMoved', point[0], point[1] - 30, button='left', buttons=1)
+        await page.mouse('mouseReleased', point[0], point[1] - 30, button='left', clickCount=1)
+        await page.wait_for(f"Number({splitter}.getAttribute('aria-valuenow')) < {start}")
+        dragged = await page.js(f"Number({splitter}.getAttribute('aria-valuenow'))")
+        await page.key('ArrowDown', 40)
+        ctx.check("分界线支持拖动和方向键", dragged == start - 30
+                  and await page.js(f"Number({splitter}.getAttribute('aria-valuenow'))") == dragged + 12)
+        ctx.check("角色与会话保留行内胶囊", await page.js("""!!document.querySelector('.sidebar-role-capsule [aria-label=编辑角色]')
+          && !!document.querySelector('.sidebar-chat-capsule [aria-label=创建分支]')"""))
+        await page.js("document.querySelector('.sidebar-create-actions [aria-label=新建群聊]').click()")
+        await page.wait_for("$modal('创建群聊')")
+        ctx.check("分段箭头直达原有群聊创建", True)
+        await page.key('Escape', 27)
+        await page.wait_for("!$modal('创建群聊')")
+        await page.shot("sidebar")
+        await ctx.close(page)
+        page = None
+
+        dom_checks.update_settings(ctx, themeMode='dark')
+        page = await dom_checks.open_app(ctx, url, 1440, 900, reduce_motion=True)
+        await page.js(f"{trigger}.click()")
+        ctx.check("暗色与减弱动态可用", await page.js(f"""document.documentElement.dataset.colorScheme === 'dark'
+            && {layer}.querySelectorAll('li').length === 7 && getComputedStyle({layer}).transitionDuration === '0s'"""))
+        ctx.check("暗色分段按钮文字满足普通文字对比度", await page.js("""(() => {
+          const style = getComputedStyle(document.querySelector('.sidebar-create-actions button'));
+          return $contrast($rgb(style.color), $rgb(style.backgroundColor)) >= 4.5;
+        })()"""))
+        await page.shot("sidebar-personas-dark")
+    finally:
+        if page is not None:
+            await ctx.close(page)
+        dom_checks.request(ctx, 'PUT', '/api/settings', saved)
 
 
 async def check_delete(ctx):
@@ -629,34 +774,57 @@ async def check_follow(ctx):
 
 async def check_version(ctx):
     """切版本：正文按方向滑入，整行不动，减少动态效果时不滑"""
-    page = await ctx.page()
-    await ctx.enter(page, ctx.fixtures["SHORT"])
-    await page.js("""[...document.querySelectorAll('button')].filter(b=>b.innerText.trim()==='重写'&&b.offsetParent!==null).pop().click()""")
-    for _ in range(40):
+    settings = ctx.api("/api/settings")
+    model = "ui-version-check"
+    preset = {"id": model, "name": "版本验证预设", "models": [model],
+              "baseUrl": ctx.mock_state.tts_url, "apiKey": "ui-version-test"}
+    character_id = ctx.api(f"/api/chats/{ctx.fixtures['SHORT']}")["characterId"]
+    status, _, response = dom_checks.request(ctx, "POST", "/api/chats", {"characterId": character_id, "title": "版本验证"})
+    if status != 200:
+        raise RuntimeError(f"创建版本验证会话失败 {status}")
+    chat_id = json.loads(response)["id"]
+    chat_path = f"/api/chats/{chat_id}"
+    fixture = "VERSION"
+    ctx.fixtures[fixture] = chat_id
+    page = None
+    try:
+        dom_checks.update_settings(ctx, apiPresets=[preset, *settings["apiPresets"]], streamEnabled=True)
+        status, _, _ = dom_checks.request(ctx, "PUT", chat_path, {
+            "overrides": {"presetId": preset["id"], "params": {"model": model}},
+        })
+        if status != 200:
+            raise RuntimeError(f"保存版本验证模型失败 {status}")
+        for role, content in [("user", "请介绍一下这一段。"), ("assistant", f"【最后一条开头 {fixture}】这是第一版。")]:
+            status, _, _ = dom_checks.request(ctx, "POST", chat_path + "/messages", {"role": role, "content": content})
+            if status != 200:
+                raise RuntimeError(f"创建版本验证消息失败 {status}")
+        page = await dom_checks.open_app(ctx, ctx.serve_built())
+        await dom_checks.enter_chat(ctx, page, fixture)
+        await page.js("$click($rows().at(-1), '重写')")
+        await page.wait_for("""document.querySelector('button[aria-label^="上一个版本"]')""", 15)
+        ctx.check("重写后版本箭头与重写按钮同组", await page.js("""(() => {
+          const group = $rows().at(-1).querySelector('[aria-label=回复版本]');
+          return !!$btn(group, '重写') && group.querySelectorAll('.message-version-arrow').length === 2;
+        })()"""))
+        probe = r"""(dir) => { const b=[...document.querySelectorAll(`button[aria-label^="${dir<0?'上一个':'下一个'}版本"]`)].pop(); const row=b.closest('.group'); const el=row.querySelector('.message-reading-content'); const a0=row.getBoundingClientRect(); window.__log=[]; b.click(); const t0=performance.now(); const tick=()=>{ const s=getComputedStyle(el); const m=new DOMMatrix(s.transform); window.__log.push([+(+s.opacity).toFixed(2), +m.m41.toFixed(1), Math.round(row.getBoundingClientRect().left-a0.left)]); if(performance.now()-t0<320) requestAnimationFrame(tick); }; requestAnimationFrame(tick); }"""
+        for direction, name in ((1, "下一个"), (-1, "上一个")):
+            await page.js(f"({probe})({direction})")
+            await asyncio.sleep(0.5)
+            log = await page.js("window.__log")
+            moving = [x for x in log if abs(x[1]) > 0.5]
+            ctx.check(f"{name}版本滑入", moving and (moving[0][1] > 0) == (direction > 0) and log[0][0] < 1 and log[-1][0] == 1 and abs(log[-1][1]) < 0.5, log[:3])
+            ctx.check(f"{name}版本整行不动", all(x[2] == 0 for x in log))
+        await page.send("Emulation.setEmulatedMedia", features=[{"name": "prefers-reduced-motion", "value": "reduce"}])
+        await page.js(f"({probe})(1)")
         await asyncio.sleep(0.4)
-        await page.js(cdp.DISMISS)
-        if not await page.js(f"{C}.isGenerating"):
-            break
-    await asyncio.sleep(0.8)
-    has_versions = await page.js("""document.querySelectorAll('button[aria-label^="上一个版本"]').length""")
-    ctx.check("重写后有版本箭头", has_versions >= 1, has_versions)
-    if not has_versions:
-        await ctx.close(page)
-        return
-    probe = r"""(dir) => { const b=[...document.querySelectorAll(`button[aria-label^="${dir<0?'上一个':'下一个'}版本"]`)].pop(); const row=b.closest('.group'); const el=row.querySelector('.message-reading-content'); const a0=row.getBoundingClientRect(); window.__log=[]; b.click(); const t0=performance.now(); const tick=()=>{ const s=getComputedStyle(el); const m=new DOMMatrix(s.transform); window.__log.push([+(+s.opacity).toFixed(2), +m.m41.toFixed(1), Math.round(row.getBoundingClientRect().left-a0.left)]); if(performance.now()-t0<320) requestAnimationFrame(tick); }; requestAnimationFrame(tick); }"""
-    for direction, name in ((1, "下一个"), (-1, "上一个")):
-        await page.js(f"({probe})({direction})")
-        await asyncio.sleep(0.5)
         log = await page.js("window.__log")
-        moving = [x for x in log if abs(x[1]) > 0.5]
-        ctx.check(f"{name}版本滑入", moving and (moving[0][1] > 0) == (direction > 0) and log[0][0] < 1 and log[-1][0] == 1 and abs(log[-1][1]) < 0.5, log[:3])
-        ctx.check(f"{name}版本整行不动", all(x[2] == 0 for x in log))
-    await page.send("Emulation.setEmulatedMedia", features=[{"name": "prefers-reduced-motion", "value": "reduce"}])
-    await page.js(f"({probe})(1)")
-    await asyncio.sleep(0.4)
-    log = await page.js("window.__log")
-    ctx.check("减少动态效果时不滑", all(abs(x[1]) < 0.5 and x[0] == 1 for x in log), log[:2])
-    await ctx.close(page)
+        ctx.check("减少动态效果时不滑", all(abs(x[1]) < 0.5 and x[0] == 1 for x in log), log[:2])
+    finally:
+        if page:
+            await ctx.close(page)
+        ctx.fixtures.pop(fixture, None)
+        dom_checks.request(ctx, "DELETE", chat_path)
+        dom_checks.request(ctx, "PUT", "/api/settings", settings)
 
 
 BUILT_SCROLLER = "document.querySelector('.drawer-panel .drawer-scroll.p-6')"
@@ -872,7 +1040,8 @@ async def check_built(ctx):
     await ctx.close(page)
 
 
-HINT_TOGGLES = "[...document.querySelectorAll('.drawer-panel .settings-hint-toggle')].filter(b => b.offsetParent)"
+HINT_TOGGLES = """[...document.querySelectorAll('.drawer-panel .settings-hint-toggle')]
+  .filter(b => b.offsetParent && !b.closest('details:not([open])'))"""
 OPEN_ACCORDIONS = """(() => {
   let n = 0;
   for (let round = 0; round < 4; round++) {
@@ -927,6 +1096,9 @@ async def check_drawer_details(ctx):
             await page.js(click_text(panel, tab))
             await asyncio.sleep(0.5)
             await page.js(OPEN_ACCORDIONS)
+            await page.js("""[...document.querySelectorAll('.drawer-panel details:not([open]) > summary')]
+              .filter(s => s.offsetParent && s.textContent.trim() === '高级设置')
+              .forEach(s => s.click())""")
             await asyncio.sleep(0.6)
             result = await page.js(HINT_PROBE)
             total += result["count"]
@@ -1150,6 +1322,8 @@ CHECKS = {
     "modals": dom_checks.check_modals,
     "dev_built": dom_checks.check_dev_built,
     "motion": check_motion,
+    "header_switch": check_chat_header_switch,
+    "composer_sidebar_spacing": check_composer_sidebar_spacing,
     "sidebar": check_sidebar,
     "background": check_background,
     "reading": check_reading,
@@ -1159,6 +1333,16 @@ CHECKS = {
     "version": check_version,
     "themes": dom_checks.check_themes,
     "appearance_modes": check_appearance_modes,
+    "settings_navigation_and_ranges": check_settings_navigation_and_ranges,
+    "focus_indicators": check_focus_indicators,
+    "chat_followup": check_chat_followup,
+    "preset_session_binding": check_preset_session_binding,
+    "assistant_model_surface": check_assistant_model_surface,
+    "assistant_settings_dock": check_assistant_settings_dock,
+    "member_probability": check_member_probability,
+    "luna_reasoning": check_luna_reasoning,
+    "web_sources": check_web_sources,
+    "preset_disclosure": check_preset_disclosure,
     "deepseek_tts": check_deepseek_tts,
     "viewports": dom_checks.check_viewports,
     "long_chat": dom_checks.check_long_chat,

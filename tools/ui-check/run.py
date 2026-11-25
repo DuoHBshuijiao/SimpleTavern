@@ -38,12 +38,14 @@ STREAM_ERROR_TEXT = "沙箱上游流内错误 QX7-流中报错原文"
 
 class MockState:
     tps = 1500
+    reply_override = None
     # None 正常回复；http401、http429、http500 直接返回错误；stream_error 流里报错；stream_reset 流到一半断连接
     fault = None
     stream_error_text = STREAM_ERROR_TEXT
     seen = []  # 收到过的请求：路径和鉴权头，用来确认密钥探针确实被发了出去
     tts_calls = []
     tts_url = ""
+    draft_model_key_checks = []
 
 
 REASONING = "先判断语气，回答不宜太长，但要留一个钩子让对话继续。先写动作，再写一句话，最后用环境收尾。" * 6
@@ -64,6 +66,12 @@ class MockHandler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_GET(self):
+        if self.path == "/draft/v1/models":
+            valid = self.headers.get("Authorization") == "Bearer draft-valid-key"
+            MockState.draft_model_key_checks.append(valid)
+            if not valid:
+                self.send_error(401)
+                return
         if self.path.rstrip("/").endswith("/models"):
             self._json({"object": "list", "data": [{"id": "mock", "object": "model"}]})
         else:
@@ -72,7 +80,9 @@ class MockHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         request = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
         auth = self.headers.get("Authorization") or self.headers.get("x-api-key") or ""
-        MockState.seen.append({"path": self.path, "auth": auth})
+        MockState.seen.append({"path": self.path, "auth": auth, "model": request.get("model"),
+                               "temperature": request.get("temperature"), "effort": request.get("reasoning_effort"),
+                               "thinking": request.get("thinking")})
         if self.path == "/v1/tools/tts":
             MockState.tts_calls.append(request)
             buffer = io.BytesIO()
@@ -128,11 +138,16 @@ class MockHandler(BaseHTTPRequestHandler):
                 self.close_connection = True
                 self.connection.close()
                 return
-            for field, text in (("reasoning_content", REASONING), ("content", REPLY)):
+            for field, text in (("reasoning_content", REASONING), ("content", MockState.reply_override or REPLY)):
                 for i in range(0, len(text), step):
                     send({field: text[i:i + step]})
                     time.sleep(step / MockState.tps)
             send({}, "stop")
+            if request.get("model") == "ui-regression-model-1":
+                prompt_tokens, cached_tokens = (12360, 10520) if MockState.reply_override else (10000, 12)
+                usage = {"prompt_tokens": prompt_tokens, "completion_tokens": 10, "total_tokens": prompt_tokens + 10,
+                         "prompt_tokens_details": {"cached_tokens": cached_tokens}}
+                self.wfile.write(b"data: " + json.dumps({"choices": [], "usage": usage}).encode() + b"\n\n")
             self.wfile.write(b"data: [DONE]\n\n")
             self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
@@ -319,6 +334,7 @@ def main():
     parser.add_argument("--built-port", type=int, default=9382)
     parser.add_argument("--dist", help="built 检查用这个现成的构建产物，不重新构建（用来做修改前的对照）")
     parser.add_argument("--built-only", action="store_true", help="core 和 modals 只跑构建产物，不跑开发服务器（做对照时用）")
+    parser.add_argument("--show-scrollbars", action="store_true", help="保留原生滚动条，用于验收滚动条宽度和截图")
     args = parser.parse_args()
 
     import checks
@@ -366,10 +382,11 @@ def main():
             ["node", vite, "--port", str(args.front_port), "--strictPort", "--host", "127.0.0.1"],
             cwd=frontend, env={**env, "SIMPLETAVERN_API_PROXY": f"http://127.0.0.1:{args.back_port}"}, stdout=log, stderr=log))
         wait_http(f"http://127.0.0.1:{args.front_port}/")
-        processes.append(subprocess.Popen(
-            [find_chrome(), "--headless=new", f"--remote-debugging-port={args.cdp_port}", f"--user-data-dir={profile}",
-             "--window-size=1440,900", "--hide-scrollbars", "--no-first-run", "--disable-gpu", "about:blank"],
-            stdout=log, stderr=log))
+        chrome_args = [find_chrome(), "--headless=new", f"--remote-debugging-port={args.cdp_port}",
+                       f"--user-data-dir={profile}", "--window-size=1440,900", "--no-first-run", "--disable-gpu"]
+        if not args.show_scrollbars:
+            chrome_args.append("--hide-scrollbars")
+        processes.append(subprocess.Popen([*chrome_args, "about:blank"], stdout=log, stderr=log))
         wait_http(f"http://127.0.0.1:{args.cdp_port}/json/version")
 
         built_url = []

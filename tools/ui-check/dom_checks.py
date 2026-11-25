@@ -472,6 +472,8 @@ async def modals_oauth(ctx, url, check):
             await asyncio.sleep(0.5)
             text = await page.js("$modal('登录').innerText")
             check(f"OAuth {provider}：字段正确", (field is None or field in text) and "开始登录" in text, text[:80])
+            if provider == "openai-chatgpt":
+                check("ChatGPT 登录弹窗给出当前授权步骤", "在浏览器登录并授权" in text and "凭证只保存在" not in text)
             await page.shot(f"dom-oauth-{provider}-{check.label}")
             await page.key("Escape", 27)
             await page.wait_for("!$modal('登录')", 5)
