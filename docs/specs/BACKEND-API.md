@@ -79,7 +79,8 @@
 
 ### 联网配置和生成
 
-- ApiPreset 新增可选 `webSearchSource=native|independent`、`webSearchSearchEnabled`、`webSearchFetchEnabled`（后两项默认 true）。缺少来源时保留历史协议选择；新建预设在前端显式设置 native。
+- GPT-6 Luna 支持 `none`、`low`、`medium`、`high`、`xhigh`、`max`。旧会话保存的 `minimal` 在生成时解析为 `low`，`none` 通过 Responses 请求显式发送。
+- 联网来源优先级为生成请求 `webSearchSource`、全局 `webSearch.source`、旧配置的来源规则。新字段取值为 `native` 或 `independent`。助手采用全局来源。API 预设继续保存 `webSearchSearchEnabled` 和 `webSearchFetchEnabled`，两项默认 true。
 - 主聊天、群聊、重新生成和助手根据选中预设共用来源判定；总开关关闭时不提供联网工具。来源失败不会自动切换独立服务或 API Key。
 - DeepSeek 官方 HTTPS 连接的 native 模式复用该预设 Key 调用官方 `/v1/tools/search`、`/v1/tools/fetch`；查询最长128字符，URL为不含账号密码的 HTTP(S) 地址，响应受读取与截断预算限制。抓取由供应商远端执行。应用工具循环沿用8轮上限。
 - Claude 使用 `web_search_20250305`、`web_fetch_20250910`，可分别启停。pause_turn 最多续轮8次，服务端结果/思考签名块在应用工具往返中原样保留。保存的回答附可点击来源；助手历史通过 `anthropicContent` 保留服务端上下文。
@@ -682,7 +683,7 @@ Content-Type: `application/json`
 
 #### `POST /api/generate/stream`
 
-单聊生成。默认把用户消息写入会话。`mergeAssistantIntoMessageId` 时把输出并入已有助手消息的新版本。`webSearchEnabled=true` 时：若本轮解析协议为 `openai_responses` / `anthropic_messages`，分别把 `{type:web_search}`、`{type:web_search_20250305,name:web_search}` 交给厂商原生联网，不要求本地独立搜索 Key。若协议为 `gemini_generate_content`，按 `geminiSearch`（请求体 > 会话 `overrides.params.geminiSearch` > 全局 `webSearch.geminiSearch`，缺省 `native`）分流：`native` 发送 `{type:google_search}`（映射 `{googleSearch:{}}`），不要求独立搜索 Key；`independent` 走本地 Tavily / 博查 / Brave 函数工具循环，未配置则 `web_search_not_configured`。其它协议一律走独立搜索循环。禁止原生联网失败时静默改走独立搜索，也禁止独立失败时静默改走原生。`omitMessageIds` 仅本次拼装忽略。成功 `done`/JSON 含归一化 `usage` 与 `generationMetadata`；流式路径在 stamp 后可另发 `event:usage`。助手消息同时写入 `generationMetadata`，并追加 `data/usage/YYYY-MM.jsonl`。账本写入失败返回 `usage_persist_failed`（不把该轮伪装成完整成功）。
+单聊生成。默认把用户消息写入会话。`mergeAssistantIntoMessageId` 时把输出并入已有助手消息的新版本。`webSearchEnabled=true` 时，本轮请求的 `webSearchSource` 优先于全局 `webSearch.source`。`native` 使用当前供应商的原生能力，包括 DeepSeek、OpenAI Responses、Anthropic Messages 和 Gemini。`independent` 使用已配置的 Tavily / 博查 / Brave，未配置返回 `web_search_not_configured`。缺少显式来源时兼容旧预设和 Gemini 设置。选定的来源失败时直接报告错误。`omitMessageIds` 仅本次拼装忽略。成功 `done`/JSON 含归一化 `usage` 与 `generationMetadata`；流式路径在 stamp 后可另发 `event:usage`。助手消息同时写入 `generationMetadata`，并追加 `data/usage/YYYY-MM.jsonl`。账本写入失败返回 `usage_persist_failed`（不把该轮伪装成完整成功）。
 
 **请求体**
 
@@ -712,7 +713,7 @@ Content-Type: `application/json`
 
 #### `POST /api/generate/group`
 
-群聊指定角色回合。成员设置中的模型/温度/思考深度/Fast 优先于会话再全局。`webSearchEnabled` / `geminiSearch` 语义与 `POST /api/generate/stream` 相同（Responses / Anthropic 原生联网；Gemini 按 geminiSearch 分流；其它协议本地 Tavily / 博查 / Brave）。
+群聊指定角色回合。成员设置中的模型/温度/思考深度/Fast 优先于会话再全局。`webSearchEnabled` / `webSearchSource` 语义与 `POST /api/generate/stream` 相同。
 
 **请求体**
 
@@ -727,7 +728,7 @@ Content-Type: `application/json`
 
 #### `POST /api/generate/interject`
 
-群聊插话：指定角色额外回复一轮，不推进正常轮转。`webSearchEnabled` / `geminiSearch` 语义与 `POST /api/generate/stream` 相同。
+群聊插话：指定角色额外回复一轮，不推进正常轮转。`webSearchEnabled` / `webSearchSource` 语义与 `POST /api/generate/stream` 相同。
 
 **请求体**
 
@@ -2647,8 +2648,9 @@ AI助手流式请求模型
 - `runtimeOverrides`: (ChatOverrides | null)
 - `omitMessageIds`: (array<string>)。仅本次请求拼装 LLM 上下文时忽略的消息 id；不写盘
 - `mergeAssistantIntoMessageId`: (string | null)。将本次助手输出作为指定 assistant 消息的新版变体落盘；为空则追加新消息
-- `webSearchEnabled`: (boolean) 默认 false。为 true 时启用本轮网络搜索。`openai_responses` / `anthropic_messages` 走厂商原生联网；`gemini_generate_content` 按 `geminiSearch` 分流（见上）；其它协议需已配置 Tavily / 博查 / Brave，否则 `web_search_not_configured`。
-- `geminiSearch`: (string | null) 枚举 `native` | `independent`。null 沿用会话再沿用全局。仅 Gemini 协议有效。
+- `webSearchEnabled`: (boolean) 默认 false，开启时按 `webSearchSource` 解析联网来源。
+- `webSearchSource`: (string | null) `native` 或 `independent`，null 沿用全局。
+- `geminiSearch`: (string | null) 兼容旧版 Gemini 搜索选项。
 
 ### `GenerationParams`
 
@@ -2661,7 +2663,8 @@ AI助手流式请求模型
 - `context_size`: (integer | null)。上下文总长度限制(token)，0或空表示未启用；长期记忆+最近消息<=此值
 - `reasoningEffort`: (string | null)。会话级思考深度（T-824）；None 表示沿用全局 settings.reasoningEffort
 - `fastMode`: (boolean | null)。会话级 Fast 模式（T-824）：OpenAI service_tier / Anthropic speed / Gemini service_tier；None 表示关闭
-- `geminiSearch`: (string | null) 枚举 `native` | `independent`。会话级 Gemini 搜索来源；None 沿用全局 `webSearch.geminiSearch`
+- `webSearchSource`: (string | null) 旧会话联网来源字段，保留用于读取旧会话数据。生成使用全局配置或本轮请求字段。
+- `geminiSearch`: (string | null) 兼容旧版会话 Gemini 搜索选项。
 
 ### `GlmLocalActionReq`
 
@@ -2681,8 +2684,9 @@ AI助手流式请求模型
 - `runtimeOverrides`: (ChatOverrides | null)
 - `omitMessageIds`: (array<string>)。仅本次请求拼装 LLM 上下文时忽略的消息 id；不写盘
 - `mergeAssistantIntoMessageId`: (string | null)。将本次助手输出作为指定 assistant 消息的新版变体落盘；为空则追加新消息
-- `webSearchEnabled`: (boolean) 默认 false。为 true 时启用本轮网络搜索。`openai_responses` / `anthropic_messages` 走厂商原生联网；`gemini_generate_content` 按 `geminiSearch` 分流（见上）；其它协议需已配置 Tavily / 博查 / Brave，否则 `web_search_not_configured`。
-- `geminiSearch`: (string | null) 枚举 `native` | `independent`。null 沿用会话再沿用全局。仅 Gemini 协议有效。
+- `webSearchEnabled`: (boolean) 默认 false，开启时按 `webSearchSource` 解析联网来源。
+- `webSearchSource`: (string | null) `native` 或 `independent`，null 沿用全局。
+- `geminiSearch`: (string | null) 兼容旧版 Gemini 搜索选项。
 
 ### `GroupMemberSettings`
 
@@ -2955,8 +2959,9 @@ WGSL 诊断条目（与前端 WgslDiagnostic 对齐；服务端无编译器时�
 - `imageFallbackMode`: (boolean) 默认 false。Imagefallbackmode
 - `omitMessageIds`: (array<string>)。仅本次请求拼装 LLM 上下文时忽略的消息 id；不写盘
 - `mergeAssistantIntoMessageId`: (string | null)。将本次助手输出作为指定 assistant 消息的新版变体落盘；为空则追加新消息
-- `webSearchEnabled`: (boolean) 默认 false。为 true 时启用本轮网络搜索。`openai_responses` / `anthropic_messages` 走厂商原生联网；`gemini_generate_content` 按 `geminiSearch` 分流（见上）；其它协议需已配置 Tavily / 博查 / Brave，否则 `web_search_not_configured`。
-- `geminiSearch`: (string | null) 枚举 `native` | `independent`。null 沿用会话再沿用全局。仅 Gemini 协议有效。
+- `webSearchEnabled`: (boolean) 默认 false，开启时按 `webSearchSource` 解析联网来源。
+- `webSearchSource`: (string | null) `native` 或 `independent`，null 沿用全局。
+- `geminiSearch`: (string | null) 兼容旧版 Gemini 搜索选项。
 
 ### `StateVariables`
 
@@ -3142,10 +3147,11 @@ WebGPU 背景预设元数据。 仅保存元数据，WGSL 源文件本体存于 
 
 ### `WebSearchSettings`
 
-主聊天独立搜索 API：按 provider 选择 Tavily、博查或 Brave。Gemini 是否走 Google 原生 Search 由 `geminiSearch` 显式选择（默认 `native`），不再在 `gemini_generate_content` 上由 `webSearchEnabled` 自动强制。OpenAI Responses / Anthropic Messages 打开搜索后仍不使用本对象。
+聊天和助手的联网来源与第三方供应商配置。
 
 - `provider`: (string) 枚举: "tavily", "bocha", "brave" 默认 "tavily"。Provider
-- `geminiSearch`: (string) 枚举: "native", "independent" 默认 "native"。Gemini 搜索来源
+- `source`: (string | null) `native` 或 `independent`，供聊天和助手使用。
+- `geminiSearch`: (string) 兼容旧版 Gemini 搜索选项。
 - `tavily`: (WebSearchTavilySettings | null)
 - `bocha`: (WebSearchBochaSettings | null)
 - `brave`: (WebSearchBraveSettings | null)

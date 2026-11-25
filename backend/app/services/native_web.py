@@ -30,15 +30,33 @@ class WebPlan:
 
 def _unsupported(message: str) -> AppError:
     return AppError(code="web_capability_unsupported", message=message, source="web.policy", status_code=400,
-                    suggested_action="检查模型、供应商及预设中的联网来源和搜索/抓取选项")
+                    suggested_action="检查模型与供应商的联网能力，或在网络搜索设置中切换来源")
+
+
+def _independent_plan(settings: Any) -> WebPlan:
+    if not web_search_is_configured(settings):
+        raise AppError(
+            code="web_search_not_configured", message="第三方搜索服务未配置 API Key",
+            source="web.policy", status_code=400, suggested_action="在设置 → 网络搜索配置第三方供应商的 API Key",
+        )
+    return WebPlan("independent", list(OPENAI_WEB_SEARCH_TOOLS))
 
 
 def resolve_web_plan(settings: Any, *, requested: bool, protocol: str, base_url: str,
-                     preset_id: str | None = None, gemini_search: str = "native") -> WebPlan:
+                     preset_id: str | None = None, source: str | None = None,
+                     gemini_search: str | None = None) -> WebPlan:
     if not requested:
         return WebPlan()
+    web_settings = getattr(settings, "webSearch", None)
+    selected = source or getattr(web_settings, "source", None)
+    if selected == "independent":
+        return _independent_plan(settings)
     preset = next((p for p in (getattr(settings, "apiPresets", None) or []) if p.id == preset_id), None)
-    source = getattr(preset, "webSearchSource", None)
+    source = selected or getattr(preset, "webSearchSource", None)
+    if not selected and protocol == GEMINI_GENERATE_CONTENT_PROTOCOL:
+        legacy_choice = gemini_search or getattr(web_settings, "geminiSearch", "native")
+        if legacy_choice == "independent":
+            source = "independent"
     search = getattr(preset, "webSearchSearchEnabled", True)
     fetch = getattr(preset, "webSearchFetchEnabled", True)
     if not search and not fetch:
@@ -46,7 +64,7 @@ def resolve_web_plan(settings: Any, *, requested: bool, protocol: str, base_url:
     if source != "independent":
         host = (urlsplit(base_url).hostname or "").lower()
         # Keys configured for a relay are never forwarded to a different origin.
-        if source == "native" and host == "api.deepseek.com" and urlsplit(base_url).scheme == "https":
+        if host == "api.deepseek.com" and urlsplit(base_url).scheme == "https":
             tools = list(OPENAI_WEB_SEARCH_TOOLS) if search else []
             if fetch:
                 tools.append(_FETCH_TOOL)
@@ -60,15 +78,13 @@ def resolve_web_plan(settings: Any, *, requested: bool, protocol: str, base_url:
             if fetch:
                 tools.append({"type": "web_fetch_20250910", "name": "web_fetch", "max_uses": 8})
             return WebPlan("hosted", tools)
-        if protocol == GEMINI_GENERATE_CONTENT_PROTOCOL and gemini_search == "native":
+        if protocol == GEMINI_GENERATE_CONTENT_PROTOCOL:
             return WebPlan("hosted", [{"type": "google_search"}]) if search else WebPlan()
         if source == "native":
             raise _unsupported("当前供应商或连接地址未支持原生联网，请手动选择独立搜索服务")
     if not search:
         raise _unsupported("独立搜索服务不提供原生网页抓取，请启用搜索或切换支持抓取的供应商")
-    if not web_search_is_configured(settings):
-        raise AppError(code="web_search_not_configured", message="独立搜索服务未配置 API Key", source="web.policy", status_code=400)
-    return WebPlan("independent", list(OPENAI_WEB_SEARCH_TOOLS))
+    return _independent_plan(settings)
 
 
 async def execute_web_tool(plan: WebPlan, *, name: str, args: dict[str, Any], settings: Any,

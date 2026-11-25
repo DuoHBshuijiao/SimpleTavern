@@ -1468,7 +1468,8 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
     llm_provider = prepared.llm_provider
     gemini_search = _resolve_gemini_search(req=req, chat=chat, settings=settings)
     web_plan = resolve_web_plan(settings, requested=web_search_requested, protocol=protocol,
-        base_url=base_url, preset_id=prepared.credentials.preset_id, gemini_search=gemini_search)
+        base_url=base_url, preset_id=prepared.credentials.preset_id, gemini_search=gemini_search,
+        source=req.webSearchSource)
     web_search_enabled = bool(web_plan.tools)
     gen_tools = None if web_plan.local else (web_plan.tools or None)
 
@@ -2163,7 +2164,8 @@ async def generate_group_response(req: GroupGenerateRequest, request: Request) -
     llm_provider = prepared.llm_provider
     gemini_search = _resolve_gemini_search(req=req, chat=chat, settings=settings)
     web_plan = resolve_web_plan(settings, requested=web_search_requested, protocol=protocol,
-        base_url=base_url, preset_id=prepared.credentials.preset_id, gemini_search=gemini_search)
+        base_url=base_url, preset_id=prepared.credentials.preset_id, gemini_search=gemini_search,
+        source=req.webSearchSource)
     web_search_enabled = bool(web_plan.tools)
     gen_tools = None if web_plan.local else (web_plan.tools or None)
 
@@ -2673,7 +2675,8 @@ async def generate_single_interject(req: SingleInterjectRequest, request: Reques
     llm_provider = prepared.llm_provider
     gemini_search = _resolve_gemini_search(req=req, chat=chat, settings=settings)
     web_plan = resolve_web_plan(settings, requested=web_search_requested, protocol=protocol,
-        base_url=base_url, preset_id=prepared.credentials.preset_id, gemini_search=gemini_search)
+        base_url=base_url, preset_id=prepared.credentials.preset_id, gemini_search=gemini_search,
+        source=req.webSearchSource)
     web_search_enabled = bool(web_plan.tools)
     gen_tools = None if web_plan.local else (web_plan.tools or None)
 

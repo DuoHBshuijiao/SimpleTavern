@@ -139,6 +139,7 @@ def filter_reasoning_extra_body_for_upstream(model: str | None, extra_body: dict
 
 
 GeminiSearchMode = Literal["native", "independent"]
+WebSearchSource = Literal["native", "independent"]
 _SECRETISH_KEY_RE = re.compile(
     r"(?i)(api[_-]?key|access[_-]?token|token|secret|password|passwd|authorization|cookie)"
 )
@@ -233,6 +234,7 @@ class GenerationParams(BaseModel):
         default=None,
         description="会话级 Gemini 搜索来源；None 表示沿用全局 webSearch.geminiSearch",
     )
+    webSearchSource: WebSearchSource | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -644,14 +646,12 @@ class WebSearchBraveSettings(BaseModel):
 
 
 class WebSearchSettings(BaseModel):
-    """主聊天独立搜索 API：按 provider 选择 Tavily / 博查 / Brave。
-
-    Gemini 是否走 Google 原生 Search 由 ``geminiSearch`` 显式选择，不由协议自动强制。
-    """
+    """聊天和助手的联网来源，以及独立搜索供应商配置。"""
 
     model_config = ConfigDict(extra="ignore")
 
     provider: WebSearchProvider = "tavily"
+    source: WebSearchSource | None = None
     geminiSearch: GeminiSearchMode = "native"
     tavily: WebSearchTavilySettings | None = Field(default_factory=WebSearchTavilySettings)
     bocha: WebSearchBochaSettings | None = Field(default_factory=WebSearchBochaSettings)
@@ -1731,6 +1731,7 @@ class GenerateStreamRequest(BaseModel):
         default=None,
         description="本轮 Gemini 搜索来源；null 沿用会话 overrides.params.geminiSearch 再沿用全局 webSearch.geminiSearch",
     )
+    webSearchSource: WebSearchSource | None = None
 
 
 class DraftHelpRequest(BaseModel):
@@ -1786,6 +1787,7 @@ class GroupGenerateRequest(BaseModel):
         default=None,
         description="本轮 Gemini 搜索来源；null 沿用会话 overrides.params.geminiSearch 再沿用全局 webSearch.geminiSearch",
     )
+    webSearchSource: WebSearchSource | None = None
 
 
 class SingleInterjectRequest(BaseModel):
@@ -1814,3 +1816,4 @@ class SingleInterjectRequest(BaseModel):
         default=None,
         description="本轮 Gemini 搜索来源；null 沿用会话 overrides.params.geminiSearch 再沿用全局 webSearch.geminiSearch",
     )
+    webSearchSource: WebSearchSource | None = None
