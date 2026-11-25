@@ -7,6 +7,7 @@ import { Network } from 'vis-network'
 import { DataSet } from 'vis-data'
 import 'vis-network/styles/vis-network.min.css'
 import { X, RefreshCw, Plus, Trash2 } from 'lucide-vue-next'
+import SettingsSwitch from '../settings-drawer/SettingsSwitch.vue'
 import { apiPost, apiDelete } from '../../api/http'
 import type {
   KgEntityType,
@@ -589,10 +590,7 @@ onUnmounted(() => destroyNetwork())
                 <span class="text-xs text-[var(--color-text-muted)]">谓语</span>
                 <input v-model="newRelPredicate" type="text" class="input w-full" placeholder="如：信任、位于" />
               </label>
-              <label class="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
-                <input v-model="useLiteralObject" type="checkbox" class="checkbox" />
-                客体为字面量（非实体）
-              </label>
+              <SettingsSwitch v-model="useLiteralObject" label="客体为字面量（非实体）" />
               <label v-if="!useLiteralObject" class="block space-y-1">
                 <span class="text-xs text-[var(--color-text-muted)]">客体实体</span>
                 <ModernSelect

@@ -111,7 +111,7 @@ void dialogRef
               <SettingsSwitch
                 label="启用"
                 :model-value="draft.enabled"
-                more="扫描深度和插入深度在「当前会话 → 世界书顺序」里按每本书设置，不保存在条目里。"
+                more="在「当前会话 → 世界书顺序」设置每本书的扫描深度和插入深度。"
                 @update:model-value="draft.enabled = $event"
               />
               <SettingsField label="正则表达式">

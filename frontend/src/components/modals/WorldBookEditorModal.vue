@@ -373,7 +373,7 @@ async function save() {
                     <div class="flex flex-wrap items-center gap-1 shrink-0">
                       <button
                         type="button"
-                        class="p-1.5 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-surface-hover"
+                        class="icon-button p-1.5"
                         aria-label="上移"
                         @click="moveEntry(e.id, -1)"
                       >
@@ -381,7 +381,7 @@ async function save() {
                       </button>
                       <button
                         type="button"
-                        class="p-1.5 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-surface-hover"
+                        class="icon-button p-1.5"
                         aria-label="下移"
                         @click="moveEntry(e.id, 1)"
                       >
@@ -389,7 +389,7 @@ async function save() {
                       </button>
                       <button
                         type="button"
-                        class="p-1.5 rounded-lg text-[var(--color-text-muted)] hover:text-brand hover:bg-surface-hover"
+                        class="icon-button p-1.5 hover:text-brand"
                         aria-label="编辑"
                         @click="openEntryEdit(e)"
                       >
@@ -397,7 +397,7 @@ async function save() {
                       </button>
                       <button
                         type="button"
-                        class="p-1.5 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-surface-hover"
+                        class="icon-button p-1.5"
                         aria-label="复制"
                         @click="duplicateEntry(e.id)"
                       >
@@ -405,7 +405,7 @@ async function save() {
                       </button>
                       <button
                         type="button"
-                        class="p-1.5 rounded-lg text-[var(--color-text-muted)] hover:text-error hover:bg-surface-hover"
+                        class="icon-button p-1.5 hover:text-error"
                         aria-label="删除"
                         @click="openRemoveEntryConfirm($event, e.id)"
                       >

@@ -172,13 +172,13 @@ watch(
           </div>
           <div
             v-if="compileMessage"
-            class="shrink-0 rounded-lg border border-[var(--color-error)]/35 bg-[var(--color-error-bg)] px-2.5 py-2 text-xs text-[var(--color-error-text)] whitespace-pre-wrap"
+            class="shrink-0 rounded-lg border border-[var(--color-error)]/35 light:border-transparent bg-[var(--color-error-bg)] px-2.5 py-2 text-xs text-[var(--color-error-text)] whitespace-pre-wrap"
           >
             {{ compileMessage }}
           </div>
           <ul
             v-if="diagnostics.length > 0"
-            class="shrink-0 list-none space-y-2 rounded-lg border border-[var(--color-error)]/35 bg-[var(--color-error-bg)] p-2.5 text-xs text-[var(--color-error-text)]"
+            class="shrink-0 list-none space-y-2 rounded-lg border border-[var(--color-error)]/35 light:border-transparent bg-[var(--color-error-bg)] p-2.5 text-xs text-[var(--color-error-text)]"
             role="list"
           >
             <li
@@ -203,7 +203,7 @@ watch(
         <div class="modal-footer shrink-0 flex flex-wrap justify-end gap-2">
           <button
             type="button"
-            class="min-h-10 rounded-lg border border-[var(--color-border-subtle)] px-3 py-2 text-xs transition-colors hover:bg-surface-hover/30 disabled:opacity-50"
+            class="btn btn-secondary"
             :disabled="disabled || compileDisabled"
             @click="emit('compile')"
           >
@@ -211,7 +211,7 @@ watch(
           </button>
           <button
             type="button"
-            class="min-h-10 rounded-lg border border-[var(--color-border-subtle)] px-3 py-2 text-xs transition-colors hover:bg-surface-hover/30 disabled:opacity-50"
+            class="btn btn-secondary"
             :disabled="disabled || saveDisabled"
             @click="emit('save')"
           >
@@ -219,7 +219,7 @@ watch(
           </button>
           <button
             type="button"
-            class="min-h-10 rounded-lg bg-brand-a20 px-3 py-2 text-xs text-brand transition-colors hover:bg-brand-a30 disabled:opacity-50"
+            class="btn btn-primary"
             :disabled="disabled || runDisabled"
             @click="emit('run')"
           >

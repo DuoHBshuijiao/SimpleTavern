@@ -29,12 +29,14 @@
           class="inline-flex items-center gap-1 text-2xs px-1.5 py-0.5 rounded-full bg-surface-muted text-[var(--color-text-secondary)]"
         >
           <input
-            class="bg-transparent border-none outline-none text-2xs w-[60px] text-[var(--color-text-secondary)]"
+            class="input input-sm !w-[60px] !border-transparent !bg-transparent !px-0 !py-0 text-2xs"
             placeholder="列名"
             :value="table.columns[ci]"
             @input="onColumnNameInput(ti, ci, $event)"
           />
-          <button type="button" class="shrink-0 leading-none text-[var(--color-text-muted)] hover:text-[var(--color-error-text)] transition-colors" @click="removeColumn(ti, ci)">&times;</button>
+          <button type="button" class="icon-button shrink-0 hover:text-error" aria-label="删除列" @click="removeColumn(ti, ci)">
+            <X class="h-3 w-3" />
+          </button>
         </span>
       </div>
 
@@ -70,7 +72,9 @@
                 />
               </td>
               <td class="p-1 border-b border-[var(--color-border-subtle)]">
-                <button type="button" class="text-[var(--color-text-muted)] hover:text-[var(--color-error-text)] text-xs leading-none transition-colors" @click="removeRow(ti, ri)">&times;</button>
+                <button type="button" class="icon-button p-0.5 hover:text-error" aria-label="删除行" @click="removeRow(ti, ri)">
+                  <X class="h-3 w-3" />
+                </button>
               </td>
             </tr>
           </tbody>
@@ -83,6 +87,7 @@
 
 <script setup lang="ts">
 import { reactive, watch } from 'vue'
+import { X } from 'lucide-vue-next'
 import type { StatusTableDef } from '../../types/models'
 
 const props = withDefaults(defineProps<{

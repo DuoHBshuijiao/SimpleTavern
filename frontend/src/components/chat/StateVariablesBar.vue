@@ -17,7 +17,7 @@
           class="relative inline-flex max-w-[min(100vw,20rem)] shrink-0 select-none items-center gap-1.5 overflow-hidden rounded-full border px-2.5 py-1 backdrop-blur-[var(--glass-blur-modal)] backdrop-saturate-[1.45] transition-colors duration-300"
           :class="[
             cap.flashing
-              ? 'border-[var(--color-brand-a50)] bg-[var(--color-brand-a30)]'
+              ? 'border-[var(--color-brand-a50)] light:border-transparent bg-[var(--color-brand-a30)]'
               : 'border-[var(--color-border)]/80 bg-surface-overlay',
           ]"
         >
@@ -65,8 +65,8 @@
         <button
           key="svbar-panel"
           type="button"
-          class="ml-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[var(--color-text-muted)] transition-colors transition-opacity hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
-          :class="preferHoverChrome ? 'opacity-0 group-hover:opacity-100' : 'opacity-100'"
+          class="icon-button ml-0.5 h-5 w-5 shrink-0"
+          :class="preferHoverChrome ? 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100' : 'opacity-100'"
           aria-label="MVU 工作日志"
           @click="$emit('toggle-panel')"
         >
