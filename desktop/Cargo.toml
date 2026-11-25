@@ -3,10 +3,16 @@ name = "simpletavern-manager"
 version = "0.810.0"
 edition = "2021"
 build = "build.rs"
+default-run = "SimpleTavern"
 
 [[bin]]
 name = "SimpleTavern"
 path = "src/main.rs"
+
+[[bin]]
+name = "SimpleTavernSetup"
+path = "src/setup.rs"
+required-features = ["setup"]
 
 [build-dependencies]
 tauri-build = "2"
@@ -22,7 +28,9 @@ rfd = "0.15"
 tempfile = "3"
 windows-sys = { version = "0.61", features = ["Win32_Foundation","Win32_System_JobObjects","Win32_System_Threading","Win32_Security"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+winreg = { version = "0.56", optional = true }
 
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
+setup = ["dep:winreg", "rfd/common-controls-v6"]

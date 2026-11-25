@@ -13,11 +13,13 @@ dotnet tool install --global vpk --version 1.2.161
 .venv/Scripts/python desktop/build_windows.py --version 0.810.0
 ```
 
-版本参数使用三段 SemVer。生成的安装包和可自更新的 Portable.zip 在 `dist/windows/`。同一目录中的 `releases.win-x64.json` 和 `*-full.nupkg` 是应用更新必需的资产。保留上次发布的完整包再构建会生成差分包。发版时把这些文件作为同一 GitHub Release 的附件上传。仓库的 Windows 发布工作流也支持手动构建。公开分发可通过 Velopack 的 `VPK_SIGN_PARAMS` 或其签名服务配置签署成品，签名凭据只保存在构建者环境。
+本地打包会复用脚本上次成功安装的前端依赖，并重新构建前端。首次打包、依赖文件或 Node 安装环境变化时会执行 `npm ci`。加 `--clean-web-deps` 可强制重装依赖。若已有所需版本的 `frontend/dist`，可用 `--reuse-web` 直接复用产物。GitHub Actions 发布构建会执行干净安装，并缓存 npm 下载。
+
+版本参数使用三段 SemVer。生成的安装包和可自更新的 Portable.zip 在 `dist/windows/`。同一目录中的 `releases.win-x64.json` 和 `*-full.nupkg` 是应用更新必需的资产。保留上次发布的完整包再构建会生成差分包。发版时把这些文件作为同一 GitHub Release 的附件上传。仓库的 Windows 发布工作流也支持手动构建。需要签名时，可通过 Velopack 的 `VPK_SIGN_PARAMS` 或其签名服务签署内部程序，打包完成后再对输出的 `*-Setup.exe` 签名。签名凭据只保存在构建者环境。
 
 ## 目录与运行
 
-- 安装版程序在当前用户的 Velopack 安装目录，数据在 `%LOCALAPPDATA%\SimpleTavern.User\data`。
+- 安装器默认使用 `%LOCALAPPDATA%\SimpleTavern`。可以选择其他空文件夹，选择 `D:\` 这样的盘符根目录会将安装路径设为 `D:\SimpleTavern`。重装沿用已有目录，换盘前请先卸载。数据保存在 `%LOCALAPPDATA%\SimpleTavern.User\data`。
 - 免安装版从压缩包根目录的启动器运行，数据和 `manager.json` 位于 `current` 之外。整个目录需可写。首次启动可从已停止写入的旧版复制 data；原文件保留。
 - 已配置的本地语音引擎使用各自的网关环境。受管进程由聊天服务启动。外部网关可检查连接。Janitor 扩展位于 `current/extensions` 中，可复制到固定位置后在浏览器中加载。
 - 管理器和服务通过父子进程管道交换固定命令与状态。退出时先暂停新写入，等活动操作结束，再停止服务。浏览器保持原页面，输入文字和待发送图片仍在原标签中。再次手工打开或刷新页面会加载最新前端。

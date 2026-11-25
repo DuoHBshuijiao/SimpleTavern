@@ -35,7 +35,7 @@
 
 ### 1. 选择 Windows 桌面版
 
-在 [Releases](https://github.com/DuoHBshuijiao/SimpleTavern/releases) 的 Assets 里选择 Windows x64 成品。安装版双击 `SimpleTavern-win-x64-Setup.exe`。免安装版将 `SimpleTavern-win-x64-Portable.zip` 完整解压到可写文件夹，再双击根目录的 `SimpleTavern.exe`。缺少 WebView2 时，安装版会补齐运行时，免安装用户可安装 [Microsoft WebView2 Evergreen Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)。
+在 [Releases](https://github.com/DuoHBshuijiao/SimpleTavern/releases) 的 Assets 里选择 Windows x64 成品。安装版双击 `SimpleTavern-win-x64-Setup.exe`，可更改安装目录。选择 `D:\` 等盘符根目录时，安装器会自动使用盘符下的 `SimpleTavern` 文件夹。免安装版将 `SimpleTavern-win-x64-Portable.zip` 完整解压到可写文件夹，再双击根目录的 `SimpleTavern.exe`。缺少 WebView2 时，安装版会补齐运行时，免安装用户可安装 [Microsoft WebView2 Evergreen Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)。
 
 ### 2. 开始聊天
 

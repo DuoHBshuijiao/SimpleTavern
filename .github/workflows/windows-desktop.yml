@@ -21,6 +21,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
@@ -37,7 +39,7 @@ jobs:
           if ($releaseVersion -match '^(\d+)\.(\d+)$') {
             $releaseVersion = '{0}.{1}.0' -f [int]$Matches[1],[int]$Matches[2]
           }
-          python desktop/build_windows.py --version $releaseVersion
+          python desktop/build_windows.py --version $releaseVersion --clean-web-deps
       - name: Exercise packaged service
         run: python tools/desktop-check/service.py
       - uses: actions/upload-artifact@v4

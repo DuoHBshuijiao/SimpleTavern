@@ -110,7 +110,7 @@ async def chat_tab(browser, origin, home):
 async def run(mode, first, expected, run_dir, browser, feed):
     home = run_dir / mode
     home.mkdir()
-    root = home / "program"
+    root = home / ("program 中文 目录" if mode == "installed" else "program")
     root.mkdir()
     debug_port, chat_port, api_port = (port() for _ in range(3))
     local = home / "local"
@@ -126,7 +126,20 @@ async def run(mode, first, expected, run_dir, browser, feed):
         profile = root
     else:
         installer = next(first.glob("*QA-*-Setup.exe"))
+        occupied = home / "occupied"
+        occupied.mkdir()
+        marker = occupied / "keep.txt"
+        marker.write_text("keep", encoding="utf-8")
+        rejected = subprocess.run([installer, "--silent", "--installto", occupied], env=env, timeout=30)
+        assert rejected.returncode != 0 and list(occupied.iterdir()) == [marker]
+        assert marker.read_text(encoding="utf-8") == "keep"
         subprocess.run([installer, "--silent", "--installto", root], env=env, check=True, timeout=100)
+        other = home / "other-program"
+        rejected = subprocess.run([installer, "--silent", "--installto", other], env=env, timeout=30)
+        assert rejected.returncode != 0 and not other.exists()
+        subprocess.run([installer, "--silent"], env=env, check=True, timeout=100)
+        assert exe.is_file() and not (local / "SimpleTavernDesktopQA").exists()
+        print("PASS installed: preserved other files and reused the registered custom directory", flush=True)
         profile = local / "SimpleTavernDesktopQA.User"
     profile.mkdir(exist_ok=True)
     (profile / "manager.json").write_text(json.dumps({"port": chat_port, "api_port": api_port}))
