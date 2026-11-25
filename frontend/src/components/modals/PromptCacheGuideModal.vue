@@ -8,7 +8,7 @@ import { computed, ref, watch } from 'vue'
 import { ArrowLeft, ArrowRight, Check, Sparkles, X } from 'lucide-vue-next'
 import { useDialogBehavior } from '../../composables/useDialogBehavior'
 import { dialogAria } from '../../utils/uiPrimitives'
-import ThemedCheckbox from '../ThemedCheckbox.vue'
+import SettingsSwitch from '../settings-drawer/SettingsSwitch.vue'
 import type { PromptCacheConfig, PromptCacheMode } from '../../types/models'
 import { defaultPromptCacheConfig } from '../../types/models'
 
@@ -163,7 +163,7 @@ const hitCost = computed(() => Math.round(inputTokens.value * cachedRatio.value 
                 显式缓存需要告诉上游「写到这里」。断点必须落在<strong class="text-[var(--color-text)]">不会每轮改动</strong>的块尾部。GPT-5.6+ 若不打断点，写入会静默失败。
               </p>
               <ol class="space-y-2 text-sm">
-                <li class="rounded-xl border border-brand/30 bg-brand-a10 px-3 py-2">1. System / 角色卡 — 几乎总该选</li>
+                <li class="rounded-xl border border-brand/30 light:border-transparent bg-brand-a10 px-3 py-2">1. System / 角色卡 — 几乎总该选</li>
                 <li class="rounded-xl border border-[var(--color-border-subtle)] px-3 py-2">2. 工具定义 — 助手开了工具时选</li>
                 <li class="rounded-xl border border-[var(--color-border-subtle)] px-3 py-2">3. 历史尾部 — 多轮对话滚动前缀，提高命中</li>
               </ol>
@@ -177,7 +177,7 @@ const hitCost = computed(() => Math.round(inputTokens.value * cachedRatio.value 
               </p>
               <label class="block space-y-1">
                 <span class="text-2xs text-[var(--color-text-muted)]">输入 token：{{ inputTokens }}</span>
-                <input v-model.number="inputTokens" type="range" min="1024" max="32000" step="256" class="w-full" />
+                <input v-model.number="inputTokens" type="range" min="1024" max="32000" step="256" class="input-range" />
               </label>
               <div class="grid gap-3 sm:grid-cols-2">
                 <div class="rounded-xl bg-[var(--color-glass-l2)] p-3">
@@ -235,8 +235,9 @@ const hitCost = computed(() => Math.round(inputTokens.value * cachedRatio.value 
                   v-for="card in MODE_CARDS"
                   :key="card.mode"
                   type="button"
-                  class="rounded-xl border p-3 text-left transition-colors"
-                  :class="draft.mode === card.mode ? 'border-brand bg-brand-a10' : 'border-[var(--color-border-subtle)] hover:bg-[var(--color-glass-l2)]'"
+                  class="settings-item cursor-pointer text-left hover:bg-surface-hover"
+                  :class="{ 'settings-item--selected': draft.mode === card.mode }"
+                  :aria-pressed="draft.mode === card.mode"
                   @click="draft.mode = card.mode"
                 >
                   <div class="text-sm font-medium">{{ card.title }}</div>
@@ -258,10 +259,7 @@ const hitCost = computed(() => Math.round(inputTokens.value * cachedRatio.value 
               <p class="text-sm leading-6 text-[var(--color-text-secondary)]">
                 真实探测需要你的 API Key 连发两次相同前缀。默认关闭，避免意外扣费。
               </p>
-              <button type="button" class="flex items-center gap-2 text-sm" @click="allowProbe = !allowProbe">
-                <ThemedCheckbox :checked="allowProbe" />
-                我了解费用，允许以后在 HTTP 日志里核对 cache 读写（本页不自动发请求）
-              </button>
+              <SettingsSwitch v-model="allowProbe" label="我了解费用，允许以后在 HTTP 日志里核对 cache 读写（本页不自动发请求）" />
               <p class="text-2xs text-[var(--color-text-muted)]">
                 完成后看消息气泡的「缓存命中」徽标，或设置 → 查看 HTTP 请求里的 usage.cacheReadInputTokens。
               </p>

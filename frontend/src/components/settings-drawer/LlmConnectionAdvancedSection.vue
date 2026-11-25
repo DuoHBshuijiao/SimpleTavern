@@ -8,10 +8,11 @@
  * - 供应商参数（providerParams）：名录里带占位符的厂商（Azure resource / Cloudflare account_id / Bedrock region）
  * - 缓存策略（promptCache）：模式 / TTL / 断点 / cache key + 「查看原理」入口
  * - 回传思考内容（echoReasoning）：带 data-settings-field，供错误卡片深链定位
- * - 「这次会怎么发」预览：按第一个模型（或手输模型名）实时展示协议 / 深度 / Fast / 缓存 / 调整
+ * - 请求预览：展开后显示当前模型的实际协议、思考深度和缓存策略
  */
 import { computed, ref, watch } from 'vue'
-import { BookOpen, ExternalLink, Loader2, Sparkles } from 'lucide-vue-next'
+import { ExternalLink, Loader2 } from 'lucide-vue-next'
+import DisclosureSummary from '../common/DisclosureSummary.vue'
 import SettingsField from './SettingsField.vue'
 import SettingsHint from './SettingsHint.vue'
 import SettingsSwitch from './SettingsSwitch.vue'
@@ -23,7 +24,9 @@ import { useProtocolPreview, describeAdjustment, PROMPT_CACHE_MODE_LABELS } from
 import {
   PROMPT_CACHE_BREAKPOINTS,
   PROMPT_CACHE_MODE_OPTIONS,
+  REASONING_EFFORT_SHORT_LABELS,
   defaultPromptCacheConfig,
+  normalizeReasoningEffort,
   type PromptCacheBreakpoint,
   type PromptCacheConfig,
   type PromptCacheMode,
@@ -31,7 +34,6 @@ import {
 
 /** 预设 / 全局连接的公共子集 */
 export interface LlmConnectionLike {
-  webSearchSource?: 'native' | 'independent' | null
   webSearchSearchEnabled?: boolean | null
   webSearchFetchEnabled?: boolean | null
   baseUrl: string
@@ -55,14 +57,12 @@ const props = withDefaults(
     reasoningEffort?: string | null
     /** 全局「回传思考内容」三态；on/off 时预设开关被覆盖，给出提示 */
     globalEchoBack?: string | null
-    compact?: boolean
   }>(),
   {
     models: () => [],
     catalogProvider: null,
     reasoningEffort: 'none',
     globalEchoBack: 'preset',
-    compact: false,
   },
 )
 
@@ -102,11 +102,7 @@ const cacheModeOptions = computed(() =>
     }
   }),
 )
-const cacheModeHint = computed(() => {
-  const reason = cacheModeDisabledReason(cache.value.mode)
-  if (reason) return reason
-  return PROMPT_CACHE_MODE_OPTIONS.find((o) => o.value === cache.value.mode)?.hint ?? ''
-})
+const cacheModeHint = computed(() => cacheModeDisabledReason(cache.value.mode) ?? undefined)
 
 const strategy = computed(() => String(props.catalogProvider?.cacheStrategy || '').toLowerCase())
 const proto = computed(() => props.connection.protocol || 'auto')
@@ -154,23 +150,23 @@ const ttlOptions = computed(() => {
   const push = (label: string, value: string) => {
     const reason = ttlDisabledReason(value)
     opts.push({
-      label: reason ? `${label}（${reason}）` : label,
+      label,
       value,
       disabled: Boolean(reason),
       hint: reason || undefined,
     })
   }
   if (p === 'anthropic_messages' || p === 'bedrock_converse' || p === 'auto') {
-    push('5 分钟（Anthropic 默认）', '5m')
-    push('1 小时（Anthropic 长缓存）', '1h')
+    push('5 分钟', '5m')
+    push('1 小时（Anthropic）', '1h')
   }
   if (p === 'openai_responses' || p === 'openai_compatible_chat' || p === 'auto') {
-    push('30 分钟（GPT-5.6+ 显式断点）', '30m')
-    push('24 小时（OpenAI retention）', '24h')
+    push('30 分钟', '30m')
+    push('24 小时', '24h')
   }
   if (p === 'gemini_generate_content' || p === 'auto') {
-    push('1 小时（Gemini cachedContents 3600s）', '3600')
-    push('6 小时（Gemini 21600s）', '21600')
+    push('1 小时（Gemini）', '3600')
+    push('6 小时', '21600')
   }
   return opts
 })
@@ -185,22 +181,18 @@ const ttlValue = computed({
 })
 
 const BREAKPOINT_LABELS: Record<PromptCacheBreakpoint, string> = {
-  system: 'System / 角色卡（最稳定，必选）',
+  system: '系统提示与角色卡',
   tools: '工具定义',
-  history_tail: '历史尾部（滚动前缀：多轮对话命中率更高）',
+  history_tail: '对话历史末尾',
 }
 const responsesCache = computed(() => proto.value === 'openai_responses' ||
   (proto.value === 'auto' && preview.value?.effective === 'openai_responses'))
-
-function unavailableBreakpoint(bp: PromptCacheBreakpoint): boolean {
-  return bp === 'system' || responsesCache.value || Boolean(breakpointsDisabledReason.value)
-}
 
 function hasBreakpoint(bp: PromptCacheBreakpoint) {
   return (cache.value.breakpoints ?? ['system']).includes(bp)
 }
 function toggleBreakpoint(bp: PromptCacheBreakpoint) {
-  if (unavailableBreakpoint(bp)) return
+  if (bp === 'system') return
   const cur = new Set(cache.value.breakpoints ?? ['system'])
   if (cur.has(bp)) cur.delete(bp)
   else cur.add(bp)
@@ -229,16 +221,16 @@ const markersDisabledReason = computed(() => {
 })
 
 const cacheKeyOptions = [
-  { label: '按会话（每个聊天独立前缀）', value: 'per_chat' },
-  { label: '按角色（同角色多会话共享）', value: 'per_character' },
-  { label: '不派生 cache key', value: 'off' },
+  { label: '按会话', value: 'per_chat' },
+  { label: '按角色', value: 'per_character' },
+  { label: '不指定', value: 'off' },
 ]
 
-const showExplicitControls = computed(() => cache.value.mode === 'explicit' || cache.value.mode === 'auto')
+const showBreakpoints = computed(() => !breakpointsDisabledReason.value && !responsesCache.value)
 
 // ---- 供应商参数 ------------------------------------------------------------
 
-const linkedWeb = computed(() => props.connection.webSearchSource !== 'independent' && (props.connection.protocol === 'openai_responses' || ['openai', 'openai-chatgpt', 'openai-codex'].includes(props.connection.providerId || '') || props.models.some(m => /^(gpt|o[134])/.test(m))))
+const linkedWeb = computed(() => props.connection.protocol === 'openai_responses' || ['openai', 'openai-chatgpt', 'openai-codex'].includes(props.connection.providerId || '') || props.models.some(m => /^(gpt|o[134])/.test(m)))
 function setSearchEnabled(enabled: boolean) {
   props.connection.webSearchSearchEnabled = enabled
   if (linkedWeb.value) props.connection.webSearchFetchEnabled = enabled
@@ -265,10 +257,15 @@ const echo = computed({
   },
 })
 const echoOverriddenByGlobal = computed(() => props.globalEchoBack === 'on' || props.globalEchoBack === 'off')
+const effectiveEcho = computed(() => echoOverriddenByGlobal.value ? props.globalEchoBack === 'on' : echo.value)
+const needsEcho = computed(() => props.catalogProvider?.id === 'deepseek' ||
+  props.models.some((model) => /(^|\/)deepseek[-/]/i.test(model)))
 
 // ---- 预览 --------------------------------------------------------------------
 
 const previewModel = ref('')
+const advancedOpen = ref(false)
+const previewOpen = ref(false)
 watch(
   () => props.models,
   (list) => {
@@ -287,60 +284,21 @@ const { preview, loading, error } = useProtocolPreview(
       protocol: props.connection.protocol ?? null,
       providerId: props.connection.providerId ?? null,
       providerParams: props.connection.providerParams ?? null,
-      ...({ authStyle: props.connection.authStyle ?? null } as object),
+      authStyle: props.connection.authStyle ?? null,
       promptCache: cache.value,
       reasoningEffort: props.reasoningEffort ?? 'none',
       fastMode: false,
-      echoReasoning: echo.value,
+      echoReasoning: effectiveEcho.value,
     }
   },
-  { debounceMs: 260 },
+  { debounceMs: 260, enabled: () => previewOpen.value || (advancedOpen.value && proto.value === 'auto') },
 )
+const requestBlocker = computed(() => preview.value?.adjustments.find((item) => item.type === 'capability_unsupported')?.reason)
+const previewAdjustments = computed(() => preview.value?.adjustments.filter((item) => item.type !== 'capability_unsupported') ?? [])
 
-const cacheSummary = computed(() => {
-  const c = preview.value?.cache
-  if (!c) return null
-  const mode = PROMPT_CACHE_MODE_LABELS[c.mode] ?? c.mode
-  const ttl = c.ttl != null && c.ttl !== '' ? `，TTL ${typeof c.ttl === 'number' ? `${c.ttl}s` : c.ttl}` : ''
-  const bps = c.breakpoints?.length ? `，断点：${c.breakpoints.join(' / ')}` : ''
-  return `${mode}${ttl}${bps}`
-})
-
-const webSearchSourceOptions = [
-  { label: '沿用原有行为', value: '' },
-  { label: '供应商原生', value: 'native' },
-  { label: '独立搜索（Tavily / 博查 / Brave）', value: 'independent' },
-]
 </script>
 
 <template>
-  <section class="settings-group" data-settings-field="webSearchSource">
-    <div class="settings-group-title">联网高级设置</div>
-    <SettingsHint more="仍需打开聊天或助手中的联网总开关。独立服务仅提供搜索。GPT 原生搜索包含网页读取动作，无法独立控制；供应商或模型不支持时会明确报错，不会自动切换付费服务。">
-      还需打开聊天或助手中的联网总开关。
-    </SettingsHint>
-    <SettingsField label="联网来源">
-      <ModernSelect
-        :model-value="connection.webSearchSource || ''"
-        :options="webSearchSourceOptions"
-        placeholder="沿用原有行为"
-        class="w-full"
-        @update:model-value="(v) => { connection.webSearchSource = (String(v) || null) as 'native' | 'independent' | null }"
-      />
-    </SettingsField>
-    <SettingsSwitch
-      :label="linkedWeb ? '搜索与网页读取联动' : '允许搜索'"
-      :model-value="connection.webSearchSearchEnabled !== false"
-      @update:model-value="setSearchEnabled"
-    />
-    <SettingsSwitch
-      v-if="!linkedWeb && connection.webSearchSource !== 'independent'"
-      label="允许网页抓取"
-      :model-value="connection.webSearchFetchEnabled !== false"
-      @update:model-value="(v) => { connection.webSearchFetchEnabled = v }"
-    />
-  </section>
-
   <section v-if="placeholders.length" class="settings-group" data-settings-field="providerParams">
     <div class="settings-field-head">
       <div class="settings-group-title">供应商参数</div>
@@ -349,13 +307,13 @@ const webSearchSourceOptions = [
         :href="catalogProvider.docsUrl"
         target="_blank"
         rel="noreferrer"
-        class="inline-flex items-center gap-1 text-xs text-brand hover:underline"
+        class="inline-flex shrink-0 items-center gap-1 text-sm text-brand hover:underline"
       >
-        官方文档 <ExternalLink class="h-3 w-3" />
+        官方文档 <ExternalLink class="h-3 w-3" aria-hidden="true" />
       </a>
     </div>
     <div class="grid gap-3 sm:grid-cols-2">
-      <SettingsField v-for="ph in placeholders" :key="ph.key" :label="ph.label || ph.key" :hint="ph.hint || undefined">
+      <SettingsField v-for="ph in placeholders" :key="ph.key" :label="ph.label || ph.key" :more="ph.hint || undefined">
         <input
           :value="paramValue(ph.key)"
           type="text"
@@ -365,136 +323,158 @@ const webSearchSourceOptions = [
         />
       </SettingsField>
     </div>
-    <p class="settings-hint">
-      地址模板：<code class="font-mono">{{ catalogProvider?.baseUrlTemplate }}</code>
-    </p>
   </section>
-  <p v-else-if="catalogProvider?.hint" class="settings-group settings-hint">
-    <span>
-      {{ catalogProvider.hint }}
-      <a v-if="catalogProvider.docsUrl" :href="catalogProvider.docsUrl" target="_blank" rel="noreferrer" class="ml-1 inline-flex items-center gap-0.5 text-brand hover:underline">
-        文档 <ExternalLink class="h-3 w-3" />
-      </a>
-    </span>
-  </p>
 
-  <section class="settings-group" data-settings-field="promptCache">
-    <div class="settings-field-head">
-      <div class="settings-group-title">提示词缓存策略</div>
-      <button type="button" class="inline-flex items-center gap-1 text-xs text-brand hover:underline" @click="emit('open-cache-guide')">
-        <BookOpen class="h-3 w-3" />
-        缓存原理与断点教学
-      </button>
-    </div>
-    <SettingsField :hint="cacheModeHint">
-      <ModernSelect
-        :model-value="cache.mode"
-        :options="cacheModeOptions"
-        class="w-full"
-        placeholder="选择缓存模式…"
-        @update:model-value="(v) => { if (!cacheModeDisabledReason(String(v) as PromptCacheMode)) cache = { ...cache, mode: String(v) as PromptCacheMode } }"
-      />
-    </SettingsField>
+  <details class="settings-group" @toggle="advancedOpen = ($event.currentTarget as HTMLDetailsElement).open">
+    <DisclosureSummary class="settings-group-title min-h-10 py-1">高级设置</DisclosureSummary>
+    <div class="py-2">
+      <section class="settings-group" data-settings-field="webSearchSource">
+        <SettingsHint title="原生联网" more="会话使用供应商原生联网时，这些开关才会生效。" />
+        <SettingsSwitch
+          :label="linkedWeb ? '搜索和网页读取' : '允许搜索'"
+          :model-value="connection.webSearchSearchEnabled !== false"
+          @update:model-value="setSearchEnabled"
+        />
+        <SettingsSwitch
+          v-if="!linkedWeb"
+          label="允许网页读取"
+          :model-value="connection.webSearchFetchEnabled !== false"
+          @update:model-value="(v) => { connection.webSearchFetchEnabled = v }"
+        />
+      </section>
 
-    <template v-if="cache.mode !== 'off'">
-      <div class="grid gap-3 sm:grid-cols-2">
-        <SettingsField label="缓存 TTL">
-          <ModernSelect :model-value="ttlValue" :options="ttlOptions" class="w-full" placeholder="供应商默认" @update:model-value="(v) => { if (!ttlDisabledReason(String(v))) (ttlValue = String(v)) }" />
-        </SettingsField>
-        <SettingsField label="缓存键" :hint="cacheKeyDisabledReason || undefined" more="对应 OpenAI 的 prompt_cache_key。">
+      <section class="settings-group" data-settings-field="promptCache">
+        <div class="settings-field-head">
+          <div class="settings-group-title">提示词缓存</div>
+                <button type="button" class="btn btn-link shrink-0" @click="emit('open-cache-guide')">
+            缓存指南
+          </button>
+        </div>
+        <SettingsField :hint="cacheModeHint">
           <ModernSelect
-            :model-value="cache.cacheKey || 'per_chat'"
-            :options="cacheKeyOptions"
+            :model-value="cache.mode"
+            :options="cacheModeOptions"
             class="w-full"
-            :disabled="Boolean(cacheKeyDisabledReason)"
-            @update:model-value="(v) => (cache = { ...cache, cacheKey: String(v) })"
+            placeholder="选择缓存模式"
+            @update:model-value="(v) => { if (!cacheModeDisabledReason(String(v) as PromptCacheMode)) cache = { ...cache, mode: String(v) as PromptCacheMode } }"
           />
         </SettingsField>
-      </div>
 
-      <SettingsField
-        v-if="showExplicitControls"
-        label="显式断点位置"
-        :hint="breakpointsDisabledReason || undefined"
-        :more="responsesCache ? 'Responses 当前适配器仅支持 System 断点。' : '对应 Anthropic 的 cache_control 和 GPT-5.6+ 的 prompt_cache_breakpoint。'"
-      >
-        <div class="flex flex-col gap-1" :class="breakpointsDisabledReason ? 'pointer-events-none opacity-60' : ''">
-          <label
-            v-for="bp in PROMPT_CACHE_BREAKPOINTS"
-            :key="bp"
-            class="inline-flex items-center gap-2 text-left text-xs text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text)]"
-            :class="unavailableBreakpoint(bp) ? 'opacity-60' : 'cursor-pointer'"
-          >
-            <ThemedCheckbox
-              :aria-label="BREAKPOINT_LABELS[bp]"
-              :checked="bp === 'system' || (!responsesCache && hasBreakpoint(bp))"
-              :disabled="unavailableBreakpoint(bp)"
-              @update:checked="toggleBreakpoint(bp)"
+        <template v-if="cache.mode !== 'off'">
+          <SettingsField label="缓存时长">
+            <ModernSelect
+              :model-value="ttlValue"
+              :options="ttlOptions"
+              class="w-full"
+              placeholder="供应商默认"
+              @update:model-value="(v) => { if (!ttlDisabledReason(String(v))) ttlValue = String(v) }"
             />
-            <span>{{ BREAKPOINT_LABELS[bp] }}</span>
-          </label>
-        </div>
-      </SettingsField>
+          </SettingsField>
+          <SettingsField v-if="!cacheKeyDisabledReason" label="缓存范围" more="按会话独立缓存，或让同一角色的不同会话共享缓存。">
+            <ModernSelect
+              :model-value="cache.cacheKey || 'per_chat'"
+              :options="cacheKeyOptions"
+              class="w-full"
+              @update:model-value="(v) => (cache = { ...cache, cacheKey: String(v) })"
+            />
+          </SettingsField>
 
-      <SettingsSwitch
-        label="在消息上打显式缓存标记"
-        :model-value="!!cache.explicitMarkers"
-        :disabled="Boolean(markersDisabledReason)"
-        :hint="markersDisabledReason || undefined"
-        more="百炼 DashScope 等中国厂商需要。"
-        @update:model-value="(v) => (cache = { ...cache, explicitMarkers: v })"
+          <SettingsField v-if="showBreakpoints" label="缓存断点">
+            <div class="flex flex-col gap-2">
+              <label
+                v-for="bp in PROMPT_CACHE_BREAKPOINTS"
+                :key="bp"
+                class="inline-flex items-center gap-2 text-sm text-[var(--color-text-secondary)]"
+                :class="bp === 'system' ? 'opacity-60' : 'cursor-pointer'"
+              >
+                <ThemedCheckbox
+                  :aria-label="BREAKPOINT_LABELS[bp]"
+                  :checked="bp === 'system' || hasBreakpoint(bp)"
+                  :disabled="bp === 'system'"
+                  @update:checked="toggleBreakpoint(bp)"
+                />
+                <span>{{ BREAKPOINT_LABELS[bp] }}</span>
+              </label>
+            </div>
+          </SettingsField>
+          <SettingsSwitch
+            v-if="!markersDisabledReason"
+            label="标记要缓存的消息"
+            :model-value="!!cache.explicitMarkers"
+            @update:model-value="(v) => (cache = { ...cache, explicitMarkers: v })"
+          />
+        </template>
+      </section>
+
+      <section class="settings-group" data-settings-field="echoReasoning">
+        <SettingsSwitch
+          v-model="echo"
+          label="回传思考内容"
+          :hint="needsEcho && !effectiveEcho ? 'DeepSeek 调用工具时需要回传思考内容。' : undefined"
+          more="发送下一条消息时附上上一轮的思考内容。"
+        />
+        <SettingsHint v-if="echoOverriddenByGlobal">
+          当前由全局设置「{{ globalEchoBack === 'on' ? '全部回传' : '全部不回传' }}」控制。
+        </SettingsHint>
+      </section>
+    </div>
+  </details>
+
+  <details @toggle="previewOpen = ($event.currentTarget as HTMLDetailsElement).open">
+    <DisclosureSummary class="settings-group-title min-h-10 py-1">请求预览</DisclosureSummary>
+    <div class="flex min-w-0 flex-col gap-3 pt-2">
+      <ModernSelect
+        v-if="previewModelOptions.length"
+        :model-value="previewModel"
+        :options="previewModelOptions"
+        class="w-full"
+        searchable
+        allow-create
+        placeholder="选择模型"
+        @update:model-value="(v) => (previewModel = String(v))"
       />
-    </template>
-  </section>
-
-  <section class="settings-group" data-settings-field="echoReasoning">
-    <SettingsSwitch
-      v-model="echo"
-      label="回传思考内容（reasoning_content）"
-      hint="DeepSeek 带工具调用时必须开启。"
-      more="开：把上一轮 assistant 的思考链一并发回；关：省 token，多数厂商可接受。"
-    />
-    <p v-if="echoOverriddenByGlobal" class="text-xs text-[var(--color-warning-text,var(--color-warning))]">
-      全局设置当前为「{{ globalEchoBack === 'on' ? '全部回传' : '全部不回传' }}」，会覆盖此处开关；改回「按预设」才生效。
-    </p>
-  </section>
-
-  <section class="settings-group">
-    <div class="settings-field-head">
-      <span class="settings-group-title inline-flex items-center gap-1.5">
-        <Sparkles class="h-3.5 w-3.5 text-brand" />
-        这次会怎么发
-        <Loader2 v-if="loading" class="h-3 w-3 animate-spin text-[var(--color-text-muted)]" />
-      </span>
-    </div>
-    <ModernSelect
-      v-if="previewModelOptions.length"
-      :model-value="previewModel"
-      :options="previewModelOptions"
-      class="w-full"
-      searchable
-      allow-create
-      placeholder="选择要预览的模型"
-      @update:model-value="(v) => (previewModel = String(v))"
-    />
-    <input v-else v-model="previewModel" type="text" class="input w-full" placeholder="输入模型名预览（如 claude-opus-4-6）" />
-    <div v-if="preview" class="settings-readout space-y-1">
-      <div class="flex flex-wrap gap-x-3 gap-y-1">
-        <span>协议：<b class="font-medium text-[var(--color-text)]">{{ preview.effectiveLabel }}</b><span v-if="preview.requested === 'auto'" class="ml-1 rounded bg-brand-a15 px-1 text-brand">自动</span></span>
-        <span>思考：<b class="font-medium text-[var(--color-text)]">{{ preview.effort }}</b>（可用：{{ preview.availableEfforts.join(' / ') || '—' }}）</span>
-        <span>Fast：{{ preview.supportsFastMode ? '支持' : '不支持' }}</span>
-        <span v-if="preview.providerLabel">供应商：{{ preview.providerLabel }}</span>
-        <span>能力来源：{{ preview.capabilitiesSource }}</span>
+      <input v-else v-model="previewModel" type="text" class="input w-full" aria-label="预览模型" placeholder="输入模型名称" />
+      <div v-if="loading" class="flex items-center gap-2 text-sm text-[var(--color-text-secondary)]" role="status">
+        <Loader2 class="h-4 w-4 animate-spin" aria-hidden="true" />
+        正在生成预览
       </div>
-      <div v-if="cacheSummary">缓存：{{ cacheSummary }}</div>
-      <ul v-if="preview.adjustments.length" class="list-disc space-y-0.5 pl-4">
-        <li v-for="(adj, i) in preview.adjustments" :key="`${adj.type}-${i}`">{{ describeAdjustment(adj) }}</li>
-      </ul>
-      <ul v-if="preview.reasons.length" class="space-y-0.5">
-        <li v-for="(r, i) in preview.reasons" :key="i">· {{ r }}</li>
-      </ul>
+      <p v-else-if="error && previewModel.trim()" class="text-sm text-[var(--color-error-text)]">预览失败。{{ error }}</p>
+      <template v-else-if="preview && previewModel.trim()">
+        <SettingsHint v-if="requestBlocker">{{ requestBlocker }}</SettingsHint>
+        <dl class="settings-readout grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm">
+          <dt>协议</dt>
+          <dd class="break-words text-[var(--color-text)]">{{ preview.effectiveLabel }}</dd>
+          <dt>思考深度</dt>
+          <dd class="text-[var(--color-text)]">{{ REASONING_EFFORT_SHORT_LABELS[normalizeReasoningEffort(preview.effort)] }}</dd>
+          <template v-if="preview.cache">
+            <dt>缓存</dt>
+            <dd class="text-[var(--color-text)]">{{ PROMPT_CACHE_MODE_LABELS[preview.cache.mode] ?? preview.cache.mode }}</dd>
+          </template>
+        </dl>
+        <details>
+          <DisclosureSummary class="py-1 text-sm text-secondary">技术详情</DisclosureSummary>
+          <div class="space-y-2 break-words pt-2 text-sm text-[var(--color-text-secondary)]">
+            <p v-if="preview.providerLabel">供应商 {{ preview.providerLabel }}</p>
+            <p>Fast {{ preview.supportsFastMode ? '支持' : '不支持' }}，能力来源 {{ preview.capabilitiesSource }}</p>
+            <p v-if="preview.availableEfforts.length">可用思考档位 {{ preview.availableEfforts.join(' / ') }}</p>
+            <p v-if="preview.cache?.ttl != null">缓存时长 {{ preview.cache.ttl }}{{ typeof preview.cache.ttl === 'number' ? ' 秒' : '' }}</p>
+            <p v-if="preview.cache?.breakpoints?.length">断点 {{ preview.cache.breakpoints.join(' / ') }}</p>
+            <ul v-if="previewAdjustments.length || preview.reasons.length" class="list-disc space-y-1 pl-5">
+              <li v-for="(adj, i) in previewAdjustments" :key="`${adj.type}-${i}`">{{ describeAdjustment(adj) }}</li>
+              <li v-for="reason in preview.reasons" :key="reason">{{ reason }}</li>
+            </ul>
+          </div>
+        </details>
+      </template>
+      <a
+        v-if="catalogProvider?.docsUrl && !placeholders.length"
+        :href="catalogProvider.docsUrl"
+        target="_blank"
+        rel="noreferrer"
+        class="inline-flex w-fit items-center gap-1 text-sm text-brand hover:underline"
+      >
+        供应商文档 <ExternalLink class="h-3 w-3" aria-hidden="true" />
+      </a>
     </div>
-    <p v-else-if="error" class="text-xs text-[var(--color-error-text)]">预览失败：{{ error }}</p>
-    <p v-else class="settings-hint">选择或输入一个模型名即可看到协议 / 思考深度 / 缓存的真实落地方式。</p>
-  </section>
+  </details>
 </template>

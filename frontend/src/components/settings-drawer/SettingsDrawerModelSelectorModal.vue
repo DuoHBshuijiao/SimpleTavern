@@ -61,7 +61,7 @@ const emit = defineEmits<{
             >
               <div
                 class="flex h-4 w-4 items-center justify-center rounded border transition-colors"
-                :class="selected.has(m) ? 'border-brand bg-brand' : 'border-[var(--color-border)]'"
+                :class="selected.has(m) ? 'border-brand light:border-transparent bg-brand' : 'border-[var(--color-border)] light:bg-[var(--color-track)]'"
               >
                 <Check v-if="selected.has(m)" class="h-2.5 w-2.5 text-on-brand" />
               </div>

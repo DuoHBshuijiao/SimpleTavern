@@ -55,8 +55,8 @@ const emit = defineEmits<{
       <SettingsField
         label="回传思考内容"
         data-settings-field="reasoningEchoBack"
-        hint="DeepSeek 带工具调用时必须回传，否则会 400。"
-        more="「按预设」看各 API 预设开关；「全部回传 / 不回传」覆盖所有预设。"
+        :hint="draft.reasoningEchoBack === 'off' ? 'DeepSeek 调用工具时需要回传思考内容。' : undefined"
+        more="「按预设」使用各预设自己的选择。全部开启或关闭时会覆盖预设。"
       >
         <ModernSelect
           :model-value="draft.reasoningEchoBack || 'preset'"
@@ -83,7 +83,7 @@ const emit = defineEmits<{
       </SettingsField>
       <SettingsField
         label="LLM 协议"
-        more="只在没有匹配到 API 预设时生效。选「自动」会按模型家族切换原生协议，结果在下方预览里能看到。"
+        more="没有匹配的 API 预设时使用此协议。打开「请求预览」可查看结果。"
       >
         <ModernSelect
           :model-value="draft.llm.protocol || 'openai_compatible_chat'"
@@ -102,7 +102,7 @@ const emit = defineEmits<{
           />
           <button
             type="button"
-            class="absolute right-1 top-1/2 flex min-h-10 min-w-10 -translate-y-1/2 items-center justify-center rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
+            class="icon-button absolute right-1 top-1/2 min-h-10 min-w-10 -translate-y-1/2"
             :aria-label="showApiKeyModel ? '隐藏 API Key' : '显示 API Key'"
             @click="showApiKeyModel = !showApiKeyModel"
           >

@@ -146,7 +146,7 @@ function cancelReplace() {
     <template v-if="showImport">
       <SettingsField
         label="服务账号密钥"
-        more="在 Google Cloud 控制台的「IAM 和管理 → 服务账号 → 密钥」里创建并下载 JSON 密钥，账号需要 Vertex AI User 角色。私钥只保存在本机，用来换取短期 access token；设置备份不含私钥，恢复备份后要重新导入。"
+        more="在 Google Cloud 的「IAM 和管理 → 服务账号 → 密钥」下载 JSON 密钥，账号需要 Vertex AI User 角色。恢复设置备份后，请重新导入密钥。"
       >
         <template #actions>
           <button v-if="replacing" type="button" class="btn btn-xs btn-secondary" @click="cancelReplace">取消</button>

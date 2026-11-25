@@ -14,9 +14,11 @@ import { SETTINGS_DRAWER_PRESETS_KEY } from '../../composables/settingsDrawerPre
 import { EXTRA_LLM_PROTOCOL_OPTIONS, VERTEX_SERVICE_ACCOUNT_AUTH_STYLE } from '../../types/models'
 import { apiPost } from '../../api/http'
 import { notifyMessage } from '../../composables/useNotify'
+import { usePreferHoverChrome } from '../../composables/usePreferHoverChrome'
 import { DEEPSEEK_TTS_VOICES } from '../../utils/apiPresetKind'
 
 const presets = inject(SETTINGS_DRAWER_PRESETS_KEY)!
+const { preferHoverChrome } = usePreferHoverChrome()
 
 const previewUrl = ref<string | null>(null)
 const previewBusy = ref(false)
@@ -89,13 +91,13 @@ const authStyleOptions = computed(() => {
             <div v-else class="flex gap-3 items-start max-sm:flex-col max-sm:items-stretch">
                 <!-- Preset List：sticky 吸附，右侧长表单滚动时左栏留在可视区；列表过长时仅内层滚动 -->
                 <div
-                  class="sticky top-0 z-10 flex min-w-0 flex-[0_0_min(11rem,34%)] flex-col self-start border-r border-[var(--color-border-subtle)] pr-3 max-sm:static max-sm:flex-none max-sm:self-stretch max-sm:border-r-0 max-sm:pr-0"
+                  class="flex min-w-0 flex-[0_0_min(11rem,34%)] flex-col self-start border-r border-[var(--color-border-subtle)] pr-3 max-sm:flex-none max-sm:self-stretch max-sm:border-r-0 max-sm:pr-0 sm:sticky sm:top-0 sm:z-10"
                 >
                     <div :ref="presets.bindPresetListHeader" class="mb-2 flex items-center justify-between gap-1.5">
                         <span class="settings-label shrink-0">预设列表</span>
                         <button
                           type="button"
-                          class="inline-flex min-h-8 shrink-0 items-center rounded-md bg-brand-a20 px-2 py-0.5 text-2xs font-medium leading-tight text-brand transition-colors hover:bg-brand-a30 touch-manipulation sm:px-2.5 sm:text-xs"
+                          class="btn btn-xs btn-primary shrink-0 touch-manipulation"
                           @click="presets.createPreset"
                         >
                           + 新建
@@ -116,24 +118,30 @@ const authStyleOptions = computed(() => {
                             class="group relative flex min-h-10 cursor-pointer items-center rounded-lg py-1.5 pl-2 pr-1 text-sm transition-colors max-sm:max-w-[10rem] max-sm:shrink-0"
                             :class="[
                               presets.editingPresetId === presetItem.id ? 'bg-brand-a10 text-brand' : 'text-[var(--color-text-secondary)] hover:bg-surface-muted',
-                              presets.apiPresetOrderDraggingIdx === idx ? 'opacity-50 ring-1 ring-brand-a50' : '',
+                              presets.apiPresetOrderDraggingIdx === idx ? 'opacity-50 dark-ui:ring-1 ring-brand-a50' : '',
                             ]"
                             @click="presets.editingPresetId = presetItem.id"
                             @dragstart="presets.handleApiPresetOrderDragStart(idx)"
                             @dragover="presets.handleApiPresetOrderDragOver($event, idx)"
                             @dragend="presets.handleApiPresetOrderDragEnd"
                         >
-                            <span class="min-w-0 max-w-full truncate pr-7">{{ presetItem.name }}</span>
-                            <span
-                              v-if="presets.isTtsPreset(presetItem)"
-                              draggable="false"
-                              class="absolute right-8 top-1.5 text-2xs leading-none text-brand"
-                              aria-label="TTS 预设"
-                            >t</span>
+                            <button
+                              type="button"
+                              class="preset-choice flex min-w-0 flex-1 flex-col items-start rounded-sm text-left"
+                              :aria-current="presets.editingPresetId === presetItem.id ? 'true' : undefined"
+                              :title="presetItem.name"
+                            >
+                              <span class="preset-choice-name line-clamp-2 w-full leading-tight [overflow-wrap:anywhere]">{{ presetItem.name }}</span>
+                              <span class="settings-hint">{{ presets.isTtsPreset(presetItem) ? '语音服务' : '模型服务' }}</span>
+                            </button>
                             <button
                               type="button"
                               draggable="false"
-                              class="absolute right-0.5 top-1/2 inline-flex min-h-8 min-w-8 -translate-y-1/2 items-center justify-center rounded-md text-[var(--color-text-muted)] opacity-0 pointer-events-none touch-manipulation hover:text-error group-hover:pointer-events-auto group-hover:opacity-100"
+                              class="icon-button absolute right-0.5 top-1/2 z-10 min-h-8 min-w-8 -translate-y-1/2 touch-manipulation bg-[var(--color-popover-surface)] hover:text-error"
+                              :class="!preferHoverChrome && presets.editingPresetId === presetItem.id
+                                ? 'opacity-100'
+                                : 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100'"
+                              :aria-label="`删除预设 ${presetItem.name}`"
                               @click.stop="presets.deletePreset(presetItem.id)"
                             >
                               <X class="h-3.5 w-3.5" />
@@ -147,18 +155,8 @@ const authStyleOptions = computed(() => {
                 <div class="min-w-0 flex-1 flex flex-col" v-if="presets.editingPreset">
                      <div class="min-w-0 pb-4">
                       <div class="settings-group">
-                        <div class="settings-group-title">连接</div>
+                        <h3 class="preset-editor-heading settings-group-title [overflow-wrap:anywhere]">{{ presets.editingPreset.name }}</h3>
                         <SettingsField label="预设名称">
-                            <template #actions>
-                              <button
-                                type="button"
-                                class="settings-hint inline-flex items-center gap-2 transition-colors hover:text-[var(--color-text)]"
-                                @click="presets.setPresetTtsService(presets.editingPreset!, !presets.isTtsPreset(presets.editingPreset))"
-                              >
-                                <ThemedCheckbox :checked="presets.isTtsPreset(presets.editingPreset)" />
-                                <span>作为 TTS 服务</span>
-                              </button>
-                            </template>
                             <LlmPresetNameCombobox
                               v-if="!presets.isTtsPreset(presets.editingPreset)"
                               v-model="presets.editingPreset!.name"
@@ -173,6 +171,15 @@ const authStyleOptions = computed(() => {
                               type="text"
                               class="input w-full"
                             />
+                        </SettingsField>
+                        <SettingsField :label="`服务类型 · ${presets.isTtsPreset(presets.editingPreset) ? '语音服务' : '模型服务'}`">
+                          <template #actions>
+                            <SettingsSwitch
+                              label="作为 TTS 服务"
+                              :model-value="presets.isTtsPreset(presets.editingPreset)"
+                              @update:model-value="presets.setPresetTtsService(presets.editingPreset!, $event)"
+                            />
+                          </template>
                         </SettingsField>
                         <SettingsField v-if="presets.isTtsPreset(presets.editingPreset)" label="TTS 提供商">
                           <ModernSelect
@@ -196,7 +203,7 @@ const authStyleOptions = computed(() => {
                         <SettingsField
                           v-if="!presets.isTtsPreset(presets.editingPreset)"
                           label="LLM 协议"
-                          more="「自动」按模型名选原生协议（Claude → Anthropic Messages、Gemini → generateContent…），结果在下方预览里能看到。固定某个协议后不再自动切换。"
+                          more="「自动」按模型选择协议。打开「请求预览」可查看结果。"
                         >
                             <ModernSelect
                               :model-value="presets.editingPreset!.protocol || 'openai_compatible_chat'"
@@ -229,7 +236,7 @@ const authStyleOptions = computed(() => {
                                 />
                                 <button
                                     type="button"
-                                    class="absolute right-1.5 top-1/2 inline-flex min-h-9 min-w-9 -translate-y-1/2 items-center justify-center rounded-md text-[var(--color-text-muted)] touch-manipulation hover:text-[var(--color-text-secondary)]"
+                                    class="icon-button absolute right-1 top-1/2 min-h-8 min-w-8 -translate-y-1/2 touch-manipulation"
                                     :aria-label="presets.editingPresetShowApiKey ? '隐藏 API Key' : '显示 API Key'"
                                     @click="presets.editingPresetShowApiKey = !presets.editingPresetShowApiKey"
                                 >
@@ -261,8 +268,7 @@ const authStyleOptions = computed(() => {
                             </div>
                         </div>
 
-                        <p v-if="presets.editingPreset.providerId === 'openai-chatgpt'" class="settings-hint">通过 OpenAI 官方提供的 Sign in with ChatGPT，使用你的 ChatGPT 订阅额度。本功能目前处于预览阶段，OpenAI 可能随时调整可用范围、使用限制或接入方式。</p>
-                        <p v-if="presets.editingPreset.providerId === 'openai-chatgpt' && presets.oauthStatusFor(presets.editingPreset.id)?.loggedIn && presets.oauthStatusFor(presets.editingPreset.id)?.subscriptionAuthorized === false" role="status" class="text-xs text-error">已登录，但尚未获得 ChatGPT 订阅使用授权，请重新登录并确认订阅授权。</p>
+                        <p v-if="presets.editingPreset.providerId === 'openai-chatgpt' && presets.oauthStatusFor(presets.editingPreset.id)?.loggedIn && presets.oauthStatusFor(presets.editingPreset.id)?.subscriptionAuthorized === false" role="status" class="text-xs text-error">请重新登录并确认 ChatGPT 订阅授权。</p>
                         <SubscriptionUsagePanel
                           v-if="['openai-chatgpt', 'openai-codex', 'xai-oauth'].includes(presets.editingPreset.providerId || '')"
                           :key="presets.editingPreset.id"
@@ -276,50 +282,34 @@ const authStyleOptions = computed(() => {
                         <div v-if="!presets.editingPresetIsDeepSeek" class="settings-group">
                              <div class="settings-field-head">
                                  <div class="settings-group-title">模型列表</div>
-                                 <button 
-                                    class="text-xs text-brand hover:underline flex items-center gap-1 shrink-0" 
-                                    :disabled="presets.presetModelsLoading"
-                                    @click="presets.openModelSelector(presets.editingPreset!)"
-                                 >
-                                    <Loader2 v-if="presets.presetModelsLoading" class="animate-spin w-3 h-3" />
-                                    <span>从 API 获取并筛选</span>
-                                 </button>
+                                 <div class="flex shrink-0 items-center gap-1">
+                                   <button
+                                     v-if="presets.editingPreset!.models.length > presets.presetModelListSelection.size"
+                                     type="button"
+                                     class="btn btn-xs btn-ghost"
+                                     @click="presets.selectAllPresetModelNames"
+                                   >
+                                     全选
+                                   </button>
+                                   <button
+                                     type="button"
+                                     class="btn btn-sm btn-ghost text-brand"
+                                     :disabled="presets.presetModelsLoading"
+                                     @click="presets.openModelSelector(presets.editingPreset!)"
+                                   >
+                                     <Loader2 v-if="presets.presetModelsLoading" class="animate-spin w-3 h-3" />
+                                     获取模型
+                                   </button>
+                                 </div>
                              </div>
-                             <div
-                               v-if="presets.editingPreset!.models.length"
-                               class="flex flex-wrap items-center gap-x-1 gap-y-0.5"
-                             >
-                               <button
-                                 type="button"
-                                 class="min-h-0 rounded px-0.5 py-0 text-xs text-brand hover:underline disabled:pointer-events-none disabled:opacity-40"
-                                 @click="presets.selectAllPresetModelNames"
-                               >
-                                 全选
+                             <div v-if="presets.presetModelListSelection.size" class="flex flex-wrap items-center gap-2">
+                               <button type="button" class="btn btn-xs btn-ghost" @click="presets.clearPresetModelListSelection">
+                                 取消选择
                                </button>
-                               <span class="select-none text-[var(--color-text-muted)]">·</span>
-                               <button
-                                 type="button"
-                                 class="min-h-0 rounded px-0.5 py-0 text-xs text-brand hover:underline disabled:pointer-events-none disabled:opacity-40"
-                                 :disabled="presets.presetModelListSelection.size === 0"
-                                 @click="presets.clearPresetModelListSelection"
-                               >
-                                 清空选择
-                               </button>
-                               <span class="select-none text-[var(--color-text-muted)]">·</span>
-                               <button
-                                 type="button"
-                                 class="min-h-0 rounded px-0.5 py-0 text-xs text-error/90 hover:underline disabled:pointer-events-none disabled:opacity-40"
-                                 :disabled="presets.presetModelListSelection.size === 0"
-                                 @click="presets.removeSelectedPresetModelNames"
-                               >
+                               <button type="button" class="btn btn-xs btn-ghost text-error" @click="presets.removeSelectedPresetModelNames">
                                  删除所选
                                </button>
-                               <span class="select-none text-[var(--color-text-muted)]">·</span>
-                               <button
-                                 type="button"
-                                 class="min-h-0 rounded px-0.5 py-0 text-xs text-error/90 hover:underline disabled:pointer-events-none disabled:opacity-40"
-                                 @click="presets.clearAllPresetModelNames"
-                               >
+                               <button type="button" class="btn btn-xs btn-ghost text-error" @click="presets.clearAllPresetModelNames">
                                  清空全部
                                </button>
                              </div>
@@ -328,18 +318,18 @@ const authStyleOptions = computed(() => {
                                      <div
                                        v-for="(m, idx) in presets.editingPreset!.models"
                                        :key="`${idx}-${m}`"
-                                       role="button"
-                                       tabindex="0"
-                                       class="group relative inline-flex max-w-full cursor-pointer items-center gap-1 rounded-md border border-[var(--color-border-subtle)] bg-surface-overlay/55 px-2 py-1 text-xs text-[var(--color-text-secondary)] backdrop-blur-[var(--glass-blur-soft)] transition-[box-shadow,border-color] hover:bg-surface-overlay/80"
-                                       :class="presets.presetModelListSelection.has(m) ? 'ring-1 ring-brand/50 border-brand/35 shadow-[0_0_0_1px_color-mix(in_srgb,var(--color-brand)_25%,transparent)]' : ''"
-                                       @click="presets.togglePresetModelListSelection(m)"
-                                       @keydown.enter.prevent="presets.togglePresetModelListSelection(m)"
-                                       @keydown.space.prevent="presets.togglePresetModelListSelection(m)"
+                                       class="settings-item group inline-flex min-w-0 max-w-full items-center gap-1 !p-1"
+                                       :class="{ 'settings-item--selected': presets.presetModelListSelection.has(m) }"
                                      >
-                                         <span class="min-w-0 truncate">{{ m }}</span>
                                          <button
                                            type="button"
-                                           class="shrink-0 rounded p-0.5 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:text-error group-hover:opacity-100 focus:opacity-100 focus:outline-none"
+                                           class="btn btn-xs btn-ghost min-w-0"
+                                           :aria-pressed="presets.presetModelListSelection.has(m)"
+                                           @click="presets.togglePresetModelListSelection(m)"
+                                         ><span class="truncate">{{ m }}</span></button>
+                                         <button
+                                           type="button"
+                                           class="icon-button shrink-0 p-1 opacity-0 hover:text-error group-hover:opacity-100 group-focus-within:opacity-100"
                                            aria-label="移除此模型"
                                            @click.stop="presets.removeSinglePresetModelAt(idx)"
                                          >
@@ -347,7 +337,7 @@ const authStyleOptions = computed(() => {
                                          </button>
                                      </div>
                                       <div v-if="!presets.editingPreset!.models.length" class="settings-hint w-full text-center py-4">
-                                          点击上方「从 API 获取并筛选」或手动添加
+                                          尚未添加模型
                                       </div>
                                  </div>
                              </div>
@@ -371,6 +361,7 @@ const authStyleOptions = computed(() => {
                         <!-- v0.810：供应商参数 / 缓存策略 / 回传思考 / 协议预览 -->
                         <LlmConnectionAdvancedSection
                           v-if="!presets.isTtsPreset(presets.editingPreset)"
+                          :key="presets.editingPreset.id"
                           :connection="presets.editingPreset!"
                           :models="presets.editingPreset!.models"
                           :catalog-provider="presets.catalogProviderFor(presets.editingPreset!)"

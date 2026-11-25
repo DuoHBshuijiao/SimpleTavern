@@ -2441,8 +2441,6 @@ function handleApiPresetOrderDragEnd() {
   apiPresetOrderDraggingIdx.value = null
 }
 
-const drawerScrollRef = ref<HTMLElement | null>(null)
-
 const { presetListHeaderRef, presetListMaxHeightPx } = useSettingsDrawerPresetListHeight({
   show: computed(() => props.show),
   tab,

@@ -230,11 +230,8 @@ onBeforeUnmount(() => { void abortSession() })
         </button>
       </div>
       <div class="modal-body space-y-4">
-        <p v-if="success" role="status" class="text-sm text-[var(--color-text-secondary)]">ChatGPT 授权已完成。你现在可以在此应用使用获授权的 ChatGPT 订阅额度；可在 ChatGPT 中管理用量和撤销授权。</p>
-        <p v-if="isChatGPT" class="text-xs leading-relaxed text-[var(--color-text-secondary)]">通过 OpenAI 官方提供的 Sign in with ChatGPT，使用你的 ChatGPT 订阅额度。本功能目前处于预览阶段，OpenAI 可能随时调整可用范围、使用限制或接入方式。</p>
-        <p class="text-sm text-[var(--color-text-muted)]">
-          凭证只保存在本机数据目录，不会写进设置备份里的 API Key 字段。
-        </p>
+        <p v-if="success" role="status" class="text-sm text-[var(--color-text-secondary)]">ChatGPT 登录成功。</p>
+        <p v-else-if="isChatGPT && !sessionId" class="text-sm text-[var(--color-text-secondary)]">在浏览器登录并授权使用 ChatGPT 订阅额度。</p>
 
         <div v-if="isCopilot && !sessionId" class="form-group">
           <label class="label">GitHub Enterprise 域名（可选）</label>
@@ -266,7 +263,6 @@ onBeforeUnmount(() => { void abortSession() })
         <label v-if="isGrok && !sessionId" class="block space-y-1">
           <span class="label">xAI 应用 Client ID（可选）</span>
           <input v-model="clientId" class="input w-full" autocomplete="off" placeholder="已注册的公开客户端 ID" />
-          <span class="block text-xs text-[var(--color-text-secondary)]">默认使用已配置的官方公开客户端；仅在需要使用自己的已注册客户端时填写。</span>
         </label>
         <p v-if="errorText" class="text-sm text-error">{{ errorText }}</p>
 
@@ -302,9 +298,9 @@ onBeforeUnmount(() => { void abortSession() })
             打开 ChatGPT 授权页 <ExternalLink class="h-3.5 w-3.5" />
           </a>
           <p v-if="!isChatGPT" class="text-xs text-[var(--color-text-muted)]">
-            浏览器会跳到 localhost:1455（页面打不开也没关系），把地址栏完整 URL 粘贴到下面。
+            授权后，从浏览器地址栏复制以 localhost:1455 开头的网址，粘贴到下面。
           </p>
-          <p v-if="isChatGPT && polling" role="status" class="text-sm text-[var(--color-text-secondary)]">在浏览器中确认授权后将自动完成登录。请保持此窗口打开。</p>
+          <p v-if="isChatGPT && polling" role="status" class="text-sm text-[var(--color-text-secondary)]">请保持此窗口打开，并在浏览器中确认授权。</p>
           <textarea
             v-if="!isChatGPT"
             aria-label="完整登录回调 URL"

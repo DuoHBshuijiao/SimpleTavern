@@ -97,7 +97,9 @@ onBeforeUnmount(() => {
     <p v-if="!loggedIn || latest?.state === 'not_logged_in'" class="text-xs text-[var(--color-text-secondary)]">登录后查看订阅信息。</p>
     <template v-else>
       <p v-if="error || latest?.state === 'error'" role="status" class="text-xs text-error">{{ stale ? '查询失败，以下为上次成功结果（已过期）。' : '暂无法查询额度。' }} {{ error || latest?.errorCode }}</p>
-      <p v-else-if="latest?.state === 'unsupported' || (latest?.state === 'available' && !latest.windows.length)" class="text-xs leading-relaxed text-[var(--color-text-secondary)]">暂无法查询：服务方未提供可用的订阅额度接口。5小时、周额度及刷新时间仅在官方返回时展示，不估算消息数。</p>
+      <p v-else-if="latest?.state === 'unsupported' || (latest?.state === 'available' && !latest.windows.length)" class="text-xs text-[var(--color-text-secondary)]">
+        {{ manageUrl ? '打开「管理用量」查看订阅额度。' : '请在供应商账号中查看订阅额度。' }}
+      </p>
       <p v-else-if="!shown" role="status" class="text-xs text-[var(--color-text-secondary)]">{{ busy ? '正在查询账号用量…' : '尚未查询' }}</p>
       <dl v-if="shown?.windows.length" class="space-y-3">
         <div v-for="window in shown.windows" :key="window.id" class="space-y-1 text-xs">
