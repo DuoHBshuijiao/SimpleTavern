@@ -25,6 +25,7 @@ from app.llm.preset_resolve import LlmPresetResolveError
 from app.llm.resolution import prepare_llm_request
 from app.mvu_model_resolve import resolve_mvu_model_from_settings
 from app.mvu_system_prompt import load_mvu_system_prompt
+from app.request_context import new_request_id, request_id_scope
 from app.schemas import (
     AssistantSettings,
     CharacterCard,
@@ -172,6 +173,8 @@ def ensure_mvu_worker(
         health.status = "disabled"
         return False
     health.enabled = True
+    if health.status in {"disabled", "error"}:
+        health.status = "paused" if health.paused else "ok"
     if character is None:
         try:
             load_character(chat.characterId)
@@ -199,6 +202,22 @@ def ensure_mvu_worker(
     return True
 
 
+def _chat_mvu_is_enabled(chat_id: str, chat: Chat | None = None) -> bool:
+    health = _chat_health(chat_id)
+    try:
+        saved_chat = chat if chat is not None else load_chat(chat_id)
+    except FileNotFoundError:
+        health.enabled = False
+        health.status = "disabled"
+        return False
+    enablement = resolve_chat_mvu_runtime_enablement(saved_chat)
+    health.set_enable_error(enablement.character_error)
+    health.enabled = enablement.enabled
+    if not enablement.enabled and enablement.character_error is None:
+        health.status = "disabled"
+    return enablement.enabled
+
+
 async def _mvu_loop(chat_id: str) -> None:
     from app.services.work_drain import draining
     event, lock = _events[chat_id], _locks[chat_id]
@@ -216,6 +235,12 @@ async def _mvu_loop(chat_id: str) -> None:
         event.clear()
 
         async with lock:
+            try:
+                chat = load_chat(chat_id)
+            except FileNotFoundError:
+                return
+            if not _chat_mvu_is_enabled(chat_id, chat):
+                return
             now = time.monotonic()
             if now - _last_run.get(chat_id, 0) < _COOLDOWN_SECS:
                 continue
@@ -235,7 +260,6 @@ async def _mvu_loop(chat_id: str) -> None:
                     continue
 
             try:
-                chat = load_chat(chat_id)
                 character = load_character(chat.characterId)
             except FileNotFoundError:
                 continue
@@ -249,7 +273,8 @@ async def _mvu_loop(chat_id: str) -> None:
                 continue
 
             try:
-                await _run_once(chat_id)
+                with request_id_scope(new_request_id()):
+                    await _run_once(chat)
             except Exception as exc:
                 logger.exception("chat %s: MVU worker run failed", chat_id)
                 error = as_app_error(
@@ -277,6 +302,8 @@ async def _mvu_loop(chat_id: str) -> None:
                 )
                 continue
 
+            if not health.enabled:
+                return
             health.record_success()
             _last_run[chat_id] = time.monotonic()
 
@@ -285,12 +312,9 @@ def work_in_progress() -> bool:
     return any(lock.locked() for lock in _locks.values())
 
 
-async def _run_once(chat_id: str) -> None:
+async def _run_once(chat: Chat) -> None:
     """执行一次完整的 MVU job：组装 job → 运行 agent → 持久化日志 → 消费队列。"""
-    try:
-        chat = load_chat(chat_id)
-    except FileNotFoundError:
-        return
+    chat_id = chat.id
     try:
         character = load_character(chat.characterId)
     except FileNotFoundError:
@@ -405,6 +429,7 @@ async def _run_once(chat_id: str) -> None:
     agent = MvuAgentService(run_ctx, include_knowledge_graph=kg_on)
     events, log_entries = await agent.run_job(
         job,
+        is_enabled=lambda: _chat_mvu_is_enabled(chat_id),
         on_event=lambda evt: _broadcast(chat_id, evt),
     )
 
@@ -414,7 +439,7 @@ async def _run_once(chat_id: str) -> None:
         save_mvu_logs(chat.characterId, chat_id, existing + log_entries)
 
     # 标记已消费消息：最新被处理消息设 mvuProcessed，清除旧标记
-    if mode == "regex" and consumed_msg_id:
+    if mode == "regex" and consumed_msg_id and _chat_mvu_is_enabled(chat_id):
         with chat_write_lock(chat_id):
             try:
                 chat_reload = load_chat(chat_id)
@@ -436,7 +461,8 @@ async def _run_once(chat_id: str) -> None:
 def signal_generate_done(chat_id: str) -> None:
     """generate.py SSE [DONE] 后调用，唤醒 MVU worker 处理队列。"""
     evt = _events.get(chat_id)
-    if evt is not None:
+    task = _tasks.get(chat_id)
+    if evt is not None and task is not None and not task.done():
         evt.set()
 
 

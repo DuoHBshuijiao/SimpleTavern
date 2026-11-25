@@ -723,6 +723,71 @@ def _(env):
     equal(env.usage_summary(chat_id).get("inputTokens"), USAGE["input"], "账本 inputTokens")
 
 
+@check("core.generate.mvu_disabled_live", "关闭角色 MVU 后，已有会话的生成不再注入状态表或唤醒后台 Agent")
+def core_mvu_disabled_live(env):
+    saved = env.settings()
+    preset = _openai_preset(env)
+    card = _character(env, mvuEnabled=True, mvuMode="directive", mvuDirective="测试状态",
+                      initialStateTables=[{"name": "MVU-STATE-FIXTURE", "columns": ["值"],
+                                           "rows": [{"field": "库存", "cells": {"值": "3"}}]}])
+    try:
+        env.update_settings(streamEnabled=True, mvuModel="mock-model")
+        chat = env.api.json_ok("POST", "/api/chats", json={"characterId": card["id"], "title": "MVU 开关"})
+        chat_path = f"/api/chats/{chat['id']}"
+        env.api.json_ok("PUT", chat_path, json={"overrides": {"presetId": preset, "params": {"model": "mock-model"}}})
+        env.api.json_ok("POST", chat_path + "/messages", json={"role": "assistant", "content": "测试历史"})
+
+        enabled = env.generate(chat["id"])
+        ensure(any(name == "done" for name, _ in enabled.events), "启用时生成成功")
+        deadline = time.monotonic() + 6
+        while len(env.mock.calls("openai")) < 2 and time.monotonic() < deadline:
+            time.sleep(.1)
+        requests = env.mock.calls("openai")
+        equal(len(requests), 2, "启用时向聊天模型和 MVU Agent 各发出一次请求")
+        ensure("MVU-STATE-FIXTURE" in str(requests[0].json["messages"]), "启用时聊天注入状态表")
+        ensure(requests[1].json.get("tools"), "第二次为 MVU Agent 请求")
+
+        time.sleep(1.2)  # 让上一轮的冷却结束，关闭后的无请求确实来自开关。
+        env.api.json_ok("PUT", f"/api/characters/{card['id']}", json={**card, "mvuEnabled": False})
+        env.mock.reset()
+        disabled = env.generate(chat["id"])
+        ensure(any(name == "done" for name, _ in disabled.events), "关闭 MVU 后普通生成成功")
+        time.sleep(1.4)
+        calls = env.mock.calls("openai")
+        equal(len(calls), 1, "已有 worker 不再请求 MVU")
+        ensure("MVU-STATE-FIXTURE" not in str(calls[0].json["messages"]), "关闭时不注入状态表")
+    finally:
+        env.api.delete(f"/api/characters/{card['id']}")
+        env.api.json_ok("PUT", "/api/settings", json=saved)
+
+
+@check("core.generate.web_search_source", "全局联网来源切换适用于已有会话和旧的会话覆盖")
+def core_web_search_source(env):
+    saved = env.settings()
+    try:
+        preset = _anthropic_preset(env)
+        chat = env.new_chat(preset, "claude-sonnet-4-5-20250929", reasoning="none")
+        env.api.json_ok("PUT", f"/api/chats/{chat}", json={"overrides": {"params": {"webSearchSource": "native"}}})
+        env.update_settings(streamEnabled=True, webSearch={"source": "independent", "provider": "tavily",
+                                                            "tavily": {"apiKey": "local-search-fixture"}})
+        independent = env.generate(chat, webSearchEnabled=True)
+        ensure(any(name == "done" for name, _ in independent.events), "第三方模式生成成功")
+        tools = env.mock.calls("anthropic")[-1].json.get("tools", [])
+        ensure(any(tool.get("name") == "web_search" and "input_schema" in tool for tool in tools),
+               "Anthropic 使用第三方搜索函数")
+        ensure(not any(str(tool.get("type", "")).startswith("web_search_") for tool in tools),
+               "第三方模式不发送原生工具")
+
+        env.update_settings(webSearch={**env.settings()["webSearch"], "source": "native"})
+        native = env.generate(chat, webSearchEnabled=True)
+        ensure(any(name == "done" for name, _ in native.events), "全局原生模式生成成功")
+        tools = env.mock.calls("anthropic")[-1].json.get("tools", [])
+        ensure(any(str(tool.get("type", "")).startswith("web_search_") for tool in tools),
+               "全局原生模式发送供应商搜索工具")
+    finally:
+        env.api.json_ok("PUT", "/api/settings", json=saved)
+
+
 @check("core.generate.merge_new_version", "mergeAssistantIntoMessageId 把输出并入已有消息的新版本，不新增消息")
 def _(env):
     preset_id = _openai_preset(env)

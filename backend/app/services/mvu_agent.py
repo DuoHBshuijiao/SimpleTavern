@@ -117,6 +117,7 @@ class MvuAgentService:
         self,
         job: MvuAgentJob,
         *,
+        is_enabled: Callable[[], bool],
         on_event: Callable[[MvuAgentEvent], Awaitable[None]] | None = None,
     ) -> tuple[list[MvuAgentEvent], list[MvuWorkLogEntry]]:
         """运行一个 MVU job。
@@ -183,6 +184,8 @@ class MvuAgentService:
 
         try:
             for turn in range(self._ctx.max_tool_turns):
+                if not is_enabled():
+                    return events, log_entries
                 resp = await chat_completions_message(
                     base_url=self._ctx.base_url,
                     api_key=self._ctx.api_key,
@@ -193,6 +196,8 @@ class MvuAgentService:
                     extra_body=self._ctx.extra_body if self._ctx.extra_body else None,
                     protocol=self._ctx.protocol,
                 )
+                if not is_enabled():
+                    return events, log_entries
 
                 tool_calls = _normalize_tool_calls_ids(resp.tool_calls)
 

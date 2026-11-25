@@ -64,6 +64,7 @@ from app.schemas import (
 from app.services.request_cancellation import ClientDisconnected, until_client_disconnect
 from app.services.generate_web_search_runtime import iter_web_search_stream_events, nonstream_web_search_rounds
 from app.services.mvu_daemon import ensure_mvu_worker, signal_generate_done, _resolve_mvu_runtime_config
+from app.group_mvu import is_chat_mvu_runtime_enabled
 from app.services.usage_ledger import append_usage_event, build_generation_metadata
 from app.services.native_web import resolve_web_plan
 from app.services.user_message_content import build_user_message_content
@@ -542,7 +543,7 @@ def _resolve_and_append_global_prefill(
 def _inject_mvu_state_tables_for_directive(messages: list[dict], chat: Any, character: Any) -> bool:
     """仅修改本次请求 messages，将指令模式状态表追加到最后一条 assistant 后。"""
     mode, _directive = _resolve_mvu_runtime_config(chat, character)
-    if mode != "directive":
+    if mode != "directive" or not is_chat_mvu_runtime_enabled(chat):
         return False
     state = getattr(chat, "stateVariables", None)
     tables = list(getattr(state, "tables", None) or [])
@@ -568,7 +569,6 @@ def _inject_mvu_state_tables_for_directive(messages: list[dict], chat: Any, char
 
 def _inject_knowledge_graph(messages: list[dict], chat: Any) -> bool:
     """仅修改本次请求 messages，按会话配置注入知识图谱摘要。"""
-    from app.group_mvu import is_chat_mvu_runtime_enabled
     from app.kg_inject import apply_knowledge_graph_injection, is_knowledge_graph_enabled
     from app.services.knowledge_graph import has_graph_data, render_context_text
     from app.storage import load_knowledge_graph

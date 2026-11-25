@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import uuid
+from contextlib import contextmanager
 from contextvars import ContextVar
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -27,6 +28,15 @@ def get_request_id(default: str | None = None) -> str | None:
     return _request_id_var.get() or default
 
 
+@contextmanager
+def request_id_scope(request_id: str):
+    token = _request_id_var.set(request_id)
+    try:
+        yield
+    finally:
+        _request_id_var.reset(token)
+
+
 class RequestIdMiddleware:
     """为整个 ASGI 请求（包括流式响应）绑定并回传 requestId。"""
 
@@ -45,7 +55,6 @@ class RequestIdMiddleware:
                 break
         request_id = normalize_client_request_id(incoming_id) or new_request_id()
         scope.setdefault("state", {})["request_id"] = request_id
-        token = _request_id_var.set(request_id)
 
         async def send_with_request_id(message: Message) -> None:
             if message["type"] == "http.response.start":
@@ -55,7 +64,5 @@ class RequestIdMiddleware:
                 message["headers"] = headers
             await send(message)
 
-        try:
+        with request_id_scope(request_id):
             await self.app(scope, receive, send_with_request_id)
-        finally:
-            _request_id_var.reset(token)
