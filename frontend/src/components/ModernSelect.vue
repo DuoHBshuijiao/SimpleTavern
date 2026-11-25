@@ -319,6 +319,8 @@ function updateDropdownPosition() {
 
 let positionRaf = 0
 let removePositionListeners: (() => void) | null = null
+let openingClick: MouseEvent | undefined
+let externalOpener: HTMLElement | null = null
 
 function scheduleUpdateDropdownPosition() {
   if (positionRaf) return
@@ -332,8 +334,9 @@ function handleOpenDropdownEscape(event: KeyboardEvent) {
   if (!isOpen.value || event.key !== 'Escape') return
   event.preventDefault()
   event.stopImmediatePropagation()
+  const focusTarget = externalOpener?.isConnected ? externalOpener : triggerRef.value
   close()
-  triggerRef.value?.focus()
+  focusTarget?.focus({ preventScroll: true })
 }
 
 function attachDropdownPositionListeners() {
@@ -395,13 +398,17 @@ watch(isOpen, (open) => {
  * 设置打开状态，清空搜索查询，如果可搜索则聚焦输入框。
  * 使用 Teleport 时在 nextTick 中计算下拉的 fixed 定位。
  */
-function open() {
+function open(event?: MouseEvent) {
+  if (props.disabled) return
+  openingClick = event
+  externalOpener = event?.currentTarget instanceof HTMLElement ? event.currentTarget : null
   isOpen.value = true
   searchQuery.value = ''
   nextTick(() => {
+    if (!isOpen.value) return
     updateDropdownPosition()
     if (props.searchable && inputRef.value) {
-      inputRef.value.focus()
+      inputRef.value.focus({ preventScroll: true })
     }
   })
 }
@@ -413,7 +420,12 @@ function open() {
  */
 function close() {
   isOpen.value = false
+  activeOption.value = null
+  openingClick = undefined
+  externalOpener = null
 }
+
+defineExpose({ open, close })
 
 /**
  * 选择选项
@@ -467,6 +479,12 @@ function handleInputEnter() {
  * @param {MouseEvent} event - 鼠标事件
  */
 function handleClickOutside(event: MouseEvent) {
+  // 外部入口的原生 click 会继续冒泡到 document，只忽略开启本下拉的那次点击。
+  if (event === openingClick) {
+    openingClick = undefined
+    return
+  }
+  if (!isOpen.value) return
   const target = event.target as Node
   if (containerRef.value?.contains(target) || dropdownRef.value?.contains(target)) return
   close()
