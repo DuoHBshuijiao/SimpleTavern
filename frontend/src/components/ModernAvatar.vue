@@ -1,45 +1,12 @@
 <script setup lang="ts">
-/**
- * ModernAvatar - 现代化头像组件
- *
- * 组件职责：
- * - 显示用户或角色的头像图片
- * - 当图片加载失败或未提供时，显示名称首字母
- * - 支持自定义尺寸、宽高比、圆角等样式
- * - 根据名称生成一致的颜色背景
- *
- * Props说明：
- * - src: 头像图片URL（可选）
- * - name: 名称，用于显示首字母和生成背景色
- * - size: 头像尺寸（数字或字符串，如40或"40px"）
- * - aspect: 宽高比（数字如1表示正方形，或"auto"表示自适应）
- * - rounded: Tailwind圆角类名（如"rounded-xl"）
- * - bordered: 是否显示边框
- * - objectFit: 图片对象适应方式（cover/contain/fill等）
- *
- * Emits说明：
- * 无
- *
- * 使用的Composables：
- * 无
- *
- * 使用的Stores：
- * 无
- *
- * 文件关系：
- *    - 被导入：被components/chat/ChatSidebar.vue、views/ChatPage.vue等组件使用
- *    - 导入：导入vue的computed和ref
- *    - 依赖：依赖vue
- *    - 位置：组件层，提供头像显示功能
- */
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 interface Props {
   src?: string | null
   name?: string
-  size?: number | string // Base width
-  aspect?: number | string // Aspect ratio, e.g., 1 (square), 0.75 (3:4), or 'auto'
-  rounded?: string // Tailwind rounded class, e.g., 'rounded-xl'
+  size?: number | string
+  aspect?: number | string
+  rounded?: string
   bordered?: boolean
   objectFit?: 'cover' | 'contain' | 'fill' | 'scale-down' | 'none'
   objectPosition?: string
@@ -56,132 +23,87 @@ const props = withDefaults(defineProps<Props>(), {
   objectPosition: '50% 50%',
 })
 
-const hasError = ref(false)
-const isLoaded = ref(false)
+const segmenter = typeof Intl.Segmenter === 'function' ? new Intl.Segmenter() : null
+const palette = [
+  'bg-brand-a20 text-brand',
+  'bg-[var(--color-info-bg)] text-[var(--color-info-text)]',
+  'bg-[var(--color-success-bg)] text-[var(--color-success-text)]',
+  'bg-[var(--color-warning-bg)] text-[var(--color-warning-text)]',
+  'bg-[var(--color-purple-bg)] text-[var(--color-purple-text)]',
+  'bg-[var(--color-assistant-bg)] text-[var(--color-text)]',
+]
 
-/**
- * 计算样式对象
- *
- * 根据size和aspect计算头像容器的宽度、高度和字体大小。
- * 如果aspect为'auto'，则高度自适应；如果为数字，则根据宽高比计算高度。
- */
-const style = computed(() => {
-  const width = typeof props.size === 'number' ? `${props.size}px` : props.size
-  let height: string | undefined = undefined
-  
-  if (props.aspect === 'auto') {
-    height = 'auto'
-  } else if (typeof props.aspect === 'number') {
-    height = typeof props.size === 'number' 
-      ? `${props.size / props.aspect}px` 
-      : `calc(${props.size} / ${props.aspect})`
-  } else {
-    height = width
+const revision = ref(0)
+const status = ref<'loading' | 'ready' | 'error'>('loading')
+watch(() => props.src, () => {
+  revision.value++
+  status.value = 'loading'
+}, { flush: 'sync' })
+
+const ready = computed(() => !!props.src && status.value === 'ready')
+const name = computed(() => props.name.trim() || '?')
+const initial = computed(() => {
+  const graphemes = segmenter
+    ? Array.from(segmenter.segment(name.value), ({ segment }) => segment)
+    : Array.from(name.value)
+  const first = graphemes.find(grapheme => /[^\p{Format}\p{Control}\p{White_Space}]/u.test(grapheme))
+  return first?.replace(/^\p{Script=Latin}/u, letter => {
+    const upper = letter.toUpperCase()
+    return Array.from(upper).length === 1 ? upper : letter
+  }) ?? '?'
+})
+
+const colorIndex = computed(() => {
+  let hash = 0
+  for (let index = 0; index < name.value.length; index++) {
+    hash = name.value.charCodeAt(index) + ((hash << 5) - hash)
   }
+  return Math.abs(hash) % palette.length
+})
 
+const style = computed(() => {
+  const width = typeof props.size === 'number' ? props.size + 'px' : props.size
+  const height = typeof props.aspect === 'number'
+    ? 'calc(' + width + ' / ' + props.aspect + ')'
+    : props.aspect === 'auto' ? 'auto' : width
   return {
     width,
     height,
-    fontSize: typeof props.size === 'number' ? `${props.size * 0.4}px` : '1rem'
+    fontSize: typeof props.size === 'number' ? (props.size * 0.4) + 'px' : '1rem',
   }
 })
 
-/**
- * 处理图片加载错误
- *
- * 当图片加载失败时，标记错误状态，显示首字母。
- */
-function handleError() {
-  hasError.value = true
-  isLoaded.value = true
+function settle(event: Event, result: 'ready' | 'error') {
+  const image = event.currentTarget as HTMLImageElement
+  if (Number(image.dataset.revision) === revision.value) status.value = result
 }
-
-/**
- * 处理图片加载成功
- *
- * 当图片加载成功时，标记加载完成状态。
- */
-function handleLoad() {
-  isLoaded.value = true
-}
-
-/**
- * 计算首字母
- *
- * 获取名称的首字母并转换为大写，如果名称为空则返回"?"。
- */
-const initials = computed(() => {
-  const name = props.name || '?'
-  return name.length > 0 ? name.charAt(0).toUpperCase() : '?'
-})
-
-/**
- * 计算背景颜色
- *
- * 根据名称生成一致的颜色（使用简单的哈希算法）。
- * 从预定义的颜色列表中选择一个颜色，确保相同名称总是得到相同颜色。
- */
-const bgColor = computed(() => {
-  const colors = [
-    'bg-brand-a20 text-brand',
-    'bg-[var(--color-info-bg)] text-[var(--color-info-text)]',
-    'bg-[var(--color-success-bg)] text-[var(--color-success-text)]',
-    'bg-[var(--color-warning-bg)] text-[var(--color-warning-text)]',
-    'bg-[var(--color-purple-bg)] text-[var(--color-purple-text)]',
-    'bg-[var(--color-assistant-bg)] text-[var(--color-text)]',
-  ]
-  let hash = 0
-  const str = props.name || '?'
-  for (let i = 0; i < str.length; i++) {
-    hash = str.charCodeAt(i) + ((hash << 5) - hash)
-  }
-  return colors[Math.abs(hash) % colors.length]
-})
 </script>
 
 <template>
   <div
-    class="relative overflow-hidden shrink-0 flex items-start justify-center select-none transition-[box-shadow,border-color] duration-300 shadow-sm"
-    :class="[
-      rounded,
-      bgColor,
-      // Liquid Glass enhancement: default subtle border for glass feel
-      'border border-[var(--color-border-subtle)]', 
-      bordered ? 'ring-2 ring-[var(--color-focus-ring)]' : ''
-    ]"
+    class="modern-avatar relative overflow-hidden shrink-0 flex items-center justify-center select-none border border-[var(--color-border-subtle)] shadow-sm"
+    :class="[rounded, palette[colorIndex], bordered && 'dark-ui:ring-2 dark-ui:ring-brand-a40']"
     :style="style"
   >
     <img
-      v-if="src && !hasError"
+      v-if="src && status !== 'error'"
+      v-show="ready"
+      :key="revision"
       :src="src"
-      class="w-full transition-opacity duration-300"
-      :class="[
-        { 'opacity-0': !isLoaded, 'opacity-100': isLoaded },
-        props.aspect === 'auto' ? 'h-auto' : 'h-full',
-        `object-${objectFit}`
-      ]"
-      :style="{ objectPosition }"
-      @error="handleError"
-      @load="handleLoad"
+      :data-revision="revision"
+      class="w-full"
+      :class="aspect === 'auto' ? 'h-auto' : 'h-full'"
+      :style="{ objectFit, objectPosition }"
       alt=""
+      @load="settle($event, 'ready')"
+      @error="settle($event, 'error')"
     />
-    <span v-else class="font-bold self-center">
-      {{ initials }}
-    </span>
-    
-    <!-- Skeleton loader -->
-    <div 
-      v-if="src && !isLoaded && !hasError" 
-      class="absolute inset-0 bg-surface-muted animate-pulse"
-    ></div>
-    
-    <!-- 仅在文字占位头像上增加轻玻璃层，避免压暗真实头像图片。 -->
-    <div v-if="!src || hasError" class="modern-avatar__glaze absolute inset-0 pointer-events-none" aria-hidden="true"></div>
+    <span
+      v-if="!ready"
+      class="modern-avatar__initial flex w-full items-center justify-center self-stretch font-bold"
+      :data-color="colorIndex"
+      aria-hidden="true"
+    >{{ initial }}</span>
+    <slot v-if="ready" />
   </div>
 </template>
-
-<style scoped>
-.modern-avatar__glaze {
-  background-color: var(--color-surface-overlay);
-}
-</style>

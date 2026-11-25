@@ -267,22 +267,21 @@ onUnmounted(() => {
               @change="handleFileSelect"
             />
 
-            <div 
-              v-if="!imageSrc" 
-              class="upload-area border-2 border-dashed border-[var(--color-border)] bg-[var(--color-surface-muted)] hover:bg-[var(--color-surface-hover)] hover:border-[var(--color-border-strong)] transition-[background-color,border-color] rounded-xl p-10 text-center cursor-pointer" 
+            <button
+              v-if="!imageSrc"
+              type="button"
+              class="btn btn-secondary w-full flex-col whitespace-normal border-dashed p-10 text-center"
               @click="triggerFileInput"
             >
-              <div class="upload-content pointer-events-none">
-                <div class="text-lg font-bold text-brand mb-2">点击选择图片</div>
-                <div class="text-xs text-muted">支持 JPG、PNG、GIF、WebP 格式（可拖拽到此区域）</div>
-              </div>
-            </div>
+              <span class="text-lg font-bold text-brand">点击选择图片</span>
+              <span class="text-xs text-muted">支持 JPG、PNG、GIF、WebP 格式（可拖拽到此区域）</span>
+            </button>
 
             <div v-else class="cropper-container bg-[var(--color-surface-inset)] rounded-xl overflow-hidden max-h-[400px]">
               <img ref="imageRef" :src="imageSrc" class="max-w-full block" />
             </div>
             <p v-if="imageSrc && preserveOriginal" class="text-xs text-[var(--color-text-muted)]">
-              当前模式不会裁剪原图像素；此处框选仅用于会话中角色头像的展示位置。
+              框选聊天中显示的头像区域。
             </p>
           </div>
         </div>
