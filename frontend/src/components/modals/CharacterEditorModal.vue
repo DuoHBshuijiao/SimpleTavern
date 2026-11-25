@@ -451,7 +451,12 @@ void dialogRef
         </div>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-secondary" @click="emit('export')" :disabled="!character">导出角色 JSON</button>
+        <button
+          v-if="character && !isNewCharacter"
+          type="button"
+          class="btn btn-secondary"
+          @click="emit('export')"
+        >导出已保存角色 JSON</button>
         <button class="btn btn-secondary" @click="emit('cancel')">取消</button>
         <button class="btn btn-primary" @click="emit('save')">保存</button>
       </div>

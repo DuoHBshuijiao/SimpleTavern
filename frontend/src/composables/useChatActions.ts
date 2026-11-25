@@ -731,8 +731,10 @@ export function useChatActions(deps: ChatActionsDeps) {
   }
 
   async function exportCharacterCard() {
+    const id = editingCharacter.value?.id
+    if (!id || isNewCharacter.value) return
     try {
-      await exportCharacter(false, editingCharacter.value?.id)
+      await exportCharacter(false, id)
     } catch (error) {
       await notifyMessage(error instanceof Error ? error.message : String(error), { title: '角色导出失败' })
     }

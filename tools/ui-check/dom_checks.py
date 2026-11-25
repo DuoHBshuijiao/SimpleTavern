@@ -311,6 +311,8 @@ async def core_modal(ctx, url, check):
     await page.js(edit)
     await page.wait_for("$modal('编辑角色')", 5)
     await asyncio.sleep(0.5)
+    check("已有角色提供已保存版本的 JSON 导出",
+          await page.js("!!$btn($modal('编辑角色'), '导出已保存角色 JSON')"))
     await page.js("$click($modal('编辑角色'), '更换头像')")
     await page.wait_for("$modal('设置头像')", 5)
     await asyncio.sleep(0.5)
@@ -323,6 +325,12 @@ async def core_modal(ctx, url, check):
     await page.js(cdp.DISMISS)
     await asyncio.sleep(0.3)
     check("Esc：第二次关下面一层", await page.js("$titles().length") == 0, await page.js("$titles()"))
+    await page.js("""$click([...document.querySelectorAll('section')].find(e=>e.firstElementChild?.innerText.includes('角色列表')), '+ 新建')""")
+    await page.wait_for("$modal('新建角色')", 5)
+    check("新建角色不显示依赖已保存数据的导出按钮",
+          await page.js("!$modal('新建角色').querySelector('.modal-footer').innerText.includes('导出')"))
+    await page.js("$click($modal('新建角色'), '取消')")
+    await page.wait_for("!$modal('新建角色')", 5)
     await settings_open(page)
     await page.key("Escape", 27)
     await asyncio.sleep(0.8)
