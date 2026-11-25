@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /** 聊天模型、思考深度和 Fast 控件。档位以当前连接的请求预览为准。 */
 import { computed, nextTick, ref, shallowRef, useId, watch } from 'vue'
-import { Brain, Check, ChevronDown, Loader2, Search, Zap } from 'lucide-vue-next'
+import { Brain, Check, ChevronDown, Search, Zap } from 'lucide-vue-next'
 import SelectDropdownSurface from '../SelectDropdownSurface.vue'
 import ReasoningEffortSegments from './ReasoningEffortSegments.vue'
 import { useSettingsStore } from '../../stores'
@@ -199,7 +199,7 @@ const connection = computed(() => {
   }
 })
 
-const { preview, loading: previewLoading } = useProtocolPreview(
+const { preview } = useProtocolPreview(
   () => {
     const c = connection.value
     if (!c || !props.currentModel || props.currentModel === '未设置') return null
@@ -468,7 +468,6 @@ function toggleOpen() {
                 <div class="mb-1.5 flex items-center justify-between gap-2 px-1">
                   <div class="flex items-center gap-1.5 pl-5 text-xs font-medium text-[var(--color-text)]">
                     思考深度
-                    <Loader2 v-if="previewLoading" class="h-3 w-3 animate-spin text-[var(--color-text-muted)]" />
                   </div>
                   <button
                     type="button"

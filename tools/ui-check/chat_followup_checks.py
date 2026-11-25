@@ -332,10 +332,18 @@ async def check_luna_reasoning(ctx):
         await page.key("ArrowRight", 39)
         await page.wait_for(f"{trigger}.getAttribute('aria-label').includes('思考：中（会话）')")
         ctx.check("连续按键按档位切换并保存最终值", ctx.api(chat_path)["overrides"]["params"]["reasoningEffort"] == "medium")
+        count_previews = "performance.getEntriesByType('resource').filter(e=>e.name.endsWith('/api/llm/resolve-preview')).length"
+        previews_before = await page.js(count_previews)
+        await page.js(f"""window.__effortSpinnerSeen = false;
+          new MutationObserver(() => {{
+            window.__effortSpinnerSeen ||= Boolean({panel}.querySelector('.animate-spin'));
+          }}).observe({panel}, {{childList:true, subtree:true}});""")
         await page.mouse("mousePressed", *coords["max"], button="left", buttons=1, clickCount=1)
         await page.mouse("mouseReleased", *coords["max"], button="left", buttons=0, clickCount=1)
         await page.wait_for(f"{trigger}.getAttribute('aria-label').includes('思考：Max（会话）')")
         ctx.check("点击档位按钮仍可直接设置", ctx.api(chat_path)["overrides"]["params"]["reasoningEffort"] == "max")
+        await page.wait_for(f"{count_previews} > {previews_before}")
+        ctx.check("思考能力预览继续更新，面板没有闪出加载图标", not await page.js("window.__effortSpinnerSeen"))
 
         await page.mouse("mousePressed", *coords["max"], button="left", buttons=1, clickCount=1)
         await page.mouse("mouseMoved", *coords["middle"], button="left", buttons=1)
