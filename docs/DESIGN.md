@@ -93,6 +93,8 @@ SimpleTavern is a dense local product surface for long AI roleplay sessions, not
 
 The design language is mature multi-layer glass. Depth is conveyed with translucent solid surfaces, blur, borders, and shadow rather than gradients or decorative glow. The system rejects generic SaaS dashboards, overly playful chat skins, hostile terminal-only density, and glass effects that reduce readability.
 
+For the desktop light theme, the [desktop light theme specification](specs/DESKTOP-LIGHT-THEME.md) defines the target palette, borderless surfaces, component states, and acceptance criteria. Its light-mode rules govern the use of borders and dividers in the general guidance below.
+
 **Key Characteristics:**
 
 - Restrained light and dark product UI with one theme accent at a time.
@@ -204,7 +206,7 @@ SimpleTavern uses tonal glass layering as the primary elevation model. Shadows s
 ### Inputs / Fields
 
 - **Style:** translucent surface, 0.75rem radius, token border, compact vertical rhythm.
-- **Focus:** border and focus ring shift to theme accent.
+- **Keyboard focus:** one 2 px outline using the theme focus color.
 - **Error / Disabled:** semantic state colors and opacity, never invisible controls.
 
 ### Settings and Form Hierarchy
@@ -224,7 +226,7 @@ Named rules:
 - **Behind the ⓘ** (`more`): anything that needs explaining. With no `hint`, the ⓘ sits next to the label (`SettingsField`) or the group title (`<SettingsHint title="…" more="…" />`) and the text opens under it.
 - **Always visible** (`hint`, or the `SettingsHint` slot): only what causes an error, costs money, or cannot be undone if missed, such as billing multipliers, irreversible actions, a required prerequisite, or a format the control rejects. One short sentence.
 
-Live state (login status, linked preset, usage counts) and empty states are not hints and stay visible. Do not write hints by hand; use these components.
+Show copy when it changes the reader’s next action or decision, or explains a current state they need to understand. Leave routine implementation details, inactive-case assurances, and text repeated by controls out of the interface. Put technical diagnostics in request previews or logs. Use these components for hints.
 
 **The Switch Rule.** A boolean setting is a `SettingsSwitch`. The switch itself shows its state, so do not add "on" or "off" text. Checkboxes stay only for compact multi-selection inside a list item.
 
