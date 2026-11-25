@@ -222,7 +222,7 @@ export function useAssistant(options: UseAssistantOptions) {
       const ok = await notifyConfirm({
         title: '提示',
         message:
-          '开启「破坏性工具」后，助手可执行删除文件、删除世界书、覆盖整卡与覆盖全部记忆等不可逆操作。请谨慎使用。',
+          '开启「破坏性工具」后，助手可执行删除文件、删除世界书、覆盖整卡与覆盖全部记忆等不可逆操作。',
         variant: 'danger',
       })
       if (!ok) return

@@ -27,6 +27,7 @@ export function useProtocolPreview(
   options: UseProtocolPreviewOptions = {},
 ) {
   const preview = shallowRef<ProtocolResolution | null>(null)
+  const resolvedRequest = shallowRef<ResolvePreviewRequest | null>(null)
   const loading = ref(false)
   const error = ref<string | null>(null)
   let timer: ReturnType<typeof setTimeout> | null = null
@@ -43,6 +44,7 @@ export function useProtocolPreview(
     const body = source()
     if (!body || !body.model?.trim()) {
       preview.value = null
+      resolvedRequest.value = null
       loading.value = false
       return
     }
@@ -55,11 +57,13 @@ export function useProtocolPreview(
       const result = await resolvePreview(body, controller.signal)
       if (mySeq !== seq) return
       preview.value = result
+      resolvedRequest.value = body
     } catch (err) {
       if (mySeq !== seq) return
       if ((err as { name?: string })?.name === 'AbortError') return
       error.value = err instanceof Error ? err.message : String(err)
       preview.value = null
+      resolvedRequest.value = null
     } finally {
       if (mySeq === seq) loading.value = false
     }
@@ -87,7 +91,7 @@ export function useProtocolPreview(
   const supportsFastMode = computed(() => preview.value?.supportsFastMode ?? false)
   const adjustments = computed(() => preview.value?.adjustments ?? [])
 
-  return { preview, loading, error, availableEfforts, supportsFastMode, adjustments, refresh: run }
+  return { preview, resolvedRequest, loading, error, availableEfforts, supportsFastMode, adjustments, refresh: run }
 }
 
 /** 调整项的中文短语（弹层 / 预设编辑器共用） */

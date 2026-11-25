@@ -5465,6 +5465,7 @@ const editingPersonaAvatarUrl = computed(() => {
     <AssistantSettingsModal
       :show="assistant.showAssistantSettings.value"
       :settings="assistant.assistantSettings.value"
+      :global-settings="settings.settings"
       :allow-web-search="assistant.allowWebSearchEnabled.value"
       :allow-write-memory="assistant.allowWriteMemoryEnabled.value"
       :allow-destructive-tools="assistant.allowDestructiveToolsEnabled.value"
