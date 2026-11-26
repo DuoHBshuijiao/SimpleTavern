@@ -23,6 +23,7 @@ const JANITOR_BRIDGE_EXT_REL_PATH = 'extensions/simpletavern-janitor-bridge'
 const JANITOR_BRIDGE_MIN_VERSION = '0.1.11'
 const JANITOR_BRIDGE_INSTALL_URL = 'https://github.com/DuoHBshuijiao/SimpleTavern#3-从-janitorai-迁移聊天记录可选'
 const JANITOR_BRIDGE_RECHECK_STORAGE_KEY = 'simpletavern:janitorBridgeRecheck'
+const JANITOR_IMPORT_FORM_STORAGE_KEY = 'simpletavern:janitorImportForm'
 const bridgeInstalled = ref(false)
 const bridgeVersion = ref('')
 const copiedExtensionUrl = ref(false)
@@ -131,6 +132,8 @@ const props = defineProps<{
   pendingId?: string | null
   /** 父级在「仅角色导入完成」等场景递增，用于在不丢失 pendingId 时刷新聊天预览 */
   pendingReloadNonce?: number
+  /** 刚通过 Janitor 抓取新建的角色 ID，返回后默认选中该角色 */
+  preferredCharacterId?: string | null
   /** 与 ChatPage 的 errorStack.pushError 一致，用于未安装扩展时的右下角错误提示 */
   pushError?: (payload: { message: unknown; source: 'main' | 'assistant'; title?: string }) => void
 }>()
@@ -202,6 +205,44 @@ function clearPendingPreview() {
   pendingPreview.value = null
 }
 
+function saveJanitorImportForm() {
+  try {
+    sessionStorage.setItem(
+      JANITOR_IMPORT_FORM_STORAGE_KEY,
+      JSON.stringify({
+        selectedPersonaId: selectedPersonaId.value,
+        openAfterImport: openAfterImport.value,
+      }),
+    )
+  } catch {
+    // ignore quota / private mode
+  }
+}
+
+function restoreJanitorImportForm() {
+  try {
+    const raw = sessionStorage.getItem(JANITOR_IMPORT_FORM_STORAGE_KEY)
+    if (!raw) return
+    const saved = JSON.parse(raw) as { selectedPersonaId?: unknown; openAfterImport?: unknown }
+    if (typeof saved.selectedPersonaId === 'string') {
+      selectedPersonaId.value = saved.selectedPersonaId
+    }
+    if (typeof saved.openAfterImport === 'boolean') {
+      openAfterImport.value = saved.openAfterImport
+    }
+  } catch {
+    // ignore malformed state
+  }
+}
+
+function clearJanitorImportForm() {
+  try {
+    sessionStorage.removeItem(JANITOR_IMPORT_FORM_STORAGE_KEY)
+  } catch {
+    // ignore
+  }
+}
+
 watch(
   () => [props.show, props.pendingId, props.pendingReloadNonce] as const,
   ([visible, pendingId]) => {
@@ -213,13 +254,29 @@ watch(
     }
     refreshBridgeStatus()
     consumeRecheckState()
+    restoreJanitorImportForm()
     if (pendingId) void loadPendingPreview(pendingId)
   },
   { immediate: true },
 )
 
-watch([() => props.show, characterListKey], ([visible]) => {
-  if (visible && !props.characters.some((character) => character.id === selectedCharacterId.value)) {
+watch([selectedPersonaId, openAfterImport], () => {
+  if (props.show) saveJanitorImportForm()
+})
+
+watch(() => props.personas, (personas) => {
+  if (personas.length > 0 && selectedPersonaId.value && !personas.some((p) => p.id === selectedPersonaId.value)) {
+    selectedPersonaId.value = ''
+  }
+}, { immediate: true })
+
+watch([() => props.show, characterListKey, () => props.preferredCharacterId], ([visible, , preferredId]) => {
+  if (!visible) return
+  if (preferredId && props.characters.some((character) => character.id === preferredId)) {
+    selectedCharacterId.value = preferredId
+    return
+  }
+  if (!props.characters.some((character) => character.id === selectedCharacterId.value)) {
     selectedCharacterId.value = props.characters[0]?.id ?? ''
   }
 }, { immediate: true })
@@ -463,6 +520,7 @@ async function confirmJanitorImport() {
       characterId,
       userPersonaId: selectedPersonaId.value || null,
     })
+    clearJanitorImportForm()
     emit('janitor-imported', {
       chatId: result.chat.id,
       characterId: result.chat.characterId ?? null,

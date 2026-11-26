@@ -5,6 +5,21 @@
     <link rel="icon" type="image/svg+xml" href="/icon_自绘_不得商用.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SimpleTavern</title>
+    <script>
+      try {
+        var raw = localStorage.getItem('simpletavern:appearanceCache')
+        if (raw) {
+          var cached = JSON.parse(raw)
+          var themes = ['blue', 'green', 'teal', 'violet', 'amber', 'rose', 'sunset']
+          if (cached && themes.indexOf(cached.themeId) !== -1) {
+            document.documentElement.dataset.theme = cached.themeId
+          }
+          if (cached && (cached.colorScheme === 'light' || cached.colorScheme === 'dark')) {
+            document.documentElement.dataset.colorScheme = cached.colorScheme
+          }
+        }
+      } catch (_) {}
+    </script>
   </head>
   <body>
     <div id="app"></div>

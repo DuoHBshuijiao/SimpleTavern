@@ -109,7 +109,7 @@
 - [x] 从保存有 `minimal` 的旧会话发送 GPT-6 Luna 消息。对照后端实际发出 `minimal`，修复后实际发出 `low`。同时验证 `none`、`xhigh`、`max` 原样发出。可用档位依据官方文档和真实 400 反馈，隔离上游负责记录请求体。 [OpenAI 模型文档](https://developers.openai.com/api/docs/models/gpt-6-luna)
 - [x] 新一轮生产构建检查 66 项通过。另复跑宽屏与窄屏的设置抽屉和 Luna 面板，35 项通过。旧构建仍显示 Luna 的旧档位、重复诊断、凭证存储说明和输入区来源选择器。旧会话使用全局联网来源。全量 `api-check` 313 项通过，另有 8 项规格观察。
 - [x] 使用真实 ChatGPT 订阅发送消息，使用旧 Codex 登录刷新模型目录（作者 2026-11-26 实测通过）。
-- [ ] 使用 Janitor Bridge 0.1.11 在 JanitorAI 实站验证回跳与抓取。
+- [x] 使用 Janitor Bridge 0.1.11 在 JanitorAI 实站验证回跳与抓取（作者 2026-11-27 实测通过）。
 
 ### 较早的验收记录
 

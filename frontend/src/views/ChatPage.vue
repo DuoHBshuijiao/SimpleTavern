@@ -259,6 +259,7 @@ const JANITOR_CHAT_PENDING_STORAGE_KEY = 'simpletavern:janitorChatPendingId'
 const JANITOR_BRIDGE_RECHECK_STORAGE_KEY = 'simpletavern:janitorBridgeRecheck'
 const janitorPendingId = ref<string | null>(null)
 const janitorPendingReloadNonce = ref(0)
+const janitorPreferredCharacterId = ref<string | null>(null)
 const settingsTab = ref<SettingsDrawerTab>('global')
 const isGenerating = computed(() => activeGeneration.value.isGenerating.value)
 const streamError = computed({
@@ -2366,6 +2367,10 @@ watch(
         // ignore
       }
     }
+    const cid = typeof route.query.janitorCharId === 'string' && route.query.janitorCharId.trim()
+      ? route.query.janitorCharId.trim()
+      : null
+    if (cid) janitorPreferredCharacterId.value = cid
     const cname = route.query.janitorCharName
     const wraw = route.query.janitorCharWarnings
     showImportModal.value = true
@@ -4199,6 +4204,7 @@ async function restoreSettingsDrawerChat(chatId: string) {
 
 async function handleJanitorImported(payload: { chatId: string; characterId: string | null; openAfterImport: boolean }) {
   janitorPendingId.value = null
+  janitorPreferredCharacterId.value = null
   try {
     sessionStorage.removeItem(JANITOR_CHAT_PENDING_STORAGE_KEY)
   } catch {
@@ -5396,6 +5402,7 @@ const editingPersonaAvatarUrl = computed(() => {
       :personas="settings.settings?.userPersonas || []"
       :pending-id="janitorPendingId"
       :pending-reload-nonce="janitorPendingReloadNonce"
+      :preferred-character-id="janitorPreferredCharacterId"
       :push-error="(p) => errorStack.pushError(p)"
       @janitor-imported="handleJanitorImported"
     />
