@@ -56,4 +56,4 @@ jobs:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
           $assets = (Get-ChildItem dist/windows -File | Where-Object Name -Match '(-Setup\.exe|-Portable\.zip|\.nupkg|^releases\.win-x64\.json)$').FullName
-          gh release upload -- $env:RELEASE_TAG @assets
+          gh release upload --clobber -- $env:RELEASE_TAG @assets

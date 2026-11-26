@@ -1,8 +1,21 @@
 # Changelog
 
-## v1.000（验收中）
+## v1.0.0
 
-运行版本仍为 v0.810。作者手测通过后改为 v1.000，下面的 v0.820 一并并入。验收清单见 `docs/tasks/T-814-v1000-release-acceptance.md`。
+正式发布版本切换为标准三段式版本号 `v1.0.0`（`backend/app/version.py`、`desktop/Cargo.toml`、`desktop/Cargo.lock` 同步；源码更新比较兼容历史两位小数标签）。原 `v0.820` 改动已一并并入。验收清单见 `docs/tasks/T-814-v1000-release-acceptance.md`。
+
+### Windows 桌面发行版与服务管理器
+
+- 新增基于 Tauri 2 + 系统 WebView2 + Velopack 的 Windows x64 安装版（`SimpleTavern-win-x64-Setup.exe`）与免安装版（`SimpleTavern-win-x64-Portable.zip`），支持自定义安装目录、托盘驻留、后台静默更新与旧版 `data/` 导入。
+- 服务管理器自动同步应用色系、亮暗模式与壁纸亮度；支持安全排空正在进行的生成与写入后再退出或重启更新。
+- 通过 PyInstaller + XZ 词表压缩 + UPX 与移出打包冗余图片优化桌面包体积，提供 GitHub Actions 自动构建与发布工作流。
+
+### 稳定性审计与界面打磨
+
+- 完成 118 项桌面端代码审计缺陷修复（见 `docs/audits/desktop-bug-fix-log.md`），覆盖并发写入与会话隔离、流式/非流式持久化、正则与世界书超时、来源链接、分叉与导入冲突保护、JanitorAI 桥接（0.1.11+）与本地请求来源校验。
+- 完成桌面前端设计评审与交互统一（见 `docs/audits/desktop-frontend-design-review-2026-11-24.md`）：统一深浅色单层焦点轮廓、跟手拖动分段胶囊、侧栏与模型面板键盘导航、工具栏同排用量展示、回复末尾来源预览卡片与单聊出错行内重试。
+- 支持保留原图的非破坏式头像显示范围裁剪与持久化（角色卡、身份与消息快照）。
+- 校准 GPT-6 Luna 官方六档思考深度，优化 ChatGPT 订阅自动缓存与旧 Codex 模型目录请求。
 
 ### 外观与朗读
 
@@ -63,7 +76,7 @@
 - 新增 `tools/ui-check/`：在无密钥沙箱里驱动界面，`built` 一项在构建产物上跑。
 - 测试政策改为：不引入测试框架，不写跟着实现走的单元测试，每项检查都要有能失败的对照。
 
-## v0.820（进行中）
+### OAuth 登录、群聊思考与架构整理（原 v0.820 并入）
 
 ### 静态审查修复
 

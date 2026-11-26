@@ -36,6 +36,7 @@ __pycache__/
 
 # Temporary output
 /temp/
+/backend/temp/
 /_update_tmp/
 /temp_commit_msg.txt
 /session.log

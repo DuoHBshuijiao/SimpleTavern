@@ -1,8 +1,8 @@
 # 当前任务
 
-- current: v1.000 发布验收（2026-11-19）。亮色主题和 DeepSeek 整段朗读已实现。
+- current: v1.0.0 发布收口（2026-11-26）。版本号已统一为标准三段式 `v1.0.0`，`CHANGELOG.md` 与 `NOTICE` 已更新。
 - checklist: `docs/tasks/T-814-v1000-release-acceptance.md`。作者的 18 项决定、问题记录和验收记录都在这里。
-- status: 亮色主题和 DeepSeek 已在构建产物和模拟上游上验收。剩作者手测三晚（真实模型、真实账号、数据进出）、DeepSeek 两种音色实测、Vertex 真实项目验收和发布动作。运行版本仍为 v0.810，作者手测通过后直接改 v1.000。
+- status: 真实 ChatGPT / Codex 订阅已实测通过；剩余 Janitor Bridge 实站、DeepSeek 两种音色实测、GitHub Actions 演练打包、新机杀毒实测、最终 `README.md` 宣传图更新与正式发布动作。
 - next_read: `docs/00-INDEX.md`（测试政策）、`docs/specs/BACKEND-API.md` 的「2026-11-07 增补」、`docs/specs/FRONTEND-FEATURES.md`
 - goal: 继续验收，每次修复后重跑两套黑盒检查。文件解析和 OCR 放到后续版本。
 

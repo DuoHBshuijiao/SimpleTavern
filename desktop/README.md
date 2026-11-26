@@ -10,7 +10,7 @@
 python -m venv .venv
 .venv/Scripts/python -m pip install -r backend/requirements.txt pyinstaller==6.22.3
 dotnet tool install --global vpk --version 1.2.161
-.venv/Scripts/python desktop/build_windows.py --version 0.810.0
+.venv/Scripts/python desktop/build_windows.py --version 1.0.0
 ```
 
 本地打包会复用脚本上次成功安装的前端依赖，并重新构建前端。首次打包、依赖文件或 Node 安装环境变化时会执行 `npm ci`。加 `--clean-web-deps` 可强制重装依赖。若已有所需版本的 `frontend/dist`，可用 `--reuse-web` 直接复用产物。GitHub Actions 发布构建会执行干净安装，并缓存 npm 下载。

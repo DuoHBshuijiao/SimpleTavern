@@ -2,12 +2,12 @@
 
 不引入测试框架，也不写跟着实现走的单元测试；验证靠 `tools/api-check/` 和 `tools/ui-check/` 的黑盒检查，原则见 `docs/00-INDEX.md`。接口与界面规格见 `docs/specs/BACKEND-API.md` 与 `docs/specs/FRONTEND-FEATURES.md`。
 
-## 当前状态（2026-11-18）
+## 当前状态（2026-11-26）
 
-正在做 v1.000 发布验收，按精简清单 [T-814](tasks/T-814-v1000-release-acceptance.md) 执行，作者的决定也写在那里。要点：
+正在做 v1.0.0 发布收口，按精简清单 [T-814](tasks/T-814-v1000-release-acceptance.md) 执行，作者的决定也写在那里。要点：
 
-- T-832 并入 1.0。作者已撤销发布前的新功能冻结。亮色主题与 DeepSeek 朗读先做接入调研，文件解析和 OCR 暂缓。
-- 版本号验收期间保持 v0.810，作者手测通过后直接改 v1.000。
+- T-832、亮色主题、DeepSeek 朗读与 Windows 桌面服务管理器/安装器均已落地。
+- 版本号已统一改为标准三段式 `v1.0.0`（`backend/app/version.py`、`desktop/Cargo.toml`、`desktop/Cargo.lock`）。
 - 只支持本机部署；安卓端不计入桌面 1.0。
 - 放到 1.0 之后：Codex 额度显示、插件 SDK、跨设备同步、AWS 签名、局域网登录。
 

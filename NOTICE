@@ -44,7 +44,9 @@ Backend (Python; see `backend/requirements.txt` and installed transitive deps)
 Commonly present licenses in a typical install include, among others:
 
 Apache-2.0
+  - cryptography  (Apache-2.0 OR BSD-3-Clause)
   - python-multipart
+  - regex
   - tokenizers
   - huggingface-hub  (pulled in with tokenizers / Hugging Face tooling)
 
@@ -54,6 +56,32 @@ MPL-2.0
 Additional permissive licenses (e.g. MIT, BSD-3-Clause, “Unlicense” for some
 small utilities) apply to other dependencies. Their notices appear in each
 package’s `METADATA` or `LICENSE` file.
+
+-------------------------------------------------------------------------------
+Desktop (Windows Manager & Packaging; see `desktop/Cargo.toml` and `Cargo.lock`)
+-------------------------------------------------------------------------------
+
+Apache-2.0 OR MIT (dual-licensed Rust crates)
+  - tauri, tauri-build, tauri-plugin-opener, tauri-plugin-single-instance,
+    tao, wry
+  - serde, serde_json, chrono, tempfile, windows-sys, tokio, reqwest, flate2
+
+Apache-2.0 / ISC / MIT (Rust TLS & cryptography)
+  - rustls, rustls-webpki, ring (see each crate's `LICENSE` for full notices)
+
+MIT
+  - velopack (Rust SDK and `vpk` packaging CLI)
+  - rfd, winreg, webview2-com
+
+GPL-2.0-or-later with distribution exceptions (Windows build / packaging tools)
+  - PyInstaller (Bootloader Exception: permits distributing frozen executables
+    under SimpleTavern's MIT license)
+  - UPX (UPX Stub Exception: permits distributing compressed binaries under
+    their own license when using an unmodified UPX stub)
+
+Windows Runtime
+  - Microsoft Edge WebView2 Runtime (invoked from the OS or bootstrapped by
+    the Velopack installer under Microsoft's WebView2 Runtime terms)
 
 -------------------------------------------------------------------------------
 MIT / BSD / ISC and similar

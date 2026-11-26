@@ -39,10 +39,12 @@ def _current_version_tuple() -> tuple[int, ...]:
 
 
 def _parse_version(tag: str) -> tuple[int, ...]:
-    """举例：将 v0.228 解析为 (0, 228)，用于比较。"""
-    tag = (tag or "").strip().lstrip("v")
-    parts = re.findall(r"\d+", tag)
-    return tuple(int(p) for p in parts) if parts else (0,)
+    """解析版本标签为可比较的整数元组并去除末尾零（如 v1.0.0 与 v1.000 均视为 (1,)）。"""
+    tag = (tag or "").strip().lstrip("vV")
+    parts = [int(p) for p in re.findall(r"\d+", tag)]
+    while len(parts) > 1 and parts[-1] == 0:
+        parts.pop()
+    return tuple(parts) if parts else (0,)
 
 
 def _is_newer(latest_tag: str, current: str) -> bool:

@@ -35,7 +35,7 @@ def run(exe, web):
         ports = [free_port() for _ in range(3)]
         origin = f"http://127.0.0.1:{ports[0]}"
         proc = subprocess.Popen([str(exe), "--port", str(ports[0]), "--api-port", str(ports[1]),
-            "--web", str(web), "--version", "0.810.0"], stdin=subprocess.PIPE,
+            "--web", str(web), "--version", "1.0.0"], stdin=subprocess.PIPE,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=subprocess.CREATE_NO_WINDOW,
             env={**os.environ, "PATH": os.pathsep.join(str(Path(os.environ["SystemRoot"]) / p)
                                                       for p in ("System32", "System32/WindowsPowerShell/v1.0")),

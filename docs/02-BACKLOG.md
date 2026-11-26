@@ -33,7 +33,7 @@
 - [x] **T-811 P1** Storage/Chats/Fork/Import/Export/Integrity 性能与错误收口
 - [x] **T-812 P1** ChatPage SSE → `useChatGeneration`，统一 meta/usage/done/error
 - [x] **T-813 P1** 数据迁移、隐私、安全与向后兼容
-- [ ] **T-814 P0** v1.000 发布验收。作者已确认精简清单 `docs/tasks/T-814-v1000-release-acceptance.md`，替代逐项核对，进行中
+- [ ] **T-814 P0** v1.0.0 发布验收与收口。精简清单见 `docs/tasks/T-814-v1000-release-acceptance.md`，版本号已切为 `v1.0.0`
 
 ### 执行顺序
 

@@ -1,6 +1,6 @@
-# T-814 v1.000 发布验收清单
+# T-814 v1.0.0 发布验收清单
 
-状态：**继续发布验收**。亮色主题和 DeepSeek 整段朗读已进入验收，DeepSeek 真实账号实测仍待完成。
+状态：**进入发布收口**。版本号已统一切换为标准三段式 `v1.0.0`（`backend/app/version.py`、`desktop/Cargo.toml`、`desktop/Cargo.lock`），真实 ChatGPT / Codex 订阅已实测通过；剩余 Janitor Bridge 实站、DeepSeek 真实朗读、GitHub Actions 演练打包、新机杀毒实测与最终 `README.md` 宣传图更新。
 
 路线图原定对照 654 个控件和 137 个接口操作逐项黑盒核对，并交给“测试组”。实际只有作者一人，所以这里缩成：能自动的都自动，作者只测真实模型、真实账号和手感。
 
@@ -108,7 +108,8 @@
 - [x] 使用模拟 HTTP 核对 ChatGPT 订阅请求与 Codex 模型目录。对应的真实日志显示，上游分别拒绝了 `prompt_cache_options` 和缺少 `client_version` 的目录请求。
 - [x] 从保存有 `minimal` 的旧会话发送 GPT-6 Luna 消息。对照后端实际发出 `minimal`，修复后实际发出 `low`。同时验证 `none`、`xhigh`、`max` 原样发出。可用档位依据官方文档和真实 400 反馈，隔离上游负责记录请求体。 [OpenAI 模型文档](https://developers.openai.com/api/docs/models/gpt-6-luna)
 - [x] 新一轮生产构建检查 66 项通过。另复跑宽屏与窄屏的设置抽屉和 Luna 面板，35 项通过。旧构建仍显示 Luna 的旧档位、重复诊断、凭证存储说明和输入区来源选择器。旧会话使用全局联网来源。全量 `api-check` 313 项通过，另有 8 项规格观察。
-- [ ] 使用真实 ChatGPT 订阅发送消息，使用旧 Codex 登录刷新模型目录。使用 Janitor Bridge 0.1.11 在 JanitorAI 实站验证回跳与抓取。
+- [x] 使用真实 ChatGPT 订阅发送消息，使用旧 Codex 登录刷新模型目录（作者 2026-11-26 实测通过）。
+- [ ] 使用 Janitor Bridge 0.1.11 在 JanitorAI 实站验证回跳与抓取。
 
 ### 较早的验收记录
 
@@ -216,14 +217,14 @@ venv/Scripts/python tools/api-check/run.py
 - [x] `[Claude]` `CHANGELOG.md` 写 v1.000（验收中），发布时并入 v0.820。
 - [x] `[Claude]` `docs/01-ROADMAP.md`、`docs/02-BACKLOG.md`、`docs/state/CURRENT.md`、`docs/state/LAST_HANDOFF.md` 更新到当前状态。
 - [x] `[Claude]` `docs/00-INDEX.md` 和路线图的测试政策按第一节第 3 项改写。
-- [ ] `[Claude]` 手测通过后，`backend/app/version.py` 改为 v1.000。
+- [x] `[Claude]` 版本号已统一改为标准三段式 `v1.0.0`（`backend/app/version.py`、`desktop/Cargo.toml`、`desktop/Cargo.lock`）。
 
 ## 七、发布动作（每一步由作者确认）
 
 - [ ] `[作者]` 确认已知问题列表（见“问题记录”，另加偶发的开场白问题），做发布评审。
-- [ ] `[作者]` 推送、打标签 `v1.000`、发布 GitHub Release。应用靠 Release 检查更新。
-- [ ] `[作者]` 从 v0.810 的旧版本走一次应用内更新到 v1.000，数据还在。
-- [ ] `[作者]` 在干净目录按 README 全新安装一次，能启动。
+- [ ] `[作者]` 推送、打标签 `v1.0.0`、发布 GitHub Release。应用靠 Release 检查更新。
+- [ ] `[作者]` 从旧版本走一次应用内更新到 `v1.0.0`，数据还在。
+- [ ] `[作者]` 在干净目录按 README 全新安装一次，能启动，并在新机器实测杀毒误报。
 
 ## 不在 1.0 范围
 
