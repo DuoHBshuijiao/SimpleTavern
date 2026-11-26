@@ -1334,6 +1334,7 @@ async def generate_stream(req: GenerateStreamRequest, request: Request) -> Strea
             senderPersonaId=None if pure_ai_mode else getattr(req, "senderPersonaId", None),
             senderName=None if pure_ai_mode else getattr(req, "senderName", None),
             senderAvatar=None if pure_ai_mode else getattr(req, "senderAvatar", None),
+            senderAvatarDisplay=None if pure_ai_mode else req.senderAvatarDisplay,
         ))
 
     runtime = req.runtimeOverrides

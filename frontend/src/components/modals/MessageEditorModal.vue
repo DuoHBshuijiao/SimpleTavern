@@ -35,7 +35,7 @@
  *    - 依赖：依赖vue
  *    - 位置：组件层，提供消息编辑功能
  */
-import type { MainChatRole } from '../../types/models'
+import type { AvatarDisplay, MainChatRole } from '../../types/models'
 import ModernAvatar from '../ModernAvatar.vue'
 import { Settings, X } from 'lucide-vue-next'
 import { useDialogBehavior } from '../../composables/useDialogBehavior'
@@ -48,6 +48,8 @@ const props = defineProps<{
   messageContent: string
   characterAvatarUrl: string | null
   userAvatarUrl: string | null
+  characterAvatarDisplay?: AvatarDisplay | null
+  userAvatarDisplay?: AvatarDisplay | null
   isGenerating: boolean
 }>()
 
@@ -103,7 +105,7 @@ void dialogRef
                   :class="messageRole === 'assistant' ? 'surface-selected' : ''"
                   @click="emit('update:messageRole', 'assistant')"
                 >
-                  <ModernAvatar :src="characterAvatarUrl" :size="20" aspect="1" rounded="rounded-sm" />
+                  <ModernAvatar :src="characterAvatarUrl" :display="characterAvatarDisplay" :size="20" aspect="1" rounded="rounded-sm" />
                   <span class="text-sm font-medium" :class="messageRole === 'assistant' ? 'text-brand-light' : 'text-[var(--color-text-secondary)]'">角色</span>
                 </div>
                 <div 
@@ -111,7 +113,7 @@ void dialogRef
                   :class="messageRole === 'user' ? 'surface-selected' : ''"
                   @click="emit('update:messageRole', 'user')"
                 >
-                  <ModernAvatar :src="userAvatarUrl" :size="20" aspect="1" rounded="rounded-sm" />
+                  <ModernAvatar :src="userAvatarUrl" :display="userAvatarDisplay" :size="20" aspect="1" rounded="rounded-sm" />
                   <span class="text-sm font-medium" :class="messageRole === 'user' ? 'text-brand-light' : 'text-[var(--color-text-secondary)]'">用户</span>
                 </div>
               </div>

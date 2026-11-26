@@ -535,6 +535,16 @@ class ApiPresetVoice(BaseModel):
     instruction: str | None = Field(default=None, description="Qwen3 / OmniVoice 的 instruction / instruct 文本")
 
 
+class AvatarRegion(BaseModel):
+    x: float = Field(ge=0, lt=1)
+    y: float = Field(ge=0, lt=1)
+    width: float = Field(gt=0, le=1)
+    height: float = Field(gt=0, le=1)
+
+
+AvatarDisplay = Literal["full"] | AvatarRegion
+
+
 class UserPersona(BaseModel):
     """
     用户Persona模型
@@ -555,6 +565,7 @@ class UserPersona(BaseModel):
     name: str = "新用户"
     description: str = ""
     avatar: str = ""
+    avatarDisplay: AvatarDisplay | None = None
     createdAt: str = Field(default_factory=_now_iso)
     updatedAt: str = Field(default_factory=_now_iso)
 
@@ -943,6 +954,7 @@ class CharacterCard(BaseModel):
     avatar: str = ""
     avatarFocusX: float | None = None
     avatarFocusY: float | None = None
+    avatarDisplay: AvatarDisplay | None = None
     attachedWorldBookIds: list[str] = Field(default_factory=list)
     extraFirstMessageEntries: list[ExtraFirstMessageEntry] = Field(default_factory=list)
     mvuEnabled: bool = False
@@ -1052,6 +1064,7 @@ class ChatMessage(BaseModel):
     senderPersonaId: str | None = None
     senderName: str | None = None
     senderAvatar: str | None = None
+    senderAvatarDisplay: AvatarDisplay | None = None
     ts: str = Field(default_factory=_now_iso)
     greetingVariants: list[str] | None = None
     greetingVariantIndex: int | None = Field(
@@ -1608,6 +1621,7 @@ class AppendMessageRequest(BaseModel):
     senderPersonaId: str | None = None
     senderName: str | None = None
     senderAvatar: str | None = None
+    senderAvatarDisplay: AvatarDisplay | None = None
     reasoningContent: str | None = Field(
         default=None,
         description="推理/思考链（流式中断落库等场景；通常仅 assistant）",
@@ -1639,6 +1653,7 @@ class UpdateMessageRequest(BaseModel):
     senderPersonaId: str | None = None
     senderName: str | None = None
     senderAvatar: str | None = None
+    senderAvatarDisplay: AvatarDisplay | None = None
     greetingVariantIndex: int | None = None
     greetingVariants: list[str] | None = Field(
         default=None,
@@ -1720,6 +1735,7 @@ class GenerateStreamRequest(BaseModel):
     senderPersonaId: str | None = None
     senderName: str | None = None
     senderAvatar: str | None = None
+    senderAvatarDisplay: AvatarDisplay | None = None
     userPersona: UserPersona | None = None
     runtimeOverrides: ChatOverrides | None = None
     omitMessageIds: list[str] = Field(

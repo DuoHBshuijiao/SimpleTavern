@@ -1123,6 +1123,7 @@ def append_message(chat_id: str, req: AppendMessageRequest) -> Chat:
             senderPersonaId=getattr(req, "senderPersonaId", None),
             senderName=getattr(req, "senderName", None),
             senderAvatar=getattr(req, "senderAvatar", None),
+            senderAvatarDisplay=req.senderAvatarDisplay,
             reasoningContent=req.reasoningContent,
             reasoningDurationSec=req.reasoningDurationSec,
         ))
@@ -1175,7 +1176,9 @@ def update_message(chat_id: str, message_id: str, req: UpdateMessageRequest) -> 
                     m.senderPersonaId = req.senderPersonaId
                 if getattr(req, "senderName", None) is not None:
                     m.senderName = req.senderName
-                if getattr(req, "senderAvatar", None) is not None:
+                if req.senderAvatar is not None:
+                    if "senderAvatarDisplay" in req.model_fields_set or req.senderAvatar != m.senderAvatar:
+                        m.senderAvatarDisplay = req.senderAvatarDisplay
                     m.senderAvatar = req.senderAvatar
                 req_dump = req.model_dump(exclude_unset=True)
                 if "greetingVariants" in req_dump:
@@ -1278,7 +1281,9 @@ def save_message_and_truncate(chat_id: str, message_id: str, req: UpdateMessageR
                     m.senderPersonaId = req.senderPersonaId
                 if getattr(req, "senderName", None) is not None:
                     m.senderName = req.senderName
-                if getattr(req, "senderAvatar", None) is not None:
+                if req.senderAvatar is not None:
+                    if "senderAvatarDisplay" in req.model_fields_set or req.senderAvatar != m.senderAvatar:
+                        m.senderAvatarDisplay = req.senderAvatarDisplay
                     m.senderAvatar = req.senderAvatar
                 req_dump = req.model_dump(exclude_unset=True)
                 if "greetingVariants" in req_dump:

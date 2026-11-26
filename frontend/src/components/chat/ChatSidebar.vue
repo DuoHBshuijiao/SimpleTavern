@@ -55,7 +55,7 @@
  *    - 依赖：依赖vue、types/models.ts
  *    - 位置：组件层，提供侧边栏功能
  */
-import type { CharacterCard, UserPersona, Chat } from '../../types/models'
+import type { AvatarDisplay, CharacterCard, UserPersona, Chat } from '../../types/models'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 
 import { MAIN_LAYOUT_TRANSITION_MS } from '../../constants/chatHeaderMorph'
@@ -271,8 +271,8 @@ function getPersonaById(id: string | null | undefined): UserPersona | null {
  * @param {Chat} chat - 聊天会话（来自types/models.ts）
  * @returns {{ src: string | null; name: string }[]} 头像列表，包含src和name
  */
-function getChatAvatars(chat: Chat): { src: string | null; name: string; objectPosition?: string }[] {
-  const avatars: { src: string | null; name: string; objectPosition?: string }[] = []
+function getChatAvatars(chat: Chat) {
+  const avatars: { src: string | null; name: string; objectPosition?: string; display?: AvatarDisplay | null }[] = []
   
   const chatPure = (chat.overrides?.pureAiMode ?? props.effectivePureAiMode) === true
   const chatPersona = getPersonaById(chat.userPersonaId)
@@ -289,6 +289,7 @@ function getChatAvatars(chat: Chat): { src: string | null; name: string; objectP
       const userAvatarFile = senderResolved?.avatar || m.senderAvatar
       avatars.push({
         src: userAvatarFile ? `/api/avatars/${userAvatarFile}` : null,
+        display: senderResolved?.avatar ? senderResolved.avatarDisplay : m.senderAvatarDisplay,
         name: m.senderName || '你',
         objectPosition: '50% 50%',
       })
@@ -297,6 +298,7 @@ function getChatAvatars(chat: Chat): { src: string | null; name: string; objectP
       if (chatPersona) {
         avatars.push({
           src: chatPersona.avatar ? `/api/avatars/${chatPersona.avatar}` : null,
+          display: chatPersona.avatarDisplay,
           name: chatPersona.name || '你',
           objectPosition: '50% 50%',
         })
@@ -312,6 +314,7 @@ function getChatAvatars(chat: Chat): { src: string | null; name: string; objectP
       const char = getCharacterById(id)
       if (char) avatars.push({
         src: char.avatar ? `/api/avatars/${char.avatar}` : null,
+        display: char.avatarDisplay,
         name: char.name,
         objectPosition: avatarObjectPositionByFocus(char.avatarFocusX, char.avatarFocusY),
       })
@@ -320,6 +323,7 @@ function getChatAvatars(chat: Chat): { src: string | null; name: string; objectP
     const char = getCharacterById(chat.characterId)
     if (char) avatars.push({
       src: char.avatar ? `/api/avatars/${char.avatar}` : null,
+      display: char.avatarDisplay,
       name: char.name,
       objectPosition: avatarObjectPositionByFocus(char.avatarFocusX, char.avatarFocusY),
     })
@@ -486,6 +490,7 @@ function confirmDelete() {
           >
             <ModernAvatar 
               :src="c.avatar ? `/api/avatars/${c.avatar}` : null" 
+              :display="c.avatarDisplay"
               :name="c.name" 
               :size="56" 
               aspect="auto"
@@ -600,6 +605,7 @@ function confirmDelete() {
                       aspect="1"
                       object-fit="cover"
                       :object-position="avatar.objectPosition || '50% 50%'"
+                      :display="avatar.display"
                       rounded="rounded-full"
                       class="dark-ui:ring-1 ring-[var(--color-surface-overlay)] bg-[var(--color-surface-overlay)]"
                     />
@@ -706,6 +712,7 @@ function confirmDelete() {
                       aspect="1"
                       object-fit="cover"
                       :object-position="avatar.objectPosition || '50% 50%'"
+                      :display="avatar.display"
                       rounded="rounded-full"
                       class="dark-ui:ring-1 ring-[var(--color-surface-overlay)] bg-[var(--color-surface-overlay)]"
                     />

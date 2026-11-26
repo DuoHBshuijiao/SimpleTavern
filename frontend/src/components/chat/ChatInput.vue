@@ -743,6 +743,7 @@ defineExpose({
                 >
                   <ModernAvatar
                     :src="member.avatar ? `/api/avatars/${member.avatar}` : null"
+                    :display="member.avatarDisplay"
                     :name="member.name"
                     :size="22"
                     aspect="1"

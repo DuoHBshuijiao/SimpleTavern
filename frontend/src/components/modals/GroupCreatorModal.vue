@@ -438,6 +438,7 @@ void dialogRef
                 <div class="relative shrink-0">
                   <ModernAvatar
                     :src="c.avatar ? `/api/avatars/${c.avatar}` : null"
+                    :display="c.avatarDisplay"
                     :name="c.name"
                     :size="40"
                     aspect="auto"

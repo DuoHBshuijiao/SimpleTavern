@@ -1014,6 +1014,16 @@ function getMessageAvatarObjectPosition(m: ChatMessage): string {
   return `${x}% ${y}%`
 }
 
+function getMessageAvatarDisplay(m: ChatMessage) {
+  if (m.role === 'user') {
+    const persona = getUserPersonaFromSettings(m.senderPersonaId)
+    if (persona?.avatar) return persona.avatarDisplay
+    if (m.senderAvatar) return m.senderAvatarDisplay
+    return m.senderPersonaId || m.senderName ? null : props.selectedPersona?.avatarDisplay
+  }
+  const character = m.characterId ? getCharacterById(m.characterId) : props.selectedCharacter
+  return character?.avatarDisplay
+}
 
 /**
  * 滚动到底部
@@ -1844,6 +1854,7 @@ onBeforeUnmount(() => {
           <ModernAvatar
             v-else
             :src="getMessageAvatar(m)"
+            :display="getMessageAvatarDisplay(m)"
             :name="getMessageLabel(m)"
             :size="40"
             aspect="1"

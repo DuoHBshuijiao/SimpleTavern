@@ -47,6 +47,7 @@ import type {
   Chat, 
   ChatMessage, 
   CharacterCard,
+  AvatarDisplay,
   ExtraFirstMessageEntry,
   MainChatRole,
   WorldBook,
@@ -366,21 +367,17 @@ export function useChatActions(deps: ChatActionsDeps) {
    */
   async function handleCharacterAvatarSave(
     imageData: string,
-    avatarFocusX?: number | null,
-    avatarFocusY?: number | null,
+    display: AvatarDisplay,
   ): Promise<EmbeddedCharacterCardPreview | null> {
-    try {
-      const res = await apiPost<UploadAvatarResponse>('/api/avatars', { imageData })
-      if (editingCharacter.value) {
-        editingCharacter.value.avatar = res.filename
-        editingCharacter.value.avatarFocusX = typeof avatarFocusX === 'number' ? avatarFocusX : null
-        editingCharacter.value.avatarFocusY = typeof avatarFocusY === 'number' ? avatarFocusY : null
-      }
-      return res.embeddedCharacterCard ?? null
-    } catch (e) {
-      console.error('Failed to upload avatar:', e)
-      return null
-    }
+    const character = editingCharacter.value
+    if (!character) return null
+    const res = await apiPost<UploadAvatarResponse>('/api/avatars', { imageData })
+    if (editingCharacter.value !== character) return null
+    character.avatar = res.filename
+    character.avatarDisplay = display
+    character.avatarFocusX = null
+    character.avatarFocusY = null
+    return res.embeddedCharacterCard ?? null
   }
 
   /**
@@ -396,6 +393,8 @@ export function useChatActions(deps: ChatActionsDeps) {
     if (!card || typeof card !== 'object') return
     const current = editingCharacter.value
     const cardObj = card as Record<string, unknown>
+    const incomingAvatar = typeof cardObj.avatar === 'string' && cardObj.avatar ? cardObj.avatar : current.avatar
+    const incomingDisplay = (card as Partial<CharacterCard>).avatarDisplay
     const mergedEntries =
       Array.isArray(cardObj.extraFirstMessageEntries)
         ? normalizeExtraFirstMessageEntries(cardObj.extraFirstMessageEntries)
@@ -410,10 +409,8 @@ export function useChatActions(deps: ChatActionsDeps) {
       firstMessage: (typeof cardObj.firstMessage === 'string' ? cardObj.firstMessage : undefined) ?? current.firstMessage,
       exampleDialogue: (typeof cardObj.exampleDialogue === 'string' ? cardObj.exampleDialogue : undefined) ?? current.exampleDialogue,
       systemPrompt: (typeof cardObj.systemPrompt === 'string' ? cardObj.systemPrompt : undefined) ?? current.systemPrompt,
-      avatar:
-        typeof cardObj.avatar === 'string' && cardObj.avatar !== ''
-          ? cardObj.avatar
-          : current.avatar,
+      avatar: incomingAvatar,
+      avatarDisplay: incomingDisplay ?? (incomingAvatar === current.avatar ? current.avatarDisplay : null),
       avatarFocusX:
         (typeof cardObj.avatarFocusX === 'number' ? cardObj.avatarFocusX : undefined)
         ?? current.avatarFocusX
@@ -609,15 +606,13 @@ export function useChatActions(deps: ChatActionsDeps) {
    * @param {string} imageData - base64编码的图片数据
    * @returns {Promise<void>} 完成时返回
    */
-  async function handlePersonaAvatarSave(imageData: string) {
-    try {
-      const res = await apiPost<{ filename: string }>('/api/avatars', { imageData })
-      if (editingPersona.value) {
-        editingPersona.value.avatar = res.filename
-      }
-    } catch (e) {
-      console.error('Failed to upload avatar:', e)
-    }
+  async function handlePersonaAvatarSave(imageData: string, display: AvatarDisplay) {
+    const persona = editingPersona.value
+    if (!persona) return
+    const res = await apiPost<{ filename: string }>('/api/avatars', { imageData })
+    if (editingPersona.value !== persona) return
+    persona.avatar = res.filename
+    persona.avatarDisplay = display
   }
 
   /**
@@ -635,6 +630,7 @@ export function useChatActions(deps: ChatActionsDeps) {
     const oldPersonaId = selectedPersona.value?.id ?? null
     const oldName = selectedPersona.value?.name ?? userName.value
     const oldAvatar = selectedPersona.value?.avatar ?? null
+    const oldAvatarDisplay = selectedPersona.value?.avatarDisplay ?? null
 
     const targets = (activeChat.value.messages || []).filter(m =>
       m.role === 'user' &&
@@ -649,6 +645,7 @@ export function useChatActions(deps: ChatActionsDeps) {
         senderPersonaId: oldPersonaId,
         senderName: oldName,
         senderAvatar: oldAvatar,
+        senderAvatarDisplay: oldAvatarDisplay,
       })
     }
 

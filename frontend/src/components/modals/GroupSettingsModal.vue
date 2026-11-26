@@ -323,6 +323,7 @@ void dialogRef
                 </div>
                 <ModernAvatar
                   :src="getCharacter(id)?.avatar ? `/api/avatars/${getCharacter(id)?.avatar}` : null"
+                  :display="getCharacter(id)?.avatarDisplay"
                   :name="getCharacter(id)?.name || '未知'"
                   :size="32"
                   aspect="1"

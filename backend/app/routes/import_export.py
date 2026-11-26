@@ -60,7 +60,7 @@ from app.prompt_xml import (
     wrap_group_roster,
     wrap_user_name,
 )
-from app.schemas import Chat, ChatContentRegexRule, ChatMessage, CharacterCard, ExtraFirstMessageEntry, MvuMode, Settings, StatusTableDef, WorldBook
+from app.schemas import AvatarDisplay, Chat, ChatContentRegexRule, ChatMessage, CharacterCard, ExtraFirstMessageEntry, MvuMode, Settings, StatusTableDef, WorldBook
 from app.services.st_mvu_compat import (
     run_st_mvu_regex_compat_agent,
     validate_st_mvu_compat_result,
@@ -221,13 +221,13 @@ def _janitor_preview_from_payload(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _resolve_persona_snapshot(settings: Settings, persona_id: str | None) -> tuple[str | None, str | None]:
+def _resolve_persona_snapshot(settings: Settings, persona_id: str | None) -> tuple[str | None, str | None, AvatarDisplay | None]:
     if not persona_id:
-        return None, None
+        return None, None, None
     persona = next((p for p in settings.userPersonas if p.id == persona_id), None)
     if not persona:
-        return None, None
-    return (persona.name or "用户"), (persona.avatar or None)
+        return None, None, None
+    return (persona.name or "用户"), (persona.avatar or None), persona.avatarDisplay
 
 
 def _janitor_title(raw: dict[str, Any]) -> str:
@@ -236,7 +236,7 @@ def _janitor_title(raw: dict[str, Any]) -> str:
 
 
 def _janitor_messages_to_chat_messages(raw: dict[str, Any], character_id: str, persona_id: str | None, settings: Settings) -> list[ChatMessage]:
-    persona_name, persona_avatar = _resolve_persona_snapshot(settings, persona_id)
+    persona_name, persona_avatar, persona_avatar_display = _resolve_persona_snapshot(settings, persona_id)
     mapped: list[ChatMessage] = []
     for raw_msg in _sorted_janitor_messages(raw):
         content = _extract_message_text(raw_msg)
@@ -251,6 +251,7 @@ def _janitor_messages_to_chat_messages(raw: dict[str, Any], character_id: str, p
             msg.senderPersonaId = persona_id
             msg.senderName = persona_name
             msg.senderAvatar = persona_avatar
+            msg.senderAvatarDisplay = persona_avatar_display
         mapped.append(msg)
     return mapped
 

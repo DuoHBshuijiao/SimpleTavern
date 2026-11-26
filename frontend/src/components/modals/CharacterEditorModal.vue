@@ -128,6 +128,7 @@ void dialogRef
                   <div class="flex shrink-0 flex-col items-center gap-3">
                     <ModernAvatar
                       :src="avatarUrl"
+                      :display="character.avatarDisplay"
                       :name="character.name"
                       :size="120"
                       aspect="auto"

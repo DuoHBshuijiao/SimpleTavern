@@ -359,12 +359,13 @@ async def check_core(ctx):
 
 
 # ---------- PNG 内嵌卡和 OAuth 弹窗 ----------
-def png_bytes(card=None):
+def png_bytes(card=None, width=64, height=64):
     def chunk(kind, payload):
         return struct.pack(">I", len(payload)) + kind + payload + struct.pack(">I", zlib.crc32(kind + payload))
 
-    width, height = 64, 64
-    raw = b"".join(b"\x00" + bytes((200, 120, 60)) * width for _ in range(height))
+    colors = ((200, 120, 60), (58, 135, 140), (98, 76, 163))
+    row = b"".join(bytes(colors[min(2, x * 3 // width)]) for x in range(width))
+    raw = (b"\x00" + row) * height
     out = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
     if card:
         out += chunk(b"tEXt", b"chara\x00" + base64.b64encode(json.dumps(card, ensure_ascii=False).encode()))
@@ -379,17 +380,127 @@ EMBEDDED_CARD = {
 PNG_TITLE = "PNG 内嵌"
 
 
-async def upload_avatar(page, path):
-    """走真实路径：编辑角色 → 更换头像 → 选文件 → 保存头像。停在点保存之前。"""
-    await page.js("$click($modal('编辑角色'), '更换头像')")
+async def upload_avatar(page, path, editor="编辑角色"):
+    """在角色或身份编辑弹窗选图，等到头像可保存。"""
+    await page.js(f"$click($modal('{editor}'), '更换头像')")
     await page.wait_for("$modal('设置头像')", 5)
     await asyncio.sleep(0.4)
     await page.set_file("""$modal('设置头像').querySelector('input[type=file]')""", path)
-    await page.wait_for("$modal('设置头像').querySelector('.cropper-container img')", 8)
-    await asyncio.sleep(0.8)
+    await page.wait_for("$btn($modal('设置头像'), '保存头像')?.disabled === false", 8)
 
 
 SAVE_AVATAR = "$click($modal('设置头像'), '保存头像')"
+
+
+async def adjust_avatar_region(page, check, editor):
+    await page.js("$click($modal('设置头像'), '裁剪')")
+    await page.wait_for("$modal('设置头像').querySelector('.cropper-crop-box')?.offsetWidth > 0", 8)
+    await asyncio.sleep(0.3)
+    handle = await page.js("""(() => {
+      const r = $modal('设置头像').querySelector('.point-se').getBoundingClientRect();
+      return {x: r.x + r.width / 2, y: r.y + r.height / 2, step: r.width * 4};
+    })()""")
+    x, y, step = handle["x"], handle["y"], handle["step"]
+    await page.mouse("mousePressed", x, y, button="left", buttons=1, clickCount=1)
+    await page.mouse("mouseMoved", x - step, y - step, buttons=1)
+    await page.mouse("mouseReleased", x - step, y - step, button="left", clickCount=1)
+    region = await page.js("""(() => {
+      const preview = $modal('设置头像');
+      const frame = preview.querySelector('.cropper-view-box');
+      const box = frame.getBoundingClientRect();
+      const image = preview.querySelector('.cropper-canvas').getBoundingClientRect();
+      return {x: (box.x - image.x) / image.width, y: (box.y - image.y) / image.height,
+        width: box.width / image.width, height: box.height / image.height,
+        rectangular: getComputedStyle(frame).borderRadius === '0px'};
+    })()""")
+    check(f"{editor}裁剪使用可调整大小的矩形框",
+          region.pop("rectangular") and 0 < region["height"] < 0.9, region)
+    return region
+
+
+async def saved_avatar(page, ctx, check, editor, original, old_src, expected):
+    await page.js(SAVE_AVATAR)
+    await page.wait_for("!$modal('设置头像')", 8)
+    avatar = f"$modal('{editor}').querySelector('.modern-avatar img')"
+    await page.wait_for(f"{avatar}?.offsetWidth > 0 && {avatar}.getAttribute('src') !== {json.dumps(old_src)}", 8)
+    actual = await page.js(f"""(() => {{
+      const img = {avatar};
+      const viewport = img.parentElement;
+      const image = img.getBoundingClientRect();
+      const root = viewport.getBoundingClientRect();
+      return {{src: img.getAttribute('src'), fit: getComputedStyle(img).objectFit,
+        region: {{x: (root.x + viewport.clientLeft - image.x) / image.width,
+          y: (root.y + viewport.clientTop - image.y) / image.height,
+          width: viewport.clientWidth / image.width, height: viewport.clientHeight / image.height}}}};
+    }})()""")
+    status, _, stored = request(ctx, "GET", actual["src"])
+    check(f"{editor}保存的原图字节一致", status == 200 and stored == original)
+    if expected == "full":
+        check(f"{editor}显示整张图片", actual["fit"] == "contain", actual["fit"])
+    else:
+        check(f"{editor}显示范围与裁剪框一致",
+              all(abs(actual["region"][key] - expected[key]) < 0.015 for key in expected), actual["region"])
+    return actual["src"]
+
+
+async def check_avatars(ctx):
+    """头像全图和矩形显示范围，验证原图字节、实际显示和持久化"""
+    original = png_bytes(width=320, height=160)
+    path = os.path.join(ctx.work, "avatar-wide.png")
+    with open(path, "wb") as f:
+        f.write(original)
+    for label, url in environments(ctx):
+        check = labeled(ctx, label)
+        page = await open_app(ctx, url)
+        try:
+            character_id = await page.js("""(() => {
+              const row = document.querySelector('[data-character-id]');
+              row.querySelector('button[aria-label="编辑角色"]').click();
+              return row.dataset.characterId;
+            })()""")
+            await page.wait_for("$modal('编辑角色')", 5)
+            await upload_avatar(page, path)
+            check("选图后只提供裁剪按钮", await page.js("""(() => {
+              const modal = $modal('设置头像');
+              const cropButton = $btn(modal, '裁剪');
+              return !!cropButton && !cropButton.disabled && !modal.querySelector('.cropper-crop-box');
+            })()"""))
+            await page.shot(f"avatar-full-{label}")
+            old_src = await page.js("$modal('编辑角色').querySelector('.modern-avatar img')?.getAttribute('src')")
+            full_src = await saved_avatar(page, ctx, check, "编辑角色", original, old_src, "full")
+            await upload_avatar(page, path)
+            expected = await adjust_avatar_region(page, check, "编辑角色")
+            await page.shot(f"avatar-region-{label}")
+            cropped_src = await saved_avatar(page, ctx, check, "编辑角色", original, full_src, expected)
+            await page.js("$click($modal('编辑角色'), '保存')")
+            await page.wait_for("!$modal('编辑角色')", 8)
+            card = ctx.api(f"/api/characters/{character_id}")
+            check("角色的矩形显示范围已持久化", card["avatar"] == cropped_src.rsplit("/", 1)[1]
+                  and all(abs(card["avatarDisplay"][key] - expected[key]) < 0.015 for key in expected))
+
+            await page.js("""document.querySelector('button[aria-label="新建身份"]').click()""")
+            await page.wait_for("$modal('新建身份')", 5)
+            await page.send("Emulation.setDeviceMetricsOverride", width=420, height=700, deviceScaleFactor=1, mobile=False)
+            await upload_avatar(page, path, "新建身份")
+            expected = await adjust_avatar_region(page, check, "新建身份")
+            await page.shot(f"avatar-region-narrow-{label}")
+            persona_src = await saved_avatar(page, ctx, check, "新建身份", original, None, expected)
+            await upload_avatar(page, path, "新建身份")
+            await page.js("$click($modal('设置头像'), '裁剪')")
+            await page.wait_for("$modal('设置头像').querySelector('.cropper-crop-box')?.offsetWidth > 0", 8)
+            await page.js("$click($modal('设置头像'), '使用全图')")
+            await page.wait_for("!$modal('设置头像').querySelector('.cropper-crop-box')", 8)
+            persona_full_src = await saved_avatar(page, ctx, check, "新建身份", original, persona_src, "full")
+            await page.js("$click($modal('新建身份'), '保存')")
+            await page.wait_for("!$modal('新建身份')", 8)
+            settings = ctx.api("/api/settings")
+            persona = next(p for p in settings["userPersonas"] if p["id"] == settings["selectedPersonaId"])
+            check("身份的全图显示已持久化", persona["avatar"] == persona_full_src.rsplit("/", 1)[1]
+                  and persona["avatarDisplay"] == "full")
+        except Exception as error:
+            check("头像流程没有跑完", False, repr(error)[:300])
+        finally:
+            await ctx.close(page)
 
 
 async def wait_png_closed(page):
@@ -425,6 +536,8 @@ async def modals_png(ctx, url, check, files):
         await upload_avatar(page, files["card"])
         await page.js(SAVE_AVATAR)
         await page.wait_for(f"$modal({json.dumps(PNG_TITLE)})", 8)
+        if name == "Esc":
+            check("PNG：头像弹窗关闭后显示内嵌卡确认", not await page.js("!!$modal('设置头像')"))
         await asyncio.sleep(0.5)
         if name == "Esc":
             text = await page.js(f"$modal({json.dumps(PNG_TITLE)}).innerText")

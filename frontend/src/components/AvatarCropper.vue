@@ -1,242 +1,182 @@
 <script setup lang="ts">
-/**
- * AvatarCropper - 头像裁剪组件
- *
- * 组件职责：
- * - 提供头像图片选择和裁剪功能
- * - 使用cropperjs库实现图片裁剪
- * - 支持圆形裁剪（用于头像）
- * - 将裁剪后的图片转换为base64格式
- *
- * Props说明：
- * - show: 是否显示弹窗（v-model:show）
- * - currentAvatar: 当前头像URL（可选，用于预览）
- *
- * Emits说明：
- * - update:show: 更新显示状态（v-model:show）
- * - save: 保存裁剪后的图片，传递base64编码的图片数据
- *
- * 使用的Composables：
- * 无
- *
- * 使用的Stores：
- * 无
- *
- * 文件关系：
- *    - 被导入：被views/ChatPage.vue使用用于裁剪角色和身份头像
- *    - 导入：导入vue的ref、onUnmounted、watch、nextTick，cropperjs库
- *    - 依赖：依赖vue、cropperjs
- *    - 位置：组件层，提供头像裁剪功能
- */
-import { ref, onUnmounted, watch, nextTick } from 'vue'
+import { ref, onUnmounted, watch } from 'vue'
 import { X } from 'lucide-vue-next'
 import Cropper from 'cropperjs'
 import 'cropperjs/dist/cropper.css'
 import { useDialogBehavior } from '../composables/useDialogBehavior'
+import type { AvatarDisplay } from '../types/models'
 import { dialogAria } from '../utils/uiPrimitives'
 
 const props = defineProps<{
   show: boolean
-  currentAvatar?: string
-  preserveOriginal?: boolean
-  focusAspect?: number
+  saveAvatar: (imageData: string, display: AvatarDisplay) => Promise<void>
 }>()
 
 const emit = defineEmits<{
-  (e: 'update:show', v: boolean): void
-  (e: 'save', payload: { imageData: string; focusX?: number; focusY?: number }): void
+  'update:show': [show: boolean]
+  saved: []
 }>()
 
 const titleId = 'avatar-cropper-title'
 const dialogAttrs = dialogAria(titleId)
+const imageRef = ref<HTMLImageElement | null>(null)
+const imageSrc = ref<string | null>(null)
+const fileInputRef = ref<HTMLInputElement | null>(null)
+const imageLoaded = ref(false)
+const isDragging = ref(false)
+const isCropping = ref(false)
+const cropperReady = ref(false)
+const saving = ref(false)
+const errorText = ref('')
+let cropper: Cropper | null = null
+let reader: FileReader | null = null
+let saved = false
 
 function close() {
-  emit('update:show', false)
+  if (!saving.value) emit('update:show', false)
+}
+
+function afterClose() {
+  if (!saved) return
+  saved = false
+  emit('saved')
 }
 
 const { dialogRef } = useDialogBehavior(() => props.show, close)
 void dialogRef
 
-const imageRef = ref<HTMLImageElement | null>(null)
-const imageSrc = ref<string | null>(null)
-const cropper = ref<Cropper | null>(null)
-const fileInputRef = ref<HTMLInputElement | null>(null)
-const isDragOver = ref(false)
-
-function isImageFile(file: File): boolean {
-  if ((file.type || '').startsWith('image/')) return true
-  const name = (file.name || '').toLowerCase()
-  return /\.(png|jpe?g|gif|webp|bmp|svg)$/.test(name)
+function resetSelection() {
+  reader?.abort()
+  reader = null
+  isCropping.value = false
+  imageLoaded.value = false
+  imageSrc.value = null
+  errorText.value = ''
+  if (fileInputRef.value) fileInputRef.value.value = ''
 }
 
 function loadImageFile(file: File) {
-  if (!isImageFile(file)) return
-  const reader = new FileReader()
-  reader.onload = (e) => {
-    imageSrc.value = e.target?.result as string
+  if (saving.value) return
+  resetSelection()
+  if (!file.type.startsWith('image/') && !/\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(file.name)) {
+    errorText.value = '请选择图片文件。'
+    return
   }
-  reader.readAsDataURL(file)
+  const currentReader = new FileReader()
+  reader = currentReader
+  currentReader.onload = () => {
+    if (reader !== currentReader) return
+    reader = null
+    imageSrc.value = currentReader.result as string
+  }
+  currentReader.onerror = () => {
+    if (reader !== currentReader) return
+    resetSelection()
+    errorText.value = '无法读取图片，请重新选择。'
+  }
+  currentReader.readAsDataURL(file)
 }
 
-/**
- * 处理文件选择
- *
- * 当用户选择图片文件时，使用FileReader读取文件并转换为base64格式。
- *
- * @param {Event} event - 文件选择事件
- */
 function handleFileSelect(event: Event) {
-  const target = event.target as HTMLInputElement
-  const file = target.files?.[0]
-  if (!file) return
-  loadImageFile(file)
+  const file = (event.target as HTMLInputElement).files?.[0]
+  if (file) loadImageFile(file)
 }
 
-/**
- * 触发文件输入
- *
- * 程序化触发隐藏的文件输入框点击事件。
- */
-function triggerFileInput() {
-  fileInputRef.value?.click()
-}
-
-function handleDragEnter(event: DragEvent) {
-  event.preventDefault()
-  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
-  isDragOver.value = true
+function handleImageError() {
+  resetSelection()
+  errorText.value = '无法打开这张图片，请重新选择。'
 }
 
 function handleDragOver(event: DragEvent) {
-  event.preventDefault()
-  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
-  isDragOver.value = true
+  if (event.dataTransfer) event.dataTransfer.dropEffect = saving.value ? 'none' : 'copy'
+  isDragging.value = !saving.value
 }
 
 function handleDragLeave(event: DragEvent) {
-  event.preventDefault()
-  const current = event.currentTarget as HTMLElement | null
-  const related = event.relatedTarget as Node | null
-  if (current && related && current.contains(related)) return
-  isDragOver.value = false
+  const current = event.currentTarget as HTMLElement
+  if (event.relatedTarget instanceof Node && current.contains(event.relatedTarget)) return
+  isDragging.value = false
 }
 
 function handleDrop(event: DragEvent) {
-  event.preventDefault()
-  isDragOver.value = false
+  isDragging.value = false
   const file = event.dataTransfer?.files?.[0]
-  if (!file) return
-  loadImageFile(file)
+  if (file) loadImageFile(file)
 }
 
-watch(imageSrc, async (src) => {
-  if (cropper.value) {
-    cropper.value.destroy()
-    cropper.value = null
-  }
-  if (src) {
-    await nextTick()
-    setTimeout(() => {
-      if (imageRef.value && imageSrc.value) {
-        cropper.value = new Cropper(imageRef.value, {
-          aspectRatio: Number.isFinite(props.focusAspect) && (props.focusAspect ?? 1) > 0 ? (props.focusAspect as number) : 1,
-          viewMode: 1,
-          dragMode: 'move',
-          autoCropArea: 1,
-          cropBoxMovable: true,
-          cropBoxResizable: true,
-          background: false,
-        })
-      }
-    }, 150)
-  }
-})
+watch(isCropping, (enabled, _, onCleanup) => {
+  if (!enabled || !imageRef.value) return
+  cropper = new Cropper(imageRef.value, {
+    aspectRatio: 1,
+    viewMode: 1,
+    dragMode: 'move',
+    autoCropArea: 1,
+    background: false,
+    checkOrientation: false,
+    minContainerWidth: 0,
+    minContainerHeight: 0,
+    ready: () => { cropperReady.value = true },
+  })
+  onCleanup(() => {
+    cropper?.destroy()
+    cropper = null
+    cropperReady.value = false
+  })
+}, { flush: 'post' })
 
 watch(() => props.show, (show) => {
-  if (!show) {
-    isDragOver.value = false
-    imageSrc.value = null
-    if (cropper.value) {
-      cropper.value.destroy()
-      cropper.value = null
-    }
-    if (fileInputRef.value) {
-      fileInputRef.value.value = ''
-    }
+  if (show) {
+    saved = false
+  } else {
+    isDragging.value = false
+    resetSelection()
   }
 })
 
-/**
- * 处理保存
- *
- * 获取裁剪后的画布，转换为256x256的PNG格式base64数据，然后触发save事件并关闭弹窗。
- */
-function handleSave() {
-  if (!cropper.value) return
+async function handleSave() {
+  if (!imageSrc.value || !imageLoaded.value || saving.value) return
 
-  const cropData = cropper.value.getData(true)
-  const imageDataInfo = cropper.value.getImageData()
-  const naturalWidth = imageDataInfo.naturalWidth || 0
-  const naturalHeight = imageDataInfo.naturalHeight || 0
-  let focusX: number | undefined
-  let focusY: number | undefined
-  if (naturalWidth > 0 && naturalHeight > 0) {
-    const centerX = (cropData.x + cropData.width / 2) / naturalWidth
-    const centerY = (cropData.y + cropData.height / 2) / naturalHeight
-    focusX = Math.max(0, Math.min(100, centerX * 100))
-    focusY = Math.max(0, Math.min(100, centerY * 100))
+  let display: AvatarDisplay = 'full'
+  if (isCropping.value) {
+    if (!cropper || !cropperReady.value) return
+    const { x, y, width, height } = cropper.getData()
+    const { naturalWidth, naturalHeight } = cropper.getImageData()
+    const left = Math.max(0, x)
+    const top = Math.max(0, y)
+    const right = Math.min(naturalWidth, x + width)
+    const bottom = Math.min(naturalHeight, y + height)
+    if (!(right > left && bottom > top)) {
+      errorText.value = '请框选头像的显示范围。'
+      return
+    }
+    display = {
+      x: left / naturalWidth,
+      y: top / naturalHeight,
+      width: (right - left) / naturalWidth,
+      height: (bottom - top) / naturalHeight,
+    }
   }
 
-  if (props.preserveOriginal) {
-    if (!imageSrc.value) return
-    emit('save', { imageData: imageSrc.value, focusX, focusY })
-    close()
-    return
-  }
-
-  const canvas = cropper.value.getCroppedCanvas({
-    width: 256,
-    height: 256,
-    imageSmoothingEnabled: true,
-    imageSmoothingQuality: 'high',
-  })
-  const imageData = canvas.toDataURL('image/png')
-  emit('save', { imageData, focusX, focusY })
-  close()
-}
-
-/**
- * 处理取消
- *
- * 关闭弹窗，不保存裁剪结果。
- */
-function handleCancel() {
-  close()
-}
-
-/**
- * 重置选择
- *
- * 清空已选择的图片，允许重新选择。
- */
-function resetSelection() {
-  imageSrc.value = null
-  if (fileInputRef.value) {
-    fileInputRef.value.value = ''
+  saving.value = true
+  errorText.value = ''
+  try {
+    await props.saveAvatar(imageSrc.value, display)
+    saved = true
+    emit('update:show', false)
+  } catch {
+    errorText.value = '头像保存失败，请重试。'
+  } finally {
+    saving.value = false
   }
 }
 
-onUnmounted(() => {
-  if (cropper.value) {
-    cropper.value.destroy()
-  }
-})
+onUnmounted(() => reader?.abort())
 </script>
 
 <template>
-  <Transition name="modal">
+  <Transition name="modal" @after-leave="afterClose">
     <div v-if="show" class="modal">
-      <div class="modal-backdrop backdrop-blur-[var(--glass-blur-soft)]" @click="handleCancel"></div>
+      <div class="modal-backdrop backdrop-blur-[var(--glass-blur-soft)]" @click="close"></div>
       <div
         ref="dialogRef"
         v-bind="dialogAttrs"
@@ -245,52 +185,73 @@ onUnmounted(() => {
       >
         <div class="modal-header">
           <h3 :id="titleId" class="modal-title">设置头像</h3>
-          <button type="button" class="modal-close" aria-label="关闭头像设置弹窗" @click="handleCancel">
+          <button type="button" class="modal-close" aria-label="关闭头像设置弹窗" :disabled="saving" @click="close">
             <X class="w-5 h-5" />
           </button>
         </div>
         <div
           class="modal-body transition-colors"
-          :class="isDragOver ? 'bg-brand-a10' : ''"
-          @dragenter="handleDragEnter"
-          @dragover="handleDragOver"
-          @dragleave="handleDragLeave"
-          @drop="handleDrop"
+          :class="isDragging ? 'bg-brand-a10' : ''"
+          @dragenter.prevent="handleDragOver"
+          @dragover.prevent="handleDragOver"
+          @dragleave.prevent="handleDragLeave"
+          @drop.prevent="handleDrop"
         >
-          <div class="space-y-6">
-            <!-- 隐藏的文件输入 -->
-            <input
-              ref="fileInputRef"
-              type="file"
-              accept="image/*"
-              class="hidden"
-              @change="handleFileSelect"
-            />
+          <input
+            ref="fileInputRef"
+            type="file"
+            accept="image/*"
+            class="hidden"
+            @change="handleFileSelect"
+          />
 
-            <button
-              v-if="!imageSrc"
-              type="button"
-              class="btn btn-secondary w-full flex-col whitespace-normal border-dashed p-10 text-center"
-              @click="triggerFileInput"
-            >
-              <span class="text-lg font-bold text-brand">点击选择图片</span>
-              <span class="text-xs text-muted">支持 JPG、PNG、GIF、WebP 格式（可拖拽到此区域）</span>
-            </button>
+          <button
+            v-if="!imageSrc"
+            type="button"
+            class="btn btn-secondary w-full flex-col whitespace-normal border-dashed p-10 text-center"
+            @click="fileInputRef?.click()"
+          >
+            <span class="text-lg font-bold text-brand">点击选择图片</span>
+            <span class="text-xs text-muted">支持 JPG、PNG、GIF、WebP 格式（可拖拽到此区域）</span>
+          </button>
 
-            <div v-else class="cropper-container bg-[var(--color-surface-inset)] rounded-xl overflow-hidden max-h-[400px]">
-              <img ref="imageRef" :src="imageSrc" class="max-w-full block" />
+          <template v-else>
+            <div class="avatar-image-preview bg-[var(--color-surface-inset)] rounded-xl overflow-hidden p-2">
+              <div>
+                <img
+                  ref="imageRef"
+                  :src="imageSrc"
+                  class="mx-auto block max-w-full max-h-[min(400px,45dvh)] object-contain"
+                  alt="待保存的头像"
+                  @load="imageLoaded = true"
+                  @error="handleImageError"
+                />
+              </div>
             </div>
-            <p v-if="imageSrc && preserveOriginal" class="text-xs text-[var(--color-text-muted)]">
-              框选聊天中显示的头像区域。
-            </p>
-          </div>
+            <div class="mt-3 flex min-h-8 items-center justify-between gap-3">
+              <p class="text-xs text-muted">
+                {{ isCropping ? '拖动方框或调整大小，选择头像的显示范围。' : '保存后显示整张图片。' }}
+              </p>
+              <button
+                type="button"
+                class="btn btn-sm btn-secondary shrink-0"
+                :disabled="!imageLoaded || saving"
+                @click="isCropping = !isCropping"
+              >{{ isCropping ? '使用全图' : '裁剪' }}</button>
+            </div>
+          </template>
+
+          <p v-if="errorText" class="mt-3 text-sm text-[var(--color-error-text)]" role="alert">{{ errorText }}</p>
         </div>
         <div class="modal-footer">
-          <button class="btn btn-secondary" @click="handleCancel">取消</button>
-          <button v-if="imageSrc" class="btn btn-secondary" @click="resetSelection">重新选择</button>
-          <button class="btn btn-primary" :disabled="!imageSrc" @click="handleSave">
-            保存头像
-          </button>
+          <button type="button" class="btn btn-secondary" :disabled="saving" @click="close">取消</button>
+          <button v-if="imageSrc" type="button" class="btn btn-secondary" :disabled="saving" @click="resetSelection">重新选择</button>
+          <button
+            type="button"
+            class="btn btn-primary"
+            :disabled="!imageLoaded || (isCropping && !cropperReady) || saving"
+            @click="handleSave"
+          >{{ saving ? '保存中…' : '保存头像' }}</button>
         </div>
       </div>
     </div>
@@ -298,9 +259,7 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-/* Removed styles replaced by Tailwind classes */
-.cropper-container :deep(.cropper-view-box),
-.cropper-container :deep(.cropper-face) {
-  border-radius: 50%;
+.avatar-image-preview :deep(.cropper-container img) {
+  image-orientation: from-image;
 }
 </style>

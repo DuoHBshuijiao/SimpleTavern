@@ -567,6 +567,7 @@ export const useChatsStore = defineStore('chats', {
         senderPersonaId?: string | null
         senderName?: string | null
         senderAvatar?: string | null
+        senderAvatarDisplay?: ChatMessage['senderAvatarDisplay']
       },
     ) {
       const body: {
@@ -583,6 +584,7 @@ export const useChatsStore = defineStore('chats', {
         senderPersonaId?: string | null
         senderName?: string | null
         senderAvatar?: string | null
+        senderAvatarDisplay?: ChatMessage['senderAvatarDisplay']
       } = { role, content }
       if (characterId !== undefined) body.characterId = characterId
       if (opts && typeof opts.greetingVariantIndex === 'number') {
@@ -623,6 +625,7 @@ export const useChatsStore = defineStore('chats', {
       }
       if (opts && 'senderAvatar' in opts) {
         body.senderAvatar = opts.senderAvatar
+        body.senderAvatarDisplay = opts.senderAvatarDisplay
       }
       const skipReload = opts?.skipReload === true
       const chat = await apiPut<Chat>(`/api/chats/${chatId}/messages/${messageId}`, body)

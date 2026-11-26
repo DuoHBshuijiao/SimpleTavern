@@ -74,7 +74,7 @@ import {
   useSettingsImport,
   useChatGeneration,
 } from '../composables'
-import { useEmbeddedAvatarImport, type AvatarCropSavePayload } from '../composables/useEmbeddedAvatarImport'
+import { useEmbeddedAvatarImport } from '../composables/useEmbeddedAvatarImport'
 import { useGenerationDeferState } from '../composables/useGenerationDeferState'
 import { usePageBackground } from '../composables/usePageBackground'
 import { useWebGpuBackground } from '../composables/useWebGpuBackground'
@@ -1722,8 +1722,7 @@ const actions = useChatActions({
 
 const embeddedAvatarImport = useEmbeddedAvatarImport({
   getEditingCharacter: () => actions.editingCharacter.value,
-  saveCharacterAvatar: (imageData, focusX, focusY) =>
-    actions.handleCharacterAvatarSave(imageData, focusX, focusY),
+  saveCharacterAvatar: actions.handleCharacterAvatarSave,
   applyAssistantCard: (card) => actions.applyAssistantCard(card),
   reloadWorldbooks: () => characterEditorModalRef.value?.reloadWorldbooks(),
   pushError: (payload) => errorStack.pushError(payload),
@@ -1742,13 +1741,10 @@ const {
   embeddedCardConfirmLabel,
   clearEmbeddedCardPreviewState,
   handleCharacterAvatarSave,
+  showEmbeddedCardConfirmation,
   confirmImportEmbeddedCard,
   updateAvatarEmbeddedMvuMode,
 } = embeddedAvatarImport
-
-async function handlePersonaAvatarSave(payload: AvatarCropSavePayload) {
-  await actions.handlePersonaAvatarSave(payload.imageData)
-}
 
 /**
  * 处理成员ID更新
@@ -2776,6 +2772,7 @@ async function sendUserMessage(options?: { retryText?: string }) {
       senderPersonaId: userRole === 'user' ? (persona?.id ?? null) : null,
       senderName: userRole === 'user' ? (senderName) : null,
       senderAvatar: userRole === 'user' ? (persona?.avatar ?? null) : null,
+      senderAvatarDisplay: userRole === 'user' ? (persona?.avatarDisplay ?? null) : null,
       ts: now,
     }, chatId)
     if (chats.activeChatId === chatId) scrollToBottomAnimated()
@@ -2790,6 +2787,7 @@ async function sendUserMessage(options?: { retryText?: string }) {
         senderPersonaId: userRole === 'user' ? (persona?.id ?? null) : null,
         senderName: userRole === 'user' ? (senderName) : null,
         senderAvatar: userRole === 'user' ? (persona?.avatar ?? null) : null,
+        senderAvatarDisplay: userRole === 'user' ? (persona?.avatarDisplay ?? null) : null,
       })
       await refreshAfterGeneration(chatId)
       if (chats.activeChatId === chatId) bumpSidebarForActiveChat()
@@ -2861,6 +2859,7 @@ async function sendUserMessage(options?: { retryText?: string }) {
         senderPersonaId: userRole === 'user' ? (persona?.id ?? null) : null,
         senderName: userRole === 'user' ? (senderName) : null,
         senderAvatar: userRole === 'user' ? (persona?.avatar ?? null) : null,
+        senderAvatarDisplay: userRole === 'user' ? (persona?.avatarDisplay ?? null) : null,
         ts: now,
       }, chatId)
       if (chats.activeChatId === chatId) scrollToBottomAnimated()
@@ -2873,6 +2872,7 @@ async function sendUserMessage(options?: { retryText?: string }) {
         senderPersonaId: userRole === 'user' ? (persona?.id ?? null) : null,
         senderName: userRole === 'user' ? (senderName) : null,
         senderAvatar: userRole === 'user' ? (persona?.avatar ?? null) : null,
+        senderAvatarDisplay: userRole === 'user' ? (persona?.avatarDisplay ?? null) : null,
       })
       if (chats.activeChatId === chatId) bumpSidebarForActiveChat()
 
@@ -2897,6 +2897,7 @@ async function sendUserMessage(options?: { retryText?: string }) {
           senderPersonaId: userRole === 'user' ? (persona?.id ?? null) : null,
           senderName: userRole === 'user' ? (senderName) : null,
           senderAvatar: userRole === 'user' ? (persona?.avatar ?? null) : null,
+          senderAvatarDisplay: userRole === 'user' ? (persona?.avatarDisplay ?? null) : null,
           ts: now,
         }, chatId)
         void tryAutoReadUserMessage(localUserId)
@@ -2918,6 +2919,7 @@ async function sendUserMessage(options?: { retryText?: string }) {
               senderPersonaId: persona?.id ?? null,
               senderName: senderName,
               senderAvatar: persona?.avatar ?? null,
+              senderAvatarDisplay: persona?.avatarDisplay ?? null,
               userPersona: persona ?? null,
               webSearchEnabled,
             },
@@ -2946,6 +2948,7 @@ async function sendUserMessage(options?: { retryText?: string }) {
           senderPersonaId: persona?.id ?? null,
           senderName: senderName,
           senderAvatar: persona?.avatar ?? null,
+          senderAvatarDisplay: persona?.avatarDisplay ?? null,
           userPersona: persona ?? null,
           webSearchEnabled,
         }, signal)
@@ -3919,6 +3922,9 @@ async function handleRewriteMessage(m: ChatMessage) {
               senderPersonaId: lastUserMessage.senderPersonaId ?? selectedPersona.value?.id ?? null,
               senderName: lastUserMessage.senderName ?? selectedPersona.value?.name ?? userName.value,
               senderAvatar: lastUserMessage.senderAvatar ?? selectedPersona.value?.avatar ?? null,
+              senderAvatarDisplay: lastUserMessage.senderAvatar
+                ? lastUserMessage.senderAvatarDisplay ?? null
+                : selectedPersona.value?.avatarDisplay ?? null,
               userPersona: selectedPersona.value ?? null,
               omitMessageIds,
               mergeAssistantIntoMessageId: anchorId,
@@ -4568,6 +4574,7 @@ async function handleSaveAndSend() {
       senderPersonaId: originalMessage.senderPersonaId ?? null,
       senderName: originalMessage.senderName ?? null,
       senderAvatar: originalMessage.senderAvatar ?? null,
+      senderAvatarDisplay: originalMessage.senderAvatarDisplay ?? null,
     })
     if (chats.activeChatId === chatId) bumpSidebarForActiveChat()
 
@@ -4599,6 +4606,7 @@ async function handleSaveAndSend() {
     senderPersonaId: originalMessage.senderPersonaId ?? null,
     senderName: originalMessage.senderName ?? null,
     senderAvatar: originalMessage.senderAvatar ?? null,
+    senderAvatarDisplay: originalMessage.senderAvatarDisplay ?? null,
   })
   if (chats.activeChatId === chatId) {
     bumpSidebarForActiveChat()
@@ -5011,6 +5019,7 @@ const editingPersonaAvatarUrl = computed(() => {
                         <span class="text-2xs text-[var(--color-text-muted)]">{{ idx + 1 }}</span>
                         <ModernAvatar
                           :src="member.avatar ? `/api/avatars/${member.avatar}` : null"
+                          :display="member.avatarDisplay"
                           :name="member.name"
                           :size="20"
                           aspect="1"
@@ -5025,7 +5034,7 @@ const editingPersonaAvatarUrl = computed(() => {
                         </span>
                       </div>
                       <div v-if="!group.effectivePureAiMode.value" class="flex items-center gap-1.5 shrink-0 rounded-full border border-brand-a20 light:border-transparent bg-brand-a10 px-2.5 py-1">
-                        <ModernAvatar :src="userAvatarUrl" :name="userName" :size="20" aspect="1" rounded="rounded" />
+                        <ModernAvatar :src="userAvatarUrl" :display="selectedPersona?.avatarDisplay" :name="userName" :size="20" aspect="1" rounded="rounded" />
                         <span class="max-w-[72px] truncate text-xs text-brand">{{ userName }}</span>
                         <span class="text-2xs text-brand-a60">你</span>
                       </div>
@@ -5324,7 +5333,9 @@ const editingPersonaAvatarUrl = computed(() => {
       :message-role="actions.editingMessageRole.value"
       :message-content="actions.editingMessageContent.value"
       :character-avatar-url="characterAvatarUrl"
+      :character-avatar-display="selectedCharacter?.avatarDisplay"
       :user-avatar-url="userAvatarUrl"
+      :user-avatar-display="selectedPersona?.avatarDisplay"
       :is-generating="isGenerating"
       @update:show="actions.showMessageEditor.value = $event"
       @update:message-role="actions.editingMessageRole.value = $event"
@@ -5492,14 +5503,13 @@ const editingPersonaAvatarUrl = computed(() => {
 
   <AvatarCropper
     v-model:show="actions.showCharacterAvatarCropper.value"
-    :preserve-original="true"
-    :focus-aspect="1"
-    @save="handleCharacterAvatarSave"
+    :save-avatar="handleCharacterAvatarSave"
+    @saved="showEmbeddedCardConfirmation"
   />
 
   <AvatarCropper
     v-model:show="actions.showPersonaAvatarCropper.value"
-    @save="handlePersonaAvatarSave"
+    :save-avatar="actions.handlePersonaAvatarSave"
   />
 </template>
 

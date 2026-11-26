@@ -346,6 +346,9 @@ export interface WorldBook {
   updatedAt: string
 }
 
+/** 头像显示范围，矩形坐标和尺寸均为原图的比例。 */
+export type AvatarDisplay = 'full' | { x: number; y: number; width: number; height: number }
+
 /**
  * 用户身份接口
  *
@@ -364,6 +367,7 @@ export interface UserPersona {
   name: string
   description: string
   avatar: string
+  avatarDisplay?: AvatarDisplay | null
   createdAt: string
   updatedAt: string
 }
@@ -630,6 +634,7 @@ export interface CharacterCard {
   /** 头像展示焦点（百分比，0-100），用于会话内矩形头像定位，不会修改原图像素 */
   avatarFocusX?: number | null
   avatarFocusY?: number | null
+  avatarDisplay?: AvatarDisplay | null
   attachedWorldBookIds?: string[]
   extraFirstMessageEntries?: ExtraFirstMessageEntry[]
   mvuEnabled?: boolean
@@ -669,6 +674,7 @@ export interface ChatMessage {
   senderPersonaId?: string | null
   senderName?: string | null
   senderAvatar?: string | null
+  senderAvatarDisplay?: AvatarDisplay | null
   ts: string
   /** 长期记忆在上一条保存后、本条消息之后被更新；仅最新一条带此标记的消息存在 */
   memoryUpdatedAfterThis?: boolean

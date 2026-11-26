@@ -6,25 +6,18 @@ import {
   type SillyTavernImportPreview,
 } from './useSettingsImport'
 import { notifyMessage } from './useNotify'
-import type { CharacterCard, MvuMode, WorldBook } from '../types/models'
+import type { AvatarDisplay, CharacterCard, MvuMode, WorldBook } from '../types/models'
 
 export interface EmbeddedCharacterCardPreview {
   card: CharacterCard
   worldbook?: WorldBook | null
 }
 
-export interface AvatarCropSavePayload {
-  imageData: string
-  focusX?: number
-  focusY?: number
-}
-
 export interface UseEmbeddedAvatarImportOptions {
   getEditingCharacter: () => CharacterCard | null
   saveCharacterAvatar: (
     imageData: string,
-    focusX?: number | null,
-    focusY?: number | null,
+    display: AvatarDisplay,
   ) => Promise<EmbeddedCharacterCardPreview | null>
   applyAssistantCard: (card: CharacterCard) => void
   reloadWorldbooks: () => void | Promise<void>
@@ -68,6 +61,7 @@ function buildMergedEmbeddedCard(
       : current.initialStateTables,
     attachedWorldBookIds,
     avatar: current.avatar || incoming.avatar,
+    avatarDisplay: current.avatar ? current.avatarDisplay : incoming.avatarDisplay,
     avatarFocusX: current.avatarFocusX ?? incoming.avatarFocusX ?? null,
     avatarFocusY: current.avatarFocusY ?? incoming.avatarFocusY ?? null,
   }
@@ -116,17 +110,13 @@ export function useEmbeddedAvatarImport(options: UseEmbeddedAvatarImportOptions)
     resetAvatarEmbeddedStState()
   }
 
-  async function handleCharacterAvatarSave(payload: AvatarCropSavePayload) {
+  async function handleCharacterAvatarSave(imageData: string, display: AvatarDisplay) {
     resetAvatarEmbeddedStState()
-    const embedded = await options.saveCharacterAvatar(
-      payload.imageData,
-      payload.focusX ?? null,
-      payload.focusY ?? null,
-    )
+    const embedded = await options.saveCharacterAvatar(imageData, display)
+    embeddedCardPreview.value = embedded
     if (embedded?.card) {
-      embeddedCardPreview.value = embedded
       try {
-        const file = imageDataUrlToPngFile(payload.imageData, 'avatar.png')
+        const file = imageDataUrlToPngFile(imageData, 'avatar.png')
         const prev = await previewSillyTavernImport(file)
         avatarEmbeddedStPendingId.value = prev.pendingId
         avatarEmbeddedStExpiresAt.value = prev.expiresAt
@@ -140,6 +130,11 @@ export function useEmbeddedAvatarImport(options: UseEmbeddedAvatarImportOptions)
       } catch {
         resetAvatarEmbeddedStState()
       }
+    }
+  }
+
+  function showEmbeddedCardConfirmation() {
+    if (embeddedCardPreview.value?.card && options.getEditingCharacter()) {
       showEmbeddedCardConfirmModal.value = true
     }
   }
@@ -211,6 +206,7 @@ export function useEmbeddedAvatarImport(options: UseEmbeddedAvatarImportOptions)
     embeddedCardConfirmLabel,
     clearEmbeddedCardPreviewState,
     handleCharacterAvatarSave,
+    showEmbeddedCardConfirmation,
     confirmImportEmbeddedCard,
     updateAvatarEmbeddedMvuMode,
   }

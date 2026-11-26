@@ -259,6 +259,7 @@ function setFast(v: string) {
             <div class="flex items-center gap-3">
               <ModernAvatar
                 :src="character.avatar ? `/api/avatars/${character.avatar}` : null"
+                :display="character.avatarDisplay"
                 :name="character.name"
                 :size="48"
                 aspect="0.75"

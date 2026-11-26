@@ -1320,6 +1320,7 @@ CHECKS = {
     "vertex": check_vertex_account,
     "core": dom_checks.check_core,
     "modals": dom_checks.check_modals,
+    "avatars": dom_checks.check_avatars,
     "dev_built": dom_checks.check_dev_built,
     "motion": check_motion,
     "header_switch": check_chat_header_switch,

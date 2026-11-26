@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, type CSSProperties } from 'vue'
+import type { AvatarDisplay } from '../types/models'
 
 interface Props {
   src?: string | null
@@ -10,6 +11,7 @@ interface Props {
   bordered?: boolean
   objectFit?: 'cover' | 'contain' | 'fill' | 'scale-down' | 'none'
   objectPosition?: string
+  display?: AvatarDisplay | null
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -35,12 +37,21 @@ const palette = [
 
 const revision = ref(0)
 const status = ref<'loading' | 'ready' | 'error'>('loading')
+const imageAspect = ref(1)
 watch(() => props.src, () => {
   revision.value++
   status.value = 'loading'
 }, { flush: 'sync' })
 
 const ready = computed(() => !!props.src && status.value === 'ready')
+const region = computed(() => {
+  const display = props.display
+  if (!display || display === 'full') return null
+  const { x, y, width, height } = display
+  if (![x, y, width, height].every(Number.isFinite) || x < 0 || y < 0 || width <= 0 || height <= 0) return null
+  if (x + width > 1 + Number.EPSILON || y + height > 1 + Number.EPSILON) return null
+  return display
+})
 const name = computed(() => props.name.trim() || '?')
 const initial = computed(() => {
   const graphemes = segmenter
@@ -69,13 +80,33 @@ const style = computed(() => {
   return {
     width,
     height,
+    aspectRatio: props.aspect === 'auto' && ready.value && region.value
+      ? String(imageAspect.value * region.value.width / region.value.height)
+      : undefined,
     fontSize: typeof props.size === 'number' ? (props.size * 0.4) + 'px' : '1rem',
   }
 })
 
+const imageStyle = computed<CSSProperties>(() => {
+  if (region.value) {
+    const { x, y, width, height } = region.value
+    return {
+      position: 'absolute',
+      maxWidth: 'none',
+      width: `${100 / width}%`,
+      height: `${100 / height}%`,
+      left: `${-100 * x / width}%`,
+      top: `${-100 * y / height}%`,
+    }
+  }
+  return { objectFit: props.display === 'full' ? 'contain' : props.objectFit, objectPosition: props.objectPosition }
+})
+
 function settle(event: Event, result: 'ready' | 'error') {
   const image = event.currentTarget as HTMLImageElement
-  if (Number(image.dataset.revision) === revision.value) status.value = result
+  if (Number(image.dataset.revision) !== revision.value) return
+  if (result === 'ready' && image.naturalHeight) imageAspect.value = image.naturalWidth / image.naturalHeight
+  status.value = result
 }
 </script>
 
@@ -93,7 +124,7 @@ function settle(event: Event, result: 'ready' | 'error') {
       :data-revision="revision"
       class="w-full"
       :class="aspect === 'auto' ? 'h-auto' : 'h-full'"
-      :style="{ objectFit, objectPosition }"
+      :style="imageStyle"
       alt=""
       @load="settle($event, 'ready')"
       @error="settle($event, 'error')"

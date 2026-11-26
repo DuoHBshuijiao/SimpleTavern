@@ -150,7 +150,7 @@ function onPanelTab(event: KeyboardEvent) {
         @click="toggle"
         @keydown.tab="enterPanelFromTrigger"
       >
-        <ModernAvatar v-if="selected" :src="selected.avatar ? `/api/avatars/${selected.avatar}` : null" :name="selected.name" :size="36" aspect="1" />
+        <ModernAvatar v-if="selected" :src="selected.avatar ? `/api/avatars/${selected.avatar}` : null" :display="selected.avatarDisplay" :name="selected.name" :size="36" aspect="1" />
         <UserRound v-else class="m-2 h-5 w-5 shrink-0 text-[var(--color-text-muted)]" aria-hidden="true" />
         <span class="min-w-0 flex-1 truncate text-sm text-brand">{{ selected?.name || '选择身份' }}</span>
         <ChevronDown class="mr-2 h-3.5 w-3.5 shrink-0 text-[var(--color-text-secondary)] transition-transform" :class="{ 'rotate-180': open }" aria-hidden="true" />
@@ -183,7 +183,7 @@ function onPanelTab(event: KeyboardEvent) {
                   :title="persona.name"
                   @click="selectPersona(persona.id)"
                 >
-                  <ModernAvatar :src="persona.avatar ? `/api/avatars/${persona.avatar}` : null" :name="persona.name" :size="36" aspect="1" />
+                  <ModernAvatar :src="persona.avatar ? `/api/avatars/${persona.avatar}` : null" :display="persona.avatarDisplay" :name="persona.name" :size="36" aspect="1" />
                   <span class="truncate text-sm" :class="persona.id === selectedPersonaId ? 'text-brand' : 'text-[var(--color-text-secondary)]'">{{ persona.name }}</span>
                 </button>
                 <div
