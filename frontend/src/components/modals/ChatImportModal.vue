@@ -22,9 +22,11 @@ declare global {
 const JANITOR_BRIDGE_EXT_REL_PATH = 'extensions/simpletavern-janitor-bridge'
 const JANITOR_BRIDGE_MIN_VERSION = '0.1.11'
 const JANITOR_BRIDGE_INSTALL_URL = 'https://github.com/DuoHBshuijiao/SimpleTavern#3-从-janitorai-迁移聊天记录可选'
+const JANITOR_BRIDGE_RECHECK_STORAGE_KEY = 'simpletavern:janitorBridgeRecheck'
 const bridgeInstalled = ref(false)
 const bridgeVersion = ref('')
 const copiedExtensionUrl = ref(false)
+const recheckFailedAfterReload = ref(false)
 const bridgeStatus = computed(() => {
   if (!bridgeInstalled.value) return 'missing'
   if (!/^\d+\.\d+\.\d+(?:\.\d+)?$/.test(bridgeVersion.value)) return 'outdated'
@@ -39,6 +41,48 @@ const bridgeStatus = computed(() => {
 function refreshBridgeStatus() {
   bridgeInstalled.value = window.__ST_JANITOR_BRIDGE_INSTALLED__ === true
   bridgeVersion.value = window.__ST_JANITOR_BRIDGE_VERSION__ || ''
+  if (bridgeStatus.value === 'ready') recheckFailedAfterReload.value = false
+}
+
+function consumeRecheckState() {
+  let raw: string | null = null
+  try {
+    raw = sessionStorage.getItem(JANITOR_BRIDGE_RECHECK_STORAGE_KEY)
+    if (raw !== null) sessionStorage.removeItem(JANITOR_BRIDGE_RECHECK_STORAGE_KEY)
+  } catch {
+    return
+  }
+  if (raw === null) return
+  try {
+    const saved = JSON.parse(raw) as { janitorLink?: unknown; jaiCharacterUrl?: unknown }
+    if (typeof saved.janitorLink === 'string' && saved.janitorLink && !janitorLink.value) {
+      janitorLink.value = saved.janitorLink
+    }
+    if (typeof saved.jaiCharacterUrl === 'string' && saved.jaiCharacterUrl && !jaiCharacterUrl.value) {
+      jaiCharacterUrl.value = saved.jaiCharacterUrl
+    }
+  } catch {
+    // ignore malformed state
+  }
+  refreshBridgeStatus()
+  recheckFailedAfterReload.value = bridgeStatus.value !== 'ready'
+}
+
+function recheckBridgeStatus() {
+  refreshBridgeStatus()
+  if (bridgeStatus.value === 'ready') return
+  try {
+    sessionStorage.setItem(
+      JANITOR_BRIDGE_RECHECK_STORAGE_KEY,
+      JSON.stringify({
+        janitorLink: janitorLink.value,
+        jaiCharacterUrl: jaiCharacterUrl.value,
+      }),
+    )
+  } catch {
+    // ignore quota / private mode
+  }
+  window.location.reload()
 }
 
 onMounted(() => {
@@ -162,8 +206,13 @@ watch(
   () => [props.show, props.pendingId, props.pendingReloadNonce] as const,
   ([visible, pendingId]) => {
     clearPendingPreview()
-    if (!visible) return
+    if (!visible) {
+      recheckFailedAfterReload.value = false
+      copiedExtensionUrl.value = false
+      return
+    }
     refreshBridgeStatus()
+    consumeRecheckState()
     if (pendingId) void loadPendingPreview(pendingId)
   },
   { immediate: true },
@@ -534,15 +583,23 @@ async function confirmJanitorImport() {
                 {{ bridgeStatus === 'missing' ? '未检测到 SimpleTavern Janitor Bridge 扩展' : '请更新 SimpleTavern Janitor Bridge 扩展' }}
               </p>
               <p v-if="bridgeStatus === 'outdated'">当前版本：{{ bridgeVersion || '旧版（未报告版本）' }}。需要 {{ JANITOR_BRIDGE_MIN_VERSION }} 或更新版本。</p>
-              <p>在浏览器扩展管理页加载或重新加载扩展，再刷新 SimpleTavern。</p>
+              <p>在浏览器扩展管理页加载或重新加载扩展后，点击下方按钮刷新检测。</p>
               <p class="break-all">扩展目录 <code>{{ JANITOR_BRIDGE_EXT_REL_PATH }}</code>，Windows 安装版位于 <code>current/</code> 下。</p>
               <div class="flex flex-wrap items-center gap-2">
+                <button type="button" class="btn btn-xs btn-primary" @click="recheckBridgeStatus">
+                  {{ bridgeStatus === 'missing' ? '我已安装，刷新检测' : '我已更新，刷新检测' }}
+                </button>
                 <a :href="JANITOR_BRIDGE_INSTALL_URL" target="_blank" rel="noopener noreferrer" class="btn btn-xs btn-secondary">查看安装步骤</a>
                 <button type="button" class="btn btn-xs btn-ghost" @click="copyExtensionManagerUrl">
                   {{ copiedExtensionUrl ? '已复制扩展管理地址' : '复制扩展管理地址' }}
                 </button>
                 <code>{{ getExtensionsManageUrlHint() }}</code>
               </div>
+              <p v-if="recheckFailedAfterReload" class="text-xs text-[var(--color-warning-text)]">
+                {{ bridgeStatus === 'missing'
+                  ? '刷新后仍未检测到扩展，请确认已在扩展管理页加载并启用。'
+                  : `刷新后仍为 ${bridgeVersion || '旧版'}，请在扩展管理页重新加载新版扩展后再试。` }}
+              </p>
             </div>
             <div class="flex flex-wrap gap-2">
               <input

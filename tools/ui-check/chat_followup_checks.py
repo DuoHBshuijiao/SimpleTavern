@@ -716,13 +716,13 @@ async def check_chat_followup(ctx):
         await page.wait_for(import_button)
         await page.js(import_button + ".click()")
         await page.wait_for("$modal('导入')")
-        status = await page.js("""(() => { const modal=$modal('导入'), button=$btn(modal,'打开并抓取');
-          return button.disabled && modal.innerText.includes('0.1.10') && modal.innerText.includes('0.1.11')
+        status = await page.js("""(() => { const modal=$modal('导入'), button=$btn(modal,'打开并抓取'), recheck=$btn(modal,'我已更新，刷新检测');
+          return button.disabled && !!recheck && !recheck.disabled && modal.innerText.includes('0.1.10') && modal.innerText.includes('0.1.11')
             && modal.innerText.includes('extensions/simpletavern-janitor-bridge') && !!modal.querySelector('a[href*=github]');
         })()""")
-        ctx.check("旧版 Janitor Bridge 阻止跳转并显示安装入口及目录", status)
+        ctx.check("旧版 Janitor Bridge 阻止跳转并显示刷新检测、安装入口及目录", status)
         await page.js("""window.__ST_JANITOR_BRIDGE_VERSION__='0.1.11';
-          window.dispatchEvent(new Event('simpletavern:janitor-bridge-ready'));""")
+          $click($modal('导入'), '我已更新，刷新检测');""")
         await page.wait_for("!$btn($modal('导入'),'打开并抓取')?.disabled")
         handoff = await page.js("""(() => {
           const modal = $modal('导入');

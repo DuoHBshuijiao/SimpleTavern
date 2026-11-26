@@ -256,6 +256,7 @@ async function handleChatExport(format: 'txt' | 'json' | 'jsonl' | 'character' |
 const showImportModal = ref(false)
 /** 与 sessionStorage 同步，避免扩展跳转或仅带 janitorCharImport 的 URL 时丢失聊天暂存 id */
 const JANITOR_CHAT_PENDING_STORAGE_KEY = 'simpletavern:janitorChatPendingId'
+const JANITOR_BRIDGE_RECHECK_STORAGE_KEY = 'simpletavern:janitorBridgeRecheck'
 const janitorPendingId = ref<string | null>(null)
 const janitorPendingReloadNonce = ref(0)
 const settingsTab = ref<SettingsDrawerTab>('global')
@@ -2203,6 +2204,13 @@ onMounted(async () => {
   if (!janitorPendingId.value) {
     const stored = sessionStorage.getItem(JANITOR_CHAT_PENDING_STORAGE_KEY)
     if (stored?.trim()) janitorPendingId.value = stored.trim()
+  }
+  try {
+    if (sessionStorage.getItem(JANITOR_BRIDGE_RECHECK_STORAGE_KEY) !== null) {
+      showImportModal.value = true
+    }
+  } catch {
+    // ignore private mode
   }
   if (!settings.settings) await settings.load()
   await characters.loadAll()
