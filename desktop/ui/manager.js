@@ -1,3 +1,5 @@
+import { startAppearance } from './appearance.js'
+
 const { invoke } = window.__TAURI__.core
 const el = id => document.getElementById(id)
 const phases = { loading:'正在读取服务状态',first:'开始使用 SimpleTavern',importing:'正在复制旧版数据',
@@ -38,7 +40,7 @@ function voiceRows() {
     row.append(label,badge)
     const actions = service.owned ? [['停止','stop']] : service.managed ? [['启动','start']] : []
     for (const [title,op] of [...actions,['检查连接','health']]) {
-      const b=document.createElement('button'); b.textContent=title
+      const b=document.createElement('button'); b.className='btn btn-secondary'; b.textContent=title
       b.onclick=()=>{b.disabled=true; act('voice',{id:service.id,op}); setTimeout(()=>{b.disabled=false},1500)}
       row.append(b)
     }
@@ -106,3 +108,7 @@ async function tick() {
   setTimeout(tick,500)
 }
 tick()
+startAppearance().catch(error => {
+  console.error('Unable to initialize manager appearance', error)
+  el('feedback').textContent = '无法读取管理器外观'
+})

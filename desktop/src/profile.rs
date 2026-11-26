@@ -21,7 +21,15 @@ impl Default for Settings {
     }
 }
 
-pub fn profile_dir(content: &Path) -> io::Result<PathBuf> {
+pub fn current_location() -> io::Result<(PathBuf, PathBuf)> {
+    let exe = std::env::current_exe()?;
+    let content = exe
+        .parent()
+        .ok_or_else(|| io::Error::other("找不到程序目录"))?;
+    Ok((content.to_path_buf(), profile_dir(content)?))
+}
+
+fn profile_dir(content: &Path) -> io::Result<PathBuf> {
     let root = content.parent().unwrap_or(content);
     if root.join(".portable").is_file() {
         return Ok(root.to_path_buf());

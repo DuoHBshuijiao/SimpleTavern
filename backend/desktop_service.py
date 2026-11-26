@@ -119,8 +119,15 @@ async def run(args):
             category = {"settings": "设置", "tts": "语音", "chats": "会话", "characters": "角色",
                         "import": "导入", "llm": "模型"}.get(section, "本地服务")
             emit("request", category=category, status=response.status_code)
-            if request.url.path == "/api/settings" and response.status_code < 300:
-                commands.put_nowait({"action": "voices"})
+            if 200 <= response.status_code < 300:
+                path = request.url.path
+                if request.method == "PUT" and path == "/api/settings":
+                    emit("appearance_changed")
+                    commands.put_nowait({"action": "voices"})
+                elif request.method == "POST" and path == "/api/import":
+                    emit("appearance_changed")
+                elif request.method == "DELETE" and path.startswith("/api/page-backgrounds/"):
+                    emit("appearance_changed", wallpaperRemoved=True)
         return response
 
     static_root = args.web.resolve()

@@ -1,6 +1,7 @@
 """Exercise two locally built --qa releases through real Windows packaging and WebView2."""
 import argparse
 import asyncio
+import base64
 from contextlib import closing, ExitStack
 import json
 import os
@@ -76,6 +77,70 @@ async def attach(debug_port, run_dir):
 async def disconnect(page):
     page.reader.cancel()
     await page.ws.close()
+
+
+async def wait_for_appearance(page, theme, scheme):
+    await page.wait_for(
+        f"document.documentElement.dataset.theme === '{theme}' && "
+        f"getComputedStyle(document.documentElement).colorScheme === '{scheme}'"
+    )
+
+
+async def check_manager_appearance(page, origin):
+    await page.wait_for("!document.getElementById('primary').hidden")
+    with httpx.Client(base_url=origin, trust_env=False) as api:
+        settings = api.get("/api/settings").raise_for_status().json()
+
+        def save(**changes):
+            settings.update(changes)
+            api.put("/api/settings", json=settings).raise_for_status()
+
+        save(themeId="teal", themeMode="light")
+        await wait_for_appearance(page, "teal", "light")
+        assert await page.js("getComputedStyle(document.getElementById('primary')).backgroundColor") == "rgb(32, 90, 101)"
+        await page.shot("manager-light")
+
+        invalid = api.put("/api/settings", json={**settings, "themeMode": "invalid", "themeId": "blue"})
+        assert invalid.status_code == 422
+        assert await page.js("document.documentElement.dataset.theme") == "teal"
+
+        async def upload(shade):
+            image = await page.js(f"""(() => {{
+              const canvas = document.createElement('canvas')
+              const context = canvas.getContext('2d')
+              context.fillStyle = '{shade}'
+              context.fillRect(0, 0, canvas.width, canvas.height)
+              return canvas.toDataURL().split(',')[1]
+            }})()""")
+            return api.post("/api/page-backgrounds", files={
+                "file": ("wallpaper.png", base64.b64decode(image), "image/png")
+            }).raise_for_status().json()["filename"]
+
+        bright = await upload("#fbf8ed")
+        dark = await upload("#14121a")
+        save(themeMode="background", pageBackgroundImage=dark, pageBackgroundOpacity=1)
+        await wait_for_appearance(page, "teal", "dark")
+        save(pageBackgroundImage=bright)
+        await wait_for_appearance(page, "teal", "light")
+        save(pageBackgroundOpacity=0)
+        await wait_for_appearance(page, "teal", "dark")
+        save(pageBackgroundOpacity=1)
+        await wait_for_appearance(page, "teal", "light")
+        api.delete(f"/api/page-backgrounds/{bright}").raise_for_status()
+        await wait_for_appearance(page, "teal", "dark")
+
+        imported = {**settings, "themeId": "amber", "themeMode": "light"}
+        result = api.post("/api/import", files={
+            "file": ("settings.json", json.dumps(imported), "application/json")
+        }).raise_for_status().json()
+        assert "settings" in result["imported"]
+        await wait_for_appearance(page, "amber", "light")
+
+        save(themeId="green", themeMode="light")
+        save(themeId="violet", themeMode="dark")
+        await wait_for_appearance(page, "violet", "dark")
+        await page.shot("manager-dark")
+    print("PASS manager: saved and imported themes, rejected save, and wallpaper brightness", flush=True)
 
 
 async def chat_tab(browser, origin, home):
@@ -176,6 +241,7 @@ async def run(mode, first, expected, run_dir, browser, feed):
         await page.js("document.getElementById('logs').open=true")
         await page.wait_for("document.getElementById('entries').children.length>0")
         await page.shot("manager")
+        await check_manager_appearance(page, origin)
         await page.wait_for("document.getElementById('update').textContent==='退出时更新'", 20)
         marker = profile / "data/qa-retained.txt"
         marker.write_text("retained", encoding="utf-8")
@@ -213,7 +279,10 @@ async def run(mode, first, expected, run_dir, browser, feed):
             await until(lambda: not manager_pids(root / "Update.exe"))
             process = subprocess.Popen([exe, "--resume"], env=env)
         page = await attach(debug_port, home)
+        await wait_for_appearance(page, "violet", "dark")
         await page.wait_for("document.getElementById('status').textContent==='酒馆正在运行'", 70)
+        assert await page.js("getComputedStyle(document.getElementById('primary')).borderRadius") == "12px"
+        assert await page.js("getComputedStyle(document.getElementById('entries')).fontSize") == "12px"
         await page.wait_for(f"document.getElementById('version').textContent==='v{expected}'", 20)
         assert marker.read_text(encoding="utf-8") == "retained"
         assert urllib.request.urlopen(origin + "/api/update/version").status == 200

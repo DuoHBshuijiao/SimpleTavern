@@ -46,13 +46,9 @@ impl ManagerState {
         shared: Shared,
         tx: Sender<Event>,
         rx: Receiver<Event>,
+        content: PathBuf,
+        profile: PathBuf,
     ) -> Result<(), String> {
-        let content = std::env::current_exe()
-            .map_err(|e| e.to_string())?
-            .parent()
-            .unwrap()
-            .to_owned();
-        let profile = profile::profile_dir(&content).map_err(|e| e.to_string())?;
         let settings = profile::read(&profile).map_err(|e| format!("管理器配置读取失败：{e}"))?;
         let version = updates::manager()
             .map(|m| m.get_current_version_as_string())
@@ -127,7 +123,10 @@ impl ManagerState {
                     m.phase = "first";
                     m.detail = "聊天会在默认浏览器中打开。已有旧版数据时，可先导入。".into();
                     match result {
-                        Ok(true) => m.start(),
+                        Ok(true) => {
+                            crate::refresh_appearance(&m.app, false);
+                            m.start();
+                        }
                         Ok(false) => {}
                         Err(e) => m.detail = e,
                     }
@@ -320,6 +319,9 @@ impl ManagerState {
                 v["kind"].as_str().unwrap_or("异常")
             )),
             Some("voices") => self.voices = v["rows"].clone(),
+            Some("appearance_changed") => {
+                crate::refresh_appearance(&self.app, v["wallpaperRemoved"].as_bool() == Some(true));
+            }
             Some("request") => {
                 let code = v["status"].as_u64().unwrap_or(500);
                 let category = v["category"].as_str().unwrap_or("本地服务");
