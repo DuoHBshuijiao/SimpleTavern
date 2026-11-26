@@ -46,10 +46,15 @@ def _get_tokenizer():
             _tokenizer_unavailable_reason = f"tokenizer dir missing: {_TOKENIZER_DIR}"
             return None
         tokenizer_json = _TOKENIZER_DIR / "tokenizer.json"
-        if not tokenizer_json.exists():
+        compressed_json = tokenizer_json.with_suffix(".json.xz")
+        if tokenizer_json.is_file():
+            _tokenizer_instance = Tokenizer.from_file(str(tokenizer_json))
+        elif compressed_json.is_file():
+            import lzma
+            _tokenizer_instance = Tokenizer.from_buffer(lzma.decompress(compressed_json.read_bytes()))
+        else:
             _tokenizer_unavailable_reason = f"tokenizer.json missing: {tokenizer_json}"
             return None
-        _tokenizer_instance = Tokenizer.from_file(str(tokenizer_json))
         _tokenizer_unavailable_reason = None
         return _tokenizer_instance
     except Exception as exc:

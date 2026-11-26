@@ -14,10 +14,12 @@ import threading
 import time
 
 import httpx
+from tokenizers import Tokenizer
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools/api-check"))
 from checks_baseline import _chat
+from checks_t832 import vertex_jwt_exchange
 from harness import Api, Env
 from mock_upstream import MockUpstream, REPLY
 
@@ -48,7 +50,7 @@ def run(exe, web):
             proc.stdin.flush()
         def expect(event):
             item = events.get(timeout=45)
-            while item and item["event"] != event and item["event"] in ("request", "voices"):
+            while item and item["event"] != event and item["event"] in ("request", "voices", "appearance_changed"):
                 if item["event"] == "request":
                     assert set(item) == {"event", "category", "status"}
                 item = events.get(timeout=45)
@@ -63,6 +65,13 @@ def run(exe, web):
             with httpx.Client(base_url=origin, trust_env=False) as client:
                 assert "simpletavern-desktop" in client.get("/chat").text
                 assert client.get(f"http://127.0.0.1:{ports[1]}/api/health").json()["ok"]
+                assert client.get("/api/tokenizer/health").raise_for_status().json()["available"]
+                vocabulary = ROOT / "backend/tokenizer/deepseek_v3_tokenizer/tokenizer.json"
+                reference = Tokenizer.from_file(str(vocabulary))
+                sample = "酒馆でチャット 👨‍👩‍👦‍👦\n안녕하세요\t123456"
+                tokens = client.post("/api/tokenizer/count", json={"text": sample}).raise_for_status().json()
+                assert tokens["tokens"] == len(reference.encode(sample).ids)
+                print("PASS packaged tokenizer matches the source vocabulary")
                 assert client.get("/api/desktop/state").status_code == 403
                 headers = {"Sec-Fetch-Site":"same-origin", "X-SimpleTavern-Desktop":"1"}
                 token = client.get("/api/desktop/state", headers=headers).json()["session"]
@@ -81,6 +90,7 @@ def run(exe, web):
                     "baseUrl": f"http://127.0.0.1:{ports[1]}/api", "ttsGlmLocalPort": ports[1],
                 })
                 client.put("/api/settings", json=settings).raise_for_status()
+                assert expect("appearance_changed") == {"event": "appearance_changed"}
                 rows = expect("voices")["rows"]
                 assert any(r["id"] == "external-test" and not r["managed"] and not r["owned"] for r in rows)
                 command("voice", id="external-test", op="health")
@@ -160,8 +170,10 @@ try {
                     command("cancel")
                     assert result.is_sse and result.succeeded and result.text == REPLY, result.summary()
                     assert env.read_chat(chat)["messages"][-1]["content"] == REPLY
-                    api.client.close()
                     print("PASS active generation survives drain, persists the full response and then becomes idle")
+                    vertex_jwt_exchange(env)
+                    api.client.close()
+                    print("PASS packaged Vertex service account signs a JWT and exchanges it for an access token")
                 finally:
                     mock.stop()
                 command("drain")

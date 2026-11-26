@@ -15,6 +15,8 @@ dotnet tool install --global vpk --version 1.2.161
 
 本地打包会复用脚本上次成功安装的前端依赖，并重新构建前端。首次打包、依赖文件或 Node 安装环境变化时会执行 `npm ci`。加 `--clean-web-deps` 可强制重装依赖。若已有所需版本的 `frontend/dist`，可用 `--reuse-web` 直接复用产物。GitHub Actions 发布构建会执行干净安装，并缓存 npm 下载。
 
+首次打包会下载固定版本的 UPX，验证 SHA-256 后缓存在 `temp/windows-build`。构建将词表以 XZ 随包分发，并在签名前压缩管理器和选定的原生扩展。打包日志会输出免安装包解压后的程序字节数。桌面程序使用 Windows 10 或更新版本自带的 Universal CRT。
+
 版本参数使用三段 SemVer。生成的安装包和可自更新的 Portable.zip 在 `dist/windows/`。同一目录中的 `releases.win-x64.json` 和 `*-full.nupkg` 是应用更新必需的资产。保留上次发布的完整包再构建会生成差分包。发版时把这些文件作为同一 GitHub Release 的附件上传。仓库的 Windows 发布工作流也支持手动构建。需要签名时，可通过 Velopack 的 `VPK_SIGN_PARAMS` 或其签名服务签署内部程序，打包完成后再对输出的 `*-Setup.exe` 签名。签名凭据只保存在构建者环境。
 
 ## 目录与运行
@@ -31,7 +33,7 @@ dotnet tool install --global vpk --version 1.2.161
 .venv/Scripts/python tools/desktop-check/service.py
 ```
 
-服务回归使用临时数据与模拟模型，覆盖流式生成期间等待退出、回复落盘、恢复接收请求及关闭。管理器的数据导入测试可用 `cargo test --manifest-path desktop/Cargo.toml` 运行。
+服务回归使用临时数据与模拟模型，覆盖词表加载、Vertex JWT 鉴权、流式生成期间等待退出、回复落盘、恢复接收请求及关闭。GitHub Actions 从生成的免安装包解压后运行这项检查。管理器的数据导入测试可用 `cargo test --manifest-path desktop/Cargo.toml` 运行。
 
 在 Windows 桌面会话中可验证完整升级。以下命令复用同一份刚构建的前后端。QA 包使用独立的安装标识、窗口标识、数据目录及本地更新源。常规发行版从项目的 GitHub Releases 检查更新。
 

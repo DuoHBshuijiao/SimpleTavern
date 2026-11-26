@@ -1,17 +1,24 @@
 """Build Windows x64 distributables from an explicit application-file allowlist."""
 import argparse
 import hashlib
+from io import BytesIO
 import json
+import lzma
 from pathlib import Path
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+from urllib.request import urlopen
+from zipfile import ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 DESKTOP = ROOT / "desktop"
 WORK = ROOT / "temp/windows-build"
+UPX_VERSION = "5.3.0"
+UPX_ARCHIVE = f"upx-{UPX_VERSION}-win64.zip"
+UPX_SHA256 = "d127996c76615e431be810e9c8d2910dbe3dd400600c5c0c50276fc5a17a9705"
 
 
 def run(*args, cwd=ROOT, env=None):
@@ -70,17 +77,72 @@ def build_web(frontend, *, clean_deps):
 
 
 def freeze():
-    run(sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--onedir",
+    tokenizer_dir = "tokenizer/deepseek_v3_tokenizer"
+    vocabulary = ROOT / "backend" / tokenizer_dir / "tokenizer.json"
+    compressed_vocabulary = WORK / "tokenizer.json.xz"
+    compressed_vocabulary.write_bytes(lzma.compress(vocabulary.read_bytes()))
+    # The desktop server uses asyncio, h11, ws="none", and its own logging configuration.
+    run(sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--onedir", "--noupx",
         "--name", "TavernService", "--distpath", WORK / "frozen", "--workpath", WORK / "pyi",
         "--specpath", WORK, "--paths", ROOT / "backend",
         "--collect-data", "certifi", "--collect-data", "jsonschema_specifications",
         "--hidden-import", "uvicorn.lifespan.on", "--hidden-import", "uvicorn.protocols.http.h11_impl",
         "--hidden-import", "uvicorn.loops.asyncio", "--hidden-import", "win32timezone",
-        "--add-data", f"{ROOT / 'backend/tokenizer'}:tokenizer",
+        "--exclude-module", "watchfiles", "--exclude-module", "httptools", "--exclude-module", "websockets",
+        "--exclude-module", "dotenv", "--exclude-module", "yaml",
+        "--add-data", f"{compressed_vocabulary}:{tokenizer_dir}",
         "--add-data", f"{ROOT / 'backend/app/llm/catalog/*.json'}:app/llm/catalog",
         "--add-data", f"{ROOT / 'backend/app/assistant/*.md'}:app/assistant",
         "--add-data", f"{ROOT / 'backend/app/MVU_AGENT.md'}:app",
         ROOT / "backend/desktop_service.py")
+
+
+def unpack_upx(destination):
+    cache = WORK / UPX_ARCHIVE
+    archive = cache.read_bytes() if cache.is_file() else b""
+    if hashlib.sha256(archive).hexdigest() != UPX_SHA256:
+        url = f"https://github.com/upx/upx/releases/download/v{UPX_VERSION}/{UPX_ARCHIVE}"
+        with urlopen(url, timeout=30) as response:
+            archive = response.read()
+        if hashlib.sha256(archive).hexdigest() != UPX_SHA256:
+            raise ValueError("UPX download does not match its pinned SHA-256")
+        cache.write_bytes(archive)
+    with ZipFile(BytesIO(archive)) as bundle:
+        destination.write_bytes(bundle.read(f"upx-{UPX_VERSION}-win64/upx.exe"))
+
+
+def copy_native(source, destination, upx):
+    from pefile import DIRECTORY_ENTRY, DLL_CHARACTERISTICS, PE
+
+    with PE(str(source), fast_load=True) as image:
+        header = image.OPTIONAL_HEADER
+        signed = header.DATA_DIRECTORY[DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_SECURITY"]].Size
+        control_flow_guard = header.DllCharacteristics & DLL_CHARACTERISTICS["IMAGE_DLLCHARACTERISTICS_GUARD_CF"]
+    if signed or control_flow_guard:
+        shutil.copy2(source, destination)
+        return
+    run(upx, "--best", "--lzma", "-q", "-o", destination, source)
+    run(upx, "-t", "-q", destination)
+
+
+def stage_service(destination, upx):
+    frozen = WORK / "frozen/TavernService"
+    internal = frozen / "_internal"
+    native = {
+        internal / "cryptography/hazmat/bindings/_rust.pyd",
+        internal / "tokenizers/tokenizers.pyd",
+        *(internal / "pydantic_core").glob("_pydantic_core.*.pyd"),
+    }
+
+    def copy_file(source, target):
+        if Path(source) in native:
+            copy_native(source, target, upx)
+        else:
+            shutil.copy2(source, target)
+
+    # Windows 10 and later provide UCRT as an operating system component.
+    shutil.copytree(frozen, destination, copy_function=copy_file,
+                    ignore=lambda folder, _: ("ucrtbase.dll",) if Path(folder) == internal else ())
 
 
 def package(stage, output, pack_id, version):
@@ -109,6 +171,9 @@ def package(stage, output, pack_id, version):
             "--features", "setup", "--bin", "SimpleTavernSetup", env=env)
         shutil.copy2(DESKTOP / "target/release/SimpleTavernSetup.exe", setup)
         payload.unlink()
+        with ZipFile(releases / f"{pack_id}-win-x64-Portable.zip") as portable:
+            size = sum(item.file_size for item in portable.infolist())
+        print(f"Extracted portable program: {size / 1024**2:.2f} MiB ({size:,} bytes)", flush=True)
         # Publish the files referenced by the feed before publishing the feed itself.
         for artifact in sorted(releases.iterdir(), key=lambda file: file.suffix not in {".nupkg", ".exe", ".zip"}):
             artifact.replace(output / artifact.name)
@@ -127,9 +192,12 @@ def build(opts):
     run("cargo", "build", "--locked", "--release", "--manifest-path", DESKTOP / "Cargo.toml",
         "--features", "setup", "--bin", "SimpleTavern")
     with tempfile.TemporaryDirectory(dir=WORK) as tmp:
-        stage = Path(tmp)
-        shutil.copy2(DESKTOP / "target/release/SimpleTavern.exe", stage)
-        shutil.copytree(WORK / "frozen/TavernService", stage / "service")
+        stage = Path(tmp) / "app"
+        stage.mkdir()
+        upx = Path(tmp) / "upx.exe"
+        unpack_upx(upx)
+        copy_native(DESKTOP / "target/release/SimpleTavern.exe", stage / "SimpleTavern.exe", upx)
+        stage_service(stage / "service", upx)
         shutil.copytree(ROOT / "frontend/dist", stage / "web")
         shutil.copytree(ROOT / "extensions/simpletavern-janitor-bridge", stage / "extensions/simpletavern-janitor-bridge")
         for name in ("NOTICE", "LICENSE"):

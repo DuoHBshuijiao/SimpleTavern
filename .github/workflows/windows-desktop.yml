@@ -41,7 +41,10 @@ jobs:
           }
           python desktop/build_windows.py --version $releaseVersion --clean-web-deps
       - name: Exercise packaged service
-        run: python tools/desktop-check/service.py
+        run: |
+          $portable = Join-Path $env:RUNNER_TEMP 'simpletavern-portable-check'
+          Expand-Archive -LiteralPath 'dist/windows/SimpleTavern-win-x64-Portable.zip' -DestinationPath $portable
+          python tools/desktop-check/service.py --exe "$portable/current/service/TavernService.exe" --web "$portable/current/web"
       - uses: actions/upload-artifact@v4
         with:
           name: SimpleTavern-windows-x64
