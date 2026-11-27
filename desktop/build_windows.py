@@ -160,9 +160,12 @@ def package(stage, output, pack_id, version):
         # Velopack moves its temporary portable ZIP into the releases directory.
         with tempfile.TemporaryDirectory(prefix=".velopack-", dir=releases) as scratch:
             env = dict(os.environ, TEMP=scratch, TMP=scratch)
+            # Omit --icon so Update.exe keeps a generic tool icon instead of looking
+            # identical to SimpleTavern.exe; SimpleTavern.exe, its root stub and
+            # SimpleTavernSetup.exe still embed desktop/icons/icon.ico via tauri-build.
             run(*cli, "pack", "--packId", pack_id, "--packVersion", version,
                 "--packDir", stage, "--mainExe", "SimpleTavern.exe", "--runtime", "win-x64",
-                "--channel", "win-x64", "--framework", "webview2", "--icon", DESKTOP / "icons/icon.ico",
+                "--channel", "win-x64", "--framework", "webview2",
                 "--outputDir", releases, env=env)
         setup = releases / f"{pack_id}-win-x64-Setup.exe"
         payload = setup.rename(releases / "VelopackSetup.exe")
