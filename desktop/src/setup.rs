@@ -8,6 +8,8 @@ use std::{
     os::windows::fs::MetadataExt,
     path::{self, Component, Path, PathBuf, Prefix},
     process::{Command, ExitCode},
+    thread,
+    time::{Duration, Instant},
 };
 use velopack::locator::create_config_from_root_dir;
 use windows_sys::Win32::{
@@ -177,7 +179,21 @@ fn same_path(first: &Path, second: &Path) -> bool {
     first == second || first.as_os_str().eq_ignore_ascii_case(second.as_os_str())
 }
 
+fn paths_overlap(first: &Path, second: &Path) -> bool {
+    first.ancestors().any(|p| same_path(p, second))
+        || second.ancestors().any(|p| same_path(p, first))
+}
+
 fn check_destination(path: &Path, installed: Option<&Path>, profile: &Path) -> SetupResult<()> {
+    check_destination_with_mode(path, installed, profile, false)
+}
+
+fn check_destination_with_mode(
+    path: &Path,
+    installed: Option<&Path>,
+    profile: &Path,
+    allow_relocate: bool,
+) -> SetupResult<()> {
     let (ancestor, metadata) = existing_ancestor(path)?;
     let resolved = resolve_from(path, ancestor)?;
     let exists = ancestor == path;
@@ -194,17 +210,24 @@ fn check_destination(path: &Path, installed: Option<&Path>, profile: &Path) -> S
         ));
     }
     let profile = resolve_from(profile, existing_ancestor(profile)?.0)?;
-    if resolved.ancestors().any(|p| same_path(p, &profile))
-        || profile.ancestors().any(|p| same_path(p, &resolved))
-    {
+    if paths_overlap(&resolved, &profile) {
         return Err("安装目录与用户数据目录重叠，请选择其他文件夹。".into());
     }
+    let mut requires_empty = true;
     if let Some(installed) = installed {
         let installed = resolve_from(installed, installed)?;
-        if !same_path(&installed, &resolved) {
-            return Err("SimpleTavern 已安装。若要更改安装目录，请先卸载。".into());
+        if same_path(&installed, &resolved) {
+            requires_empty = false;
+        } else if !allow_relocate {
+            return Err(
+                "SimpleTavern 已安装。若要更改安装目录，请直接运行安装程序点击「更改目录」，或先卸载后再安装（用户数据会保留）。"
+                    .into(),
+            );
+        } else if paths_overlap(&resolved, &installed) {
+            return Err("新安装目录不能与原安装目录重叠，请选择其他空文件夹。".into());
         }
-    } else if exists {
+    }
+    if requires_empty && exists {
         let mut entries = fs::read_dir(path).map_err(|e| path_error(path, e))?;
         if entries.next().is_some() {
             return Err(format!(
@@ -239,17 +262,38 @@ fn choose_destination(
     installed: Option<&Path>,
     profile: &Path,
 ) -> Option<PathBuf> {
+    let data_dir = profile.join("data");
     loop {
-        let description = if installed.is_some() {
-            format!("将重新安装到现有目录。\n\n{}", destination.display())
-        } else {
-            format!("安装目录\n\n{}", destination.display())
+        let is_relocating = installed.is_some_and(|old| {
+            let old_res = resolve_from(old, old).ok();
+            let dst_res = existing_ancestor(&destination)
+                .ok()
+                .and_then(|(anc, _)| resolve_from(&destination, anc).ok());
+            match (old_res, dst_res) {
+                (Some(a), Some(b)) => !same_path(&a, &b),
+                _ => !same_path(old, &destination),
+            }
+        });
+        let description = match (installed, is_relocating) {
+            (Some(old), true) => format!(
+                "将安装到新目录，并自动移除原程序目录（用户数据保留不变，不会丢失）。\n\n新安装目录\n{}\n\n原安装目录（将被移除）\n{}\n\n用户数据目录（保留不变）\n{}",
+                destination.display(),
+                old.display(),
+                data_dir.display()
+            ),
+            (Some(_), false) => format!(
+                "将重新安装到现有目录（用户数据保留在单独目录，不会丢失）。\n如需换盘或换目录，请点击「更改目录」。\n\n安装目录\n{}\n\n用户数据目录\n{}",
+                destination.display(),
+                data_dir.display()
+            ),
+            (None, _) => format!(
+                "安装目录\n{}\n\n用户数据目录（卸载、重装或更改目录时均会保留）\n{}",
+                destination.display(),
+                data_dir.display()
+            ),
         };
-        let buttons = if installed.is_some() {
-            MessageButtons::OkCancelCustom(INSTALL.into(), CANCEL.into())
-        } else {
-            MessageButtons::YesNoCancelCustom(INSTALL.into(), BROWSE.into(), CANCEL.into())
-        };
+        let buttons =
+            MessageButtons::YesNoCancelCustom(INSTALL.into(), BROWSE.into(), CANCEL.into());
         let choice = MessageDialog::new()
             .set_title(TITLE)
             .set_description(description)
@@ -257,7 +301,7 @@ fn choose_destination(
             .show();
         match choice {
             MessageDialogResult::Custom(button) if button == INSTALL => {
-                match check_destination(&destination, installed, profile) {
+                match check_destination_with_mode(&destination, installed, profile, true) {
                     Ok(()) => return Some(destination),
                     Err(e) => show_error(&e),
                 }
@@ -338,6 +382,33 @@ fn run_velo_setup(destination: Option<&Path>, options: Options) -> SetupResult<E
         .map_or(ExitCode::FAILURE, ExitCode::from))
 }
 
+fn uninstall_existing(old_dir: &Path) -> SetupResult<()> {
+    let updater = old_dir.join("Update.exe");
+    if !updater.is_file() {
+        return Err(format!("找不到原安装目录的卸载程序 {}。", updater.display()));
+    }
+    let status = Command::new(&updater)
+        .args(["uninstall", "--silent"])
+        .status()
+        .map_err(|e| format!("无法卸载原安装目录。\n{e}"))?;
+    if !status.success() {
+        return Err("移除原安装目录失败，请先退出正在运行的 SimpleTavern 后重试。".into());
+    }
+    let uninstall_key = format!(r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{PACKAGE_ID}");
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while Instant::now() < deadline {
+        let reg_gone = matches!(
+            RegKey::predef(HKEY_CURRENT_USER).open_subkey(&uninstall_key),
+            Err(e) if e.kind() == io::ErrorKind::NotFound
+        );
+        if reg_gone && registered_install()?.is_none() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(200));
+    }
+    Ok(())
+}
+
 fn run(args: Vec<OsString>) -> SetupResult<ExitCode> {
     let options = Options::parse(args)?;
     if options.help {
@@ -357,6 +428,13 @@ fn run(args: Vec<OsString>) -> SetupResult<ExitCode> {
         check_destination(&path, installed.as_deref(), &profile)?;
         installed.unwrap_or(path)
     } else if let Some(path) = choose_destination(default, installed.as_deref(), &profile) {
+        if let Some(old_dir) = installed.as_deref() {
+            let old_resolved = resolve_from(old_dir, old_dir)?;
+            let dest_resolved = resolve_from(&path, existing_ancestor(&path)?.0)?;
+            if !same_path(&old_resolved, &dest_resolved) {
+                uninstall_existing(old_dir)?;
+            }
+        }
         path
     } else {
         return Ok(ExitCode::SUCCESS);

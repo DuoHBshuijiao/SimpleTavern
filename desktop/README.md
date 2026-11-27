@@ -21,7 +21,7 @@ dotnet tool install --global vpk --version 1.2.161
 
 ## 目录与运行
 
-- 安装器默认使用 `%LOCALAPPDATA%\SimpleTavern`。可以选择其他空文件夹，选择 `D:\` 这样的盘符根目录会将安装路径设为 `D:\SimpleTavern`。重装沿用已有目录，换盘前请先卸载。数据保存在 `%LOCALAPPDATA%\SimpleTavern.User\data`。
+- 安装器默认使用 `%LOCALAPPDATA%\SimpleTavern`。可以选择其他空文件夹，选择 `D:\` 这样的盘符根目录会将安装路径设为 `D:\SimpleTavern`。已安装时再次运行安装器可原地重装，也可点击「更改目录」自动卸载原程序目录并安装到新目录；用户数据保存在 `%LOCALAPPDATA%\SimpleTavern.User\data`，卸载、重装或更改目录时均会保留。
 - 免安装版从压缩包根目录的启动器运行，数据和 `manager.json` 位于 `current` 之外。整个目录需可写。首次启动可从已停止写入的旧版复制 data；原文件保留。
 - 已配置的本地语音引擎使用各自的网关环境。受管进程由聊天服务启动。外部网关可检查连接。Janitor 扩展位于 `current/extensions` 中，可复制到固定位置后在浏览器中加载。
 - 管理器和服务通过父子进程管道交换固定命令与状态。退出时先暂停新写入，等活动操作结束，再停止服务。浏览器保持原页面，输入文字和待发送图片仍在原标签中。再次手工打开或刷新页面会加载最新前端。
