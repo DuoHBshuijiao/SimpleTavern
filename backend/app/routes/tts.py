@@ -8,6 +8,7 @@ TTS 路由模块
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import os
 import re
@@ -90,7 +91,7 @@ def _require_tts_enabled() -> Settings:
     """加载设置并验证 TTS 已启用，否则 403。"""
     settings = load_settings()
     if not settings.ttsEnabled:
-        raise HTTPException(status_code=403, detail="TTS disabled")
+        raise HTTPException(status_code=403, detail="全局 TTS 朗读服务尚未启用")
     return settings
 
 
@@ -474,6 +475,9 @@ class SynthesizeReq(BaseModel):
     message_id: str | None = None  # 关联消息 ID（用于写回 ttsAudioAssetId）
     chat_id: str | None = None
     preset_id: str | None = None
+    base_url: str | None = None
+    api_key: str | None = None
+    provider: TtsProvider | None = None
 
 
 class VoicesReq(BaseModel):
@@ -624,6 +628,25 @@ async def _synthesize_deepseek(request: Request, req: SynthesizeReq, preset: Api
 async def synthesize(request: Request, req: SynthesizeReq):
     """合成语音（非流式/流式）。"""
     settings = _require_tts_enabled()
+    if req.provider == "deepseek" and req.api_key is not None and req.api_key.strip():
+        inline_key = req.api_key.strip()
+        inline_base = (req.base_url or "").strip()
+        saved_match = next(
+            (p for p in settings.apiPresets if p.id == req.preset_id and p.presetKind == "tts" and p.ttsProvider == "deepseek"),
+            None,
+        )
+        if saved_match and (saved_match.apiKey or "").strip() == inline_key and (saved_match.baseUrl or "").strip() == inline_base:
+            return await _synthesize_deepseek(request, req, saved_match)
+        draft_key_tag = hashlib.sha256(inline_key.encode("utf-8")).hexdigest()[:12]
+        draft_preset = ApiPreset(
+            id=f"{(req.preset_id or 'draft').strip() or 'draft'}:draft:{draft_key_tag}",
+            name="draft",
+            baseUrl=inline_base,
+            apiKey=inline_key,
+            presetKind="tts",
+            ttsProvider="deepseek",
+        )
+        return await _synthesize_deepseek(request, req, draft_preset)
     matched_preset = _resolve_tts_preset(settings, req.preset_id)
     provider = _resolve_tts_provider(matched_preset.ttsProvider)
     if provider == "deepseek":

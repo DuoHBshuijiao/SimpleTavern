@@ -80,12 +80,14 @@ export function useWebGpuBackgroundRuntime() {
     persistRuntime()
   }
 
-  function clearRuntime() {
+  function clearRuntime(options?: { reload?: boolean }) {
     runtimeState.hasOverride = false
     runtimeState.enabled = false
     runtimeState.activePresetId = null
     runtimeState.shaderFilename = null
-    runtimeState.nonce += 1
+    if (options?.reload !== false) {
+      runtimeState.nonce += 1
+    }
     safeWriteSessionStorage(RUNTIME_STORAGE_KEY, null)
   }
 

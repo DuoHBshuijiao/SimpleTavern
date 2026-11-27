@@ -13,7 +13,7 @@ import SettingsSwitch from './SettingsSwitch.vue'
 import { SETTINGS_DRAWER_PRESETS_KEY } from '../../composables/settingsDrawerPresetsKey'
 import { EXTRA_LLM_PROTOCOL_OPTIONS, VERTEX_SERVICE_ACCOUNT_AUTH_STYLE } from '../../types/models'
 import { apiPost } from '../../api/http'
-import { notifyMessage } from '../../composables/useNotify'
+import { notifyChoice, notifyMessage } from '../../composables/useNotify'
 import { usePreferHoverChrome } from '../../composables/usePreferHoverChrome'
 import { DEEPSEEK_TTS_VOICES } from '../../utils/apiPresetKind'
 
@@ -36,13 +36,33 @@ onBeforeUnmount(resetVoicePreview)
 
 async function previewDeepSeekVoice(voiceId: string) {
   if (!presets.canPreviewDeepSeekVoice || previewBusy.value) return
+  if (!presets.globalTtsEnabled) {
+    const choice = await notifyChoice({
+      title: 'TTS 朗读服务未启用',
+      message: '当前全局 TTS 朗读服务已关闭，是否现在启用并继续试听？',
+      choices: [{ value: 'enable', label: '立即启用并试听' }],
+    })
+    if (choice !== 'enable') return
+    try {
+      const enabled = await presets.enableGlobalTtsNow()
+      if (!enabled) return
+    } catch (error) {
+      void notifyMessage(error instanceof Error ? error.message : String(error), { title: '启用 TTS 失败' })
+      return
+    }
+  }
+  const draft = presets.editingPreset
+  if (!draft) return
   const controller = new AbortController()
   previewController = controller
   previewBusy.value = true
   previewUrl.value = null
   try {
     const result = await apiPost<{ assetId: string }>('/api/tts/synthesize', {
-      preset_id: presets.editingPreset.id,
+      preset_id: draft.id,
+      provider: 'deepseek',
+      base_url: draft.baseUrl,
+      api_key: draft.apiKey,
       voice_id: voiceId,
       text: '你好，这是一段简短的朗读试听。',
     }, controller.signal)
@@ -382,7 +402,7 @@ const authStyleOptions = computed(() => {
                               @click="previewDeepSeekVoice(voice.voiceId)"
                             >试听</button>
                           </div>
-                          <SettingsHint v-if="!presets.canPreviewDeepSeekVoice">填写 API Key 并保存设置后可试听。</SettingsHint>
+                          <SettingsHint v-if="!presets.canPreviewDeepSeekVoice">填写 API Key 后即可试听。</SettingsHint>
                           <AudioPreviewPlayer v-if="previewUrl" :src="previewUrl" label="音色试听" autoplay />
                         </div>
                         <div v-else-if="presets.isTtsPreset(presets.editingPreset)" class="settings-group">

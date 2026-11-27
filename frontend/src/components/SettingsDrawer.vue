@@ -1753,6 +1753,8 @@ function openWebGpuShaderEditorForPreset(presetId: string) {
   showWebGpuShaderEditorModal.value = true
 }
 
+const webgpuModifiedShaderFiles = new Set<string>()
+
 async function saveWebGpuPresetSource() {
   const preset = activeWebgpuPreset.value
   if (!preset || !webgpuEditorReady.value || webgpuPresetSaveBusy.value) return
@@ -1766,6 +1768,7 @@ async function saveWebGpuPresetSource() {
       body: JSON.stringify({ source: normalized }),
     })
     if (!response.ok) throw new Error(await response.text())
+    webgpuModifiedShaderFiles.add(preset.wgslFile)
     writeWebGpuDraftSource(preset.id, null)
     if (request === webgpuSourceRequest && activeWebgpuPreset.value?.id === preset.id) {
       webgpuPresetEditorSource.value = normalized
@@ -1825,6 +1828,7 @@ function runWebGpuPresetFromList() {
     void notifyMessage('请先启用 WebGPU 背景。')
     return
   }
+  webgpuModifiedShaderFiles.delete(preset.wgslFile)
   setWebGpuRuntime({ enabled: true, activePresetId: preset.id, shaderFilename: preset.wgslFile })
 }
 
@@ -2643,10 +2647,21 @@ const editingPresetIsOpenrouter = computed(() => editingPresetTtsProvider.value 
 const editingPresetIsDeepSeek = computed(() => editingPresetTtsProvider.value === 'deepseek')
 const canPreviewDeepSeekVoice = computed(() => {
   const draft = editingPreset.value
-  const saved = settingsStore.settings?.apiPresets.find((preset) => preset.id === draft?.id)
-  return !!draft && saved?.ttsProvider === 'deepseek' && !!saved.apiKey?.trim()
-    && saved.apiKey === draft.apiKey && cloudTtsBaseUrl(saved.baseUrl, 'deepseek') === draft.baseUrl
+  return !!draft && isTtsPreset(draft) && editingPresetTtsProvider.value === 'deepseek' && !!draft.apiKey?.trim()
 })
+const globalTtsEnabled = computed(() => settingsStore.settings?.ttsEnabled === true)
+
+async function enableGlobalTtsNow(): Promise<boolean> {
+  const base = settingsStore.settings
+  if (!base) return false
+  if (base.ttsEnabled === true) {
+    if (globalDraft.value) globalDraft.value.ttsEnabled = true
+    return true
+  }
+  await settingsStore.save({ ...base, ttsEnabled: true })
+  if (globalDraft.value) globalDraft.value.ttsEnabled = true
+  return settingsStore.settings?.ttsEnabled === true
+}
 
 const editingPresetSupportsVoiceDesign = computed(() => editingPresetTtsProvider.value === 'minimax')
 
@@ -3293,6 +3308,8 @@ provide(
     editingPresetIsOpenrouter,
     editingPresetIsDeepSeek,
     canPreviewDeepSeekVoice,
+    globalTtsEnabled,
+    enableGlobalTtsNow,
     editingPresetSupportsVoiceDesign,
     editingPresetSupportsPromptAudio,
     editingPresetSupportsVoiceFetch,
@@ -3532,9 +3549,23 @@ function handleChatModelSelect(option: { value: string; presetId?: string | null
  *
  * @returns {Promise<void>} 完成时返回
  */
+function resolveActiveWebgpuShaderFilename(settings: Settings | null | undefined): string | null {
+  if (!settings || settings.webgpuBackgroundEnabled !== true || !settings.webgpuBackgroundActivePresetId) {
+    return null
+  }
+  const active = settings.webgpuBackgroundPresets?.find((item) => item.id === settings.webgpuBackgroundActivePresetId)
+  return active?.wgslFile?.trim() || null
+}
+
 async function saveGlobal() {
   if (!globalDraft.value) return
   const previousSavedPageBackground = savedPageBackgroundImage.value
+  const runningWebgpuEnabled = webgpuRuntimeState.hasOverride
+    ? webgpuRuntimeState.enabled
+    : settingsStore.settings?.webgpuBackgroundEnabled === true
+  const runningWebgpuFilename = webgpuRuntimeState.hasOverride
+    ? (webgpuRuntimeState.shaderFilename?.trim() || null)
+    : resolveActiveWebgpuShaderFilename(settingsStore.settings)
   const draft = {
     ...globalDraft.value,
     llm: { ...globalDraft.value.llm, providerParams: { ...globalDraft.value.llm.providerParams } },
@@ -3588,7 +3619,17 @@ async function saveGlobal() {
   )
   markSavedPageBackground(globalDraft.value.pageBackgroundImage ?? null)
   await deletePendingPageBackgrounds(globalDraft.value.pageBackgroundImage ?? null)
-  clearWebGpuRuntime()
+  const savedWebgpuEnabled = settingsStore.settings?.webgpuBackgroundEnabled === true
+  const savedWebgpuFilename = resolveActiveWebgpuShaderFilename(settingsStore.settings)
+  const shaderCodeUpdated = Boolean(savedWebgpuFilename && webgpuModifiedShaderFiles.has(savedWebgpuFilename))
+  const sameWebgpuRunning =
+    !shaderCodeUpdated
+    && runningWebgpuEnabled === savedWebgpuEnabled
+    && runningWebgpuFilename === savedWebgpuFilename
+  if (savedWebgpuFilename) webgpuModifiedShaderFiles.delete(savedWebgpuFilename)
+  if (webgpuRuntimeState.hasOverride || !sameWebgpuRunning) {
+    clearWebGpuRuntime({ reload: !sameWebgpuRunning })
+  }
   if (previousSavedPageBackground && previousSavedPageBackground !== globalDraft.value.pageBackgroundImage) {
     await deletePageBackgroundFile(previousSavedPageBackground)
   }
